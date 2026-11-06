@@ -4,11 +4,13 @@
 from unittest.mock import patch
 
 import httpx
+import pytest
 from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
+from nhx.core.jobs.app.constants import JOB_CREATION_PENDING_KEY
 from nhx.core.jobs.controllers.admission import AdmissionDecision
-from nhx.core.jobs.controllers.backends.exceptions import ResourceAllocationError, SchedulingDeferred
+from nhx.core.jobs.controllers.backends.exceptions import AdmissionDeferred, ResourceAllocationError, SchedulingDeferred
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.backends.test import MockDockerCPUJobBackend
 from nhx.core.jobs.controllers.scheduler import JobScheduler
@@ -435,3 +437,26 @@ def test_admission_deferral_rewrites_when_reason_changes(
     body = mock_jobs_client.update_job_step_status.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.QUEUED
     assert body.status_details == {"message": "waiting for capacity"}
+
+
+def test_scheduler_does_not_expose_an_unreleased_first_step(
+    job_scheduler: JobScheduler,
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+):
+    pending = test_step_created.model_copy(update={"status_details": {JOB_CREATION_PENDING_KEY: True}})
+    mock_jobs_client.list_steps.return_value = paginated_response([pending])
+    assert job_scheduler.get_steps_for_scheduling() == []
+
+
+def test_direct_scheduling_cannot_bypass_creation_release(
+    job_scheduler: JobScheduler,
+    backend_registry: BackendRegistry,
+    test_step_created: HelixJobStepWithContext,
+):
+    pending = test_step_created.model_copy(update={"status_details": {JOB_CREATION_PENDING_KEY: True}})
+    backend = backend_registry.get_backend(provider="cpu", profile="default")
+    assert isinstance(backend, MockDockerCPUJobBackend)
+    with pytest.raises(AdmissionDeferred):
+        job_scheduler.schedule_step(pending)
+    assert backend.mock.schedule_calls == []

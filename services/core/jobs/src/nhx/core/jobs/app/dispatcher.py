@@ -9,8 +9,11 @@ import re
 import weakref
 from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
+from nemo_helix_plugin.client.retry import body_was_sent
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.types import JobControl, derive_job_fileset_name
@@ -47,6 +50,7 @@ from nhx.core.jobs.app.constants import (
     ERROR_CAUSE,
     IMAGE_DIGEST_AT_SAVE,
     IMAGE_DIGEST_STEP,
+    JOB_CREATION_PENDING_KEY,
     JOB_TASK_CLEANUP_PENDING_KEY,
     STORAGE_RECLAIMED_AT,
 )
@@ -106,7 +110,7 @@ class JobAlreadyExistsError(ValueError):
 
 
 class JobStorageReclaimPendingError(ValueError):
-    """Exception raised when a deleted job with the same name still has storage to reclaim."""
+    """The Job name is held by unfinished resource cleanup."""
 
 
 class JobDeletionConflictError(ValueError):
@@ -349,12 +353,20 @@ class JobDispatcher:
             try:
                 existing_job = await self.store.get(HelixJob, job_name, workspace=workspace)
                 if existing_job:
+                    if existing_job.creation_failed:
+                        raise JobStorageReclaimPendingError(
+                            f"Earlier creation of job '{job_name}' in workspace '{workspace}' is awaiting cleanup."
+                        )
                     raise JobAlreadyExistsError(
                         f"Job with name '{job_name}' already exists in workspace '{workspace}'."
                     )
             except EntityNotFoundError:
                 pass  # Job does not exist, proceed to create
 
+        job: HelixJob | None = None
+        job_create_attempted = False
+        fileset_call_in_flight = False
+        creation_token = get_model_id("create")
         try:
             platform_spec = job_req.platform_spec
             control = job_req.control or JobControl()
@@ -366,7 +378,9 @@ class JobDispatcher:
                 job_name = generate_job_name(job_req.source, get_model_id("job")[-8:])
             await self._reject_pending_storage_reclaim(job_name, workspace)
 
-            # Resolve the fileset for job artifacts (caller-supplied output_location or auto-created).
+            # Validate and name the artifact destination before persisting the Job.
+            # Allocate owned storage only after its Job owner exists.
+            fileset_request: CreateFilesetRequest | None = None
             if job_req.output_location is not None:
                 try:
                     await self.files.get_fileset(name=job_req.output_location, workspace=workspace)
@@ -380,10 +394,11 @@ class JobDispatcher:
                     fileset_request = CreateFilesetRequest(name=derive_job_fileset_name(job_name, workspace))
                 except ValidationError as exc:
                     raise RuntimeError(f"job name '{job_name}' cannot name its artifact fileset") from exc
-                fileset_resp = await self.files.create_fileset(body=fileset_request, workspace=workspace)
-                fileset_name = fileset_resp.data().name
+                fileset_name = fileset_request.name
 
-            # Create job (ID is assigned by entity store)
+            # Persist the complete execution spec and intended artifact location first.
+            # No step is schedulable until allocation and attempt creation finish.
+            job_create_attempted = True
             job = await self.store.create(
                 HelixJob(
                     name=job_name,
@@ -395,6 +410,10 @@ class JobDispatcher:
                     platform_spec=platform_spec,
                     control=control,
                     fileset=fileset_name,
+                    creation_token=creation_token,
+                    creation_pending=True,
+                    fileset_creation_pending=fileset_request is not None,
+                    fileset_creation_started=fileset_request is None,
                     output_location=job_req.output_location,
                     status=HelixJobStatus.CREATED,
                     ownership=job_req.ownership,
@@ -403,6 +422,32 @@ class JobDispatcher:
                 # Add auth_context separately, it's a PrivateAttr, so it's not set in the constructor
                 .with_auth_context(auth_context)
             )
+
+            # Close the admission-check/Job-write gap against queued reclamation.
+            await self._reject_pending_storage_reclaim(job.name, workspace)
+            if fileset_request is not None:
+                # Correlate even a committed allocation whose response is lost to its
+                # immutable Job owner. A name conflict never establishes ownership.
+                fileset_request.custom_fields = {"job_id": job.id}
+                # CAS fences a timed-out creator before it can issue allocation.
+                # A lost initial Job response therefore remains provably resource-free.
+                job.fileset_creation_started = True
+                job.with_auth_context(auth_context)
+                job = await self.store.update(job)
+                fileset_call_in_flight = True
+                # One non-idempotent allocation only. Replaying a timed-out POST
+                # could outlive cleanup after another replay already committed.
+                fileset_resp = await self.files.with_retry(RetryPolicy(max_retries=0)).create_fileset(
+                    body=fileset_request, workspace=workspace
+                )
+                fileset_call_in_flight = False
+                allocated = fileset_resp.data()
+                job.fileset = allocated.name
+                job.fileset_id = allocated.id
+                job.fileset_creation_pending = False
+                # Persist confirmed ownership before attempting any execution writes.
+                job.with_auth_context(auth_context)
+                job = await self.store.update(job)
 
             # Create first attempt
             # Use short ID prefix to stay within 32 char name limit
@@ -429,11 +474,78 @@ class JobDispatcher:
             logger.info("Created new job", extra={"job": job.name, "workspace": job.workspace})
             await self._start_attempt(job, attempt)
 
+            # Releasing the first step is the final execution commit. A failed or
+            # ambiguous release is reconciled by cleanup before any resource deletion.
+            first_step = await self.store.get(
+                HelixJobStep, attempt.get_first_step().name, workspace=workspace, parent=attempt.id
+            )
+            job.with_auth_context(auth_context)
+            job = await self.store.update(job)
+            first_step.status_details = {
+                key: value for key, value in first_step.status_details.items() if key != JOB_CREATION_PENDING_KEY
+            }
+            await self.store.update(first_step)
+            job.creation_pending = False
+            job.with_auth_context(auth_context)
+            await self.store.update(job)
+
             operations_counter.add(1, attributes={"operation": "create_job"})
             return result
 
-        except Exception as e:
-            raise e
+        except Exception as creation_error:
+            # A successful Job write with a lost response precedes all allocation.
+            # Correlate it explicitly; never adopt a competing same-name Job.
+            if job is None and job_create_attempted and job_name is not None:
+                try:
+                    candidate = await self.system_store.get(HelixJob, job_name, workspace=workspace)
+                    if candidate.creation_token == creation_token:
+                        job = candidate
+                except EntityNotFoundError:
+                    pass
+                except Exception:
+                    logger.exception("Could not reconcile failed Job creation", extra={"job": job_name})
+            if job is not None:
+                uncertain = fileset_call_in_flight and not (
+                    isinstance(creation_error, NemoHTTPError)
+                    and 400 <= creation_error.status_code < 500
+                    and creation_error.status_code != 408
+                )
+                if isinstance(creation_error, NemoTransportError) and not body_was_sent(creation_error.error):
+                    uncertain = False
+                try:
+                    await self._request_creation_cleanup(job, uncertain)
+                except Exception as cleanup_error:
+                    creation_error.add_note(f"Cleanup handoff failed; Job {job.id} retains ownership: {cleanup_error}")
+                    logger.exception("Could not hand failed creation to cleanup", extra={"job": job.id})
+            raise
+
+    async def _request_creation_cleanup(self, job: HelixJob, allocation_uncertain: bool) -> None:
+        """Hand failed creation to existing cleanup; keep two discovery paths."""
+        job.fileset_allocation_uncertain = allocation_uncertain
+        queue_error: Exception | None = None
+        try:
+            await self.system_store.create(HelixJobStorageReclaim.for_failed_creation(job))
+        except EntityConflictError:
+            pass
+        except Exception as exc:
+            queue_error = exc
+        try:
+            for retry in range(3):
+                current = await self.system_store.get_by_id(HelixJob, job.id)
+                current.creation_failed = True
+                current.fileset_allocation_uncertain = allocation_uncertain
+                try:
+                    await self.system_store.update(current)
+                    break
+                except EntityConflictError:
+                    if retry == 2:
+                        raise
+        except Exception:
+            if queue_error is not None:
+                raise queue_error
+            logger.exception("Failed creation is queued but its Job marker needs reconciliation", extra={"job": job.id})
+        if queue_error is not None:
+            logger.warning("Failed creation retained on its Job for cleanup discovery", extra={"job": job.id})
 
     async def get_job(self, identifier: str, workspace: str) -> HelixJobResponse | None:
         """Get a platform job by name or ID, with its current attempt.
@@ -476,10 +588,10 @@ class JobDispatcher:
             return None
         async with _get_job_mutation_lock(resolved.name, workspace):
             try:
-                job = await self.store.get(HelixJob, resolved.name, workspace=workspace)
+                job = await self.store.get_by_id(HelixJob, resolved.id)
             except EntityNotFoundError:
                 return None
-            if job.id != resolved.id:
+            if job.workspace != workspace:
                 return None
 
             fields = update.model_fields_set
@@ -561,25 +673,30 @@ class JobDispatcher:
         if job_entity is None:
             return False
         async with _get_job_mutation_lock(job_entity.name, workspace):
-            return await self._delete_job_locked(job_entity.name, workspace, expected_id=job_entity.id)
+            return await self._delete_job_locked(job_entity.id, workspace)
 
-    async def _delete_job_locked(self, job_name: str, workspace: str, expected_id: str | None = None) -> bool:
-        """Delete a terminal job while holding the per-job mutation lock.
-
-        ``expected_id`` guards against a same-name replacement: the identifier was
-        resolved before the lock was taken, so re-verify the re-fetched job is
-        still the one we resolved before deleting anything.
-        """
+    async def _delete_job_locked(self, job_id: str, workspace: str) -> bool:
+        """Delete the exact resolved Job while holding its mutation lock."""
         try:
-            job_entity = await self.store.get(HelixJob, job_name, workspace=workspace)
+            job_entity = await self.store.get_by_id(HelixJob, job_id)
         except EntityNotFoundError:
             return False
-        if expected_id is not None and job_entity.id != expected_id:
-            # A same-name job was recreated between resolve and lock acquisition;
-            # the originally-resolved job is gone. Do not touch the replacement.
+        if job_entity.workspace != workspace:
             return False
 
         extras = {"job": job_entity.name, "workspace": job_entity.workspace}
+
+        if job_entity.creation_failed:
+            raise JobDeletionConflictError(
+                f"Failed creation of job {job_entity.name!r} is awaiting controller cleanup."
+            )
+
+        if job_entity.fileset_creation_pending:
+            # The allocation may have failed, conflicted, or committed without a
+            # response. Keep the ownership reference until cleanup reconciles it.
+            raise JobDeletionConflictError(
+                f"Cannot delete job '{job_entity.name}' while artifact fileset allocation is unresolved."
+            )
 
         try:
             # Get all attempts
@@ -645,20 +762,11 @@ class JobDispatcher:
             # Delete job
             await self.store.delete_by_id(HelixJob, job_entity.id)
 
-            # Delete only the fileset the job owns (auto-created); a caller-supplied output_location
-            # fileset is left for the caller to manage. Ownership is recorded at create time, so a
-            # caller cannot fool this by naming their fileset like an auto-created one. Tolerate the
-            # owned fileset already being gone.
-            if job_entity.output_location is None:
-                try:
-                    await self.files.delete_fileset(name=job_entity.fileset, workspace=workspace)
-                except ClientNotFoundError:
-                    logger.warning(
-                        "Job fileset not found during deletion, may have been cleaned up already", extra=extras
-                    )
+            # External resources are owned by the queued record until the
+            # controller confirms cleanup. Never discard a failed Files deletion.
 
             logger.info(
-                "Deleted job and all associated data for job",
+                "Deleted Job records and handed off resource cleanup",
                 extra=extras,
             )
             operations_counter.add(1, attributes={"operation": "delete_job"})
@@ -672,45 +780,48 @@ class JobDispatcher:
             raise e
 
     async def _queue_storage_reclaim(self, job: HelixJob, attempts: list[HelixJobAttempt]) -> None:
-        """Record the job's storage for the controller to reclaim once the job is gone.
-
-        Skipped when the job never mounted storage. Written before any entity is deleted,
-        and a failure to write it fails the delete: without the record, a new job with the
-        same name would mount this job's storage. A job the storage sweep already reclaimed
-        is recorded too, since the sweep may have stopped before queueing it.
-
-        The current attempt is marked reclaimed first. A delete that fails after queueing
-        leaves the job in place while the controller deletes its storage, and the mark makes
-        resume, rerun and control updates refuse it.
-        """
+        """Transfer backend and artifact ownership before removing any Job records."""
         targets = storage_targets(job.platform_spec)
-        if not targets:
+        fileset_name = job.fileset if job.output_location is None else None
+        if not targets and fileset_name is None:
             return
-        extras = {"job": job.name, "workspace": job.workspace}
         current = next((attempt for attempt in attempts if attempt.id == job.current_attempt_id), None)
-        if current is not None and not (current.status_details or {}).get(STORAGE_RECLAIMED_AT):
+        if targets and current is not None and not (current.status_details or {}).get(STORAGE_RECLAIMED_AT):
             current.status_details = self._update_status_details_object(
                 current.status_details, {STORAGE_RECLAIMED_AT: datetime.datetime.now(datetime.timezone.utc).isoformat()}
             )
             await self.store.update(current)
+        record = HelixJobStorageReclaim(
+            name=HelixJobStorageReclaim.name_for_job(job.id),
+            workspace=SYSTEM_WORKSPACE,
+            job_id=job.id,
+            job_workspace=job.workspace,
+            job_name=job.name,
+            targets=targets,
+            fileset_name=fileset_name,
+            fileset_id=job.fileset_id,
+        )
         try:
-            await self.system_store.create(
-                HelixJobStorageReclaim(
-                    name=HelixJobStorageReclaim.name_for_job(job.id),
-                    workspace=SYSTEM_WORKSPACE,
-                    job_id=job.id,
-                    job_workspace=job.workspace,
-                    job_name=job.name,
-                    targets=targets,
-                )
-            )
+            await self.system_store.create(record)
         except EntityConflictError:
-            # A previous delete of this job failed after queueing the reclaim.
-            pass
-        except Exception:
-            logger.exception("Could not queue storage reclaim for deleted job", extra=extras)
-            raise
-        logger.info("Queued storage reclaim for deleted job", extra=extras)
+            # Retention may already be reclaiming backend storage. Add artifact
+            # ownership without reintroducing any targets it finished.
+            for retry in range(3):
+                current_record = await self.system_store.get(
+                    HelixJobStorageReclaim, record.name, workspace=SYSTEM_WORKSPACE
+                )
+                if current_record.failed_creation:
+                    current_record.targets = targets
+                    current_record.failed_creation = False
+                current_record.fileset_name = fileset_name
+                if record.fileset_id is not None:
+                    current_record.fileset_id = record.fileset_id
+                try:
+                    await self.system_store.update(current_record)
+                    break
+                except EntityConflictError:
+                    if retry == 2:
+                        raise
 
     async def _reject_pending_storage_reclaim(self, job_name: str, workspace: str) -> None:
         """Refuse a job name whose deleted predecessor's storage is not reclaimed yet.
@@ -775,6 +886,9 @@ class JobDispatcher:
         # Store original spec name in config for reference
         step_config = dict(first_step.config) if first_step.config else {}
         step_config[STEP_SPEC_NAME_CONFIG_KEY] = first_step.name
+        status_details = saved_image_digest_for_step(attempt.status_details, first_step.name)
+        if job.creation_pending:
+            status_details = {**(status_details or {}), JOB_CREATION_PENDING_KEY: True}
         await self.store.create(
             HelixJobStep(
                 name=first_step.name,  # Simple name, unique per attempt via parent-scoped uniqueness
@@ -782,7 +896,7 @@ class JobDispatcher:
                 attempt_id=attempt.id,
                 config=step_config,
                 status=HelixJobStatus.CREATED,
-                status_details=saved_image_digest_for_step(attempt.status_details, first_step.name),
+                status_details=status_details,
             )
         )
 
@@ -891,10 +1005,16 @@ class JobDispatcher:
     async def get_current_attempt(self, job_name: str, workspace: str) -> Optional[HelixJobAttempt]:
         """Get the current attempt for a job."""
         job_entity = await self._resolve_job(job_name, workspace)
-        if job_entity is None or job_entity.current_attempt_id is None:
+        if job_entity is None:
             return None
-        attempt = await self.get_attempt(job_entity.current_attempt_id)
-        if attempt is None or attempt.job != job_entity.id or attempt.workspace != workspace:
+        return await self._current_attempt_for_job(job_entity)
+
+    async def _current_attempt_for_job(self, job: HelixJob) -> HelixJobAttempt | None:
+        """Read the attempt of an already resolved Job without resolving its name again."""
+        if job.current_attempt_id is None:
+            return None
+        attempt = await self.get_attempt(job.current_attempt_id)
+        if attempt is None or attempt.job != job.id or attempt.workspace != job.workspace:
             return None
         return attempt
 
@@ -1038,6 +1158,10 @@ class JobDispatcher:
             filter_str = json.dumps(
                 {"$and": [json.loads(filter_str), cleanup_filter]} if filter_str else cleanup_filter
             )
+        # Older schedulers must also be unable to see an unpublished first
+        # step. Apply this before pagination so counts and page boundaries agree.
+        released_filter = {"$not": {"data.status_details." + JOB_CREATION_PENDING_KEY: True}}
+        filter_str = json.dumps({"$and": [json.loads(filter_str), released_filter]} if filter_str else released_filter)
         sort_str = sort.value
 
         use_store_pagination = (not filter.job or filter.job == "-") and not filter.source
@@ -1253,6 +1377,11 @@ class JobDispatcher:
     ) -> tuple[HelixJobStep, HelixJobAttempt]:
         """Update a job from a step while holding the per-job mutation lock."""
         step_to_save = await self.store.get_by_id(HelixJobStep, step.id)
+        if step_to_save.status_details.get(JOB_CREATION_PENDING_KEY) and status not in (
+            HelixJobStatus.CANCELLED,
+            HelixJobStatus.ERROR,
+        ):
+            raise JobOperationConflictError("Job creation has not released this step for execution.")
         if status == HelixJobStatus.ERROR:
             error_details = await self._with_task_cause(step_to_save, error_details)
         saved_step: HelixJobStep | None = None
@@ -1660,7 +1789,7 @@ class JobDispatcher:
                 HelixJobStatus.CANCELLING,
             )
         else:
-            attempt = await self.get_current_attempt(job_entity.name, workspace=job_entity.workspace)
+            attempt = await self._current_attempt_for_job(job_entity)
             if attempt is None:
                 raise JobOperationConflictError(f"Cannot cancel job '{job_entity.name}': it has no current attempt.")
             steps = await self._list_all_entities(
@@ -1683,31 +1812,25 @@ class JobDispatcher:
         if job_entity is None:
             return None
         async with _get_job_mutation_lock(job_entity.name, workspace):
-            return await self._rerun_job_locked(
-                job_entity.name, workspace, expected_id=job_entity.id, auth_context=auth_context
-            )
+            return await self._rerun_job_locked(job_entity.id, workspace, auth_context=auth_context)
 
     async def _rerun_job_locked(
         self,
-        job_name: str,
+        job_id: str,
         workspace: str,
-        expected_id: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> HelixJobResponse | None:
-        """Re-run a terminal job while holding the per-job mutation lock.
-
-        ``expected_id`` guards against a same-name replacement created between the
-        pre-lock resolve and lock acquisition (see ``_delete_job_locked``).
-        """
+        """Re-run the exact resolved Job while holding its mutation lock."""
         try:
-            job_entity = await self.store.get(HelixJob, job_name, workspace=workspace)
+            job_entity = await self.store.get_by_id(HelixJob, job_id)
         except EntityNotFoundError:
             return None
-        if expected_id is not None and job_entity.id != expected_id:
-            # The originally-resolved job was replaced by a same-name job; don't rerun it.
+        if job_entity.workspace != workspace:
             return None
 
-        attempt = await self.get_current_attempt(job_entity.name, workspace=job_entity.workspace)
+        if job_entity.creation_failed:
+            raise JobOperationConflictError("Failed Job creation is awaiting cleanup.")
+        attempt = await self._current_attempt_for_job(job_entity)
         if attempt is None:
             return None
 
@@ -1729,6 +1852,11 @@ class JobDispatcher:
             raise JobOperationConflictError(
                 f"Cannot rerun job '{job_entity.name}': storage has been reclaimed. Create a new job."
             )
+
+        try:
+            await self._reject_pending_storage_reclaim(job_entity.name, workspace)
+        except JobStorageReclaimPendingError as exc:
+            raise JobOperationConflictError("Job resource cleanup is pending.") from exc
 
         for step in await self._list_all_entities(
             HelixJobStep, filter_obj={"attempt_id": attempt.id}, workspace=workspace
@@ -1773,7 +1901,7 @@ class JobDispatcher:
         if job_entity is None:
             return None
 
-        attempt = await self.get_current_attempt(job_entity.name, workspace=job_entity.workspace)
+        attempt = await self._current_attempt_for_job(job_entity)
         if attempt is None:
             raise JobOperationConflictError(f"Cannot pause job '{job_entity.name}': it has no current attempt.")
 
@@ -1810,7 +1938,7 @@ class JobDispatcher:
         if job is None:
             return None
 
-        attempt = await self.get_current_attempt(job.name, workspace=job.workspace)
+        attempt = await self._current_attempt_for_job(job)
         if attempt is None:
             raise JobOperationConflictError(f"Cannot resume job '{job.name}': it has no current attempt.")
 
@@ -1828,7 +1956,7 @@ class JobDispatcher:
                 raise JobOperationConflictError(f"Cannot resume job '{job.name}': no paused step was found.")
             await self.update_job_status_from_step(paused_step, HelixJobStatus.RESUMING)
             operations_counter.add(1, attributes={"operation": "resume_job"})
-            return create_platform_job_response(job, await self.get_current_attempt(job.name, workspace))  # type: ignore
+            return create_platform_job_response(job, await self._current_attempt_for_job(job))  # type: ignore
 
         raise JobOperationConflictError(self._resume_conflict_detail(job.name, attempt.status))
 
@@ -1866,7 +1994,7 @@ class JobDispatcher:
         if job is None:
             return None
 
-        attempt = await self.get_current_attempt(job.name, workspace=job.workspace)
+        attempt = await self._current_attempt_for_job(job)
         if attempt is None:
             raise JobOperationConflictError(f"Cannot update control for job '{job.name}': it has no current attempt.")
         if (attempt.status_details or {}).get(STORAGE_RECLAIMED_AT):

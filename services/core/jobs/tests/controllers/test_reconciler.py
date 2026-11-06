@@ -15,7 +15,7 @@ from kubernetes import client as kubernetes_client
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nhx.common.controller import Loop, TimedLoopWaiter, TrackLastExecutionTime
-from nhx.common.entities import EntityConflictError
+from nhx.common.entities import EntityConflictError, EntityNotFoundError
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
 from nhx.core.jobs.app.constants import STORAGE_SWEPT_AT
@@ -316,8 +316,22 @@ def _job(
 
 def _reconciler(backend_registry, mock_nemo_client, storage_config: JobsStorageConfig | None = None):
     system_entities = MagicMock()
+    system_entities.get.side_effect = EntityNotFoundError("No replacement Job")
     system_entities.list.return_value = SimpleNamespace(data=[])
-    system_entities.update.side_effect = lambda entity: entity
+
+    def persist(entity):
+        records = system_entities.list.return_value.data
+        system_entities.list.return_value.data = [
+            entity if record.name == entity.name else record for record in records
+        ]
+        return entity
+
+    def read_record(entity_type, entity_id):
+        records = system_entities.list(entity_type, workspace="system").data
+        return next(record for record in records if record.id == entity_id)
+
+    system_entities.update.side_effect = persist
+    system_entities.get_by_id.side_effect = read_record
     reconciler = JobReconciler(
         backend_registry,
         mock_nemo_client,
@@ -496,7 +510,11 @@ def test_deleted_job_storage_is_reclaimed_on_every_backend_then_cleared(
         reconciler.step()
 
     reclaim.assert_called_once_with("team", "train-llama")
-    system_entities.delete_by_id.assert_called_once_with(HelixJobStorageReclaim, record.id)
+    system_entities.delete_by_id.assert_called_once_with(
+        HelixJobStorageReclaim,
+        record.id,
+        expected_db_version=record.db_version,
+    )
 
 
 @pytest.mark.parametrize("shared_backend", [False, True])
@@ -547,7 +565,7 @@ def test_reclaim_persists_progress_across_ticks_and_controller_restarts(
         return entity
 
     system_entities.update.side_effect = persist
-    system_entities.delete_by_id.side_effect = lambda *args: stored.clear()
+    system_entities.delete_by_id.side_effect = lambda *args, **kwargs: stored.clear()
 
     for _ in range(3):
         # Read the saved record rather than retaining progress only in controller memory.
@@ -559,7 +577,11 @@ def test_reclaim_persists_progress_across_ticks_and_controller_restarts(
         reconciler = JobReconciler(reconciler._backend_registry, mock_nemo_client, system_entity_client=system_entities)
 
     assert not stored
-    system_entities.delete_by_id.assert_called_once_with(HelixJobStorageReclaim, record.id)
+    system_entities.delete_by_id.assert_called_once_with(
+        HelixJobStorageReclaim,
+        record.id,
+        expected_db_version=record.db_version,
+    )
     first.reclaim_persistent_storage.reset_mock()
     second.reclaim_persistent_storage.reset_mock()
     reconciler._reclaim_queued_storage()
@@ -622,7 +644,7 @@ def test_reclaim_drains_kubernetes_cleanup_workloads_for_shared_and_distinct_cla
         return entity
 
     system_entities.update.side_effect = persist
-    system_entities.delete_by_id.side_effect = lambda *args: stored.clear()
+    system_entities.delete_by_id.side_effect = lambda *args, **kwargs: stored.clear()
 
     for _ in range(3):
         reconciler._reclaim_queued_storage()
@@ -855,3 +877,63 @@ def test_reconciler_loop_stays_healthy_during_a_slow_retention_scan(
 
     assert scan_seconds > 3 * interval
     assert not unhealthy
+
+
+def test_blocked_reclaims_do_not_starve_later_pages(backend_registry, mock_nemo_client):
+    reconciler, entities = _reconciler(backend_registry, mock_nemo_client)
+    blocked = [
+        HelixJobStorageReclaim(
+            name=HelixJobStorageReclaim.name_for_job(f"blocked-{index}"),
+            workspace="system",
+            job_id=f"blocked-{index}",
+            job_workspace="team",
+            job_name=f"blocked-{index}",
+            failed_creation=True,
+        )
+        for index in range(100)
+    ]
+    ready = HelixJobStorageReclaim(
+        name=HelixJobStorageReclaim.name_for_job("ready"),
+        workspace="system",
+        job_id="ready",
+        job_workspace="team",
+        job_name="ready",
+    )
+
+    def page(entity_type, *, workspace, page=1, page_size=100):
+        return SimpleNamespace(data=blocked if page == 1 else [ready])
+
+    entities.list.side_effect = page
+    entities.get_by_id.side_effect = lambda entity_type, entity_id: ready
+    with patch.object(reconciler, "_prepare_failed_creation", return_value=None):
+        reconciler._reclaim_queued_storage()
+        entities.delete_by_id.assert_not_called()
+        reconciler._reclaim_queued_storage()
+    entities.delete_by_id.assert_called_once_with(
+        HelixJobStorageReclaim,
+        ready.id,
+        expected_db_version=ready.db_version,
+    )
+
+
+def test_step_polling_failure_does_not_block_queued_cleanup(backend_registry, mock_nemo_client, mock_jobs_client):
+    reconciler, entities = _reconciler(backend_registry, mock_nemo_client)
+    ready = HelixJobStorageReclaim(
+        name=HelixJobStorageReclaim.name_for_job("ready"),
+        workspace="system",
+        job_id="ready",
+        job_workspace="team",
+        job_name="ready",
+    )
+    records = [ready]
+
+    def list_records(entity_type, **kwargs):
+        return SimpleNamespace(data=list(records) if entity_type is HelixJobStorageReclaim else [])
+
+    entities.list.side_effect = list_records
+    entities.get_by_id.side_effect = lambda entity_type, entity_id: ready
+    entities.delete_by_id.side_effect = lambda *args, **kwargs: records.clear()
+    mock_jobs_client.list_steps.side_effect = NemoTransportError(httpx.ConnectError("step polling unavailable"))
+    reconciler.step()
+    assert not records
+    assert not reconciler.is_healthy

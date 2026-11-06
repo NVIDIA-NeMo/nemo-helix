@@ -57,6 +57,20 @@ class HelixJob(EntityBase):
     current_attempt_id: Optional[str] = Field(default=None, description="Current Attempt ID")
     status: Optional[HelixJobStatus] = Field(default=None, description="Current attempt status")
     fileset: str = Field(..., description="Fileset ID for storing job artifacts (logs, results)")
+    fileset_id: str | None = Field(default=None, description="Immutable ID of the owned artifact fileset.")
+    creation_token: str | None = Field(default=None, description="Correlates this submission's ambiguous Job write.")
+    creation_pending: bool = Field(default=False, description="First-step scheduling has not been released.")
+    creation_failed: bool = Field(default=False, description="Creation handed this Job to controller cleanup.")
+    fileset_allocation_uncertain: bool = Field(
+        default=False, description="A Files create may still commit; absence alone cannot authorize cleanup."
+    )
+    fileset_creation_started: bool = Field(
+        default=True, description="The owned Files allocation may have started; False proves no allocation was issued."
+    )
+    fileset_creation_pending: bool = Field(
+        default=False,
+        description="Artifact fileset allocation is not yet confirmed; retain the Job for cleanup reconciliation.",
+    )
     output_location: Optional[str] = Field(
         default=None,
         description="Caller-supplied artifact fileset; None when the dispatcher auto-created the fileset",
@@ -218,11 +232,11 @@ class JobStorageTarget(BaseModel):
 
 
 class HelixJobStorageReclaim(EntityBase):
-    """Job storage waiting for the jobs controller to reclaim it, from a deleted job or one stopped too long.
+    """Job resources waiting for the existing controller to finish cleanup.
 
     Job storage is keyed by the job name, and deleting the job removes the entities the
     storage sweep reads. This record outlives the job, so the controller can still reach
-    the backends that hold the storage, and it holds the name until the storage is gone.
+    the backends and owned fileset, and it holds the name until cleanup finishes.
     It lives in the system workspace, so deleting the job's workspace does not drop it.
     """
 
@@ -232,6 +246,28 @@ class HelixJobStorageReclaim(EntityBase):
     job_workspace: str = Field(..., description="Workspace the job belongs to")
     job_name: str = Field(..., description="Name of the job. Job storage is keyed by it.")
     targets: list[JobStorageTarget] = Field(default_factory=list, description="Backends that hold the storage")
+
+    fileset_name: str | None = Field(default=None, description="Owned artifact fileset awaiting deletion.")
+    failed_creation: bool = Field(
+        default=False, description="Reconcile and remove a failed, unreleased creation first."
+    )
+    fileset_allocation_uncertain: bool = Field(default=False, description="A missing allocation is not yet definitive.")
+    fileset_id: str | None = Field(default=None, description="Fileset generation observed during cleanup.")
+
+    @classmethod
+    def for_failed_creation(cls, job: HelixJob) -> Self:
+        """Keep failed creation discoverable independently of its Job."""
+        return cls(
+            name=cls.name_for_job(job.id),
+            workspace="system",
+            job_id=job.id,
+            job_workspace=job.workspace,
+            job_name=job.name,
+            fileset_name=job.fileset if job.output_location is None else None,
+            fileset_id=job.fileset_id,
+            failed_creation=True,
+            fileset_allocation_uncertain=job.fileset_allocation_uncertain,
+        )
 
     @staticmethod
     def name_for_job(job_id: str) -> str:

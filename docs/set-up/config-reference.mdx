@@ -511,8 +511,10 @@ jobs:
   max_active_jobs_per_workspace: 200
   # Register the subprocess/default execution profile. When unset, defaults to true for docker/none runtimes and false for kubernetes.
   enable_subprocess_executor:
-  # How long paused and failed jobs keep their storage.
+  # Cleanup timeout for incomplete creation and storage retention for stopped jobs.
   storage:
+    # Age after Job persistence at which unfinished setup becomes eligible for cleanup. The controller claims expired setup with version checks before cleanup; an ambiguous Files allocation keeps its ownership reference until reconciled. | default: 900
+    creation_timeout_seconds: 900
     # How long storage is kept after a job pauses, unless that job sets its own pause window. Measured from the paused step's stopped_at. 0 reclaims on the next retention pass. | default: 604800
     paused_storage_ttl_seconds: 604800
     # Longest pause window a job may set, measured from stopped_at. A longer pause_ttl_seconds is rejected. The platform paused-storage TTL still applies when a job does not set its own window, and that default is also capped by this maximum. | default: 2592000

@@ -7966,7 +7966,7 @@ paths:
       tags:
       - Jobs
       summary: Delete Job
-      description: Delete a platform job.
+      description: Delete a terminal Job.
       operationId: delete_job_apis_jobs_v2_workspaces__workspace__jobs__name__delete
       parameters:
       - name: name

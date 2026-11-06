@@ -18,6 +18,7 @@ from nemo_helix_plugin.jobs.types import (
 from nhx.common.controller import Controller, HeartbeatMixin
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.common.observability import start_span_with_ctx
+from nhx.core.jobs.app.constants import JOB_CREATION_PENDING_KEY
 from nhx.core.jobs.app.ctx import JobBackendContext, JobContext
 from nhx.core.jobs.controllers.admission import AdmissionController, AlwaysAdmit
 from nhx.core.jobs.controllers.backends import JobUpdate, extract_provider_profile
@@ -321,10 +322,13 @@ class JobScheduler(HeartbeatMixin, Controller):
             workspace="-",  # Cross-workspace query
             query_params=query,
         ).items():
-            steps.append(step)
+            if not (step.status_details or {}).get(JOB_CREATION_PENDING_KEY):
+                steps.append(step)
         return steps
 
     def schedule_step(self, step: HelixJobStepWithContext) -> JobUpdate:
+        if (step.status_details or {}).get(JOB_CREATION_PENDING_KEY):
+            raise AdmissionDeferred("Job creation has not released this step.")
         provider, profile = extract_provider_profile(step)
         backend = self._backend_registry.get_backend(profile=profile, provider=provider)
         self._step_scheduled_total.add(1, attributes={"provider": provider, "profile": profile})

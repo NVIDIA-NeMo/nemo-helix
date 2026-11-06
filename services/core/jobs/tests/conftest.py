@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from nemo_helix_plugin.capabilities import reset_capability_cache
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.api_factory import ContainerSpec as FactoryContainerSpec
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProviderSpec as FactoryCPUExecutionProviderSpec
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable as FactoryEnvironmentVariable
@@ -272,12 +273,16 @@ def sample_job_dict():
 @fixture
 def mock_files_client():
     """Create a mock AsyncFilesClient for testing."""
-    mock_files = AsyncMock()
+    mock_files = AsyncMock(spec=AsyncFilesClient)
+    mock_files.with_retry.return_value = mock_files
     mock_fileset = MagicMock()
     mock_fileset.name = "test-fileset-id"
+    mock_fileset.id = "test-fileset-generation"
+    mock_fileset.custom_fields = {}
     mock_response = MagicMock()
     mock_response.data.return_value = mock_fileset
     mock_files.create_fileset.return_value = mock_response
+    mock_files.get_fileset.return_value = mock_response
     mock_files.delete_fileset.return_value = None
     return mock_files
 

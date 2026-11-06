@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
@@ -890,7 +891,7 @@ async def test_delete_job_serializes_with_same_name_create(
     mock_files_client,
     sample_platform_job_request: CreateHelixJobRequest,
 ):
-    """A same-name create waits until delete finishes all cleanup for the old job."""
+    """Deletion serializes the mutation; queued resource cleanup keeps the name held."""
     job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-create-lock-test-job")
     other_dispatcher = JobDispatcher(store=mock_store, files=mock_files_client, secrets=AsyncMock())
     create_request = sample_platform_job_request.model_copy(update={"name": job_name})
@@ -917,7 +918,8 @@ async def test_delete_job_serializes_with_same_name_create(
 
             allow_delete.set()
             assert await delete_task is True
-            recreated = await create_task
+            with pytest.raises(JobStorageReclaimPendingError):
+                await create_task
         finally:
             allow_delete.set()
             if create_task is not None:
@@ -926,8 +928,8 @@ async def test_delete_job_serializes_with_same_name_create(
                 await asyncio.gather(delete_task, return_exceptions=True)
 
     await verify_job_data_exists(mock_store, job_id, should_exist=False)
-    assert recreated.name == job_name
-    assert recreated.id != job_id
+    queued = await mock_store.list(HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE)
+    assert [record.job_id for record in queued.data] == [job_id]
 
 
 @pytest.mark.asyncio
@@ -1372,10 +1374,10 @@ async def test_delete_job_leaves_caller_supplied_fileset(
 
 
 @pytest.mark.asyncio
-async def test_delete_job_deletes_owned_fileset(
+async def test_delete_job_queues_owned_fileset(
     mock_dispatcher: JobDispatcher, mock_store: EntityClient, mock_files_client
 ):
-    """Deleting a job that owns its fileset (output_location unset) removes that fileset too."""
+    """Deletion durably hands its owned fileset to the controller before dropping the Job."""
     job_id, job_name, _, _, _, _ = await create_test_job_data(
         mock_store, "delete-owned-job", fileset="job-fileset-delete-owned-job"
     )
@@ -1383,7 +1385,9 @@ async def test_delete_job_deletes_owned_fileset(
     deleted = await mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE)
 
     assert deleted is True
-    mock_files_client.delete_fileset.assert_awaited_once()
+    mock_files_client.delete_fileset.assert_not_awaited()
+    queued = await mock_store.list(HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE)
+    assert [record.fileset_name for record in queued.data] == ["job-fileset-delete-owned-job"]
     await verify_job_data_exists(mock_store, job_id, should_exist=False)
 
 
@@ -1425,6 +1429,7 @@ async def test_create_then_delete_auto_fileset_round_trip(
     def _echo_create(*, body, workspace):
         fileset = MagicMock()
         fileset.name = body.name
+        fileset.id = "test-fileset-generation"
         response = MagicMock()
         response.data.return_value = fileset
         return response
@@ -1441,9 +1446,9 @@ async def test_create_then_delete_auto_fileset_round_trip(
     deleted = await mock_dispatcher.delete_job(job.name, DEFAULT_WORKSPACE)
 
     assert deleted is True
-    mock_files_client.delete_fileset.assert_awaited_once_with(
-        name=f"job-fileset-{job.name}", workspace=DEFAULT_WORKSPACE
-    )
+    mock_files_client.delete_fileset.assert_not_awaited()
+    queued = await mock_dispatcher.system_store.list(HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE)
+    assert [record.fileset_name for record in queued.data] == [job.fileset]
 
 
 @pytest.mark.asyncio
@@ -1461,6 +1466,7 @@ async def test_full_length_caller_name_derives_within_limit_fileset_and_round_tr
     def _echo_create(*, body, workspace):
         fileset = MagicMock()
         fileset.name = body.name
+        fileset.id = "test-fileset-generation"
         response = MagicMock()
         response.data.return_value = fileset
         return response
@@ -1484,7 +1490,9 @@ async def test_full_length_caller_name_derives_within_limit_fileset_and_round_tr
     deleted = await mock_dispatcher.delete_job(job.name, DEFAULT_WORKSPACE)
 
     assert deleted is True
-    mock_files_client.delete_fileset.assert_awaited_once_with(name=job.fileset, workspace=DEFAULT_WORKSPACE)
+    mock_files_client.delete_fileset.assert_not_awaited()
+    queued = await mock_dispatcher.system_store.list(HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE)
+    assert [record.fileset_name for record in queued.data] == [job.fileset]
 
 
 @pytest.mark.asyncio
@@ -2208,9 +2216,11 @@ async def test_list_steps_across_multiple_workspaces(
     # Create entity store with multiple workspaces and projects
     projects = ["default/test-project", "other-workspace/test-project"]
     with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
-        mock_files = AsyncMock()
+        mock_files = AsyncMock(spec=AsyncFilesClient)
+        mock_files.with_retry.return_value = mock_files
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
+        mock_fileset_obj.id = "test-fileset-generation"
         mock_resp = MagicMock()
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
@@ -2336,9 +2346,11 @@ async def test_list_steps_with_status_filter(
     from nhx.testing import create_test_client
 
     with create_test_client(client_type=EntityClient) as mock_store:
-        mock_files = AsyncMock()
+        mock_files = AsyncMock(spec=AsyncFilesClient)
+        mock_files.with_retry.return_value = mock_files
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
+        mock_fileset_obj.id = "test-fileset-generation"
         mock_resp = MagicMock()
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
@@ -2378,9 +2390,11 @@ async def test_list_steps_looks_up_attempts_and_jobs_in_batches(
     from nhx.testing import create_test_client
 
     with create_test_client(client_type=EntityClient) as mock_store:
-        mock_files = AsyncMock()
+        mock_files = AsyncMock(spec=AsyncFilesClient)
+        mock_files.with_retry.return_value = mock_files
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
+        mock_fileset_obj.id = "test-fileset-generation"
         mock_resp = MagicMock()
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
@@ -2425,9 +2439,11 @@ async def test_list_steps_drops_a_step_whose_job_no_longer_exists(sample_platfor
     from nhx.testing import create_test_client
 
     with create_test_client(client_type=EntityClient) as mock_store:
-        mock_files = AsyncMock()
+        mock_files = AsyncMock(spec=AsyncFilesClient)
+        mock_files.with_retry.return_value = mock_files
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
+        mock_fileset_obj.id = "test-fileset-generation"
         mock_resp = MagicMock()
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
@@ -2584,10 +2600,10 @@ async def test_delete_job_by_id(mock_dispatcher: JobDispatcher, mock_store: Enti
 async def test_delete_job_locked_rejects_same_name_replacement(
     mock_dispatcher: JobDispatcher, mock_store: EntityClient
 ):
-    """The ID guard stops a stale id-based delete from hitting a same-name replacement.
+    """Direct ID selection prevents a stale delete from hitting a same-name replacement.
 
     Simulates the TOCTOU window: the original job (resolved by id) is gone and a
-    new job now holds the same name. _delete_job_locked, given the ORIGINAL id,
+    new job now holds the same name. _delete_job_locked, given the original ID,
     must refuse to delete the replacement.
     """
     original_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "racing-del-job")
@@ -2596,7 +2612,7 @@ async def test_delete_job_locked_rejects_same_name_replacement(
     replacement_id, _, _, _, _, _ = await create_test_job_data(mock_store, job_name)
     assert replacement_id != original_id
 
-    deleted = await mock_dispatcher._delete_job_locked(job_name, DEFAULT_WORKSPACE, expected_id=original_id)
+    deleted = await mock_dispatcher._delete_job_locked(original_id, DEFAULT_WORKSPACE)
 
     assert deleted is False
     # The replacement must be untouched.
@@ -2605,13 +2621,13 @@ async def test_delete_job_locked_rejects_same_name_replacement(
 
 @pytest.mark.asyncio
 async def test_rerun_job_locked_rejects_same_name_replacement(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
-    """The ID guard stops a stale id-based rerun from hitting a same-name replacement."""
+    """Direct ID selection prevents a stale rerun from hitting a same-name replacement."""
     original_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "racing-rerun-job")
     await mock_dispatcher.delete_job(original_id, DEFAULT_WORKSPACE)
     replacement_id, _, _, _, _, _ = await create_test_job_data(mock_store, job_name)
     assert replacement_id != original_id
 
-    result = await mock_dispatcher._rerun_job_locked(job_name, DEFAULT_WORKSPACE, expected_id=original_id)
+    result = await mock_dispatcher._rerun_job_locked(original_id, DEFAULT_WORKSPACE)
 
     assert result is None
     # The replacement must not have gained a new attempt.
@@ -2642,9 +2658,11 @@ async def test_get_job_by_id_does_not_cross_workspaces(
 
     projects = ["default/test-project", "other-workspace/test-project"]
     with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
-        mock_files = AsyncMock()
+        mock_files = AsyncMock(spec=AsyncFilesClient)
+        mock_files.with_retry.return_value = mock_files
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
+        mock_fileset_obj.id = "test-fileset-generation"
         mock_resp = MagicMock()
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
@@ -2676,9 +2694,11 @@ async def test_list_jobs_across_multiple_workspaces(
     # Create entity store with multiple workspaces and projects
     projects = ["default/test-project", "other-workspace/test-project"]
     with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
-        mock_files = AsyncMock()
+        mock_files = AsyncMock(spec=AsyncFilesClient)
+        mock_files.with_retry.return_value = mock_files
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
+        mock_fileset_obj.id = "test-fileset-generation"
         mock_resp = MagicMock()
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
@@ -3745,7 +3765,7 @@ async def test_delete_queues_storage_reclaim_and_holds_the_name(
 
 
 @pytest.mark.asyncio
-async def test_delete_without_storage_queues_nothing(
+async def test_delete_without_backend_storage_still_queues_owned_artifacts(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
     sample_platform_job_request: CreateHelixJobRequest,
@@ -3759,7 +3779,9 @@ async def test_delete_without_storage_queues_nothing(
     assert await mock_dispatcher.delete_job(job.name, DEFAULT_WORKSPACE)
 
     reclaims = await mock_store.list(HelixJobStorageReclaim, filter_obj={}, workspace=SYSTEM_WORKSPACE)
-    assert reclaims.data == []
+    assert len(reclaims.data) == 1
+    assert reclaims.data[0].targets == []
+    assert reclaims.data[0].fileset_name == job.fileset
 
 
 @pytest.mark.asyncio
@@ -3948,18 +3970,27 @@ async def test_update_job_preserves_attempt_snapshot(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("replace", [False, True])
 async def test_update_job_returns_none_when_job_is_deleted_after_resolution(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
     sample_platform_job_request: CreateHelixJobRequest,
+    replace: bool,
 ):
     created = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
-    resolved = await mock_store.get(HelixJob, created.name, workspace=DEFAULT_WORKSPACE)
+    resolved = await mock_store.get_by_id(HelixJob, created.id)
+    replacements: list[HelixJob] = []
 
-    with (
-        patch.object(mock_dispatcher, "_resolve_job", new=AsyncMock(return_value=resolved)),
-        patch.object(mock_store, "get", new=AsyncMock(side_effect=EntityNotFoundError("deleted"))),
-    ):
+    async def resolve_then_delete(identifier: str, workspace: str) -> HelixJob:
+        assert identifier == created.name and workspace == DEFAULT_WORKSPACE
+        await mock_store.delete_by_id(HelixJob, resolved.id)
+        if replace:
+            replacement = await mock_store.create(resolved.model_copy(update={"description": "replacement"}))
+            assert replacement.id != resolved.id
+            replacements.append(replacement)
+        return resolved
+
+    with patch.object(mock_dispatcher, "_resolve_job", side_effect=resolve_then_delete):
         updated = await mock_dispatcher.update_job(
             created.name,
             DEFAULT_WORKSPACE,
@@ -3967,6 +3998,8 @@ async def test_update_job_returns_none_when_job_is_deleted_after_resolution(
         )
 
     assert updated is None
+    for replacement in replacements:
+        assert (await mock_store.get_by_id(HelixJob, replacement.id)).description == "replacement"
 
 
 @pytest.mark.asyncio

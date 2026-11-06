@@ -655,7 +655,7 @@ async def delete_job(
     workspace: str,
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
 ) -> None:
-    """Delete a platform job."""
+    """Delete a terminal Job."""
     with scoped_app_ctx(JobContext(id=name)):
         try:
             deleted = await dispatcher.delete_job(name, workspace)

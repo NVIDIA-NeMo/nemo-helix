@@ -85,3 +85,6 @@ RERUN_EXCLUDED_STATUS_DETAILS = frozenset(
     }
 )
 POD_PHASES = frozenset({"Pending", "Running", "Succeeded", "Failed", "Unknown"})
+
+# A first step is invisible to scheduling until Job creation releases it.
+JOB_CREATION_PENDING_KEY = "_creation_pending"
