@@ -39,6 +39,7 @@ class Clock:
 
 @pytest.fixture(scope="module")
 def preflight_code() -> CodeType:
+    """Compile the notebook's actual preflight and helper for isolated execution."""
     notebook = json.loads(NOTEBOOK.read_text())
     source = next(
         "".join(cell["source"]) for cell in notebook["cells"] if "def ensure_provider_model(" in "".join(cell["source"])
@@ -72,6 +73,8 @@ def run_preflight(
     agent: str = "codex",
     run_id: str | None = None,
 ) -> httpx.Response | None:
+    """Execute preflight with context credentials, a controlled HTTP boundary and a fake clock."""
+
     def respond(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         assert request.headers["Authorization"] == "Bearer notebook-context-token"
@@ -104,6 +107,7 @@ def test_preflight_waits_for_new_gateway_route_before_calling_model(preflight_co
     clock, requests, model_calls = Clock(), [], []
 
     def gateway(request: httpx.Request) -> httpx.Response:
+        """Expose the route after cache refresh, then record provider invocations."""
         if clock.now < 3:
             return httpx.Response(404, json=MISSING_ROUTE)
         model_calls.append(request)
@@ -149,6 +153,7 @@ def test_preflight_retry_budget_includes_slow_cache_misses(preflight_code: CodeT
     clock, requests, timeouts = Clock(), [], []
 
     def gateway(request: httpx.Request) -> httpx.Response:
+        """Consume request time while recording the remaining timeout budget."""
         assert clock.now < 120, "no request may start after the retry deadline"
         timeouts.append(request.extensions["timeout"]["read"])
         clock.now += 57 if len(timeouts) < 3 else 1
@@ -188,6 +193,7 @@ def test_preflight_does_not_replay_unrelated_404(preflight_code: CodeType, body:
     clock, requests = Clock(), []
 
     def gateway(request: httpx.Request) -> httpx.Response:
+        """Serve provider-origin and malformed 404 payloads without a gateway cache miss."""
         if isinstance(body, bytes):
             return httpx.Response(404, content=body)
         return httpx.Response(404, json=body)
