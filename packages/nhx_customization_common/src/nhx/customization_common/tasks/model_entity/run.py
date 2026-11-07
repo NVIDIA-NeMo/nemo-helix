@@ -282,6 +282,7 @@ class ModelEntityRunner:
                 f"Adapter {adapter_workspace}/{config.name} already exists for model "
                 f"{base_model_ref}, updating with new fileset"
             )
+            self._require_adapter_base_model(adapter_workspace, config.name, base_model_ref)
             try:
                 output_me = self.models.update_adapter(
                     name=config.name,
@@ -308,6 +309,33 @@ class ModelEntityRunner:
         except Exception as e:
             logger.exception(f"Failed to create model adapter: {e}")
             raise ModelEntityCreationError(f"Failed to create model adapter: {e}") from e
+
+    def _require_adapter_base_model(self, workspace: str, name: str, base_model_ref: str) -> None:
+        """Refuse to repoint an existing adapter that belongs to a different base model.
+
+        A name conflict only means the adapter name is taken. Updating it would swap the
+        fileset under whatever model it serves, so the existing adapter's canonical model
+        reference must match ``base_model_ref`` first. A mismatch is raised as
+        ``ModelEntityCreationError`` before anything is changed.
+        """
+        try:
+            existing = self.models.get_adapter(workspace=workspace, name=name).data()
+        except TRANSIENT_RETRYABLE_EXCEPTIONS:
+            raise
+        except Exception as lookup_error:
+            logger.exception(f"Failed to look up existing adapter {workspace}/{name}: {lookup_error}")
+            raise ModelEntityCreationError(
+                f"Adapter '{name}' already exists but could not be inspected: {lookup_error}"
+            ) from lookup_error
+
+        existing_ref = existing.model
+        if existing_ref and "/" not in existing_ref:
+            existing_ref = f"{workspace}/{existing_ref}"
+        if existing_ref != base_model_ref:
+            raise ModelEntityCreationError(
+                f"Adapter '{workspace}/{name}' already exists for model "
+                f"'{existing.model or 'unknown'}', not '{base_model_ref}'; refusing to update it."
+            )
 
     def _create_or_update_full_entity(
         self,

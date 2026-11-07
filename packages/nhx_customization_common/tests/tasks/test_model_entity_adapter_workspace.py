@@ -55,6 +55,10 @@ class _Result:
 class _Adapter:
     """A minimal adapter payload."""
 
+    def __init__(self, model: str | None = f"{BASE_WORKSPACE}/base-model") -> None:
+        """Hold the base model reference the adapter reports."""
+        self.model = model
+
     def model_dump(self) -> dict:
         """Return the adapter as a plain dict."""
         return {"name": "my-adapter"}
@@ -63,8 +67,15 @@ class _Adapter:
 class _RecordingModels:
     """Records adapter calls. Nested (base-model-workspace) adapter endpoints are not provided on purpose."""
 
-    def __init__(self, *, conflict: bool = False, fail_update: bool = False) -> None:
-        """Choose whether create conflicts and whether the follow-up update fails."""
+    def __init__(
+        self,
+        *,
+        conflict: bool = False,
+        fail_update: bool = False,
+        existing_model: str | None = f"{BASE_WORKSPACE}/base-model",
+    ) -> None:
+        """Choose whether create conflicts, whether the update fails, and the existing adapter's base model."""
+        self.existing_model = existing_model
         self.conflict = conflict
         self.fail_update = fail_update
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -75,6 +86,11 @@ class _RecordingModels:
         if self.conflict:
             raise _Conflict()
         return _Result(_Adapter())
+
+    def get_adapter(self, **kwargs: Any) -> _Result:
+        """Record the lookup and return the existing adapter."""
+        self.calls.append(("get_adapter", kwargs))
+        return _Result(_Adapter(self.existing_model))
 
     def update_adapter(self, **kwargs: Any) -> _Result:
         """Record the call, failing when configured to."""
@@ -114,8 +130,8 @@ def test_conflict_updates_adapter_in_output_workspace():
 
     _run(models)
 
-    assert [name for name, _ in models.calls] == ["create_adapter", "update_adapter"]
-    update = models.calls[1][1]
+    assert [name for name, _ in models.calls] == ["create_adapter", "get_adapter", "update_adapter"]
+    update = models.calls[2][1]
     assert update["workspace"] == OUTPUT_WORKSPACE
     assert update["name"] == "my-adapter"
     assert update["body"].fileset == f"{OUTPUT_WORKSPACE}/my-adapter"
@@ -132,3 +148,24 @@ def test_update_failure_after_conflict_is_reported():
     """A failed update after a conflict is raised, not swallowed."""
     with pytest.raises(ModelEntityCreationError, match="already exists but update failed"):
         _run(_RecordingModels(conflict=True, fail_update=True))
+
+
+def test_conflict_with_a_different_base_model_is_rejected_without_updating():
+    """An adapter of that name on another base model is not repointed, and the error is not relabeled."""
+    models = _RecordingModels(conflict=True, existing_model="ws-other/other-model")
+
+    with pytest.raises(ModelEntityCreationError, match="refusing to update") as excinfo:
+        _run(models)
+
+    assert "update failed" not in str(excinfo.value)
+    assert [name for name, _ in models.calls] == ["create_adapter", "get_adapter"]
+
+
+def test_unqualified_existing_model_resolves_against_the_adapter_workspace():
+    """A bare model name on the existing adapter means the adapter's workspace, so it does not match ws-base."""
+    models = _RecordingModels(conflict=True, existing_model="base-model")
+
+    with pytest.raises(ModelEntityCreationError, match="refusing to update"):
+        _run(models)
+
+    assert "update_adapter" not in [name for name, _ in models.calls]

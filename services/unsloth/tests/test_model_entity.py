@@ -20,6 +20,7 @@ import re
 import types
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -460,6 +461,7 @@ class TestCreateAdapter:
         models, files = _make_clients()
         models.get_model.return_value = _response(_model_entity(name="base-model"))
         models.create_adapter.side_effect = lambda **_: _raise_runner_conflict()
+        models.get_adapter.return_value = _response(SimpleNamespace(model="default/base-model"))
         models.update_adapter.return_value = _response(_model_entity(name="adapter-x"))
 
         runner = _make_runner(models, files)
