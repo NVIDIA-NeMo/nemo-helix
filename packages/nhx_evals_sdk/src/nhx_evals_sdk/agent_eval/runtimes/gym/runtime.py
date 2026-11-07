@@ -53,6 +53,10 @@ from nhx_evals_sdk.values.results import AggregateScore
 
 logger = logging.getLogger(__name__)
 
+OUTPUT_DIR_ENV = "NHX_GYM_OUTPUT_DIR"
+"""Names the directory, under the run's work dir, where Gym servers write outputs to keep with the run."""
+OUTPUT_SUBDIR = "outputs"
+
 
 class GymAgentTaskRunner:
     """An :class:`AgentTaskRunner` that runs an existing Gym env, then adapts its rollouts.
@@ -244,7 +248,10 @@ class GymAgentTaskRunner:
         # detects a `uv run` ancestor and tries to replicate that uv project onto its workers,
         # asserting the project pyproject.toml lives in the driver's cwd — which aborts startup. That
         # hook is wrong for Gym (servers manage their own deps), so disable it for the subprocesses.
-        subprocess_env = gym_invocation_env(cfg, resolved_env)
+        output_dir = work_dir / OUTPUT_SUBDIR
+        output_dir.mkdir(exist_ok=True)
+        # Set last so it always points inside the work dir, which a platform job saves with its bundle.
+        subprocess_env = {**gym_invocation_env(cfg, resolved_env), OUTPUT_DIR_ENV: str(output_dir)}
 
         selection = selection_args(cfg, work_dir)
 
