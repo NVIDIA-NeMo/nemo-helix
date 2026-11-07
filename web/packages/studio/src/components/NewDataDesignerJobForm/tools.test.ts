@@ -126,6 +126,13 @@ describe('generateDataDesignerJobRequestTool schema order', () => {
     ]);
   });
 
+  it('asks for judge score options as a score-to-description map', () => {
+    const score = childAt(columnSchemaFor('llm-judge'), 'scores').items ?? {};
+    expect(keysOf(score)).toEqual(['name', 'description', 'options']);
+    expect(score.required).toEqual(['name', 'description', 'options']);
+    expect(childAt(score, 'options').additionalProperties).toEqual({ type: 'string' });
+  });
+
   it('only offers seed sources the builder can load', () => {
     const source = childAt(config, 'seed_config', 'source');
     expect(keysOf(source)).toEqual(['seed_type', 'path']);

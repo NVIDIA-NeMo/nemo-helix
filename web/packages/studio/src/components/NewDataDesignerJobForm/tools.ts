@@ -245,8 +245,22 @@ const COLUMN_SCHEMAS = [
       scores: {
         type: 'array',
         minItems: 1,
-        description: 'Scoring rubrics: { name, description, options }.',
-        items: { type: 'object' },
+        description: 'Scoring rubrics.',
+        items: {
+          type: 'object',
+          required: ['name', 'description', 'options'],
+          properties: {
+            name: { type: 'string', description: 'Short name of the scored dimension.' },
+            description: { type: 'string', description: 'How to judge this dimension.' },
+            options: {
+              type: 'object',
+              description:
+                'Map of each score to what it means, e.g. { "1": "Not helpful", "5": "Very helpful" }.',
+              additionalProperties: { type: 'string' },
+            },
+          },
+          additionalProperties: false,
+        },
       },
     },
     LLM_OPTIONAL_FIELDS
