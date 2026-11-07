@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
-import { ModelSelectV2 } from '@nemo/common/src/components/ModelSelectV2/ModelSelectV2';
+import { ModelSelect } from '@nemo/common/src/components/ModelSelectV2/ModelSelect';
 import type {
   ModelSelection,
-  ModelSelectV2Props,
+  ModelSelectProps,
 } from '@nemo/common/src/components/ModelSelectV2/types';
 import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 import type { Meta, StoryObj } from '@storybook/react';
@@ -109,39 +109,39 @@ const groupByWorkspace = (models: ModelWorkspaceGroup['models']): ModelWorkspace
   }));
 };
 
-const meta: Meta<typeof ModelSelectV2> = {
-  component: ModelSelectV2,
-  title: 'Studio Common/ModelSelectV2',
+const meta: Meta<typeof ModelSelect> = {
+  component: ModelSelect,
+  title: 'Studio Common/ModelSelect',
 };
 
 export default meta;
 
-type Story = StoryObj<typeof ModelSelectV2>;
+type Story = StoryObj<typeof ModelSelect>;
 
-const DefaultRender = (args: ModelSelectV2Props) => {
+const DefaultRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
-  return <ModelSelectV2 {...args} value={value} onValueChange={setValue} groups={mockGroups} />;
+  return <ModelSelect {...args} value={value} onValueChange={setValue} groups={mockGroups} />;
 };
 
 export const Default: Story = {
   render: DefaultRender,
 };
 
-const WithSelectionRender = (args: ModelSelectV2Props) => {
+const WithSelectionRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>({
     model: 'nvidia/nemotron-8b',
   });
-  return <ModelSelectV2 {...args} value={value} onValueChange={setValue} groups={mockGroups} />;
+  return <ModelSelect {...args} value={value} onValueChange={setValue} groups={mockGroups} />;
 };
 
 export const WithSelection: Story = {
   render: WithSelectionRender,
 };
 
-const WithModelTypeToggleRender = (args: ModelSelectV2Props) => {
+const WithModelTypeToggleRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
   return (
-    <ModelSelectV2
+    <ModelSelect
       {...args}
       value={value}
       onValueChange={setValue}
@@ -155,11 +155,11 @@ export const WithModelTypeToggle: Story = {
   render: WithModelTypeToggleRender,
 };
 
-const WithParamsRender = (args: ModelSelectV2Props) => {
+const WithParamsRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
   const [inferenceParams, setInferenceParams] = useState<Partial<InferenceParams>>({});
   return (
-    <ModelSelectV2
+    <ModelSelect
       {...args}
       value={value}
       onValueChange={setValue}
@@ -175,11 +175,11 @@ export const WithParams: Story = {
   render: WithParamsRender,
 };
 
-const WithAllFeaturesRender = (args: ModelSelectV2Props) => {
+const WithAllFeaturesRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
   const [inferenceParams, setInferenceParams] = useState<Partial<InferenceParams>>({});
   return (
-    <ModelSelectV2
+    <ModelSelect
       {...args}
       fullWidth
       value={value}
@@ -197,19 +197,19 @@ export const WithAllFeatures: Story = {
   render: WithAllFeaturesRender,
 };
 
-const LoadingRender = (args: ModelSelectV2Props) => {
+const LoadingRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
-  return <ModelSelectV2 {...args} value={value} onValueChange={setValue} groups={[]} loading />;
+  return <ModelSelect {...args} value={value} onValueChange={setValue} groups={[]} loading />;
 };
 
 export const Loading: Story = {
   render: LoadingRender,
 };
 
-const DisabledRender = (args: ModelSelectV2Props) => {
+const DisabledRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
   return (
-    <ModelSelectV2 {...args} value={value} onValueChange={setValue} groups={mockGroups} disabled />
+    <ModelSelect {...args} value={value} onValueChange={setValue} groups={mockGroups} disabled />
   );
 };
 
@@ -217,9 +217,9 @@ export const Disabled: Story = {
   render: DisabledRender,
 };
 
-const EmptyRender = (args: ModelSelectV2Props) => {
+const EmptyRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
-  return <ModelSelectV2 {...args} value={value} onValueChange={setValue} groups={[]} />;
+  return <ModelSelect {...args} value={value} onValueChange={setValue} groups={[]} />;
 };
 
 export const Empty: Story = {
@@ -326,10 +326,10 @@ const manyModelsGroups: ModelWorkspaceGroup[] = [
   },
 ];
 
-const ManyModelsRender = (args: ModelSelectV2Props) => {
+const ManyModelsRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
   return (
-    <ModelSelectV2
+    <ModelSelect
       {...args}
       value={value}
       onValueChange={setValue}
@@ -343,10 +343,10 @@ export const ManyModels: Story = {
   render: ManyModelsRender,
 };
 
-const HideAdaptersRender = (args: ModelSelectV2Props) => {
+const HideAdaptersRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
   return (
-    <ModelSelectV2
+    <ModelSelect
       {...args}
       value={value}
       onValueChange={setValue}
@@ -368,7 +368,7 @@ const PROGRESSIVE_LATENCY_MS = 600;
  * The paged contract `useModelSearch` implements, stubbed with a local list: the filter box
  * reports its debounced value instead of filtering in place, and pages arrive as the list scrolls.
  */
-const ProgressiveRender = (args: ModelSelectV2Props) => {
+const ProgressiveRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
   const [search, setSearch] = useState('');
   const [pageCount, setPageCount] = useState(1);
@@ -393,7 +393,7 @@ const ProgressiveRender = (args: ModelSelectV2Props) => {
   };
 
   return (
-    <ModelSelectV2
+    <ModelSelect
       {...args}
       value={value}
       onValueChange={setValue}
