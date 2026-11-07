@@ -7,13 +7,13 @@ import {
   type ModelSearchFilter,
   type ModelSearchProps,
 } from '@nemo/common/src/api/models/useModelSearchCore';
-import { ModelSelectV2 } from '@nemo/common/src/components/ModelSelectV2/ModelSelectV2';
-import type { ModelSelectV2Props } from '@nemo/common/src/components/ModelSelectV2/types';
+import { ModelSelect } from '@nemo/common/src/components/ModelSelectV2/ModelSelect';
+import type { ModelSelectProps } from '@nemo/common/src/components/ModelSelectV2/types';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { useState, type FC } from 'react';
 
 export interface WorkspaceModelSelectCoreProps extends Omit<
-  ModelSelectV2Props,
+  ModelSelectProps,
   keyof ModelSearchProps
 > {
   /** Workspace to search. Nothing is fetched while this is null. */
@@ -28,7 +28,7 @@ export interface WorkspaceModelSelectCoreProps extends Omit<
 }
 
 /**
- * `ModelSelectV2` wired to its own paged search: nothing is requested until the user opens the
+ * `ModelSelect` wired to its own paged search: nothing is requested until the user opens the
  * menu, the filter box queries the API, and further pages arrive as the list scrolls.
  *
  * Takes its fetcher so plugins can run it on `host.sdk`; Studio code uses `WorkspaceModelSelect`.
@@ -60,7 +60,7 @@ export const WorkspaceModelSelectCore: FC<WorkspaceModelSelectCoreProps> = ({
   };
 
   return (
-    <ModelSelectV2
+    <ModelSelect
       {...selectProps}
       groups={groups}
       loading={loading}

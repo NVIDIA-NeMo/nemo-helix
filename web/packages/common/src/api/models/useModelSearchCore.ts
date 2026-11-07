@@ -43,7 +43,7 @@ export interface UseModelSearchCoreOptions {
 }
 
 /**
- * Props for `ModelSelectV2`, ready to spread. Every field lines up with a prop name so a caller
+ * Props for `ModelSelect`, ready to spread. Every field lines up with a prop name so a caller
  * that needs nothing custom is a single line.
  */
 export interface ModelSearchProps {
@@ -71,7 +71,7 @@ export interface UseModelSearchResult extends ModelSearchProps {
  * @example
  * const [open, setOpen] = useState(false);
  * const models = useModelSearchCore({ workspace, listModels, enabled: open });
- * return <ModelSelectV2 {...models} value={value} onValueChange={onChange} onOpenChange={setOpen} />;
+ * return <ModelSelect {...models} value={value} onValueChange={onChange} onOpenChange={setOpen} />;
  */
 export const useModelSearchCore = ({
   workspace,

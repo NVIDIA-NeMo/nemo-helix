@@ -9883,7 +9883,7 @@ interface ModelSelection {
    */
   entity?: ModelEntity;
 }
-interface ModelSelectV2Props {
+interface ModelSelectProps {
   /** Currently selected model (and optional adapter) */
   value: ModelSelection | null;
   /** Called when user selects a model or adapter */
@@ -9953,8 +9953,8 @@ interface ModelSelectV2Props {
 }
 type ModelType = 'custom' | 'base';
 //#endregion
-//#region src/components/ModelSelectV2/ModelSelectV2.d.ts
-export declare const ModelSelectV2: FC<ModelSelectV2Props>;
+//#region src/components/ModelSelectV2/ModelSelect.d.ts
+export declare const ModelSelect: FC<ModelSelectProps>;
 //#endregion
 //#region src/api/filterOperators.d.ts
 /**
@@ -10023,7 +10023,7 @@ interface UseModelSearchCoreOptions {
   include?: (model: ModelEntity) => boolean;
 }
 /**
- * Props for `ModelSelectV2`, ready to spread. Every field lines up with a prop name so a caller
+ * Props for `ModelSelect`, ready to spread. Every field lines up with a prop name so a caller
  * that needs nothing custom is a single line.
  */
 interface ModelSearchProps {
@@ -10049,12 +10049,12 @@ interface UseModelSearchResult extends ModelSearchProps {
  * @example
  * const [open, setOpen] = useState(false);
  * const models = useModelSearchCore({ workspace, listModels, enabled: open });
- * return <ModelSelectV2 {...models} value={value} onValueChange={onChange} onOpenChange={setOpen} />;
+ * return <ModelSelect {...models} value={value} onValueChange={onChange} onOpenChange={setOpen} />;
  */
 declare const useModelSearchCore: ({ workspace, listModels, filter, sort, pageSize, enabled, include }: UseModelSearchCoreOptions) => UseModelSearchResult;
 //#endregion
 //#region src/components/ModelSelectV2/WorkspaceModelSelectCore.d.ts
-interface WorkspaceModelSelectCoreProps extends Omit<ModelSelectV2Props, keyof ModelSearchProps> {
+interface WorkspaceModelSelectCoreProps extends Omit<ModelSelectProps, keyof ModelSearchProps> {
   /** Workspace to search. Nothing is fetched while this is null. */
   workspace: string | null;
   listModels: ListModels;
@@ -10066,7 +10066,7 @@ interface WorkspaceModelSelectCoreProps extends Omit<ModelSelectV2Props, keyof M
   enabled?: boolean;
 }
 /**
- * `ModelSelectV2` wired to its own paged search: nothing is requested until the user opens the
+ * `ModelSelect` wired to its own paged search: nothing is requested until the user opens the
  * menu, the filter box queries the API, and further pages arrive as the list scrolls.
  *
  * Takes its fetcher so plugins can run it on `host.sdk`; Studio code uses `WorkspaceModelSelect`.
@@ -11405,4 +11405,4 @@ export declare const CJobLaunchableStatuses: HelixJobStatus[];
 export declare const CJobTerminalStatuses: HelixJobStatus[];
 export declare const HelixJobTerminalStatuses: HelixJobStatus[];
 //#endregion
-export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type ListModels, type LogStatus, type ModelSearchFilter, type ModelSearchProps, type ModelSelectV2Props, type ModelSelection, type ModelType, type ModelWorkspaceGroup, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseModelSearchCoreOptions as UseModelSearchOptions, type UseModelSearchResult, type UseStudioDataViewStateOptions, type WithFilterOperators, WorkspaceModelSelectCore as WorkspaceModelSelect, type WorkspaceModelSelectCoreProps as WorkspaceModelSelectProps, useModelSearchCore as useModelSearch };
+export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type ListModels, type LogStatus, type ModelSearchFilter, type ModelSearchProps, type ModelSelectProps, type ModelSelection, type ModelType, type ModelWorkspaceGroup, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseModelSearchCoreOptions as UseModelSearchOptions, type UseModelSearchResult, type UseStudioDataViewStateOptions, type WithFilterOperators, WorkspaceModelSelectCore as WorkspaceModelSelect, type WorkspaceModelSelectCoreProps as WorkspaceModelSelectProps, useModelSearchCore as useModelSearch };

@@ -58,14 +58,14 @@ export { FormModal } from '@nemo/common/src/components/FormModal';
 export type { FormModalProps } from '@nemo/common/src/components/FormModal';
 export { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 export { LogViewer } from '@nemo/common/src/components/LogViewer';
-export { ModelSelectV2 } from '@nemo/common/src/components/ModelSelectV2/ModelSelectV2';
+export { ModelSelect } from '@nemo/common/src/components/ModelSelectV2/ModelSelect';
 export {
   WorkspaceModelSelectCore as WorkspaceModelSelect,
   type WorkspaceModelSelectCoreProps as WorkspaceModelSelectProps,
 } from '@nemo/common/src/components/ModelSelectV2/WorkspaceModelSelectCore';
 export type {
   ModelSelection,
-  ModelSelectV2Props,
+  ModelSelectProps,
   ModelType,
 } from '@nemo/common/src/components/ModelSelectV2/types';
 export type { LogStatus } from '@nemo/common/src/utils/logs';
