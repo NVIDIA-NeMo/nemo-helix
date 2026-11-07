@@ -176,16 +176,22 @@ async def test_normal_observer_shutdown_releases_worker(tmp_path, caplog):
         threads.append(threading.current_thread())
         entered.set()
 
-    with patch.object(LocalProgressObserver, "poll", poll):
+    # A poll interval far longer than the shutdown wait means only waking on cancel
+    # can avoid "shutdown timed out"; both are long enough for loaded CI runners.
+    with (
+        patch.object(LocalProgressObserver, "poll", poll),
+        patch("nemo_agents_plugin.fabric.progress._POLL_SECONDS", 60),
+        patch("nemo_agents_plugin.fabric.progress._WORKER_SHUTDOWN_SECONDS", 10),
+    ):
         task = asyncio.create_task(_observer(tmp_path).run())
-        async with asyncio.timeout(1):
+        async with asyncio.timeout(30):  # Hang guard only.
             while not entered.is_set():
                 await asyncio.sleep(0.001)
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
     for thread in threads:
-        thread.join(timeout=0.1)
+        thread.join(timeout=10)
     assert len(threads) == 1 and not threads[0].is_alive()
     assert "shutdown timed out" not in caplog.text
 
@@ -202,15 +208,17 @@ def test_stalled_poll_does_not_delay_invocation_or_asyncio_run_shutdown(tmp_path
     terminal = FabricRuntimeResult(status="succeeded")
     failure = RuntimeError("private invocation error")
     calls = 0
+    stalled_at = []
     _file(tmp_path).write_bytes(_record())
 
     def stalled_poll(observer):
         threads.append(threading.current_thread())
+        stalled_at.append(monotonic())
         entered.set()
         try:
             # Self-release on regressions so a default-executor shutdown cannot
-            # hang pytest indefinitely. Correct code exits before this expires.
-            release.wait(2)
+            # hang pytest indefinitely. Correct code exits long before this expires.
+            release.wait(10)
             original_poll(observer)
         finally:
             finished.set()
@@ -218,7 +226,7 @@ def test_stalled_poll_does_not_delay_invocation_or_asyncio_run_shutdown(tmp_path
     async def invoke(request):
         nonlocal calls
         calls += 1
-        async with asyncio.timeout(0.5):
+        async with asyncio.timeout(30):  # Hang guard only.
             while not entered.is_set():
                 await asyncio.sleep(0.001)
         if outcome == "failure":
@@ -256,9 +264,9 @@ def test_stalled_poll_does_not_delay_invocation_or_asyncio_run_shutdown(tmp_path
                 invoke,
             ),
         ):
-            started = monotonic()
             asyncio.run(run())
-            assert monotonic() - started < 1
+            # Measured from the stall, so slow worker startup does not count.
+            assert monotonic() - stalled_at[0] < 5
             assert entered.is_set() and not finished.is_set()
             assert calls == 1
             assert len(threads) == 1 and threads[0].daemon
@@ -267,7 +275,7 @@ def test_stalled_poll_does_not_delay_invocation_or_asyncio_run_shutdown(tmp_path
     finally:
         release.set()
         for thread in threads:
-            thread.join(timeout=1)
+            thread.join(timeout=10)
         assert all(not thread.is_alive() for thread in threads)
     # A resumed worker must not emit lifecycle records after invocation exit.
     assert "Agent telemetry progress" not in caplog.text
