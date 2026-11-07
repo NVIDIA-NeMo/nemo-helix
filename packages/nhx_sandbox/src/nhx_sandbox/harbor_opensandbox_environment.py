@@ -442,6 +442,16 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         )
         return build_egress_policy(self._egress_allowlist(targets))
 
+    async def _build_egress_policy(self) -> EgressPolicy:
+        """:meth:`egress_policy`, run in a worker thread.
+
+        Building a policy does blocking DNS lookups and reads ``/etc/resolv.conf``. Harbor runs every
+        trial on one event loop, so doing that inline would pause all of them for as long as a slow or
+        unresolvable host takes to time out. The policy is rebuilt for every sandbox rather than cached,
+        so a long run always sees current DNS answers.
+        """
+        return await asyncio.to_thread(self.egress_policy)
+
     def _operator_hosts(self) -> tuple[str, ...]:
         """Egress targets from the operator rather than the task; their addresses may be carved out."""
         return self._trusted_allowed_hosts
@@ -514,7 +524,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         if uses_extension:
             await self._require_extension()
 
-        egress_policy = self.egress_policy()
+        # Built once and shared by the create, the verification and the applied-egress record, so all
+        # three describe the same policy. Off the event loop: it resolves hostnames and reads resolv.conf.
+        egress_policy = await self._build_egress_policy()
         entrypoint = self._sandbox_entrypoint()
         sandbox = await self._driver.create(
             CreateRequest(
