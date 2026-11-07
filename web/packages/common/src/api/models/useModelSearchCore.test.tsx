@@ -102,6 +102,20 @@ describe('useModelSearchCore', () => {
     expect(result.current.hasMore).toBe(false);
   });
 
+  it('stops auto-paging after a next page fails', async () => {
+    mockListModels
+      .mockResolvedValueOnce(makePage([makeModel('no-provider')], 1, 3))
+      .mockImplementation(
+        () => new Promise((_, reject) => setTimeout(() => reject(new Error('boom')), 10))
+      );
+
+    const { result } = renderSearch({ include: (model) => !!model.model_providers?.length });
+
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(mockListModels).toHaveBeenCalledTimes(2);
+  });
+
   it('appends the next page on demand', async () => {
     mockListModels
       .mockResolvedValueOnce(makePage([makeModel('a')], 1, 2))

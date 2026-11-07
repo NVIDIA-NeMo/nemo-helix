@@ -99,14 +99,21 @@ export const useModelSearchCore = ({
 
   const isEnabled = enabled && !!workspace;
   const queryWorkspace = workspace ?? 'default';
-  const { data, error, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
-    useInfiniteQuery({
-      queryKey: getQueryKeyInfiniteModels(queryWorkspace, query),
-      queryFn: ({ pageParam }) => listModels(queryWorkspace, { ...query, page: pageParam }),
-      getNextPageParam: getNextModelsPageParam,
-      enabled: isEnabled,
-      initialPageParam: 1,
-    });
+  const {
+    data,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchNextPageError,
+    isFetchingNextPage,
+    isLoading,
+  } = useInfiniteQuery({
+    queryKey: getQueryKeyInfiniteModels(queryWorkspace, query),
+    queryFn: ({ pageParam }) => listModels(queryWorkspace, { ...query, page: pageParam }),
+    getNextPageParam: getNextModelsPageParam,
+    enabled: isEnabled,
+    initialPageParam: 1,
+  });
 
   const models = useMemo(() => {
     const loaded = data?.pages.flatMap((page) => page.data ?? []) ?? [];
@@ -125,10 +132,25 @@ export const useModelSearchCore = ({
   // `include` can empty a whole page, leaving the list with no rows to scroll and therefore no way
   // to ask for the next one. Keep paging until something survives the filter.
   useEffect(() => {
-    if (isEnabled && models.length === 0 && hasNextPage && !isFetchingNextPage && !isLoading) {
+    if (
+      isEnabled &&
+      models.length === 0 &&
+      hasNextPage &&
+      !isFetchingNextPage &&
+      !isFetchNextPageError &&
+      !isLoading
+    ) {
       void fetchNextPage();
     }
-  }, [fetchNextPage, hasNextPage, isEnabled, isFetchingNextPage, isLoading, models.length]);
+  }, [
+    fetchNextPage,
+    hasNextPage,
+    isEnabled,
+    isFetchNextPageError,
+    isFetchingNextPage,
+    isLoading,
+    models.length,
+  ]);
 
   return {
     models,
