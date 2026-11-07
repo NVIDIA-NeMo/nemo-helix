@@ -49,29 +49,36 @@ JOB_ID = "rl-job-1"
 
 
 class _Recorder:
-    """Records reaper and driver-termination calls in the order they happen."""
+    """Records reaper and driver-termination calls in the order they happen, on a fake clock."""
 
     def __init__(self) -> None:
-        """Start with no recorded events or calls."""
+        """Start with no recorded events or calls, and a clock that only the fakes advance."""
         self.events: list[str] = []
         self.reap_calls: list[dict[str, Any]] = []
         self.terminate_calls: list[tuple[int, int]] = []
-        self.handlers_during_driver_wait: dict[str, Any] = {}
+        self.signal_actions_during_sweep: list[tuple[Any, Any]] = []
         self.reap_error: Exception | None = None
+        self.now = 1000.0
+        self.sweep_cost_s = 0.0
+        self.driver_uses_whole_wait = False
+
+    def monotonic(self) -> float:
+        """The fake clock the backend reads."""
+        return self.now
 
     def terminate(self, signum: int, timeout: int = 30) -> None:
-        """Record the driver termination and its wait."""
+        """Record the driver termination, spending its whole wait when asked to."""
         self.events.append("terminate_driver")
         self.terminate_calls.append((signum, timeout))
-        self.on_terminate(timeout)
-
-    def on_terminate(self, timeout: int) -> None:
-        """Hook for tests that model the driver using its whole wait."""
+        if self.driver_uses_whole_wait:
+            self.now += timeout
 
     def reap(self, job_id: str, **kwargs: Any) -> tuple[str, ...]:
-        """Record a sweep, raising the configured error if any."""
+        """Record a sweep, spend its cost on the clock, and raise the configured error if any."""
         self.events.append("reap")
         self.reap_calls.append({"job_id": job_id, **kwargs})
+        self.signal_actions_during_sweep.append((signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)))
+        self.now += self.sweep_cost_s
         if self.reap_error is not None:
             raise self.reap_error
         return ()
@@ -79,12 +86,14 @@ class _Recorder:
 
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    """Install a fake ``sandboxed_gym.job_reaper`` that records every sweep."""
+    """Install a fake ``sandboxed_gym.job_reaper`` and a fake clock on the backend module."""
     recorded = _Recorder()
     module = types.ModuleType("sandboxed_gym.job_reaper")
     setattr(module, "reap_job_sandboxes", recorded.reap)
     monkeypatch.setitem(sys.modules, "sandboxed_gym", types.ModuleType("sandboxed_gym"))
     monkeypatch.setitem(sys.modules, "sandboxed_gym.job_reaper", module)
+    # Replace the backend's own ``time`` name rather than the shared stdlib module.
+    monkeypatch.setattr(backend_module, "time", SimpleNamespace(monotonic=recorded.monotonic))
     return recorded
 
 
@@ -221,41 +230,19 @@ def test_a_cancel_restores_default_signal_actions_before_any_blocking_work(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recorder: _Recorder
 ) -> None:
     """A second signal must end the process, not re-enter the handler mid-teardown."""
-    seen: dict[str, Any] = {}
-    original_reap = recorder.reap
-
-    def reap_and_look(job_id: str, **kwargs: Any) -> tuple[str, ...]:
-        """Record the signal actions in force during the sweep."""
-        seen.setdefault("sigterm", signal.getsignal(signal.SIGTERM))
-        seen.setdefault("sigint", signal.getsignal(signal.SIGINT))
-        return original_reap(job_id, **kwargs)
-
-    monkeypatch.setattr(recorder, "reap", reap_and_look)
-    module = sys.modules["sandboxed_gym.job_reaper"]
-    monkeypatch.setattr(module, "reap_job_sandboxes", reap_and_look)
-
     with pytest.raises(SystemExit):
         _execute(tmp_path, monkeypatch, recorder, gym=_sandboxed_gym(), during_driver=_cancel)
 
-    assert seen == {"sigterm": signal.SIG_DFL, "sigint": signal.SIG_DFL}
+    # The first sweep runs inside the handler, before it waits on the driver.
+    assert recorder.signal_actions_during_sweep[0] == (signal.SIG_DFL, signal.SIG_DFL)
 
 
 def test_a_cancel_shares_one_shutdown_budget_between_the_sweeps_and_the_driver_wait(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recorder: _Recorder
 ) -> None:
     """Every sweep and the driver wait are bounded by what is left of one deadline."""
-    clock = [1000.0]
-    monkeypatch.setattr(backend_module.time, "monotonic", lambda: clock[0])
-    original_reap = recorder.reap
-
-    def slow_reap(job_id: str, **kwargs: Any) -> tuple[str, ...]:
-        """A sweep that spends 8s of the budget."""
-        clock[0] += 8.0  # the first sweep burns 8s of the budget
-        return original_reap(job_id, **kwargs)
-
-    module = sys.modules["sandboxed_gym.job_reaper"]
-    monkeypatch.setattr(module, "reap_job_sandboxes", slow_reap)
-    monkeypatch.setattr(recorder, "on_terminate", lambda timeout: clock.__setitem__(0, clock[0] + timeout))
+    recorder.sweep_cost_s = 8.0
+    recorder.driver_uses_whole_wait = True
 
     with pytest.raises(SystemExit):
         _execute(tmp_path, monkeypatch, recorder, gym=_sandboxed_gym(), during_driver=_cancel)
@@ -264,7 +251,7 @@ def test_a_cancel_shares_one_shutdown_budget_between_the_sweeps_and_the_driver_w
     assert first["timeout_s"] == backend_module.SANDBOX_REAP_TIMEOUT_S
     # 25s budget - 8s spent - 5s kill allowance = 12s for the driver to exit.
     assert recorder.terminate_calls == [(signal.SIGTERM, 12)]
-    # The driver used its 12s, and the second sweep itself costs 8s, so it gets only the 5s left.
+    # The driver used its 12s after the first 8s sweep, leaving 5s for the second.
     assert second["timeout_s"] == pytest.approx(5.0)
 
 
@@ -272,17 +259,7 @@ def test_a_sweep_after_the_shutdown_budget_is_spent_is_skipped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recorder: _Recorder
 ) -> None:
     """The final sweep must not push teardown past the grace period."""
-    clock = [1000.0]
-    monkeypatch.setattr(backend_module.time, "monotonic", lambda: clock[0])
-    original_reap = recorder.reap
-
-    def very_slow_reap(job_id: str, **kwargs: Any) -> tuple[str, ...]:
-        """A sweep that spends the entire shutdown budget."""
-        clock[0] += backend_module.SHUTDOWN_GRACE_S + 1
-        return original_reap(job_id, **kwargs)
-
-    module = sys.modules["sandboxed_gym.job_reaper"]
-    monkeypatch.setattr(module, "reap_job_sandboxes", very_slow_reap)
+    recorder.sweep_cost_s = backend_module.SHUTDOWN_GRACE_S + 1
 
     with pytest.raises(SystemExit):
         _execute(tmp_path, monkeypatch, recorder, gym=_sandboxed_gym(), during_driver=_cancel)
