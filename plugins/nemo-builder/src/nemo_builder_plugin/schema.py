@@ -210,6 +210,7 @@ class BuildSet(BaseModel):
     )
     revision: int = Field(
         ge=1,
+        le=1_000_000_000,
         description=(
             "The caller's version of `name`. Submitting the same request again returns the existing "
             "build; submitting a different one under the same revision is refused."

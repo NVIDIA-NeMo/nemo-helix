@@ -173,7 +173,9 @@ def _build_router() -> APIRouter:
         build_set: str | None = Query(
             default=None, max_length=128, description="Only the images of the build set with this `name`."
         ),
-        revision: int | None = Query(default=None, ge=1, description="Only the images of this `revision`."),
+        revision: int | None = Query(
+            default=None, ge=1, le=1_000_000_000, description="Only the images of this `revision`."
+        ),
         status: Literal["queued", "pending", "ready", "failed"] | None = Query(
             default=None, description="Only images in this state."
         ),
