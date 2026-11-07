@@ -9,7 +9,7 @@ interface ObjectSchema {
   additionalProperties?: boolean | object;
   items?: ObjectSchema;
   anyOf?: ObjectSchema[];
-  const?: string;
+  enum?: string[];
 }
 
 const emitted: ObjectSchema = JSON.parse(
@@ -34,7 +34,7 @@ const columnSchemas = childAt(config, 'columns').items?.anyOf ?? [];
 
 const columnSchemaFor = (columnType: string): ObjectSchema => {
   const schema = columnSchemas.find(
-    (column) => column.properties?.column_type?.const === columnType
+    (column) => column.properties?.column_type?.enum?.[0] === columnType
   );
   if (!schema) {
     throw new Error(`No column schema for column_type "${columnType}"`);
@@ -58,7 +58,7 @@ describe('generateDataDesignerJobRequestTool schema order', () => {
   });
 
   it.each([
-    ['sampler', ['name', 'column_type', 'sampler_type', 'params']],
+    ['sampler', ['name', 'column_type', 'sampler_type', 'params', 'convert_to']],
     ['expression', ['name', 'column_type', 'expr', 'dtype']],
     [
       'llm-text',
@@ -107,7 +107,6 @@ describe('generateDataDesignerJobRequestTool schema order', () => {
         'extract_reasoning_content',
       ],
     ],
-    ['embedding', ['name', 'column_type', 'target_column', 'model_alias']],
     ['validation', ['name', 'column_type', 'target_columns', 'validator_type', 'validator_params']],
   ])('orders %s column keys and rejects unknown ones', (columnType, expectedKeys) => {
     const column = columnSchemaFor(columnType);
@@ -116,16 +115,21 @@ describe('generateDataDesignerJobRequestTool schema order', () => {
   });
 
   it('offers exactly one schema per column type', () => {
-    expect(columnSchemas.map((column) => column.properties?.column_type?.const)).toEqual([
-      'sampler',
-      'expression',
-      'llm-text',
-      'llm-structured',
-      'llm-judge',
-      'llm-code',
-      'embedding',
-      'validation',
+    expect(columnSchemas.map((column) => column.properties?.column_type?.enum)).toEqual([
+      ['sampler'],
+      ['expression'],
+      ['llm-text'],
+      ['llm-structured'],
+      ['llm-judge'],
+      ['llm-code'],
+      ['validation'],
     ]);
+  });
+
+  it('only offers seed sources the builder can load', () => {
+    const source = childAt(config, 'seed_config', 'source');
+    expect(keysOf(source)).toEqual(['seed_type', 'path']);
+    expect(childAt(source, 'seed_type').enum).toEqual(['nhx']);
   });
 
   it('declares required keys before optional ones in every object', () => {

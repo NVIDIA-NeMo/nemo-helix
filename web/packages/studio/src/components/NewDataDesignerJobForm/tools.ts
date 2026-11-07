@@ -1,14 +1,23 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  DatetimeSamplerParamsUnit,
+  ExpressionColumnConfigDtype,
+  PersonSamplerParamsSex,
+  SamplerType,
+  SamplingStrategy,
+  TimeDeltaSamplerParamsUnit,
+  ValidatorType,
+} from '@nemo/sdk/generated/data-designer/schema';
 import type { ChatCompletionTool } from 'openai/resources/index.mjs';
 
-const COLUMN_TYPE_DESCRIPTION = `Each column starts with "name" then "column_type" (one of: "sampler", "expression", "llm-text", "llm-structured", "llm-judge", "llm-code", "embedding", "validation"), followed by that type's fields in the order listed here.
-- sampler: "sampler_type", then "params" (object), both set on the column itself. "params" is never empty except for "uuid". Examples: "category" -> { "values": ["a", "b"], "weights"?: number[] }; "subcategory" -> { "category": "<parent column name>", "values": { "<parent value>": ["x", "y"] } } (parent column must come earlier, and "values" needs a key for every parent value); "uniform" -> { "low", "high" }; "gaussian" -> { "mean", "stddev" }; "datetime" -> { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "unit"?: "D" }; "uuid" -> {} or { "prefix" }. Use "subcategory" for values that depend on another column instead of an expression.
+const COLUMN_TYPE_DESCRIPTION = `Each column starts with "name" then "column_type" (one of: "sampler", "expression", "llm-text", "llm-structured", "llm-judge", "llm-code", "validation"), followed by that type's fields in the order listed here.
+- sampler: "sampler_type", then "params" (object), both set on the column itself, then optional "convert_to" (e.g. "int", "float", or a date format like "%Y-%m-%d"). "params" is never empty except for "uuid". Examples: "category" -> { "values": ["a", "b"], "weights"?: number[] }; "subcategory" -> { "category": "<parent column name>", "values": { "<parent value>": ["x", "y"] } } (parent column must come earlier, and "values" needs a key for every parent value); "uniform" -> { "low", "high" }; "gaussian" -> { "mean", "stddev" }; "datetime" -> { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "unit"?: "D" }; "uuid" -> {} or { "prefix" }. Use "subcategory" for values that depend on another column instead of an expression.
 - expression: "expr" (Jinja2 only; not Python), then optional "dtype" ("int"|"float"|"str"|"bool"). Reference other columns only as {{ column_name }}, never bare identifiers. Do not use Python ternary forms like "1 if cond else 0" without proper Jinja wrapping and {{ }} output. Order columns so expr only references earlier columns. Avoid keyword substring rules for sentiment—use sampler or LLM columns instead.
 - llm-text: "prompt", "model_alias", then optional "system_prompt", "extract_reasoning_content". Prompt may only reference columns listed earlier in "columns" (exact {{ name }} match).
 - llm-structured, llm-judge, llm-code: "prompt", "model_alias", then "output_format", "scores" or "code_lang" respectively, then the same optional fields as llm-text.
-- embedding: "target_column", "model_alias". validation: "target_columns", "validator_type", "validator_params". Prefer sampler/expression/llm-text for simple specs.`;
+- validation: "target_columns", "validator_type", "validator_params". Prefer sampler/expression/llm-text for simple specs.`;
 
 const SCALAR_VALUE = { anyOf: [{ type: 'string' }, { type: 'number' }] };
 
@@ -114,7 +123,7 @@ const SAMPLER_PARAMS_SCHEMA = {
         dt_min: { type: 'integer' },
         dt_max: { type: 'integer' },
         reference_column_name: { type: 'string' },
-        unit: { type: 'string', enum: ['D', 'h', 'm', 's'] },
+        unit: { type: 'string', enum: Object.values(TimeDeltaSamplerParamsUnit) },
       },
       additionalProperties: false,
     },
@@ -125,7 +134,7 @@ const SAMPLER_PARAMS_SCHEMA = {
       properties: {
         start: { type: 'string', description: 'Inclusive start, e.g. YYYY-MM-DD.' },
         end: { type: 'string', description: 'Exclusive end, e.g. YYYY-MM-DD.' },
-        unit: { type: 'string', enum: ['Y', 'M', 'D', 'h', 'm', 's'] },
+        unit: { type: 'string', enum: Object.values(DatetimeSamplerParamsUnit) },
       },
       additionalProperties: false,
     },
@@ -144,7 +153,7 @@ const SAMPLER_PARAMS_SCHEMA = {
       type: 'object',
       properties: {
         locale: { type: 'string' },
-        sex: { type: 'string', enum: ['Male', 'Female'] },
+        sex: { type: 'string', enum: Object.values(PersonSamplerParamsSex) },
         age_range: { type: 'array', items: { type: 'integer' } },
         city: { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
         select_field_values: { type: 'object', additionalProperties: true },
@@ -186,7 +195,7 @@ const columnSchema = (
   required: ['name', 'column_type', ...Object.keys(requiredFields)],
   properties: {
     name: COLUMN_NAME,
-    column_type: { type: 'string', const: columnType },
+    column_type: { type: 'string', enum: [columnType] },
     ...requiredFields,
     ...optionalFields,
   },
@@ -194,28 +203,19 @@ const columnSchema = (
 });
 
 const COLUMN_SCHEMAS = [
-  columnSchema('sampler', {
-    sampler_type: {
-      type: 'string',
-      enum: [
-        'category',
-        'subcategory',
-        'uniform',
-        'gaussian',
-        'datetime',
-        'uuid',
-        'person',
-        'person_from_faker',
-        'bernoulli',
-        'bernoulli_mixture',
-        'binomial',
-        'poisson',
-        'scipy',
-        'timedelta',
-      ],
+  columnSchema(
+    'sampler',
+    {
+      sampler_type: { type: 'string', enum: Object.values(SamplerType) },
+      params: SAMPLER_PARAMS_SCHEMA,
     },
-    params: SAMPLER_PARAMS_SCHEMA,
-  }),
+    {
+      convert_to: {
+        type: 'string',
+        description: 'Optional conversion after sampling: "int", "float", "str", or a date format.',
+      },
+    }
+  ),
   columnSchema(
     'expression',
     {
@@ -225,7 +225,7 @@ const COLUMN_SCHEMAS = [
           'Full Jinja2 template; use {{ col }} for every column reference (not bare col). No Python if/else expressions unless expressed as Jinja {{ a if b else c }}.',
       },
     },
-    { dtype: { type: 'string', enum: ['str', 'int', 'float', 'bool'] } }
+    { dtype: { type: 'string', enum: Object.values(ExpressionColumnConfigDtype) } }
   ),
   columnSchema('llm-text', { prompt: PROMPT, model_alias: MODEL_ALIAS }, LLM_OPTIONAL_FIELDS),
   columnSchema(
@@ -260,13 +260,9 @@ const COLUMN_SCHEMAS = [
     },
     LLM_OPTIONAL_FIELDS
   ),
-  columnSchema('embedding', {
-    target_column: { type: 'string', description: 'Text column to embed.' },
-    model_alias: MODEL_ALIAS,
-  }),
   columnSchema('validation', {
     target_columns: { type: 'array', minItems: 1, items: { type: 'string' } },
-    validator_type: { type: 'string', enum: ['code', 'local_callable', 'remote'] },
+    validator_type: { type: 'string', enum: Object.values(ValidatorType) },
     validator_params: {
       type: 'object',
       description: 'For "code": { "code_lang": "python" }. For "remote": { "url": "https://..." }.',
@@ -310,8 +306,20 @@ const SEED_CONFIG_SCHEMA = {
   description: 'Only when the user names an existing dataset to seed rows from.',
   required: ['source'],
   properties: {
-    source: { type: 'object', description: 'Seed source, e.g. { "seed_type", "path" }.' },
-    sampling_strategy: { type: 'string', enum: ['ordered', 'shuffle'] },
+    source: {
+      type: 'object',
+      required: ['seed_type', 'path'],
+      properties: {
+        seed_type: { type: 'string', enum: ['nhx'] },
+        path: {
+          type: 'string',
+          description:
+            'Fileset file as "<workspace>/<fileset>#<file>", e.g. "default/reviews#data.csv".',
+        },
+      },
+      additionalProperties: false,
+    },
+    sampling_strategy: { type: 'string', enum: Object.values(SamplingStrategy) },
     selection_strategy: { type: 'object' },
   },
   additionalProperties: false,
@@ -326,7 +334,7 @@ export const generateDataDesignerJobRequestTool: ChatCompletionTool = {
   type: 'function',
   function: {
     name: 'generate_data_designer_job_request',
-    description: `Generate a Data Designer job request from the user's description. Write keys in the order the schema lists them: job_request { name, spec { num_records, config { model_configs, columns, seed_config? } } }. model_configs comes first in config: one { "alias", "model", "provider", "inference_parameters"? } per alias the LLM columns use, or [] when no column uses a model. ${COLUMN_TYPE_DESCRIPTION} Keep config minimal and valid for preview.`,
+    description: `Generate a Data Designer job request from the user's description, writing keys in schema order. ${COLUMN_TYPE_DESCRIPTION}`,
     parameters: {
       type: 'object',
       required: ['job_request'],
@@ -338,7 +346,7 @@ export const generateDataDesignerJobRequestTool: ChatCompletionTool = {
             name: {
               type: 'string',
               description:
-                'Job name without spaces; use hyphens or underscores (e.g. "my-data-job").',
+                'Lowercase job name starting with a letter; letters, digits and hyphens only (e.g. "my-data-job").',
             },
             spec: {
               type: 'object',
