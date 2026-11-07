@@ -143,7 +143,7 @@ def _created(response) -> tuple[dict, list[dict]]:  # noqa: ANN001
     run_id = response.json()["id"]
     run = BenchmarkRunStore().get(run_id)
     assert run is not None
-    members = BenchmarkRunStore().members_for_runs([run_id])
+    members = BenchmarkRunStore().read_for_runs([run_id])[run_id].members
     stored = [EvaluationStore().load_for_dispatch(member["id"]) for member in members]
     assert None not in stored
     return run, [row for row in stored if row is not None]

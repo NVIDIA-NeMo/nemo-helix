@@ -13,8 +13,8 @@ from fastapi.responses import StreamingResponse
 from scaled_evals.api import artifacts
 from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
-from scaled_evals.api.benchmark_run_store import derive_run_view
-from scaled_evals.api.db import Database, get_db, get_stream_database_factory
+from scaled_evals.api.benchmark_run_store import enrich_run_reads
+from scaled_evals.api.db import Database, get_request_db, get_request_stream_database_factory
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.routers.evaluations import teardown_cancelled_evaluation
 from scaled_evals.api.runnability import (
@@ -45,8 +45,10 @@ from scaled_evals.api.utils import make_id
 
 router = APIRouter(prefix="/benchmark-runs", tags=["benchmark-runs"])
 
-Db = Annotated[Database, Depends(get_db)]
-StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]], Depends(get_stream_database_factory)]
+Db = Annotated[Database, Depends(get_request_db)]
+StreamDatabaseFactory = Annotated[
+    Callable[[], AbstractContextManager[Database]], Depends(get_request_stream_database_factory)
+]
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
 Secrets = Annotated[SecretReadable, Depends(caller_secret_readable)]
 
@@ -164,11 +166,12 @@ def _create_command(body: CreateBenchmarkRunRequest) -> list[str]:
     return command
 
 
-def _response(db: Database, run: dict[str, Any]) -> BenchmarkRunResponse:
-    """Derive the run's status/reward/breakdown from its members, then build the response."""
-    members = db.benchmark_runs.members_for_runs([run["id"]])
-    view = derive_run_view(run, members)
-    return BenchmarkRunResponse(**view, links=_links(run["id"]))
+def _response(db: Database, run_id: str) -> BenchmarkRunResponse:
+    """Build a response only from a fresh eligible parent and its paired members."""
+    read = db.benchmark_runs.read_for_runs([run_id]).get(run_id)
+    if read is None:
+        raise _http_error(404, "not_found", "benchmark run not found")
+    return BenchmarkRunResponse(**enrich_run_reads([read])[0].view(), links=_links(run_id))
 
 
 @router.post("/preflight", response_model=RunnabilityReport)
@@ -268,7 +271,7 @@ def create_benchmark_run(
         visibility=body.visibility,
         owner_id=current.owner_id,
     )
-    return _response(db, row)
+    return _response(db, row["id"])
 
 
 @router.get("", response_model=ListEnvelope[BenchmarkRun])
@@ -283,9 +286,8 @@ def list_benchmark_runs(
 ) -> ListEnvelope[BenchmarkRun]:
     """List benchmark runs, newest first (optionally filtered by benchmark_id).
 
-    Each run's status/reward is derived from its member evaluations on read — one
-    extra query fetches the members for the whole page, then they're grouped and
-    rolled up per run (no per-run query).
+    Eligibility, page membership and status/reward use the same batched parent
+    and member read. Denied runs are excluded before search and pagination.
     """
     rows = db.benchmark_runs.list(
         limit=limit,
@@ -295,12 +297,7 @@ def list_benchmark_runs(
         shared=shared,
         q=q,
     )
-    page = rows[:limit]
-    members_by_run: dict[str, list[dict]] = {}
-    for member in db.benchmark_runs.members_for_runs([r["id"] for r in page]):
-        members_by_run.setdefault(member["benchmark_run_id"], []).append(member)
-    derived = [derive_run_view(r, members_by_run.get(r["id"], [])) for r in rows]
-    return page_from_rows(derived, limit, BenchmarkRun)
+    return page_from_rows(rows, limit, BenchmarkRun)
 
 
 @router.get("/{run_id}", response_model=BenchmarkRunResponse)
@@ -309,16 +306,17 @@ def get_benchmark_run(run_id: str, db: Db) -> BenchmarkRunResponse:
     row = db.benchmark_runs.get(run_id)
     if row is None:
         raise _http_error(404, "not_found", "benchmark run not found")
-    return _response(db, row)
+    return _response(db, row["id"])
 
 
 @router.get("/{run_id}/reproduce", response_model=ReproduceBenchmarkRunResponse)
 def reproduce_benchmark_run(run_id: str, db: Db) -> ReproduceBenchmarkRunResponse:
     """Return a safe, complete request and CLI command that reruns a benchmark run."""
-    row = db.benchmark_runs.get(run_id)
-    if row is None:
+    read = db.benchmark_runs.read_for_runs([run_id]).get(run_id)
+    if read is None:
         raise _http_error(404, "not_found", "benchmark run not found")
-    members = db.benchmark_runs.members_for_runs([run_id])
+    read = enrich_run_reads([read])[0]
+    row, members = read.run, read.members
     if not members:
         raise _http_error(
             409,
@@ -333,7 +331,7 @@ def reproduce_benchmark_run(run_id: str, db: Db) -> ReproduceBenchmarkRunRespons
             "benchmark run member execution settings are unavailable",
         )
     body = _reproduce_request(row, source)
-    view = derive_run_view(row, members)
+    view = read.view()
     stale = split_stored_credentials(row.get("credentials"))[1]
     return ReproduceBenchmarkRunResponse(
         benchmark_run_id=run_id,
@@ -386,12 +384,12 @@ def cancel_benchmark_run(run_id: str, db: Db) -> BenchmarkRunResponse:
         raise _http_error(404, "not_found", "benchmark run not found")
     for member in cancelled_members:
         teardown_cancelled_evaluation(db, member)
-    return _response(db, row)
+    return _response(db, row["id"])
 
 
 @router.delete("/{run_id}", response_model=DeleteResponse)
 def delete_benchmark_run(run_id: str, db: Db) -> DeleteResponse:
-    """Soft-delete a benchmark run (cascades to its member evaluations)."""
+    """Soft-delete the benchmark run without deleting its member evaluations."""
     if not db.benchmark_runs.soft_delete(run_id):
         raise _http_error(404, "not_found", "benchmark run not found")
     return DeleteResponse(id=run_id)

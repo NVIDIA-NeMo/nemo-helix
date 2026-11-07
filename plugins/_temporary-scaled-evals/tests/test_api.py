@@ -14,7 +14,7 @@ pytest.importorskip("scaled_evals")
 from api_test_fixture import app, client, v1
 from pydantic import ValidationError
 from scaled_evals.api import auth
-from scaled_evals.api.db import get_db
+from scaled_evals.api.db import get_db, get_request_db
 from scaled_evals.api.routers import ops
 from scaled_evals.api.settings import Settings, settings
 
@@ -29,11 +29,15 @@ def _user_db_override() -> Iterator[MagicMock]:
     }
     app.dependency_overrides[get_db] = lambda: db
     v1.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_request_db] = lambda: db
+    v1.dependency_overrides[get_request_db] = lambda: db
     ops._evaluation_metrics_cache = None
     yield db
     app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_request_db, None)
     app.dependency_overrides.pop(auth.current_principal, None)
     v1.dependency_overrides.pop(get_db, None)
+    v1.dependency_overrides.pop(get_request_db, None)
     v1.dependency_overrides.pop(auth.current_principal, None)
 
 
