@@ -177,13 +177,17 @@ ATTRIBUTE_SPECS = (
         field=SpanAttributeField.ERROR_TYPE,
         bag=AttributeBag.STRING,
         bag_key="exception.type",
-        source_keys=("exception.type",),
+        source_keys=("exception.type", "nemo_relay.end.metadata.exception.type"),
     ),
     AttributeSpec(
         field=SpanAttributeField.ERROR_MESSAGE,
         bag=AttributeBag.STRING,
         bag_key="exception.message",
-        source_keys=("exception.message",),
+        source_keys=(
+            "exception.message",
+            "nemo_relay.end.metadata.exception.message",
+            "nemo_relay.end.metadata.otel.status_description",
+        ),
     ),
     AttributeSpec(
         field=SpanAttributeField.INPUT_TOKENS,

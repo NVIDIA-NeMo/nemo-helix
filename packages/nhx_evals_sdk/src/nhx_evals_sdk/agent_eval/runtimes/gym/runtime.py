@@ -20,9 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import (
-    HYDRA_SUBDIR,
     GymRuntimeConfig,
-    hydra_scalar,
     model_call_capture_dir,
     selection_args,
 )
@@ -268,14 +266,20 @@ class GymAgentTaskRunner:
         env_pump = asyncio.create_task(pump_stream(env_proc.stdout, env_log, label="gym env start"))
         try:
             await self._wait_for_servers(env_log, env_proc)
-            await self._collect_rollouts(gym, input_path, output_path, work_dir, subprocess_env)
+            await self._collect_rollouts(gym, selection, input_path, output_path, work_dir, subprocess_env)
         finally:
             await terminate(env_proc, grace_s=cfg.shutdown_grace_s)
             # Bounded: a leaked grandchild holding the inherited pipe must not wedge teardown.
             await drain_pumps([env_pump], grace_s=cfg.shutdown_grace_s, what="gym env start")
 
     async def _collect_rollouts(
-        self, gym: str, input_path: Path, output_path: Path, work_dir: Path, subprocess_env: dict[str, str]
+        self,
+        gym: str,
+        selection: Sequence[str],
+        input_path: Path,
+        output_path: Path,
+        work_dir: Path,
+        subprocess_env: dict[str, str],
     ) -> None:
         """Run ``gym eval run --no-serve`` against the live servers, bounded and self-cleaning.
 
@@ -303,11 +307,7 @@ class GymAgentTaskRunner:
             str(cfg.num_repeats),
             "--concurrency",
             str(cfg.concurrency),
-            # `gym eval run` is a Hydra app too, and unlike validate/start it does not go through
-            # selection_args — so without this it writes `outputs/<date>/<time>/` into the caller's
-            # cwd on every single collection. Quoted for the same reason as there: a work dir
-            # containing `,` or `[` is otherwise misread as sweep syntax.
-            f"hydra.run.dir={hydra_scalar(str(work_dir / HYDRA_SUBDIR))}",
+            *selection,
         ]
         stdout_log = work_dir / "gym_eval.stdout.log"
         stderr_log = work_dir / "gym_eval.stderr.log"
