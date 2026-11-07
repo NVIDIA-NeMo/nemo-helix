@@ -24,7 +24,6 @@ overrides:
 
 # https://pnpm.io/catalogs
 catalog:
-  '@mui/x-charts': ^7.28.0
   '@mui/x-data-grid': ^7.28.3
   '@nvidia/foundations-react-core': 1.19.0
   '@nvidia/foundations-tailwind-plugin': 1.19.0
@@ -47,7 +46,6 @@ catalog:
   '@types/react-dom': ^19.2.3
   '@types/qs': ^6.14.0
   '@vitejs/plugin-react': ^6.0.2
-  '@vitejs/plugin-react-swc': ^3.11.0
   '@vitest/coverage-v8': 4.1.10
   '@vitest/eslint-plugin': ^1.6.15
   'eslint-plugin-jsx-a11y': ^6.10.2
@@ -84,6 +82,5 @@ catalog:
   vite-plugin-mkcert: ^1.17.8
   vitest: ^4.1.10
   vitest-fail-on-console: ^0.10.1
-  vite-plugin-dts: ^4.5.4
   vite-plugin-svgr: ^4.5.0
   zod: ^3.25.76

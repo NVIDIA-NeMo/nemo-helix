@@ -31,7 +31,7 @@ const ANALYSIS_RUN_STATUS_URL = mockApiUrl(
   ':agent'
 );
 
-export const mockAnalysisRunResponse = (
+const mockAnalysisRunResponse = (
   workspace: string,
   { agent, default_model, fast_model }: CreateAnalysisRunRequest
 ): AnalysisRunResponse => ({

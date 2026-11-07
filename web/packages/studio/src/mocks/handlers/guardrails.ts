@@ -58,7 +58,7 @@ export const mockGuardrailConfigs: GuardrailConfig[] = [
 ];
 
 /** Guardrail checks are entity-store children of a config; these hang off `cfg-1` (pii-filter). */
-export const mockGuardrailChecks: GuardrailCheckEntity[] = [
+const mockGuardrailChecks: GuardrailCheckEntity[] = [
   {
     entity_type: GUARDRAIL_CHECKS_ENTITY_TYPE,
     id: 'chk-1',
