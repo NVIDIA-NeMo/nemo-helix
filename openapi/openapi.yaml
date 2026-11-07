@@ -3316,6 +3316,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/files/v2/workspaces/{workspace}/git-repositories/find-files:
+    post:
+      tags:
+      - Files
+      summary: Find Files in a Git Repository
+      description: 'Find every file with a given name in the commit a git storage
+        config resolves to.
+
+
+        Without `known_hosts`, returns the host''s public keys instead and reads nothing,
+        as
+
+        ssh prompts on a first connection: confirm one key''s fingerprint, then repeat
+        the
+
+        request with only that key''s `known_hosts_line`.
+
+
+        With `known_hosts`, runs the same checks as creating a fileset with this storage,
+
+        without creating one. A fileset created afterwards from the same branch or
+        tag
+
+        resolves it again, so if the branch has moved since, its files may differ.'
+      operationId: find_git_repository_files_apis_files_v2_workspaces__workspace__git_repositories_find_files_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FindGitRepositoryFilesRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindGitRepositoryFilesResponse'
+        '400':
+          description: The storage, its secret, or its host was rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '502':
+          description: The host or repository could not be reached
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/guardrails/v2/workspaces/{workspace}/checks:
     post:
       tags:
@@ -15921,6 +15990,50 @@ components:
       - generic
       - model
       title: FilesetPurpose
+    FindGitRepositoryFilesRequest:
+      properties:
+        storage:
+          allOf:
+          - $ref: '#/components/schemas/GitStorageConfig'
+          description: The storage a git fileset would be created with. Leave known_hosts
+            empty to get the host's keys.
+        file_name:
+          type: string
+          minLength: 1
+          pattern: ^[^/]+$
+          title: File Name
+          description: A file name, without a directory, to look for anywhere under
+            the storage path
+      type: object
+      required:
+      - storage
+      - file_name
+      title: FindGitRepositoryFilesRequest
+    FindGitRepositoryFilesResponse:
+      properties:
+        host_keys:
+          items:
+            $ref: '#/components/schemas/SshHostKey'
+          type: array
+          title: Host Keys
+          description: 'Set when the storage had no known_hosts: the keys the host
+            presents, ed25519 first. Each was fetched over its own unverified connection,
+            so confirm one key''s fingerprint and repeat the request with only that
+            key''s known_hosts_line. The repository is not read.'
+        revision:
+          title: Revision
+          description: The commit SHA the storage's revision resolved to. Unset when
+            host_keys is set.
+          type: string
+        paths:
+          items:
+            type: string
+          type: array
+          title: Paths
+          description: Paths of every file with that name, relative to the storage
+            path
+      type: object
+      title: FindGitRepositoryFilesResponse
     FinetuningType:
       type: string
       enum:
@@ -16520,12 +16633,13 @@ components:
           description: known_hosts lines for the remote host, e.g. the output of `ssh-keyscan
             host` once its fingerprint has been checked against one obtained through
             a trusted channel. The host key is verified against these and nothing
-            else.
+            else. Required to read the repository; leave it empty only to have find-files
+            return the host's keys.
+          default: ''
       type: object
       required:
       - url
       - ssh_key_secret
-      - known_hosts
       title: GitStorageConfig
     GithubStorageConfig:
       properties:
@@ -23064,6 +23178,27 @@ components:
       required:
       - data
       title: SpansPage
+    SshHostKey:
+      properties:
+        key_type:
+          type: string
+          title: Key Type
+          description: Key algorithm, e.g. 'ssh-ed25519'
+        fingerprint:
+          type: string
+          title: Fingerprint
+          description: SHA256 fingerprint, in the form ssh prints it
+        known_hosts_line:
+          type: string
+          title: Known Hosts Line
+          description: The key as a known_hosts line. Store only the line of the key
+            whose fingerprint was confirmed
+      type: object
+      required:
+      - key_type
+      - fingerprint
+      - known_hosts_line
+      title: SshHostKey
     StatusEnum:
       type: string
       enum:

@@ -15,7 +15,7 @@ from typing import Any, NotRequired, TypedDict
 
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nemo_helix_plugin.files.metadata import FilesetMetadata
-from nemo_helix_plugin.files.storage_config import StorageConfig
+from nemo_helix_plugin.files.storage_config import GitStorageConfig, StorageConfig
 from nemo_helix_plugin.schema import Page
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -194,3 +194,42 @@ class OtlpExportLogsPartialSuccess(BaseModel):
 
 class OtlpExportLogsResponse(BaseModel):
     partial_success: OtlpExportLogsPartialSuccess | None = Field(default=None, alias="partialSuccess")
+
+
+# ---------------------------------------------------------------------------
+# Git repository preview types
+# ---------------------------------------------------------------------------
+
+
+class SshHostKey(BaseModel):
+    key_type: str = Field(description="Key algorithm, e.g. 'ssh-ed25519'")
+    fingerprint: str = Field(description="SHA256 fingerprint, in the form ssh prints it")
+    known_hosts_line: str = Field(
+        description="The key as a known_hosts line. Store only the line of the key whose fingerprint was confirmed"
+    )
+
+
+class FindGitRepositoryFilesRequest(BaseModel):
+    storage: GitStorageConfig = Field(
+        description="The storage a git fileset would be created with. Leave known_hosts empty to get the host's keys."
+    )
+    file_name: str = Field(
+        min_length=1,
+        pattern=r"^[^/]+$",
+        description="A file name, without a directory, to look for anywhere under the storage path",
+    )
+
+
+class FindGitRepositoryFilesResponse(BaseModel):
+    host_keys: list[SshHostKey] = Field(
+        default_factory=list,
+        description="Set when the storage had no known_hosts: the keys the host presents, ed25519 first. "
+        "Each was fetched over its own unverified connection, so confirm one key's fingerprint and repeat the "
+        "request with only that key's known_hosts_line. The repository is not read.",
+    )
+    revision: str | None = Field(
+        default=None, description="The commit SHA the storage's revision resolved to. Unset when host_keys is set."
+    )
+    paths: list[str] = Field(
+        default_factory=list, description="Paths of every file with that name, relative to the storage path"
+    )

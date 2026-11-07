@@ -794,6 +794,14 @@ authz:
         scopes:
         - files:read
         - platform:read
+    # Does everything creating a git fileset does except store it, or fetches the host's keys to trust first.
+    /apis/files/v2/workspaces/{workspace}/git-repositories/find-files:
+      post:
+        permissions:
+        - filesets.create
+        scopes:
+        - files:write
+        - platform:write
     /apis/guardrails/v2/workspaces/{workspace}/checks:
       post:
         permissions:
