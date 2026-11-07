@@ -667,18 +667,20 @@ def _sandbox_hub_dataset_path(filename: str = HUB_ENV_DATASET_FILENAME) -> str:
 def _loader_accepts_argument(vf_env_id: str, argument: str) -> bool:
     """True when the installed hub ``load_environment`` can take ``argument``.
 
-    ``verifiers.load_environment`` forwards ``vf_env_args`` unchanged. A loader
-    that only declares ``dataset_name`` raises ``TypeError`` on ``dataset_path``.
+    ``verifiers.load_environment`` forwards ``vf_env_args`` as keywords. A loader
+    that only declares ``dataset_name``, or takes ``dataset_path`` positional-only,
+    raises ``TypeError`` on it.
     """
     module_name = vf_env_id.replace("-", "_").split("/")[-1]
     module = importlib.import_module(module_name)
     loader = getattr(module, "load_environment", None)
     if loader is None:
         return False
-    parameters = inspect.signature(loader).parameters
-    if argument in parameters:
-        return True
-    return any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters.values())
+    try:
+        inspect.signature(loader).bind_partial(**{argument: None})
+    except TypeError:
+        return False
+    return True
 
 
 @contextmanager

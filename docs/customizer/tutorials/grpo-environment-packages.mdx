@@ -74,6 +74,8 @@ The job looks up `{server_type}/{implementation}/` in the environment FileSet fi
 
 You can reference `simple_agent`, `vllm_model`, and `verifiers_agent` without uploading their `app.py` — shipping only `responses_api_agents/simple_agent/configs/*.yaml` is correct and intended. Any other implementation must appear as `{type}/{impl}/` in the FileSet (`native-v1` and `wheels-v1`). Put YAML alone under `configs/` only when every implementation is one of those image servers (`adapter-wheels-v1`).
 
+A server's `app.py` can read package files beside its own directory or elsewhere under the package root, such as `../../shared/settings.json`. It cannot read a configs-only directory through `../`: that directory stays the image's built-in, and Gym reads its YAML only through `config_paths`.
+
 <Warning>
 Two layout mistakes fail in ways that are hard to read:
 

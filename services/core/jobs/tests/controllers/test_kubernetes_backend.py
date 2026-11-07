@@ -755,6 +755,52 @@ def test_cleanup_job_name_is_a_short_hash_of_the_claim_and_folder():
     assert len(shared) <= 63
 
 
+def test_reclaim_finds_the_cleanup_job_another_profile_on_the_same_pvc_created():
+    """The stable name ignores the profile, so a profile removed after creating the Job can't strand it."""
+    batch_v1 = MagicMock()
+    workloads: dict[str, client.V1Job] = {}
+
+    def listed(*, namespace, label_selector):
+        wanted = dict(item.split("=", 1) for item in label_selector.split(","))
+        return SimpleNamespace(
+            items=[
+                job
+                for job in workloads.values()
+                if all(job.metadata.labels.get(key) == value for key, value in wanted.items())
+            ]
+        )
+
+    def created(*, namespace, body):
+        if body.metadata.name in workloads:
+            raise ApiException(status=409)
+        workloads[body.metadata.name] = body
+
+    batch_v1.list_namespaced_job.side_effect = listed
+    batch_v1.create_namespaced_job.side_effect = created
+    batch_v1.delete_namespaced_job.side_effect = lambda *, name, **kwargs: workloads.pop(name)
+
+    def reclaim(profile: str) -> bool:
+        return reclaim_job_persistent_storage(
+            namespace="ns",
+            batch_v1=batch_v1,
+            pvc_name="pvc",
+            workspace="ws",
+            job_id="jid",
+            permissions_image="perm:img",
+            execution_backend="kubernetes_job",
+            execution_profile=profile,
+            job_metadata=KubernetesObjectMetadata(),
+            pod_metadata=KubernetesObjectMetadata(),
+        )
+
+    assert reclaim("a") is False
+    (job,) = workloads.values()
+    job.status = client.V1JobStatus(conditions=[client.V1JobCondition(type="Complete", status="True")])
+
+    assert reclaim("b") is True
+    assert not workloads
+
+
 def test_reclaim_starts_a_cleanup_job_and_reports_it_pending():
     batch_v1 = MagicMock()
     _cleanup_jobs(batch_v1)
@@ -766,13 +812,14 @@ def test_reclaim_starts_a_cleanup_job_and_reports_it_pending():
         f"{JOB_TYPE_LABEL}={JOB_TYPE_STORAGE_CLEANUP}",
         f"{JOB_WORKSPACE_ID_LABEL}=ws",
         f"{JOB_ID_LABEL}=jid",
-        f"{JOB_EXECUTION_BACKEND_LABEL}=kubernetes_job",
-        f"{JOB_EXECUTION_PROFILE_LABEL}=default",
     ):
         assert label in selector
-    assert f"{JOB_STEP_NAME_LABEL}=" not in batch_v1.list_namespaced_job.call_args.kwargs["label_selector"]
+    for key in (JOB_STEP_NAME_LABEL, JOB_EXECUTION_BACKEND_LABEL, JOB_EXECUTION_PROFILE_LABEL):
+        assert f"{key}=" not in batch_v1.list_namespaced_job.call_args.kwargs["label_selector"]
     body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
     assert all(body.metadata.labels[key] == value for key, value in (item.split("=") for item in selector))
+    assert body.metadata.labels[JOB_EXECUTION_BACKEND_LABEL] == "kubernetes_job"
+    assert body.metadata.labels[JOB_EXECUTION_PROFILE_LABEL] == "default"
     # Reclaim deletes the Job once it has seen it finish. A TTL could delete it before that.
     assert body.spec.ttl_seconds_after_finished is None
     assert body.spec.template.spec.containers[0].resources.limits == {"cpu": "500m", "memory": "256Mi"}

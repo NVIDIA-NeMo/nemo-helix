@@ -1202,7 +1202,9 @@ def cleanup_job_persistent_storage(
     """
     # Workload cleanup and retention share this directory. A second rm races the first.
     labels = _storage_cleanup_labels(workspace, job_id, step_name, execution_backend, execution_profile)
-    labels.pop(JOB_STEP_NAME_LABEL, None)
+    # The Job name depends only on the PVC and directory, so any step or profile may have created it.
+    for label in (JOB_STEP_NAME_LABEL, JOB_EXECUTION_BACKEND_LABEL, JOB_EXECUTION_PROFILE_LABEL):
+        labels.pop(label, None)
     selector = ",".join(f"{key}={value}" for key, value in labels.items())
     inflight = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector).items or []
     if any(
@@ -1386,7 +1388,9 @@ def reclaim_job_persistent_storage(
     call starts a new one.
     """
     labels = _storage_cleanup_labels(workspace, job_id, STORAGE_RECLAIM_STEP_NAME, execution_backend, execution_profile)
-    labels.pop(JOB_STEP_NAME_LABEL, None)
+    # The Job name depends only on the PVC and directory, so any step or profile may have created it.
+    for label in (JOB_STEP_NAME_LABEL, JOB_EXECUTION_BACKEND_LABEL, JOB_EXECUTION_PROFILE_LABEL):
+        labels.pop(label, None)
     selector = ",".join(f"{key}={value}" for key, value in labels.items())
     cleanup_jobs = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector).items
     # Providers may use the same profile name with different PVCs. A cleanup of one

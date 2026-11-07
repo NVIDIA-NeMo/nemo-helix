@@ -390,29 +390,48 @@ def test_convert_omits_dataset_path_when_the_loader_rejects_it(tmp_path: Path, m
     assert (result.dataset_dir / "hub_environment.parquet").read_bytes() == b"PARQUET"
 
 
-def test_loader_accepts_argument_follows_the_installed_signature(monkeypatch) -> None:
+def _load_by_name(dataset_name: str = "agentica-org/DeepScaleR-Preview-Dataset"):
+    return dataset_name
+
+
+def _load_starred(**kwargs):
+    return kwargs
+
+
+def _load_by_path(dataset_path=None):
+    return dataset_path
+
+
+def _load_keyword_only(*, dataset_path):
+    return dataset_path
+
+
+def _load_positional_only(dataset_path=None, /):
+    return dataset_path
+
+
+@pytest.mark.parametrize(
+    ("loader", "accepted"),
+    [
+        (_load_by_name, False),
+        (_load_starred, True),
+        (_load_by_path, True),
+        (_load_keyword_only, True),
+        # verifiers passes vf_env_args as keywords, which a positional-only parameter rejects.
+        (_load_positional_only, False),
+    ],
+)
+def test_loader_accepts_argument_follows_the_installed_signature(monkeypatch, loader, accepted: bool) -> None:
     import sys
     from types import ModuleType
 
     from nhx.rl.tasks.environment.convert import DATASET_PATH_ARG, _loader_accepts_argument
 
-    named = ModuleType("deepscaler_math")
+    module = ModuleType("hub_env")
+    setattr(module, "load_environment", loader)
+    monkeypatch.setitem(sys.modules, "hub_env", module)
 
-    def load_by_name(dataset_name: str = "agentica-org/DeepScaleR-Preview-Dataset"):
-        return dataset_name
-
-    setattr(named, "load_environment", load_by_name)
-    starred = ModuleType("ascii_tree")
-
-    def load_starred(**kwargs):
-        return kwargs
-
-    setattr(starred, "load_environment", load_starred)
-    monkeypatch.setitem(sys.modules, "deepscaler_math", named)
-    monkeypatch.setitem(sys.modules, "ascii_tree", starred)
-
-    assert _loader_accepts_argument("deepscaler-math", DATASET_PATH_ARG) is False
-    assert _loader_accepts_argument("ascii-tree", DATASET_PATH_ARG) is True
+    assert _loader_accepts_argument("primeintellect/hub-env", DATASET_PATH_ARG) is accepted
 
 
 def test_split_train_validation_never_overlaps() -> None:
