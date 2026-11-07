@@ -23,7 +23,7 @@ def _atif(*calls: dict[str, Any]) -> dict[str, Any]:
 
 
 # The name Hermes records for the analyzer's MCP tool; the metric matches it exactly.
-_TOOL = "mcp__email_phishing_analyzer__email_phishing_analyzer"
+_TOOL = "mcp__lookup_tool__lookup_tool"
 
 
 def _call(text: object, name: str = _TOOL) -> dict[str, Any]:
@@ -71,7 +71,7 @@ async def test_other_tools_are_ignored_and_no_call_fails() -> None:
     assert await _score(_METRIC, _atif(_call(_EMAIL, name="read_file"))) is False
     # Exact match only: a shared suffix, or the bare name when the record is prefixed, is another tool.
     assert await _score(_METRIC, _atif(_call(_EMAIL, name="backup_" + _TOOL))) is False
-    assert await _score(_METRIC, _atif(_call(_EMAIL, name="email_phishing_analyzer"))) is False
+    assert await _score(_METRIC, _atif(_call(_EMAIL, name="lookup_tool"))) is False
     assert await _score(_METRIC, _atif()) is False
     assert await _score(_METRIC, None) is False
 

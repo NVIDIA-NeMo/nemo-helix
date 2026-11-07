@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Dataset-driven eval config for the agentEvaluation e2e test, scored over the rows of
-# public/sample-agents/email-phishing-analyzer/smaller_test.csv.
+# public/sample-agents/email-security-triage/smaller_test.csv.
 #
 # `dataset` is absent on purpose: Studio's Run Agent Evaluation flow writes the ref to the
 # dataset uploaded beside this file at submit time.

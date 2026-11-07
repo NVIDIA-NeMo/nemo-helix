@@ -14,9 +14,9 @@ Requires a reachable OpenAI-compatible inference endpoint and NeMo Fabric with H
 
 Install Fabric first: ``NEMO_FABRIC_REPO=... script/dev-install-fabric.sh``
 
-Golden path shape matches Hermes (``nvidia.fabric.hermes``), inspired by the
-email-phishing-analyzer harnesses. MCP AnalyzerRunBinding agents need an
-extra trial-path bridge and are not covered by this smoke.
+Golden path shape matches Hermes (``nvidia.fabric.hermes``). MCP
+AnalyzerRunBinding agents need an extra trial-path bridge and are not covered
+by this smoke.
 """
 
 from __future__ import annotations
