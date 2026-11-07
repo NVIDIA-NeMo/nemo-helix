@@ -60,6 +60,17 @@ def test_span_attribute_catalog_extracts_source_aliases_and_consumed_keys():
     }
 
 
+def test_generic_error_type_is_not_consumed_as_an_exception_alias():
+    source = {"error.type": "coarse classification", "exception.type": "ConcreteError"}
+    semantic, consumed_keys = SpanSemanticAttributes.from_source_attributes(source)
+    bags = semantic.to_bags()
+    bags.put_unhandled_source_attributes(source, consumed_keys=consumed_keys)
+    assert semantic.error_type == "ConcreteError"
+    assert "error.type" not in consumed_keys
+    assert bags.string["error.type"] == "coarse classification"
+    assert bags.string["exception.type"] == "ConcreteError"
+
+
 def test_span_semantic_attributes_use_name_based_evaluation_fields():
     semantic, consumed_keys = SpanSemanticAttributes.from_source_attributes(
         {

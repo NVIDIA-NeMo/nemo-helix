@@ -2,16 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.common.entities.constants import MAX_LENGTH_255, REGEX_WORD_CHARACTER_DOT_DASH
 from nhx.core.models.api.dependencies import get_prompt_service
 from nhx.core.models.api.service.prompt_service import PromptService
+from nhx.core.models.constants import RESOURCE_LOOKUP_NAME_PATTERN
 from nhx.core.models.schemas import (
     CreatePromptRequest,
     DeletePromptRequest,
@@ -117,8 +120,8 @@ async def create_prompt(
     status_code=status.HTTP_200_OK,
 )
 async def get_prompt(
-    workspace: str,
-    name: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    name: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     service: PromptService = Depends(get_prompt_service),
 ) -> Prompt:
     """Get a prompt by workspace and name."""
@@ -182,8 +185,8 @@ async def update_prompt(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_prompt(
-    workspace: str,
-    name: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    name: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     service: PromptService = Depends(get_prompt_service),
 ):
     """Delete a prompt by workspace and name."""
