@@ -298,6 +298,19 @@ def _sample_sequence_lengths(
     return lengths
 
 
+def _count_template_tokens(tokens) -> int:
+    """Return the number of token ids in the output of ``apply_chat_template``.
+
+    A tokenizer can return either a list of ids or a mapping such as
+    ``BatchEncoding``. Counting a mapping with ``len()`` gives its number of keys,
+    which silently under-reports every sample as ~2 tokens, so unwrap
+    ``input_ids`` first.
+    """
+    if hasattr(tokens, "keys"):
+        tokens = tokens["input_ids"]
+    return len(tokens)
+
+
 def _get_sample_token_length(obj: dict, tokenizer) -> int | None:
     """
     Get the tokenized length of a dataset sample.
@@ -318,12 +331,17 @@ def _get_sample_token_length(obj: dict, tokenizer) -> int | None:
         messages = obj["messages"]
         if messages and hasattr(tokenizer, "apply_chat_template"):
             try:
+                # ``return_dict=False`` asks for a plain list of token ids. Newer
+                # transformers releases return a ``BatchEncoding`` from
+                # ``tokenize=True`` by default, and ``len()`` of that is its key
+                # count (2: ``input_ids`` and ``attention_mask``), not the token count.
                 tokens = tokenizer.apply_chat_template(
                     messages,
                     add_generation_prompt=False,
                     tokenize=True,
+                    return_dict=False,
                 )
-                return len(tokens)
+                return _count_template_tokens(tokens)
             except Exception:
                 # Fall back to text extraction if chat template fails
                 pass
