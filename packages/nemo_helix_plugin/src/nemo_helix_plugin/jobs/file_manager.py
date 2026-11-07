@@ -72,19 +72,25 @@ def _filter_files_by_patterns(
     return [p for p in relative_paths if not matches(p)]
 
 
+# Uploaded trees can hold files written by untrusted agents, and a symlink there would upload whatever it
+# points at on the worker, so only regular files are listed.
 async def _list_local_files(local_path: Path) -> list[str]:
-    """List all files in a local directory recursively."""
+    """List all regular files in a local directory recursively, skipping symlinks."""
     files: list[str] = []
     async_path = anyio.Path(local_path)
     async for file_path in async_path.rglob("*"):
-        if await file_path.is_file():
+        if await file_path.is_file() and not await file_path.is_symlink():
             files.append(str(Path(file_path).relative_to(local_path)))
     return files
 
 
 def _list_local_files_sync(local_path: Path) -> list[str]:
-    """List all files in a local directory recursively."""
-    return [str(file_path.relative_to(local_path)) for file_path in local_path.rglob("*") if file_path.is_file()]
+    """List all regular files in a local directory recursively, skipping symlinks."""
+    return [
+        str(file_path.relative_to(local_path))
+        for file_path in local_path.rglob("*")
+        if file_path.is_file() and not file_path.is_symlink()
+    ]
 
 
 class FileManager(Protocol):
