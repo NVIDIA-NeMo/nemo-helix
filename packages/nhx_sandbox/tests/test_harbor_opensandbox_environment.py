@@ -200,15 +200,15 @@ async def test_a_slow_dns_lookup_does_not_block_the_event_loop(
     loop_progressed = threading.Event()
     loop_ran_during_lookup: list[bool] = []
 
-    def slow_getaddrinfo(host: str, *args: Any, **kwargs: Any) -> list[Any]:
-        lookups.append(host)
+    def slow_resolve_host(target: str) -> tuple[Any, ...]:
+        lookups.append(target)
         lookup_started.set()
         # Only another coroutine on the loop can set this. If the lookup ran on the loop, nothing
         # would, and the wait would run out.
         loop_ran_during_lookup.append(loop_progressed.wait(timeout=5))
-        raise OSError("name does not resolve")
+        return ()
 
-    monkeypatch.setattr(egress.socket, "getaddrinfo", slow_getaddrinfo)
+    monkeypatch.setattr(egress, "_resolve_host", slow_resolve_host)
     environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
     environment._trusted_allowed_hosts = ("slow.example.com",)
 
