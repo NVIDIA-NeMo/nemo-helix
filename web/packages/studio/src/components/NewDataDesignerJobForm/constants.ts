@@ -4,10 +4,12 @@
 export const DATA_DESIGNER_JOB_GENERATOR_SYSTEM_PROMPT = `You are a Data Designer job specification generator. The user will describe what type of content or data they want to generate. Your task is to call the generate_data_designer_job_request tool with a complete, valid Data Designer job request that passes API validation.
 
 You must always call the tool exactly once with the "job_request" argument. The job_request must have:
-- spec (required): { num_records (positive integer), config (object) }
-- config must have "columns" (array with at least one column). Each column must have "name" (string) and "column_type" (string). Add type-specific fields per column_type (e.g. expression: expr, dtype; sampler: sampler_type, params; llm-text: prompt, model_alias).
-- If any column uses model_alias, include config.model_configs with matching alias, model, and provider (required). Add optional inference_parameters (e.g. generation_type: "chat-completion", max_tokens).
-- Optionally job_request.name (no spaces; use hyphens or underscores, e.g. "my-data-job"), description, project; optionally config.seed_config.
+- name (no spaces; use hyphens or underscores, e.g. "my-data-job"), then spec: { num_records (positive integer), config (object) }
+- config must have "model_configs" first, then "columns" (array with at least one column), then optionally seed_config.
+- model_configs holds one entry per alias used by an LLM column, each with alias, model, and provider (required), and optional inference_parameters (e.g. generation_type: "chat-completion", max_tokens). Use [] when no column uses a model.
+- Each column has "name", then "column_type", then that type's fields (expression: expr, dtype; sampler: sampler_type, params; llm-text: prompt, model_alias).
+
+Key order: the tool call may be decoded with a grammar that only accepts keys in the order the schema lists them, so a key written out of order is lost or corrupted. Write every object's keys in schema order. Decide every field of an object (and every model alias the columns will use) before you start writing it. model_configs goes inside config, before columns, never on spec or job_request.
 
 Critical rules (these prevent silent 422s or runtime failures):
 1) Column order = dependency order: list columns so every reference is to a column defined earlier in the array. In llm-text "prompt" and in expression "expr", reference other columns only by their exact "name" using Jinja2 placeholders like {{ column_name }} (no typos; e.g. use {{ sentiment_label }} if the column is named sentiment_label).

@@ -3,12 +3,12 @@
 
 import type { ChatCompletionTool } from 'openai/resources/index.mjs';
 
-const COLUMN_TYPE_DESCRIPTION = `Each column must have "name" (string) and "column_type" (string, one of: "expression", "sampler", "llm-text", "llm-code", "llm-judge", "llm-structured", "seed-dataset", "validation", "embedding", "custom").
-- expression: requires "expr" (Jinja2 only; not Python). Reference other columns only as {{ column_name }}, never bare identifiers. Do not use Python ternary forms like "1 if cond else 0" without proper Jinja wrapping and {{ }} output. Optional "dtype" ("int"|"float"|"str"|"bool"). Order columns so expr only references earlier columns. Avoid keyword substring rules for sentiment—use sampler or LLM columns instead.
-- sampler: requires "sampler_type" and "params" (object), both set on the column itself. "params" is never empty except for "uuid". Examples: "category" -> { "values": ["a", "b"], "weights"?: number[] }; "subcategory" -> { "category": "<parent column name>", "values": { "<parent value>": ["x", "y"] } } (parent column must come earlier, and "values" needs a key for every parent value); "uniform" -> { "low", "high" }; "gaussian" -> { "mean", "stddev" }; "datetime" -> { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "unit"?: "D" }; "uuid" -> {} or { "prefix" }. Use "subcategory" for values that depend on another column instead of an expression.
-- llm-text: requires "prompt" (string), "model_alias" (string). Optional "system_prompt". Prompt may only reference columns listed earlier in "columns" (exact {{ name }} match).
-- llm-code additionally requires "code_lang"; llm-judge requires "scores"; llm-structured requires "output_format". All three also require "prompt" and "model_alias".
-- seed-dataset, validation, embedding, custom: require type-specific fields; prefer expression/sampler/llm-text for simple specs.`;
+const COLUMN_TYPE_DESCRIPTION = `Each column starts with "name" then "column_type" (one of: "sampler", "expression", "llm-text", "llm-structured", "llm-judge", "llm-code", "embedding", "validation"), followed by that type's fields in the order listed here.
+- sampler: "sampler_type", then "params" (object), both set on the column itself. "params" is never empty except for "uuid". Examples: "category" -> { "values": ["a", "b"], "weights"?: number[] }; "subcategory" -> { "category": "<parent column name>", "values": { "<parent value>": ["x", "y"] } } (parent column must come earlier, and "values" needs a key for every parent value); "uniform" -> { "low", "high" }; "gaussian" -> { "mean", "stddev" }; "datetime" -> { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "unit"?: "D" }; "uuid" -> {} or { "prefix" }. Use "subcategory" for values that depend on another column instead of an expression.
+- expression: "expr" (Jinja2 only; not Python), then optional "dtype" ("int"|"float"|"str"|"bool"). Reference other columns only as {{ column_name }}, never bare identifiers. Do not use Python ternary forms like "1 if cond else 0" without proper Jinja wrapping and {{ }} output. Order columns so expr only references earlier columns. Avoid keyword substring rules for sentiment—use sampler or LLM columns instead.
+- llm-text: "prompt", "model_alias", then optional "system_prompt", "extract_reasoning_content". Prompt may only reference columns listed earlier in "columns" (exact {{ name }} match).
+- llm-structured, llm-judge, llm-code: "prompt", "model_alias", then "output_format", "scores" or "code_lang" respectively, then the same optional fields as llm-text.
+- embedding: "target_column", "model_alias". validation: "target_columns", "validator_type", "validator_params". Prefer sampler/expression/llm-text for simple specs.`;
 
 const SCALAR_VALUE = { anyOf: [{ type: 'string' }, { type: 'number' }] };
 
@@ -155,198 +155,218 @@ const SAMPLER_PARAMS_SCHEMA = {
   ],
 };
 
+const COLUMN_NAME = { type: 'string', description: 'Column name.' };
+
+const PROMPT = {
+  type: 'string',
+  description: 'Prompt template; reference earlier columns as {{ column_name }}.',
+};
+
+const MODEL_ALIAS = { type: 'string', description: 'Alias of an entry in config.model_configs.' };
+
+const LLM_OPTIONAL_FIELDS = {
+  system_prompt: {
+    type: 'string',
+    description: 'Use to constrain style (e.g. no chain-of-thought in the answer).',
+  },
+  extract_reasoning_content: {
+    type: 'boolean',
+    description:
+      'If true, reasoning split by the provider goes to {column}__reasoning_content instead of the value.',
+  },
+};
+
+// llama.cpp grammars emit required keys before optional ones, so declare them in that order too.
+const columnSchema = (
+  columnType: string,
+  requiredFields: Record<string, object>,
+  optionalFields: Record<string, object> = {}
+) => ({
+  type: 'object',
+  required: ['name', 'column_type', ...Object.keys(requiredFields)],
+  properties: {
+    name: COLUMN_NAME,
+    column_type: { type: 'string', const: columnType },
+    ...requiredFields,
+    ...optionalFields,
+  },
+  additionalProperties: false,
+});
+
+const COLUMN_SCHEMAS = [
+  columnSchema('sampler', {
+    sampler_type: {
+      type: 'string',
+      enum: [
+        'category',
+        'subcategory',
+        'uniform',
+        'gaussian',
+        'datetime',
+        'uuid',
+        'person',
+        'person_from_faker',
+        'bernoulli',
+        'bernoulli_mixture',
+        'binomial',
+        'poisson',
+        'scipy',
+        'timedelta',
+      ],
+    },
+    params: SAMPLER_PARAMS_SCHEMA,
+  }),
+  columnSchema(
+    'expression',
+    {
+      expr: {
+        type: 'string',
+        description:
+          'Full Jinja2 template; use {{ col }} for every column reference (not bare col). No Python if/else expressions unless expressed as Jinja {{ a if b else c }}.',
+      },
+    },
+    { dtype: { type: 'string', enum: ['str', 'int', 'float', 'bool'] } }
+  ),
+  columnSchema('llm-text', { prompt: PROMPT, model_alias: MODEL_ALIAS }, LLM_OPTIONAL_FIELDS),
+  columnSchema(
+    'llm-structured',
+    {
+      prompt: PROMPT,
+      model_alias: MODEL_ALIAS,
+      output_format: { type: 'object', description: 'JSON schema of the output.' },
+    },
+    LLM_OPTIONAL_FIELDS
+  ),
+  columnSchema(
+    'llm-judge',
+    {
+      prompt: PROMPT,
+      model_alias: MODEL_ALIAS,
+      scores: {
+        type: 'array',
+        minItems: 1,
+        description: 'Scoring rubrics: { name, description, options }.',
+        items: { type: 'object' },
+      },
+    },
+    LLM_OPTIONAL_FIELDS
+  ),
+  columnSchema(
+    'llm-code',
+    {
+      prompt: PROMPT,
+      model_alias: MODEL_ALIAS,
+      code_lang: { type: 'string', description: 'Target language, e.g. "python".' },
+    },
+    LLM_OPTIONAL_FIELDS
+  ),
+  columnSchema('embedding', {
+    target_column: { type: 'string', description: 'Text column to embed.' },
+    model_alias: MODEL_ALIAS,
+  }),
+  columnSchema('validation', {
+    target_columns: { type: 'array', minItems: 1, items: { type: 'string' } },
+    validator_type: { type: 'string', enum: ['code', 'local_callable', 'remote'] },
+    validator_params: {
+      type: 'object',
+      description: 'For "code": { "code_lang": "python" }. For "remote": { "url": "https://..." }.',
+    },
+  }),
+];
+
+const MODEL_CONFIG_SCHEMA = {
+  type: 'object',
+  required: ['alias', 'model', 'provider'],
+  properties: {
+    alias: { type: 'string', description: 'Short stable alias, e.g. "review-model".' },
+    model: { type: 'string', description: 'Model identifier (e.g. workspace/model-name).' },
+    provider: {
+      type: 'string',
+      description:
+        'Model provider name. Use the provider part of the model or "workspace/provider-name" if workspace-scoped.',
+    },
+    inference_parameters: {
+      type: 'object',
+      properties: {
+        generation_type: { type: 'string', enum: ['chat-completion'] },
+        max_tokens: { type: 'integer', minimum: 1 },
+        temperature: { type: 'number' },
+        top_p: { type: 'number' },
+        max_parallel_requests: { type: 'integer', minimum: 1 },
+        extra_body: {
+          type: 'object',
+          description:
+            'Provider-specific JSON merged into the chat request (e.g. flags to disable thinking mode); keys depend on the inference backend.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+const SEED_CONFIG_SCHEMA = {
+  type: 'object',
+  description: 'Only when the user names an existing dataset to seed rows from.',
+  required: ['source'],
+  properties: {
+    source: { type: 'object', description: 'Seed source, e.g. { "seed_type", "path" }.' },
+    sampling_strategy: { type: 'string', enum: ['ordered', 'shuffle'] },
+    selection_strategy: { type: 'object' },
+  },
+  additionalProperties: false,
+};
+
 /**
  * Tool definition for the model to call when generating a Data Designer job request.
- * Schema is aligned with PreviewRequest and DataDesignerJobRequest so the payload
- * passes API validation (avoids 422).
+ * Accepts a strict subset of PreviewRequest / DataDesignerJobRequest. `model_configs` is required
+ * (possibly empty) so order-enforcing grammars emit it before `columns`, not after on the wrong level.
  */
 export const generateDataDesignerJobRequestTool: ChatCompletionTool = {
   type: 'function',
   function: {
     name: 'generate_data_designer_job_request',
-    description: `Generate a Data Designer job request from the user's description. Call with job_request containing a valid spec: spec.num_records (positive integer) and spec.config (object with "columns" array, at least one column). Optional: job_request.name, job_request.description, job_request.project. ${COLUMN_TYPE_DESCRIPTION} If using LLM columns, include spec.config.model_configs: array of { "alias": string, "model": string, "provider": string (required), "inference_parameters"?: { "generation_type": "chat-completion", "max_tokens"?: number } }. Each model_config MUST have "provider": the model provider name. Keep config minimal and valid for preview.`,
+    description: `Generate a Data Designer job request from the user's description. Write keys in the order the schema lists them: job_request { name, spec { num_records, config { model_configs, columns, seed_config? } } }. model_configs comes first in config: one { "alias", "model", "provider", "inference_parameters"? } per alias the LLM columns use, or [] when no column uses a model. ${COLUMN_TYPE_DESCRIPTION} Keep config minimal and valid for preview.`,
     parameters: {
       type: 'object',
+      required: ['job_request'],
       properties: {
         job_request: {
           type: 'object',
-          description:
-            'Data Designer job request: optional name, description, project; required spec with num_records and config.',
-          required: ['spec'],
+          required: ['name', 'spec'],
           properties: {
             name: {
               type: 'string',
               description:
-                'Optional job name. Must not contain spaces; use hyphens or underscores (e.g. "my-data-job").',
+                'Job name without spaces; use hyphens or underscores (e.g. "my-data-job").',
             },
-            description: { type: 'string', description: 'Optional job description.' },
-            project: { type: 'string', description: 'Optional project.' },
             spec: {
               type: 'object',
-              description:
-                'Required. num_records (positive integer) and config (object with columns array).',
               required: ['num_records', 'config'],
               properties: {
                 num_records: {
-                  type: 'number',
-                  description: 'Number of records to generate. Must be a positive integer.',
+                  type: 'integer',
                   minimum: 1,
+                  description: 'Number of records to generate.',
                 },
                 config: {
                   type: 'object',
-                  description:
-                    'Data Designer config. Must have "columns" (array, at least one column). Optional: model_configs.',
-                  required: ['columns'],
+                  required: ['model_configs', 'columns'],
                   properties: {
+                    model_configs: {
+                      type: 'array',
+                      description:
+                        'Every alias referenced by a column model_alias, defined before the columns. [] if no column uses a model.',
+                      items: MODEL_CONFIG_SCHEMA,
+                    },
                     columns: {
                       type: 'array',
                       minItems: 1,
                       description:
-                        'Column configs. Each item: name (string), column_type (string), plus type-specific fields. See main description.',
-                      items: {
-                        type: 'object',
-                        required: ['name', 'column_type'],
-                        properties: {
-                          name: { type: 'string', description: 'Column name.' },
-                          column_type: {
-                            type: 'string',
-                            enum: [
-                              'expression',
-                              'sampler',
-                              'llm-text',
-                              'llm-code',
-                              'llm-judge',
-                              'llm-structured',
-                              'seed-dataset',
-                              'validation',
-                              'embedding',
-                              'custom',
-                            ],
-                            description: 'Discriminator for column config type.',
-                          },
-                          drop: {
-                            type: 'boolean',
-                            description: 'Optional. If true, column is dropped from output.',
-                          },
-                          expr: {
-                            type: 'string',
-                            description:
-                              'For column_type expression: full Jinja2 template; use {{ col }} for every column reference (not bare col). No Python if/else expressions unless expressed as Jinja {{ a if b else c }}.',
-                          },
-                          dtype: {
-                            type: 'string',
-                            enum: ['int', 'float', 'str', 'bool'],
-                            description: 'For expression: result type.',
-                          },
-                          sampler_type: {
-                            type: 'string',
-                            enum: [
-                              'uuid',
-                              'category',
-                              'subcategory',
-                              'uniform',
-                              'gaussian',
-                              'bernoulli',
-                              'bernoulli_mixture',
-                              'binomial',
-                              'poisson',
-                              'scipy',
-                              'person',
-                              'person_from_faker',
-                              'datetime',
-                              'timedelta',
-                            ],
-                            description: 'For column_type sampler: sampler type.',
-                          },
-                          params: SAMPLER_PARAMS_SCHEMA,
-                          code_lang: {
-                            type: 'string',
-                            description: 'Required for llm-code: target language, e.g. "python".',
-                          },
-                          scores: {
-                            type: 'array',
-                            description: 'Required for llm-judge: scoring rubrics.',
-                            items: { type: 'object' },
-                          },
-                          output_format: {
-                            type: 'object',
-                            description: 'Required for llm-structured: JSON schema of the output.',
-                            additionalProperties: true,
-                          },
-                          prompt: {
-                            type: 'string',
-                            description:
-                              'For llm-text/llm-code/llm-judge/llm-structured: prompt template.',
-                          },
-                          model_alias: {
-                            type: 'string',
-                            description: 'For LLM columns: alias from model_configs.',
-                          },
-                          system_prompt: {
-                            type: 'string',
-                            description:
-                              'Optional for LLM columns. Use to constrain style (e.g. no chain-of-thought in the answer).',
-                          },
-                          extract_reasoning_content: {
-                            type: 'boolean',
-                            description:
-                              'For llm-text (and similar): if true, reasoning split by the provider goes to {column}__reasoning_content; helps when content vs reasoning are separate fields.',
-                          },
-                        },
-                        additionalProperties: true,
-                      },
+                        'Columns in dependency order. Each starts with name, column_type, then the fields of that type.',
+                      items: { anyOf: COLUMN_SCHEMAS },
                     },
-                    model_configs: {
-                      type: 'array',
-                      description:
-                        'Required if any column uses model_alias. Each item: alias, model, provider (required), optional inference_parameters.',
-                      items: {
-                        type: 'object',
-                        required: ['alias', 'model', 'provider'],
-                        properties: {
-                          alias: { type: 'string' },
-                          skip_health_check: { type: 'boolean' },
-                          model: {
-                            type: 'string',
-                            description: 'Model identifier (e.g. workspace/model-name).',
-                          },
-                          provider: {
-                            type: 'string',
-                            description:
-                              'Model provider name. Required. Use the provider part of the model or "workspace/provider-name" if workspace-scoped.',
-                          },
-                          inference_parameters: {
-                            type: 'object',
-                            properties: {
-                              generation_type: { type: 'string', enum: ['chat-completion'] },
-                              max_tokens: { type: 'number' },
-                              temperature: { type: 'number' },
-                              top_p: { type: 'number' },
-                              max_parallel_requests: { type: 'number' },
-                              extra_body: {
-                                type: 'object',
-                                description:
-                                  'Provider-specific JSON merged into the chat request (e.g. flags to disable thinking mode); keys depend on the inference backend.',
-                                additionalProperties: true,
-                              },
-                            },
-                          },
-                        },
-                        additionalProperties: true,
-                      },
-                    },
-                    seed_config: {
-                      type: 'object',
-                      description:
-                        'Optional. source (e.g. seed_type, path), sampling_strategy, selection_strategy.',
-                      properties: {
-                        source: { type: 'object' },
-                        sampling_strategy: { type: 'string', enum: ['ordered', 'shuffle'] },
-                      },
-                      additionalProperties: true,
-                    },
-                    constraints: { type: 'array', items: { type: 'object' } },
-                    processors: { type: 'array', items: { type: 'object' } },
+                    seed_config: SEED_CONFIG_SCHEMA,
                   },
                   additionalProperties: false,
                 },
@@ -357,7 +377,7 @@ export const generateDataDesignerJobRequestTool: ChatCompletionTool = {
           additionalProperties: false,
         },
       },
-      required: ['job_request'],
+      additionalProperties: false,
     },
   },
 };
