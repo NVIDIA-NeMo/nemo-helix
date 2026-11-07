@@ -13,7 +13,8 @@ from __future__ import annotations
 # `BenchmarkRunStore.list` shadows the builtin inside the class body.
 import builtins
 import contextlib
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, TypeVar
 
@@ -27,6 +28,7 @@ from scaled_evals.api.evaluation_store import TERMINAL_STATUSES as _TERMINAL_STA
 from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.repositories.base_repository import Conflict
+from scaled_evals.api.resource_access import INTERNAL_ACCESS, ResourceAccess
 from scaled_evals.api.task_store import TaskStore
 
 T = TypeVar("T")
@@ -259,16 +261,63 @@ def _row(entity: ScaledEvalsBenchmarkRun) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class BenchmarkRunRead:
+    """A live, eligible parent and its authorized members from one batched read."""
+
+    run: dict[str, Any]
+    members: list[dict[str, Any]]
+
+    def view(self) -> dict[str, Any]:
+        """Roll up only the members paired with this eligible parent."""
+        return derive_run_view(self.run, self.members)
+
+
+def enrich_run_reads(reads: Sequence[BenchmarkRunRead]) -> list[BenchmarkRunRead]:
+    """Hydrate task metadata while retaining each eligible parent/member snapshot."""
+    tasks = TaskStore().tasks(member["task_id"] for read in reads for member in read.members)
+    return [
+        BenchmarkRunRead(
+            read.run,
+            [
+                {**member, "task_slug": task["slug"], "task_name": task["name"]}
+                for member in read.members
+                if (task := tasks.get(member["task_id"]))
+            ],
+        )
+        for read in reads
+    ]
+
+
 class BenchmarkRunStore:
-    def __init__(self, client: SyncEntityClient | None = None) -> None:
+    def __init__(self, client: SyncEntityClient | None = None, *, access: ResourceAccess = INTERNAL_ACCESS) -> None:
+        """Use service storage with explicit request access or privileged internal access."""
         self._client = client or entity_store.entity_client()
+        self._access = access
+
+    def _can_access(self, entity: ScaledEvalsBenchmarkRun, *, write: bool = False) -> bool:
+        """Require parent access and the same access to every live member."""
+        if self._access.include_all:
+            return True
+        if write:
+            if not self._access.can_write(entity.owner_id):
+                return False
+        elif not self._access.can_read(entity.owner_id, entity.visibility):
+            return False
+        members = EvaluationStore(self._client, access=INTERNAL_ACCESS).list_for_runs([entity.name])
+        if write:
+            return all(self._access.can_write(member["owner_id"]) for member in members)
+        return all(self._access.can_read(member["owner_id"], member["visibility"]) for member in members)
 
     def _get(self, run_id: str, *, include_deleted: bool = False) -> ScaledEvalsBenchmarkRun | None:
+        """Return an accessible live run; only internal callers may include deleted runs."""
         try:
             entity = self._client.get(ScaledEvalsBenchmarkRun, run_id, workspace=entity_store.private_workspace())
         except EntityNotFoundError:
             return None
-        return entity if include_deleted or entity.deleted_at is None else None
+        if entity.deleted_at is not None and not (include_deleted and self._access.internal):
+            return None
+        return entity if self._can_access(entity) else None
 
     def _mutate(
         self,
@@ -277,9 +326,10 @@ class BenchmarkRunStore:
         *,
         include_deleted: bool = False,
     ) -> T | None:
+        """Recheck parent and member write access on every compare-and-swap attempt."""
         for _ in range(_MAX_WRITE_ATTEMPTS):
             entity = self._get(run_id, include_deleted=include_deleted)
-            if entity is None:
+            if entity is None or not self._can_access(entity, write=True):
                 return None
             result, write = change(entity)
             if not write:
@@ -469,6 +519,13 @@ class BenchmarkRunStore:
     def exists(self, run_id: str) -> bool:
         return self._get(run_id) is not None
 
+    def get_for_mutation(self, run_id: str) -> dict | None:
+        """Return a run only when the caller may mutate it and all its live members."""
+        entity = self._get(run_id)
+        if entity is None or not self._can_access(entity, write=True):
+            return None
+        return _row(entity)
+
     def list(
         self,
         *,
@@ -483,19 +540,26 @@ class BenchmarkRunStore:
         # ponytail: lists every live run, and a search derives each run's
         # status from all of its members. Upgrade path: store a derived status
         # the members update on terminal transitions.
-        runs = [
-            _row(entity)
+        entities = [
+            entity
             for entity in entity_store.list_all(
                 self._client,
                 ScaledEvalsBenchmarkRun,
                 {"benchmark_id": [benchmark_id]} if benchmark_id is not None else None,
             )
-            if entity.deleted_at is None and (not shared or entity.visibility != "private")
+            if entity.deleted_at is None
+            and self._access.can_read(entity.owner_id, entity.visibility)
+            and (not shared or entity.visibility != "private")
+        ]
+        reads = self.read_for_runs([entity.name for entity in entities])
+        runs = [
+            read.run
+            for read in reads.values()
+            if (benchmark_id is None or read.run["benchmark_id"] == benchmark_id)
+            and (not shared or read.run["visibility"] != "private")
         ]
         if q:
-            members: dict[str, builtins.list[dict]] = {}
-            for member in self.members_for_runs([run["id"] for run in runs]):
-                members.setdefault(member["benchmark_run_id"], []).append(member)
+            reads = {read.run["id"]: read for read in enrich_run_reads([reads[run["id"]] for run in runs])}
             runs = [
                 run
                 for run in runs
@@ -506,25 +570,48 @@ class BenchmarkRunStore:
                     run["benchmark_id"],
                     run["framework"],
                     run["runtime"],
-                    derive_run_view(run, members.get(run["id"], []))["status"],
+                    reads[run["id"]].view()["status"],
                 )
             ]
-        return entity_store.keyset_page(runs, cursor=cursor, order=order, limit=limit)
+        page = entity_store.keyset_page(runs, cursor=cursor, order=order, limit=limit)
+        selected = [reads[run["id"]] for run in page]
+        if not q:
+            selected = enrich_run_reads(selected)
+        return [read.view() for read in selected]
 
     def count(self) -> int:
         """Return how many runs were ever created, deleted ones included."""
         return len(entity_store.list_all(self._client, ScaledEvalsBenchmarkRun))
 
-    def members_for_runs(self, run_ids: builtins.list[str]) -> builtins.list[dict]:
-        """Return the member evaluations of the given runs with their task slug and name, by task."""
-        rows = EvaluationStore(self._client).list_for_runs(run_ids)
-        tasks = TaskStore().tasks(row["task_id"] for row in rows)
-        members = [
-            {**row, "task_slug": task["slug"], "task_name": task["name"]}
-            for row in rows
-            if (task := tasks.get(row["task_id"]))
-        ]
-        return sorted(members, key=lambda member: (member["task_id"], member["id"]))
+    def read_for_runs(self, run_ids: builtins.list[str]) -> dict[str, BenchmarkRunRead]:
+        """Return fresh eligible parents paired with their members, including empty runs.
+
+        Missing, deleted and denied parents are absent from the result, so callers
+        never mistake a failed authorization check for an empty member list.
+        """
+        if not run_ids:
+            return {}
+        parents = {
+            entity.name: entity
+            for entity in entity_store.list_by_names(self._client, ScaledEvalsBenchmarkRun, sorted(set(run_ids)))
+            if entity.deleted_at is None and self._access.can_read(entity.owner_id, entity.visibility)
+        }
+        rows = EvaluationStore(self._client, access=INTERNAL_ACCESS).list_for_runs(list(parents))
+        if not self._access.include_all:
+            inaccessible_runs = {
+                row["benchmark_run_id"] for row in rows if not self._access.can_read(row["owner_id"], row["visibility"])
+            }
+            parents = {run_id: entity for run_id, entity in parents.items() if run_id not in inaccessible_runs}
+            rows = [row for row in rows if row["benchmark_run_id"] in parents]
+        members: dict[str, builtins.list[dict[str, Any]]] = {run_id: [] for run_id in parents}
+        for row in rows:
+            members[row["benchmark_run_id"]].append(row)
+        return {
+            run_id: BenchmarkRunRead(
+                _row(entity), sorted(members[run_id], key=lambda member: (member["task_id"], member["id"]))
+            )
+            for run_id, entity in parents.items()
+        }
 
     def cancel(self, run_id: str) -> tuple[dict | None, bool, builtins.list[dict]]:
         """Cancel a run and its unfinished members.
@@ -541,11 +628,16 @@ class BenchmarkRunStore:
             entity.cancelled_at = datetime.now(tz=UTC)
             return True, True
 
-        cancelled_now = bool(self._mutate(run_id, change))
+        changed = self._mutate(run_id, change)
+        if changed is None:
+            return None, False, []
+        cancelled_now = bool(changed)
         run = self._get(run_id)
+        if run is None or not self._can_access(run, write=True):
+            return None, False, []
         cancelled_members: builtins.list[dict] = []
-        if run is not None and run.cancelled_at is not None:
-            evaluations = EvaluationStore(self._client)
+        if run.cancelled_at is not None:
+            evaluations = EvaluationStore(self._client, access=self._access)
             # ponytail: members are cancelled one write each after the run is
             # marked, so a crash or conflict between them leaves some members
             # queued until the run is cancelled again, which retries them.
