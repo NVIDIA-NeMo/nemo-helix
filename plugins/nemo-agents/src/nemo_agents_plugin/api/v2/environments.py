@@ -16,9 +16,9 @@ NemoEntitiesClient, 404/409 mapping).
 from __future__ import annotations
 
 import logging
-from typing import TypeVar
+from typing import Annotated, TypeVar
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from nemo_agents_plugin.api.v2._perms import ComputeSpecPerms, EnvironmentPerms, EnvironmentSpecPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client
 from nemo_agents_plugin.authz import scope
@@ -38,6 +38,7 @@ from nemo_helix_plugin.api.filters import make_filter_obj_dep
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entities import CLIENT_ERRORS
+from nemo_helix_plugin.entities.base import ID_PATTERN
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -71,7 +72,7 @@ _compute_spec_filter_dep = make_filter_obj_dep(ComputeSpecFilter)
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[EnvironmentPerms.CREATE])
 async def create_environment(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     body: CreateEnvironmentRequest,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AgentEnvironment:
@@ -145,7 +146,7 @@ async def delete_environment(
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[EnvironmentSpecPerms.CREATE])
 async def create_environment_spec(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     body: CreateEnvironmentSpecRequest,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AgentEnvironmentSpec:
@@ -213,7 +214,7 @@ async def delete_environment_spec(
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[ComputeSpecPerms.CREATE])
 async def create_compute_spec(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     body: CreateComputeSpecRequest,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AgentComputeSpec:

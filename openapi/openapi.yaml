@@ -2336,6 +2336,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[\w\-\+.@:]+$
           title: Workspace
       requestBody:
         required: true
@@ -6722,6 +6723,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[\w\-\+.@:]+$
           title: Workspace
       requestBody:
         required: true
@@ -10031,12 +10033,16 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '200':
@@ -10107,12 +10113,16 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '204':
@@ -10178,6 +10188,8 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Workspace
       - name: sort
         in: query
@@ -10248,6 +10260,8 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       requestBody:
         required: true
@@ -10297,6 +10311,8 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
@@ -10346,12 +10362,16 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '200':
@@ -10384,12 +10404,16 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '204':
@@ -10470,6 +10494,8 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
@@ -10523,6 +10549,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[\w\-\+.@:]+$
           title: Workspace
       requestBody:
         required: true
@@ -22300,6 +22327,7 @@ components:
           description: The workspace this binding applies to. None for platform-level
             roles.
           type: string
+          pattern: ^[\w\-\+.@:]+$
         role:
           type: string
           title: Role
