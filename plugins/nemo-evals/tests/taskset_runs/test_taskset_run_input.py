@@ -288,9 +288,12 @@ def test_digest_sorts_nested_dictionary_keys(run_body):
         (("execution", "sandbox"), {"cpus": 2}, {"cpus": 4}),
         (("spec", "target", "agent_kwargs"), {"value": 1}, {"value": 1.0}),
         (("spec", "target", "closed_book"), False, True),
+        (("spec", "result_ignore_patterns"), ["*.tmp"], ["*.log"]),
+        (("spec", "result_ignore_patterns"), [], ["*.tmp"]),
     ],
 )
 def test_digest_preserves_meaningful_request_differences(run_body, path, left, right):
+    """Execution and retention changes distinguish requests reusing an idempotency key."""
     requests = []
     for value in (left, right):
         body = deepcopy(run_body)
@@ -320,7 +323,16 @@ def test_publication_is_part_of_the_request_identity(run_body):
     assert len({plain, *digests.values()}) == 3
 
 
-def test_digest_hashes_the_exact_compact_json_projection(run_body):
+@pytest.mark.parametrize(
+    "retention_settings",
+    [
+        {},
+        {"result_ignore_patterns": []},
+    ],
+)
+def test_digest_hashes_the_exact_compact_json_projection(run_body, retention_settings):
+    """Omitted and empty retention settings preserve the pre-upgrade request digest."""
+    run_body["spec"].update(retention_settings)
     request = TasksetRunInput.model_validate(run_body)
     expected_body = {
         "spec": {
@@ -498,3 +510,20 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
         if with_details
         else None,
     }
+
+
+@pytest.mark.parametrize("pattern", ["metadata.json", "trials.jsonl", "scores.jsonl", "*.json", "*.jsonl", "*"])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_run_rejects_excluded_aggregation_inputs(run_body, pattern, as_json):
+    run_body["spec"]["result_ignore_patterns"] = [pattern]
+    with pytest.raises(ValidationError, match="required Kubernetes aggregation inputs"):
+        if as_json:
+            TasksetRunInput.model_validate_json(json.dumps(run_body))
+        else:
+            TasksetRunInput.model_validate(run_body)
+
+
+@pytest.mark.parametrize("patterns", [[], ["/evidence/"], ["*.tmp", "evidence/"], ["nested/metadata.json"]])
+def test_run_accepts_exclusions_that_keep_aggregation_inputs(run_body, patterns):
+    run_body["spec"]["result_ignore_patterns"] = patterns
+    assert TasksetRunInput.model_validate(run_body).spec.result_ignore_patterns == patterns

@@ -12,6 +12,7 @@ from typing import Protocol
 import anyio
 from filesets import AsyncFilesetFileSystem, FilesetFileSystem, build_fileset_ref, parse_fileset_ref
 from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.jobs.ignore_patterns import matches_ignore_patterns
 from nemo_helix_plugin.jobs.schemas import FileStorageType
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,10 @@ def _filter_files_by_patterns(
         ignore_patterns: Glob patterns for files to ignore. Supports:
             - "*.ext" - match files by extension (at any depth)
             - "name" - match files by name (at any depth)
-            - "dir/" - match all files inside directories named "dir"
+            - "dir/" - match all files inside directories named "dir" at any depth;
+              the folder name may be a glob, such as "dir*/"
+            - "dir/sub/" - match all files inside "dir/sub" at the root of the listed paths;
+              each folder name may be a glob, such as "dir/sub*/"
 
     Returns:
         Filtered list of relative path strings (files not matching any pattern)
@@ -57,19 +61,7 @@ def _filter_files_by_patterns(
     if isinstance(ignore_patterns, str):
         ignore_patterns = [ignore_patterns]
 
-    def matches(rel_path: str) -> bool:
-        path = Path(rel_path)
-        for pattern in ignore_patterns:
-            if pattern.endswith("/"):
-                # Directory pattern: match files under directories with this name
-                dir_name = pattern.rstrip("/")
-                if dir_name in path.parts[:-1]:
-                    return True
-            elif path.match(pattern):
-                return True
-        return False
-
-    return [p for p in relative_paths if not matches(p)]
+    return [p for p in relative_paths if not matches_ignore_patterns(Path(p), ignore_patterns)]
 
 
 async def _list_local_files(local_path: Path) -> list[str]:
