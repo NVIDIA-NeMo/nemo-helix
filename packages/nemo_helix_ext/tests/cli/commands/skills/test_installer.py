@@ -320,7 +320,7 @@ class TestInstallManifest:
         def _fail(path: Path) -> None:
             raise PermissionError(f"busy: {path}")
 
-        monkeypatch.setattr("nemo_helix_ext.cli.commands.skills.installer.shutil.rmtree", _fail)
+        monkeypatch.setattr("nemo_helix_ext.cli.commands.skills.installer.rmtree", _fail)
         with caplog.at_level(logging.WARNING, logger="nemo_helix_ext.cli.commands.skills.installer"):
             installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
 

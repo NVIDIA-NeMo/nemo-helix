@@ -9,7 +9,7 @@ import re
 from pathlib import PurePosixPath
 from typing import Annotated, Literal, Self
 
-from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.entities import MAX_REVISION, ContainerImage
 from nemo_builder_plugin.identity import (
     PLATFORM_PATTERN,
     normalize_reference,
@@ -280,6 +280,7 @@ class BuildSet(BaseModel):
     )
     revision: int = Field(
         ge=1,
+        le=MAX_REVISION,
         description=(
             "The caller's version of `name`. Submitting the same request again returns the existing "
             "build; submitting a different one under the same revision is refused."
