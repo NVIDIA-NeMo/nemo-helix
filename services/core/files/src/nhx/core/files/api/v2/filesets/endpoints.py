@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
+import anyio
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -943,8 +944,26 @@ async def upload_file(
 
     with scoped_app_ctx(FilesContext(fileset_name=fileset.name, path=path)):
         try:
-            async with streaming_file_upload(request, chunk_processor) as upload:
-                file_info = await storage.upload(path, upload, content_length=content_length)
+            if isinstance(chunk_processor, MultipartChunkProcessor):
+                # The request length includes framing. Measure the parsed file before
+                # handing it to backends that require an exact file length.
+                async with anyio.TemporaryFile() as temporary:
+                    file_length = 0
+                    async with streaming_file_upload(request, chunk_processor, content_length=content_length) as upload:
+                        async for chunk in upload:
+                            await temporary.write(chunk)
+                            file_length += len(chunk)
+                    await temporary.seek(0)
+
+                    async def file_chunks():
+                        """Read the parsed file with bounded memory."""
+                        while chunk := await temporary.read(1024 * 1024):
+                            yield chunk
+
+                    file_info = await storage.upload(path, file_chunks(), content_length=file_length)
+            else:
+                async with streaming_file_upload(request, chunk_processor) as upload:
+                    file_info = await storage.upload(path, upload, content_length=content_length)
             return fileset_file_output_from_info(
                 workspace=workspace,
                 name=name,
@@ -956,6 +975,8 @@ async def upload_file(
                 status_code=HTTP_400_BAD_REQUEST,
                 detail=str(e),
             ) from e
+        except ValueError as e:
+            raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail=str(e)) from e
         except InactivityTimeoutError:
             msg = f"Connection terminated due to inactivity: {path}"
             logger.error(msg)

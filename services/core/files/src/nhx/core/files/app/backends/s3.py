@@ -72,6 +72,7 @@ def _raise_for_s3_error(error: ClientError, context: str = "") -> NoReturn:
         "SignatureDoesNotMatch",
         "ExpiredToken",
         "InvalidToken",
+        "InvalidSecurity",
         "403",
     ):
         raise S3AccessError(f"Access denied{ctx}: {error_message}")
