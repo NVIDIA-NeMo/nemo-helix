@@ -196,6 +196,7 @@ AUTHENTIK_DOCKER_E2E_CONFIG = pytest.mark.e2e_config(
                                 {
                                     "volume_name": AUTHENTIK_GATEWAY_TLS_VOLUME_NAME,
                                     "mount_path": "/etc/nhx/gateway-tls",
+                                    "read_only": True,
                                 }
                             ]
                         },
