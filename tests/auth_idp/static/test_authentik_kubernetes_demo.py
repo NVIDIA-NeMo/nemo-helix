@@ -298,9 +298,12 @@ def test_builder_e2e_moves_to_opt_in_workflow_with_both_auth_modes() -> None:
     assert job["if"] == "needs.build-cpu-smoke-images.outputs.publish_images == 'true'"
     assert job["strategy"]["matrix"]["auth"] == ["off", "on"]
     assert "needs.changes.outputs" not in block
-    assert "e2e/test_builder.py" in block
-    assert "features+=(--feature auth --config e2e/quickstart/auth.yaml)" in block
-    assert "if tests == 0 or skipped:" in block
+    steps = {step["name"]: step for step in job["steps"]}
+    run = steps["Run builder e2e tests"]["run"]
+    assert "e2e/test_builder.py" in run
+    assert "features+=(--feature auth --config e2e/quickstart/auth.yaml)" in run
+    assert "if tests == 0 or skipped:" in run
+    assert steps["Finalize Kind builder e2e"]["if"] == "always()"
 
 
 def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:

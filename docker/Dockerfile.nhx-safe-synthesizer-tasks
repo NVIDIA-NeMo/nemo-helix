@@ -238,6 +238,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --no-install-package tokenizers \
         --no-install-package triton
 
+# The release workspace relock is blocked by the DataDesignerPlugins index.
+# Apply the same narrow post-sync fix as nhx-tasks until it can be relocked.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv --no-config pip install --python /opt/venv/bin/python --no-deps "urllib3==2.8.0"
+
 # Fail the image build if a later sync changes the pinned training versions.
 RUN python - <<'PY'
 from importlib.metadata import version
