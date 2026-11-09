@@ -166,9 +166,6 @@ USER ${BUILD_UID}:${BUILD_GID}
 # Empty UV_SYNC_MODE relocks. Default is --frozen.
 ARG UV_SYNC_MODE=--frozen
 
-# The driver installs this from PyPI rather than from RL's lock, which resolves it for the actor
-# venvs only. Keep in lockstep with the pin in NeMo-RL's pyproject.toml.
-ARG NEMO_SANDBOXED_GYM_VERSION=0.1.0a1
 # Warm the uv cache. Extras conflict, so each sync prunes the last; the cache is what remains.
 # The two combined syncs match the worker venvs: mcore+nemo_gym and vllm+nemo_gym.
 # RL's own pyproject.toml and uv.lock are used as-is. These nine packages are left out of
@@ -204,6 +201,7 @@ SKIP=(
     # Optional transfer backend unused by RL; its wheel bundles Go/etcd libraries.
     --no-install-package mooncake-transfer-engine
     --no-install-package mooncake-transfer-engine-cuda13
+    --no-install-package nemo-sandboxed-gym
 )
 uv venv --seed
 
@@ -228,8 +226,10 @@ chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv
 EOF
 
 # Own layer so a pin edit does not rebuild the sync above.
-# opensandbox is the Gym client. OpenTelemetry pins: opentelemetry-overrides.txt.
+# opensandbox is the Gym client. The driver venv does not keep the nemo_gym extra,
+# so the client is installed here. OpenTelemetry pins: opentelemetry-overrides.txt.
 # Gym is --no-deps here; worker venvs get nemo_gym from the extra.
+# nemo-sandboxed-gym is not installed in this image.
 RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/opentelemetry-overrides.txt,readonly \
     <<"EOF" bash -eu
 set -x
@@ -252,8 +252,6 @@ uv pip install --directory /tmp --python /opt/nemo_rl_venv/bin/python \
     "${OTEL_PINS[@]}"
 uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps \
     -e /opt/nemo-rl/3rdparty/Gym-workspace/Gym
-uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps \
-    "nemo-sandboxed-gym==${NEMO_SANDBOXED_GYM_VERSION}"
 chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv /opt/nemo-rl
 EOF
 
@@ -291,6 +289,7 @@ SKIP=(
     # Match the cache-warming sync: do not install this unused Go/etcd-bearing wheel.
     --no-install-package mooncake-transfer-engine
     --no-install-package mooncake-transfer-engine-cuda13
+    --no-install-package nemo-sandboxed-gym
 )
 # Same wrapper prefetch_venvs.py writes, into the driver bin (on PATH) rather
 # than /usr/local/bin, which the build user cannot write.
@@ -316,11 +315,6 @@ sync_venv() {
     shift
     UV_PROJECT_ENVIRONMENT="${venv}" \
         uv sync ${UV_SYNC_MODE} --inexact --no-install-project --directory /opt/nemo-rl "$@" "${SKIP[@]}"
-    if [[ " $* " == *" --extra nemo_gym "* ]]; then
-        uv pip install --directory /tmp --python "${venv}/bin/python" \
-            "nemo-sandboxed-gym[server,opensandbox,ray]==${NEMO_SANDBOXED_GYM_VERSION}" \
-            "opensandbox>=0.1.9"
-    fi
     # --python selects the venv. --directory keeps uv from reading the git pins in pyproject.toml.
     uv pip install --directory /tmp --python "${venv}/bin/python" --no-deps /mnt/wheels/*.whl
     write_wrapper "${venv}"
