@@ -11,9 +11,10 @@ import type { FC, RefObject } from 'react';
 const PRIMARY_ACTION_BY_TAB: Partial<Record<AgentDetailTab, ActionId>> = {
   evaluations: 'evaluate',
   optimizations: 'optimize',
+  insights: 'get-insights',
 };
 
-type ActionId = 'evaluate' | 'deploy' | 'optimize';
+type ActionId = 'evaluate' | 'deploy' | 'optimize' | 'get-insights';
 
 interface Action {
   id: ActionId;
@@ -38,6 +39,8 @@ export interface AgentDetailCTAsProps {
   /** Omitted until the tab can render the optimization form; the button stays visible but inert. */
   onOptimize?: () => void;
   onImportTraces: () => void;
+  onGetInsights: () => void;
+  onInsightsSettings: () => void;
 }
 
 /**
@@ -45,8 +48,8 @@ export interface AgentDetailCTAsProps {
  *
  * Overview is the hub, so it shows the full set of actions with the tab's own next step as the
  * brand-colored button and the rest secondary. Every other tab is already scoped to one job, so it
- * shows only its primary action and leaves the rest to Overview. Optimize is the exception — it
- * only appears on the tab that can render its form.
+ * shows only its primary action and leaves the rest to Overview. Optimize and Get Insights are the
+ * exceptions — each only appears on its own tab.
  */
 export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
   tab,
@@ -61,6 +64,8 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
   onRunEvaluation,
   onOptimize,
   onImportTraces,
+  onGetInsights,
+  onInsightsSettings,
 }) => {
   const actions: Action[] = [
     {
@@ -87,6 +92,15 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
     });
   }
 
+  if (tab === 'insights') {
+    actions.push({
+      id: 'get-insights',
+      label: 'Get Insights',
+      disabled: !agentName,
+      onClick: onGetInsights,
+    });
+  }
+
   const primaryId = actions.some((action) => action.id === PRIMARY_ACTION_BY_TAB[tab])
     ? PRIMARY_ACTION_BY_TAB[tab]
     : 'deploy';
@@ -106,6 +120,11 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
             Import traces
           </Button>
         </>
+      )}
+      {tab === 'insights' && (
+        <Button kind="secondary" onClick={onInsightsSettings} disabled={!agentName}>
+          Insights settings
+        </Button>
       )}
       {ordered.map((action) => {
         const isPrimary = action.id === primaryId;

@@ -20,6 +20,11 @@ describe('sinceFor', () => {
     expect(sinceFor('week', { now })).toBe('2026-10-02T12:00:00.000Z');
   });
 
+  it('counts the two-week and month presets back from now', () => {
+    expect(sinceFor('two-weeks', { now })).toBe('2026-09-25T12:00:00.000Z');
+    expect(sinceFor('month', { now })).toBe('2026-09-09T12:00:00.000Z');
+  });
+
   it('has no bound for all history, a missing cursor, or an unusable custom value', () => {
     expect(sinceFor('all', { now })).toBeUndefined();
     expect(sinceFor('periodic-cursor', { now })).toBeUndefined();

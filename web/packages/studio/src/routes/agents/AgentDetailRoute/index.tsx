@@ -22,7 +22,9 @@ import {
 } from '@nvidia/foundations-react-core';
 import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
+import { GetInsightsModal } from '@studio/components/GetInsightsModal';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
+import { InsightsSettingsModal } from '@studio/components/InsightsSettingsModal';
 import {
   AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
   AGENT_OPTIMIZATION_FORM_ENABLED,
@@ -81,6 +83,8 @@ export const AgentDetailRoute: FC = () => {
   const [createDeploymentOpen, setCreateDeploymentOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [importTracesOpen, setImportTracesOpen] = useState(false);
+  const [getInsightsOpen, setGetInsightsOpen] = useState(false);
+  const [insightsSettingsOpen, setInsightsSettingsOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [launchOptimizeOpen, setLaunchOptimizeOpen] = useState(false);
   const [launchStrategy, setLaunchStrategy] = useState<OptimizationStrategy | undefined>();
@@ -365,6 +369,8 @@ export const AgentDetailRoute: FC = () => {
                 onRunEvaluation={runEvaluation}
                 onOptimize={openOptimize}
                 onImportTraces={() => setImportTracesOpen(true)}
+                onGetInsights={() => setGetInsightsOpen(true)}
+                onInsightsSettings={() => setInsightsSettingsOpen(true)}
               />
             </Flex>
           </Flex>
@@ -473,6 +479,20 @@ export const AgentDetailRoute: FC = () => {
           onClose={() => setImportTracesOpen(false)}
           workspace={workspace}
           agent={agentName}
+        />
+      )}
+      {agentName && getInsightsOpen && (
+        <GetInsightsModal
+          workspace={agent?.workspace ?? workspace}
+          agent={agent?.name ?? agentName}
+          onClose={() => setGetInsightsOpen(false)}
+        />
+      )}
+      {agentName && insightsSettingsOpen && (
+        <InsightsSettingsModal
+          workspace={agent?.workspace ?? workspace}
+          agent={agent?.name ?? agentName}
+          onClose={() => setInsightsSettingsOpen(false)}
         />
       )}
       {agentName && launchOptimizeOpen && (

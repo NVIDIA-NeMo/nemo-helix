@@ -20,6 +20,7 @@ const INTENTIONAL_ALIASES: Record<string, string> = {
   // A config and its tests are one thing to the user.
   guardrailChecks: 'guardrails',
   recentJobs: 'jobs',
+  insightJobs: 'jobs',
   // Files and their containing fileset share the mapped folder glyph.
   filesetFiles: 'filesets',
 };
