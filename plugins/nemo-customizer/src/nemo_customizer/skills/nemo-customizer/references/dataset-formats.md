@@ -46,14 +46,14 @@ Automodel detects schema from the **first JSONL line**.
 | Schema | JSONL shape | Job JSON |
 |--------|-------------|----------|
 | **CHAT** (preferred when model has chat template) | `{"messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}` | (none) |
-| **MULTIMODAL** (fileset shape only; trainer support pending) | Same `messages` list. `content` is a string (one text part) or a list of `{type: text, text}` and `{type: image_url, image_url: {url}}`. `url` is a fileset-relative path or a `data:` URL. The assistant label stays one text part. | (none) |
+| **MULTIMODAL** (vision checkpoints only) | Same `messages` list. `content` is a string (one text part) or a list of `{type: text, text}` and `{type: image_url, image_url: {url}}`. `url` is a fileset-relative path or a `data:` URL. The assistant label stays one text part. | (none) |
 | **SFT** | `{"prompt": "...", "completion": "..."}` | (none) |
 | **CUSTOM** | Any two columns, e.g. `{"input": "...", "output": "..."}` | `"prompt_template": "{input} {output}"` on `dataset` |
 | **EMBEDDING** | `{"query": "...", "pos_doc": "...", "neg_doc": ["...", "..."]}` | `training.recipe: bi_encoder` or `cross_encoder`. `neg_doc` must be a **non-empty** list; convert-only retrieval Stage 1 emits `[]` and training crashes unless you mine first. |
 
 **Conversion preference:** CHAT if the model has a chat template (`hf-conversion.md` § **Chat-template check**, or model `spec.is_chat` / `spec.chat_template`) → else SFT. Use CUSTOM or EMBEDDING only when the user asks or the task requires it. String `content` stays CHAT. A row with an image saves that file next to the JSONL and sets the user message to an `image_url` part followed by a text part; that part list is MULTIMODAL (`hf-conversion.md` § Image rows). `scripts/import_cord.py` and `scripts/import_finance.py` are examples of that conversion (CORD-v2, and finance OCR, reasoning, and code). Upload the directory that is already this shape; Automodel does not convert the Hugging Face dataset.
 
-MULTIMODAL rows are the fileset to upload. Automodel detects a `messages` row as CHAT, and `ChatDataset` requires string `content`, so an image row fails validation until multimodal training support lands.
+MULTIMODAL rows train only on a model entity with `spec.has_vision_tower: true`, which Automodel runs as vision-language SFT. A text-only model rejects them, and `--dry-run` reports `line N has an image row, which requires a model with a vision tower`. A vision checkpoint trains with the `sft` recipe only, which `auto` resolves to: no distillation, no `bi_encoder` or `cross_encoder`, and no sequence packing. Each `url` names a file in the fileset by its fileset-relative path, or is a `data:` URL. An `http(s)` URL or an absolute path is rejected.
 
 ```json
 {"messages": [

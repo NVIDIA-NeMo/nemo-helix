@@ -15,15 +15,21 @@ from nhx.customization_common.dry_run import check_local_dataset_rows
 from nhx.customization_common.schemas.checkpoint import CheckpointTraits
 
 _CHAT = {"messages": [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]}
-_IMAGE_CHAT = {
-    "messages": [
-        {
-            "role": "user",
-            "content": [{"type": "image_url", "image_url": {"url": "a.png"}}, {"type": "text", "text": "q"}],
-        },
-        {"role": "assistant", "content": "a"},
-    ]
-}
+_PNG_DATA_URL = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII="
+)
+
+
+def _image_chat(url: str) -> dict[str, Any]:
+    return {
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "image_url", "image_url": {"url": url}}, {"type": "text", "text": "q"}],
+            },
+            {"role": "assistant", "content": "a"},
+        ]
+    }
 
 
 def _spec() -> Any:
@@ -54,9 +60,10 @@ def test_a_row_training_rejects_fails(tmp_path: Path) -> None:
     assert "train.jsonl line 1 does not conform to the expected schema" in check.message
 
 
+@pytest.mark.parametrize("url", ["a.png", _PNG_DATA_URL], ids=["dataset-path", "data-url"])
 @pytest.mark.parametrize("has_vision_tower", [True, False])
-def test_an_image_row_passes_only_for_a_vision_model(tmp_path: Path, has_vision_tower: bool) -> None:
-    (tmp_path / "train.jsonl").write_text(json.dumps(_IMAGE_CHAT) + "\n")
+def test_an_image_row_passes_only_for_a_vision_model(tmp_path: Path, has_vision_tower: bool, url: str) -> None:
+    (tmp_path / "train.jsonl").write_text(json.dumps(_image_chat(url)) + "\n")
     traits = CheckpointTraits(has_vision_tower=has_vision_tower)
     [dataset] = AutomodelJob._dry_run_datasets(_spec(), "ws", traits)
 
