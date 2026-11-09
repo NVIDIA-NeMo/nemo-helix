@@ -442,6 +442,9 @@ STARTUP_OUTPUT_MAX_CHARS = 16000
 #: Lines of the first error report inlined into an exception. A longer report keeps its first line
 #: and its end, which is where a traceback names the exception.
 FIRST_ERROR_CONTEXT_LINES = 12
+#: Characters kept of each line in the first error report, so one long line cannot crowd out the
+#: rest. Twelve such lines stay well within :data:`STARTUP_OUTPUT_MAX_CHARS`.
+FIRST_ERROR_LINE_MAX_CHARS = 1000
 #: The ``(server_name) `` prefix Gym adds to each component's output.
 _SERVER_PREFIX = r"\([^)\s]+\) "
 _SERVER_PREFIX_RE = re.compile(f"^{_SERVER_PREFIX}")
@@ -457,7 +460,8 @@ def _first_error_block(lines: Sequence[str], start: int, end: int) -> str:
     ``cause:`` chain, or a traceback's frames. A traceback also takes the unindented line that ends
     it, the exception itself. Lines other servers print in between are skipped. A report longer than
     :data:`FIRST_ERROR_CONTEXT_LINES` keeps its first line and its end, so a deep traceback still
-    names its exception.
+    names its exception. Each line is cut to :data:`FIRST_ERROR_LINE_MAX_CHARS`, so a long line
+    cannot crowd out that end either.
     """
     first = lines[start]
     prefix_match = _SERVER_PREFIX_RE.match(first)
@@ -465,7 +469,8 @@ def _first_error_block(lines: Sequence[str], start: int, end: int) -> str:
     is_traceback = first[len(prefix) :].lstrip().startswith(_TRACEBACK_HEADER)
     # Scan to the end of the report however far other servers' output spreads it, keeping only the
     # lines that can be shown.
-    rest: deque[str] = deque(maxlen=FIRST_ERROR_CONTEXT_LINES - 2)
+    # One more than a shortened report shows, so a report that fits keeps every line.
+    rest: deque[str] = deque(maxlen=FIRST_ERROR_CONTEXT_LINES - 1)
     rest_count = 0
     for line in lines[start + 1 : end]:
         if prefix and not line.startswith(prefix):
@@ -480,10 +485,18 @@ def _first_error_block(lines: Sequence[str], start: int, end: int) -> str:
         rest_count += 1
         if ends_report:
             break
+    shown = list(rest)
     if rest_count + 1 > FIRST_ERROR_CONTEXT_LINES:
-        omitted = rest_count - len(rest)
-        return "\n".join([first, f"... {omitted} line(s) omitted ...", *rest])
-    return "\n".join([first, *rest])
+        # The marker takes a line, so show one fewer from the end.
+        shown = shown[-(FIRST_ERROR_CONTEXT_LINES - 2) :]
+        shown.insert(0, f"... {rest_count - len(shown)} line(s) omitted ...")
+    return "\n".join(_clip_line(line) for line in [first, *shown])
+
+
+def _clip_line(line: str) -> str:
+    if len(line) <= FIRST_ERROR_LINE_MAX_CHARS:
+        return line
+    return f"{line[:FIRST_ERROR_LINE_MAX_CHARS]}... ({len(line) - FIRST_ERROR_LINE_MAX_CHARS} more characters)"
 
 
 def startup_output_excerpt(env_log_text: str) -> str:
@@ -504,7 +517,7 @@ def startup_output_excerpt(env_log_text: str) -> str:
     first_error = next((index for index, line in enumerate(lines) if _ERROR_START_RE.match(line)), None)
     if first_error is not None and first_error < tail_start:
         block = _first_error_block(lines, first_error, tail_start)
-        sections.append(f"--- first error in startup output ---\n{block[:STARTUP_OUTPUT_MAX_CHARS]}")
+        sections.append(f"--- first error in startup output ---\n{block}")
     return "\n".join(sections)
 
 

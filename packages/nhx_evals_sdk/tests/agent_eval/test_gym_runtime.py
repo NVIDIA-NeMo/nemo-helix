@@ -62,7 +62,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     require_full_coverage,
     trials_from_rollouts,
 )
-from nhx_evals_sdk.agent_eval.runtimes.gym.runtime import FIRST_ERROR_CONTEXT_LINES
+from nhx_evals_sdk.agent_eval.runtimes.gym.runtime import FIRST_ERROR_CONTEXT_LINES, FIRST_ERROR_LINE_MAX_CHARS
 from nhx_evals_sdk.agent_eval.trials import UNKNOWN_ERROR_TYPE, AgentEvalTrialStatus, TrialError, TrialMeasurements
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nhx_evals_sdk.values import SecretRef
@@ -1764,6 +1764,43 @@ def test_early_exit_finds_a_traceback_end_far_below_its_start(tmp_path: Path) ->
     assert "(mcqa) Traceback (most recent call last):" in first_error
     assert f"(mcqa) {exception}" in first_error
     assert "Downloading" not in first_error
+
+
+def _first_error_section(transcript_lines: list[str], tmp_path: Path) -> str:
+    noise = [f"(policy_model) Downloading package-{i}" for i in range(LOG_TAIL_LINES + 10)]
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(
+        "\n".join([*transcript_lines, *noise]), tmp_path / "gym_env.log", 1
+    )
+    return message.split("--- first error in startup output ---\n", 1)[1]
+
+
+def test_early_exit_keeps_every_line_of_a_report_that_fits(tmp_path: Path) -> None:
+    # Exactly at the limit: nothing is omitted, so no line may be dropped and no marker shown.
+    report = [
+        "(mcqa) error: Failed to install",
+        *(f"(mcqa)   cause: reason {i}" for i in range(FIRST_ERROR_CONTEXT_LINES - 1)),
+    ]
+
+    first_error = _first_error_section(report, tmp_path)
+
+    assert first_error.strip().splitlines() == report
+
+
+def test_early_exit_shortens_a_long_line_without_losing_the_exception(tmp_path: Path) -> None:
+    # One frame repeats a huge value; the exception after it must still be shown.
+    exception = "ValueError: config rejected"
+    report = [
+        "(mcqa) Traceback (most recent call last):",
+        '(mcqa)   File "/app/server.py", line 3, in start',
+        f"(mcqa)     load({'x' * 50_000!r})",
+        f"(mcqa) {exception}",
+    ]
+
+    first_error = _first_error_section(report, tmp_path)
+
+    assert f"(mcqa) {exception}" in first_error
+    assert "more characters)" in first_error
+    assert all(len(line) < FIRST_ERROR_LINE_MAX_CHARS + 40 for line in first_error.splitlines())
 
 
 def test_early_exit_ignores_gym_deprecation_text_that_mentions_errors(tmp_path: Path) -> None:
