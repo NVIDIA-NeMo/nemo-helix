@@ -8,9 +8,10 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { DatasetListRoute } from '@studio/routes/DatasetListRoute';
 import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
-import { mockUseParams } from '@studio/tests/util/mockUseParams';
+import { mockUseNavigate, mockUseParams } from '@studio/tests/util/mockUseParams';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter } from 'react-router';
 
@@ -75,5 +76,23 @@ describe('DatasetListRoute', () => {
 
     await screen.findByText('qa-data', undefined, { timeout: LG_SELECTOR_TIMEOUT });
     expect(lastUrl?.searchParams.get('filter[purpose]')).toBe(FilesetPurpose.dataset);
+  });
+
+  it('opens a dataset on its detail page under /datasets', async () => {
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    mockUseNavigate(navigate);
+    render(
+      <TestProviders>
+        <MemoryRouter>
+          <DatasetListRoute />
+        </MemoryRouter>
+      </TestProviders>
+    );
+
+    await user.click(
+      await screen.findByText('qa-data', undefined, { timeout: LG_SELECTOR_TIMEOUT })
+    );
+    expect(navigate).toHaveBeenCalledWith(`/workspaces/${workspace1.workspace}/datasets/qa-data`);
   });
 });

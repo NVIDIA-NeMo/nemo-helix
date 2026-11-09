@@ -13,6 +13,7 @@ import { FilesetCreateModal } from '@studio/components/FilesetCreateModal';
 import { useFilesetsTable } from '@studio/components/FilesetsTable/useFilesetsTable';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { DatasetBulkDeleteModal } from '@studio/routes/FilesetListRoute/DatasetBulkDeleteModal';
+import { getDatasetDetailRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
 import type { FC, ReactNode } from 'react';
 
@@ -131,6 +132,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({ getDatasetRoute, renderR
           onClose={closeCreateModal}
           workspace={workspace}
           purpose={FilesetPurpose.dataset}
+          getDetailRoute={getDatasetDetailRoute}
         />
       )}
     </>

@@ -491,28 +491,61 @@ export const getModelCompareRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.modelCompare, { workspace });
 };
 
-export const getFilesetDetailRoute = (
+export interface FilesetDetailRouteOptions {
+  tab?: FilesetDetailTab;
+  folder?: string;
+  file?: string;
+}
+
+/** Builds a detail-page URL from a section's index and tab route patterns. */
+const buildFilesetDetailRoute = (
+  routes: { index: string; tab: string },
   workspace: string,
   filesetName: string,
-  options?: { tab?: FilesetDetailTab; folder?: string; file?: string }
+  options?: FilesetDetailRouteOptions
 ) => {
   // Folder and file selection only render on the Files tab, so default to it.
   const tab =
     options?.tab ?? (options?.folder || options?.file ? FilesetDetailTab.Files : undefined);
   const base = tab
-    ? generatePath(ROUTES.workspace.filesetDetailTab, { workspace, filesetName, filesetTab: tab })
-    : generatePath(ROUTES.workspace.filesetDetail, { workspace, filesetName });
+    ? generatePath(routes.tab, { workspace, filesetName, filesetTab: tab })
+    : generatePath(routes.index, { workspace, filesetName });
   const search = new URLSearchParams();
   if (options?.folder) search.set(QUERY_PARAMETERS.filesetFolder, options.folder);
   if (options?.file) search.set(QUERY_PARAMETERS.file, options.file);
   return search.size ? `${base}?${search.toString()}` : base;
 };
 
+export const getFilesetDetailRoute = (
+  workspace: string,
+  filesetName: string,
+  options?: FilesetDetailRouteOptions
+) =>
+  buildFilesetDetailRoute(
+    { index: ROUTES.workspace.filesetDetail, tab: ROUTES.workspace.filesetDetailTab },
+    workspace,
+    filesetName,
+    options
+  );
+
+/** The same detail page as `getFilesetDetailRoute`, under the Datasets section. */
+export const getDatasetDetailRoute = (
+  workspace: string,
+  filesetName: string,
+  options?: FilesetDetailRouteOptions
+) =>
+  buildFilesetDetailRoute(
+    { index: ROUTES.workspace.datasetDetail, tab: ROUTES.workspace.datasetDetailTab },
+    workspace,
+    filesetName,
+    options
+  );
+
 /** Accepts a bare fileset name or a `workspace/name` reference. */
 export const getFilesetRoute = (
   workspace: string,
   filesetRef: string,
-  options?: { tab?: FilesetDetailTab; folder?: string; file?: string }
+  options?: FilesetDetailRouteOptions
 ) => getFilesetDetailRoute(workspace, filesetRef.split('/').pop() ?? filesetRef, options);
 
 export const getIntakeTracesRoute = (workspace: string, options: { agentName?: string } = {}) => {

@@ -11,6 +11,7 @@ import {
   getEvaluationMetricsRunRoute,
   getEvaluationNewRoute,
   getEvaluationSessionDetailRoute,
+  getDatasetDetailRoute,
   getFilesetDetailRoute,
   getFilesetRoute,
   getIntakeSessionRoute,
@@ -225,6 +226,17 @@ describe('getFilesetDetailRoute', () => {
   it('respects an explicit tab', () => {
     expect(getFilesetDetailRoute('my-workspace', 'set', { tab: FilesetDetailTab.Card })).toBe(
       '/workspaces/my-workspace/filesets/set/card'
+    );
+  });
+});
+
+describe('getDatasetDetailRoute', () => {
+  it('builds the detail page under /datasets with the same query options', () => {
+    expect(getDatasetDetailRoute('my-workspace', '100% coverage')).toBe(
+      '/workspaces/my-workspace/datasets/100%25%20coverage'
+    );
+    expect(getDatasetDetailRoute('my-workspace', 'set', { folder: 'nested' })).toBe(
+      '/workspaces/my-workspace/datasets/set/files?filesetFolder=nested'
     );
   });
 });

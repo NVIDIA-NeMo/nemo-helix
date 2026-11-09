@@ -99,6 +99,9 @@ export const ROUTES = {
     modelAdapterDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}/adapters/:${P.adapterName}`,
     /** Filesets scoped to `purpose: dataset`. */
     datasets: `/workspaces/:${P.workspace}/datasets`,
+    /** The fileset detail page for a dataset, kept under the Datasets section. */
+    datasetDetail: `/workspaces/:${P.workspace}/datasets/:${P.filesetName}`,
+    datasetDetailTab: `/workspaces/:${P.workspace}/datasets/:${P.filesetName}/:${P.filesetTab}`,
     filesets: `/workspaces/:${P.workspace}/filesets`,
     filesetNew: `/workspaces/:${P.workspace}/filesets/new`,
     /**
