@@ -8,21 +8,11 @@ import { FABRIC_CONFIG_FORMAT, getAgentModelNames } from '@nemo/common/src/utils
 import { Cog, Commit, CopyDoc } from '@nemo/icons/icons';
 import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import {
-  Badge,
-  Button,
-  Flex,
-  PageHeader,
-  Stack,
-  TabsContent,
-  TabsList,
-  TabsRoot,
-  TabsTrigger,
-  Text,
-} from '@nvidia/foundations-react-core';
+import { Badge, Button, TabsContent } from '@nvidia/foundations-react-core';
 import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
+import { DetailPageLayout } from '@studio/components/Layouts/DetailPageLayout';
 import {
   AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
   AGENT_OPTIMIZATION_FORM_ENABLED,
@@ -51,6 +41,7 @@ import { OptimizationsTab } from '@studio/routes/agents/AgentDetailRoute/optimiz
 import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
 import {
   ACTION_SEARCH_PARAM,
+  AGENT_DETAIL_TABS,
   type AgentDetailTab,
   DEFAULT_TAB,
   EVAL_TABS,
@@ -277,189 +268,166 @@ export const AgentDetailRoute: FC = () => {
 
   return (
     <AccessibleTitle title={`${agentName ?? 'Agent'} details for ${workspace}`}>
-      <Stack className="h-full min-h-0" gap="density-2xl" padding="density-2xl">
-        <PageHeader
-          className="shrink-0 p-0"
-          slotHeading={
-            <Flex align="center" gap="3" className="min-w-0">
-              <Text kind="title/md" className="min-w-0 truncate font-bold" title={displayName}>
-                {displayName}
-              </Text>
-              <Flex align="center" gap="3" className="shrink-0">
-                <HeaderDeploymentSelect
-                  deployments={agentDeployments}
-                  selected={selectedDeployment}
-                  canCreate={!!agentName && !isDeploying && !isAgentPending}
-                  onSelect={setSelectedDeploymentName}
-                  onCreate={onDeploy}
-                />
-                {agent?.id ? (
-                  <button
-                    type="button"
-                    className="group contents"
-                    onClick={copyAgentId}
-                    aria-label={`Copy agent ID ${agent.id}`}
-                  >
-                    <Badge kind="solid" color="gray" className="cursor-pointer">
-                      <CopyDoc size="12" aria-hidden />
-                      ID
-                      <span className="max-w-0 overflow-hidden whitespace-nowrap transition-[max-width] duration-200 group-hover:max-w-96 group-focus-visible:max-w-96">
-                        {agent.id}
-                      </span>
-                    </Badge>
-                  </button>
-                ) : null}
-                {specSource ? (
-                  <Badge
-                    kind="solid"
-                    color="gray"
-                    aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
-                  >
-                    <Commit size="12" aria-hidden />
-                    {shortRevision(specSource.revision)}
-                  </Badge>
-                ) : null}
-              </Flex>
-            </Flex>
-          }
-        />
-
-        <TabsRoot
-          className="flex min-h-0 flex-1 flex-col"
-          value={selectedTab}
-          onValueChange={(value) => {
-            if (isAgentDetailTab(value)) setSelectedTab(value);
-          }}
-        >
-          <Flex className="shrink-0" align="center" gap="4">
-            <TabsList className="min-w-0 flex-1" ref={tabsRef}>
-              {AGENT_OVERVIEW_ENABLED && <TabsTrigger value="overview">Overview</TabsTrigger>}
-              <TabsTrigger value="chat">Chat</TabsTrigger>
-              <TabsTrigger value="evaluations">Evaluations</TabsTrigger>
-              {OPTIMIZER_ENABLED && <TabsTrigger value="insights">Insights</TabsTrigger>}
-              {AGENT_OPTIMIZATIONS_ENABLED && (
-                <TabsTrigger value="optimizations">Optimizations</TabsTrigger>
-              )}
-              <TabsTrigger value="deployments">Deployment</TabsTrigger>
-              <TabsTrigger value="logs">Logs</TabsTrigger>
-            </TabsList>
-            <Flex align="center" gap="2">
-              <Button
-                kind="secondary"
-                aria-label="Agent config"
-                aria-haspopup="dialog"
-                onClick={() => setConfigOpen(true)}
-              >
-                <Cog aria-hidden />
-              </Button>
-              <AgentDetailCTAs
-                tab={selectedTab}
-                agentName={agentName}
-                canDeploy={canDeploy}
-                isAgentPending={isAgentPending}
-                canRunEvaluation={canRunEvaluation}
-                isDeploying={isDeploying}
-                canOptimize={!isCreatingOptimization}
-                deployButtonRef={deployButtonRef}
-                onDeploy={onDeploy}
-                onRunEvaluation={runEvaluation}
-                onOptimize={openOptimize}
-                onImportTraces={() => setImportTracesOpen(true)}
-              />
-            </Flex>
-          </Flex>
-
-          {AGENT_OVERVIEW_ENABLED && (
-            <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="overview">
-              <OverviewTab
-                workspace={workspace}
-                agent={agent}
-                modelNames={modelNames}
-                evals={agentEvals}
-                isEvalsPending={isAgentEvalsPending}
-                onRunAgent={() => setSelectedTab('chat')}
-                onRunEvaluation={canRunEvaluation ? runEvaluation : undefined}
-              />
-            </TabsContent>
-          )}
-
-          <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="evaluations">
-            <EvaluationsTab
-              workspace={workspace}
-              agentName={agentName}
-              evals={agentEvals}
-              jobs={agentJobs}
-            />
-          </TabsContent>
-
-          {AGENT_OPTIMIZATIONS_ENABLED && (
-            <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="optimizations">
-              <OptimizationsTab
-                agentName={agentName}
-                evals={agentEvals}
-                isEvalsPending={isAgentEvalsPending}
-                view={optimizationView}
-                onOptimize={openOptimize}
-                onViewChange={setOptimizationView}
-                onUploadConfig={() => setLaunchOptimizeOpen(true)}
-                onRunStrategy={setLaunchStrategy}
-              />
-            </TabsContent>
-          )}
-
-          {OPTIMIZER_ENABLED && (
-            <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="insights">
-              <InsightsTab workspace={workspace} agentName={agentName} agent={agent} />
-            </TabsContent>
-          )}
-
-          <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="deployments">
-            <DeploymentsTab
-              agentName={agentName}
+      <DetailPageLayout
+        title={displayName}
+        slotBadges={
+          <>
+            <HeaderDeploymentSelect
               deployments={agentDeployments}
-              isDeploymentsLoading={isDeploymentsLoading}
-              isDeploying={isDeploying}
-              onDeploy={onDeploy}
-              onChat={switchToChat}
-              onDelete={setDeleteDeploymentTarget}
-              onViewLogs={viewLogs}
+              selected={selectedDeployment}
+              canCreate={!!agentName && !isDeploying && !isAgentPending}
+              onSelect={setSelectedDeploymentName}
+              onCreate={onDeploy}
+            />
+            {agent?.id ? (
+              <button
+                type="button"
+                className="group contents"
+                onClick={copyAgentId}
+                aria-label={`Copy agent ID ${agent.id}`}
+              >
+                <Badge kind="solid" color="gray" className="cursor-pointer">
+                  <CopyDoc size="12" aria-hidden />
+                  ID
+                  <span className="max-w-0 overflow-hidden whitespace-nowrap transition-[max-width] duration-200 group-hover:max-w-96 group-focus-visible:max-w-96">
+                    {agent.id}
+                  </span>
+                </Badge>
+              </button>
+            ) : null}
+            {specSource ? (
+              <Badge
+                kind="solid"
+                color="gray"
+                aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
+              >
+                <Commit size="12" aria-hidden />
+                {shortRevision(specSource.revision)}
+              </Badge>
+            ) : null}
+          </>
+        }
+        tabs={AGENT_DETAIL_TABS}
+        selectedTab={selectedTab}
+        onTabChange={setSelectedTab}
+        tabsListRef={tabsRef}
+        slotActions={
+          <>
+            <Button
+              kind="secondary"
+              aria-label="Agent config"
+              aria-haspopup="dialog"
+              onClick={() => setConfigOpen(true)}
+            >
+              <Cog aria-hidden />
+            </Button>
+            <AgentDetailCTAs
+              tab={selectedTab}
+              agentName={agentName}
               canDeploy={canDeploy}
               isAgentPending={isAgentPending}
-              specSource={specSource}
+              canRunEvaluation={canRunEvaluation}
+              isDeploying={isDeploying}
+              canOptimize={!isCreatingOptimization}
+              deployButtonRef={deployButtonRef}
+              onDeploy={onDeploy}
+              onRunEvaluation={runEvaluation}
+              onOptimize={openOptimize}
+              onImportTraces={() => setImportTracesOpen(true)}
+            />
+          </>
+        }
+      >
+        {AGENT_OVERVIEW_ENABLED && (
+          <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="overview">
+            <OverviewTab
               workspace={workspace}
-              canPackage={canPackage}
-              isAgentLoading={isAgentLoading}
-              onImageBuilt={(image) => {
-                rememberBuiltImage(image);
-                setCreateDeploymentOpen(true);
-              }}
-              onImageAvailable={rememberBuiltImage}
-              pendingBuild={pendingBuildForAgent}
+              agent={agent}
+              modelNames={modelNames}
+              evals={agentEvals}
+              isEvalsPending={isAgentEvalsPending}
+              onRunAgent={() => setSelectedTab('chat')}
+              onRunEvaluation={canRunEvaluation ? runEvaluation : undefined}
             />
           </TabsContent>
+        )}
 
-          <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="logs">
-            <DeploymentLogsView workspace={workspace} deployment={selectedDeployment} />
-          </TabsContent>
+        <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="evaluations">
+          <EvaluationsTab
+            workspace={workspace}
+            agentName={agentName}
+            evals={agentEvals}
+            jobs={agentJobs}
+          />
+        </TabsContent>
 
-          <TabsContent className="min-h-0 flex-1 overflow-hidden p-0 pt-6" value="chat">
-            <div className="mx-auto flex h-full w-full max-w-4xl flex-col">
-              <ChatPlaygroundContent
-                workspace={workspace}
-                agentName={agentName}
-                deployment={selectedDeployment}
-                hasHealthyDeployments={healthyDeployments.length > 0}
-                isDeploymentsLoading={isDeploymentsLoading}
-                isDeploying={isDeploying}
-                chatAreaRef={chatAreaRef}
-                onDeploy={onDeploy}
-                canDeploy={canDeploy}
-                isAgentPending={isAgentPending}
-              />
-            </div>
+        {AGENT_OPTIMIZATIONS_ENABLED && (
+          <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="optimizations">
+            <OptimizationsTab
+              agentName={agentName}
+              evals={agentEvals}
+              isEvalsPending={isAgentEvalsPending}
+              view={optimizationView}
+              onOptimize={openOptimize}
+              onViewChange={setOptimizationView}
+              onUploadConfig={() => setLaunchOptimizeOpen(true)}
+              onRunStrategy={setLaunchStrategy}
+            />
           </TabsContent>
-        </TabsRoot>
-      </Stack>
+        )}
+
+        {OPTIMIZER_ENABLED && (
+          <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="insights">
+            <InsightsTab workspace={workspace} agentName={agentName} agent={agent} />
+          </TabsContent>
+        )}
+
+        <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="deployments">
+          <DeploymentsTab
+            agentName={agentName}
+            deployments={agentDeployments}
+            isDeploymentsLoading={isDeploymentsLoading}
+            isDeploying={isDeploying}
+            onDeploy={onDeploy}
+            onChat={switchToChat}
+            onDelete={setDeleteDeploymentTarget}
+            onViewLogs={viewLogs}
+            canDeploy={canDeploy}
+            isAgentPending={isAgentPending}
+            specSource={specSource}
+            workspace={workspace}
+            canPackage={canPackage}
+            isAgentLoading={isAgentLoading}
+            onImageBuilt={(image) => {
+              rememberBuiltImage(image);
+              setCreateDeploymentOpen(true);
+            }}
+            onImageAvailable={rememberBuiltImage}
+            pendingBuild={pendingBuildForAgent}
+          />
+        </TabsContent>
+
+        <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="logs">
+          <DeploymentLogsView workspace={workspace} deployment={selectedDeployment} />
+        </TabsContent>
+
+        <TabsContent className="min-h-0 flex-1 overflow-hidden p-0 pt-6" value="chat">
+          <div className="mx-auto flex h-full w-full max-w-4xl flex-col">
+            <ChatPlaygroundContent
+              workspace={workspace}
+              agentName={agentName}
+              deployment={selectedDeployment}
+              hasHealthyDeployments={healthyDeployments.length > 0}
+              isDeploymentsLoading={isDeploymentsLoading}
+              isDeploying={isDeploying}
+              chatAreaRef={chatAreaRef}
+              onDeploy={onDeploy}
+              canDeploy={canDeploy}
+              isAgentPending={isAgentPending}
+            />
+          </div>
+        </TabsContent>
+      </DetailPageLayout>
       <AgentConfigPanel
         open={configOpen}
         workspace={workspace}
