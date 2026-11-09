@@ -3,6 +3,7 @@
 
 import asyncio
 import collections
+import contextlib
 import io
 import json
 import os
@@ -2549,3 +2550,7 @@ def test_the_host_accessors_return_this_interpreters_live_objects() -> None:
     # reach whatever sys.stderr is at call time.
     assert runtime._import_path() is sys.path
     assert runtime._host_stderr() is sys.stderr
+    # The host replaces sys.stderr after import, so the accessor must not cache the stream.
+    replacement = io.StringIO()
+    with contextlib.redirect_stderr(replacement):
+        assert runtime._host_stderr() is replacement
