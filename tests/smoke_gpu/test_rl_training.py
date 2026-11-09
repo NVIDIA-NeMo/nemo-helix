@@ -177,11 +177,12 @@ def test_sandboxed_gym_driver_imports():
     """The driver must be able to import the mode-B sandbox modules.
 
     Sandboxed GRPO calls spinup_nemo_gym_actor() in the DRIVER process, which imports the
-    adapter and sandboxed_gym.host.models at module scope, so the base venv needs both even
-    though the Gym actor itself runs in its own venv. The `uv sync --all-groups` in the base
-    image is exact and prunes the nemo_gym extra, so this is only satisfied by the explicit
-    `uv pip install` of the Gym workspace member — without it, mode B fails at Gym spin-up
-    with a ModuleNotFoundError, minutes into a run and only on a sandbox-capable cluster.
+    adapter and sandboxed_gym.host.models at module scope, so the driver venv needs both even
+    though the Gym actor itself runs in its own venv. The base image skips the published
+    nemo-sandboxed-gym wheel, and its `uv sync --all-groups` prunes the nemo_gym extra, so
+    the import is satisfied only by the training image's install of the in-tree package.
+    Without that install, mode B fails at Gym spin-up with a ModuleNotFoundError, minutes
+    into a run and only on a sandbox-capable cluster.
     """
     from nemo_rl.environments.sandbox.nemo_gym_actor import SandboxedGymActorConfig  # noqa: F401
     from sandboxed_gym.host.models import NemoGymSandboxedConfig  # noqa: F401
