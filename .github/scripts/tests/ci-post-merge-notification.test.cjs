@@ -9,7 +9,8 @@ function harness(results) {
   const calls = [];
   const failures = [];
   const summary = {
-    addHeading() {
+    addHeading(heading) {
+      this.heading = heading;
       return this;
     },
     addTable(rows) {
@@ -96,6 +97,17 @@ test("missing webhook or failed delivery is visible, not silently ignored", asyn
   h.env.SLACK_ALERTS_WEBHOOK = "https://example.test/slack";
   h.fetchImpl = async () => ({ ok: false, status: 503 });
   await assert.rejects(reportPostMergeResults(h), /Slack webhook returned 503/);
+});
+
+test("workflow names distinguish image and E2E alerts and summaries", async () => {
+  for (const name of ["image", "E2E"]) {
+    const h = harness({ prerequisite: { result: "failure" } });
+    h.env.CHECKS_NAME = name;
+    await reportPostMergeResults(h);
+    assert.equal(h.core.summary.heading, `Post-merge ${name} checks`);
+    assert.ok(h.failures[0].startsWith(`Post-merge ${name} checks:`));
+    assert.ok(h.calls[0].text.includes(`*Post-merge ${name} checks failed*`));
+  }
 });
 
 test("job text cannot inject Slack mentions", async () => {
