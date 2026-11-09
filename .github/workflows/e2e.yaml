@@ -8,7 +8,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main, "release/*"]
-    types: [labeled]
+    types: [labeled, synchronize]
   workflow_dispatch:
     inputs:
       image_tag:
@@ -26,7 +26,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Unrelated label additions must not cancel a PR's active E2E run.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'e2e' && format('ignored-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -38,11 +39,12 @@ jobs:
     name: Check E2E eligibility
     # Never run secret-bearing tests or publish images for forks/drafts. Do not
     # use pull_request_target: PR code runs only in the pull_request context.
-    # Recheck current labels and draft status on each label event.
+    # Recheck current labels and draft status on label additions and new commits.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request' &&
+       (github.event.action == 'synchronize' || github.event.label.name == 'e2e') &&
        github.event.pull_request.head.repo.full_name == github.repository &&
        toJSON(github.event.pull_request.draft) == 'false' &&
        contains(github.event.pull_request.labels.*.name, 'e2e'))

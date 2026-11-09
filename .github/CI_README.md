@@ -91,9 +91,11 @@ Manual runs retain the `image_tag` and `publish` inputs.
 
 For PRs to `main` or `release/*`, maintainers can opt in by adding **`e2e`** to a
 **non-draft, same-repository PR**. Forks and missing/invalid PR context cannot opt
-in. PR runs are triggered only by label additions, checking current labels and
-draft status. New commits, reopening, and readiness changes do not rerun E2E;
-remove and reapply `e2e` to test a newer commit or a previously draft PR.
+in. Adding `e2e` runs the suite, and new commits (`synchronize`) rerun it while
+the label remains present. Each event rechecks current labels and draft status;
+new commits cancel outdated runs. Unrelated label additions neither run the suite
+nor cancel an active run. Reopening and readiness changes do not rerun E2E;
+remove and reapply `e2e` to test a previously draft PR without pushing a commit.
 Unlabeling or converting to draft does not cancel an existing run. No
 `pull_request_target` or new permissions are used.
 
