@@ -9,6 +9,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -2540,3 +2541,11 @@ def test_an_extras_only_wheels_package_links_no_venv_but_still_stages_its_wheels
 
     assert not venv_root.exists()
     assert runtime.os.environ["PYTHONPATH"].split(runtime.os.pathsep)[0] == str(work / runtime.WHEELS_V1_INSTALL_SUBDIR)
+
+
+def test_the_host_accessors_return_this_interpreters_live_objects() -> None:
+    # Tests replace these accessors to keep their writes out of the shared interpreter, so check
+    # the real ones here: the wheels-v1 install must extend sys.path itself, and log output must
+    # reach whatever sys.stderr is at call time.
+    assert runtime._import_path() is sys.path
+    assert runtime._host_stderr() is sys.stderr
