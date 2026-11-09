@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, overload
 
 from nemo_evals.api.schemas import TasksetRef
-from nemo_evals.jobs.agent_spec import GymPlacement
+from nemo_evals.jobs.agent_spec import FilesetTaskSource, GymPlacement
 from nemo_evals.sdk._executor import (
     SubmitTargetSpec,
     _AsyncEvaluatorPluginExecutor,
@@ -143,7 +143,7 @@ class Evaluator:
     def submit(
         self,
         *,
-        tasks: TasksetRef,
+        tasks: TasksetRef | FilesetTaskSource,
         target: GymAgentTaskRunner,
         placement: GymPlacement,
     ) -> AgentEvaluatorJobResource: ...
@@ -152,7 +152,7 @@ class Evaluator:
     def submit(
         self,
         *,
-        tasks: TasksetRef,
+        tasks: TasksetRef | FilesetTaskSource,
         target: AgentTaskRunner,
     ) -> AgentEvaluatorJobResource: ...
 
@@ -169,7 +169,7 @@ class Evaluator:
         *,
         metric: Metric | None = None,
         dataset: PluginDatasetInput | None = None,
-        tasks: TasksetRef | None = None,
+        tasks: TasksetRef | FilesetTaskSource | None = None,
         trials: list[AgentEvalTrial] | None = None,
         config: RunConfig | RunConfigOnline | RunConfigOnlineModel | None = None,
         target: SubmitTargetSpec | AgentTaskRunner | None = None,
@@ -340,7 +340,7 @@ class AsyncEvaluator:
     async def submit(
         self,
         *,
-        tasks: TasksetRef,
+        tasks: TasksetRef | FilesetTaskSource,
         target: GymAgentTaskRunner,
         placement: GymPlacement,
     ) -> AsyncAgentEvaluatorJobResource: ...
@@ -349,7 +349,7 @@ class AsyncEvaluator:
     async def submit(
         self,
         *,
-        tasks: TasksetRef,
+        tasks: TasksetRef | FilesetTaskSource,
         target: AgentTaskRunner,
     ) -> AsyncAgentEvaluatorJobResource: ...
 
@@ -366,7 +366,7 @@ class AsyncEvaluator:
         *,
         metric: Metric | None = None,
         dataset: PluginDatasetInput | None = None,
-        tasks: TasksetRef | None = None,
+        tasks: TasksetRef | FilesetTaskSource | None = None,
         trials: list[AgentEvalTrial] | None = None,
         config: RunConfig | RunConfigOnline | RunConfigOnlineModel | None = None,
         target: SubmitTargetSpec | AgentTaskRunner | None = None,

@@ -26,7 +26,7 @@ from nemo_evals._fileset_receipt import FilesetReceipt
 from nemo_evals.api.schemas import AgentRef, TaskInputs, TaskMetadataList, TaskRef, TasksetRef
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
-from nemo_evals.filesets import FilesetRef
+from nemo_evals.filesets import FilesetRef, is_fileset_glob_pattern
 from nemo_evals.jobs.gateway_agents import GatewayAgentEnv, gateway_agent_env, validate_gateway_env
 from nemo_evals.jobs.publication_spec import PublicationSpec
 from nemo_evals.metric_refs import MetricRefOrInline
@@ -825,6 +825,133 @@ def target_agent_identity(target: Target | Model | AgentBase | ModelRef | None) 
     return None, None
 
 
+class GymFilesetSource(BaseModel):
+    """A Gym jsonl dataset file in a FileSet, converted into tasks when the evaluation is submitted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fileset: FilesetRef = Field(
+        description="The dataset file, as `workspace/fileset#path/to/file.jsonl`. One file only: a whole "
+        "FileSet or a glob is refused. It is read once, as the submitter, at submission.",
+    )
+    format: Literal["gym-jsonl"] = Field(
+        description="How rows become tasks. `gym-jsonl`: one task per distinct Gym dataset row, built as "
+        "`discover_gym_tasks` builds them and scored by the Gym reward. Requires a `gym` target.",
+    )
+    id_field: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Row field holding each row's id, a string or integer. Omitted: a task's id is the "
+        "hash of its row's content, so editing a row makes it a new task. Set: the value is the task id "
+        "(the Intake test case id), so a row keeps its id when edited. Ids must be unique in the file.",
+    )
+
+    @field_validator("fileset")
+    @classmethod
+    def _require_one_file(cls, value: FilesetRef) -> FilesetRef:
+        try:
+            _, _, file_path = parse_fileset_ref(value.root, workspace_fallback="_validation")
+        except FilesetPathError as exc:
+            raise ValueError(f"invalid FileSet reference: {value.root!r}") from exc
+        if not file_path:
+            raise ValueError("name one dataset file in the FileSet: `workspace/fileset#path/to/file.jsonl`")
+        if is_fileset_glob_pattern(file_path):
+            raise ValueError("a FileSet task source names one file; globs are not supported")
+        return value
+
+
+class TaskSnapshotSpec(BaseModel):
+    """Publish the converted tasks, and a taskset revision grouping them, before the evaluation runs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    taskset: TasksetRef = Field(
+        description="Taskset to publish the file's tasks as, `workspace/name` or `name`; it is created if "
+        "absent. Each submission publishes a revision only when the file's tasks or bytes changed, and "
+        "the evaluation runs that exact revision. Tasks are written to the taskset's workspace.",
+    )
+    task_id_prefix: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Required with `source.id_field`, refused without it. Stored task names are "
+        "`<task_id_prefix>-<id>`, so row ids such as `17` stay unique among every other task in the "
+        "workspace. Hash ids need no prefix.",
+    )
+
+    @field_validator("taskset")
+    @classmethod
+    def _reject_revision_selector(cls, value: TasksetRef) -> TasksetRef:
+        if "#" in value.root:
+            raise ValueError("a snapshot taskset is a write destination; drop its `#tag` or `#digest`")
+        return value
+
+
+class FilesetTaskSource(BaseModel):
+    """Tasks read from a dataset file at submission, optionally published as a taskset first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: GymFilesetSource = Field(description="The dataset file and how its rows become tasks.")
+    snapshot: TaskSnapshotSpec | None = Field(
+        default=None,
+        description="Publish the tasks and a taskset revision, and run from that revision. Omit to run "
+        "the file's tasks inline, storing nothing but the job.",
+    )
+
+    @model_validator(mode="after")
+    def _prefix_goes_with_row_ids(self) -> Self:
+        if self.snapshot is None:
+            return self
+        has_prefix = self.snapshot.task_id_prefix is not None
+        if self.source.id_field is not None and not has_prefix:
+            raise ValueError(
+                "`snapshot.task_id_prefix` is required with `source.id_field`: stored task names must be "
+                "unique across the workspace, and row ids alone are not"
+            )
+        if self.source.id_field is None and has_prefix:
+            raise ValueError("`snapshot.task_id_prefix` applies to `source.id_field` ids; hash ids take none")
+        return self
+
+
+class TaskSourceDelta(BaseModel):
+    """How a snapshot's taskset revision differs from the revision it replaced, by task identity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    added: int = Field(ge=0, description="Tasks only in the new revision.")
+    changed: int = Field(ge=0, description="Tasks in both whose pinned content differs.")
+    removed: int = Field(ge=0, description="Tasks only in the replaced revision. Their records are kept.")
+    unchanged: int = Field(ge=0, description="Tasks in both with identical pinned content.")
+
+
+class TaskSnapshotRecord(BaseModel):
+    """What a snapshot published, set at submission."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    taskset: TasksetRef = Field(description="The exact revision the evaluation ran: `workspace/name#<digest>`.")
+    taskset_revision: int = Field(ge=1, description="Ordinal of that revision.")
+    task_id_prefix: str | None = Field(default=None, description="Prefix applied to row ids, if any.")
+    delta: TaskSourceDelta
+
+
+class TaskSourceRecord(BaseModel):
+    """Where a FileSet-sourced evaluation's tasks came from, set at submission; never submitted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fileset: FilesetRef = Field(description="The dataset file, fully qualified.")
+    format: Literal["gym-jsonl"]
+    file_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$",
+        description="SHA-256 of the exact bytes read. The FileSet may keep no version history, "
+        "so this records which file the tasks were built from.",
+    )
+    task_count: int = Field(ge=1, description="Tasks built from the file (distinct rows).")
+    id_field: str | None = None
+    snapshot: TaskSnapshotRecord | None = None
+
+
 class AgentEvalTaskInput(BaseModel):
     """Submitter-facing task DTO: metrics may be inline bundles or stored-metric references."""
 
@@ -1003,17 +1130,28 @@ class _AgentEvalSpecCommon(BaseModel):
 class AgentEvalInputSpec(_AgentEvalSpecCommon):
     """Submitter-facing agent-evaluation input.
 
-    ``tasks`` accepts inline tasks, stored task references, or a stored taskset reference.
-    Stored definitions and scoring expand at submission; Harbor archives are prepared on the worker.
+    ``tasks`` accepts inline tasks, stored task references, a stored taskset reference, or a dataset
+    file in a FileSet. Stored definitions, files and scoring expand at submission; Harbor archives are
+    prepared on the worker.
     """
 
     tasks: (
         TasksetRef
+        | FilesetTaskSource
         | Annotated[list[AgentEvalTaskInput], Field(min_length=1)]
         | Annotated[list[TaskRef], Field(min_length=1)]
     ) = Field(
-        description="Tasks to evaluate: a nonempty list containing only inline tasks or only task references, or a stored taskset reference.",
+        description="Tasks to evaluate: a nonempty list containing only inline tasks or only task references, "
+        "a stored taskset reference, or a FileSet task source (`{source, snapshot}`) whose dataset file is "
+        "converted to tasks at submission.",
     )
+
+    @model_validator(mode="after")
+    def _fileset_source_needs_a_matching_target(self) -> Self:
+        if isinstance(self.tasks, FilesetTaskSource) and not isinstance(self.target, GymRunnerTarget):
+            source = "precomputed `trials`" if self.target is None else f"a `{self.target.kind}` target"
+            raise ValueError(f"a `gym-jsonl` FileSet task source needs a `gym` target, not {source}")
+        return self
 
     @model_validator(mode="after")
     def _reject_empty_inline_tasks(self) -> Self:
@@ -1043,6 +1181,11 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
 
     tasks: Annotated[list[ResolvedTask], Field(min_length=1)] = Field(
         description="Resolved task snapshots in execution order. Only archive materialization remains on the worker."
+    )
+    task_source: TaskSourceRecord | None = Field(
+        default=None,
+        description="Set at submission when the tasks came from a FileSet task source: the file, its "
+        "SHA-256, and what a snapshot published. Server-set; submitters cannot provide it.",
     )
 
     @model_validator(mode="after")

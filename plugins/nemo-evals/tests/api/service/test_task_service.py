@@ -17,9 +17,11 @@ from nemo_evals.api.schemas import (
     TaskInput,
     TaskInputs,
 )
-from nemo_evals.api.service.task_service import MetricRefNotFoundError, TaskService
+from nemo_evals.api.service.metric_service import derived_metric_ref
+from nemo_evals.api.service.task_service import MetricRefNotFoundError, TaskService, stored_evaluator_task_digest
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evals.entities import TaskEntity
+from nemo_evals.revisions import RevisionNotFoundError
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
@@ -719,3 +721,60 @@ async def test_a_real_tree_change_does_cut_a_revision(service: TaskService) -> N
     await service.create_task("fix-test", _harbor_input(), workspace="default")
     changed, published = await service.replace_task("fix-test", _harbor_input(digest="b" * 64), workspace="default")
     assert published and changed.revision == 2
+
+
+async def test_every_write_and_read_reports_the_digest_of_its_revision(service: TaskService) -> None:
+    # A caller pins what it just wrote by this digest, so it must be the revision's own, and an
+    # unchanged replace must report the existing revision's rather than inventing a new one.
+    created, _ = await service.create_task("task-1", _task_input(), workspace="default")
+    unchanged, published = await service.replace_task("task-1", _task_input(), workspace="default")
+    edited, _ = await service.replace_task("task-1", _task_input(intent="Something else."), workspace="default")
+    head = await service.get_task("default", "task-1")
+    revisions = await service.list_revisions("default", "task-1")
+
+    assert revisions is not None and head is not None
+    by_ordinal = {revision.revision: revision.content_hash for revision in revisions.data}
+    assert not published
+    assert created.content_hash == unchanged.content_hash == by_ordinal[1]
+    assert edited.content_hash == head.content_hash == by_ordinal[2]
+    assert created.content_hash != edited.content_hash
+    pinned = await service.get_task("default", "task-1", revision=created.content_hash)
+    assert pinned is not None and pinned.content_hash == created.content_hash
+
+
+async def test_pinned_revisions_resolve_in_a_batch(service: TaskService) -> None:
+    created = [
+        (await service.create_task(f"task-{i}", _task_input(intent=f"Intent {i}."), workspace="default"))[0]
+        for i in range(3)
+    ]
+    edited, _ = await service.replace_task("task-0", _task_input(intent="Edited."), workspace="default")
+    pins = [(task.name, task.content_hash or "") for task in created] + [("task-0", edited.content_hash or "")]
+
+    # Both revisions of task-0 and the only revision of the others resolve.
+    await service.resolve_pinned_revisions("default", pins)
+
+    with pytest.raises(NemoEntityNotFoundError):
+        await service.resolve_pinned_revisions("default", [("missing", "a" * 64)])
+    with pytest.raises(RevisionNotFoundError):
+        await service.resolve_pinned_revisions("default", [("task-1", "b" * 64)])
+
+
+async def test_stored_digest_matches_what_the_service_publishes(entity_store) -> None:
+    # A bulk writer skips a task when this digest equals a published revision's, so it must be exactly
+    # the digest a write would publish under, including the derived ref an inline metric becomes.
+    class _RealNaming(_FakeMetricService):
+        async def store_derived_metric(self, metric: MetricInline, *, workspace: str) -> MetricRef:
+            self.stored.append(metric)
+            return derived_metric_ref(metric, workspace=workspace)
+
+    service = TaskService(entity_store, _RealNaming(), authorize_metric_read=AsyncMock())
+    task_input = _task_input_with_metrics(_inline_metric())
+    created, _ = await service.create_task("task-1", task_input, workspace="default")
+
+    assert stored_evaluator_task_digest(task_input, workspace="default") == created.content_hash
+    assert stored_evaluator_task_digest(task_input, workspace="other") != created.content_hash
+
+
+def test_stored_digest_refuses_what_it_cannot_compute() -> None:
+    with pytest.raises(ValueError, match="needs a lookup"):
+        stored_evaluator_task_digest(_task_input_with_metrics(MetricRef("default/stored-metric")), workspace="default")

@@ -13,11 +13,12 @@ live in the entity record; there's no separate Files payload, unlike a metric bu
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Protocol, cast
 
 from nemo_evals.api.schemas import (
     LATEST_TAG,
+    EvaluatorTaskDefinition,
     HarborTaskDefinition,
     MetricInline,
     MetricRef,
@@ -26,12 +27,15 @@ from nemo_evals.api.schemas import (
     TaskDefinition,
     TaskInput,
 )
+from nemo_evals.api.service.metric_service import derived_metric_ref
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.harbor.materialization import verify_definition
 from nemo_evals.metric_refs import parse_metric_ref
 from nemo_evals.revisions import (
     apply_tag,
+    find_task_revisions_by_digest,
     get_revision,
+    head_digest,
     list_revisions,
     publish_revision,
 )
@@ -83,6 +87,8 @@ def _entity_to_task(entity: TaskEntity) -> Task:
         spec=entity.spec,
         metadata=entity.metadata,
         revision=entity.latest_revision,
+        # The head's content is always the latest revision's, which was published under this digest.
+        content_hash=head_digest(entity),
         tags=entity.tags,
         created_at=created_at,
         updated_at=updated_at,
@@ -107,6 +113,7 @@ def _revision_to_task(head: TaskEntity, revision: TaskRevisionEntity) -> Task:
         spec=revision.spec,
         metadata=revision.metadata,
         revision=revision.revision,
+        content_hash=revision.content_hash,
         tags={tag: ordinal for tag, ordinal in head.tags.items() if ordinal == revision.revision},
         created_at=created_at,
         updated_at=revision.updated_at or created_at,
@@ -135,6 +142,34 @@ def _pagination(src: PaginationInfo, current_page_size: int) -> PaginationData:
         total_pages=src.total_pages,
         total_results=src.total_results,
     )
+
+
+def stored_evaluator_task_digest(task_input: TaskInput, *, workspace: str) -> str:
+    """The revision digest :class:`TaskService` publishes ``task_input`` under in ``workspace``, computed
+    without writing anything.
+
+    Mirrors ``_apply_content`` for the one case it can without a lookup: an evaluator task whose
+    metrics are all inline, which the service stores as content-addressed derived metric refs
+    (:func:`derived_metric_ref`). Lets a bulk writer skip a task whose content is already published.
+
+    Raises:
+        ValueError: The task is not an evaluator task, or references a stored metric.
+    """
+    spec = task_input.spec
+    if not isinstance(spec, EvaluatorTaskDefinition):
+        raise ValueError("only evaluator tasks have a digest computable without the store")
+    metrics = []
+    for metric in spec.metrics:
+        if not isinstance(metric, MetricInline):
+            raise ValueError("a stored-metric reference needs a lookup; only inline metrics are supported")
+        metrics.append(derived_metric_ref(metric, workspace=workspace))
+    entity = TaskEntity(
+        name="digest-only",
+        workspace=workspace,
+        spec=spec.model_copy(update={"metrics": metrics}),
+        metadata=task_input.metadata,
+    )
+    return head_digest(entity)
 
 
 class TaskEntityStoreProtocol(EntityClientProtocol[TaskEntity], EntityUpdateClientProtocol[TaskEntity], Protocol):
@@ -369,6 +404,14 @@ class TaskService:
         head = await self.entity_client.get(TaskEntity, name=name, workspace=workspace)
         revision = await get_revision(self.revision_client, TaskRevisionEntity, head, fragment)
         return revision.content_hash
+
+    async def resolve_pinned_revisions(self, workspace: str, pins: Sequence[tuple[str, str]]) -> None:
+        """Check that each ``(name, digest)`` pin names a published, intact revision, in a few batched queries.
+
+        Raises ``NemoEntityNotFoundError`` for a missing task and :class:`RevisionNotFoundError` for a
+        missing revision, as :meth:`resolve_revision` would for each pin.
+        """
+        await find_task_revisions_by_digest(self.entity_client, workspace, pins)
 
     async def list_revisions(
         self, workspace: str, name: str, *, page: int = 1, page_size: int = 100

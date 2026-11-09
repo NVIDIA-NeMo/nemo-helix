@@ -3726,6 +3726,7 @@ components:
         tasks:
           anyOf:
           - $ref: '#/components/schemas/TasksetRef'
+          - $ref: '#/components/schemas/FilesetTaskSource'
           - items:
               $ref: '#/components/schemas/AgentEvalTaskInput'
             type: array
@@ -3736,7 +3737,9 @@ components:
             minItems: 1
           title: Tasks
           description: 'Tasks to evaluate: a nonempty list containing only inline
-            tasks or only task references, or a stored taskset reference.'
+            tasks or only task references, a stored taskset reference, or a FileSet
+            task source (`{source, snapshot}`) whose dataset file is converted to
+            tasks at submission.'
       additionalProperties: false
       type: object
       required:
@@ -3745,11 +3748,13 @@ components:
       description: 'Submitter-facing agent-evaluation input.
 
 
-        ``tasks`` accepts inline tasks, stored task references, or a stored taskset
-        reference.
+        ``tasks`` accepts inline tasks, stored task references, a stored taskset reference,
+        or a dataset
 
-        Stored definitions and scoring expand at submission; Harbor archives are prepared
-        on the worker.'
+        file in a FileSet. Stored definitions, files and scoring expand at submission;
+        Harbor archives are
+
+        prepared on the worker.'
     AgentEvalMetricOutputCoverage:
       properties:
         total:
@@ -3997,6 +4002,12 @@ components:
           title: Tasks
           description: Resolved task snapshots in execution order. Only archive materialization
             remains on the worker.
+        task_source:
+          allOf:
+          - $ref: '#/components/schemas/TaskSourceRecord'
+          description: 'Set at submission when the tasks came from a FileSet task
+            source: the file, its SHA-256, and what a snapshot published. Server-set;
+            submitters cannot provide it.'
       additionalProperties: false
       type: object
       required:
@@ -5748,6 +5759,25 @@ components:
       title: FilesetRef
       description: Reference to a persisted platform fileset, optionally with a file
         fragment.
+    FilesetTaskSource:
+      properties:
+        source:
+          allOf:
+          - $ref: '#/components/schemas/GymFilesetSource'
+          description: The dataset file and how its rows become tasks.
+        snapshot:
+          allOf:
+          - $ref: '#/components/schemas/TaskSnapshotSpec'
+          description: Publish the tasks and a taskset revision, and run from that
+            revision. Omit to run the file's tasks inline, storing nothing but the
+            job.
+      additionalProperties: false
+      type: object
+      required:
+      - source
+      title: FilesetTaskSource
+      description: Tasks read from a dataset file at submission, optionally published
+        as a taskset first.
     GenericAgent:
       properties:
         url:
@@ -5847,6 +5877,37 @@ components:
         and the union''s
 
         members must share no required key.'
+    GymFilesetSource:
+      properties:
+        fileset:
+          allOf:
+          - $ref: '#/components/schemas/FilesetRef'
+          description: 'The dataset file, as `workspace/fileset#path/to/file.jsonl`.
+            One file only: a whole FileSet or a glob is refused. It is read once,
+            as the submitter, at submission.'
+        format:
+          type: string
+          const: gym-jsonl
+          title: Format
+          description: 'How rows become tasks. `gym-jsonl`: one task per distinct
+            Gym dataset row, built as `discover_gym_tasks` builds them and scored
+            by the Gym reward. Requires a `gym` target.'
+        id_field:
+          title: Id Field
+          description: 'Row field holding each row''s id, a string or integer. Omitted:
+            a task''s id is the hash of its row''s content, so editing a row makes
+            it a new task. Set: the value is the task id (the Intake test case id),
+            so a row keeps its id when edited. Ids must be unique in the file.'
+          type: string
+          minLength: 1
+      additionalProperties: false
+      type: object
+      required:
+      - fileset
+      - format
+      title: GymFilesetSource
+      description: A Gym jsonl dataset file in a FileSet, converted into tasks when
+        the evaluation is submitted.
     GymRunnerTarget:
       properties:
         kind:
@@ -8915,6 +8976,15 @@ components:
           description: "Ordinal of the published revision this content corresponds\
             \ to. Every stored task has at least one revision \u2014 creating a task\
             \ publishes revision 1 \u2014 so this is never 0."
+        content_hash:
+          title: Content Hash
+          description: Digest of the revision this content corresponds to; pin it
+            as 'workspace/name#<content_hash>'. A create or replace returns the digest
+            it published, or of the existing revision it matched when the content
+            was unchanged. Always set by this server; optional only so clients still
+            read responses from servers that predate it.
+          type: string
+          pattern: ^[0-9a-f]{64}$
         tags:
           additionalProperties:
             type: integer
@@ -9093,6 +9163,54 @@ components:
         \ It may name a tag or a content\ndigest. Anything **persisted** as a published\
         \ snapshot must carry a resolved digest: tags move,\nand a stored tag fragment\
         \ would silently re-point published membership."
+    TaskSnapshotRecord:
+      properties:
+        taskset:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRef'
+          description: 'The exact revision the evaluation ran: `workspace/name#<digest>`.'
+        taskset_revision:
+          type: integer
+          minimum: 1.0
+          title: Taskset Revision
+          description: Ordinal of that revision.
+        task_id_prefix:
+          title: Task Id Prefix
+          description: Prefix applied to row ids, if any.
+          type: string
+        delta:
+          $ref: '#/components/schemas/TaskSourceDelta'
+      additionalProperties: false
+      type: object
+      required:
+      - taskset
+      - taskset_revision
+      - delta
+      title: TaskSnapshotRecord
+      description: What a snapshot published, set at submission.
+    TaskSnapshotSpec:
+      properties:
+        taskset:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRef'
+          description: Taskset to publish the file's tasks as, `workspace/name` or
+            `name`; it is created if absent. Each submission publishes a revision
+            only when the file's tasks or bytes changed, and the evaluation runs that
+            exact revision. Tasks are written to the taskset's workspace.
+        task_id_prefix:
+          title: Task Id Prefix
+          description: Required with `source.id_field`, refused without it. Stored
+            task names are `<task_id_prefix>-<id>`, so row ids such as `17` stay unique
+            among every other task in the workspace. Hash ids need no prefix.
+          type: string
+          minLength: 1
+      additionalProperties: false
+      type: object
+      required:
+      - taskset
+      title: TaskSnapshotSpec
+      description: Publish the converted tasks, and a taskset revision grouping them,
+        before the evaluation runs.
     TaskSort:
       type: string
       enum:
@@ -9104,6 +9222,74 @@ components:
       - -updated_at
       title: TaskSort
       description: Sort fields for task queries.
+    TaskSourceDelta:
+      properties:
+        added:
+          type: integer
+          minimum: 0.0
+          title: Added
+          description: Tasks only in the new revision.
+        changed:
+          type: integer
+          minimum: 0.0
+          title: Changed
+          description: Tasks in both whose pinned content differs.
+        removed:
+          type: integer
+          minimum: 0.0
+          title: Removed
+          description: Tasks only in the replaced revision. Their records are kept.
+        unchanged:
+          type: integer
+          minimum: 0.0
+          title: Unchanged
+          description: Tasks in both with identical pinned content.
+      additionalProperties: false
+      type: object
+      required:
+      - added
+      - changed
+      - removed
+      - unchanged
+      title: TaskSourceDelta
+      description: How a snapshot's taskset revision differs from the revision it
+        replaced, by task identity.
+    TaskSourceRecord:
+      properties:
+        fileset:
+          allOf:
+          - $ref: '#/components/schemas/FilesetRef'
+          description: The dataset file, fully qualified.
+        format:
+          type: string
+          const: gym-jsonl
+          title: Format
+        file_sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          title: File Sha256
+          description: SHA-256 of the exact bytes read. The FileSet may keep no version
+            history, so this records which file the tasks were built from.
+        task_count:
+          type: integer
+          minimum: 1.0
+          title: Task Count
+          description: Tasks built from the file (distinct rows).
+        id_field:
+          title: Id Field
+          type: string
+        snapshot:
+          $ref: '#/components/schemas/TaskSnapshotRecord'
+      additionalProperties: false
+      type: object
+      required:
+      - fileset
+      - format
+      - file_sha256
+      - task_count
+      title: TaskSourceRecord
+      description: Where a FileSet-sourced evaluation's tasks came from, set at submission;
+        never submitted.
     TasksPage:
       properties:
         data:
@@ -9173,6 +9359,15 @@ components:
           title: Revision
           description: Ordinal of the published revision this content corresponds
             to. Every stored taskset has at least one revision, so this is never 0.
+        content_hash:
+          title: Content Hash
+          description: Digest of the revision this content corresponds to; pin it
+            as 'workspace/name#<content_hash>'. A create or replace returns the digest
+            it published, or of the existing revision it matched when the content
+            was unchanged. Always set by this server; optional only so clients still
+            read responses from servers that predate it.
+          type: string
+          pattern: ^[0-9a-f]{64}$
         tags:
           additionalProperties:
             type: integer

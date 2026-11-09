@@ -27,7 +27,8 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Protocol, TypeVar
+from collections.abc import Sequence
+from typing import Protocol, TypeVar, cast
 
 from nemo_evals.api.schemas import LATEST_TAG, REF_FRAGMENT_CHARSET
 from nemo_evals.content_hash import DIGEST_PATTERN, content_hash
@@ -285,6 +286,83 @@ async def get_revision(
         ) from exc
     _verify_content(head, revision)
     return revision
+
+
+#: Names (and so heads) looked up per batched query. Well under the entity store's 1000-row page cap.
+_PIN_BATCH = 200
+#: Rows per page when listing the revisions a batch of pins names.
+_PIN_PAGE_SIZE = 1000
+
+
+async def find_task_revisions_by_digest(
+    entity_client: EntityClientProtocol[TaskEntity],
+    workspace: str,
+    pins: Sequence[tuple[str, str]],
+) -> dict[tuple[str, str], tuple[TaskEntity, TaskRevisionEntity]]:
+    """Resolve many ``(task name, digest)`` pins in one workspace with batched queries.
+
+    The batched form of ``get(TaskEntity)`` + :func:`get_revision` per pin: one query for each batch
+    of heads and one (paged) for their revisions, instead of two round trips per pin, so pinning a
+    taskset of thousands of members costs a handful of queries. Same guarantees: each revision is
+    the newest with that digest under that head, and its content is re-verified against the digest.
+
+    Raises:
+        NemoEntityNotFoundError: A named task does not exist.
+        RevisionNotFoundError: A task has no revision with its pinned digest.
+    """
+    revision_client = cast(EntityClientProtocol[TaskRevisionEntity], entity_client)
+    found: dict[tuple[str, str], tuple[TaskEntity, TaskRevisionEntity]] = {}
+    unique = list(dict.fromkeys(pins))
+    for start in range(0, len(unique), _PIN_BATCH):
+        batch = unique[start : start + _PIN_BATCH]
+        names = sorted({name for name, _ in batch})
+        heads_page = await entity_client.list(
+            TaskEntity,
+            workspace=workspace,
+            filter_operation=ComparisonOperation(field="name", operator=FilterOperator.IN, value=names),
+            page_size=len(names),
+        )
+        heads = {head.name: head for head in heads_page.data}
+        for name in names:
+            if name not in heads:
+                raise NemoEntityNotFoundError(f"Task '{workspace}/{name}' not found")
+        newest: dict[tuple[str, str], TaskRevisionEntity] = {}
+        page = 1
+        while True:
+            revisions = await revision_client.list(
+                TaskRevisionEntity,
+                workspace=workspace,
+                filter_operation=LogicalOperation(
+                    operator=FilterOperator.AND,
+                    operations=[
+                        ComparisonOperation(
+                            field="parent", operator=FilterOperator.IN, value=sorted(h.id for h in heads.values())
+                        ),
+                        ComparisonOperation(
+                            field="data.content_hash",
+                            operator=FilterOperator.IN,
+                            value=sorted({digest for _, digest in batch}),
+                        ),
+                    ],
+                ),
+                sort="-created_at",
+                page=page,
+                page_size=_PIN_PAGE_SIZE,
+            )
+            for revision in revisions.data:
+                # Newest first, so the first row seen for a (parent, digest) is the one find_by_digest picks.
+                newest.setdefault((revision.parent or "", revision.content_hash), revision)
+            if page >= revisions.pagination.total_pages:
+                break
+            page += 1
+        for name, digest in batch:
+            head = heads[name]
+            revision = newest.get((head.id, digest))
+            if revision is None:
+                raise RevisionNotFoundError(f"'{workspace}/{name}' has no revision with digest {digest!r}")
+            _verify_content(head, revision)
+            found[(name, digest)] = (head, revision)
+    return found
 
 
 def _verify_content(head: TaskEntity | TasksetEntity, revision: TaskRevisionEntity | TasksetRevisionEntity) -> None:

@@ -21,7 +21,7 @@ import logging
 import os
 import shutil
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -34,6 +34,7 @@ from nemo_agents_plugin.jobs.gateway_proxy import (
     rewrite_fabric_gateway_models,
     routes_fabric_inference_through_gateway,
 )
+from nemo_evals.api.schemas import TaskRef, TasksetRef
 from nemo_evals.config import get_config
 from nemo_evals.gateway.middleware.closed_book import MIDDLEWARE_NAME as CLOSED_BOOK_MIDDLEWARE
 from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
@@ -51,8 +52,10 @@ from nemo_evals.jobs.agent_files_snapshot import (
 from nemo_evals.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
+    AgentEvalTaskInput,
     AgentTarget,
     FabricRunnerTarget,
+    FilesetTaskSource,
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
@@ -65,6 +68,7 @@ from nemo_evals.jobs.agent_spec import (
 )
 from nemo_evals.jobs.attempt_tasks import load_attempt_tasks
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
+from nemo_evals.jobs.fileset_tasks import SourceFile, load_task_inputs, publish_snapshot, task_source_record
 from nemo_evals.jobs.gateway_models import (
     TrialRoute,
     add_gateway_key_placeholder,
@@ -235,6 +239,38 @@ def _staged_agent_files(target: FabricRunnerTarget | HarborRunnerTarget, ctx: Jo
     return staged
 
 
+async def _with_fileset_source(
+    spec: AgentEvalSpec,
+    source: FilesetTaskSource,
+    source_file: SourceFile,
+    inputs: list[AgentEvalTaskInput],
+    *,
+    common: dict[str, Any],
+    workspace: str,
+    async_sdk: AsyncHelixClient,
+    authorize: SourceReadAuthorizer | None,
+) -> AgentEvalSpec:
+    """``spec`` with the FileSet source recorded and, when snapshotting, its tasks published and pinned.
+
+    Runs after every other submission check: the snapshot is the submission's only write.
+    """
+    if source.snapshot is None:
+        record = task_source_record(source, source_file, len(spec.tasks))
+        tasks = spec.tasks
+    else:
+        tasks, record = await publish_snapshot(
+            source.snapshot,
+            inputs,
+            spec.tasks,
+            source_file,
+            source,
+            workspace=workspace,
+            async_client=async_sdk,
+            authorize=authorize,
+        )
+    return AgentEvalSpec(tasks=tasks, target=spec.target, task_source=record, **common)
+
+
 class _AgentEvalJobBase(NemoJob):
     """Run agent evaluation (``AgentEvaluator``) over tasks against a Model/Agent endpoint or runner."""
 
@@ -280,7 +316,27 @@ class _AgentEvalJobBase(NemoJob):
             adapters=cls.adapters,
             authorize=authorize,
         )
-        loaded_tasks = await load_tasks(submit_spec.tasks, ctx)
+        # A FileSet source becomes ordinary inline tasks here, so every check below covers its rows
+        # before a snapshot (the only write) is published at the very end.
+        fileset_source: FilesetTaskSource | None = None
+        file_inputs: list[AgentEvalTaskInput] = []
+        source_file: SourceFile | None = None
+        selection: TasksetRef | Sequence[AgentEvalTaskInput] | Sequence[TaskRef]
+        if isinstance(submit_spec.tasks, FilesetTaskSource):
+            fileset_source = submit_spec.tasks
+            config = get_config()
+            source_file, file_inputs = await load_task_inputs(
+                fileset_source,
+                workspace=workspace,
+                async_client=require_platform_client(async_sdk, "reading a FileSet task source"),
+                authorize=authorize,
+                max_bytes=config.fileset_task_source_max_bytes,
+                max_rows=config.fileset_task_source_max_rows,
+            )
+            selection = file_inputs
+        else:
+            selection = submit_spec.tasks
+        loaded_tasks = await load_tasks(selection, ctx)
         resolved_tasks = await map_with_limited_concurrency(lambda task: snapshot_task(task, ctx), loaded_tasks)
         validate_task_collection(resolved_tasks)
         target = await resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
@@ -295,6 +351,17 @@ class _AgentEvalJobBase(NemoJob):
                 tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"})
             )
             add_gateway_key_placeholder(build_task_environment(_secret_refs(spec)), spec.target)
+            if fileset_source is not None and source_file is not None:
+                spec = await _with_fileset_source(
+                    spec,
+                    fileset_source,
+                    source_file,
+                    file_inputs,
+                    common=submit_spec.model_dump(exclude={"tasks", "target"}),
+                    workspace=workspace,
+                    async_sdk=require_platform_client(async_sdk, "publishing a FileSet task snapshot"),
+                    authorize=authorize,
+                )
             return spec
         except Exception:
             # Resolution may have snapshotted the agent's files; a submission that fails after that owns no job
@@ -727,6 +794,9 @@ class _AgentEvalJobBase(NemoJob):
         }
         if outcome.failed:
             output["reason"] = outcome.message
+        if spec.task_source is not None:
+            # Durable on the job record as spec.task_source; repeated here beside the result it explains.
+            output["task_source"] = spec.task_source.model_dump(mode="json", exclude_none=True)
 
         # Publication runs last, after the bundle and the queryable record are both durable, so a
         # failed publish costs a re-publish rather than a re-run. Nothing depends on its result.

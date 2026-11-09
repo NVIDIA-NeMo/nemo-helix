@@ -107,8 +107,11 @@ from nhx_evals_sdk.agent_eval.runtimes.gym import GymRewardMetric, discover_gym_
 tasks = discover_gym_tasks("path/to/example.jsonl", metrics=[GymRewardMetric()])
 ```
 
-Task identity is the row's **content hash**, which has two consequences worth knowing before you
-build a dataset:
+Task identity is the row's content hash. Each task's id is `gym-` followed by 59 hex digits of
+the hash, which is also a valid platform entity name. Pass `id_field="uuid"` (any string or integer
+field) to use that field's value as the id instead, so a row keeps its id when you edit it; ids must
+then be unique in the file. Content-hash identity has two consequences worth knowing before you build
+a dataset:
 
 - Duplicate rows collapse into a single task, and the runner warns. Duplicates usually mean a data
   problem.
@@ -359,12 +362,11 @@ reward = MetricInline.model_validate(
     bundle_metric(GymRewardMetric(), InlineMetricBundlePackager()).model_dump(mode="json")
 )
 
-names = []
-for index, task in enumerate(tasks):
-    name = f"mcqa-{index}"
-    names.append(name)
-    evaluator.tasks.create(
-        name,
+for task in tasks:
+    # Naming the task after task.id, a valid task name, makes replace() idempotent: an
+    # unchanged row publishes no new revision, however the file is reordered.
+    evaluator.tasks.replace(
+        task.id,
         task=TaskInput(
             spec=EvaluatorTaskDefinition(
                 kind="evaluator",
@@ -376,17 +378,19 @@ for index, task in enumerate(tasks):
         ),
     )
 
-evaluator.tasksets.create("mcqa-suite", taskset=TasksetInput(tasks=[TaskRef(n) for n in names]))
+evaluator.tasksets.replace("mcqa-suite", taskset=TasksetInput(tasks=[TaskRef(task.id) for task in tasks]))
 
 job = evaluator.submit(tasks=TasksetRef("mcqa-suite"), target=runner)
 job.wait_until_done()
 ```
 
+If your dataset is already in a FileSet, skip this step and see
+[Run from a FileSet](#run-from-a-fileset).
+
 Two things that bite here:
 
-- **Do not name the task after `task.id`.** It is a 64-character hex digest, already past the
-  63-character cap on entity names, and it may begin with a digit where a name must start with a
-  letter. Derive a name, as above; the digest stays the task's own `id`.
+- **Name each task after `task.id`.** A name derived from the row's position, such as `mcqa-{index}`,
+  renames every later row when one is inserted, and each rename publishes a new task.
 - **`gym_row` rides on `inputs` and `gym_row_extras` on the task's `metadata`** — the field beside
   `spec`, not inside it. A task missing either is rejected job-side with `task '<id>' is missing
   inputs['gym_row'] and/or metadata['gym_row_extras']`.
@@ -419,6 +423,78 @@ On a sandbox-enabled deployment, the Evaluator step runs in `nhx-tasks` and call
 `nhx-gym-host`. On a deployment using the compatibility path, Evaluator and Gym run together in
 `nhx-gym-tasks`. A target with an `environment` FileSet is rejected on the compatibility path and
 adds `stage-environment` before `agent-evaluate` on a sandbox-enabled deployment.
+
+## Run from a FileSet
+
+An `agent-evaluate` job can read its tasks straight from a Gym dataset file in a FileSet, with no
+client step. The file is read and converted at submission, as the submitter. A bad row fails the submit
+with HTTP 422 and a message that names the file and line:
+
+```json
+{
+  "target": {"kind": "gym", "source": {"component": "simple_agent", "config": "responses_api_agents/simple_agent/configs/simple_agent.yaml"}, "resources_server": "mcqa"},
+  "tasks": {
+    "source": {"fileset": "default/golden#gym/golden.jsonl", "format": "gym-jsonl", "id_field": "uuid"},
+    "snapshot": {"taskset": "default/golden-suite", "task_id_prefix": "golden"}
+  }
+}
+```
+
+```bash
+nemo evals agent-evaluate --spec-file gym_fileset_eval.json
+```
+
+- `source.fileset` names one file: `workspace/fileset#path/to/file.jsonl`. A whole FileSet or a glob
+  is refused. The FileSet can be backed by external storage such as your own S3 bucket.
+- `source.id_field` is optional. Without it, task ids come from row content, as with
+  `discover_gym_tasks`. With it, each row's field value is its task id, and so its Intake test case id.
+- `snapshot` is optional. Without it, the tasks run inline and nothing is stored but the job.
+
+### Snapshots
+
+With `snapshot`, the submission also publishes the file's tasks and a revision of the named taskset,
+then runs exactly that revision. Submit whenever the file changes; each submission compares the file
+with the taskset's current revision:
+
+| The file | Tasks | Taskset |
+| --- | --- | --- |
+| is unchanged | No new revisions | No new revision; the job runs the same revision as before |
+| has rows reordered | No new revisions | One new revision, because the file's bytes changed |
+| has an edited row, without `id_field` | The edited row is a new task | One new revision |
+| has an edited row, with `id_field` | A new revision of the same task | One new revision |
+| has a row removed | The task is kept, so older revisions still resolve | One new revision without it |
+
+With `id_field`, `snapshot.task_id_prefix` is required: stored task names are
+`<task_id_prefix>-<id>`, because task names must be unique across the workspace but ids such as `17`
+are not. The prefix is not used without a snapshot, so a row's test case id is `17` in a run without a
+snapshot and `golden-17` in one with it. A stored task name must start with a lowercase letter, use
+lowercase letters, digits, `-`, `.`, `@`, `+` and `_`, and be at most 63 characters; a row whose name
+would not fit is refused before anything is written.
+
+Each taskset revision records the file it came from in its metadata (`source_fileset`,
+`source_sha256`, `format`, and the id settings) and carries the tag `src-<sha256>`. Members are pinned
+to the exact task revisions the submission published, so a concurrent submission cannot change what a
+revision holds.
+
+To snapshot, the submitter needs to read the source FileSet and write tasks and tasksets in the
+taskset's workspace. It also needs to create FileSets there, because the first task in a workspace
+stores the Gym reward metric's bundle.
+
+### What the job records
+
+The job spec carries `task_source`: the file, the SHA-256 of the bytes read (the FileSet may keep no
+version of its own), the task count, and for a snapshot, the pinned taskset revision and its change
+from the previous one (`added`, `changed`, `removed`, `unchanged`). The job output repeats it.
+
+### Limits
+
+Two Evals settings bound a file, because conversion runs inside the Evals API while the submission
+waits: `fileset_task_source_max_bytes` (default 64 MiB) and `fileset_task_source_max_rows` (default
+50,000). A larger file is refused with 422 naming the setting.
+
+The first snapshot of a file writes one task per row, so for thousands of rows it can take minutes;
+give that submission a long client timeout. Later submissions write only the rows that changed, and a
+submission of an unchanged file writes nothing.
 
 ## Run a registered agent
 

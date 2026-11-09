@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Protocol, cast
 
 from nemo_evals.api.schemas import (
@@ -34,6 +34,8 @@ from nemo_evals.revisions import (
     RevisionNotFoundError,
     apply_tag,
     get_revision,
+    head_digest,
+    is_digest,
     list_revisions,
     publish_revision,
 )
@@ -68,6 +70,8 @@ class _TaskService(Protocol):
     async def get_task(self, workspace: str, name: str) -> object | None: ...
 
     async def resolve_revision(self, workspace: str, name: str, fragment: str = "latest") -> str: ...
+
+    async def resolve_pinned_revisions(self, workspace: str, pins: Sequence[tuple[str, str]]) -> None: ...
 
 
 class TaskRefNotFoundError(ValueError):
@@ -110,6 +114,8 @@ def _entity_to_taskset(entity: TasksetEntity) -> Taskset:
         tasks=entity.tasks,
         files_ref=entity.files_ref,
         revision=entity.latest_revision,
+        # The head's content is always the latest revision's, which was published under this digest.
+        content_hash=head_digest(entity),
         tags=entity.tags,
         metadata=entity.metadata,
         created_at=created_at,
@@ -133,6 +139,7 @@ def _revision_to_taskset(head: TasksetEntity, revision: TasksetRevisionEntity) -
         files_ref=revision.files_ref,
         metadata=revision.metadata,
         revision=revision.revision,
+        content_hash=revision.content_hash,
         tags={tag: ordinal for tag, ordinal in head.tags.items() if ordinal == revision.revision},
         created_at=created_at,
         updated_at=revision.updated_at or created_at,
@@ -268,14 +275,50 @@ class TasksetService:
             return sorted(pinned, key=lambda ref: ref.root)
         self._reject_duplicate_members(taskset_input.tasks, workspace=workspace)
         limit = asyncio.Semaphore(_MEMBER_RESOLUTION_CONCURRENCY)
+        # Members already pinned to a digest need no resolution, only verification, which batches:
+        # a few queries per workspace instead of two round trips per member. The rest (bare and
+        # tag-pinned refs) resolve one by one, as a tag can only be read off its own task.
+        by_digest: dict[str, list[tuple[str, str]]] = {}
+        unpinned: list[TaskRef] = []
+        for ref in taskset_input.tasks:
+            ref_workspace, name, fragment = parse_subentity_ref(ref.root, workspace)
+            if fragment and is_digest(fragment):
+                by_digest.setdefault(ref_workspace, []).append((name, fragment))
+            else:
+                unpinned.append(ref)
+
+        async def _authorized(ref_workspace: str, name: str) -> None:
+            async with limit:
+                await self.authorize_task_read(ref_workspace, name)
 
         async def _bounded(ref: TaskRef) -> TaskRef:
             async with limit:
                 return await self._pin_member(ref, workspace=workspace)
 
-        pending = [asyncio.create_task(_bounded(ref)) for ref in taskset_input.tasks]
+        pending = [
+            asyncio.create_task(_authorized(ref_workspace, name))
+            for ref_workspace, pins in by_digest.items()
+            for name, _ in pins
+        ]
         try:
-            return sorted(await asyncio.gather(*pending), key=lambda ref: ref.root)
+            await asyncio.gather(*pending)
+        except BaseException:
+            for task in pending:
+                task.cancel()
+            raise
+        pinned: list[TaskRef] = []
+        for ref_workspace, pins in by_digest.items():
+            try:
+                await self.task_service.resolve_pinned_revisions(ref_workspace, pins)
+            except NemoEntityNotFoundError as exc:
+                raise TaskRefNotFoundError(f"Task reference not found in workspace '{ref_workspace}': {exc}") from exc
+            except RevisionNotFoundError as exc:
+                raise TaskRefNotFoundError(f"Task reference names no published revision: {exc}") from exc
+            pinned.extend(TaskRef(f"{ref_workspace}/{name}#{digest}") for name, digest in pins)
+
+        pending = [asyncio.create_task(_bounded(ref)) for ref in unpinned]
+        try:
+            return sorted([*pinned, *await asyncio.gather(*pending)], key=lambda ref: ref.root)
         except BaseException:
             # ``gather`` propagates the first failure but leaves its siblings running. One bad
             # member in a large grouping would otherwise keep issuing reads long after the request
