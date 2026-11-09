@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { withOperators } from '@nemo/common/src/api/filterOperators';
+import { jsonFilter, withOperators } from '@nemo/common/src/api/filterOperators';
 import { jobsListJobs } from '@nemo/sdk/generated/platform/jobs';
 import type {
   HelixJobListSortField,
@@ -16,7 +16,8 @@ const PAGE_SIZE = 50;
 export const fetchEvaluatorJobs = async (
   workspace: string,
   signal: AbortSignal,
-  shouldStop?: (accumulated: HelixJobResponse[]) => boolean
+  shouldStop?: (accumulated: HelixJobResponse[]) => boolean,
+  agentName?: string
 ): Promise<HelixJobResponse[]> => {
   const all: HelixJobResponse[] = [];
   let page = 1;
@@ -27,9 +28,27 @@ export const fetchEvaluatorJobs = async (
         page,
         page_size: PAGE_SIZE,
         sort: '-created_at' as HelixJobListSortField,
-        filter: withOperators<HelixJobsListFilter>({
-          source: { $in: [...EVALUATOR_JOB_SOURCES] },
-        }),
+        filter: agentName
+          ? jsonFilter<HelixJobsListFilter>({
+              $and: [
+                { source: { $in: [...EVALUATOR_JOB_SOURCES] } },
+                {
+                  $or: [
+                    {
+                      'spec.target.kind': { $eq: 'agent' },
+                      'spec.target.agent.name': { $in: [agentName, `${workspace}/${agentName}`] },
+                    },
+                    {
+                      'spec.target.kind': { $in: ['fabric', 'harbor', 'gym'] },
+                      'spec.target.source.agent': { $in: [agentName, `${workspace}/${agentName}`] },
+                    },
+                  ],
+                },
+              ],
+            })
+          : withOperators<HelixJobsListFilter>({
+              source: { $in: [...EVALUATOR_JOB_SOURCES] },
+            }),
       },
       signal
     );
