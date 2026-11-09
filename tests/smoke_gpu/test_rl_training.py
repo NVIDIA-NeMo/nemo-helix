@@ -173,6 +173,28 @@ def test_nhx_rl_training_importable():
 
 
 @pytest.mark.smoke_nhx_rl_training
+@pytest.mark.parametrize("actor_fqn", ["driver", *sorted(WORKER_VENV_IMPORTS)])
+def test_job_reaper_importable(actor_fqn):
+    """Every training venv can reap sandboxes for a cancelled job.
+
+    ``_reap_job_sandboxes`` imports ``sandboxed_gym.job_reaper`` in the process the
+    runtime signals. ``import sandboxed_gym`` does not cover that: a venv whose
+    install predates ``job_reaper`` raises ``No module named 'sandboxed_gym.job_reaper'``
+    and the job's sandboxes stay up until ``ttl_s``.
+    """
+    venv = Path("/opt/nemo_rl_venv") if actor_fqn == "driver" else RAY_VENVS / actor_fqn
+    python = venv / "bin" / "python"
+    if actor_fqn != "driver" and not python.exists():
+        pytest.skip(f"venv for {actor_fqn} not present; covered by test_worker_venv_prefetched")
+    result = subprocess.run(
+        [str(python), "-c", "from sandboxed_gym.job_reaper import reap_job_sandboxes"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"`sandboxed_gym.job_reaper` failed in {venv}:\n{result.stderr}"
+
+
+@pytest.mark.smoke_nhx_rl_training
 def test_sandboxed_gym_driver_imports():
     """The driver must be able to import the mode-B sandbox modules.
 
