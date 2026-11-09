@@ -9410,9 +9410,11 @@ components:
         trial_counts:
           allOf:
           - $ref: '#/components/schemas/TrialCounts'
-          description: Trial counts summed across the run's tasks. The reward is the
-            mean of each task's mean reward, so every task counts equally regardless
-            of how many trials it ran.
+          description: 'Trial counts summed across the run''s tasks. The reward is
+            the mean of each task''s mean reward, so every task counts equally regardless
+            of how many trials it ran. None when any task has no counts, as in a run
+            that was already going when trial counts were added: a total over only
+            some of its tasks would read as the whole run''s.'
       type: object
       required:
       - tasks
