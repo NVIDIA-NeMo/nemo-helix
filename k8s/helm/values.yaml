@@ -1041,7 +1041,7 @@ api:
   # -- Pod-level security context settings for the API service.
   # @default -- This object has the following default values for the pod security context.
   podSecurityContext:
-    # -- UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. Overrides a global `podSecurityContext.runAsUser`, so set both if you need a different UID.
+    # -- UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. An explicit global `podSecurityContext.runAsUser` / `runAsGroup` takes precedence over this default.
     runAsUser: 1000
     # -- GID of the `nvs` user.
     runAsGroup: 1000
@@ -1298,7 +1298,7 @@ core:
     # -- Pod-level security context settings for the controller service.
     # @default -- This object has the following default values for the pod security context.
     podSecurityContext:
-      # -- UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. Overrides a global `podSecurityContext.runAsUser`, so set both if you need a different UID.
+      # -- UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. An explicit global `podSecurityContext.runAsUser` / `runAsGroup` takes precedence over this default.
       runAsUser: 1000
       # -- GID of the `nvs` user.
       runAsGroup: 1000
