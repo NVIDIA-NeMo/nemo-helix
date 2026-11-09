@@ -445,10 +445,11 @@ FIRST_ERROR_CONTEXT_LINES = 12
 #: How far past the first error line to look for the end of its report.
 _FIRST_ERROR_SCAN_LINES = 500
 #: The ``(server_name) `` prefix Gym adds to each component's output.
-_SERVER_PREFIX_RE = re.compile(r"^\([^)\s]+\) ")
+_SERVER_PREFIX = r"\([^)\s]+\) "
+_SERVER_PREFIX_RE = re.compile(f"^{_SERVER_PREFIX}")
 _TRACEBACK_HEADER = "Traceback (most recent call last)"
 #: A line that starts an error report: uv's ``error:`` or a Python traceback, after the prefix.
-_ERROR_START_RE = re.compile(r"^(?:\([^)\s]+\)\s+)?(?:error:|Traceback \(most recent call last\))")
+_ERROR_START_RE = re.compile(rf"^(?:{_SERVER_PREFIX}\s*)?(?:error:|{re.escape(_TRACEBACK_HEADER)})")
 
 
 def _first_error_block(lines: Sequence[str], start: int, end: int) -> str:
