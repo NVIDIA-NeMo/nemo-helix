@@ -497,8 +497,10 @@ than silently shipping an image whose workers rebuild their venv on the node at 
 One venv is built **per registered actor, not per extra** — the directory name is the actor
 FQN, as `prefetch_venvs.py` would name it — so `NemoGym` and `SandboxedGymActor` each get a directory even though both
 use `nemo_gym`. `opensandbox` / `tenacity` come in through the extra itself, since RL declares
-`nemo_gym = ["nemo_gym[sandbox]"]`. The worker sync then installs
-`nemo-sandboxed-gym[server,opensandbox,ray]` into each `nemo_gym` venv.
+`nemo_gym = ["nemo_gym[sandbox]", "nemo-sandboxed-gym[server,opensandbox,ray]==0.1.0a1"]`.
+The base sync skips `nemo-sandboxed-gym`, so that published wheel is never installed.
+`Dockerfile.nhx-rl-training` installs the in-tree package into the driver venv and each
+`nemo_gym` worker venv.
 
 Without this, each venv is built **on the node at first run**, re-resolving and
 recompiling `deep_ep` / `mamba-ssm` / `causal-conv1d` against a cold uv cache on every
