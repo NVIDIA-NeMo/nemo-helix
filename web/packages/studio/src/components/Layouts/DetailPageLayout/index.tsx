@@ -20,20 +20,16 @@ export interface DetailPageTab<T extends string> {
 
 export interface DetailPageLayoutProps<T extends string> {
   title: string;
-  /** Status, IDs, and tags shown beside the title. */
   slotBadges?: ReactNode;
   slotDescription?: ReactNode;
   tabs: DetailPageTab<T>[];
   selectedTab: T;
   onTabChange: (tab: T) => void;
-  /** The selected tab's actions, aligned with the tab bar. */
   slotActions?: ReactNode;
   tabsListRef?: Ref<HTMLDivElement>;
-  /** One `TabsContent` per tab. */
   children: ReactNode;
 }
 
-/** Header and tab bar shared by the entity detail pages (agents, models). */
 export const DetailPageLayout = <T extends string>({
   title,
   slotBadges,

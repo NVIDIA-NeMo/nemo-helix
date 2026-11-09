@@ -75,7 +75,6 @@ export const WithDescription: Story = {
   args: { description: 'Fine-tuned on the customer support dataset.' },
 };
 
-/** The title truncates rather than pushing the badges onto a second line. */
 export const LongTitle: Story = {
   args: {
     title:

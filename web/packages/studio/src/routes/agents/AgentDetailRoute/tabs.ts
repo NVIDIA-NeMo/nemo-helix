@@ -19,8 +19,6 @@ export type AgentDetailTab =
   | 'deployments'
   | 'logs';
 
-/** The tabs this build shows, in order. Flagged-off tabs are left out, so their URLs fall back to
- *  DEFAULT_TAB. */
 export const AGENT_DETAIL_TABS: DetailPageTab<AgentDetailTab>[] = [
   ...(AGENT_OVERVIEW_ENABLED ? [{ value: 'overview' as const, label: 'Overview' }] : []),
   { value: 'chat', label: 'Chat' },
