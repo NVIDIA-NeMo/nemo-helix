@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from helpers import list_response, make_deployment, make_deployment_config
 from nemo_deployments_plugin.api.v2 import deployment_configs as configs_module
 from nemo_deployments_plugin.api.v2.dependencies import get_entity_client
+from nemo_deployments_plugin.entities import OpenShellDeploymentConfig
 from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
@@ -158,6 +159,47 @@ def test_create_deployment_config_rejects_docker_namespace_mode(
     )
     assert resp.status_code == 422
     mock_entity_client.create.assert_not_awaited()
+
+
+@pytest.mark.parametrize("backend_alias", ["backendConfig", "backend_config"])
+@pytest.mark.parametrize("path_alias", ["policyPath", "policy_path"])
+@pytest.mark.parametrize("path", ["/controller/private.yaml", "../policy.yaml", ""])
+def test_create_deployment_config_rejects_openshell_policy_path(
+    client: TestClient,
+    mock_entity_client: AsyncMock,
+    backend_alias: str,
+    path_alias: str,
+    path: str,
+) -> None:
+    resp = client.post(
+        "/apis/deployments/v2/workspaces/default/deployment-configs",
+        json={"name": "cfg1", backend_alias: {"openshell": {path_alias: path}}},
+    )
+    assert resp.status_code == 422
+    assert "Per-deployment OpenShell policy paths are not supported" in resp.text
+    mock_entity_client.create.assert_not_awaited()
+
+
+@pytest.mark.parametrize("openshell", [{}, {"policyPath": None}, {"policy_path": None}])
+def test_create_deployment_config_accepts_openshell_without_policy_override(
+    client: TestClient, mock_entity_client: AsyncMock, openshell: dict[str, None]
+) -> None:
+    mock_entity_client.create.side_effect = lambda config: config
+    resp = client.post(
+        "/apis/deployments/v2/workspaces/default/deployment-configs",
+        json={"name": "cfg1", "backendConfig": {"openshell": openshell}},
+    )
+    assert resp.status_code == 201
+    assert mock_entity_client.create.await_args.args[0].backend_config.openshell.policy_path is None
+
+
+def test_get_legacy_openshell_policy_config_remains_readable(client: TestClient, mock_entity_client: AsyncMock) -> None:
+    config = make_deployment_config("legacy")
+    config.backend_config.openshell = OpenShellDeploymentConfig(policyPath="/controller/private.yaml")
+    mock_entity_client.get.return_value = config
+    resp = client.get("/apis/deployments/v2/workspaces/default/deployment-configs/legacy")
+    assert resp.status_code == 200
+    assert resp.json()["backendConfig"]["openshell"]["policyPath"] == "/controller/private.yaml"
 
 
 def test_get_deployment_config_404(client: TestClient, mock_entity_client: AsyncMock) -> None:

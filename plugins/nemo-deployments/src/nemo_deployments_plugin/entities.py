@@ -238,12 +238,20 @@ class OpenShellDeploymentConfig(BaseModel):
         default=None,
         alias="policyPath",
         description=(
-            "Path to a sandbox policy YAML file on the backend host. "
-            "Overrides the executor-level default_policy_path for this deployment only."
+            "Legacy policy override, retained for reading persisted configs only. "
+            "Non-null values are rejected for new configs and deployment execution. "
+            "Configure default_policy_path on the executor instead."
         ),
     )
 
     model_config = {"populate_by_name": True}
+
+    def validate_client_policy(self) -> None:
+        """Keep legacy configs readable without allowing controller-host file access."""
+        if self.policy_path is not None:
+            raise ValueError(
+                "Per-deployment OpenShell policy paths are not supported; configure the executor policy instead"
+            )
 
 
 class DeploymentBackendConfig(BaseModel):

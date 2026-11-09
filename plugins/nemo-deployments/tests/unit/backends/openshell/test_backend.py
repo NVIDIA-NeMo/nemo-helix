@@ -525,8 +525,12 @@ async def test_read_status_not_found_is_lost(
     assert update.status == "LOST"
 
 
+@pytest.mark.parametrize("backend_config", [{}, {"openshell": {}}, {"openshell": {"policyPath": None}}])
 async def test_create_uses_executor_policy_when_no_policy_path_override(
-    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock, mock_entities: AsyncMock
+    openshell_backend: OpenShellDeploymentBackend,
+    mock_stub: MagicMock,
+    mock_entities: AsyncMock,
+    backend_config: dict,
 ) -> None:
     mock_entities.get.return_value = _config()
     mock_stub.GetSandbox.side_effect = _not_found()
@@ -534,36 +538,63 @@ async def test_create_uses_executor_policy_when_no_policy_path_override(
 
     executor_policy = openshell_backend._policy
     await openshell_backend.create_deployment(
-        workspace="default", name="srv", config_name="cfg1", labels={}, backend_config={}
+        workspace="default", name="srv", config_name="cfg1", labels={}, backend_config=backend_config
     )
 
     spec = mock_stub.CreateSandbox.call_args.args[0].spec
     assert spec.policy == executor_policy
 
 
-async def test_create_uses_per_deployment_policy_when_policy_path_set(
+async def test_create_preserves_operator_configured_policy(
     openshell_backend: OpenShellDeploymentBackend,
     mock_stub: MagicMock,
     mock_entities: AsyncMock,
     tmp_path: Path,
 ) -> None:
-    policy_file = tmp_path / "policy.yaml"
-    policy_file.write_text("version: 1\nprocess:\n  run_as_user: sandbox\n  run_as_group: sandbox\n")
+    policy_file = tmp_path / "operator-policy.yaml"
+    policy_file.write_text("version: 1\nprocess:\n  run_as_user: operator-selected-user\n")
+    openshell_backend._executor_config.default_policy_path = str(policy_file)
+    openshell_backend._policy = openshell_backend._build_executor_policy()
     mock_entities.get.return_value = _config()
     mock_stub.GetSandbox.side_effect = _not_found()
-    mock_stub.CreateSandbox.return_value = MagicMock()
 
-    executor_policy = openshell_backend._policy
     await openshell_backend.create_deployment(
-        workspace="default",
-        name="srv",
-        config_name="cfg1",
-        labels={},
-        backend_config={"openshell": {"policyPath": str(policy_file)}},
+        workspace="default", name="srv", config_name="cfg1", labels={}, backend_config={}
     )
 
-    spec = mock_stub.CreateSandbox.call_args.args[0].spec
-    assert spec.policy != executor_policy
+    policy = mock_stub.CreateSandbox.call_args.args[0].spec.policy
+    assert policy == openshell_backend._policy
+    assert policy.process.run_as_user == "operator-selected-user"
+
+
+@pytest.mark.parametrize("alias", ["policyPath", "policy_path"])
+@pytest.mark.parametrize("path", ["/controller/private.yaml", "../policy.yaml", ""])
+async def test_create_rejects_legacy_policy_path_before_file_or_gateway_access(
+    openshell_backend: OpenShellDeploymentBackend,
+    mock_stub: MagicMock,
+    mock_entities: AsyncMock,
+    alias: str,
+    path: str,
+) -> None:
+    with (
+        patch("builtins.open") as open_file,
+        pytest.raises(ValueError, match="Per-deployment OpenShell policy paths are not supported") as exc,
+    ):
+        await openshell_backend.create_deployment(
+            workspace="default",
+            name="srv",
+            config_name="cfg1",
+            labels={},
+            backend_config={"openshell": {alias: path}},
+        )
+
+    assert str(exc.value) == (
+        "Per-deployment OpenShell policy paths are not supported; configure the executor policy instead"
+    )
+    open_file.assert_not_called()
+    mock_entities.get.assert_not_awaited()
+    mock_stub.GetSandbox.assert_not_called()
+    mock_stub.CreateSandbox.assert_not_called()
 
 
 async def test_create_requires_serve_command(

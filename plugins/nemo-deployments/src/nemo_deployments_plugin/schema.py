@@ -135,10 +135,12 @@ class CreateDeploymentConfigRequest(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def validate_docker_network(self) -> CreateDeploymentConfigRequest:
+    def validate_backend_config(self) -> CreateDeploymentConfigRequest:
         # Persisted entities remain readable for status, migration, and deletion.
         if self.backend_config.docker is not None:
             validate_client_docker_network(self.backend_config.docker.network)
+        if self.backend_config.openshell is not None:
+            self.backend_config.openshell.validate_client_policy()
         return self
 
 

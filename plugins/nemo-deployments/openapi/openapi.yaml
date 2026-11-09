@@ -1376,8 +1376,9 @@ components:
       properties:
         policyPath:
           title: Policypath
-          description: Path to a sandbox policy YAML file on the backend host. Overrides
-            the executor-level default_policy_path for this deployment only.
+          description: Legacy policy override, retained for reading persisted configs
+            only. Non-null values are rejected for new configs and deployment execution.
+            Configure default_policy_path on the executor instead.
           type: string
       type: object
       title: OpenShellDeploymentConfig
