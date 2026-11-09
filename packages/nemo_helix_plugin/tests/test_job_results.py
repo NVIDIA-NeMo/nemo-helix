@@ -34,6 +34,7 @@ from nemo_helix_plugin.job_results import (
 )
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
 from nemo_helix_plugin.jobs.constants import NEMO_JOB_WORKSPACE_ENVVAR
+from nemo_helix_plugin.jobs.file_manager import _filter_files_by_patterns
 from nemo_helix_plugin.jobs.result_manager import (
     AsyncResultManager,
     ResultManager,
@@ -110,12 +111,79 @@ class TestSaveDirectory:
         (src / "cache" / "cache.db").write_text("junk")
         (src / "keep.txt").write_text("K")
         results = LocalJobResults(root=root)
-        # Trailing-slash form mirrors the platform impl's accepted shape;
-        # the local builder normalizes it before fnmatch.
+        # A trailing slash selects directories rather than regular files.
         results.save("artifacts", src, ignore_patterns=["cache.db", "cache/"])
         dst = root / "artifacts"
         assert (dst / "keep.txt").read_text() == "K"
         assert not (dst / "cache").exists()
+
+    def test_save_directory_anchors_directory_path_patterns(self, tmp_path: Path, root: Path) -> None:
+        """Exclude a root-relative directory while retaining deeper copies and same-prefix files."""
+        src = tmp_path / "payload"
+        for relative in (
+            "home/.tmp/plugins/catalog.json",
+            "home/.tmp/plugins.sha",
+            "workspace/home/.tmp/plugins/kept.json",
+        ):
+            (src / relative).parent.mkdir(parents=True, exist_ok=True)
+            (src / relative).write_text(relative)
+        results = LocalJobResults(root=root)
+        # Same anchoring as the platform impl: the directory path starts at the saved root.
+        results.save("artifacts", src, ignore_patterns=["home/.tmp/plugins/"])
+        dst = root / "artifacts"
+        assert not (dst / "home" / ".tmp" / "plugins").exists()
+        assert (dst / "home" / ".tmp" / "plugins.sha").exists()
+        assert (dst / "workspace" / "home" / ".tmp" / "plugins" / "kept.json").exists()
+
+    def test_save_directory_matches_globbed_directory_paths(self, tmp_path: Path, root: Path) -> None:
+        """Match globs inside a root-relative directory path without filtering adjacent files."""
+        src = tmp_path / "payload"
+        for relative in ("home/.tmp/plugins-clone-a1/catalog.json", "home/.tmp/plugins.sha"):
+            (src / relative).parent.mkdir(parents=True, exist_ok=True)
+            (src / relative).write_text(relative)
+        results = LocalJobResults(root=root)
+        results.save("artifacts", src, ignore_patterns=["home/.tmp/plugins*/"])
+        dst = root / "artifacts"
+        assert not (dst / "home" / ".tmp" / "plugins-clone-a1").exists()
+        assert (dst / "home" / ".tmp" / "plugins.sha").exists()
+
+    def test_save_directory_matches_single_folder_globs(self, tmp_path: Path, root: Path) -> None:
+        """Folder globs exclude matching directories at any depth and keep same-prefix files."""
+        src = tmp_path / "payload"
+        for relative in (
+            "plugins/catalog.json",
+            "plugins-clone-a1/nested/skill.md",
+            "nested/plugins/catalog.json",
+            "nested/plugins-clone-b2/catalog.json",
+            "plugins.sha",
+            "nested/plugins.sha",
+            "other/keep.txt",
+        ):
+            (src / relative).parent.mkdir(parents=True, exist_ok=True)
+            (src / relative).write_text(relative)
+
+        LocalJobResults(root=root).save("artifacts", src, ignore_patterns=["plugins*/"])
+
+        dst = root / "artifacts"
+        assert sorted(path.relative_to(dst).as_posix() for path in dst.rglob("*") if path.is_file()) == [
+            "nested/plugins.sha",
+            "other/keep.txt",
+            "plugins.sha",
+        ]
+
+    def test_save_directory_keeps_filename_glob_behavior(self, tmp_path: Path, root: Path) -> None:
+        """Filename globs continue excluding matching files at every depth."""
+        src = tmp_path / "payload"
+        for relative in ("cache.tmp", "nested/cache.tmp", "keep.txt"):
+            (src / relative).parent.mkdir(parents=True, exist_ok=True)
+            (src / relative).write_text(relative)
+
+        LocalJobResults(root=root).save("artifacts", src, ignore_patterns=["*.tmp"])
+
+        dst = root / "artifacts"
+        assert (dst / "keep.txt").is_file()
+        assert not (dst / "cache.tmp").exists()
+        assert not (dst / "nested/cache.tmp").exists()
 
     def test_save_directory_overwrites(self, tmp_path: Path, root: Path) -> None:
         src1 = tmp_path / "p1"
@@ -130,6 +198,68 @@ class TestSaveDirectory:
         dst = root / "artifacts"
         assert (dst / "two.txt").exists()
         assert not (dst / "one.txt").exists()
+
+    @pytest.mark.parametrize(
+        ("patterns", "excluded"),
+        [
+            (None, set()),
+            ([], set()),
+            ("*.tmp", {"cache.tmp", "nested/cache.tmp"}),
+            (
+                ["plugins*/"],
+                {
+                    "plugins/catalog.json",
+                    "nested/plugins-clone/catalog.json",
+                    "home/.tmp/plugins/catalog.json",
+                    "deep/home/.tmp/plugins/catalog.json",
+                },
+            ),
+            (["home/.tmp/plugins*/"], {"home/.tmp/plugins/catalog.json"}),
+            (["/home/.tmp/plugins*/"], {"home/.tmp/plugins/catalog.json"}),
+            (["/plugins/"], {"plugins/catalog.json"}),
+            (["/evidence/"], {"evidence/trace.json"}),
+            (["nested/*.tmp"], {"nested/cache.tmp"}),
+            (
+                ["catalog.json"],
+                {
+                    "plugins/catalog.json",
+                    "nested/plugins-clone/catalog.json",
+                    "home/.tmp/plugins/catalog.json",
+                    "deep/home/.tmp/plugins/catalog.json",
+                },
+            ),
+            (["[Cc]ache.tmp"], {"cache.tmp", "nested/cache.tmp"}),
+            ([".hidden"], {".hidden", "nested/.hidden"}),
+        ],
+    )
+    def test_local_and_hosted_saves_keep_the_same_files(self, tmp_path: Path, root: Path, patterns, excluded) -> None:
+        """Cover file-only globs, directory anchoring, and path globs in both save paths."""
+        files = {
+            "cache.tmp",
+            "nested/cache.tmp",
+            "logs.tmp/keep.txt",
+            "nested/logs.tmp/keep.txt",
+            "plugins/catalog.json",
+            "nested/plugins-clone/catalog.json",
+            "plugins.sha",
+            "evidence/trace.json",
+            "nested/evidence/trace.json",
+            "home/.tmp/plugins/catalog.json",
+            "deep/home/.tmp/plugins/catalog.json",
+            ".hidden",
+            "nested/.hidden",
+        }
+        src = tmp_path / "payload"
+        for relative in files:
+            (src / relative).parent.mkdir(parents=True, exist_ok=True)
+            (src / relative).write_text(relative)
+
+        LocalJobResults(root=root).save("artifacts", src, ignore_patterns=patterns)
+
+        dst = root / "artifacts"
+        saved = {path.relative_to(dst).as_posix() for path in dst.rglob("*") if path.is_file()}
+        assert saved == files - excluded
+        assert set(_filter_files_by_patterns(sorted(files), patterns)) == saved
 
 
 class TestSaveOverwriteAcrossKinds:

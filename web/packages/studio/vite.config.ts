@@ -99,14 +99,18 @@ const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx'];
 
 const IN_NODE_MODULES = /(^|[\\/])node_modules([\\/]|$)/;
 
-const resolveSourceFile = (base: string): string | null => {
-  if (fs.existsSync(base) && fs.statSync(base).isFile()) return base;
+const resolveSourceFile = (source: string): string | null => {
+  // Query suffixes belong to the loader, not the filesystem path (e.g. SVG ?react).
+  const queryStart = source.search(/[?#]/);
+  const base = queryStart === -1 ? source : source.slice(0, queryStart);
+  const suffix = queryStart === -1 ? '' : source.slice(queryStart);
+  if (fs.existsSync(base) && fs.statSync(base).isFile()) return base + suffix;
   for (const ext of SOURCE_EXTENSIONS) {
-    if (fs.existsSync(base + ext)) return base + ext;
+    if (fs.existsSync(base + ext)) return base + ext + suffix;
   }
   for (const ext of SOURCE_EXTENSIONS) {
     const indexFile = path.join(base, `index${ext}`);
-    if (fs.existsSync(indexFile)) return indexFile;
+    if (fs.existsSync(indexFile)) return indexFile + suffix;
   }
   return null;
 };
@@ -257,7 +261,9 @@ async function buildVendorBundles(
       outfile: 'common.js',
       external: [...VENDOR_EXTERNALS],
       banner: buildRequireShim(VENDOR_EXTERNALS),
-      plugins: [workspaceSourcePlugin()],
+      // This is a standalone Rolldown build, so it does not inherit Vite's
+      // plugins. Common's model metadata imports SVGs as React components.
+      plugins: [workspaceSourcePlugin(), svgr()],
     },
   ];
 

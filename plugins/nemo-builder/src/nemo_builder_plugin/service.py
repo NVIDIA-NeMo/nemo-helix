@@ -25,7 +25,7 @@ from nemo_builder_plugin.completion import (
     submit_refusal,
 )
 from nemo_builder_plugin.config import BuilderConfig
-from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.entities import MAX_REVISION, ContainerImage
 from nemo_builder_plugin.identity import ImageReference
 from nemo_builder_plugin.schema import BuildSet, SubmitBuildResponse
 from nemo_builder_plugin.submit import (
@@ -173,7 +173,9 @@ def _build_router() -> APIRouter:
         build_set: str | None = Query(
             default=None, max_length=128, description="Only the images of the build set with this `name`."
         ),
-        revision: int | None = Query(default=None, ge=1, description="Only the images of this `revision`."),
+        revision: int | None = Query(
+            default=None, ge=1, le=MAX_REVISION, description="Only the images of this `revision`."
+        ),
         status: Literal["queued", "pending", "ready", "failed"] | None = Query(
             default=None, description="Only images in this state."
         ),

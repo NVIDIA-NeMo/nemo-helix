@@ -233,6 +233,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[\w\-\+.@:]+$
           title: Workspace
       requestBody:
         required: true
@@ -641,6 +642,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[\w\-\+.@:]+$
           title: Workspace
       requestBody:
         required: true
@@ -789,6 +791,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[\w\-\+.@:]+$
           title: Workspace
       requestBody:
         required: true

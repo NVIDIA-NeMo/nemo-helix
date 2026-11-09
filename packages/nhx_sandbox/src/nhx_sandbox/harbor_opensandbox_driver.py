@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import secrets
 from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -52,6 +53,14 @@ TRANSIENT_SDK_EXCEPTIONS = frozenset(
 )
 # Sandbox states that end a readiness wait with a failure.
 _TERMINAL_STATES = frozenset({"Failed", "Terminated"})
+
+# execd, the command server in every sandbox, listens on the pod IP and runs whatever it is sent, as root on most
+# images. OpenSandbox gives it no credential, so any pod that reaches the pod IP, or holds the server's shared API key
+# and calls the proxy, could command any sandbox. Once its environment carries this variable, execd rejects every
+# request, including its health check, that lacks the matching header. Each sandbox gets its own token, so the task
+# inside, which can read it, can only reach its own execd.
+EXECD_ACCESS_TOKEN_ENV = "EXECD_ACCESS_TOKEN"
+EXECD_ACCESS_TOKEN_HEADER = "X-EXECD-ACCESS-TOKEN"
 
 # Returns a failure message once a sandbox can no longer become ready, else None.
 FailureCheck = Callable[[Any], Awaitable[str | None]]
@@ -111,7 +120,9 @@ class Connection:
     # Kept out of repr, so logging or raising with a Connection never prints the key.
     api_key: str | None = field(repr=False)
     protocol: str = "https"
-    use_server_proxy: bool = False
+    # Through the server by default: execd takes commands from anyone who reaches it, so a deployment that isolates
+    # sandbox pods admits only the server, and a client dialling the pod IP directly can't reach it.
+    use_server_proxy: bool = True
     # The SDK's 30 s default is too short for a server that pulls the image during create.
     request_timeout_sec: float | None = None
 
@@ -197,8 +208,14 @@ class OpenSandboxDriver:
             self._sdk = load_sdk()
         return self._sdk
 
-    def connection_config(self) -> Any:
-        """The SDK ``ConnectionConfig`` for this server."""
+    def connection_config(self, *, execd_access_token: str | None = None) -> Any:
+        """The SDK ``ConnectionConfig`` for this server.
+
+        Args:
+            execd_access_token: One sandbox's execd token. The SDK sends a config's headers on every call it makes
+                with it, and a sandbox keeps the config it was created with, so every execd call on that sandbox
+                carries the token. Leave it out for server-only calls, such as listing and killing sandboxes.
+        """
         kwargs: dict[str, Any] = {
             "domain": self._connection.domain,
             "api_key": self._connection.api_key,
@@ -208,6 +225,8 @@ class OpenSandboxDriver:
         # Only override the SDK's own request timeout when one was configured.
         if self._connection.request_timeout_sec is not None:
             kwargs["request_timeout"] = timedelta(seconds=self._connection.request_timeout_sec)
+        if execd_access_token is not None:
+            kwargs["headers"] = {EXECD_ACCESS_TOKEN_HEADER: execd_access_token}
         return self.sdk["ConnectionConfig"](**kwargs)
 
     async def create(self, request: CreateRequest, *, failure_check: FailureCheck | None = None) -> Any:
@@ -259,8 +278,13 @@ class OpenSandboxDriver:
     async def _create_once(
         self, request: CreateRequest, metadata: Mapping[str, str], failure_check: FailureCheck | None
     ) -> Any:
-        """One create call, then the readiness wait; the sandbox is killed if it never becomes ready."""
+        """One create call, then the readiness wait; the sandbox is killed if it never becomes ready.
+
+        Each attempt gets a fresh execd token, held only by the returned SDK object, so it never reaches the request,
+        trial records or logs. Ours overrides any ``EXECD_ACCESS_TOKEN`` in ``request.env``.
+        """
         sdk = self.sdk
+        execd_access_token = secrets.token_urlsafe(32)
         # The request carries the policy as plain data; the SDK takes its own model.
         network_policy = (
             sdk["NetworkPolicy"].model_validate(dict(request.network_policy))
@@ -274,13 +298,13 @@ class OpenSandboxDriver:
             # Cut again on every attempt: a retry's sandbox must not outlive ``expires_at`` by the failed attempts.
             timeout=timedelta(seconds=request.lifetime_sec()),
             ready_timeout=timedelta(seconds=request.ready_timeout_sec),
-            env=dict(request.env),
+            env={**request.env, EXECD_ACCESS_TOKEN_ENV: execd_access_token},
             metadata=dict(metadata),
             resource=dict(request.resource),
             network_policy=network_policy,
             extensions=dict(request.extensions),
             entrypoint=list(request.entrypoint) if request.entrypoint is not None else None,
-            connection_config=self.connection_config(),
+            connection_config=self.connection_config(execd_access_token=execd_access_token),
             skip_health_check=True,
         )
         self._logger.debug("OpenSandbox sandbox created sandbox_id=%s", sandbox_id(sandbox))

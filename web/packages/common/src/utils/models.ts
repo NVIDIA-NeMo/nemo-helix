@@ -4,7 +4,7 @@
 import {
   buildWorkspaceGroup,
   type ModelWorkspaceGroup,
-} from '@nemo/common/src/api/models/useModels';
+} from '@nemo/common/src/api/models/modelPages';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import type { ResourceRef } from '@nemo/common/src/types';
 import {
