@@ -141,13 +141,6 @@ const getEditStats = (args: Record<string, unknown>): { additions: number; delet
   deletions: getLineCount(getRawStringArg(args, ['old_string']) ?? ''),
 });
 
-export const splitCollapsedThinkingParagraphs = (text: string): readonly string[] =>
-  text
-    .trim()
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
-
 const getAskUserQuestionSummary = (args: AssistantToolArgs): string | undefined => {
   const questions = args.questions;
   const firstQuestion = Array.isArray(questions) ? questions.find(isPlainObject) : undefined;
