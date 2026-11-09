@@ -265,7 +265,7 @@ class GymAgentTaskRunner:
         )
         env_pump = asyncio.create_task(pump_stream(env_proc.stdout, env_log, label="gym env start"))
         try:
-            await self._wait_for_servers(env_log, env_proc)
+            await self._wait_for_servers(env_log, env_proc, env_pump)
             await self._collect_rollouts(gym, selection, input_path, output_path, work_dir, subprocess_env)
         finally:
             await terminate(env_proc, grace_s=cfg.shutdown_grace_s)
@@ -350,7 +350,9 @@ class GymAgentTaskRunner:
                 f"--- last {LOG_TAIL_LINES} line(s) ---\n{tail}"
             )
 
-    async def _wait_for_servers(self, env_log: Path, env_proc: asyncio.subprocess.Process) -> None:
+    async def _wait_for_servers(
+        self, env_log: Path, env_proc: asyncio.subprocess.Process, env_pump: asyncio.Task[None]
+    ) -> None:
         """Wait until ``gym env start`` reports every composed server ready.
 
         Keys off Gym's own readiness line (``All N / N servers ready!``), which it prints only after
@@ -364,7 +366,10 @@ class GymAgentTaskRunner:
         text = ""
         while loop.time() < deadline:
             if env_proc.returncode is not None:
-                raise RuntimeError(f"`gym env start` exited early (rc={env_proc.returncode}); see {env_log}")
+                # Let the pump write what Gym printed last, which is usually the reason it exited.
+                await drain_pumps([env_pump], grace_s=cfg.shutdown_grace_s, what="gym env start")
+                text = env_log.read_text(encoding="utf-8", errors="replace") if env_log.exists() else ""
+                raise RuntimeError(self._early_exit_message(text, env_log, env_proc.returncode))
             text = env_log.read_text(encoding="utf-8", errors="replace") if env_log.exists() else ""
             if "required uv version" in text.lower():
                 raise RuntimeError(f"`gym env start` hit the uv required-version gate; see {env_log}")
@@ -408,12 +413,6 @@ class GymAgentTaskRunner:
                 f"Search {env_log.name} for '({names[0]})' — each line is prefixed with the server "
                 "that emitted it."
             )
-        # Readiness polls can fill the tail after the actual startup error. Keep
-        # diagnostics in the task exception because CI may not retain this file.
-        diagnostic_lines = (
-            line for line in env_log_text.splitlines() if "servers ready. Waiting for servers to spin up:" not in line
-        )
-        startup_output = "\n".join(deque(diagnostic_lines, maxlen=LOG_TAIL_LINES))[-16000:]
         return (
             f"Gym servers for resources-server {cfg.resources_server!r} were not ready within "
             f"startup_timeout_s={cfg.startup_timeout_s}s. {detail}\n"
@@ -421,9 +420,52 @@ class GymAgentTaskRunner:
             "If the environment installs heavy dependencies or builds a container image on first run, "
             "this timeout is expected on a cold cache — raise GymRuntimeConfig.startup_timeout_s and "
             "re-run; the second run reuses what the first installed.\n"
-            f"--- startup output (last {LOG_TAIL_LINES} lines excluding readiness polls, at most 16000 characters) ---\n"
-            f"{startup_output}"
+            f"{startup_output_excerpt(env_log_text)}"
         )
+
+    def _early_exit_message(self, env_log_text: str, env_log: Path, returncode: int) -> str:
+        """Explain why ``gym env start`` died before its servers came up.
+
+        The log lives on job storage, which a failed job's reader usually cannot reach, so the
+        exception has to carry the reason itself.
+        """
+        return (
+            f"`gym env start` for resources-server {self._config.resources_server!r} exited early "
+            f"(rc={returncode}) before all servers were ready.\n"
+            f"Full startup output: {env_log}\n"
+            f"{startup_output_excerpt(env_log_text)}"
+        )
+
+
+#: Characters of Gym startup output inlined into an exception.
+STARTUP_OUTPUT_MAX_CHARS = 16000
+#: Lines kept after the first error line, which is where uv puts its ``Caused by:`` chain.
+FIRST_ERROR_CONTEXT_LINES = 12
+#: A line that starts an error report: uv's ``error:`` or a Python traceback, after the
+#: ``(server_name) `` prefix Gym adds to each component's output.
+_ERROR_START_RE = re.compile(r"^(?:\([^)\s]+\)\s+)?(?:error:|Traceback \(most recent call last\))")
+
+
+def startup_output_excerpt(env_log_text: str) -> str:
+    """The part of ``gym env start``'s output worth inlining into an exception.
+
+    Readiness polls can fill the tail after the actual startup error, so they are dropped. When one
+    component fails, the others keep installing, which can push its error out of the tail; the first
+    error block is then shown as well. It goes last because on Kubernetes the job's task record keeps
+    only the end of the pod log, so the end of this message is the part a reader is sure to see.
+    """
+    lines = [line for line in env_log_text.splitlines() if "servers ready. Waiting for servers to spin up:" not in line]
+    tail_start = max(len(lines) - LOG_TAIL_LINES, 0)
+    tail = "\n".join(lines[tail_start:])[-STARTUP_OUTPUT_MAX_CHARS:]
+    sections = [
+        f"--- startup output (last {LOG_TAIL_LINES} lines excluding readiness polls, at most "
+        f"{STARTUP_OUTPUT_MAX_CHARS} characters) ---\n{tail}"
+    ]
+    first_error = next((index for index, line in enumerate(lines) if _ERROR_START_RE.match(line)), None)
+    if first_error is not None and first_error < tail_start:
+        block = "\n".join(lines[first_error : min(first_error + FIRST_ERROR_CONTEXT_LINES, tail_start)])
+        sections.append(f"--- first error in startup output ---\n{block[:STARTUP_OUTPUT_MAX_CHARS]}")
+    return "\n".join(sections)
 
 
 #: Gym's per-poll readiness line, e.g.
