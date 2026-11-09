@@ -505,15 +505,16 @@ def test_task_source_cannot_be_submitted() -> None:
 def test_the_row_cap_counts_only_up_to_the_limit() -> None:
     from nemo_evals.jobs.fileset_tasks import build_task_inputs
 
-    # Blank lines don't count; the count stops at the first row past the limit, wherever the file ends.
-    body = (_row("q1") + "\n\n" + _row("q2") + "\n" + "1\n" * 100_000).encode()
+    # Blank lines, Unicode whitespace included, don't count; the count stops at the first row past the
+    # limit, wherever the file ends.
+    body = (_row("q1") + "\n\u2003\u00a0\n\n" + _row("q2") + "\n" + "1\n" * 100_000).encode()
     source_file = SourceFile(fileset=FilesetRef("default/golden#gym/golden.jsonl"), body=body, sha256="0" * 64)
     with pytest.raises(ValueError, match="more than the 2-row limit"):
         build_task_inputs(source_file, id_field=None, task_id_prefix=None, max_rows=2)
     assert (
         len(
             build_task_inputs(
-                SourceFile(source_file.fileset, (_row("q1") + "\n\n").encode(), "0" * 64),
+                SourceFile(source_file.fileset, (_row("q1") + "\n\u2003\n").encode(), "0" * 64),
                 id_field=None,
                 task_id_prefix=None,
                 max_rows=1,

@@ -159,7 +159,9 @@ def build_task_inputs(
     # BytesIO splits on "\n" only, the same lines ``iter_jsonl_objects`` reads.
     rows = 0
     for line in io.BytesIO(source_file.body):
-        if line.strip():
+        # Blank as iter_jsonl_objects judges it: after decoding, so Unicode whitespace is blank too.
+        # Undecodable lines count as rows; discovery rejects them with their line number.
+        if line.decode("utf-8", errors="replace").strip():
             rows += 1
             if rows > max_rows:
                 raise ValueError(
