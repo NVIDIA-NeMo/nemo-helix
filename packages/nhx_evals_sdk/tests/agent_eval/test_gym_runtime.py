@@ -1825,6 +1825,18 @@ def test_early_exit_keeps_both_ends_of_a_long_exception_line(tmp_path: Path) -> 
     )
 
 
+def test_early_exit_shows_an_error_that_long_lines_pushed_past_the_character_limit(tmp_path: Path) -> None:
+    # The error is among the last 40 lines, but the long lines after it fill the character limit.
+    long_lines = [f"(policy_model) {'z' * 2_000} {i}" for i in range(10)]
+    transcript = "\n".join([*_UV_CA_FAILURE.splitlines(), *long_lines])
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    tail, first_error = message.split("--- first error in startup output ---", 1)
+    assert "invalid peer certificate: UnknownIssuer" not in tail
+    assert "invalid peer certificate: UnknownIssuer" in first_error
+
+
 def test_early_exit_ignores_gym_deprecation_text_that_mentions_errors(tmp_path: Path) -> None:
     # Gym's startup warning talks about errors without being one; only a line that starts an error
     # report should be pulled out of the log.

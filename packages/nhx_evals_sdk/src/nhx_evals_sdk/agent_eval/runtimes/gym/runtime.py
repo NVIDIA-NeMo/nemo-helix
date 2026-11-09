@@ -493,6 +493,20 @@ def _first_error_block(lines: Sequence[str], start: int, end: int) -> str:
     return "\n".join(_clip_line(line) for line in [first, *shown])
 
 
+def _first_whole_line_shown(lines: Sequence[str], tail_start: int) -> int:
+    """Index of the first line the tail shows in full once it is cut to :data:`STARTUP_OUTPUT_MAX_CHARS`.
+
+    Long lines after an error can push it out of the character limit even when it is among the last
+    :data:`LOG_TAIL_LINES` lines, and then it needs the first-error section as much as an older one.
+    """
+    shown = len(lines)
+    length = -1  # no newline before the first line
+    while shown > tail_start and length + 1 + len(lines[shown - 1]) <= STARTUP_OUTPUT_MAX_CHARS:
+        length += 1 + len(lines[shown - 1])
+        shown -= 1
+    return shown
+
+
 def _clip_line(line: str) -> str:
     """Cut ``line`` to :data:`FIRST_ERROR_LINE_MAX_CHARS`, keeping both ends.
 
@@ -525,9 +539,10 @@ def startup_output_excerpt(env_log_text: str) -> str:
         f"--- startup output (last {LOG_TAIL_LINES} lines excluding readiness polls, at most "
         f"{STARTUP_OUTPUT_MAX_CHARS} characters) ---\n{tail}"
     ]
+    shown_start = _first_whole_line_shown(lines, tail_start)
     first_error = next((index for index, line in enumerate(lines) if _ERROR_START_RE.match(line)), None)
-    if first_error is not None and first_error < tail_start:
-        block = _first_error_block(lines, first_error, tail_start)
+    if first_error is not None and first_error < shown_start:
+        block = _first_error_block(lines, first_error, shown_start)
         sections.append(f"--- first error in startup output ---\n{block}")
     return "\n".join(sections)
 
