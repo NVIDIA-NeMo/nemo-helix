@@ -129,7 +129,7 @@ def test_probe_status_returns_true_for_status_200() -> None:
         assert str(request.url) == "http://127.0.0.1:8080/status"
         return httpx.Response(200)
 
-    with patch("nemo_helix_ext.local.transport.httpx.Client") as client_factory:
+    with patch("nemo_helix_ext.local.transport.Client") as client_factory:
         client = client_factory.return_value
         client.get.side_effect = lambda url: handler(httpx.Request("GET", url))
         assert transport.probe_status(base_url="http://127.0.0.1:8080") is True
@@ -137,7 +137,7 @@ def test_probe_status_returns_true_for_status_200() -> None:
 
 
 def test_probe_status_returns_false_for_request_error() -> None:
-    with patch("nemo_helix_ext.local.transport.httpx.Client") as client_factory:
+    with patch("nemo_helix_ext.local.transport.Client") as client_factory:
         client = client_factory.return_value
         client.get.side_effect = httpx.ConnectError("boom")
         assert transport.probe_status(base_url="http://127.0.0.1:8080") is False
@@ -146,7 +146,7 @@ def test_probe_status_returns_false_for_request_error() -> None:
 
 @pytest.mark.asyncio
 async def test_probe_status_async_returns_false_for_request_error() -> None:
-    with patch("nemo_helix_ext.local.transport.httpx.AsyncClient") as client_factory:
+    with patch("nemo_helix_ext.local.transport.AsyncClient") as client_factory:
         client = client_factory.return_value
         client.get = AsyncMock(side_effect=httpx.ConnectError("boom"))
         client.aclose = AsyncMock()

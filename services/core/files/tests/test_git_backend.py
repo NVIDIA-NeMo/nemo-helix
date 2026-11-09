@@ -435,7 +435,7 @@ class TestProcessGroups:
         proc = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
         proc.wait()
         signalled: list[int] = []
-        monkeypatch.setattr(git_backend.os, "killpg", lambda pid, _sig: signalled.append(pid))
+        monkeypatch.setattr(git_backend, "killpg", lambda pid, _sig: signalled.append(pid))
         await stop_process_group(proc)
         assert signalled == []
 

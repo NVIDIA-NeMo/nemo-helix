@@ -123,7 +123,7 @@ class TestTelemetrySessionState:
         monkeypatch.setattr(session_mod, "_now_utc", lambda: now)
 
     def _set_next_uuid(self, monkeypatch, value: str):
-        monkeypatch.setattr(session_mod.uuid, "uuid4", lambda: uuid.UUID(value))
+        monkeypatch.setattr(session_mod, "uuid4", lambda: uuid.UUID(value))
 
     def test_missing_state_creates_session_id_with_creation_date(self, monkeypatch, tmp_path):
         path = self._use_state_path(monkeypatch, tmp_path)

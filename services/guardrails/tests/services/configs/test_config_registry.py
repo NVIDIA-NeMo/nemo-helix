@@ -72,7 +72,9 @@ class TestConfigRegistry(unittest.TestCase):
             coro.close()  # Properly close the coroutine to prevent warning
             return MagicMock()
 
-        with patch("asyncio.create_task", side_effect=capture_and_close_coro) as mock_create_task:
+        with patch(
+            "nhx.guardrails.app.services.configs.registry.create_task", side_effect=capture_and_close_coro
+        ) as mock_create_task:
             # Should return the stale entry (not None)
             entry = self.config_registry.get_cache_entry(config_ids=[self.mock_config_id])
 

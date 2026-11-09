@@ -20,6 +20,7 @@ import httpx
 import jwt
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from httpx import AsyncClient
 from nhx.common.auth.access_keys import public_jwk_from_private_key_pem_async
 from nhx.common.auth.signing_keys import RSASigningKey, RSASigningKeyCache
 from nhx.common.auth.token_claims import groups_from_claim
@@ -364,7 +365,7 @@ class WorkloadTokenExchangeService:
             return cached.jwks
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with AsyncClient(timeout=30.0) as client:
                 response = await client.get(jwks_uri)
             response.raise_for_status()
         except httpx.HTTPError as exc:
@@ -592,7 +593,7 @@ async def _decode_kubernetes_subject_token(
     reviewer_token, ca_path = _kubernetes_reviewer_credentials()
     token_review_url = f"https://{host}:{port}/apis/authentication.k8s.io/v1/tokenreviews"
     try:
-        async with httpx.AsyncClient(timeout=10.0, verify=ca_path) as client:
+        async with AsyncClient(timeout=10.0, verify=ca_path) as client:
             response = await client.post(
                 token_review_url,
                 json={

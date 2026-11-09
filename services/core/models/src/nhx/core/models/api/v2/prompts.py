@@ -2,15 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.common.entities.constants import MAX_LENGTH_255, REGEX_WORD_CHARACTER_DOT_DASH
 from nhx.core.models.api.dependencies import get_prompt_service
 from nhx.core.models.api.service.prompt_service import PromptService
+from nhx.core.models.constants import RESOURCE_LOOKUP_NAME_PATTERN
 from nhx.core.models.schemas import (
     CreatePromptRequest,
     DeletePromptRequest,
@@ -46,8 +50,7 @@ router = APIRouter()
 )
 async def list_prompts(
     workspace: str,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: PromptSort = Query(
         default=PromptSort.CREATED_AT_ASC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -61,8 +64,8 @@ async def list_prompts(
     try:
         return await service.list_prompts(
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_operation=parsed_filter.operation,
         )
@@ -117,8 +120,8 @@ async def create_prompt(
     status_code=status.HTTP_200_OK,
 )
 async def get_prompt(
-    workspace: str,
-    name: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    name: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     service: PromptService = Depends(get_prompt_service),
 ) -> Prompt:
     """Get a prompt by workspace and name."""
@@ -182,8 +185,8 @@ async def update_prompt(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_prompt(
-    workspace: str,
-    name: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    name: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     service: PromptService = Depends(get_prompt_service),
 ):
     """Delete a prompt by workspace and name."""

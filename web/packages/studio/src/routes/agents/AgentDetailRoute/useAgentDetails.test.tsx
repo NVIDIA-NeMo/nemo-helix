@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { JOB_POLLING_INTERVAL_LONG, JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { useAgentsListDeployments } from '@nemo/sdk/generated/agents/agent-deployments';
 import { useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
+import { fetchEvaluatorJobs } from '@studio/api/evaluation/evaluator-jobs';
 import { useAgentDetails } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook } from '@testing-library/react';
@@ -29,13 +31,22 @@ vi.mock('@studio/api/evaluation/evaluator-jobs', () => ({ fetchEvaluatorJobs: vi
 
 const AGENT = 'my-agent';
 
-const queryClient = new QueryClient();
+let queryClient: QueryClient;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+});
+
+afterEach(() => {
+  queryClient.clear();
+});
 const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
 );
 
 const render = (opts: { evalsEnabled?: boolean }) =>
-  renderHook(() => useAgentDetails({ workspace: 'default', agentName: AGENT, ...opts }), {
+  renderHook(() => useAgentDetails({ workspace: DEFAULT_WORKSPACE, agentName: AGENT, ...opts }), {
     wrapper,
   });
 
@@ -53,6 +64,15 @@ describe('useAgentDetails', () => {
   it('skips evaluations when they are disabled', () => {
     render({ evalsEnabled: false });
     expect(lastQueryOptions(useListEvaluations).enabled).toBe(false);
+    expect(fetchEvaluatorJobs).not.toHaveBeenCalled();
+    expect(
+      queryClient
+        .getQueryCache()
+        .find({
+          queryKey: ['evaluator-jobs', DEFAULT_WORKSPACE, 'agent-panel', AGENT],
+        })
+        ?.isDisabled()
+    ).toBe(true);
   });
 
   it('fetches evaluations when they are enabled', () => {

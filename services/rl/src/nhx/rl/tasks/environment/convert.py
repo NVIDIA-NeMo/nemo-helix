@@ -6,18 +6,21 @@
 from __future__ import annotations
 
 import ast
+import importlib
+import inspect
 import json
 import logging
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 import tomllib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from subprocess import run
+from sys import executable
 from types import ModuleType
 from typing import Any, Generator
 
@@ -40,7 +43,10 @@ from packaging.version import InvalidVersion, Version
 logger = logging.getLogger(__name__)
 
 PRIME_HUB_SIMPLE_INDEX = "https://hub.primeintellect.ai/primeintellect/simple/"
-DEFAULT_VERIFIERS_SPEC = "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.3.1"
+# v0.3.1 requires prime-sandboxes>=0.2.39, and that release requires connectrpc<0.12.
+# The NeMo-RL lock pins connectrpc==0.12.1, so a closure built against it does not
+# resolve. v0.3.0 still accepts prime-sandboxes 0.2.38, which does not depend on connectrpc.
+DEFAULT_VERIFIERS_SPEC = "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.3.0"
 
 # Training image is linux/amd64; resolve and download for that, not this host.
 # pip matches --platform tags literally, so several glibc floors are listed.
@@ -74,7 +80,7 @@ GYM_VENV_REQUIREMENTS = (
 # Snapshot of the hub env's HF dataset, mounted at SANDBOX_DATASET_PATH.
 HUB_ENV_DATASET_FILENAME = "hub_environment.parquet"
 DATASET_PATH_ARG = "dataset_path"
-# Isolated Hugging Face cache from convert, for loaders that ignore dataset_path.
+# Isolated Hugging Face cache from convert, for loaders that do not accept dataset_path.
 HUB_ENV_HF_CACHE_DIRNAME = ".huggingface"
 
 
@@ -109,7 +115,7 @@ def _run_build_step(cmd: list[str]) -> None:
     # stdout carries this CLI's JSON result. `uv pip compile` echoes the compiled
     # requirements even with --output-file, and pip download prints progress, so an
     # inherited stdout lands both in front of the JSON and breaks a strict consumer.
-    subprocess.run(cmd, check=True, stdout=sys.stderr)
+    run(cmd, check=True, stdout=sys.stderr)
 
 
 def rl_dependency_policy(nemo_rl_root: Path) -> tuple[list[str], list[str]]:
@@ -296,7 +302,7 @@ def _run_pip_download(
     """Download the already-pinned closure with ``pip download --no-deps``."""
     dest.mkdir(parents=True, exist_ok=True)
     cmd = [
-        sys.executable,
+        executable,
         "-m",
         "pip",
         "download",
@@ -658,6 +664,25 @@ def _sandbox_hub_dataset_path(filename: str = HUB_ENV_DATASET_FILENAME) -> str:
     return f"{SANDBOX_DATASET_PATH.rstrip('/')}/{filename}"
 
 
+def _loader_accepts_argument(vf_env_id: str, argument: str) -> bool:
+    """True when the installed hub ``load_environment`` can take ``argument``.
+
+    ``verifiers.load_environment`` forwards ``vf_env_args`` as keywords. A loader
+    that only declares ``dataset_name``, or takes ``dataset_path`` positional-only,
+    raises ``TypeError`` on it.
+    """
+    module_name = vf_env_id.replace("-", "_").split("/")[-1]
+    module = importlib.import_module(module_name)
+    loader = getattr(module, "load_environment", None)
+    if loader is None:
+        return False
+    try:
+        inspect.signature(loader).bind_partial(**{argument: None})
+    except TypeError:
+        return False
+    return True
+
+
 @contextmanager
 def _isolated_hf_home(hf_home: Path) -> Generator[Path, None, None]:
     """Point Hugging Face cache settings at ``hf_home`` for the duration of the block.
@@ -751,7 +776,7 @@ def _install_hub_package_from_wheels(wheels_dir: Path, package_name: str) -> Non
     """
     whl = _hub_package_wheel(wheels_dir, package_name)
     cmd = [
-        sys.executable,
+        executable,
         "-m",
         "pip",
         "install",
@@ -765,7 +790,7 @@ def _install_hub_package_from_wheels(wheels_dir: Path, package_name: str) -> Non
         "importable afterwards. Run pi-to-gym-conversion from a dedicated conversion "
         "environment rather than the repo .venv if that matters.",
         whl.name,
-        sys.executable,
+        executable,
     )
     logger.info("Installing hub package for dataset load: %s", " ".join(cmd))
     _run_build_step(cmd)
@@ -881,7 +906,15 @@ def convert_prime_environment(spec: ConvertEnvironmentSpec) -> ConvertedPackage:
                     )
                 vendor_hub_environment_dataset(env, dataset_out)
                 snapshot_huggingface_home(hf_home, dataset_out)
-                package_vf_env_args[DATASET_PATH_ARG] = _sandbox_hub_dataset_path()
+                if _loader_accepts_argument(vf_env_id, DATASET_PATH_ARG):
+                    package_vf_env_args[DATASET_PATH_ARG] = _sandbox_hub_dataset_path()
+                else:
+                    logger.info(
+                        "%s load_environment does not accept %s; the sandbox loads through "
+                        "the loader's own dataset argument and the snapshotted Hugging Face cache",
+                        vf_env_id,
+                        DATASET_PATH_ARG,
+                    )
 
         manifest = write_adapter_wheels_package(
             out_dir=env_out,

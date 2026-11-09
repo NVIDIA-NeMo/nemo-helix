@@ -1027,8 +1027,8 @@ async def test_stream_claude_hides_startup_oserror(monkeypatch: pytest.MonkeyPat
     async def fail_start(*args: Any, **kwargs: Any):
         raise OSError("secret local path")
 
-    monkeypatch.setattr(assistant.shutil, "which", lambda name: "/usr/bin/claude")
-    monkeypatch.setattr(assistant.asyncio, "create_subprocess_exec", fail_start)
+    monkeypatch.setattr(assistant, "which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr(assistant, "create_subprocess_exec", fail_start)
 
     chunks = [chunk async for chunk in assistant._stream_claude(session_id, "hello", "http://test/mcp")]
 
@@ -2679,7 +2679,7 @@ async def test_invoke_assistant_relays_reasoning_despite_shared_step_id(monkeypa
         def stream(self, *args, **kwargs):
             return _Stream()
 
-    monkeypatch.setattr(assistant.httpx, "AsyncClient", lambda **kwargs: _Client())
+    monkeypatch.setattr(assistant, "AsyncClient", lambda **kwargs: _Client())
 
     text, _ = await assistant._invoke_assistant("https://a.test", {}, [], session_id)
 
@@ -2743,7 +2743,7 @@ async def test_invoke_assistant_emits_a_repeated_reasoning_step_once(monkeypatch
         def stream(self, *args, **kwargs):
             return _Stream()
 
-    monkeypatch.setattr(assistant.httpx, "AsyncClient", lambda **kwargs: _Client())
+    monkeypatch.setattr(assistant, "AsyncClient", lambda **kwargs: _Client())
 
     await assistant._invoke_assistant("https://a.test", {}, [], session_id)
 

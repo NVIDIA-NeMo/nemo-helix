@@ -751,6 +751,10 @@ volume and `node_selector`, so the profiles must agree with each other:
   workspace's path. Publishing anywhere else means copying the image out afterwards.
 - **Each new request needs a new `revision`.** The same request again returns its rows; a different
   one under a used `name` and `revision` returns `409`.
+- **On kind, a build can't write `/product_uuid` or `/product_name`.** kind copies both into the root
+  of every container, and kaniko builds in its sandbox's own root, so the sandbox tells kaniko to
+  ignore them. A file a Dockerfile writes at either path is then left out of the image, and the build
+  still succeeds. Other clusters don't add them, so there nothing is ignored.
 
 ### Reliability
 
@@ -850,6 +854,11 @@ uv run --frozen ruff check plugins/nemo-builder && uv run --frozen ty check plug
 ```
 
 The tests need no cluster, registry or running platform.
+
+`e2e/test_builder.py` does: CI's `kind-builder-e2e` job runs it on kind, once with platform auth off and once
+with it on, after a merge to `main` or on a manual run of `ci.yaml`, not on pull requests. It builds two
+images, checks them with crane and cosign, and with auth on checks who may complete an image. Its docstring
+lists what it needs to run against another cluster.
 
 | File | What it holds |
 |---|---|

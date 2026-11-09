@@ -26,7 +26,7 @@ from typing import Any, Protocol, TypeAlias, runtime_checkable
 from urllib.parse import urlparse
 
 import httpx
-from httpx import Timeout
+from httpx import AsyncClient, Timeout
 from pydantic import BaseModel, ConfigDict, Field
 
 from nhx_evals_sdk.agent_stream_translation import (
@@ -174,7 +174,7 @@ def make_agent_inference_fn(
 
 
 def new_agent_inference_client(timeout: float | None = None) -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=Timeout(timeout or _DEFAULT_TIMEOUT))
+    return AsyncClient(timeout=Timeout(timeout or _DEFAULT_TIMEOUT))
 
 
 async def make_agent_inference_request(

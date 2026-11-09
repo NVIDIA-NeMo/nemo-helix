@@ -5,20 +5,24 @@
 
 import logging
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
+import anyio
 from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
     HTTPException,
+    Path,
     Query,
     Request,
     Response,
 )
 from fastapi.responses import FileResponse
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.entities.base import ID_PATTERN
 from nhx.common.api.common import ErrorResponse, GenericSortField, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
@@ -39,6 +43,7 @@ from nhx.common.service.dependencies import (
     get_service_config_factory,
 )
 from nhx.core.files.api.endpoint_helpers import (
+    UPSTREAM_STORAGE_ACCESS_DETAIL,
     CacheContext,
     get_cache_status_for_files,
     get_download_file_info,
@@ -271,7 +276,7 @@ class FilesContext(BaseContext):
     status_code=HTTP_200_OK,
 )
 async def create_fileset(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     create_request: CreateFilesetRequest,
     background_tasks: BackgroundTasks,
     entity_store: EntityClient = Depends(get_entity_client),
@@ -411,8 +416,7 @@ async def create_fileset(
 )
 async def list_filesets(
     workspace: str,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=10, ge=1, le=100, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep(default_size=10, max_size=100)),
     sort: GenericSortField = Query(
         default=GenericSortField.CREATED_AT_DESC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -431,8 +435,8 @@ async def list_filesets(
     res = await entity_store.list(
         Fileset,
         workspace=workspace,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort.value,
         filter_operation=parsed.operation,
     )
@@ -940,8 +944,26 @@ async def upload_file(
 
     with scoped_app_ctx(FilesContext(fileset_name=fileset.name, path=path)):
         try:
-            async with streaming_file_upload(request, chunk_processor) as upload:
-                file_info = await storage.upload(path, upload, content_length=content_length)
+            if isinstance(chunk_processor, MultipartChunkProcessor):
+                # The request length includes framing. Measure the parsed file before
+                # handing it to backends that require an exact file length.
+                async with anyio.TemporaryFile() as temporary:
+                    file_length = 0
+                    async with streaming_file_upload(request, chunk_processor, content_length=content_length) as upload:
+                        async for chunk in upload:
+                            await temporary.write(chunk)
+                            file_length += len(chunk)
+                    await temporary.seek(0)
+
+                    async def file_chunks():
+                        """Read the parsed file with bounded memory."""
+                        while chunk := await temporary.read(1024 * 1024):
+                            yield chunk
+
+                    file_info = await storage.upload(path, file_chunks(), content_length=file_length)
+            else:
+                async with streaming_file_upload(request, chunk_processor) as upload:
+                    file_info = await storage.upload(path, upload, content_length=content_length)
             return fileset_file_output_from_info(
                 workspace=workspace,
                 name=name,
@@ -953,10 +975,15 @@ async def upload_file(
                 status_code=HTTP_400_BAD_REQUEST,
                 detail=str(e),
             ) from e
+        except ValueError as e:
+            raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail=str(e)) from e
         except InactivityTimeoutError:
             msg = f"Connection terminated due to inactivity: {path}"
             logger.error(msg)
             raise HTTPException(status_code=HTTP_408_REQUEST_TIMEOUT, detail=msg)
+        except StorageAccessError as e:
+            logger.exception("Storage access error during upload")
+            raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail=UPSTREAM_STORAGE_ACCESS_DETAIL) from e
         except OSError as e:
             logger.exception(f"Storage error for upload at {path}")
             raise HTTPException(

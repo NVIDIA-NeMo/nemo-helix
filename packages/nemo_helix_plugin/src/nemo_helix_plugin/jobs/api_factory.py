@@ -35,6 +35,7 @@ from anyio import open_file, to_thread
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import GENERATED_ROUTE_CALLERS, AuthzScope, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -1387,8 +1388,7 @@ def job_route_factory(
         async def list_jobs(
             workspace: str,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
-            page: int = Query(default=1, description="Page number.", gt=0),
-            page_size: int = Query(default=10, description="Page size.", gt=0),
+            page_params: PageParams = Depends(make_page_dep(default_size=10)),
             sort: BaseJobsSortField = Query(
                 default=BaseJobsSortField.CREATED_AT_DESC,
                 description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -1443,8 +1443,8 @@ def job_route_factory(
             # parse_json_filter, so a single JSON-string param survives the
             # round trip cleanly.
             list_query: ListJobsQueryParams = {
-                "page": page,
-                "page_size": page_size,
+                "page": page_params.page,
+                "page_size": page_params.page_size,
                 "sort": str(sort),
                 "filter": json.dumps(parsed.to_response()),
             }
@@ -1553,15 +1553,18 @@ def job_route_factory(
             workspace: str,
             name: str,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
-            page: int = Query(default=1, gt=0),
-            page_size: int = Query(default=25, gt=0),
+            page_params: PageParams = Depends(make_page_dep(default_size=25)),
             sort: Literal["seq", "-seq"] = Query(default="-seq"),
             filter: str | None = Query(default=None),
         ) -> Page[TypedJobAttempt]:
             f"""List attempts for a {service_name} job."""
             jobs = AsyncJobsClient.from_client(async_client)
             await _require_job_in_collection(jobs, name=name, workspace=workspace)
-            query: ListAttemptsQueryParams = {"page": page, "page_size": page_size, "sort": sort}
+            query: ListAttemptsQueryParams = {
+                "page": page_params.page,
+                "page_size": page_params.page_size,
+                "sort": sort,
+            }
             if filter is not None:
                 query["filter"] = filter
             attempt_page = (

@@ -10,8 +10,9 @@ agent-hardener's own venv (installed via uv), and the separate garak venv its ag
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
+from shutil import which
+from subprocess import run
 
 import typer
 from nemo_agent_hardener_plugin.cli.checks import redact_index_url
@@ -38,7 +39,7 @@ def run_subprocess(
     operator, which is why *timeout* accepts ``None`` (a person deciding is not a hung command).
     """
     try:
-        proc = subprocess.run(cmd, check=False, env=env, cwd=cwd, timeout=timeout)
+        proc = run(cmd, check=False, env=env, cwd=cwd, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         typer.secho(f"Timed out after {timeout}s trying to {action} — the command made no progress.", fg="red")
         raise typer.Exit(code=1) from exc
@@ -52,7 +53,7 @@ def run_subprocess(
 
 def provision_venv(config: AgentHardenerConfig, *, force: bool) -> None:
     """Create agent-hardener's dedicated venv and install agent-hardener into it via uv."""
-    if shutil.which("uv") is None:
+    if which("uv") is None:
         typer.secho("uv not found — install it (https://docs.astral.sh/uv/) then re-run setup.", fg="red")
         raise typer.Exit(code=1)
 

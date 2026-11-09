@@ -4,7 +4,8 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.entities import CLIENT_ERRORS
@@ -14,9 +15,11 @@ from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, AuthContext, get_auth_client
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.common.entities.constants import MAX_LENGTH_255, REGEX_WORD_CHARACTER_DOT_DASH
 from nhx.core.models.api.dependencies import get_model_provider_service, get_secrets_client
 from nhx.core.models.api.permissions import check_deployment_access, check_secret_access
 from nhx.core.models.api.service.model_provider_service import ModelProviderService, ModelProviderValidationError
+from nhx.core.models.constants import RESOURCE_LOOKUP_NAME_PATTERN
 from nhx.core.models.schemas import (
     CreateModelProviderRequest,
     DeleteModelProviderRequest,
@@ -50,9 +53,8 @@ provider_routes = PolicyRoutes(router, provider_policy, auth_dependency=get_auth
     ),
 )
 async def list_providers(
-    workspace: str,
-    page: int = Query(default=1, description="Page number."),
-    page_size: int = Query(default=100, description="Page size."),
+    workspace: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
+    page_params: PageParams = Depends(make_page_dep()),
     sort: ModelProviderSort = Query(
         default=ModelProviderSort.CREATED_AT_ASC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -63,13 +65,14 @@ async def list_providers(
     """
     List model providers for a specific workspace.
     """
+    # Canonical workspace names may contain +/@ even when no provider DTO exists in an empty page.
     # Extract workspace — inject from path param if not in filter
     filter_workspace = parsed_filter.remove("workspace") or workspace
     try:
         result = await service.list_model_providers(
             workspace=filter_workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_operation=parsed_filter.operation,
         )
@@ -88,7 +91,7 @@ async def list_providers(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_provider(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
     request: Annotated[
         CreateModelProviderRequest,
         Body(
@@ -158,7 +161,7 @@ async def create_provider(
     status_code=status.HTTP_200_OK,
 )
 async def upsert_provider(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
     name: str,
     request: Annotated[
         UpsertModelProviderRequest,
@@ -230,7 +233,7 @@ async def upsert_provider(
     status_code=status.HTTP_200_OK,
 )
 async def update_provider_status(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
     name: str,
     request: UpdateModelProviderStatusRequest,
     service: ModelProviderService = Depends(get_model_provider_service),
@@ -279,8 +282,8 @@ async def update_provider_status(
     status_code=status.HTTP_200_OK,
 )
 async def get_provider(
-    workspace: str,
-    name: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    name: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     service: ModelProviderService = Depends(get_model_provider_service),
 ) -> ModelProvider:
     """
@@ -316,8 +319,8 @@ async def get_provider(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_provider(
-    workspace: str,
-    name: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    name: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     service: ModelProviderService = Depends(get_model_provider_service),
 ):
     """

@@ -1,14 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import importlib.util
 import logging
 import time
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from typing import List, Optional
 
-import fsspec
 from fastapi import FastAPI
+from fsspec import open as fsspec_open
+from fsspec.core import url_to_fs
 from nhx.common.observability.otel import settings as otel_settings
 from nhx.guardrails.app.handlers.utils import update_models_in_config
 from nhx.guardrails.app.services.configs.sources import get_config
@@ -97,11 +98,11 @@ def _load_and_execute_py_config(filepath: str):
     """Load a Python configuration file and execute its init function if it exists."""
 
     filename = Path(filepath).stem
-    with fsspec.open(filepath):
-        spec = importlib.util.spec_from_file_location(filename, filepath)
+    with fsspec_open(filepath):
+        spec = spec_from_file_location(filename, filepath)
         if spec is not None:
             if spec.loader is not None:
-                config_module = importlib.util.module_from_spec(spec)
+                config_module = module_from_spec(spec)
                 try:
                     spec.loader.exec_module(config_module)
                 except Exception as e:
@@ -117,7 +118,7 @@ def _load_and_execute_py_config(filepath: str):
 
 def get_path_to_py_configs(files_url: str) -> List[str]:
     py_config_files = []
-    fs, _ = fsspec.core.url_to_fs(files_url, **settings.storage_options)
+    fs, _ = url_to_fs(files_url, **settings.storage_options)
 
     if fs.isdir(files_url):
         # find all config.py files at files_url

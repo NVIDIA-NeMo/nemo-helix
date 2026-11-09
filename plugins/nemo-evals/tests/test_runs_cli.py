@@ -7,6 +7,7 @@ import io
 import json
 import shlex
 import subprocess
+import sys
 import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,6 +37,7 @@ from nemo_evals.runs_cli import (
     add_runs_commands,
     check_git_source,
     download_git_tasks,
+    download_hub_tasks,
     job_error,
     newest_bundle_job,
     publish_tasks,
@@ -79,6 +81,92 @@ def test_selects_by_index_or_name(tokens, indexes):
 
 
 @pytest.mark.parametrize(
+    ("tokens", "indexes"),
+    [
+        ("0-2", [0, 1, 2]),
+        ("2-2", [2]),
+        ("2,0-1", [2, 0, 1]),
+        ("0-0,sum-three", [0, 2]),
+        (" 00-01 , ,sum-three,", [0, 1, 2]),
+    ],
+)
+def test_selects_inclusive_ranges(tokens, indexes):
+    assert [c.index for c in select_tasks(CANDIDATES, tokens)] == indexes
+
+
+def test_selects_ranges_mixed_with_indexes_and_names():
+    candidates = [Candidate(i, f"task-{i}", f"task-{i}") for i in range(8)]
+    candidates.append(Candidate(8, "anko-example", "anko-example"))
+    assert [c.index for c in select_tasks(candidates, "0-4,7,anko-example")] == [0, 1, 2, 3, 4, 7, 8]
+
+
+@pytest.mark.parametrize(
+    ("tokens", "reason"),
+    [
+        ("2-1", "reversed"),
+        ("0,2-1", "reversed"),
+        ("0-3", "out of range"),
+        ("3-3", "out of range"),
+        ("3-5", "out of range"),
+        ("0-99999999999999999999", "out of range"),
+    ],
+)
+def test_invalid_ranges_identify_the_range(tokens, reason):
+    with pytest.raises(SelectionError, match=reason) as error:
+        select_tasks(CANDIDATES, tokens)
+    assert repr(tokens.split(",")[-1]) in str(error.value)
+
+
+def test_explicit_range_on_an_empty_source_is_rejected():
+    assert select_tasks([], None) == []
+    with pytest.raises(SelectionError, match="out of range"):
+        select_tasks([], "0-0")
+
+
+def test_range_endpoint_exceeding_the_interpreter_limit_is_a_selection_error():
+    limit = sys.get_int_max_str_digits()
+    if not limit:
+        pytest.skip("integer-string conversion limit is disabled")
+    with pytest.raises(SelectionError, match="invalid task range"):
+        select_tasks(CANDIDATES, "0-" + "9" * (limit + 1))
+
+
+@pytest.mark.parametrize(
+    "tokens",
+    ["0-1,1", "1,0-1", "0-1,1-2", "0-1,0-1", "1-2,greet-universe", "greet-universe,1-2"],
+)
+def test_range_overlaps_and_aliases_are_rejected(tokens):
+    with pytest.raises(SelectionError, match="selected twice"):
+        select_tasks(CANDIDATES, tokens)
+
+
+@pytest.mark.parametrize("tokens", ["1--2", "1-", "-1-2", "0 - 2", "0:2", "1-2-3"])
+def test_malformed_range_without_a_matching_name_is_rejected(tokens):
+    with pytest.raises(SelectionError, match="no task named"):
+        select_tasks(CANDIDATES, tokens)
+
+
+@pytest.mark.parametrize("token", ["7-days", "suite-0-2", "bench/0-2", "1--2"])
+def test_hyphenated_names_are_not_ranges(token):
+    candidate = (
+        Candidate(0, "suite-0-2", "bench/0-2") if token in ("suite-0-2", "bench/0-2") else Candidate(0, token, token)
+    )
+    assert select_tasks([candidate], token) == [candidate]
+
+
+def test_numeric_pair_names_are_selected_by_individual_index():
+    candidates = [Candidate(0, "first", "first"), Candidate(1, "0-2", "0-2"), Candidate(2, "last", "last")]
+    assert select_tasks(candidates, "0-2") == candidates
+    assert select_tasks(candidates, "1") == [candidates[1]]
+
+
+@pytest.mark.parametrize("tokens", ["", " ", ",", " , , "])
+def test_empty_selection_is_rejected(tokens):
+    with pytest.raises(SelectionError, match="selects no task"):
+        select_tasks(CANDIDATES, tokens)
+
+
+@pytest.mark.parametrize(
     ("tokens", "match"),
     [("3", "out of range"), ("nope", "no task named"), ("2,sum-three", "selected twice"), (",", "selects no task")],
 )
@@ -104,7 +192,7 @@ MEMBERS: list[str] = [f"ac9/deep-swe-{name}#" + "1" * 64 for name in ("a", "b")]
 @pytest.fixture
 def submitting(monkeypatch):
     """``runs submit`` over a fake evaluator and submit; returns what it published, requested and sent."""
-    seen = SimpleNamespace(bodies=[], published=[], posts=[], created=[])
+    seen = SimpleNamespace(bodies=[], published=[], published_members=[], posts=[], created=[], members=list(MEMBERS))
     builds = SimpleNamespace(
         build_images=lambda name, revision, workspace: seen.posts.append(name) or _ready(name),
         get_image_build=lambda name, build_id, revision, workspace: _ready(name),
@@ -114,9 +202,14 @@ def submitting(monkeypatch):
         build_images=builds.build_images,
         get_image_build=builds.get_image_build,
     )
+
+    def replace_taskset(name, taskset, workspace):
+        seen.published.append(name)
+        seen.published_members.append([member.root for member in taskset.tasks])
+
     tasksets = SimpleNamespace(
-        retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=[TaskRef(m) for m in MEMBERS]),
-        replace=lambda name, taskset, workspace: seen.published.append(name),
+        retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=[TaskRef(m) for m in seen.members]),
+        replace=replace_taskset,
         list_revisions=lambda name, workspace, page_size: SimpleNamespace(
             data=[SimpleNamespace(content_hash="3" * 64)]
         ),
@@ -143,6 +236,99 @@ def submitting(monkeypatch):
 
     seen.invoke = invoke
     return seen
+
+
+@pytest.fixture
+def local_submission(submitting, monkeypatch, tmp_path):
+    for name in ("sum-three", "debug-agent-runtime-error", "greet-universe"):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "task.toml").write_text(f'[task]\nname = "hello/{name}"\n')
+    submitting.directory = tmp_path
+    submitting.uploaded = []
+    submitting.build_refs = []
+
+    def publish(evaluator, task_dirs, *, prefix, workspace, echo):
+        submitting.uploaded.extend(task_dirs)
+        return [f"{workspace}/{directory.name}#" + "1" * 64 for directory in task_dirs]
+
+    def build(evaluator, refs, **kwargs):
+        submitting.build_refs.extend(refs)
+        return {ref: _ready(ref) for ref in refs}
+
+    monkeypatch.setattr(runs_cli, "publish_tasks", publish)
+    monkeypatch.setattr(runs_cli, "wait_for_builds", build)
+    return submitting
+
+
+def test_submit_local_range_selection(local_submission):
+    seen = local_submission
+    result = seen.invoke("--harbor-dir", str(seen.directory), "--tasks", "sum-three,0-0")
+    assert result.exit_code == 0, result.output
+    refs = [f"ac9/{name}#" + "1" * 64 for name in ("sum-three", "debug-agent-runtime-error")]
+    assert seen.uploaded == [seen.directory / "sum-three", seen.directory / "debug-agent-runtime-error"]
+    assert seen.published_members == [refs]
+    assert seen.build_refs == refs
+    assert seen.bodies[0]["spec"]["tasks"] == f"ac9/{seen.published[0]}#" + "3" * 64
+    assert "2 of 3 tasks" in result.output
+
+
+@pytest.mark.parametrize("tokens", ["0,2-1", "0-3", "0-1,1"])
+def test_submit_invalid_range_writes_nothing(local_submission, tokens):
+    seen = local_submission
+    result = seen.invoke("--harbor-dir", str(seen.directory), "--tasks", tokens)
+    assert result.exit_code == 1 and "Error:" in result.output
+    assert seen.uploaded == seen.published == seen.build_refs == seen.posts == seen.bodies == []
+
+
+def test_submit_listing_ignores_an_invalid_range(local_submission):
+    seen = local_submission
+    result = seen.invoke("--harbor-dir", str(seen.directory), "--tasks", "2-1", "--list-tasks")
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [
+        "  #  task",
+        "  0  hello/debug-agent-runtime-error",
+        "  1  hello/greet-universe",
+        "  2  hello/sum-three",
+    ]
+    assert seen.uploaded == seen.published == seen.build_refs == seen.bodies == []
+
+
+@pytest.mark.parametrize("from_spec", [False, True], ids=["taskset", "spec-file"])
+@pytest.mark.parametrize("tokens", ["0-1", "0,2-1", "0-3", "0-1,1"])
+def test_submit_stored_range_selection(submitting, tmp_path, from_spec, tokens):
+    members = [f"ac9/deep-swe-{name}#" + "1" * 64 for name in ("c", "a", "b")]
+    submitting.members = members
+    if from_spec:
+        spec = tmp_path / "run.json"
+        spec.write_text(
+            json.dumps(
+                {
+                    "spec": {"tasks": STORED, "target": {"kind": "harbor", "source": {"name": "oracle"}}},
+                    "execution": {},
+                }
+            )
+        )
+        source = ["--spec-file", str(spec)]
+    else:
+        source = ["--taskset", STORED]
+    result = submitting.invoke(*source, "--tasks", tokens)
+    assert submitting.posts == []
+    if tokens == "0-1":
+        assert result.exit_code == 0, result.output
+        assert submitting.published_members == [[members[1], members[2]]]
+        assert submitting.bodies[0]["spec"]["tasks"] == f"ac9/{submitting.published[0]}#" + "3" * 64
+    else:
+        assert result.exit_code == 1 and "Error:" in result.output
+        assert submitting.published == submitting.bodies == []
+
+
+def test_submit_help_explains_ranges_without_a_client():
+    result = CliRunner().invoke(_runs_app(), ["runs", "submit", "--help"], terminal_width=160)
+    assert result.exit_code == 0, result.output
+    help_text = " ".join(result.output.replace("│", " ").split())
+    assert "Zero-based" in help_text and "inclusive ranges" in help_text
+    assert "0-4,7,anko-example" in help_text
 
 
 def submit_error(status: int, detail: str, key: str = "k-1") -> TasksetRunSubmitError:
@@ -710,21 +896,74 @@ class FakeGitRegistry:
 
 @pytest.fixture
 def git_registry(monkeypatch):
-    from harbor.registry.client import git_repo
-
     FakeGitRegistry.downloads = []
     FakeGitRegistry.repos = []
     FakeGitRegistry.commits = None
-    monkeypatch.setattr(git_repo, "GitRepoRegistryClient", FakeGitRegistry)
+    monkeypatch.setattr(runs_cli, "GitRepoRegistryClient", FakeGitRegistry)
     return FakeGitRegistry
 
 
-def test_git_source_downloads_only_the_selected_tasks(git_registry, tmp_path):
-    name, sha, dirs, total = download_git_tasks(f"{TB}@v3.0.0", "sum-three,0", tmp_path)
+@pytest.mark.parametrize(
+    ("tokens", "names"),
+    [
+        ("sum-three,0", ["sum-three", "bun-sourcemap-leak"]),
+        ("1-2", ["greet-universe", "sum-three"]),
+        ("1-2,0", ["greet-universe", "sum-three", "bun-sourcemap-leak"]),
+    ],
+)
+def test_git_source_downloads_only_the_selected_tasks(git_registry, tmp_path, tokens, names):
+    name, sha, dirs, total = download_git_tasks(f"{TB}@v3.0.0", tokens, tmp_path)
     # The checked-out commit, not the tag object an annotated tag's ls-remote gives.
     assert (name, sha, total) == ("harbor-framework/terminal-bench", COMMIT, 3)
-    assert dirs == [tmp_path / "sum-three", tmp_path / "bun-sourcemap-leak"]  # name order: index 0 is bun-…
-    assert git_registry.downloads == [["sum-three", "bun-sourcemap-leak"]]
+    assert dirs == [tmp_path / task for task in names]  # name order: index 0 is bun-…
+    assert git_registry.downloads == [names]
+
+
+@pytest.mark.parametrize("tokens", ["0,2-1", "0-3", "0,0-1"])
+def test_git_invalid_range_downloads_nothing(git_registry, tmp_path, tokens):
+    with pytest.raises(SelectionError):
+        download_git_tasks(f"{TB}@v3.0.0", tokens, tmp_path)
+    assert git_registry.downloads == []
+
+
+@pytest.fixture
+def hub_registry(monkeypatch):
+    downloads = []
+
+    async def metadata(dataset):
+        names = ["hello/sum-three", "hello/debug-agent-runtime-error", "hello/greet-universe"]
+        return SimpleNamespace(
+            name="hello/suite",
+            version="sha256:" + "a" * 64,
+            task_ids=[SimpleNamespace(get_name=lambda n=name: n) for name in names],
+        )
+
+    async def download_tasks(task_ids, output_dir, export):
+        names = [task.get_name() for task in task_ids]
+        downloads.append(names)
+        return SimpleNamespace(paths=[output_dir / name.rpartition("/")[2] for name in names])
+
+    client = SimpleNamespace(get_dataset_metadata=metadata, _task_client=SimpleNamespace(download_tasks=download_tasks))
+    monkeypatch.setattr(runs_cli, "PackageDatasetClient", lambda: client)
+    return downloads
+
+
+@pytest.mark.parametrize(
+    ("tokens", "names"),
+    [("1-2", ["greet-universe", "sum-three"]), ("1-2,0", ["greet-universe", "sum-three", "debug-agent-runtime-error"])],
+)
+def test_hub_range_downloads_only_selected_tasks(hub_registry, tmp_path, tokens, names):
+    dataset, version, paths = download_hub_tasks("hello/suite@latest", tokens, tmp_path)
+    assert (dataset, version) == ("hello/suite", "sha256:" + "a" * 64)
+    assert hub_registry == [[f"hello/{name}" for name in names]]
+    assert paths == [tmp_path / name for name in names]
+
+
+@pytest.mark.parametrize("tokens", ["0,2-1", "0-3", "0,0-1"])
+def test_hub_invalid_range_downloads_nothing(hub_registry, tmp_path, tokens):
+    with pytest.raises(SelectionError):
+        download_hub_tasks("hello/suite@latest", tokens, tmp_path)
+    assert hub_registry == []
 
 
 @pytest.mark.parametrize("second", ["a" * 40, None], ids=["another-commit", "unresolved"])
@@ -788,13 +1027,11 @@ def test_a_tree_url_reads_tasks_from_its_directory(git_registry):
     ],
 )
 def test_a_failed_git_command_is_an_error_not_a_traceback(monkeypatch, error, message):
-    from harbor.registry.client import git_repo
-
     class UnreachableRepo(FakeGitRegistry):
         async def get_dataset_metadata(self, name):
             raise error
 
-    monkeypatch.setattr(git_repo, "GitRepoRegistryClient", UnreachableRepo)
+    monkeypatch.setattr(runs_cli, "GitRepoRegistryClient", UnreachableRepo)
     client = NemoClient(base_url="http://platform.test", workspace="default")
     app = typer.Typer()
     add_runs_commands(app, lambda: client)
@@ -1858,5 +2095,5 @@ def test_a_regular_spec_file_is_not_a_stream(tmp_path):
 
 @pytest.mark.parametrize("path", ["/dev/shm/run.json", "/proc/self/cwd/spec.json"])
 def test_a_regular_file_under_dev_or_proc_is_not_a_stream(monkeypatch, path):
-    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr(runs_cli, "_is_file", lambda path: True)
     assert not runs_cli._is_stream(Path(path))
