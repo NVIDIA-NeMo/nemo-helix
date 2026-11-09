@@ -540,19 +540,41 @@ def test_a_non_utf8_body_is_a_contract_failure_not_a_decode_crash() -> None:
     assert "not UTF-8" in str(excinfo.value)
 
 
+_DIGIT_LIMIT_BODY = b"1" * 5000
+_DEEPLY_NESTED_BODY = b"[" * 100_000 + b"]" * 100_000
+
+
+def _json_refuses(body: bytes) -> bool:
+    try:
+        json.loads(body)
+    except (ValueError, RecursionError):
+        return True
+    return False
+
+
 def test_a_json_refusal_that_is_not_a_decode_error_is_a_contract_failure() -> None:
     """``json`` has refusals that are not ``JSONDecodeError``, and they escape a narrow catch.
 
-    Both bodies below are well within ``max_response_bytes``, so nothing upstream stops them.
+    The body is well within ``max_response_bytes``, so nothing upstream stops it.
     """
-    session = _session()
+    with pytest.raises(RolloutTransportError) as excinfo:
+        _session()._decode_results(_DIGIT_LIMIT_BODY)
 
-    for payload in (b"1" * 5000, b"[" * 100_000 + b"]" * 100_000):
-        with pytest.raises(RolloutTransportError) as excinfo:
-            session._decode_results(payload)
+    assert excinfo.value.origin == "sandbox"
+    assert not excinfo.value.retryable
 
-        assert excinfo.value.origin == "sandbox"
-        assert not excinfo.value.retryable
+
+@pytest.mark.skipif(
+    not _json_refuses(_DEEPLY_NESTED_BODY),
+    reason="this interpreter parses the nesting: Python 3.14 bounds recursion by stack size, not depth",
+)
+def test_json_refusing_deep_nesting_is_a_contract_failure() -> None:
+    """Where ``json`` raises ``RecursionError`` on deep nesting, it is classified like a decode error."""
+    with pytest.raises(RolloutTransportError) as excinfo:
+        _session()._decode_results(_DEEPLY_NESTED_BODY)
+
+    assert excinfo.value.origin == "sandbox"
+    assert not excinfo.value.retryable
 
 
 def test_a_non_list_results_field_is_a_contract_failure() -> None:
