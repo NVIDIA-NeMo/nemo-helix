@@ -41,4 +41,9 @@ export interface ManifestUpdate {
   rounds?: number;
   /** Replace the stored default model selection (attack/analysis/agent groups). */
   models?: WarGameModels;
+  /**
+     * Registry image built from this manifest's `agent-hardener stage` context; empty clears it.
+     * @pattern ^\S*$
+     */
+  victim_image?: string;
 }

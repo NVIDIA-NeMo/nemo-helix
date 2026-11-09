@@ -36,6 +36,8 @@ agent-hardener = "nemo_agent_hardener_plugin.cli.main:AgentHardenerCLI"
 "agent-hardener.war-game" = "nemo_agent_hardener_plugin.jobs.run:AgentHardenerRunJob"
 # Named "synth" so the auto job group doesn't shadow the hand-written `agent-hardener synth-benign`.
 "agent-hardener.synth" = "nemo_agent_hardener_plugin.jobs.synth_benign:AgentHardenerSynthBenignJob"
+# Named "victim-context" so the auto job group doesn't shadow the hand-written `agent-hardener stage`.
+"agent-hardener.victim-context" = "nemo_agent_hardener_plugin.jobs.victim_context:AgentHardenerVictimContextJob"
 
 [project.entry-points."nemo.sdk"]
 # Underscore: the nemo.sdk key is the client attribute name (`client.agent_hardener`); a hyphen never matches.

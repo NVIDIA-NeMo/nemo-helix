@@ -78,6 +78,22 @@ def test_history_filters_by_last_seen_id(tmp_path: Path) -> None:
     assert [seq for seq, _ in stream.history(after_id=2)] == [3]
 
 
+def test_replicas_sharing_events_dir_serve_each_others_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Two API replicas = two hubs. With events_dir on a shared volume, the replica that took the job's POST
+    # and the one Studio polls see the same log.
+    shared = tmp_path / "shared"
+    config = AgentHardenerConfig(venv_path=tmp_path / "local" / "venv", events_dir=shared)
+    monkeypatch.setattr(events.AgentHardenerConfig, "get", lambda: config)
+
+    events.EventHub().stream("ws", "run/1").publish({"event": "round_completed", "payload": {}})
+
+    assert [event["event"] for _, event in events.EventHub().stream("ws", "run/1").history(after_id=0)] == [
+        "round_completed"
+    ]
+    assert (shared / "ws" / "run_1.jsonl").is_file()
+    assert not (tmp_path / "local" / "run-events").exists()
+
+
 def test_publish_persists_and_a_fresh_stream_replays(tmp_path: Path) -> None:
     # Durability: events written by one stream survive on disk and replay from a brand-new stream on the
     # same file (as after a service restart), with ids continuing monotonically from the file's line count.

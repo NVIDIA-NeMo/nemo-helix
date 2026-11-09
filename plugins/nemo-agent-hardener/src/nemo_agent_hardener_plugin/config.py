@@ -235,9 +235,17 @@ class AgentHardenerConfig(NemoConfig):
         default=False,
         description=(
             "Allow war-game and benign-suite jobs to run in the nhx-agent-hardener-tasks image when the "
-            "platform registers no subprocess profile (Helm). Off by default: OpenShell 0.1.0 and later "
-            "create sandboxes only from a registry image, and agent-hardener still builds the victim from a "
-            "Dockerfile, so these jobs cannot finish yet. Set NEMO_AGENT_HARDENER_CONTAINER_JOBS to override."
+            "platform registers no subprocess profile (Helm). Such a job cannot build the victim, so each "
+            "manifest it runs needs a `victim_image` pushed to a registry the OpenShell gateway can pull from. "
+            "Set NEMO_AGENT_HARDENER_CONTAINER_JOBS to override."
+        ),
+    )
+    events_dir: Path | None = Field(
+        default=None,
+        description=(
+            "Where the API keeps each live run's event log. Unset uses {state_dir}/run-events, local to one API "
+            "process; on Helm point it at the shared files volume so a live run's log survives an API restart and "
+            "every replica sees it. Set NEMO_AGENT_HARDENER_EVENTS_DIR to override."
         ),
     )
     openshell_gateway_endpoint: str | None = Field(
@@ -284,8 +292,13 @@ class AgentHardenerConfig(NemoConfig):
 
     @property
     def state_dir(self) -> Path:
-        """Base dir for agent-hardener on-host state (the venvs live under it; also run-event logs)."""
+        """Base dir for agent-hardener on-host state (the venvs live under it)."""
         return self.venv_path.parent
+
+    @property
+    def run_events_dir(self) -> Path:
+        """Root of the per-run event logs the API serves to Studio."""
+        return self.events_dir or self.state_dir / "run-events"
 
     @property
     def agent_hardener_bin(self) -> Path:

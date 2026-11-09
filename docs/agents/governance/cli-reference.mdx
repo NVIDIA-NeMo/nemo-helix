@@ -24,6 +24,7 @@ see [Run a War-Game](/documentation/agents/governance/run-a-war-game).
 | `setup` | Provision the virtual environments and the inference credential |
 | `init` | Resolve an agent or project into a saved manifest |
 | `refresh` | Re-resolve a saved manifest against its agent as it is now |
+| `stage` | Write a manifest's victim build context, to build its victim image yourself |
 | `synth-benign` | Generate the benign request suite and cache it on the manifest |
 | `synth` | Submit benign-suite synthesis as a platform job |
 | `run` | Run the attack, defend and validate cycle |
@@ -126,6 +127,18 @@ Re-resolves the manifest against the agent as it is now. Egress, backends, secre
 models, defenders and the cached benign suite are preserved. A run logs a warning
 when the agent is newer than its manifest.
 
+### `stage`
+
+```bash
+nemo agent-hardener stage --manifest-id <name>
+```
+
+Writes the victim's build context as a `.tar.gz` that `docker build -t <ref> - < <archive>`
+builds as it is, and prints the build, push and record commands. War-games that run in
+a container, as on a Helm deployment, need this image; see
+[On Kubernetes](/documentation/agents/governance#on-kubernetes). Needs
+`nemo agent-hardener setup`, not Docker or OpenShell.
+
 ### `manifest show`
 
 ```bash
@@ -158,6 +171,7 @@ apply to one launch only.
 | `--safety-model <name>` | Default model the generated guardrail uses to screen traffic. Unset uses the analysis model |
 | `--safety-base-url <url>` | Custom OpenAI-compatible endpoint for the safety model. Unset uses the analysis endpoint |
 | `--safety-key-secret <name>` | Secrets-store name holding the safety endpoint's API key |
+| `--victim-image <ref>` | Registry image built from `stage`, which war-games that run in a container use as the victim. An empty value clears it |
 
 ## Running
 

@@ -163,6 +163,29 @@ def test_patch_updates_benign_suite_and_port(client, mock_entity_client) -> None
     assert updated.benign_suite[0]["payload"] == "what time"
 
 
+@pytest.mark.parametrize(("sent", "stored"), [("reg.example/victim:1", "reg.example/victim:1"), ("", "")])
+def test_patch_sets_and_clears_the_victim_image(client, mock_entity_client, sent: str, stored: str) -> None:
+    existing = AgentHardenerManifest(name="m1", workspace="default", agent="default/clockbot", victim_image="old:1")
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.patch("/apis/agent-hardener/v2/workspaces/default/manifests/m1", json={"victim_image": sent})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["victim_image"] == stored
+
+
+def test_patch_rejects_a_victim_image_with_whitespace(client, mock_entity_client) -> None:
+    mock_entity_client.update = AsyncMock()
+
+    resp = client.patch(
+        "/apis/agent-hardener/v2/workspaces/default/manifests/m1", json={"victim_image": "reg/victim:1 --rm"}
+    )
+
+    assert resp.status_code == 422
+    mock_entity_client.update.assert_not_awaited()
+
+
 @pytest.mark.parametrize("command", ["python app.py --port 8000", 'python app.py --port "$PORT"'])
 @pytest.mark.parametrize("yaml_port", [8000, "8000", 9100])
 def test_patch_saved_default_synchronizes_listener_and_next_run(

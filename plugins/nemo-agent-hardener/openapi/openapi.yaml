@@ -18,6 +18,34 @@ paths:
                 additionalProperties: true
                 type: object
                 title: Response Healthz Apis Agent Hardener V1 Healthz Get
+  /apis/agent-hardener/v2/workspaces/{workspace}/execution:
+    get:
+      tags:
+      - Agent Hardener Manifests
+      summary: Get Execution Settings
+      description: How war-games run on this deployment, so Studio asks for a victim
+        image only where a run needs one.
+      operationId: get_execution_settings_apis_agent_hardener_v2_workspaces__workspace__execution_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionSettings'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agent-hardener/v2/workspaces/{workspace}/jobs:
     post:
       tags:
@@ -1837,6 +1865,561 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/victim-context/jobs:
+    post:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: Create Job
+      operationId: create_job_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VictimContextJobRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VictimContextJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: List Jobs
+      operationId: list_jobs_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/VictimContextJobsSortField'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: -created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/VictimContextJobsListFilter'
+        description: Filter jobs on various criteria.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VictimContextJobsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/victim-context/jobs/{job}/results/{name}:
+    get:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: Get Job Result
+      operationId: get_job_result_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs__job__results__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/victim-context/jobs/{job}/results/{name}/download:
+    get:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: Download Job Result
+      operationId: download_job_result_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs__job__results__name__download_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/victim-context/jobs/{name}:
+    get:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: Get Job
+      operationId: get_job_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VictimContextJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: Update Job
+      operationId: update_job_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VictimContextJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VictimContextJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: Delete Job
+      operationId: delete_job_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/victim-context/jobs/{name}/attempts:
+    get:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VictimContextJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/victim-context/jobs/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VictimContextJobAttempt'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/victim-context/jobs/{name}/cancel:
+    post:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: Cancel Job
+      operationId: cancel_job_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs__name__cancel_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VictimContextJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/victim-context/jobs/{name}/logs:
+    get:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: Get Job Logs
+      operationId: get_job_logs_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs__name__logs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: limit
+        in: query
+        required: false
+        schema:
+          title: Limit
+          type: integer
+      - name: page_cursor
+        in: query
+        required: false
+        schema:
+          title: Page Cursor
+          type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobLogPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/victim-context/jobs/{name}/results:
+    get:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: List Job Results
+      operationId: list_job_results_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs__name__results_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobListResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/victim-context/jobs/{name}/status:
+    get:
+      tags:
+      - Agent Hardener Victim Context Jobs
+      summary: Get Job Status
+      operationId: get_job_status_apis_agent_hardener_v2_workspaces__workspace__victim_context_jobs__name__status_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AgentHardenerManifest:
@@ -1905,6 +2488,13 @@ components:
           description: In-container glob patterns scoping which processes may egress;
             agent-hardener requires them because the layout of an image it did not
             write cannot be inferred.
+        victim_image:
+          type: string
+          title: Victim Image
+          description: Registry image built from this manifest's `agent-hardener stage`
+            context. Required where the job cannot build the victim itself (Kubernetes);
+            empty means the run builds it with Docker.
+          default: ''
         manifest_yaml:
           type: string
           title: Manifest Yaml
@@ -2339,6 +2929,20 @@ components:
       title: EventsResponse
       description: "Response for GET /runs/{name}/events \u2014 events after the given\
         \ sequence id."
+    ExecutionSettings:
+      properties:
+        victim_image_required:
+          type: boolean
+          title: Victim Image Required
+          description: War-games run in a container here, so each manifest needs a
+            victim image built from `agent-hardener stage`. False where a host builds
+            the victim itself.
+      type: object
+      required:
+      - victim_image_required
+      title: ExecutionSettings
+      description: "Response for ``GET /v2/workspaces/{workspace}/execution`` \u2014\
+        \ how this deployment runs war-games."
     FileStorageType:
       type: string
       enum:
@@ -2948,6 +3552,12 @@ components:
           - $ref: '#/components/schemas/WarGameModels'
           description: Replace the stored default model selection (attack/analysis/agent
             groups).
+        victim_image:
+          title: Victim Image
+          description: Registry image built from this manifest's `agent-hardener stage`
+            context; empty clears it.
+          type: string
+          pattern: ^\S*$
       type: object
       title: ManifestUpdate
       description: "Body for ``PATCH /v2/workspaces/{workspace}/manifests/{name}``\
@@ -3437,6 +4047,270 @@ components:
       - msg
       - type
       title: ValidationError
+    VictimContextJob:
+      properties:
+        id:
+          title: Id
+          type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
+        name:
+          type: string
+          title: Name
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        workspace:
+          title: Workspace
+          type: string
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+        spec:
+          $ref: '#/components/schemas/VictimContextSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          title: Status Details
+          additionalProperties: true
+          type: object
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
+      type: object
+      required:
+      - name
+      - spec
+      title: VictimContextJob
+    VictimContextJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/VictimContextSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: VictimContextJobAttempt
+    VictimContextJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/VictimContextJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: VictimContextJobAttemptsPage
+    VictimContextJobRequest:
+      properties:
+        name:
+          title: Name
+          type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        spec:
+          $ref: '#/components/schemas/VictimContextSpec'
+        profile:
+          title: Profile
+          type: string
+        options:
+          title: Options
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+        output_location:
+          title: Output Location
+          type: string
+      type: object
+      required:
+      - spec
+      title: VictimContextJobRequest
+    VictimContextJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/VictimContextSpec'
+      additionalProperties: false
+      type: object
+      title: VictimContextJobUpdate
+    VictimContextJobsListFilter:
+      additionalProperties: false
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+      title: VictimContextJobsListFilter
+      type: object
+    VictimContextJobsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/VictimContextJob'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: VictimContextJobsPage
+    VictimContextJobsSortField:
+      type: string
+      enum:
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      title: VictimContextJobsSortField
+    VictimContextSpec:
+      properties:
+        manifest_id:
+          type: string
+          minLength: 1
+          pattern: \S
+          title: Manifest Id
+      type: object
+      required:
+      - manifest_id
+      title: VictimContextSpec
+      description: Inputs for staging a saved manifest's victim build context (the
+        shape ``run()``/``compile()`` see).
     WarGameJob:
       properties:
         id:

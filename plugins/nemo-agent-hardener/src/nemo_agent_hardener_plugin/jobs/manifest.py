@@ -227,6 +227,15 @@ def _synchronize_agent_listener_port(agent: dict[str, Any], port: int) -> None:
         agent["start_command"] = updated_command
 
 
+def _apply_victim_image(manifest: dict[str, Any], data: dict[str, Any]) -> None:
+    """Run the victim from the manifest's pre-built image — the config form of agent-hardener's ``--victim-image``.
+
+    Set in the manifest rather than on each command line so ``up``, ``run`` and ``synth-benign`` all pick it up.
+    """
+    if image := str(data.get("victim_image") or ""):
+        manifest.setdefault("overrides", {}).setdefault("victim_control", {}).setdefault("config", {})["image"] = image
+
+
 def _materialize_manifest(
     sdk: Any, manifest_id: str, ctx: JobContext, config_overrides: dict[str, Any] | None = None
 ) -> str:
@@ -265,6 +274,7 @@ def _materialize_manifest(
         )
     else:
         manifest = _materialize_legacy_agent_manifest(sdk, manifest_id, data, ctx, manifest_dir, record)
+    _apply_victim_image(manifest, data)
     manifest_path = manifest_dir / "agent-hardener.yaml"
     manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
     return str(manifest_path)

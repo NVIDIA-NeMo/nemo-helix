@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI
-from nemo_agent_hardener_plugin.api.v2.jobs import router, synth_router
+from nemo_agent_hardener_plugin.api.v2.jobs import router, synth_router, victim_context_router
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
 from nemo_agent_hardener_plugin.jobs.synth_benign import AgentHardenerSynthBenignJob
 from nemo_helix_plugin.agent_hardener.types import SynthBenignSpec, WarGameSpec
@@ -80,6 +80,7 @@ def mixed_jobs(monkeypatch):
         "old-synth": _job("old-synth", synth),
         "new-war": _job("new-war", {**war, "_nemo_job_route": "war-game"}),
         "new-synth": _job("new-synth", {**synth, "_nemo_job_route": "synth-benign"}),
+        "new-stage": _job("new-stage", {"manifest_id": "manifest", "_nemo_job_route": "victim-context"}),
         "foreign": _job("foreign", war, "other"),
         "ambiguous": _job("ambiguous", {**war, **synth}),
         "unknown": _job("unknown", {"manifest_id": "manifest"}),
@@ -130,6 +131,7 @@ def mixed_jobs(monkeypatch):
     app = FastAPI()
     app.include_router(router, prefix="/v2/{workspace}")
     app.include_router(synth_router, prefix="/v2/{workspace}/synth-benign")
+    app.include_router(victim_context_router, prefix="/v2/{workspace}/victim-context")
     app.dependency_overrides[get_nemo_client] = lambda: SimpleNamespace()
     app.dependency_overrides[get_entity_client] = lambda: SimpleNamespace()
     authorize = AsyncMock()
@@ -144,6 +146,7 @@ def mixed_jobs(monkeypatch):
     [
         ("", {"old-war", "old-service-war", "new-war"}),
         ("/synth-benign", {"old-synth", "new-synth"}),
+        ("/victim-context", {"new-stage"}),
     ],
 )
 @pytest.mark.parametrize(
