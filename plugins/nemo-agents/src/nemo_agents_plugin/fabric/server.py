@@ -53,6 +53,7 @@ from nemo_agents_plugin.fabric.streaming import (
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER, session_id_to_uuid
 from starlette.types import Receive, Scope, Send
+from uvicorn import run
 
 logger = logging.getLogger(__name__)
 
@@ -535,10 +536,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    import uvicorn
-
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run(
+    run(
         create_fabric_serving_app(
             args.agent_config,
             settings=FabricServingSettings(

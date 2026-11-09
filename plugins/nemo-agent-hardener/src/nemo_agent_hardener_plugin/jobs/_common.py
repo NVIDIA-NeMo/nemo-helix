@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from subprocess import run
 from typing import Any, cast
 
 import yaml
@@ -360,10 +361,10 @@ def execute(
     ``(completed, log_text, log_ref)``.
     """
     if sys.stdin.isatty():
-        completed = subprocess.run(cmd, text=True, check=False, env=env)  # inherits the terminal
+        completed = run(cmd, text=True, check=False, env=env)  # inherits the terminal
         return completed, "", None
     with log_path.open("w", encoding="utf-8") as log_file:
-        completed = subprocess.run(
+        completed = run(
             cmd,
             stdin=subprocess.DEVNULL,
             stdout=log_file,

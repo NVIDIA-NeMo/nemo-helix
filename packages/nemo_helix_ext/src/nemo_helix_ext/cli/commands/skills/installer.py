@@ -9,6 +9,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from shutil import rmtree
 
 import yaml
 from nemo_helix_ext.cli.commands.skills.base import (
@@ -77,7 +78,7 @@ def _remove_if_owned(skills_root: Path, name: str) -> bool:
         target.unlink()  # Removes the link only, never its target.
         return True
     try:
-        shutil.rmtree(target)
+        rmtree(target)
     except FileNotFoundError:
         return True
     except NotADirectoryError:
@@ -196,7 +197,7 @@ class BaseAgentInstaller:
             dest = target_dir / item.name
             if item.is_dir():
                 if dest.exists():
-                    shutil.rmtree(dest)
+                    rmtree(dest)
                 shutil.copytree(item, dest)
             else:
                 shutil.copy2(item, dest)

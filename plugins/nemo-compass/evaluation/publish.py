@@ -6,7 +6,6 @@
 maintainer machine with the CSS credentials loaded from ``evaluation/.env``.
 """
 
-import getpass
 import hashlib
 import json
 import os
@@ -15,6 +14,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Mapping
+from getpass import getuser
 from pathlib import Path
 
 from evaluation import artifact, release
@@ -63,7 +63,7 @@ def publish(candidate: Path, *, reason: str | None, env: Mapping[str, str] | Non
         reason = env.get("REASON") or str(manifest.get("reason") or "")
     metadata = {
         "reason": _sanitize_reason(reason),
-        "published-by": getpass.getuser(),
+        "published-by": getuser(),
         "sha256": _sha256(candidate),
     }
     names = release.object_names()

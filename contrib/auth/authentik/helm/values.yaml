@@ -279,6 +279,12 @@ nemo-helix:
       oidc:
         enabled: true
         issuer: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-user/'
+        # Authentik sets aud to the issuing provider's client_id: "nemo-helix" for setup/e2e
+        # tokens, and nemo-helix-user / nemo-helix-cli for browser and CLI logins.
+        audience: "nemo-helix"
+        additional_audiences:
+          - "nemo-helix-user"
+          - "nemo-helix-cli"
         additional_issuers:
           - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo/'
           - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-cli/'
@@ -342,7 +348,12 @@ nemo-helix:
             env:
               SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
               REQUESTS_CA_BUNDLE: *workloadTokenTlsCaBundleFile
+            # executor_defaults only apply to the built-in profiles, not to cpu/workload,
+            # so set the core PVC here. Without it the profile refuses steps that need
+            # persistent storage (agent-evaluate).
             storage:
+              pvc_name: '{{ include "nhx-core.persistentVolumeClaim" . }}'
+              volume_permissions_image: '{{ .Values.core.storage.volumePermissionsImage }}'
               additional_volumes:
                 - name: workload-token-tls-ca
                   secret:

@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEntityReference } from '@nemo/common/src/namedEntity';
+import { ModelChat } from '@studio/components/ModelChat';
 import { entityStoreBaseModel1 } from '@studio/mocks/entity-store/models';
 import { render, renderRoute, screen } from '@studio/tests/util/render';
-
-import { ModelChat } from '.';
 
 vi.mock('@nemo/common/src/hooks/useChatCompletion', () => ({
   useChatCompletion: () => ({

@@ -131,9 +131,9 @@ def _flatten_overrides(overrides: Mapping[str, Any], _prefix: str = "") -> list[
 def selection_args(config: GymRuntimeConfig, work_dir: Path) -> list[str]:
     """The environment/agent/model selection passed to Gym.
 
-    Built once and handed verbatim to both ``gym env validate`` and ``gym env start``, so what is
-    validated is exactly what runs — a pre-flight against a different config would be worse than
-    none.
+    Built once and handed verbatim to ``gym env validate``, ``gym env start`` and
+    ``gym eval run --no-serve``, so what is validated is exactly what runs — a pre-flight against
+    a different config would be worse than none.
     """
     selection = [
         "--config",

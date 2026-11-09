@@ -997,7 +997,7 @@ class TestFunctionSubmitVerb:
             kwargs.setdefault("transport", transport)
             return original_client(*args, **kwargs)
 
-        monkeypatch.setattr("nemo_helix_plugin.client.client.httpx.Client", _client_factory)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.Client", _client_factory)
 
         app = _app_with_functions(_CountFunction)
         result = runner.invoke(
@@ -1046,7 +1046,7 @@ class TestFunctionSubmitVerb:
                 cli_kwargs=cli_kwargs,
             )
 
-        monkeypatch.setattr("nemo_helix_ext.client.bootstrap.httpx.Client", _client_factory)
+        monkeypatch.setattr("nemo_helix_ext.client.bootstrap.Client", _client_factory)
         monkeypatch.setattr("nemo_helix_plugin.commands._post_function_submit", _capture_post)
         state = _SubmitCLIContext(base_url=HttpUrl("http://localhost:8080"), token="shared-client-token")
         try:
@@ -1135,7 +1135,7 @@ class TestFunctionSubmitVerb:
             kwargs.setdefault("transport", transport)
             return original_client(*args, **kwargs)
 
-        monkeypatch.setattr("nemo_helix_plugin.client.client.httpx.Client", _client_factory)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.Client", _client_factory)
 
         app = _app_with_functions(_GreetFunction)
         result = runner.invoke(

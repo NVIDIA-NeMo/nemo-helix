@@ -5,8 +5,8 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+from sys import prefix as sys_prefix
 
 
 def services_extra_install_command() -> str:
@@ -17,6 +17,6 @@ def services_extra_install_command() -> str:
     in place. uv marks such an environment with a ``uv-receipt.toml`` at its
     root, which is what distinguishes it from an ordinary virtual environment.
     """
-    if (Path(sys.prefix) / "uv-receipt.toml").is_file():
+    if (Path(sys_prefix) / "uv-receipt.toml").is_file():
         return "uv tool install 'nemo-helix[all]'"
     return "pip install 'nemo-helix[all]'"

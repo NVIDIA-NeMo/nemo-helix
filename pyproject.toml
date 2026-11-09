@@ -382,7 +382,7 @@ constraint-dependencies = [
   "sqlfluff>=4.2.2",
   "sqlparse>=0.6.0,<0.7",
   "starlette>=1.3.1",
-  "urllib3>=2.7.0",
+  "urllib3>=2.8.0",
   "uv>=0.13.4",
   "wandb>=0.30.0",
 ]
@@ -407,7 +407,7 @@ override-dependencies = [
   "joserfc>=1.7.2",
   "pyasn1>=0.6.4",            # High OOS – nhx-garak-tasks + customizer
   "setuptools>=78.1.1",       # High OOS – nhx-tasks/gpu-tasks/customizer-tasks
-  "urllib3>=2.7.0",           # High OOS – nhx-garak-tasks + customizer
+  "urllib3>=2.8.0",           # GHSA-vxq7-64xx-v4gw and GHSA-8988-9cw3-xx77
   "wheel>=0.46.2",            # High OOS – widespread
   "cbor2>=5.9.0",             # High – customizer + nhx-gpu-tasks
   "simpleeval>=1.0.5",        # High – nhx-api + nhx-gpu-tasks
@@ -658,6 +658,8 @@ extra-paths = [
   "plugins/nemo-agent-hardener/tests/unit",
   # So ``helpers`` and ``reconciler.conftest`` resolve in the deployments plugin's unit tests.
   "plugins/nemo-deployments/tests/unit",
+  # Match pytest's sibling-module resolution for the deployments K8s integration fixtures.
+  "plugins/nemo-deployments/tests/integration",
   # nemo-evals plugin is not a workspace member; add its src so ty can
   # resolve nemo_evals imports when checking plugin test files.
   "plugins/nemo-evals/src",

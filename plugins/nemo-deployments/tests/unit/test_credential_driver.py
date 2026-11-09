@@ -574,7 +574,7 @@ def test_sidecar_syncs_rotated_and_removed_token_before_success(tmp_path: Path) 
             synced_tokens.append(staged.read_bytes() if staged.exists() else None)
 
     module = "nemo_deployments_plugin.backends.openshell.credential_driver.sidecar"
-    with patch(f"{module}.os.fsync", side_effect=sync_and_observe):
+    with patch(f"{module}.fsync", side_effect=sync_and_observe):
         prepare_credentials(source, destination)
         assert synced_tokens[-1] == b"new-token"
         prepare_credentials(source, destination, auth_disabled=True)
@@ -585,7 +585,7 @@ def test_sidecar_syncs_rotated_and_removed_token_before_success(tmp_path: Path) 
             raise OSError("Directory sync failed")
         original_fsync(descriptor)
 
-    with patch(f"{module}.os.fsync", side_effect=fail_directory_sync):
+    with patch(f"{module}.fsync", side_effect=fail_directory_sync):
         with pytest.raises(OSError, match="Directory sync failed"):
             prepare_credentials(source, destination)
 

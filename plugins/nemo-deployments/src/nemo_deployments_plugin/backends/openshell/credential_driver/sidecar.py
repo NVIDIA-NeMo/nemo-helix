@@ -10,6 +10,7 @@ import asyncio
 import os
 import stat
 import tempfile
+from os import fsync
 from pathlib import Path
 
 import grpc
@@ -44,7 +45,7 @@ def _read_mount(path: Path) -> bytes:
 def _sync_directory(path: Path) -> None:
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        os.fsync(descriptor)
+        fsync(descriptor)
     finally:
         os.close(descriptor)
 
@@ -80,7 +81,7 @@ def prepare_credentials(source: Path, destination: Path, *, auth_disabled: bool 
             with os.fdopen(descriptor, "wb") as file:
                 file.write(value)
                 file.flush()
-                os.fsync(file.fileno())
+                fsync(file.fileno())
             os.replace(temporary, destination / name)
             _sync_directory(destination)
         finally:

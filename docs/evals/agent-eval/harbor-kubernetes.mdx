@@ -147,7 +147,8 @@ Each source flag takes a whole dataset; `--tasks` narrows it. The source flags a
 | `--taskset <ws>/<name>#<digest>` | Stored taskset from `nemo evals tasksets create` | Already pinned |
 
 - `--list-tasks` prints the selectable tasks with their zero-based indexes and exits.
-- `--tasks` takes zero-based indexes or names, comma-separated: `--tasks 0,2` or `--tasks anko-default-function-arguments,geo-shapeindex-serialization`. Omit it to run every task.
+- In both `runs submit` and `tasksets create`, `--tasks` takes zero-based indexes, inclusive `START-END` ranges, or names, comma-separated. For a source with enough tasks, `--tasks 0-4,7,anko-example` selects indexes 0 through 4, index 7, and `anko-example`. Omit it to select every task.
+- Use indexes from `--list-tasks` for the same source or stored taskset. Both range endpoints must exist, and the start must not exceed the end. Repeating a task, including through overlapping ranges or an index/name combination, is an error. Select a task literally named like `0-2` by its individual index.
 
 ```bash
 nemo evals runs submit --workspace "$WS" --harbor-hub datacurve/deep-swe --list-tasks

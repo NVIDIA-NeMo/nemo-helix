@@ -1,15 +1,34 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from contextvars import ContextVar
+from __future__ import annotations
 
-import duckdb
+from contextvars import ContextVar
+from typing import TYPE_CHECKING
+
 from data_designer.engine.resources.seed_reader import SeedReader
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 from data_designer_nemo.filesystem import make_filesystem
 from nemo_helix_plugin.client.client import NemoClient
 
+if TYPE_CHECKING:
+    # Importing duckdb opens its default connection, which aborts in some
+    # sandboxes. Data Designer imports this module whenever it loads seed-reader
+    # plugins (including on `nemo data-designer --help`), so keep it lazy.
+    import duckdb
+
 workspace_cvar = ContextVar[str | None]("workspace_cvar", default=None)
+
+
+def _connect() -> duckdb.DuckDBPyConnection:
+    """Open an in-memory DuckDB connection, importing duckdb only on first use.
+
+    Also a seam so tests can replace the connection without patching the
+    duckdb module itself.
+    """
+    import duckdb
+
+    return duckdb.connect()
 
 
 class FilesetFileSeedReader(SeedReader[FilesetFileSeedSource]):
@@ -24,7 +43,7 @@ class FilesetFileSeedReader(SeedReader[FilesetFileSeedSource]):
             raise RuntimeError("FilesetFileSeedReader requires an injected NeMo Helix client")
 
         filesystem = make_filesystem(self._client)
-        conn = duckdb.connect()
+        conn = _connect()
         conn.register_filesystem(filesystem)
         return conn
 

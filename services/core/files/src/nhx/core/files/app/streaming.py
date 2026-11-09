@@ -10,6 +10,7 @@ from typing import AsyncIterator, TypeVar
 
 import aiohttp
 import anyio
+from aiohttp import ClientSession
 from anyio import to_thread
 from anyio.streams.memory import MemoryObjectSendStream
 from fastapi import Request
@@ -361,7 +362,7 @@ async def download_url(
     if headers is None:
         headers = {}
 
-    async with aiohttp.ClientSession() as session:
+    async with ClientSession() as session:
         # Use encoded=True to prevent aiohttp/yarl from re-encoding
         # already-percent-encoded query parameters in the URL.
         async with session.get(URL(url, encoded=True), headers=headers) as response:
@@ -400,7 +401,7 @@ async def upload_url_streaming(
         headers = {}
 
     if session is None:
-        session_cm = aiohttp.ClientSession()
+        session_cm = ClientSession()
     else:
         session_cm = nullcontext(session)
 

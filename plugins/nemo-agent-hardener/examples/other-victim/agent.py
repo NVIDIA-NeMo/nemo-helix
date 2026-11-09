@@ -20,6 +20,7 @@ import json
 import os
 import subprocess
 import sys
+from subprocess import run
 from typing import Any, cast
 
 import nemo_relay
@@ -84,7 +85,7 @@ def _bash_executor(command: str) -> str:
     # into "tool call refused", which in a war-game reads as a guardrail blocking the attack when it
     # was really just a slow command.
     try:
-        result = subprocess.run(  # noqa: S602 - the tool's entire purpose is running arbitrary commands
+        result = run(  # noqa: S602 - the tool's entire purpose is running arbitrary commands
             command, shell=True, capture_output=True, text=True, timeout=30, check=False
         )
     except subprocess.TimeoutExpired:
@@ -95,7 +96,7 @@ def _bash_executor(command: str) -> str:
 
 def _python_executor(code: str) -> str:
     try:
-        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30, check=False)
+        result = run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30, check=False)
     except subprocess.TimeoutExpired:
         return "error: execution timed out after 30s"
     output = result.stdout + result.stderr

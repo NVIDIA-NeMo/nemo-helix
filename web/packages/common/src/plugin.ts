@@ -11,6 +11,18 @@ export type {
   AssistantChatProps,
 } from '@nemo/common/src/components/AssistantChat/types';
 export { AccordionSection } from '@nemo/common/src/components/AccordionSection';
+// Presentational only: pass `agents` (and `onSearchChange`/`onLoadMore` to page) from `host.sdk`.
+// WorkspaceAgentSelect is deliberately NOT exported — it fetches.
+export { AgentSelect } from '@nemo/common/src/components/AgentSelect/AgentSelect';
+export type {
+  AgentSelectProps,
+  MultiAgentSelectProps,
+  SingleAgentSelectProps,
+} from '@nemo/common/src/components/AgentSelect/types';
+export {
+  groupAgentsByFormat,
+  matchesAgentSearch,
+} from '@nemo/common/src/components/AgentSelect/utils';
 // CancelJobButton is deliberately NOT exported
 export { ConfirmationModal } from '@nemo/common/src/components/ConfirmationModal';
 export { CreateSecretModal } from '@nemo/common/src/components/CreateSecretModal';
@@ -46,6 +58,16 @@ export { FormModal } from '@nemo/common/src/components/FormModal';
 export type { FormModalProps } from '@nemo/common/src/components/FormModal';
 export { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 export { LogViewer } from '@nemo/common/src/components/LogViewer';
+export { ModelSelect } from '@nemo/common/src/components/ModelSelectV2/ModelSelect';
+export {
+  WorkspaceModelSelectCore as WorkspaceModelSelect,
+  type WorkspaceModelSelectCoreProps as WorkspaceModelSelectProps,
+} from '@nemo/common/src/components/ModelSelectV2/WorkspaceModelSelectCore';
+export type {
+  ModelSelection,
+  ModelSelectProps,
+  ModelType,
+} from '@nemo/common/src/components/ModelSelectV2/types';
 export type { LogStatus } from '@nemo/common/src/utils/logs';
 export { RadioCard } from '@nemo/common/src/components/RadioCard';
 export type { RadioCardProps } from '@nemo/common/src/components/RadioCard';
@@ -67,6 +89,16 @@ export type {
 
 export { withOperators } from '@nemo/common/src/api/filterOperators';
 export type { FilterOperators, WithFilterOperators } from '@nemo/common/src/api/filterOperators';
+
+export {
+  MODEL_SEARCH_PAGE_SIZE,
+  useModelSearchCore as useModelSearch,
+  type ModelSearchFilter,
+  type ModelSearchProps,
+  type UseModelSearchCoreOptions as UseModelSearchOptions,
+  type UseModelSearchResult,
+} from '@nemo/common/src/api/models/useModelSearchCore';
+export type { ListModels, ModelWorkspaceGroup } from '@nemo/common/src/api/models/modelPages';
 
 export { fetchAllPages } from '@nemo/common/src/api/fetchAllPages';
 export type { FetchAllPagesOptions, PaginatedResponse } from '@nemo/common/src/api/fetchAllPages';

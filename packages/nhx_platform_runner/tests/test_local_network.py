@@ -15,21 +15,21 @@ import docker
 
 @pytest.fixture
 def local_docker(monkeypatch):
-    monkeypatch.setattr(local_network.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(local_network, "platform_system", lambda: "Linux")
     monkeypatch.delenv("DOCKER_HOST", raising=False)
     monkeypatch.setattr("nemo_helix_plugin.config.get_platform_config", lambda: SimpleNamespace(runtime=Runtime.DOCKER))
     client = MagicMock(spec=docker.DockerClient)
     client.networks = MagicMock()
     client.networks.get.return_value.attrs = {"IPAM": {"Config": [{"Gateway": "172.17.0.1"}]}}
     create = MagicMock(return_value=client)
-    monkeypatch.setattr("docker.from_env", create)
+    monkeypatch.setattr(local_network, "_docker_module", lambda: SimpleNamespace(from_env=create))
     return client, create
 
 
 def test_native_linux_discovers_and_validates_local_bridge(local_docker, monkeypatch):
     client, create = local_docker
     sockets = MagicMock()
-    monkeypatch.setattr(local_network.socket, "socket", sockets)
+    monkeypatch.setattr(local_network, "new_socket", sockets)
     assert local_network.docker_listener_host("127.0.0.1") == "172.17.0.1"
     sockets.return_value.__enter__.return_value.bind.assert_called_once_with(("172.17.0.1", 0))
     client.close.assert_called_once()
@@ -46,7 +46,7 @@ def test_explicit_non_loopback_binding_is_not_expanded(local_docker, host):
 @pytest.mark.parametrize("system", ["Darwin", "Windows"])
 def test_desktop_routing_is_preserved(local_docker, monkeypatch, system):
     _, create = local_docker
-    monkeypatch.setattr(local_network.platform, "system", lambda: system)
+    monkeypatch.setattr(local_network, "platform_system", lambda: system)
     assert local_network.docker_listener_host("127.0.0.1") is None
     create.assert_not_called()
 
@@ -70,7 +70,7 @@ def test_no_docker_runtime_does_not_create_listener(local_docker, monkeypatch):
 def test_bridge_in_another_namespace_is_not_advertised(local_docker, monkeypatch):
     sockets = MagicMock()
     sockets.return_value.__enter__.return_value.bind.side_effect = OSError("address not available")
-    monkeypatch.setattr(local_network.socket, "socket", sockets)
+    monkeypatch.setattr(local_network, "new_socket", sockets)
     assert local_network.docker_listener_host("127.0.0.1") is None
 
 

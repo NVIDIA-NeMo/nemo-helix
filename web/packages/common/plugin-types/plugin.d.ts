@@ -3,7 +3,8 @@
 import * as React$1 from "react";
 import react__default, { AriaAttributes, CSSProperties, ChangeEvent, ComponentProps, ComponentPropsWithRef, ComponentPropsWithoutRef, ComponentType, ElementType, FC, ForwardRefExoticComponent, JSX as JSX$1, JSXElementConstructor, MouseEventHandler, PropsWithChildren, ReactElement, ReactNode, RefAttributes, RefObject, SVGProps } from "react";
 import { ThreadMessageLike, ThreadPrimitive, ToolCallMessagePartComponent } from "@assistant-ui/react";
-import { HelixJobLog, HelixJobStatus, PromptData } from "@nemo/sdk/generated/platform/schema";
+import { HelixJobLog, HelixJobStatus, InferenceParams, ModelEntity, ModelEntityFilter, ModelEntitySortField, ModelEntitysPage, ModelsListModelsParams, PromptData } from "@nemo/sdk/generated/platform/schema";
+import { Agent } from "@nemo/sdk/generated/agents/schema";
 import { VariantProps } from "class-variance-authority";
 //#endregion
 //#region src/components/AccessibleTitle/index.d.ts
@@ -795,6 +796,83 @@ interface AccordionSectionProps {
  * AccordionItem implementation to support a custom icon in the header of an accordion section.
  */
 export declare const AccordionSection: FC<PropsWithChildren<AccordionSectionProps>>;
+//#endregion
+//#region src/components/AgentSelect/types.d.ts
+interface AgentSelectBaseProps {
+  /**
+   * The loaded page(s) of agents. The dropdown renders exactly what it is given — pair with
+   * {@link onSearchChange} and {@link onLoadMore} (see `useAgentSearch`, or just use
+   * `WorkspaceAgentSelect`) so a large workspace arrives one page at a time.
+   */
+  agents?: Agent[];
+  /**
+   * Heading for each agent; agents sharing one render together under it, in first-seen order.
+   * Omit for a flat list. `groupAgentsByFormat` groups by Fabric / NAT workflow.
+   */
+  groupBy?: (agent: Agent) => string;
+  /**
+   * Server-side search. When set, the dropdown stops filtering {@link agents} itself and reports
+   * the debounced filter text instead; the caller re-queries and passes back new `agents`.
+   */
+  onSearchChange?: (search: string) => void;
+  /** How long the filter box settles before {@link onSearchChange} fires. */
+  searchDebounceMs?: number;
+  /** Called as the list scrolls near its end. Ignored unless {@link hasMore} is true. */
+  onLoadMore?: () => void | Promise<void>;
+  /** Whether another page is available for {@link onLoadMore} to fetch. */
+  hasMore?: boolean;
+  /** Whether the next page is in flight. */
+  isLoadingMore?: boolean;
+  /** Footer copy shown once every page has loaded. Omit to render nothing. */
+  doneLoadingMessage?: string;
+  /** Copy shown when no agents match. */
+  emptyMessage?: string;
+  /** Whether the first page of agents is still loading. */
+  loading?: boolean;
+  /**
+   * Why an agent cannot be picked here, or undefined when it can. Disabled agents stay listed
+   * (dimmed) and show the reason in their hover details, rather than silently disappearing.
+   */
+  getDisabledReason?: (agent: Agent) => string | undefined;
+  disabled?: boolean;
+  placeholder?: string;
+  fullWidth?: boolean;
+  dropdownSide?: 'top' | 'bottom';
+  onOpenChange?: (open: boolean) => void;
+  'aria-label'?: string;
+}
+interface SingleAgentSelectProps extends AgentSelectBaseProps {
+  multiple?: false;
+  /** Selected agent name. */
+  value: string | null;
+  onValueChange: (name: string, agent: Agent) => void;
+}
+interface MultiAgentSelectProps extends AgentSelectBaseProps {
+  multiple: true;
+  /** Selected agent names, in selection order. */
+  value: readonly string[];
+  /**
+   * Called with the full new selection. `agents` holds the entity for every selected name the
+   * dropdown has seen; names restored from elsewhere and never loaded are left out.
+   */
+  onValueChange: (names: string[], agents: Agent[]) => void;
+  /** Cap on how many agents can be selected; further rows are disabled once it is reached. */
+  maxSelected?: number;
+}
+type AgentSelectProps = SingleAgentSelectProps | MultiAgentSelectProps;
+//#endregion
+//#region src/components/AgentSelect/AgentSelect.d.ts
+/**
+ * The one picker for agents, single or multiple (`multiple`). Rows show each agent's details on
+ * hover, can be grouped (`groupBy`), and the list is virtualized with search-as-you-type and
+ * scroll paging. Use `WorkspaceAgentSelect` to have it fetch its own agents.
+ */
+export declare const AgentSelect: FC<AgentSelectProps>;
+//#endregion
+//#region src/components/AgentSelect/utils.d.ts
+export declare const groupAgentsByFormat: (agent: Agent) => string;
+/** Client-side match for when the caller does not search server-side. */
+export declare const matchesAgentSearch: (agent: Agent, search: string) => boolean;
 declare namespace clsx_d_exports {
   export { ClassArray, ClassDictionary, ClassValue$1 as ClassValue, clsx, clsx as default };
 }
@@ -6059,6 +6137,7 @@ interface ActionMenuItem {
     className?: string;
   }>;
   disabled?: boolean;
+  disabledReason?: string;
   danger?: boolean;
   divider?: Omit<DropdownDividerItemEntry, 'kind'>;
 }
@@ -6067,6 +6146,7 @@ interface DeleteAction {
   onSelect: () => void;
   label?: DeleteActionLabel;
   disabled?: boolean;
+  disabledReason?: string;
 }
 //#endregion
 //#region src/components/QuickActionsMenu/QuickActionsMenuRoot/index.d.ts
@@ -9779,6 +9859,222 @@ interface LogViewerProps {
 }
 export declare const LogViewer: FC<LogViewerProps>;
 //#endregion
+//#region src/api/models/modelPages.d.ts
+/**
+ * Lists one page of a workspace's models. Studio passes the SDK's `modelsListModels`; a plugin
+ * passes `host.sdk.platform.modelsListModels` so the request runs on Studio's authenticated client.
+ */
+type ListModels = (workspace: string, params: ModelsListModelsParams) => Promise<ModelEntitysPage>;
+type ModelWorkspaceGroup = {
+  workspace: string;
+  models: ModelEntity[];
+};
+//#endregion
+//#region src/components/ModelSelectV2/types.d.ts
+interface ModelSelection {
+  /** Model URN (e.g. "workspace/model_name") */
+  model: string;
+  /** Adapter name, if an adapter was selected instead of the base model */
+  adapter?: string;
+  /**
+   * The catalogue entry the user picked, when the selection came from the dropdown. Saves
+   * callers a lookup (or a second request) for fields like `model_providers`; absent when the
+   * selection was restored from a URL, a form default, or any other source outside the list.
+   */
+  entity?: ModelEntity;
+}
+interface ModelSelectProps {
+  /** Currently selected model (and optional adapter) */
+  value: ModelSelection | null;
+  /** Called when user selects a model or adapter */
+  onValueChange: (selection: ModelSelection) => void;
+  /**
+   * The page of models to show, grouped by workspace. The dropdown renders exactly what it is
+   * given — pair with {@link onSearchChange} and {@link onLoadMore} (see `useModelSearch`) so a
+   * large catalogue arrives one page at a time instead of all at once.
+   */
+  groups?: ModelWorkspaceGroup[];
+  /**
+   * Server-side search. When set, the dropdown stops filtering {@link groups} itself and instead
+   * reports the debounced filter text; the caller re-queries and passes back new `groups`.
+   * Leave unset to filter the given groups client-side.
+   */
+  onSearchChange?: (search: string) => void;
+  /** How long the filter box settles before {@link onSearchChange} fires. */
+  searchDebounceMs?: number;
+  /** Called as the list scrolls near its end. Ignored unless {@link hasMore} is true. */
+  onLoadMore?: () => void | Promise<void>;
+  /** Whether another page is available for {@link onLoadMore} to fetch. */
+  hasMore?: boolean;
+  /** Whether the next page is in flight. */
+  isLoadingMore?: boolean;
+  /** Footer copy shown once every page has loaded. Omit to render nothing. */
+  doneLoadingMessage?: string;
+  /** Copy shown when no models match. */
+  emptyMessage?: string;
+  /** Whether the first page of models is still loading */
+  loading?: boolean;
+  /** Whether the component is disabled */
+  disabled?: boolean;
+  /** Placeholder text for the model trigger button */
+  placeholder?: string;
+  /** Show the Custom/Base segmented control toggle */
+  showModelTypeToggle?: boolean;
+  /** Default active segment when toggle is shown */
+  defaultModelType?: ModelType;
+  /**
+   * Called when the model-type segment changes. Same contract as {@link onSearchChange}: when set,
+   * the caller owns the filter and the dropdown stops applying it to {@link groups}.
+   */
+  onModelTypeChange?: (modelType: ModelType) => void;
+  /** Show the params button alongside the model button */
+  showParams?: boolean;
+  /**
+   * Hide each model's adapter sub-list. When true, models render as flat,
+   * directly-selectable items even if they have adapters.
+   *
+   * Use this when only base models are valid selections (e.g. fine-tuning
+   * source models, where the customizer requires a model URN with a
+   * fileset, not an adapter).
+   */
+  hideAdapters?: boolean;
+  /** Make the component fill the width of its container */
+  fullWidth?: boolean;
+  /** Preferred side for the dropdown content */
+  dropdownSide?: 'top' | 'bottom';
+  /** Current inference parameter values */
+  inferenceParams?: Partial<InferenceParams>;
+  /** Called when the user changes any inference parameter */
+  onInferenceParamsChange?: (params: Partial<InferenceParams>) => void;
+  /** Called when the model dropdown opens or closes */
+  onOpenChange?: (open: boolean) => void;
+  /** aria-label for the button group */
+  'aria-label'?: string;
+}
+type ModelType = 'custom' | 'base';
+//#endregion
+//#region src/components/ModelSelectV2/ModelSelect.d.ts
+export declare const ModelSelect: FC<ModelSelectProps>;
+//#endregion
+//#region src/api/filterOperators.d.ts
+/**
+ * Mongo-style comparison operators accepted by NeMo Helix's unified filter
+ * syntax (e.g. `{ name: { $like: '%foo%' } }`, `{ created_at: { $gte, $lte } }`).
+ *
+ * The OpenAPI-generated SDK types model filter fields as bare scalars
+ * (`name?: string`) and do not expose the operator-object form. Use
+ * {@link WithFilterOperators} to widen a generated filter shape so call sites
+ * can build operator filters without `as unknown as` casts.
+ */
+interface FilterOperators<V> {
+  $eq?: V;
+  $ne?: V;
+  $in?: readonly V[];
+  $nin?: readonly V[];
+  $gt?: V;
+  $gte?: V;
+  $lt?: V;
+  $lte?: V;
+  /** Substring match (e.g. `%foo%`). String-typed regardless of `V`. */
+  $like?: string;
+}
+/**
+ * Widens each field of `F` so it accepts either its original scalar value or
+ * a {@link FilterOperators} object. Intended for API call sites that need
+ * operator-object filters; coerce back to the generated filter type once at
+ * the SDK boundary.
+ *
+ * @example
+ * type ModelFilterInput = WithFilterOperators<ModelEntityFilter>;
+ * const filter: ModelFilterInput = { name: { $like: '%foo%' } };
+ */
+type WithFilterOperators<F> = { [K in keyof F]?: F[K] | FilterOperators<NonNullable<F[K]>>; };
+/**
+ * Build a typed operator-filter and coerce it to the generated SDK filter type
+ * in one step. Centralizes the unavoidable cast at the SDK boundary so call
+ * sites can be written with full type-checking on operator objects.
+ *
+ * @example
+ * filter: withOperators<FilesetFilter>({ name: { $like: `%${search}%` } })
+ */
+export declare const withOperators: <F>(filter: WithFilterOperators<F>) => F;
+//#endregion
+//#region src/api/models/useModelSearchCore.d.ts
+/**
+ * Page size for search-as-you-type model lists. Small on purpose: the dropdown pulls the next
+ * page as the user scrolls, so the first page needs to arrive fast, not be complete.
+ */
+export declare const MODEL_SEARCH_PAGE_SIZE = 25;
+type ModelSearchFilter = WithFilterOperators<ModelEntityFilter>;
+interface UseModelSearchCoreOptions {
+  /** Workspace to search. The query stays idle while this is null. */
+  workspace: string | null;
+  listModels: ListModels;
+  /** Extra filters merged into the request (e.g. `lora_enabled`, `base_model`). */
+  filter?: ModelSearchFilter;
+  sort?: ModelEntitySortField;
+  pageSize?: number;
+  enabled?: boolean;
+  /**
+   * Client-side predicate applied to every page — for conditions the API cannot express, such as
+   * "has a ready deployment" (`model_providers.length > 0`). The hook keeps paging while a page
+   * filters down to nothing, so an excluded page never stalls the list.
+   */
+  include?: (model: ModelEntity) => boolean;
+}
+/**
+ * Props for `ModelSelect`, ready to spread. Every field lines up with a prop name so a caller
+ * that needs nothing custom is a single line.
+ */
+interface ModelSearchProps {
+  groups: ModelWorkspaceGroup[];
+  loading: boolean;
+  onSearchChange: (search: string) => void;
+  onLoadMore: () => Promise<void>;
+  hasMore: boolean;
+  isLoadingMore: boolean;
+}
+interface UseModelSearchResult extends ModelSearchProps {
+  models: ModelEntity[];
+  search: string;
+  error: Error | null;
+}
+/**
+ * Server-side model search with progressive paging — the counterpart to `useAllModels`, which
+ * walks every page up front. Filtering happens in the API and pages arrive as the user scrolls,
+ * so a workspace with thousands of models costs one small request at a time.
+ *
+ * Takes its fetcher so plugins can run it on `host.sdk`; Studio code uses `useModelSearch`.
+ *
+ * @example
+ * const [open, setOpen] = useState(false);
+ * const models = useModelSearchCore({ workspace, listModels, enabled: open });
+ * return <ModelSelect {...models} value={value} onValueChange={onChange} onOpenChange={setOpen} />;
+ */
+declare const useModelSearchCore: ({ workspace, listModels, filter, sort, pageSize, enabled, include }: UseModelSearchCoreOptions) => UseModelSearchResult;
+//#endregion
+//#region src/components/ModelSelectV2/WorkspaceModelSelectCore.d.ts
+interface WorkspaceModelSelectCoreProps extends Omit<ModelSelectProps, keyof ModelSearchProps> {
+  /** Workspace to search. Nothing is fetched while this is null. */
+  workspace: string | null;
+  listModels: ListModels;
+  /** Extra filters merged into the search request (e.g. `lora_enabled`). */
+  filter?: ModelSearchFilter;
+  /** Client-side predicate for conditions the API cannot express (e.g. "has a deployment"). */
+  include?: (model: ModelEntity) => boolean;
+  /** Hold the request back for reasons of the caller's own, on top of the open check. */
+  enabled?: boolean;
+}
+/**
+ * `ModelSelect` wired to its own paged search: nothing is requested until the user opens the
+ * menu, the filter box queries the API, and further pages arrive as the list scrolls.
+ *
+ * Takes its fetcher so plugins can run it on `host.sdk`; Studio code uses `WorkspaceModelSelect`.
+ * Reach for the search hook directly only when the caller needs the models themselves — to merge
+ * in a pinned entry, or to surface the query error.
+ */
+declare const WorkspaceModelSelectCore: FC<WorkspaceModelSelectCoreProps>;
+//#endregion
 //#region src/components/RadioCard/index.d.ts
 interface RadioCardProps extends Omit<ComponentProps<typeof RadioGroupItem>, 'children'> {
   /** The radio value (forwarded to RadioGroupInput) */
@@ -10991,49 +11287,6 @@ interface StudioDataViewState<FilterType = Record<string, unknown>> extends Data
  */
 export declare const useStudioDataViewState: <FilterType = Record<string, unknown>>(options?: UseStudioDataViewStateOptions) => StudioDataViewState<FilterType>;
 //#endregion
-//#region src/api/filterOperators.d.ts
-/**
- * Mongo-style comparison operators accepted by NeMo Helix's unified filter
- * syntax (e.g. `{ name: { $like: '%foo%' } }`, `{ created_at: { $gte, $lte } }`).
- *
- * The OpenAPI-generated SDK types model filter fields as bare scalars
- * (`name?: string`) and do not expose the operator-object form. Use
- * {@link WithFilterOperators} to widen a generated filter shape so call sites
- * can build operator filters without `as unknown as` casts.
- */
-interface FilterOperators<V> {
-  $eq?: V;
-  $ne?: V;
-  $in?: readonly V[];
-  $nin?: readonly V[];
-  $gt?: V;
-  $gte?: V;
-  $lt?: V;
-  $lte?: V;
-  /** Substring match (e.g. `%foo%`). String-typed regardless of `V`. */
-  $like?: string;
-}
-/**
- * Widens each field of `F` so it accepts either its original scalar value or
- * a {@link FilterOperators} object. Intended for API call sites that need
- * operator-object filters; coerce back to the generated filter type once at
- * the SDK boundary.
- *
- * @example
- * type ModelFilterInput = WithFilterOperators<ModelEntityFilter>;
- * const filter: ModelFilterInput = { name: { $like: '%foo%' } };
- */
-type WithFilterOperators<F> = { [K in keyof F]?: F[K] | FilterOperators<NonNullable<F[K]>>; };
-/**
- * Build a typed operator-filter and coerce it to the generated SDK filter type
- * in one step. Centralizes the unavoidable cast at the SDK boundary so call
- * sites can be written with full type-checking on operator objects.
- *
- * @example
- * filter: withOperators<FilesetFilter>({ name: { $like: `%${search}%` } })
- */
-export declare const withOperators: <F>(filter: WithFilterOperators<F>) => F;
-//#endregion
 //#region src/api/fetchAllPages.d.ts
 interface PaginatedResponse<T> {
   data?: T[];
@@ -11152,4 +11405,4 @@ export declare const CJobLaunchableStatuses: HelixJobStatus[];
 export declare const CJobTerminalStatuses: HelixJobStatus[];
 export declare const HelixJobTerminalStatuses: HelixJobStatus[];
 //#endregion
-export { type AccordionSectionProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type LogStatus, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type WithFilterOperators };
+export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type ListModels, type LogStatus, type ModelSearchFilter, type ModelSearchProps, type ModelSelectProps, type ModelSelection, type ModelType, type ModelWorkspaceGroup, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseModelSearchCoreOptions as UseModelSearchOptions, type UseModelSearchResult, type UseStudioDataViewStateOptions, type WithFilterOperators, WorkspaceModelSelectCore as WorkspaceModelSelect, type WorkspaceModelSelectCoreProps as WorkspaceModelSelectProps, useModelSearchCore as useModelSearch };

@@ -17,7 +17,7 @@ export interface ModelSelection {
   entity?: ModelEntity;
 }
 
-export interface ModelSelectV2Props {
+export interface ModelSelectProps {
   /** Currently selected model (and optional adapter) */
   value: ModelSelection | null;
   /** Called when user selects a model or adapter */
@@ -87,3 +87,6 @@ export interface ModelSelectV2Props {
 }
 
 export type ModelType = 'custom' | 'base';
+
+/** @deprecated Use `ModelSelectProps`. */
+export type ModelSelectV2Props = ModelSelectProps;

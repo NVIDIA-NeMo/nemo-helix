@@ -75,3 +75,110 @@ def test_sandbox_cluster_capable_wires_domain_protocol_and_secret() -> None:
     assert platform["sandbox_api_key_secret_key"] == "api-key"
     assert "sandbox_cluster_capable" not in config.get("rl", {})
     assert _has_opensandbox_deployment(documents) is False
+
+
+SANDBOX_POLICIES = ("--set", "sandboxClusterCapable=true")
+
+
+def _sandbox_policies(documents: list[dict]) -> list[dict]:
+    return [
+        document
+        for document in documents
+        if document["kind"] == "NetworkPolicy" and document["metadata"]["name"].endswith("-opensandbox-sandbox-ingress")
+    ]
+
+
+def test_sandbox_pods_admit_ingress_only_from_the_opensandbox_server_namespace() -> None:
+    """Every sandbox pod, on every port, admits only the server's namespace: execd there takes commands unauthenticated."""
+    (policy,) = _sandbox_policies(_helm_template(*SANDBOX_POLICIES))
+
+    assert policy["metadata"]["namespace"] == "default"
+    assert policy["spec"] == {
+        "podSelector": {"matchExpressions": [{"key": "opensandbox.io/id", "operator": "Exists"}]},
+        "policyTypes": ["Ingress"],
+        "ingress": [
+            {"from": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "opensandbox-system"}}}]}
+        ],
+    }
+
+
+def test_sandbox_policy_goes_to_the_sandbox_namespace_and_narrows_to_the_server_pods() -> None:
+    """The policy lands where the server creates sandboxes, and a server pod selector narrows the namespace."""
+    (policy,) = _sandbox_policies(
+        _helm_template(
+            *SANDBOX_POLICIES,
+            "--set",
+            "opensandbox.composeServices.sandboxNamespace=nemo-sandboxes",
+            "--set",
+            "opensandbox.sandboxNetworkPolicy.serverPodSelector.matchLabels.app=opensandbox-server",
+        )
+    )
+
+    assert policy["metadata"]["namespace"] == "nemo-sandboxes"
+    assert policy["spec"]["ingress"] == [
+        {
+            "from": [
+                {
+                    "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "opensandbox-system"}},
+                    "podSelector": {"matchLabels": {"app": "opensandbox-server"}},
+                }
+            ]
+        }
+    ]
+
+
+def test_sandbox_policy_is_rendered_whatever_the_chart_wide_network_policy_switch_says() -> None:
+    """OpenSandbox alone turns the policy on: execd takes commands from anyone who reaches it."""
+    assert _sandbox_policies(_helm_template(*SANDBOX_POLICIES, "--set", "networkPolicies.enabled=false"))
+
+
+def test_sandbox_policy_is_not_rendered_without_opensandbox() -> None:
+    assert _sandbox_policies(_helm_template("--set", "networkPolicies.enabled=true")) == []
+
+
+def test_extra_ingress_can_admit_everything() -> None:
+    """With no off switch, an empty rule is how an operator opens sandboxes up."""
+    (policy,) = _sandbox_policies(
+        _helm_template(*SANDBOX_POLICIES, "--set-json", "opensandbox.sandboxNetworkPolicy.extraIngress=[{}]")
+    )
+
+    assert policy["spec"]["ingress"][-1] == {}
+
+
+def test_sandbox_policy_refuses_to_admit_the_whole_sandbox_namespace() -> None:
+    """A server in the sandbox namespace needs a pod selector, or the policy would admit the sandboxes themselves."""
+    with pytest.raises(subprocess.CalledProcessError) as refused:
+        _helm_template(
+            *SANDBOX_POLICIES,
+            "--set",
+            "opensandbox.namespace=default",
+            "--set",
+            "opensandbox.domain=opensandbox-server.default.svc.cluster.local",
+        )
+
+    assert "opensandbox.sandboxNetworkPolicy.serverPodSelector is required" in refused.value.stderr
+
+
+def test_sandbox_policy_refuses_a_namespace_the_server_domain_contradicts() -> None:
+    """A wrong opensandbox.namespace would shut the server out of every sandbox, so the chart refuses it."""
+    with pytest.raises(subprocess.CalledProcessError) as refused:
+        _helm_template(*SANDBOX_POLICIES, "--set", "opensandbox.namespace=elsewhere")
+
+    assert "doesn't match the namespace in opensandbox.domain" in refused.value.stderr
+
+
+def test_sandbox_policy_skips_the_domain_check_for_an_external_domain() -> None:
+    """A gateway or external hostname names no namespace, so only opensandbox.namespace decides."""
+    (policy,) = _sandbox_policies(
+        _helm_template(
+            *SANDBOX_POLICIES,
+            "--set",
+            "opensandbox.domain=sandbox.example.com",
+            "--set",
+            "opensandbox.namespace=elsewhere",
+        )
+    )
+
+    assert policy["spec"]["ingress"][0]["from"][0]["namespaceSelector"]["matchLabels"] == {
+        "kubernetes.io/metadata.name": "elsewhere"
+    }
