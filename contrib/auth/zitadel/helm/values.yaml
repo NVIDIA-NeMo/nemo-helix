@@ -426,7 +426,12 @@ nemo-helix:
               NHX_CLIENT_SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
               SSL_CERT_FILE: *workloadTokenTlsTrustBundleFile
               REQUESTS_CA_BUNDLE: *workloadTokenTlsTrustBundleFile
+            # executor_defaults only apply to the built-in profiles, not to cpu/workload,
+            # so set the core PVC here. Without it the profile refuses steps that need
+            # persistent storage (agent-evaluate).
             storage:
+              pvc_name: '{{ include "nhx-core.persistentVolumeClaim" . }}'
+              volume_permissions_image: '{{ .Values.core.storage.volumePermissionsImage }}'
               additional_volumes:
                 - name: workload-token-tls-ca
                   secret:
