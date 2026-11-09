@@ -1143,6 +1143,65 @@ def test_authentik_umbrella_values_configure_nemo_envoy_as_the_only_edge_proxy()
     }
 
 
+_PEM = "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n"
+
+
+def test_kubernetes_job_trust_bundle_uses_the_one_run_sh_prepared(tmp_path) -> None:
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    (tmp_path / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
+    (tmp_path / "ca-bundle.crt").write_text(_PEM.format("prepared"), encoding="utf-8")
+
+    assert live_test._job_trust_bundle(tmp_path) == tmp_path / "ca-bundle.crt"
+
+
+def test_kubernetes_job_trust_bundle_is_built_when_the_tls_dir_has_none(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A TLS directory prepared without run.sh has no bundle; the secret still needs one.
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+    (tls_dir / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
+    public = tmp_path / "public.pem"
+    public.write_text(_PEM.format("public"), encoding="utf-8")
+    monkeypatch.setenv(live_test.PUBLIC_CA_BUNDLE_ENV, str(public))
+
+    bundle = live_test._job_trust_bundle(tls_dir).read_text(encoding="utf-8")
+
+    assert bundle == _PEM.format("public") + _PEM.format("gateway")
+    assert not (tls_dir / "ca-bundle.crt").exists()
+
+
+def test_kubernetes_job_trust_bundle_refuses_a_public_bundle_without_certificates(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    (tmp_path / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
+    not_pem = tmp_path / "hosts"
+    not_pem.write_text("127.0.0.1 localhost\n", encoding="utf-8")
+    monkeypatch.setenv(live_test.PUBLIC_CA_BUNDLE_ENV, str(not_pem))
+
+    with pytest.raises(RuntimeError, match="no PEM certificates"):
+        live_test._job_trust_bundle(tmp_path)
+
+
+def test_kubernetes_job_trust_bundle_names_the_override_when_no_public_bundle_exists(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    (tmp_path / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
+    monkeypatch.delenv(live_test.PUBLIC_CA_BUNDLE_ENV, raising=False)
+    monkeypatch.setattr(live_test, "_PUBLIC_CA_BUNDLE_CANDIDATES", ())
+    monkeypatch.setattr(live_test, "certifi_bundle_path", lambda: str(tmp_path / "missing.pem"))
+
+    with pytest.raises(RuntimeError, match=live_test.PUBLIC_CA_BUNDLE_ENV):
+        live_test._job_trust_bundle(tmp_path)
+
+
 def test_kubernetes_deployment_workload_runtime_config_targets_in_cluster_envoy(tmp_path) -> None:
     from tests.auth_idp import runtime_kubernetes as live_test
 
@@ -1844,8 +1903,8 @@ def test_authentik_compose_mounts_gateway_ca_without_test_runner_overlay() -> No
     services = compose_config["services"]
     nemo_environment = services["nemo"]["environment"]
 
-    assert nemo_environment["SSL_CERT_FILE"] == "/etc/nhx/gateway-tls/tls.crt"
-    assert nemo_environment["REQUESTS_CA_BUNDLE"] == "/etc/nhx/gateway-tls/tls.crt"
+    assert nemo_environment["SSL_CERT_FILE"] == "/etc/nhx/gateway-tls/ca-bundle.crt"
+    assert nemo_environment["REQUESTS_CA_BUNDLE"] == "/etc/nhx/gateway-tls/ca-bundle.crt"
     assert "gateway-tls:/etc/nhx/gateway-tls:ro" in services["nemo"]["volumes"]
     assert "auth-idp-e2e" not in services
 
@@ -1900,6 +1959,7 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     assert tls_values["secretName"] == "nemo-helix-envoy-tls"
     assert tls_values["mountPath"] == "/etc/nhx/workload-token-tls"
     assert tls_values["caBundleFile"] == "/etc/nhx/workload-token-ca/ca.crt"
+    assert tls_values["trustBundleFile"] == "/etc/nhx/workload-token-ca/ca-bundle.crt"
     assert "create" not in tls_values
     assert "durationDays" not in tls_values
     assert "dnsNames" not in tls_values
@@ -1948,8 +2008,9 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     assert seed_job["extraVolumes"] == controller["extraVolumes"]
     assert seed_job["extraVolumeMounts"] == controller["extraVolumeMounts"]
     assert nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["env"] == {
-        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
+        "NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
+        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
     }
     assert "service_discovery" not in nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]
     assert nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["storage"] == {
@@ -1958,7 +2019,10 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
                 "name": "workload-token-tls-ca",
                 "secret": {
                     "secret_name": "nemo-helix-envoy-tls",
-                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "items": [
+                        {"key": "ca.crt", "path": "ca.crt"},
+                        {"key": "ca-bundle.crt", "path": "ca-bundle.crt"},
+                    ],
                 },
             }
         ],
@@ -1980,8 +2044,9 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     assert "default_task_image" not in workload_config
     assert "service_discovery" not in workload_config
     assert workload_config["env"] == {
-        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
+        "NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
+        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
     }
     # executor_defaults don't apply to cpu/workload, so its storage sets the core PVC beside the CA volume.
     expected_storage = {

@@ -188,8 +188,9 @@ AUTHENTIK_DOCKER_E2E_CONFIG = pytest.mark.e2e_config(
                         "cleanup_completed_jobs_immediately": False,
                         "launcher_tool_path": "/tools/jobs-launcher",
                         "env": {
-                            "SSL_CERT_FILE": "/etc/nhx/gateway-tls/tls.crt",
-                            "REQUESTS_CA_BUNDLE": "/etc/nhx/gateway-tls/tls.crt",
+                            "NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/gateway-tls/tls.crt",
+                            "SSL_CERT_FILE": "/etc/nhx/gateway-tls/ca-bundle.crt",
+                            "REQUESTS_CA_BUNDLE": "/etc/nhx/gateway-tls/ca-bundle.crt",
                         },
                         "storage": {
                             "additional_volume_mounts": [
