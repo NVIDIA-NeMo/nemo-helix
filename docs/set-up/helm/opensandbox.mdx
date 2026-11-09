@@ -132,6 +132,7 @@ opensandbox:
 - If `opensandbox.domain` is an in-cluster Service name, its namespace must match `opensandbox.namespace`. Otherwise the chart refuses to render, since the policy would shut the server out.
 - If the server runs in the sandbox namespace, set `serverPodSelector`. Otherwise the chart refuses to render, since admitting that namespace would admit every sandbox.
 - A client that sets `use_server_proxy: false` connects to the pod IP directly and is refused unless `extraIngress` admits it.
+- Every request to a sandbox goes through the OpenSandbox server, which forwards it over a pool of at most 100 connections per server process. A running command holds one connection until it finishes, so about 100 trials running at once fill the pool, and the next request waits up to 180 seconds for a free connection and then fails with `500`. The default evaluation caps (`max_cluster_concurrent_jobs: 50`) stay under this. Raise them past it only after giving the server more capacity.
 - In ingress gateway mode, add the gateway to `extraIngress` before upgrading, or it can't reach sandboxes.
 - The CNI must enforce NetworkPolicy. One that doesn't, such as flannel, stores the policy and ignores it.
 
