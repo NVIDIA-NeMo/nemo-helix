@@ -10,6 +10,7 @@ it reports ``a/`` as ignored for ``a/*`` and does not apply parent exclusion.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path, PurePosixPath
@@ -41,7 +42,10 @@ CASES: list[tuple[list[str], list[str]]] = [
 
 def _git_excluded(tmp_path: Path, patterns: list[str], files: list[str]) -> set[str]:
     """Return the files Git leaves out of a work-tree walk with ``patterns`` as ``.gitignore``."""
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    # Isolate from the caller's Git context (hooks set GIT_DIR/GIT_INDEX_FILE) and global excludes.
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=env)
     (tmp_path / ".gitignore").write_text("\n".join(patterns) + "\n")
     for relative in files:
         (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
@@ -51,6 +55,7 @@ def _git_excluded(tmp_path: Path, patterns: list[str], files: list[str]) -> set[
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     ).stdout.split("\0")
     return set(files) - set(listed)
 
