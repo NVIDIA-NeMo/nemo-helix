@@ -1750,6 +1750,22 @@ def test_early_exit_reads_a_traceback_through_other_servers_output(tmp_path: Pat
     assert "Downloading pyarrow" not in first_error
 
 
+def test_early_exit_finds_a_traceback_end_far_below_its_start(tmp_path: Path) -> None:
+    # Heavy parallel installs can put hundreds of other servers' lines between a traceback's frames.
+    exception = "RuntimeError: resources server failed to bind"
+    frames = _traceback("(mcqa) ", 3, exception)
+    spread: list[str] = []
+    for frame in frames:
+        spread += [frame, *(f"(policy_model) Downloading package-{i}" for i in range(300))]
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message("\n".join(spread), tmp_path / "gym_env.log", 1)
+
+    first_error = message.split("--- first error in startup output ---", 1)[1]
+    assert "(mcqa) Traceback (most recent call last):" in first_error
+    assert f"(mcqa) {exception}" in first_error
+    assert "Downloading" not in first_error
+
+
 def test_early_exit_ignores_gym_deprecation_text_that_mentions_errors(tmp_path: Path) -> None:
     # Gym's startup warning talks about errors without being one; only a line that starts an error
     # report should be pulled out of the log.

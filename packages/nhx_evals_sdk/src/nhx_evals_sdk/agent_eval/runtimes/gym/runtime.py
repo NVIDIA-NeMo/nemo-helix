@@ -442,8 +442,6 @@ STARTUP_OUTPUT_MAX_CHARS = 16000
 #: Lines of the first error report inlined into an exception. A longer report keeps its first line
 #: and its end, which is where a traceback names the exception.
 FIRST_ERROR_CONTEXT_LINES = 12
-#: How far past the first error line to look for the end of its report.
-_FIRST_ERROR_SCAN_LINES = 500
 #: The ``(server_name) `` prefix Gym adds to each component's output.
 _SERVER_PREFIX = r"\([^)\s]+\) "
 _SERVER_PREFIX_RE = re.compile(f"^{_SERVER_PREFIX}")
@@ -465,23 +463,27 @@ def _first_error_block(lines: Sequence[str], start: int, end: int) -> str:
     prefix_match = _SERVER_PREFIX_RE.match(first)
     prefix = prefix_match.group(0) if prefix_match else ""
     is_traceback = first[len(prefix) :].lstrip().startswith(_TRACEBACK_HEADER)
-    block = [first]
-    for line in lines[start + 1 : min(end, start + 1 + _FIRST_ERROR_SCAN_LINES)]:
+    # Scan to the end of the report however far other servers' output spreads it, keeping only the
+    # lines that can be shown.
+    rest: deque[str] = deque(maxlen=FIRST_ERROR_CONTEXT_LINES - 2)
+    rest_count = 0
+    for line in lines[start + 1 : end]:
         if prefix and not line.startswith(prefix):
             continue
         if not prefix and _SERVER_PREFIX_RE.match(line):
             continue
         content = line[len(prefix) :]
-        if content[:1].isspace():
-            block.append(line)
-            continue
-        if is_traceback and content:
-            block.append(line)
-        break
-    if len(block) > FIRST_ERROR_CONTEXT_LINES:
-        omitted = len(block) - FIRST_ERROR_CONTEXT_LINES + 1
-        block = [block[0], f"... {omitted} line(s) omitted ...", *block[-(FIRST_ERROR_CONTEXT_LINES - 2) :]]
-    return "\n".join(block)
+        ends_report = not content[:1].isspace()
+        if ends_report and not (is_traceback and content):
+            break
+        rest.append(line)
+        rest_count += 1
+        if ends_report:
+            break
+    if rest_count + 1 > FIRST_ERROR_CONTEXT_LINES:
+        omitted = rest_count - len(rest)
+        return "\n".join([first, f"... {omitted} line(s) omitted ...", *rest])
+    return "\n".join([first, *rest])
 
 
 def startup_output_excerpt(env_log_text: str) -> str:
