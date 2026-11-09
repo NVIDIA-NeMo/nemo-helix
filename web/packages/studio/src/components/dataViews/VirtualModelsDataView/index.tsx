@@ -11,6 +11,7 @@ import {
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
@@ -26,7 +27,7 @@ import {
   useDeleteVirtualModel,
   useListVirtualModels,
 } from '@nemo/sdk/generated/platform/virtual-models';
-import { type DropdownEntry, Stack, Text } from '@nvidia/foundations-react-core';
+import { Stack, Text } from '@nvidia/foundations-react-core';
 import { BaseModelSearchFilterField } from '@studio/components/FilterFields';
 import { getVirtualModelChatRoute, getVirtualModelDetailsRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
@@ -69,7 +70,9 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
 
   const openVirtualModel = useCallback(
     (virtualModel: VirtualModelWithId, tab: 'details' | 'chat', event?: React.MouseEvent) => {
-      if (!virtualModel.name) return;
+      if (!virtualModel.name) {
+        return;
+      }
 
       // The row already holds the full virtual model, so prime the detail query — the detail page
       // then renders immediately instead of showing a skeleton. It still revalidates in background.
@@ -161,7 +164,9 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
   );
 
   const handleDeleteVirtualModel = async () => {
-    if (!modalVirtualModel?.name) return false;
+    if (!modalVirtualModel?.name) {
+      return false;
+    }
     try {
       await deleteVirtualModelMutation.mutateAsync({
         workspace,
@@ -243,26 +248,15 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
         rowActionsColumn({
           size: ROW_ACTIONS_COLUMN_SIZE,
           enableResizing: false,
-          cellProps: {
-            attributes: {
-              DropdownContent: { className: 'min-w-[156px]' },
-            },
-          },
-          rowActions: (vm: VirtualModelWithId): DropdownEntry[] => [
-            {
-              children: 'View',
-              onSelect: () => openVirtualModel(vm, 'details'),
-            },
-            {
-              children: 'Chat',
-              onSelect: () => openVirtualModel(vm, 'chat'),
-            },
-            {
-              children: 'Delete',
-              danger: true,
-              onSelect: () => setModalVirtualModel(vm),
-            },
-          ],
+          cell: ({ row: { original: vm } }) => (
+            <QuickActionsMenuRoot
+              actions={[
+                { label: 'View', onSelect: () => openVirtualModel(vm, 'details') },
+                { label: 'Chat', onSelect: () => openVirtualModel(vm, 'chat') },
+              ]}
+              deleteAction={{ onSelect: () => setModalVirtualModel(vm) }}
+            />
+          ),
         }),
       ],
       [openVirtualModel, workspace]
