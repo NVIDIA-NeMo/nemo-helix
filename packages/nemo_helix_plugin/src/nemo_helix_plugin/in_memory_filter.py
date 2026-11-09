@@ -23,8 +23,8 @@ class InMemoryFilterRepository(FilterRepository):
 
     Bind an entity (mirrors ``SQLAlchemyFilterRepository`` binding a model), then
     run ``operation.apply(repo)``. The entity may be a mapping or an object: base
-    fields resolve as attributes/keys, and ``data.<dotted>`` fields walk the
-    nested ``data`` mapping.
+    fields resolve as attributes/keys, and dotted fields walk a nested JSON
+    mapping such as ``data`` or a typed Job's ``spec``.
 
     Semantics are plain Python, NOT a byte-for-byte mirror of the SQL backends:
 
@@ -51,13 +51,18 @@ class InMemoryFilterRepository(FilterRepository):
         """Resolve ``field`` on the bound entity (``_MISSING`` if absent).
 
         Mirrors ``SQLAlchemyFilterRepository._get_column``: a plain attribute/key,
-        or a ``data.<dotted>`` walk through the nested ``data`` mapping.
+        or a dotted walk through a nested JSON mapping.
         """
         if _has_attr(self.entity, field):
             return _get_attr(self.entity, field, _MISSING)
         if field.startswith("data."):
             data = _get_attr(self.entity, "data", _MISSING)
             return _walk_json_path(data, field.split(".")[1:])
+        if "." in field:
+            root, *path = field.split(".")
+            value = _get_attr(self.entity, root, _MISSING)
+            if isinstance(value, dict) or value is None:
+                return _walk_json_path(value, path)
         raise ValueError(f"Field '{field}' does not exist on {type(self.entity).__name__}")
 
     def eq(self, field: str, value: Any) -> bool:
@@ -204,7 +209,7 @@ def _get_attr(entity: Any, field: str, default: Any) -> Any:
 
 
 def _walk_json_path(data: Any, path: List[str]) -> Any:
-    """Navigate a dotted `data.<a>.<b>` path through nested mappings.
+    """Navigate a dotted path through nested JSON mappings.
 
     Mirrors the SQL JSON subscript walk. A missing key (or descending into a
     non-mapping) yields ``_MISSING`` so callers apply SQL null semantics.

@@ -45,15 +45,17 @@ async def _compile_war_game(
 # manifest_id overlap and cannot identify a kind. Reject ambiguous/unknown shapes
 # rather than guess from names or schema validation (WarGame accepts synth fields).
 # Use the same predicate in SQL lists (before pagination) and named route checks.
+# Dotted null comparisons preserve HAS_KEY's non-null semantics, including False,
+# without applying an unsupported operator to the bare spec namespace.
 def _legacy_kind_filter(own_field: str, sibling_field: str) -> LogicalOperation:
     return LogicalOperation(
         operator=FilterOperator.AND,
         operations=[
-            ComparisonOperation(operator=FilterOperator.HAS_KEY, field="spec", value=own_field),
             LogicalOperation(
                 operator=FilterOperator.NOT,
-                operations=[ComparisonOperation(operator=FilterOperator.HAS_KEY, field="spec", value=sibling_field)],
+                operations=[ComparisonOperation(operator=FilterOperator.EQ, field=f"spec.{own_field}", value=None)],
             ),
+            ComparisonOperation(operator=FilterOperator.EQ, field=f"spec.{sibling_field}", value=None),
         ],
     )
 
