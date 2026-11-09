@@ -172,8 +172,19 @@ def test_nhx_rl_training_importable():
     from nhx.rl.tasks.training import __main__ as training_main  # noqa: F401
 
 
+# SyncRolloutActor does not load sandboxed gym. The training image does not install it there.
+JOB_REAPER_ACTORS = [
+    "driver",
+    *(
+        actor_fqn
+        for actor_fqn in sorted(WORKER_VENV_IMPORTS)
+        if actor_fqn != "nemo_rl.experience.sync_rollout_actor.SyncRolloutActor"
+    ),
+]
+
+
 @pytest.mark.smoke_nhx_rl_training
-@pytest.mark.parametrize("actor_fqn", ["driver", *sorted(WORKER_VENV_IMPORTS)])
+@pytest.mark.parametrize("actor_fqn", JOB_REAPER_ACTORS)
 def test_job_reaper_importable(actor_fqn):
     """Every training venv can reap sandboxes for a cancelled job.
 
@@ -192,6 +203,83 @@ def test_job_reaper_importable(actor_fqn):
         text=True,
     )
     assert result.returncode == 0, f"`sandboxed_gym.job_reaper` failed in {venv}:\n{result.stderr}"
+
+
+def _candidate_venv_pythons() -> list[Path]:
+    """Interpreters that might own the nemo-helix install, not only the Ray workers.
+
+    The RL backend module is part of the nemo-helix installation. That install is
+    editable into the driver venv here, but a published nemo-helix wheel can land
+    in a different venv than ``/opt/ray_venvs``.
+    """
+    roots = (
+        Path("/opt/nemo_rl_venv"),
+        Path("/opt/venv"),
+        Path("/app/.venv"),
+        RAY_VENVS,
+        Path("/opt/gym_venvs"),
+    )
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        direct = root / "bin" / "python"
+        pythons = [direct] if direct.exists() else []
+        if not direct.exists():
+            pythons.extend(root.glob("*/bin/python"))
+            pythons.extend(root.glob("*/*/bin/python"))
+            pythons.extend(root.glob("*/.venv/bin/python"))
+        for python in pythons:
+            if not python.is_file():
+                continue
+            resolved = python.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            found.append(python)
+    return found
+
+
+@pytest.mark.smoke_nhx_rl_training
+def test_nemo_helix_backend_can_import_job_reaper():
+    """The venv that loads nemo-helix's RL backend can import the job reaper.
+
+    ``nhx.rl.tasks.training.backends.nemo_rl.backend`` (``backend.py`` in the
+    nemo-helix installation) calls ``_reap_job_sandboxes``, which does
+    ``from sandboxed_gym.job_reaper import reap_job_sandboxes``. That module is
+    not installed into every Ray venv, so the check has to use the interpreter
+    that actually imports ``backend.py``.
+    """
+    owners: list[tuple[Path, str]] = []
+    for python in _candidate_venv_pythons():
+        probe = subprocess.run(
+            [
+                str(python),
+                "-c",
+                "import nhx.rl.tasks.training.backends.nemo_rl.backend as backend; print(backend.__file__)",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if probe.returncode == 0:
+            owners.append((python, probe.stdout.strip()))
+    assert owners, (
+        "no image venv can import nhx.rl.tasks.training.backends.nemo_rl.backend; "
+        "the nemo-helix installation that runs _reap_job_sandboxes was not found"
+    )
+    failures: list[str] = []
+    for python, backend_file in owners:
+        result = subprocess.run(
+            [str(python), "-c", "from sandboxed_gym.job_reaper import reap_job_sandboxes"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            failures.append(
+                f"{python} loads {backend_file} but cannot import sandboxed_gym.job_reaper:\n{result.stderr}"
+            )
+    assert not failures, "\n".join(failures)
 
 
 @pytest.mark.smoke_nhx_rl_training
