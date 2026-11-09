@@ -79,12 +79,18 @@ jobs:
         cleanup_completed_jobs_immediately: true
         launcher_tool_path: /tools/jobs-launcher
         env:
-          SSL_CERT_FILE: "/etc/nhx/gateway-tls/tls.crt"
-          REQUESTS_CA_BUNDLE: "/etc/nhx/gateway-tls/tls.crt"
+          # Public roots plus the gateway certificate, written by gateway-tls-init: these variables
+          # replace a client's trust store, and jobs also reach public hosts such as PyPI.
+          NHX_CLIENT_SSL_CERT_FILE: "/etc/nhx/gateway-tls/tls.crt"
+          SSL_CERT_FILE: "/etc/nhx/gateway-tls/ca-bundle.crt"
+          REQUESTS_CA_BUNDLE: "/etc/nhx/gateway-tls/ca-bundle.crt"
         storage:
           additional_volume_mounts:
             - volume_name: "authentik_gateway_tls"
               mount_path: "/etc/nhx/gateway-tls"
+              # The volume also holds the gateway's private key and the CA files the platform
+              # trusts, so job code must not be able to change it.
+              read_only: true
   executor_defaults:
     docker:
       cleanup_completed_jobs_immediately: true

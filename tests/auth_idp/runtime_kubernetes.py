@@ -25,6 +25,7 @@ from urllib.parse import urlparse
 
 import httpx
 import pytest
+from certifi import where as certifi_bundle_path
 from httpx import Client as HttpClient
 from httpx import get as http_get
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig
@@ -877,7 +878,46 @@ def _reconcile_secret(
             kubeconfig,
         )
     )
-    _apply_manifest(context, rendered.stdout, kubeconfig)
+    # Server-side: client-side apply copies the secret into an annotation capped at 256 KiB, and
+    # the job CA bundle alone is larger.
+    _run_with_input(
+        _kubectl_command(context, ["apply", "--server-side", "--force-conflicts", "-f", "-"], kubeconfig),
+        rendered.stdout,
+    )
+
+
+PUBLIC_CA_BUNDLE_ENV = "NHX_HARNESS_PUBLIC_CA_BUNDLE"
+_PUBLIC_CA_BUNDLE_CANDIDATES = (
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/cert.pem",
+)
+
+
+def _job_trust_bundle(tls_dir: Path) -> Path:
+    """The job pods' SSL_CERT_FILE: public roots with the gateway CA appended.
+
+    run.sh writes it into the prepared TLS directory. A directory prepared some other way may not
+    have one, so build it the same way: SSL_CERT_FILE replaces a client's trust store, and the
+    gateway CA alone would stop jobs from reaching public hosts such as PyPI.
+    """
+    prepared = tls_dir / "ca-bundle.crt"
+    if prepared.is_file():
+        return prepared
+    candidates = [os.environ.get(PUBLIC_CA_BUNDLE_ENV, ""), *_PUBLIC_CA_BUNDLE_CANDIDATES, certifi_bundle_path()]
+    public = next(
+        (Path(path) for path in candidates if path and Path(path).is_file() and Path(path).stat().st_size), None
+    )
+    if public is None:
+        raise RuntimeError(f"no public CA bundle found for job pods; set {PUBLIC_CA_BUNDLE_ENV} to a PEM bundle")
+    public_roots = public.read_text(encoding="utf-8")
+    if "BEGIN CERTIFICATE" not in public_roots:
+        raise RuntimeError(f"public CA bundle has no PEM certificates: {public}; set {PUBLIC_CA_BUNDLE_ENV}")
+    bundle = Path(tempfile.mkdtemp(prefix="nhx-job-ca-")) / "ca-bundle.crt"
+    bundle.write_text(
+        public_roots.rstrip("\n") + "\n" + (tls_dir / "ca.crt").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    return bundle
 
 
 def _prepare_precreated_secrets(context: str, kubeconfig: Path | None = None) -> None:
@@ -900,6 +940,7 @@ def _prepare_precreated_secrets(context: str, kubeconfig: Path | None = None) ->
             f"--from-file=tls.crt={tls_dir / 'tls.crt'}",
             f"--from-file=tls.key={tls_dir / 'tls.key'}",
             f"--from-file=ca.crt={tls_dir / 'ca.crt'}",
+            f"--from-file=ca-bundle.crt={_job_trust_bundle(tls_dir)}",
         ],
         kubeconfig,
     )

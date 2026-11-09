@@ -11,9 +11,9 @@ from nemo_scaled_evals_plugin.entities import ScaledEvalsBenchmarkRun
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from scaled_evals.api import artifacts, dispatch_health, entity_store
-from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
+from scaled_evals.api.benchmark_run_store import BenchmarkRunGlobalQueries
 from scaled_evals.api.build import buildkit, registry
-from scaled_evals.api.evaluation_store import EvaluationStore
+from scaled_evals.api.evaluation_store import EvaluationGlobalQueries
 from scaled_evals.api.schemas.common import HealthStatus, ReadyzResponse
 from scaled_evals.api.settings import settings
 from scaled_evals.api.task_store import TaskStore
@@ -385,7 +385,7 @@ def _dependency_state(status: str) -> str:
 def _evaluation_status_counts() -> dict[str, int]:
     counts = dict.fromkeys(_KNOWN_EVALUATION_STATUSES, 0)
     try:
-        counts.update(EvaluationStore().status_counts())
+        counts.update(EvaluationGlobalQueries().status_counts())
     except Exception:  # noqa: BLE001 — keep metrics scrape available on store errors
         pass
     return counts
@@ -395,8 +395,8 @@ def _fleet_totals() -> dict[str, int]:
     try:
         return {
             "task_definitions": TaskStore().count(include_deleted=True),
-            **EvaluationStore().fleet_totals(),
-            "benchmark_runs": BenchmarkRunStore().count(),
+            **EvaluationGlobalQueries().fleet_totals(),
+            "benchmark_runs": BenchmarkRunGlobalQueries().count(),
         }
     except Exception:  # noqa: BLE001 — keep metrics scrape available on store errors
         return {}
@@ -413,7 +413,7 @@ def _dispatch_observability_snapshot() -> dict:
         "backend_failures": [],
     }
     try:
-        return EvaluationStore().dispatch_snapshot(
+        return EvaluationGlobalQueries().dispatch_snapshot(
             stuck_queued_seconds=settings.observability_stuck_queued_seconds,
             stuck_provisioning_seconds=settings.observability_stuck_provisioning_seconds,
             stuck_running_seconds=settings.observability_stuck_running_seconds,
