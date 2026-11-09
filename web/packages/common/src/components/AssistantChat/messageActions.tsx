@@ -5,16 +5,19 @@ import { ActionBarPrimitive, MessagePrimitive } from '@assistant-ui/react';
 import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMessageError';
 import { useCopyToClipboard } from '@nemo/common/src/hooks/useCopyToClipboard';
 import { Check, CopyGeneric } from '@nemo/icons/icons';
-import { Tooltip } from '@nvidia/foundations-react-core';
-import { useEffect, useState } from 'react';
+import { Button, Tooltip } from '@nvidia/foundations-react-core';
+import { type ComponentProps, useEffect, useState } from 'react';
 
-export const ACTION_BUTTON_CLASS =
-  'flex cursor-pointer size-7 items-center justify-center rounded border border-transparent text-base bg-transparent text-secondary hover:border-base hover:bg-surface-raised hover:text-primary disabled:cursor-not-allowed disabled:opacity-50';
+export const MESSAGE_ACTION_ICON_SIZE = '12';
 
 export const MESSAGE_ACTIONS_CLASS =
-  'flex gap-density-xs opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 [@media(hover:none)]:opacity-100';
+  'flex gap-density-xxs opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 [@media(hover:none)]:opacity-100';
 
 const COPIED_DURATION_MS = 3000;
+
+export const MessageActionButton = (props: ComponentProps<typeof Button>) => (
+  <Button kind="tertiary" size="tiny" type="button" {...props} />
+);
 
 interface CopyErrorActionProps {
   error: string;
@@ -35,7 +38,9 @@ const CopyErrorAction = ({ error }: CopyErrorActionProps) => {
   });
 
   useEffect(() => {
-    if (copyState === 'idle') return undefined;
+    if (copyState === 'idle') {
+      return undefined;
+    }
     const timeout = setTimeout(() => setCopyState('idle'), COPIED_DURATION_MS);
     return () => clearTimeout(timeout);
   }, [copyState]);
@@ -46,31 +51,34 @@ const CopyErrorAction = ({ error }: CopyErrorActionProps) => {
         copyState === 'failed' ? 'Could not copy: clipboard access was blocked' : 'Copy error'
       }
     >
-      <button
-        type="button"
-        aria-label="Copy error"
-        className={ACTION_BUTTON_CLASS}
-        onClick={() => void copyToClipboard(error)}
-      >
-        {copyState === 'copied' ? <Check size="16" /> : <CopyGeneric size="16" />}
-      </button>
+      <MessageActionButton aria-label="Copy error" onClick={() => void copyToClipboard(error)}>
+        {copyState === 'copied' ? (
+          <Check size={MESSAGE_ACTION_ICON_SIZE} />
+        ) : (
+          <CopyGeneric size={MESSAGE_ACTION_ICON_SIZE} />
+        )}
+      </MessageActionButton>
     </Tooltip>
   );
 };
 
 export const CopyAction = () => {
   const error = useMessageError();
-  if (error) return <CopyErrorAction error={error} />;
+  if (error) {
+    return <CopyErrorAction error={error} />;
+  }
 
   return (
     <Tooltip slotContent="Copy message">
-      <ActionBarPrimitive.Copy aria-label="Copy message" className={ACTION_BUTTON_CLASS}>
-        <MessagePrimitive.If copied>
-          <Check size="16" />
-        </MessagePrimitive.If>
-        <MessagePrimitive.If copied={false}>
-          <CopyGeneric size="16" />
-        </MessagePrimitive.If>
+      <ActionBarPrimitive.Copy asChild>
+        <MessageActionButton aria-label="Copy message">
+          <MessagePrimitive.If copied>
+            <Check size={MESSAGE_ACTION_ICON_SIZE} />
+          </MessagePrimitive.If>
+          <MessagePrimitive.If copied={false}>
+            <CopyGeneric size={MESSAGE_ACTION_ICON_SIZE} />
+          </MessagePrimitive.If>
+        </MessageActionButton>
       </ActionBarPrimitive.Copy>
     </Tooltip>
   );
