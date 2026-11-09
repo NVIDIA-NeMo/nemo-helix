@@ -16,10 +16,12 @@ from typing import Annotated, Any, Literal
 
 import click
 import typer
+from nemo_helix_plugin.cli_git_host_keys import DEFAULT_KNOWN_HOSTS_FILE, trust_git_host
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.endpoints import upload_otlp_logs
 from nemo_helix_plugin.files.types import (
     CreateFilesetRequest,
+    FindGitRepositoryFilesRequest,
     ListFilesetsQueryParams,
     OtlpLogQueryRequest,
     UpdateFilesetRequest,
@@ -58,7 +60,12 @@ filesets_app = create_typer_app(name="filesets", help="Manage filesets")
 otlp_app = create_typer_app(name="otlp", help="OTLP operations")
 logs_app = create_typer_app(name="logs", help="Manage logs")
 
+git_repositories_app = create_typer_app(
+    name="git-repositories", help="Look up git repositories before creating a fileset"
+)
+
 app.add_typer(filesets_app, name="filesets")
+app.add_typer(git_repositories_app, name="git-repositories")
 app.add_typer(otlp_app, name="otlp")
 otlp_app.add_typer(logs_app, name="logs")
 
@@ -680,6 +687,92 @@ def update_filesets(
 
     result = state.typed_client(FilesClient).update_fileset(name=name, workspace=workspace, body=body)
 
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Git repositories
+# ---------------------------------------------------------------------------
+
+GIT_URL_HELP = "SSH remote, e.g. git@gitlab.example.com:org/repo.git or ssh://host:2222/org/repo.git"
+HOST_KEY_HELP = (
+    "SHA256 fingerprint of the host key to trust, checked against one from a trusted source. "
+    "Without it, the key must already be in --known-hosts-file, or you confirm it at a prompt."
+)
+KNOWN_HOSTS_FILE_HELP = "known_hosts file to recognize the host from. A host listed there under another key is refused."
+
+
+@git_repositories_app.command("find-files")
+@collect_warnings
+@handle_errors
+def find_git_repository_files(
+    ctx: typer.Context,
+    url: Annotated[str, typer.Argument(help=GIT_URL_HELP)],
+    file_name: Annotated[
+        str, typer.Option("--file-name", help="File name, without a directory, to look for anywhere under --path")
+    ],
+    ssh_key_secret: Annotated[
+        str, typer.Option("--ssh-key-secret", help="Secret holding an unencrypted SSH private key with read access")
+    ],
+    revision: Annotated[
+        str | None, typer.Option("--revision", help="Branch, tag, or commit SHA. Defaults to the remote's HEAD.")
+    ] = None,
+    path: Annotated[str | None, typer.Option("--path", help="Directory within the repository to search")] = None,
+    host_key: Annotated[str | None, typer.Option("--host-key", help=HOST_KEY_HELP)] = None,
+    known_hosts_file: Annotated[
+        Path, typer.Option("--known-hosts-file", help=KNOWN_HOSTS_FILE_HELP)
+    ] = DEFAULT_KNOWN_HOSTS_FILE,
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Find every file with a name in a git repository, without creating a fileset.
+
+    The files service scans the host's SSH keys first. The key is trusted when it
+    matches --host-key or --known-hosts-file; otherwise you confirm its fingerprint,
+    as ssh asks on a first connection. The trusted known_hosts line is printed to
+    stderr for the storage of a fileset created afterwards.
+
+        [green]Examples:[/]
+        nemo files git-repositories find-files git@gitlab.example.com:org/repo.git --ssh-key-secret deploy-key --file-name agent.yaml
+        nemo files git-repositories find-files ssh://host:2222/org/repo.git --revision main --ssh-key-secret deploy-key --file-name agent.yaml --host-key SHA256:...
+    """
+    storage: dict[str, Any] = {"type": "git", "url": url, "ssh_key_secret": ssh_key_secret}
+    if revision is not None:
+        storage["revision"] = revision
+    if path is not None:
+        storage["path"] = path
+    body = build_request_body(
+        FindGitRepositoryFilesRequest,
+        {"storage": storage, "file_name": file_name},
+        command_name="files git-repositories find-files",
+    )
+
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+    kwargs = build_kwargs(workspace=workspace, body=body)
+    if handle_code_generation(FilesClient, "find_git_repository_files", kwargs, resolved_output_format, state):
+        return
+
+    files_client = state.typed_client(FilesClient)
+    trusted_storage = trust_git_host(
+        files_client,
+        workspace=workspace,
+        storage=body.storage,
+        file_name=file_name,
+        host_key=host_key,
+        known_hosts_file=known_hosts_file,
+    )
+    typer.echo(f"known_hosts: {trusted_storage.known_hosts}", err=True)
+
+    result = files_client.find_git_repository_files(
+        workspace=workspace, body=body.model_copy(update={"storage": trusted_storage})
+    )
     format_output(
         result,
         is_list=False,

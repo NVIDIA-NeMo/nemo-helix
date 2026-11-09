@@ -1060,3 +1060,115 @@ def test_otlp_logs_create_code_output() -> None:
     assert recorder.requests == []
     assert "client.upload_otlp_logs(" in result.stdout
     assert 'query_params={"artifact_base_path": "runs/1"}' in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# git-repositories
+# ---------------------------------------------------------------------------
+
+GIT_URL = "git@gitlab.example.com:org/repo.git"
+ED25519_LINE = "gitlab.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEd25519KeyBlob"
+RSA_LINE = "gitlab.example.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQRsaKeyBlob"
+HOST_KEYS = {
+    "host_keys": [
+        {"key_type": "ssh-ed25519", "fingerprint": "SHA256:edfingerprint", "known_hosts_line": ED25519_LINE},
+        {"key_type": "ssh-rsa", "fingerprint": "SHA256:rsafingerprint", "known_hosts_line": RSA_LINE},
+    ],
+    "revision": None,
+    "paths": [],
+}
+FOUND = {"host_keys": [], "revision": "a" * 40, "paths": ["agent.yaml", "agents/b/agent.yaml"]}
+
+
+def _find_files_args(*extra: str) -> list[str]:
+    return [
+        "files",
+        "git-repositories",
+        "find-files",
+        GIT_URL,
+        "--ssh-key-secret",
+        "deploy-key",
+        "--file-name",
+        "agent.yaml",
+        *extra,
+    ]
+
+
+def test_find_files_trusts_a_key_from_known_hosts_file_and_searches_with_it(tmp_path: Path) -> None:
+    known_hosts = tmp_path / "known_hosts"
+    known_hosts.write_text(RSA_LINE + "\n")
+    recorder = Recorder([httpx.Response(200, json=HOST_KEYS), httpx.Response(200, json=FOUND)])
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(
+        app, _find_files_args("--revision", "main", "--known-hosts-file", str(known_hosts)), obj=state
+    )
+
+    assert result.exit_code == 0, result.output
+    assert recorder.calls() == [("POST", "/apis/files/v2/workspaces/default/git-repositories/find-files")] * 2
+    scan, search = (json.loads(request.content) for request in recorder.requests)
+    assert scan["storage"]["known_hosts"] == ""
+    assert search["storage"] == {**scan["storage"], "known_hosts": RSA_LINE}
+    assert search["storage"]["revision"] == "main"
+    assert search["file_name"] == "agent.yaml"
+    assert json.loads(result.stdout)["paths"] == FOUND["paths"]
+    assert f"known_hosts: {RSA_LINE}" in result.stderr
+
+
+def test_find_files_host_key_option_pins_the_key(tmp_path: Path) -> None:
+    recorder = Recorder([httpx.Response(200, json=HOST_KEYS), httpx.Response(200, json=FOUND)])
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(
+        app,
+        _find_files_args("--host-key", "SHA256:edfingerprint", "--known-hosts-file", str(tmp_path / "none")),
+        obj=state,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(recorder.last.content)["storage"]["known_hosts"] == ED25519_LINE
+
+
+def test_find_files_unknown_host_without_a_terminal_stops_before_reading(tmp_path: Path) -> None:
+    recorder = Recorder([httpx.Response(200, json=HOST_KEYS)])
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(app, _find_files_args("--known-hosts-file", str(tmp_path / "none")), obj=state)
+
+    assert result.exit_code == 2
+    assert len(recorder.requests) == 1
+    assert "--host-key" in result.stderr
+    assert "SHA256:edfingerprint" in result.stderr
+
+
+def test_find_files_host_outside_the_allowlist_is_a_remote_error(tmp_path: Path) -> None:
+    recorder = Recorder([httpx.Response(400, json={"detail": "ssh://gitlab.example.com is not an allowed host"})])
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(app, _find_files_args("--known-hosts-file", str(tmp_path / "none")), obj=state)
+
+    assert result.exit_code == 3
+    assert "not an allowed host" in result.stderr
+
+
+def test_find_files_rejects_a_non_ssh_url_locally() -> None:
+    recorder = Recorder()
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(
+        app,
+        [
+            "files",
+            "git-repositories",
+            "find-files",
+            "https://example.com/repo.git",
+            "--ssh-key-secret",
+            "deploy-key",
+            "--file-name",
+            "agent.yaml",
+        ],
+        obj=state,
+    )
+
+    assert result.exit_code != 0
+    assert recorder.requests == []

@@ -1627,3 +1627,181 @@ def test_environment_spec_create_via_typed_client_sends_auth_header() -> None:
 
     assert result.exit_code == 0, result.stderr
     assert captured["auth"] == "Bearer tok-xyz"
+
+
+_GIT_URL = "git@gitlab.example.com:org/repo.git"
+_RSA_LINE = "gitlab.example.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQRsaKeyBlob"
+_HOST_KEYS = [{"key_type": "ssh-rsa", "fingerprint": "SHA256:rsafingerprint", "known_hosts_line": _RSA_LINE}]
+_GIT_AGENT_FILES = {
+    "agent.yaml": "config_format: nemo-agents-spec-v1\nname: git-agent\ndefault_harness: hermes\n"
+    "harnesses:\n  hermes:\n    kind: hermes\n",
+    "skills/search.md": "# Search\n",
+}
+_FILES_API = "/apis/files/v2/workspaces/default"
+_GIT_FILESET = {
+    "id": "fileset-1",
+    "name": "git-agent-ethos",
+    "workspace": "default",
+    "description": "",
+    "purpose": "generic",
+    "storage": {"type": "local", "path": "/data/git-agent-ethos"},
+    "metadata": {},
+    "custom_fields": {},
+    "project": "",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+}
+
+
+class _GitPlatform:
+    """Answers the files and agents calls a git registration makes, recording each."""
+
+    def __init__(self, *, paths: Sequence[str] = ("agent.yaml",), register_status: int = 200) -> None:
+        self.paths = list(paths)
+        self.register_status = register_status
+        self.calls: list[tuple[str, str]] = []
+        self.find_bodies: list[dict[str, Any]] = []
+        self.fileset_body: dict[str, Any] | None = None
+        self.agent_body: dict[str, Any] | None = None
+
+    def __call__(self, req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        self.calls.append((req.method, path))
+        if path == f"{_FILES_API}/git-repositories/find-files":
+            body = json.loads(req.content)
+            self.find_bodies.append(body)
+            if not body["storage"]["known_hosts"]:
+                return httpx.Response(200, json={"host_keys": _HOST_KEYS})
+            return httpx.Response(200, json={"revision": "a" * 40, "paths": self.paths})
+        if req.method == "POST" and path == f"{_FILES_API}/filesets":
+            self.fileset_body = json.loads(req.content)
+            return httpx.Response(201, json=_GIT_FILESET)
+        if req.method == "GET" and path == f"{_FILES_API}/filesets/git-agent-ethos/files":
+            files = [
+                {"file_ref": f"default/git-agent-ethos#{name}", "file_url": "", "path": name, "size": len(content)}
+                for name, content in _GIT_AGENT_FILES.items()
+            ]
+            return httpx.Response(200, json={"data": files})
+        if req.method == "GET" and path.startswith(f"{_FILES_API}/filesets/git-agent-ethos/-/"):
+            name = path.removeprefix(f"{_FILES_API}/filesets/git-agent-ethos/-/")
+            return httpx.Response(200, content=_GIT_AGENT_FILES[name].encode())
+        if req.method == "DELETE" and path == f"{_FILES_API}/filesets/git-agent-ethos":
+            return httpx.Response(200, json=_GIT_FILESET)
+        if req.method == "POST" and path.endswith("/agents"):
+            self.agent_body = json.loads(req.content)
+            if self.register_status != 200:
+                return httpx.Response(self.register_status, json={"detail": "Agent 'git-agent' already exists"})
+            return httpx.Response(200, json={"name": "git-agent"})
+        raise AssertionError(f"unexpected {req.method} {path}")
+
+
+def _register_from_git(platform: _GitPlatform, known_hosts: Path, *extra: str) -> tuple[Any, list[set[str]]]:
+    staged: list[set[str]] = []
+
+    async def _validate_platform_agent_config(config_dict: dict[str, Any], *, base_dir: Path):
+        staged.append({path.relative_to(base_dir).as_posix() for path in Path(base_dir).rglob("*") if path.is_file()})
+        return type("ValidationResult", (), {"agent_config": _ValidatedAgentConfig(config_dict)})()
+
+    app = AgentsCLI().get_cli()
+    with (
+        _install_mock_transport(platform),
+        patch("nemo_agents_plugin.fabric.validation.validate_platform_agent_config", _validate_platform_agent_config),
+        patch(
+            "nemo_agents_plugin.cli._upload_ethos_fileset", side_effect=AssertionError("git agents are not uploaded")
+        ),
+    ):
+        result = CliRunner().invoke(
+            app,
+            [
+                "register",
+                "--name",
+                "git-agent",
+                "--from-git",
+                _GIT_URL,
+                "--ssh-key-secret",
+                "deploy-key",
+                "--known-hosts-file",
+                str(known_hosts),
+                *extra,
+            ],
+            obj=_CLIState(base_url="http://test"),
+        )
+    return result, staged
+
+
+def _known_hosts_file(tmp_path: Path) -> Path:
+    path = tmp_path / "known_hosts"
+    path.write_text(_RSA_LINE + "\n")
+    return path
+
+
+def test_register_from_git_creates_a_tracking_fileset_and_validates_its_files(tmp_path: Path) -> None:
+    platform = _GitPlatform()
+
+    result, staged = _register_from_git(platform, _known_hosts_file(tmp_path), "--revision", "main")
+
+    assert result.exit_code == 0, result.stderr
+    assert [body["storage"]["known_hosts"] for body in platform.find_bodies] == ["", _RSA_LINE]
+    assert platform.fileset_body is not None
+    assert platform.fileset_body["name"] == "git-agent-ethos"
+    assert platform.fileset_body["storage"]["known_hosts"] == _RSA_LINE
+    assert platform.fileset_body["storage"]["revision"] == "main"
+    assert staged == [set(_GIT_AGENT_FILES)]
+    assert platform.agent_body is not None
+    assert platform.agent_body["name"] == "git-agent"
+    assert ("DELETE", f"{_FILES_API}/filesets/git-agent-ethos") not in platform.calls
+
+
+def test_register_from_git_lists_agent_directories_without_a_terminal(tmp_path: Path) -> None:
+    platform = _GitPlatform(paths=["agents/a/agent.yaml", "agents/b/agent.yaml"])
+
+    result, _ = _register_from_git(platform, _known_hosts_file(tmp_path), "--path", "src")
+
+    assert result.exit_code == 2
+    assert "src/agents/a\n" in result.stderr
+    assert "src/agents/b" in result.stderr
+    assert platform.fileset_body is None
+
+
+def test_register_from_git_removes_the_fileset_when_registration_fails(tmp_path: Path) -> None:
+    platform = _GitPlatform(register_status=409)
+
+    result, _ = _register_from_git(platform, _known_hosts_file(tmp_path))
+
+    assert result.exit_code == 1
+    assert platform.calls[-1] == ("DELETE", f"{_FILES_API}/filesets/git-agent-ethos")
+
+
+def test_register_from_git_stops_at_an_unknown_host_without_a_terminal(tmp_path: Path) -> None:
+    platform = _GitPlatform()
+
+    result, _ = _register_from_git(platform, tmp_path / "missing")
+
+    assert result.exit_code == 2
+    assert "--host-key" in result.stderr
+    assert len(platform.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("args", "error"),
+    [
+        (["--from-git", _GIT_URL], "--from-git needs --ssh-key-secret"),
+        (["--from-git", _GIT_URL, "--ssh-key-secret", "k", "--agent-config", "{config}"], "cannot be combined"),
+        (["--revision", "main"], "need --from-git"),
+    ],
+)
+def test_register_from_git_option_errors(tmp_path: Path, args: list[str], error: str) -> None:
+    config = tmp_path / "agent.yaml"
+    config.write_text("name: git-agent\n")
+    app = AgentsCLI().get_cli()
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"unexpected {req.method} {req.url.path}")
+
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(
+            app, ["register", "--name", "git-agent", *(arg.format(config=config) for arg in args)]
+        )
+
+    assert result.exit_code == 2
+    assert error in result.stderr
