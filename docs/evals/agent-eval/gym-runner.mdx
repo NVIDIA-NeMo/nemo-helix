@@ -284,7 +284,8 @@ Gym's own artifacts land in a `gym_run/` subdirectory — `rollouts.jsonl`,
 
 To keep files an environment produces, such as generated media or checkpoints, have its servers write
 them to the directory named by the `NHX_GYM_OUTPUT_DIR` environment variable. The runner creates it as
-`gym_run/outputs/` and sets the variable for every Gym process, overriding any value in `env_vars`. A
+`gym_run/outputs/`, refusing to start if it already holds files, and sets the variable to its absolute
+path for every Gym process, overriding any value in `env_vars`. A
 colocated platform job saves it with the rest of `gym_run/` in the `agent-eval-results` result. Only
 regular files are uploaded; symbolic links are skipped. Sandboxed Gym runs don't return this directory.
 

@@ -250,8 +250,11 @@ class GymAgentTaskRunner:
         # detects a `uv run` ancestor and tries to replicate that uv project onto its workers,
         # asserting the project pyproject.toml lives in the driver's cwd — which aborts startup. That
         # hook is wrong for Gym (servers manage their own deps), so disable it for the subprocesses.
-        output_dir = work_dir / OUTPUT_SUBDIR
+        # Absolute because Gym starts each server from its own directory.
+        output_dir = (work_dir / OUTPUT_SUBDIR).resolve()
         output_dir.mkdir(exist_ok=True)
+        if any(output_dir.iterdir()):
+            raise FileExistsError(f"{output_dir} already holds Gym output; give each run a fresh work_dir")
         # Set last so it always points inside the work dir, which a platform job saves with its bundle.
         subprocess_env = {**gym_invocation_env(cfg, resolved_env), OUTPUT_DIR_ENV: str(output_dir)}
 

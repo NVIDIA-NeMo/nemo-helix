@@ -1769,12 +1769,19 @@ def test_gym_servers_get_an_output_dir_inside_the_run_work_dir(monkeypatch: pyte
         raise RuntimeError("stop before start")
 
     monkeypatch.setattr(runner, "_validate_config", capture_env)
+    monkeypatch.chdir(tmp_path)
+    tasks = discover_gym_tasks(EXAMPLE)[:1]
     with pytest.raises(RuntimeError, match="stop before start"):
-        asyncio.run(runner.run_tasks(discover_gym_tasks(EXAMPLE)[:1], AgentEvalRunConfig(work_dir=tmp_path)))
+        asyncio.run(runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=Path("run"))))
 
-    expected = tmp_path / "gym_run" / gym_runtime.OUTPUT_SUBDIR
+    expected = tmp_path.resolve() / "run" / "gym_run" / gym_runtime.OUTPUT_SUBDIR
     assert observed == [str(expected)]
     assert expected.is_dir()
+
+    (expected / "video.mp4").write_text("from a failed run")
+    with pytest.raises(FileExistsError, match="already holds Gym output"):
+        asyncio.run(runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=Path("run"))))
+    assert observed == [str(expected)]
 
 
 def test_custom_secret_resolver_supplies_gym_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
