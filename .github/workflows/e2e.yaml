@@ -812,7 +812,9 @@ jobs:
   web-studio-e2e:
     name: Studio UI E2E tests
     needs: [eligibility]
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is 26.04, which Playwright 1.58 cannot install browsers on.
+    # Return to ubuntu-latest once @playwright/test is bumped to a release that supports it.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: web
