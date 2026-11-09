@@ -39,6 +39,7 @@ from sandboxed_gym.environment_package import (
     CUSTOM_RESOURCES_SERVER_SUBDIR,
     ENVIRONMENT_MANIFEST_FILENAME,
     SERVER_INSTALL_MARKERS,
+    WHEELS_V1_SUBDIR,
     AdapterWheelsV1Package,
     EnvironmentPackage,
     EnvironmentPackageError,
@@ -893,19 +894,85 @@ def _link_wheels_v1_component_venvs(
         )
 
 
-def _prepend_environment_search_root(environment_root: str) -> None:
-    """Search the mounted package, then the image Gym checkout, then operator roots.
+def _stage_packaged_servers_into_gym_checkout(package: EnvironmentPackage) -> bool:
+    """Copy packaged servers onto the writable Gym checkout Gym will actually launch.
+
+    Gym starts a server with ``cd <server dir> && python app.py``. A FileSet directory wins
+    that resolution when it contains ``requirements.txt``, but it sits outside the checkout, so
+    ``../../pyproject.toml`` is missing and the launch looks for ``app.py`` in a directory that
+    is not the tree ``gym_host.sh`` staged under ``/tmp``. Copying the shipped server onto that
+    checkout, then searching the checkout first, runs the packaged ``app.py`` from the tree the
+    other servers already use.
+
+    A directory with no ``app.py`` is a reference to the image's built-in of the same name.
+    Leave that built-in in place.
+    """
+    image_root = _image_gym_search_root()
+    if image_root is None:
+        return False
+    image = Path(image_root)
+    staged: list[str] = []
+    loose_files: list[tuple[str, Path]] = []
+    for kind in (CUSTOM_RESOURCES_SERVER_SUBDIR, CUSTOM_AGENT_SUBDIR):
+        kind_dir = package.root / kind
+        if not kind_dir.is_dir():
+            continue
+        for entry in sorted(kind_dir.iterdir()):
+            # No app.py means a reference to the image built-in. Leave it untouched.
+            # A file next to a server, such as settings.json, is read via ../ from app.py.
+            if not entry.is_dir():
+                if entry.is_file():
+                    loose_files.append((kind, entry))
+                continue
+            if not (entry / "app.py").is_file():
+                continue
+            if not any((entry / marker).is_file() for marker in SERVER_INSTALL_MARKERS):
+                continue
+            destination = image / kind / entry.name
+            if destination.exists():
+                shutil.rmtree(destination)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(entry, destination, symlinks=False)
+            staged.append(f"{kind}/{entry.name}")
+    if not staged:
+        return False
+    for kind, entry in loose_files:
+        dest = image / kind / entry.name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(entry, dest)
+    # app.py runs from the checkout, so ../../shared/settings.json has to land there too.
+    # Server trees are already copied. Wheels stay on the package mount. nemo_gym is the library
+    # the host imports from this checkout, so a package copy must not replace it.
+    for entry in package.root.iterdir():
+        if entry.name in {WHEELS_V1_SUBDIR, CUSTOM_RESOURCES_SERVER_SUBDIR, CUSTOM_AGENT_SUBDIR, "nemo_gym"}:
+            continue
+        dest = image / entry.name
+        if entry.is_dir():
+            shutil.copytree(entry, dest, symlinks=False, dirs_exist_ok=True)
+        elif entry.is_file():
+            shutil.copy2(entry, dest)
+    print(f"gym-host: staged packaged servers onto {image}: {', '.join(staged)}", flush=True)
+    return True
+
+
+def _prepend_environment_search_root(environment_root: str, *, checkout_first: bool = False) -> None:
+    """Search the image Gym checkout and the mounted package, then operator roots.
 
     Gym resolves a server directory from ``NEMO_GYM_EXTRA_ROOTS`` before the install root.
     The library wheel is first on ``PYTHONPATH``, so that install root has no server trees.
     Servers the package does not ship, such as ``simple_agent`` and ``vllm_model``, resolve
-    from the image checkout. The package stays first so a server it does ship wins.
+    from the image checkout. The package stays first until its servers have been copied onto
+    that checkout; after that the checkout has to win, because that is the tree ``python app.py``
+    can run.
     """
     existing = [root for root in os.environ.get(NEMO_GYM_EXTRA_ROOTS_ENV_KEY, "").split(os.pathsep) if root]
     image_root = _image_gym_search_root()
-    roots = [environment_root]
-    if image_root:
-        roots.append(image_root)
+    if checkout_first and image_root:
+        roots = [image_root, environment_root]
+    else:
+        roots = [environment_root]
+        if image_root:
+            roots.append(image_root)
     roots.extend(existing)
     deduplicated = list(dict.fromkeys(roots))
     os.environ[NEMO_GYM_EXTRA_ROOTS_ENV_KEY] = os.pathsep.join(deduplicated)
@@ -1027,9 +1094,10 @@ def bootstrap_gym_host() -> tuple[Any, Any, Any]:
     # anything from the mounted package.
     global_config = _compose_gym_config_with_environment_package(global_config, environment_package)
     if environment_package is not None:
-        # Put the mounted source ahead of image roots so Gym imports the components
-        # described by this package rather than same-named built-ins.
-        _prepend_environment_search_root(str(environment_package.root))
+        # Copy shipped servers onto the writable checkout, then search that checkout first.
+        # A FileSet directory that merely holds requirements.txt is not a tree Gym can launch.
+        checkout_first = _stage_packaged_servers_into_gym_checkout(environment_package)
+        _prepend_environment_search_root(str(environment_package.root), checkout_first=checkout_first)
     _install_wheels_v1_dependencies(
         environment_package,
         os.environ.get("NHX_WORK_PATH", "/job/work"),

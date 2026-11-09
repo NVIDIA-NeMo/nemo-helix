@@ -143,7 +143,10 @@ describe('VirtualModelsDataView', () => {
 
     await screen.findByText('my-vm');
 
-    await user.click(screen.getByRole('button', { name: 'Row Actions' }));
+    await user.click(screen.getByRole('button', { name: 'Open quick actions menu' }));
+    const items = await screen.findAllByTestId('quick-actions-menu-item');
+    expect(items.map((item) => item.textContent)).toEqual(['View', 'Chat', 'Delete']);
+    expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
     await user.click(await screen.findByText('Delete'));
     await user.click(await screen.findByRole('button', { name: 'Delete' }));
 
@@ -157,7 +160,7 @@ describe('VirtualModelsDataView', () => {
 
     await screen.findByText('my-vm');
 
-    await user.click(screen.getByRole('button', { name: 'Row Actions' }));
+    await user.click(screen.getByRole('button', { name: 'Open quick actions menu' }));
     await user.click(await screen.findByText('Chat'));
 
     await waitFor(() =>

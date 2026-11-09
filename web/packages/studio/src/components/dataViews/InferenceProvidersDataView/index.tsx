@@ -20,6 +20,7 @@ import {
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useDeferredUnmount } from '@nemo/common/src/hooks/useDeferredUnmount';
@@ -36,7 +37,7 @@ import type {
   ModelProviderFilter,
   ModelProviderSort,
 } from '@nemo/sdk/generated/platform/schema';
-import { type DropdownEntry, Stack, Text } from '@nvidia/foundations-react-core';
+import { Stack, Text } from '@nvidia/foundations-react-core';
 import { EditInferenceProviderModal } from '@studio/routes/InferenceProvidersListRoute/EditInferenceProviderModal';
 import { InferenceProviderDetailsSidePanel } from '@studio/routes/InferenceProvidersListRoute/InferenceProviderDetailsSidePanel';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
@@ -139,7 +140,9 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
   );
 
   const handleDeleteProvider = async () => {
-    if (!modalProvider) return false;
+    if (!modalProvider) {
+      return false;
+    }
     try {
       await deleteProviderMutation.mutateAsync({
         workspace,
@@ -201,28 +204,25 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
         rowActionsColumn({
           size: ROW_ACTIONS_COLUMN_SIZE,
           enableResizing: false,
-          cellProps: {
-            attributes: {
-              DropdownContent: { className: 'min-w-[156px]' },
-            },
-          },
-          rowActions: (provider: ProviderWithId): DropdownEntry[] => [
-            {
-              children: 'Edit',
-              onSelect: () => {
-                setModalProvider(provider);
-                setModalOpen('edit');
-              },
-            },
-            {
-              children: 'Delete',
-              danger: true,
-              onSelect: () => {
-                setModalProvider(provider);
-                setModalOpen('delete');
-              },
-            },
-          ],
+          cell: ({ row: { original: provider } }) => (
+            <QuickActionsMenuRoot
+              actions={[
+                {
+                  label: 'Edit',
+                  onSelect: () => {
+                    setModalProvider(provider);
+                    setModalOpen('edit');
+                  },
+                },
+              ]}
+              deleteAction={{
+                onSelect: () => {
+                  setModalProvider(provider);
+                  setModalOpen('delete');
+                },
+              }}
+            />
+          ),
         }),
       ],
       []

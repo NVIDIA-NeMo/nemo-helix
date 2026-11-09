@@ -27,7 +27,10 @@ from nemo_scaled_evals_plugin.jobs.specs import BenchmarkArchiveBuildSpec, Evalu
 from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
 from scaled_evals.api import entity_store
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
-from scaled_evals.api.evaluation_store import DISPATCH_STATE_COLUMNS, EvaluationStore
+from scaled_evals.api.evaluation_store import (
+    DISPATCH_STATE_COLUMNS,
+    EvaluationWorkerRepository,
+)
 from scaled_evals.api.settings import settings
 from scaled_evals.dispatch.worker import _retry_delay_seconds, evaluation_run_budget_seconds
 
@@ -140,7 +143,7 @@ class EvaluationSubmitter:
         return (await self.jobs.create_job(workspace=settings.platform_jobs_workspace, body=request)).data()
 
     def _claim(self, evaluation_id: str | None) -> dict[str, Any] | None:
-        return EvaluationStore().claim_next(
+        return EvaluationWorkerRepository().claim_next(
             claim_timeout=TaskBuildWorker.claim_timeout,
             worker_id=self.worker_id,
             cluster_slot_limit=settings.control_plane_cluster_run_limit,
@@ -149,13 +152,13 @@ class EvaluationSubmitter:
         )
 
     def _load(self, evaluation_id: str) -> dict[str, Any] | None:
-        return EvaluationStore().load_for_dispatch(evaluation_id)
+        return EvaluationWorkerRepository().load_for_dispatch(evaluation_id)
 
     def _write_inputs(self, evaluation_id: str, execution_number: int, name: str) -> None:
         """Store the execution's immutable launch inputs where its Job reads them."""
         if self.entities is None:
             return
-        row = EvaluationStore().load_for_dispatch(evaluation_id)
+        row = EvaluationWorkerRepository().load_for_dispatch(evaluation_id)
         if row is None:
             raise RuntimeError(f"evaluation not found: {evaluation_id}")
         inputs = {key: value for key, value in row.items() if key not in DISPATCH_STATE_COLUMNS}
@@ -174,10 +177,12 @@ class EvaluationSubmitter:
             pass
 
     def _record(self, evaluation_id: str, execution_number: int, name: str, uid: str) -> None:
-        EvaluationStore().record_dispatch_job(evaluation_id, execution_number=execution_number, name=name, uid=uid)
+        EvaluationWorkerRepository().record_dispatch_job(
+            evaluation_id, execution_number=execution_number, name=name, uid=uid
+        )
 
     def _retry(self, evaluation_id: str, execution_number: int) -> None:
-        EvaluationStore().schedule_retry(
+        EvaluationWorkerRepository().schedule_retry(
             evaluation_id,
             execution_number=execution_number,
             failure_code="HelixJobSubmissionError",

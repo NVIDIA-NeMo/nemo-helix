@@ -8,12 +8,17 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
-from contextlib import asynccontextmanager
+from concurrent.futures import CancelledError
+from contextlib import asynccontextmanager, closing
 from dataclasses import dataclass, field
+from io import BufferedReader, RawIOBase
 from typing import Any, AsyncIterator, NoReturn
 
 import aioboto3
 import aiohttp
+import boto3
+from anyio import create_task_group, from_thread, to_thread
+from boto3.s3.transfer import TransferConfig
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 from nhx.common.files.storage_config import S3StorageConfig
@@ -23,7 +28,7 @@ from nhx.core.files.app.backends.base import (
     StorageImpl,
 )
 from nhx.core.files.app.http_session import get_http_session
-from nhx.core.files.app.streaming import download_url_streaming, upload_url_streaming
+from nhx.core.files.app.streaming import download_url_streaming
 from nhx.core.files.exceptions import (
     NotFoundError,
     StorageAccessError,
@@ -31,6 +36,7 @@ from nhx.core.files.exceptions import (
     StorageConfigError,
     StorageUnavailableError,
 )
+from s3transfer.utils import ChunksizeAdjuster
 from types_aiobotocore_s3 import S3Client
 
 logger = logging.getLogger(__name__)
@@ -64,6 +70,9 @@ def _raise_for_s3_error(error: ClientError, context: str = "") -> NoReturn:
         "AccessDenied",
         "InvalidAccessKeyId",
         "SignatureDoesNotMatch",
+        "ExpiredToken",
+        "InvalidToken",
+        "InvalidSecurity",
         "403",
     ):
         raise S3AccessError(f"Access denied{ctx}: {error_message}")
@@ -78,6 +87,41 @@ def _raise_for_s3_error(error: ClientError, context: str = "") -> NoReturn:
 
     # Default to generic backend error
     raise S3BackendError(f"S3 error{ctx}: {error_message}")
+
+
+class _UploadStream(RawIOBase):
+    """Expose the async request stream to boto3's non-threaded transfer manager."""
+
+    def __init__(self, stream: AsyncIterator[bytes], content_length: int):
+        """Track the declared length and current fragment without buffering the request."""
+        self.stream = stream
+        self.remaining = content_length
+        self.pending = memoryview(b"")
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int:
+        """Read on an AnyIO worker, preserving partial chunks and checking the declared length."""
+        from_thread.check_cancelled()
+        while not self.pending:
+            try:
+                chunk = from_thread.run(anext, self.stream, None)
+            except CancelledError:
+                from_thread.check_cancelled()
+                raise
+            if chunk is None:
+                if self.remaining:
+                    raise ValueError("Upload body does not match Content-Length")
+                return 0
+            self.remaining -= len(chunk)
+            if self.remaining < 0:
+                raise ValueError("Upload body exceeds Content-Length")
+            self.pending = memoryview(chunk)
+        size = min(len(buffer), len(self.pending))
+        buffer[:size] = self.pending[:size]
+        self.pending = self.pending[size:]
+        return size
 
 
 def _add_content_md5_header(params: dict[str, Any], **kwargs: Any) -> None:
@@ -250,32 +294,33 @@ class S3StorageImpl(StorageImpl):
         fstream: AsyncIterator[bytes],
         content_length: int | None = None,
     ) -> FileInfo:
-        """Upload a file to S3 using a presigned URL with aiohttp streaming.
-
-        Args:
-            path: The path within the storage to upload to
-            fstream: Async iterator of bytes to upload
-            content_length: Required - the total size of the upload. S3 presigned
-                URLs require Content-Length header for PUT requests.
-        """
+        """Stream a file using boto3's managed PUT/multipart transfer."""
         if content_length is None:
             raise ValueError("content_length is required for S3 uploads")
+        if content_length < 0:
+            raise ValueError("content_length must be non-negative")
 
-        full_key = self._full_key(path)
+        def upload() -> None:
+            """Keep SDK calls and synchronous stream reads on the same AnyIO worker."""
+            # Serial classic transfers keep reads on this AnyIO worker and memory bounded.
+            transfer = TransferConfig(use_threads=False, preferred_transfer_client="classic")
+            transfer.multipart_chunksize = ChunksizeAdjuster().adjust_chunksize(
+                transfer.multipart_chunksize, content_length
+            )
+            with (
+                closing(boto3.Session().client("s3", **self._get_client_kwargs())) as client,
+                BufferedReader(_UploadStream(fstream, content_length)) as source,
+            ):
+                client.upload_fileobj(source, self.config.bucket, self._full_key(path), Config=transfer)
 
-        async with self._client() as client:
-            try:
-                url = await client.generate_presigned_url(
-                    "put_object",
-                    Params={"Bucket": self.config.bucket, "Key": full_key},
-                    ExpiresIn=3600,
-                )
-            except ClientError as e:
-                _raise_for_s3_error(e, f"generating presigned URL for {path}")
-
-        headers = {"Content-Length": str(content_length)}
-        await upload_url_streaming(url, fstream, headers=headers)
-
+        try:
+            async with create_task_group() as group:
+                group.start_soon(to_thread.run_sync, upload)
+        except ExceptionGroup as errors:
+            error = errors.exceptions[0]  # Only the upload worker can fail in this group.
+            if isinstance(error, ClientError):
+                _raise_for_s3_error(error, f"uploading {path}")
+            raise error from None
         return FileInfo(path=path, size=content_length)
 
     async def validate_storage(self):

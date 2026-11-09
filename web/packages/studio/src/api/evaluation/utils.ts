@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
+import { agentNameForTarget } from '@studio/api/evaluation/agentTarget';
 import { type EvalRunOutcome, evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import {
   getAgentEvaluationDetailRoute,
   getEvaluationResultDetailsRoute,
 } from '@studio/routes/utils';
+import { asRecord } from '@studio/util/guards';
 
 export type EvalJobKind = 'task' | 'dataset';
 
@@ -26,9 +27,6 @@ export interface EvalJobRow {
   outcome: EvalRunOutcome | null;
 }
 
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  isPlainObject(value) ? value : undefined;
-
 const asNonEmptyString = (value: unknown): string | undefined =>
   typeof value === 'string' && value.length > 0 ? value : undefined;
 
@@ -37,21 +35,8 @@ const specOf = (job: HelixJobResponse): Record<string, unknown> => job.spec ?? {
 export const evalJobKind = (job: HelixJobResponse): EvalJobKind =>
   specOf(job).dataset !== undefined ? 'dataset' : 'task';
 
-const stripWorkspacePrefix = (name: string, workspace?: string): string => {
-  const prefix = workspace ? `${workspace}/` : '';
-  return prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name;
-};
-
-export const targetNameForEvalJob = (job: HelixJobResponse): string | null => {
-  const target = asRecord(specOf(job).target);
-  if (!target) return null;
-  const name =
-    target.kind === 'agent'
-      ? asNonEmptyString(asRecord(target.agent)?.name)
-      : asNonEmptyString(target.name);
-  if (!name) return null;
-  return stripWorkspacePrefix(name, job.workspace);
-};
+export const targetNameForEvalJob = (job: HelixJobResponse): string | null =>
+  agentNameForTarget(specOf(job).target, job.workspace);
 
 export const evalJobConfigLabel = (job: HelixJobResponse): string | null => {
   const spec = specOf(job);

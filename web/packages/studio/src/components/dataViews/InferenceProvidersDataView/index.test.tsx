@@ -121,7 +121,10 @@ describe('InferenceProvidersDataView', () => {
     renderDataView('/workspaces/default/inference-providers');
 
     await screen.findByText(provider.name);
-    await user.click(screen.getByRole('button', { name: 'Row Actions' }));
+    await user.click(screen.getByRole('button', { name: 'Open quick actions menu' }));
+    const items = await screen.findAllByTestId('quick-actions-menu-item');
+    expect(items.map((item) => item.textContent)).toEqual(['Edit', 'Delete']);
+    expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
     await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
 
     expect(
@@ -141,7 +144,7 @@ describe('InferenceProvidersDataView', () => {
     renderDataView('/workspaces/default/inference-providers');
 
     await screen.findByText(provider.name);
-    await user.click(screen.getByRole('button', { name: 'Row Actions' }));
+    await user.click(screen.getByRole('button', { name: 'Open quick actions menu' }));
     await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
     await user.click(await screen.findByRole('button', { name: 'Delete' }));
 

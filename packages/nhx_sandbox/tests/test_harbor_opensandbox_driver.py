@@ -21,6 +21,8 @@ from nhx_sandbox.core.errors import ExecInterrupted
 from nhx_sandbox.harbor_opensandbox_driver import (
     CREATE_ATTEMPT_METADATA_KEY,
     CREATE_ATTEMPTS,
+    EXECD_ACCESS_TOKEN_ENV,
+    EXECD_ACCESS_TOKEN_HEADER,
     Connection,
     CreateRequest,
     OpenSandboxDriver,
@@ -72,7 +74,7 @@ async def test_create_sends_the_request_and_labels_the_attempt(server: Server) -
 
     sent = server.creates[-1]
     assert sent["image"] == "registry.example/hello:1"
-    assert sent["env"] == {"A": "1"}
+    assert sent["env"] == {"A": "1", EXECD_ACCESS_TOKEN_ENV: sent["env"][EXECD_ACCESS_TOKEN_ENV]}
     assert sent["resource"] == {"cpu": "2"}
     assert sent["network_policy"].payload == {"defaultAction": "deny", "egress": []}
     assert sent["skip_health_check"] is True
@@ -81,6 +83,45 @@ async def test_create_sends_the_request_and_labels_the_attempt(server: Server) -
     assert sent["metadata"]["owner"] == "eval-1"
     assert len(sent["metadata"][CREATE_ATTEMPT_METADATA_KEY]) == 32
     assert server.live() == {sandbox.id}
+
+
+async def test_create_locks_execd_to_a_token_only_the_sandboxs_own_client_sends(server: Server) -> None:
+    """execd gets a token in its environment, and the sandbox's connection sends it on every execd call."""
+    await _driver(server).create(_request())
+
+    sent = server.creates[-1]
+    token = sent["env"][EXECD_ACCESS_TOKEN_ENV]
+    assert len(token) >= 32
+    assert sent["connection_config"].headers == {EXECD_ACCESS_TOKEN_HEADER: token}
+
+
+async def test_every_create_attempt_gets_its_own_execd_token(server: Server) -> None:
+    """A retried create and a second sandbox never share a token, so one sandbox's token opens no other."""
+    server.create_failures.append(SandboxApiException("lost response"))
+    driver = _driver(server)
+
+    await driver.create(_request())
+    await driver.create(_request())
+
+    tokens = [create["env"][EXECD_ACCESS_TOKEN_ENV] for create in server.creates]
+    assert len(tokens) == 3
+    assert len(set(tokens)) == 3
+
+
+async def test_a_task_env_cannot_choose_the_execd_token(server: Server) -> None:
+    """A token already in the request's env is replaced, so whoever wrote the env can't know execd's token."""
+    await _driver(server).create(_request(env={"A": "1", EXECD_ACCESS_TOKEN_ENV: "chosen-by-the-task"}))
+
+    sent = server.creates[-1]
+    assert sent["env"][EXECD_ACCESS_TOKEN_ENV] != "chosen-by-the-task"
+    assert sent["connection_config"].headers == {EXECD_ACCESS_TOKEN_HEADER: sent["env"][EXECD_ACCESS_TOKEN_ENV]}
+
+
+async def test_server_only_calls_send_no_execd_token(server: Server) -> None:
+    """Listing and killing sandboxes talk only to the server, so their connection carries no sandbox's token."""
+    config = _driver(server).connection_config()
+
+    assert EXECD_ACCESS_TOKEN_HEADER not in getattr(config, "headers", {})
 
 
 async def test_create_sends_an_entrypoint_and_extensions(server: Server) -> None:
@@ -491,7 +532,7 @@ def test_connection_config_keeps_the_sdk_timeout_when_unset(server: Server) -> N
     config = driver.connection_config()
 
     assert not hasattr(config, "request_timeout")
-    assert (config.domain, config.api_key, config.protocol, config.use_server_proxy) == ("d", "k", "https", False)
+    assert (config.domain, config.api_key, config.protocol, config.use_server_proxy) == ("d", "k", "https", True)
 
 
 def test_default_backoff_matches_harbor() -> None:

@@ -13,7 +13,7 @@ compare-and-swap on the evaluation itself.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from nemo_helix_plugin.entity import NemoEntity
 from pydantic import BaseModel, Field, model_validator
@@ -235,11 +235,15 @@ class ScaledEvalsBenchmarkArchive(BaseModel):
     cleanup_checked_at: datetime | None = None
 
 
+BenchmarkRunInitializationStatus = Literal["created", "complete"]
+
+
 class ScaledEvalsBenchmarkRun(NemoEntity, entity_type="scaled_evals_benchmark_run"):
     """A benchmark run's identity and config, named by its run id.
 
-    Status, reward and the per-task breakdown are derived from the member
-    evaluations on read, never stored here.
+    Initialization tracks whether member creation has finished. Overall status,
+    reward and the per-task breakdown are derived on read from that marker and
+    the member evaluations.
     """
 
     owner_id: str | None = None
@@ -264,6 +268,8 @@ class ScaledEvalsBenchmarkRun(NemoEntity, entity_type="scaled_evals_benchmark_ru
     parallelism: int
     max_concurrent_members: int | None = None
     visibility: str = "private"
+    # Older records predate initialization tracking and retain their existing behavior.
+    initialization_status: BenchmarkRunInitializationStatus = "complete"
     cancelled_at: datetime | None = None
     deleted_at: datetime | None = None
     archive: ScaledEvalsBenchmarkArchive | None = None

@@ -303,8 +303,10 @@ class HarborAgentTaskRunner:
     for that variable, so a value-only :class:`~nhx_evals_sdk.resolver_protocols.SecretResolver`
     cannot be used here.
 
-    ``job_scope`` (native mode) is entered around each Harbor job's ``run()``, with the
+    ``job_scopes`` (native mode) are entered in order around each Harbor job's ``run()``, with the
     ``harbor.job.Job`` already planned: its trials are named and configured, and none has started.
+    Each scope does its own setup and cleanup, so one caller can, for example, issue trial credentials
+    while another reports trial progress.
     """
 
     def __init__(
@@ -317,7 +319,7 @@ class HarborAgentTaskRunner:
         run_job: RunJob | None = None,
         reward_key: str = DEFAULT_REWARD_KEY,
         secret_resolver: EnvSecretSource | None = None,
-        job_scope: HarborJobScope | None = None,
+        job_scopes: Sequence[HarborJobScope] = (),
     ) -> None:
         if config is None and job_dir is None:
             raise ValueError("provide either a HarborRuntimeConfig or an explicit job_dir")
@@ -326,7 +328,7 @@ class HarborAgentTaskRunner:
         self._task_names = task_names
         self._job_dir = Path(job_dir) if job_dir is not None else None
         self._run_job = run_job
-        self._job_scope = job_scope
+        self._job_scopes = tuple(job_scopes)
         self._secret_resolver = secret_resolver if secret_resolver is not None else LocalSecretResolver()
         if config is not None and config.env_secrets and not isinstance(self._secret_resolver, EnvSecretSource):
             raise TypeError(
@@ -456,7 +458,7 @@ class HarborAgentTaskRunner:
                     # JobConfig comparison can therefore match.
                     force_rerun=(self._config.force_rerun or stale),
                     env_templates=env_templates,
-                    job_scope=self._job_scope,
+                    job_scopes=self._job_scopes,
                 )
                 # Fingerprint the inputs *before* running and confirm they are
                 # unchanged afterwards. Stamping only the post-run state would label
@@ -1009,7 +1011,7 @@ def _build_native_job(
     job_name: str | None = None,
     force_rerun: bool | None = None,
     env_templates: Mapping[str, str],
-    job_scope: HarborJobScope | None = None,
+    job_scopes: Sequence[HarborJobScope] = (),
 ) -> tuple[Path, RunJob]:
     """Build a Harbor ``JobConfig`` from ``config`` and return ``(job_dir, run_job)``.
 
@@ -1117,7 +1119,9 @@ def _build_native_job(
             async def _attempt() -> None:
                 job = await _create_harbor_job(job_config)
                 setup_slots.attach(job)
-                async with job_scope(job) if job_scope is not None else contextlib.nullcontext():
+                async with contextlib.AsyncExitStack() as scopes:
+                    for scope in job_scopes:
+                        await scopes.enter_async_context(scope(job))
                     await job.run()
 
             try:

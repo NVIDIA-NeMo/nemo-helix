@@ -1,0 +1,1 @@
+image-only==1

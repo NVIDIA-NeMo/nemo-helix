@@ -25,12 +25,14 @@ from python_package_versions import assert_python_package_min_versions
 BASE_FILE_REMOVALS = (
     Path("/smoke_test/removals/files/base/pytorch-ngc-common.txt"),
     Path("/smoke_test/removals/files/base/nhx-customizer-tasks.txt"),
+    Path("/smoke_test/removals/files/final/training-fsspec.txt"),
 )
 DALI_FILE_REMOVALS = {
     "/usr/local/lib/python3.12/dist-packages/nvidia/dali",
     "/usr/local/lib/python3.12/dist-packages/nvidia_dali_cuda130-*.dist-info",
 }
 MINIMUM_PYTHON_PACKAGE_VERSIONS = {
+    "fsspec": "2026.6.0",
     "mamba-ssm": "2.3.0",
     "notebook": "7.6.3",
     "transformers": "5.12.1",
@@ -84,6 +86,13 @@ def test_typed_client_resources_importable():
     with NemoClient(base_url="http://127.0.0.1:1") as client:
         client.files
         client.models
+
+
+@pytest.mark.smoke_nhx_customizer_tasks
+def test_stale_system_fsspec_removed():
+    patterns = [pattern for pattern in read_file_patterns(*BASE_FILE_REMOVALS) if "/fsspec" in pattern]
+    assert len(patterns) == 2
+    assert_file_patterns_absent(patterns)
 
 
 @pytest.mark.smoke_nhx_customizer_tasks
