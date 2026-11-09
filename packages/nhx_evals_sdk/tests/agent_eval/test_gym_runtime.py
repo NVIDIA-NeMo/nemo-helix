@@ -1799,8 +1799,30 @@ def test_early_exit_shortens_a_long_line_without_losing_the_exception(tmp_path: 
     first_error = _first_error_section(report, tmp_path)
 
     assert f"(mcqa) {exception}" in first_error
-    assert "more characters)" in first_error
-    assert all(len(line) < FIRST_ERROR_LINE_MAX_CHARS + 40 for line in first_error.splitlines())
+    assert "characters omitted)" in first_error
+    assert all(len(line) <= FIRST_ERROR_LINE_MAX_CHARS for line in first_error.splitlines())
+
+
+def test_early_exit_keeps_both_ends_of_a_long_exception_line(tmp_path: Path) -> None:
+    # The part of an exception line that explains it often comes after a long value.
+    cause = "because the policy server refused the connection"
+    exception = f"RuntimeError: startup failed for {'y' * 5_000} {cause}"
+    report = [
+        "(mcqa) Traceback (most recent call last):",
+        '(mcqa)   File "/app/server.py", line 3, in start',
+        f"(mcqa) {exception}",
+    ]
+
+    first_error = _first_error_section(report, tmp_path)
+    exception_line = first_error.strip().splitlines()[-1]
+
+    assert exception_line.startswith("(mcqa) RuntimeError: startup failed for ")
+    assert exception_line.endswith(cause)
+    assert len(exception_line) <= FIRST_ERROR_LINE_MAX_CHARS
+    omitted = int(exception_line.split(" ... (", 1)[1].split(" characters omitted", 1)[0])
+    assert omitted == len(f"(mcqa) {exception}") - len(
+        exception_line.replace(f" ... ({omitted} characters omitted) ... ", "")
+    )
 
 
 def test_early_exit_ignores_gym_deprecation_text_that_mentions_errors(tmp_path: Path) -> None:

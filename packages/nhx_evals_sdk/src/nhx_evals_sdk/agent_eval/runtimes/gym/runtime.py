@@ -494,9 +494,20 @@ def _first_error_block(lines: Sequence[str], start: int, end: int) -> str:
 
 
 def _clip_line(line: str) -> str:
+    """Cut ``line`` to :data:`FIRST_ERROR_LINE_MAX_CHARS`, keeping both ends.
+
+    An exception line often ends with the part that explains it, after a long value, so the end is
+    kept as well as the start.
+    """
     if len(line) <= FIRST_ERROR_LINE_MAX_CHARS:
         return line
-    return f"{line[:FIRST_ERROR_LINE_MAX_CHARS]}... ({len(line) - FIRST_ERROR_LINE_MAX_CHARS} more characters)"
+    # The marker names the count, so size it for the largest count this line could report.
+    marker_width = len(f" ... ({len(line)} characters omitted) ... ")
+    kept = FIRST_ERROR_LINE_MAX_CHARS - marker_width
+    head = kept - kept // 3
+    tail = kept // 3
+    omitted = len(line) - head - tail
+    return f"{line[:head]} ... ({omitted} characters omitted) ... {line[-tail:]}"
 
 
 def startup_output_excerpt(env_log_text: str) -> str:
