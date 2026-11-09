@@ -5,13 +5,14 @@
 
 import logging
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
     HTTPException,
+    Path,
     Query,
     Request,
     Response,
@@ -20,6 +21,7 @@ from fastapi.responses import FileResponse
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.entities.base import ID_PATTERN
 from nhx.common.api.common import ErrorResponse, GenericSortField, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
@@ -272,7 +274,7 @@ class FilesContext(BaseContext):
     status_code=HTTP_200_OK,
 )
 async def create_fileset(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     create_request: CreateFilesetRequest,
     background_tasks: BackgroundTasks,
     entity_store: EntityClient = Depends(get_entity_client),

@@ -5,9 +5,10 @@ import logging
 import math
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from fastapi.responses import JSONResponse
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
+from nemo_helix_plugin.entities.base import ID_PATTERN
 from nhx.common.api.common import ErrorResponse, Page, PaginationData
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.config import HelixConfig
@@ -70,7 +71,7 @@ def _require_default_ngc_api_key(platform_config: HelixConfig, workspace: str, n
     response_model=schemas.HelixSecretResponse,
 )
 async def create_secret(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     create_request: schemas.HelixSecretCreateRequest,
     entity_store: EntityClient = Depends(get_entity_client),
     platform_config: HelixConfig = Depends(get_platform_config),

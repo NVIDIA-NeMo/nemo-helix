@@ -11,6 +11,9 @@ from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
 from nemo_evals.jobs.agent_spec import AgentEvalSpec
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+#: Files required to aggregate every intermediate task bundle.
+TASK_BUNDLE_FILES = ("trials.jsonl", "scores.jsonl", "metadata.json")
+
 
 class RunIntakePublication(BaseModel):
     """Where the run publishes its trials: one Intake Evaluation, named after the run, in this Experiment.

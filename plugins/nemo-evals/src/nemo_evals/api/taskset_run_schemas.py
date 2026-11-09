@@ -6,6 +6,7 @@
 import hashlib
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Literal, Self
 
 from nemo_evals.api.fields import TasksetRef
@@ -20,6 +21,8 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunPhase,
 )
 from nemo_evals.taskset_runs.progress import TasksetRunProgress
+from nemo_evals.taskset_runs.specs import TASK_BUNDLE_FILES
+from nemo_helix_plugin.jobs.ignore_patterns import matches_ignore_patterns
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -206,6 +209,20 @@ class TasksetRunInput(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _require_aggregation_inputs(self) -> Self:
+        """Reject exclusions that prevent aggregation before scheduling task Jobs."""
+        excluded = [
+            name
+            for name in TASK_BUNDLE_FILES
+            if matches_ignore_patterns(Path(name), self.spec.result_ignore_patterns or [])
+        ]
+        if excluded:
+            raise ValueError(
+                "spec.result_ignore_patterns excludes required Kubernetes aggregation inputs: " + ", ".join(excluded)
+            )
+        return self
+
+    @model_validator(mode="after")
     def _require_serial_trials(self) -> Self:
         """Check that this request leaves Harbor trial concurrency to the task Job.
 
@@ -232,13 +249,16 @@ def request_digest(req: TasksetRunInput) -> str:
         req: Validated caller request, with model defaults filled.
 
     Returns:
-        SHA-256 of compact JSON with sorted keys and only idempotency_key excluded. An omitted
-        ``publication``, and a Harbor target's unset ``closed_book``, are left out too, so requests from before
-        those fields existed keep their digest.
+        SHA-256 of compact JSON with sorted keys, excluding idempotency_key. An omitted
+        ``publication``, a Harbor target's unset ``closed_book``, and empty result-retention
+        settings are left out too, so requests from before those fields existed keep their digest.
     """
     exclude = {"idempotency_key"} if req.publication is not None else {"idempotency_key", "publication"}
     body = req.model_dump(mode="json", exclude=exclude)
-    target = body["spec"].get("target")
+    spec = body["spec"]
+    if not req.spec.result_ignore_patterns:
+        spec.pop("result_ignore_patterns", None)
+    target = spec.get("target")
     if isinstance(req.spec.target, HarborRunnerTarget) and not req.spec.target.closed_book and isinstance(target, dict):
         target.pop("closed_book", None)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))

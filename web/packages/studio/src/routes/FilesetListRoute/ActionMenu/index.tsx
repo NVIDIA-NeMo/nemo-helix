@@ -3,18 +3,11 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { logger } from '@nemo/common/src/utils/logger';
-import { MoreVert } from '@nemo/icons/icons';
 import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
-import {
-  Button,
-  DropdownContent,
-  DropdownItem,
-  DropdownRoot,
-  DropdownTrigger,
-} from '@nvidia/foundations-react-core';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
@@ -73,21 +66,15 @@ export const ActionMenu: FC<ActionMenuProps> = ({
 
   return (
     <>
-      <DropdownRoot>
-        <DropdownTrigger asChild showChevron={false} data-testid="quick-actions-menu-trigger">
-          <Button kind="tertiary" aria-label="Open dataset actions menu">
-            <MoreVert />
-          </Button>
-        </DropdownTrigger>
-        <DropdownContent align="end" className="w-[180px]">
-          <DropdownItem onClick={() => onNavigateToDetails(dataset)}>View</DropdownItem>
-          <DropdownItem onClick={() => setModalOpen('edit')}>Edit</DropdownItem>
-          <DropdownItem onClick={() => setModalOpen('copy')}>Copy to New Fileset</DropdownItem>
-          <DropdownItem onClick={() => setModalOpen('delete')} danger>
-            Delete
-          </DropdownItem>
-        </DropdownContent>
-      </DropdownRoot>
+      <QuickActionsMenuRoot
+        ariaLabel="Open dataset actions menu"
+        actions={[
+          { label: 'View', onSelect: () => onNavigateToDetails(dataset) },
+          { label: 'Edit', onSelect: () => setModalOpen('edit') },
+          { label: 'Copy to New Fileset', onSelect: () => setModalOpen('copy') },
+        ]}
+        deleteAction={{ onSelect: () => setModalOpen('delete') }}
+      />
 
       {/* Edit Modal */}
       {modalOpen === 'edit' && (

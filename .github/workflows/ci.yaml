@@ -1078,6 +1078,14 @@ jobs:
       - name: Install web dependencies
         working-directory: web
         run: pnpm install --frozen-lockfile
+      # Unit tests skip the vendor bundler; exercise the same production mode
+      # as the Studio image so asset/loader failures are caught before merge.
+      - name: Build Studio production assets
+        working-directory: web
+        timeout-minutes: 5
+        env:
+          NODE_ENV: production
+        run: pnpm --filter nemo-studio-ui --fail-if-no-match build:fastapi
       - name: Run Lint
         uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
         env:
