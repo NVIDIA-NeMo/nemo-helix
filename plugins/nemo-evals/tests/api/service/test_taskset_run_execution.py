@@ -12,7 +12,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 from nemo_evals.api.fields import TaskRef
-from nemo_evals.api.service.taskset_run_service import MAX_CONCURRENT_IMAGE_PREPARATIONS, TasksetRunResolutionError
+from nemo_evals.api.service.taskset_run_service import (
+    MAX_CONCURRENT_IMAGE_PREPARATIONS,
+    TasksetRunResolutionError,
+    TasksRejectedError,
+)
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evals.harbor.remote.preparation import PreparationCheck, prepare_task_images
@@ -280,6 +284,23 @@ async def test_a_rejected_task_stops_every_preparation(service, two_task_body, r
     with pytest.raises(TasksetRunResolutionError, match=f"{tasks[rejected]}: gpu_unsupported"):
         await submit(service, two_task_body)
     assert sorted(run_preparer.checked) == tasks and run_preparer.calls == []
+
+
+async def test_a_rejection_lists_each_task_its_revision_and_why(service, two_task_body, run_preparer):
+    """The CLI offers to submit the other tasks from this list, so it names each task's revision."""
+    run_preparer.reject = {"task-2": "gpu_unsupported"}
+    with pytest.raises(TasksRejectedError) as raised:
+        await submit(service, two_task_body)
+    (task,) = raised.value.tasks
+    assert (task.task, task.code, task.detail) == ("task-2", "gpu_unsupported", "scripted")
+    assert task.ref is not None and task.ref.split("#")[0].endswith("/task-2") and len(task.ref.split("#")[1]) == 64
+
+
+async def test_a_task_without_images_is_listed_with_its_code(service, request_body, run_preparer):
+    run_preparer.fail = {"task-1": "build_failed"}
+    with pytest.raises(TasksRejectedError) as raised:
+        await submit(service, request_body)
+    assert [(t.task, t.code) for t in raised.value.tasks] == [("task-1", "build_failed")]
 
 
 async def test_a_replay_never_reads_images_again(service, request_body, fake_task_jobs, run_preparer, run_store):

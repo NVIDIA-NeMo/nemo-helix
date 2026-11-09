@@ -263,6 +263,8 @@ def test_status_only_reads_and_its_exit_code_says_where_the_builds_are(cli):
         builds.get_image_build(name, "1", revision=DIGEST, workspace="default")
     failed = cli(builds, "build-images", "default/suite", "--status")
     assert failed.exit_code == 1 and "  failed        default/b#" in failed.output and "no Dockerfile" in failed.output
+    hint = "Or submit the 1 ready task with: nemo evals runs submit --taskset default/suite --tasks 0"
+    assert failed.output.splitlines()[-1] == hint
     assert builds.posts == ["a", "b"]  # --status never requests
 
 
@@ -287,7 +289,13 @@ def test_wait_and_status_do_not_combine(cli):
 
 def test_wait_exits_1_when_a_build_failed_and_points_to_submit_when_all_are_ready(cli):
     failed = cli(FakeBuilds({"a": ["fail", "fail"]}), "build-images", "default/suite", "--wait", "--poll-seconds", "0")
-    assert failed.exit_code == 1 and failed.output.splitlines()[-1] == "Rerun this command to retry the failed builds."
+    assert failed.exit_code == 1 and failed.output.splitlines()[-2:] == [
+        "Rerun this command to retry the failed builds.",
+        "Or submit the 1 ready task with: nemo evals runs submit --taskset default/suite --tasks 1",
+    ]
+    every = {name: ["fail", "fail"] for name in ("a", "b")}
+    none_ready = cli(FakeBuilds(every), "build-images", "default/suite", "--wait", "--poll-seconds", "0")
+    assert none_ready.output.splitlines()[-1] == "Rerun this command to retry the failed builds."
     ready = cli(FakeBuilds(), "build-images", "default/suite", "--wait", "--poll-seconds", "0")
     assert ready.exit_code == 0
     assert ready.output.splitlines()[-1] == "Submit with: nemo evals runs submit --taskset default/suite"

@@ -748,17 +748,18 @@ paths:
         \    Public run status with advisory notices; 201 for acceptance or 200 for\
         \ replay. Submission starts\n    no task Jobs (the run controller does) and\
         \ no image builds: a task whose image isn't built yet is\n    rejected (422).\
-        \ A keyed replay returns the stored status.\n\nRaises:\n    RequestValidationError:\
-        \ The execution budget exceeds the operator maximum.\n    HTTPException: Source\
-        \ denial (403), conflicting key or Evaluation dataset (409), resolution rejection\n\
-        \        (422), an unavailable image build service before acceptance (503,\
-        \ safe to resend), an Intake\n        Evaluation that couldn't be created\
-        \ before acceptance (503), an Intake Evaluation refused\n        before acceptance\
-        \ (403, not retried), or a sanitized unexpected failure (500).\n        When\
-        \ the request omits idempotency_key, submit generates one. A 5xx then names\
-        \ it in the\n        detail and the ``x-idempotency-key`` header and says\
-        \ not to retry automatically: the SDK\n        would resend the keyless request\
-        \ and accept a second run. Resubmit with that key instead."
+        \ A keyed replay returns the stored status. When tasks can't run here or have\
+        \ no\n    images, a 422 whose body lists them in ``rejected_tasks``.\n\nRaises:\n\
+        \    RequestValidationError: The execution budget exceeds the operator maximum.\n\
+        \    HTTPException: Source denial (403), conflicting key or Evaluation dataset\
+        \ (409), resolution rejection\n        (422), an unavailable image build service\
+        \ before acceptance (503, safe to resend), an Intake\n        Evaluation that\
+        \ couldn't be created before acceptance (503), an Intake Evaluation refused\n\
+        \        before acceptance (403, not retried), or a sanitized unexpected failure\
+        \ (500).\n        When the request omits idempotency_key, submit generates\
+        \ one. A 5xx then names it in the\n        detail and the ``x-idempotency-key``\
+        \ header and says not to retry automatically: the SDK\n        would resend\
+        \ the keyless request and accept a second run. Resubmit with that key instead."
       operationId: submit_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_post
       parameters:
       - name: workspace
@@ -792,8 +793,10 @@ paths:
           description: The idempotency key already belongs to a different request,
             or the run's Intake Evaluation exists with different dataset metadata.
         '422':
-          description: Invalid request, excessive timeout, missing or incompatible
-            source, unconfigured execution, or a task without images.
+          description: 'Invalid request, excessive timeout, missing or incompatible
+            source, unconfigured execution, or tasks that can''t run here or have
+            no images. For those tasks the body also has `rejected_tasks`: each task,
+            its revision and why.'
         '503':
           description: Reading image builds, or Intake, failed before the run was
             accepted; retry the same request.

@@ -21,7 +21,7 @@ import tarfile
 import tempfile
 import time
 import uuid
-from collections.abc import Callable, Coroutine, Sequence
+from collections.abc import Callable, Collection, Coroutine, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -59,6 +59,26 @@ _NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
 
 class SelectionError(ValueError):
     """``--tasks`` names a task that isn't there, or the same task twice."""
+
+
+class SubmitRejectedTasksError(RuntimeError):
+    """The platform refused the run because of some of its tasks; ``tasks`` lists each one and why.
+
+    Each entry is the API's ``rejected_tasks`` item: ``task``, ``ref``, ``code`` and ``detail``. Kept apart from
+    other refusals so submit can print the command that runs the other tasks.
+    """
+
+    def __init__(self, message: str, tasks: list[dict[str, Any]]) -> None:
+        super().__init__(message)
+        self.tasks = tasks
+
+
+class BuildsFailedError(RuntimeError):
+    """Some image builds ended failed, so submit sent nothing; ``builds`` holds every task's last build."""
+
+    def __init__(self, builds: dict[str, ImageBuild]) -> None:
+        super().__init__(f"image builds failed: {failed_builds(builds)}")
+        self.builds = builds
 
 
 @dataclass(frozen=True)
@@ -333,6 +353,18 @@ def taskset_members(evaluator: Evaluator, ref: str) -> list[str]:
     return sorted(str(member.root if isinstance(member, TaskRef) else member) for member in taskset.tasks)
 
 
+def tasks_without(refs: Sequence[str], left_out: Collection[str]) -> tuple[int, str] | None:
+    """``--tasks`` that selects every task of a taskset whose members are ``refs`` except ``left_out``.
+
+    Returns how many tasks it selects and the option's value, or None when it would select none. Indexes count
+    ``refs`` sorted, the order ``--tasks`` counts in. Tasks match by ``workspace/name``, without the digest, so a
+    pinned and an unpinned ref name the same task: a taskset holds one revision of each task.
+    """
+    names = {ref.partition("#")[0] for ref in left_out}
+    kept = [str(index) for index, ref in enumerate(sorted(refs)) if ref.partition("#")[0] not in names]
+    return (len(kept), ",".join(kept)) if kept else None
+
+
 # --- Image builds -----------------------------------------------------------------------------------------
 # Prebuilt images go through a build too: it copies them into the platform's registry (#2986). A request is
 # idempotent per task revision: it returns the build that's ready or in progress, and starts the next attempt
@@ -543,12 +575,26 @@ def submit_run(
             continue
         if response.status_code >= 400:
             message = f"submit failed ({response.status_code}): {_detail(response)}"
+            if response.status_code == 422 and (rejected := _rejected_tasks(response)) is not None:
+                raise SubmitRejectedTasksError(message, rejected)
             if response.status_code >= 500 and body.get("idempotency_key"):
                 # The run may already be accepted: only the same key finishes it instead of starting another.
                 message += f"; to finish this run, rerun the same command with --idempotency-key {shlex.quote(body['idempotency_key'])}"
             raise RuntimeError(message)
         return response.json()
     raise AssertionError("unreachable")
+
+
+def _rejected_tasks(response: httpx.Response) -> list[dict[str, Any]] | None:
+    """The 422's ``rejected_tasks``, or None when the body has none (another refusal, or an older platform)."""
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    tasks = body.get("rejected_tasks") if isinstance(body, dict) else None
+    if not isinstance(tasks, list) or not tasks or not all(isinstance(task, dict) for task in tasks):
+        return None
+    return tasks
 
 
 def _detail(response: httpx.Response) -> str:
@@ -721,13 +767,17 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         stored_ref = qualify_ref(taskset, workspace) if taskset is not None else None
         flag = _workspace_flag(workspace, client.resolve_workspace())
         taskset_ref: str | None = None
+        refs: list[str] = []
         waiting_for_builds = False
         submitting_key: str | None = None
         spec: dict[str, Any] | None = None
         source: tuple[str, str | None] | None = parse_dataset(intake_dataset) if intake_dataset else None
 
-        def rerun(ref: str) -> str:
-            """This submit's command for ``ref``: the source flags become ``--taskset``, the run settings stay."""
+        def rerun(ref: str, tasks: str | None = None) -> str:
+            """This submit's command for ``ref``: the source flags become ``--taskset``, the run settings stay.
+
+            ``tasks`` is a ``--tasks`` value that narrows it to some of the taskset's tasks.
+            """
             kept: list[tuple[str, object]] = [
                 ("--spec-file", "<spec file>" if spec_file is not None and _is_stream(spec_file) else spec_file),
                 ("--agent", None if spec_file is not None or agent == "oracle" else agent),
@@ -738,6 +788,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 ("--dispatcher-profile", dispatcher_profile),
                 ("--experiment", experiment),
                 ("--intake-dataset", "@".join(p for p in source if p) if experiment and source else None),
+                ("--tasks", tasks),
             ]
             options = "".join(f" {name} {shlex.quote(str(value))}" for name, value in kept if value is not None)
             return f"nemo evals runs submit --taskset {shlex.quote(ref)}{options}{flag}"
@@ -780,8 +831,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                     waiting_for_builds = True
                     builds = wait_for_builds(evaluator, refs, poll_seconds=poll_seconds, echo=echo)
                     waiting_for_builds = False
-                    if (failed := failed_builds(builds)) is not None:
-                        raise RuntimeError(f"image builds failed: {failed}")
+                    if failed_builds(builds) is not None:
+                        raise BuildsFailedError(builds)
             request = run_request(
                 taskset_ref,
                 spec=spec,
@@ -816,10 +867,15 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 echo(f"Interrupted. Submit with: {rerun(taskset_ref)}" if taskset_ref else "Interrupted.")
             raise typer.Exit(code=130) from None
         except (SelectionError, RuntimeError, NemoClientError, ValueError) as exc:
-            echo(f"Error: {exc}", err=True)
-            if stored_ref is not None and "without images" in str(exc):
-                # The ref names its workspace, and build-images takes no --workspace.
-                echo(f"Check with: nemo evals tasksets build-images {shlex.quote(stored_ref)} --status", err=True)
+            if isinstance(exc, SubmitRejectedTasksError) and taskset_ref is not None:
+                _explain_rejected_tasks(exc.tasks, refs, taskset_ref, rerun)
+            elif isinstance(exc, BuildsFailedError) and taskset_ref is not None:
+                _explain_failed_builds(exc.builds, taskset_ref, rerun)
+            else:
+                echo(f"Error: {exc}", err=True)
+                if stored_ref is not None and "without images" in str(exc):
+                    # The ref names its workspace, and build-images takes no --workspace.
+                    echo(f"Check with: nemo evals tasksets build-images {shlex.quote(stored_ref)} --status", err=True)
             raise typer.Exit(code=1) from exc
         if status.get("phase", "accepted") == "accepted":
             echo(
@@ -838,6 +894,65 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 echo("  It uses the spec file's idempotency_key; pass a new --idempotency-key to start another run")
         echo("")
         echo(f"View evaluation run: nemo evals runs status {status['run_id']}{flag} --watch")
+
+
+def _explain_rejected_tasks(
+    tasks: list[dict[str, Any]], refs: Sequence[str], taskset_ref: str, rerun: Callable[[str, str | None], str]
+) -> None:
+    """Print each task the platform refused and why, then the command that submits the others.
+
+    A task whose image isn't built yet (``image_unavailable``) may still build, so then this points to the
+    builds instead of offering to leave tasks out.
+    """
+    echo = _stderr
+    echo(f"Error: submit refused the run because of {len(tasks)} of {len(refs)} tasks:")
+    for line in _columns([(str(t.get("task")), str(t.get("code")), str(t.get("detail"))) for t in tasks]):
+        echo(f"  {line}")
+    if any(t.get("code") == "image_unavailable" for t in tasks):
+        # The ref names its workspace, and build-images takes no --workspace.
+        echo(f"Check with: nemo evals tasksets build-images {shlex.quote(taskset_ref)} --status")
+        return
+    left_out = [t.get("ref") for t in tasks]
+    if not all(isinstance(ref, str) for ref in left_out):
+        return  # a task the platform couldn't name a revision for: no safe --tasks to offer
+    option = tasks_without(refs, [ref for ref in left_out if isinstance(ref, str)])
+    if option is None:
+        echo("None of these tasks can run here.")
+        return
+    count, value = option
+    echo(f"Submit the other {count} with: {rerun(taskset_ref, value)}")
+
+
+def _explain_failed_builds(
+    builds: dict[str, ImageBuild], taskset_ref: str, rerun: Callable[[str, str | None], str]
+) -> None:
+    """Print each failed build, how to retry them, and the command that submits the tasks whose builds are ready.
+
+    A build that fails the same way again won't be fixed by retrying, so the ready tasks can run without it.
+    """
+    echo = _stderr
+    failed = {ref: build for ref, build in builds.items() if build.status != "ready"}
+    echo(f"Error: image builds failed for {len(failed)} of {len(builds)} tasks:")
+    for line in _columns([(ref, build.error or "its Job ended") for ref, build in failed.items()]):
+        echo(f"  {line}")
+    # The ref names its workspace, and build-images takes no --workspace.
+    echo(f"Retry the failed builds with: nemo evals tasksets build-images {shlex.quote(taskset_ref)} --wait")
+    echo(f"Once they're ready, submit with: {rerun(taskset_ref, None)}")
+    if (option := tasks_without(list(builds), failed)) is not None:
+        count, value = option
+        echo(f"Or submit the {count} ready task{'s' if count != 1 else ''} now with: {rerun(taskset_ref, value)}")
+
+
+def _stderr(line: str) -> None:
+    typer.echo(line, err=True)
+
+
+def _columns(rows: Sequence[tuple[str, ...]]) -> list[str]:
+    """``rows`` as lines with every column but the last padded to its widest cell."""
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]) - 1)] if rows else []
+    return [
+        "  ".join([*(cell.ljust(width) for cell, width in zip(row, widths, strict=False)), row[-1]]) for row in rows
+    ]
 
 
 def _is_stream(path: Path) -> bool:
