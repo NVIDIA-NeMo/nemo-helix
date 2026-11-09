@@ -103,7 +103,22 @@ def test_workload_profile_runs_steps_that_need_persistent_storage(
         )
 
     # Jobs refuse a step that sets the storage path env var unless its profile has
-    # persistent storage, so a successful create proves the workload profile kept it.
+    # persistent storage. The second step runs in a new container, so reading the
+    # first step's file proves the PVC is mounted rather than the container's own disk.
+    storage_path = f"${{{PERSISTENT_JOB_STORAGE_PATH_ENVVAR}}}"
+    storage_env = [{"name": PERSISTENT_JOB_STORAGE_PATH_ENVVAR, "value": DEFAULT_JOB_STORAGE_PATH}]
+
+    def storage_step(name: str, command: str) -> dict[str, object]:
+        return {
+            "name": name,
+            "executor": {
+                "provider": "cpu",
+                "profile": "workload",
+                "container": {"image": nhx_api_image(), "entrypoint": ["sh", "-c"], "command": [command]},
+            },
+            "environment": storage_env,
+        }
+
     job = (
         JobsClient.from_client(auth_idp_runtime.workload_provider_client())
         .create_job(
@@ -113,25 +128,14 @@ def test_workload_profile_runs_steps_that_need_persistent_storage(
                 spec={"test": "workload-storage-job"},
                 platform_spec={
                     "steps": [
-                        {
-                            "name": "workload-storage-write",
-                            "executor": {
-                                "provider": "cpu",
-                                "profile": "workload",
-                                "container": {
-                                    "image": nhx_api_image(),
-                                    "entrypoint": ["sh", "-c"],
-                                    "command": [
-                                        f'mkdir -p "${{{PERSISTENT_JOB_STORAGE_PATH_ENVVAR}}}" && '
-                                        f'echo stored > "${{{PERSISTENT_JOB_STORAGE_PATH_ENVVAR}}}/probe.txt" && '
-                                        f'echo "Persistent storage: $(cat "${{{PERSISTENT_JOB_STORAGE_PATH_ENVVAR}}}/probe.txt")"',
-                                    ],
-                                },
-                            },
-                            "environment": [
-                                {"name": PERSISTENT_JOB_STORAGE_PATH_ENVVAR, "value": DEFAULT_JOB_STORAGE_PATH},
-                            ],
-                        }
+                        storage_step(
+                            "workload-storage-write",
+                            f'mkdir -p "{storage_path}" && echo stored > "{storage_path}/probe.txt"',
+                        ),
+                        storage_step(
+                            "workload-storage-read",
+                            f'echo "Persistent storage: $(cat "{storage_path}/probe.txt")"',
+                        ),
                     ]
                 },
             ),
@@ -143,4 +147,7 @@ def test_workload_profile_runs_steps_that_need_persistent_storage(
     assert completed_job.status == "completed"
 
     step_logs = wait_for_job_logs(e2e_setup_client, job.name, auth_idp_workspace, min_log_count=1, timeout=240)
-    assert any("Persistent storage: stored" in log.message for log in step_logs.data)
+    assert any(
+        log.job_step == "workload-storage-read" and "Persistent storage: stored" in log.message
+        for log in step_logs.data
+    )

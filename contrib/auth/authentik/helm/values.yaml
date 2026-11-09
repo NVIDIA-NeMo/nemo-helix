@@ -348,9 +348,9 @@ nemo-helix:
             env:
               SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
               REQUESTS_CA_BUNDLE: *workloadTokenTlsCaBundleFile
-            # This storage block replaces executor_defaults.kubernetes_job.storage
-            # rather than merging with it, so repeat the core PVC here. Without it the
-            # profile refuses steps that need persistent storage (agent-evaluate).
+            # executor_defaults only apply to the built-in profiles, not to cpu/workload,
+            # so set the core PVC here. Without it the profile refuses steps that need
+            # persistent storage (agent-evaluate).
             storage:
               pvc_name: '{{ include "nhx-core.persistentVolumeClaim" . }}'
               volume_permissions_image: '{{ .Values.core.storage.volumePermissionsImage }}'

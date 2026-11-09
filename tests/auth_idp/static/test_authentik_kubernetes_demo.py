@@ -1932,7 +1932,7 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
         "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
         "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
     }
-    # The executor's storage replaces the defaults, so it repeats the core PVC alongside the CA volume.
+    # executor_defaults don't apply to cpu/workload, so its storage sets the core PVC beside the CA volume.
     expected_storage = {
         "pvc_name": '{{ include "nhx-core.persistentVolumeClaim" . }}',
         "volume_permissions_image": "{{ .Values.core.storage.volumePermissionsImage }}",
