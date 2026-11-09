@@ -196,6 +196,34 @@ async def test_an_error_is_retrying_until_harbor_stops_retrying_it(job: Job, har
     assert (timed_out.phase, timed_out.attempts, timed_out.reward) == (TrialPhase.ERRORED, 1, 0.0)
 
 
+async def test_an_error_only_a_step_recorded_is_not_retried_and_stays_errored(job: Job, harbor: Harbor) -> None:
+    """Harbor retries on the trial's own exception; a multi-step trial's step-only error ends the trial."""
+    reports = Reports()
+    first, _ = job._remaining_trial_configs
+    step_only = TrialResult.model_construct(
+        trial_name=first.trial_name,
+        started_at=STARTED,
+        finished_at=STARTED.replace(minute=5),
+        exception_info=None,
+        step_results=[StepResult.model_construct(exception_info=_error("RuntimeError"))],
+        verifier_result=None,
+    )
+
+    async with _reporter(reports).job_scope()(job):
+        for event in (TrialEvent.START, TrialEvent.AGENT_START, TrialEvent.VERIFICATION_START):
+            await harbor.fire(event, first)
+        await harbor.fire(TrialEvent.END, first, step_only)
+        ended = reports.last()[0]
+
+    settled = reports.last()[0]  # after the scope exits, which cancels whatever hadn't settled
+    assert (ended.phase, ended.error_type, ended.finished_at) == (
+        TrialPhase.ERRORED,
+        "RuntimeError",
+        STARTED.replace(minute=5),
+    )
+    assert (settled.phase, settled.finished_at) == (TrialPhase.ERRORED, STARTED.replace(minute=5))
+
+
 async def test_a_cancelled_trial_stays_cancelled_when_its_attempt_ends(job: Job, harbor: Harbor) -> None:
     reports = Reports()
     first, _ = job._remaining_trial_configs
@@ -247,8 +275,10 @@ def test_reward_and_error_are_read_off_the_attempts_result() -> None:
         return TrialResult.model_construct(verifier_result=VerifierResult(rewards=rewards))
 
     assert trial_reward(result({"reward": 1, "style": 0.2}), "reward") == 1.0
-    assert trial_reward(result({"accuracy": 0.25}), "reward") == 0.25  # the only reward
+    # The configured key or nothing, as in the final evaluation: a lone differently named reward isn't guessed at.
+    assert trial_reward(result({"accuracy": 0.25}), "reward") is None
     assert trial_reward(result({"accuracy": 0.25, "style": 1}), "reward") is None
+    assert trial_reward(result({"reward": float("nan")}), "reward") is None
 
     step = StepResult.model_construct(exception_info=_error("StepError"))
     multi_step = TrialResult.model_construct(exception_info=None, step_results=[StepResult.model_construct(), step])

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -34,7 +35,8 @@ logger = logging.getLogger(__name__)
 
 PUBLISH_TIMEOUT_SEC = 15.0
 """How long a trial event waits for its report; a slower report keeps going in the background."""
-MAX_ERROR_CHARS = 500
+MAX_ERROR_CHARS = 2000
+"""Longest error message kept per trial. Errors are rare and their details are what debugging needs, so it's generous."""
 
 Publish = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -61,16 +63,20 @@ def trial_error(result: TrialResult) -> ExceptionInfo | None:
 
 
 def trial_reward(result: TrialResult, reward_key: str) -> float | None:
-    """The attempt's primary reward: ``reward_key`` from the verifier's rewards, or their only value."""
+    """The attempt's primary reward: the verifier's ``reward_key`` and nothing else.
+
+    A missing key is no reward, even when the verifier emitted one differently named: the final evaluation
+    selects the primary reward the same way, and a live score that final results then lack would mislead.
+    """
     verifier = result.verifier_result
     rewards = verifier.rewards if verifier is not None else None
     if not rewards:
         return None
 
     value = rewards.get(reward_key)
-    if value is None and len(rewards) == 1:
-        value = next(iter(rewards.values()))
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        return None
+    return float(value)
 
 
 class TrialProgressReporter:
@@ -196,7 +202,9 @@ class TrialProgressReporter:
 
         if trial.phase is TrialPhase.CANCELLED:
             phase = TrialPhase.CANCELLED
-        elif will_retry(self._retry, error, self._ended[trial.trial]):
+        # Harbor retries on the trial's own exception only. A multi-step trial's error can sit on a step alone, which
+        # Harbor doesn't retry, so predict the retry from the top-level one but report the step's error.
+        elif will_retry(self._retry, event.result.exception_info, self._ended[trial.trial]):
             phase = TrialPhase.RETRYING
         else:
             phase = TrialPhase.ERRORED if error is not None else TrialPhase.SUCCEEDED
