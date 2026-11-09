@@ -6,11 +6,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from argparse import Namespace
 from collections.abc import AsyncIterator
 from pathlib import Path
-from unittest.mock import patch
+from typing import Literal
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -30,14 +30,18 @@ from nemo_deployments_plugin.backends.openshell.credential_driver.tickets import
 )
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 from pydantic import SecretStr
 
 WORKSPACE = "gateway-private"
 VALUE = SecretStr("synthetic-internal-key-not-for-production")
 USER_SECRET = ("users", "provider-token")
+type CreateTimeout = Literal["before_commit", "after_commit"]
 
 
 class Harness:
+    """Real registry and typed client with controllable Secrets responses."""
+
     def __init__(self, directory: Path) -> None:
         self.tickets = RegistrationTickets(b"test-only-registration-key-32-bytes", "gateway")
         self.registry = BindingRegistry(directory / "bindings.db", self.tickets)
@@ -47,9 +51,9 @@ class Harness:
             provider_id="sandbox-id",
             credential_key="SSH_HOST_PRIVATE_KEY",
         )
-        self.values = {USER_SECRET: "synthetic-provider-token"}
+        self.values: dict[tuple[str, str], str] = {USER_SECRET: "synthetic-provider-token"}
         self.calls: list[tuple[str, str]] = []
-        self.fail_create = ""
+        self.create_timeout: CreateTimeout | None = None
         self.failed_deletes: set[str] = set()
         self.create_started = asyncio.Event()
         self.create_release = asyncio.Event()
@@ -70,29 +74,37 @@ class Harness:
     async def http(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         self.calls.append((request.method, path))
-        parts = path.split("/")
-        workspace = parts[5]
-        if request.method == "POST":
-            body = json.loads(request.content)
-            name = body["name"]
-            self.create_started.set()
-            await self.create_release.wait()
-            if self.fail_create == "before":
-                raise httpx.ReadTimeout("synthetic lost response", request=request)
-            if (workspace, name) in self.values:
-                return httpx.Response(409, json={"detail": "Already exists"})
-            self.values[workspace, name] = body["value"]
-            if self.fail_create == "after":
-                raise httpx.ReadTimeout("synthetic lost response", request=request)
-            return httpx.Response(201, json={"name": name, "workspace": workspace})
-        name = parts[7]
-        if request.method == "DELETE":
-            if name in self.failed_deletes:
-                return httpx.Response(503, json={"detail": "synthetic outage"})
-            if self.values.pop((workspace, name), None) is None:
-                return httpx.Response(404, json={"detail": "Not found"})
-            return httpx.Response(204)
-        assert request.method == "GET" and path.endswith("/access")
+        match request.method, path.strip("/").split("/"):
+            case "POST", ["apis", "secrets", "v2", "workspaces", workspace, "secrets"]:
+                return await self._create_secret(request, workspace)
+            case "DELETE", ["apis", "secrets", "v2", "workspaces", workspace, "secrets", name]:
+                return self._delete_secret(workspace, name)
+            case "GET", ["apis", "secrets", "v2", "workspaces", workspace, "secrets", name, "access"]:
+                return await self._access_secret(workspace, name)
+            case _:
+                raise RuntimeError(f"Unexpected test request: {request.method} {path}")
+
+    async def _create_secret(self, request: httpx.Request, workspace: str) -> httpx.Response:
+        secret = HelixSecretCreateRequest.model_validate_json(request.content)
+        self.create_started.set()
+        await self.create_release.wait()
+        if self.create_timeout == "before_commit":
+            raise httpx.ReadTimeout("synthetic lost response", request=request)
+        if (workspace, secret.name) in self.values:
+            return httpx.Response(409, json={"detail": "Already exists"})
+        self.values[workspace, secret.name] = secret.value.get_secret_value()
+        if self.create_timeout == "after_commit":
+            raise httpx.ReadTimeout("synthetic lost response", request=request)
+        return httpx.Response(201, json={"name": secret.name, "workspace": workspace})
+
+    def _delete_secret(self, workspace: str, name: str) -> httpx.Response:
+        if name in self.failed_deletes:
+            return httpx.Response(503, json={"detail": "synthetic outage"})
+        if self.values.pop((workspace, name), None) is None:
+            return httpx.Response(404, json={"detail": "Not found"})
+        return httpx.Response(204)
+
+    async def _access_secret(self, workspace: str, name: str) -> httpx.Response:
         value = self.values.get((workspace, name))
         if value is None:
             return httpx.Response(404, json={"detail": "Not found"})
@@ -208,9 +220,9 @@ async def test_replacement_keeps_previous_handle_until_gateway_deletes_it(harnes
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["before", "after"])
-async def test_ambiguous_create_recovers_after_restart(harness: Harness, failure: str) -> None:
-    harness.fail_create = failure
+@pytest.mark.parametrize("timeout_phase", ["before_commit", "after_commit"])
+async def test_ambiguous_create_recovers_after_restart(harness: Harness, timeout_phase: CreateTimeout) -> None:
+    harness.create_timeout = timeout_phase
     with pytest.raises(NemoTransportError):
         await harness.owned.store(harness.owner, VALUE, object_id="operation")
     pending = harness.registry.pending_owned()[0]
@@ -220,7 +232,7 @@ async def test_ambiguous_create_recovers_after_restart(harness: Harness, failure
     restarted = harness.restart()
     await restarted.reconcile()
     assert sum(method == "POST" for method, _ in harness.calls) == 1
-    harness.fail_create = ""
+    harness.create_timeout = None
     assert await restarted.store(harness.owner, VALUE, object_id="operation") == pending.handle
     assert await restarted.resolve(harness.owner, pending.handle) == VALUE.get_secret_value()
     assert harness.registry.get_owned(harness.owner, pending.handle).create_uncertain
@@ -263,7 +275,7 @@ async def test_failed_delete_stays_revoked_and_does_not_starve_other_cleanup(har
 
 @pytest.mark.asyncio
 async def test_delayed_create_after_delete_404_is_cleaned_by_recovery(harness: Harness) -> None:
-    harness.fail_create = "before"
+    harness.create_timeout = "before_commit"
     with pytest.raises(NemoTransportError):
         await harness.owned.store(harness.owner, VALUE, object_id="operation")
     pending = harness.registry.pending_owned()[0]
@@ -371,3 +383,61 @@ async def test_mixed_resolution_keeps_reference_expiry_and_owned_lifecycle(
     await driver._dispatch("DeleteCredential", {**reference_owner.model_dump(), "handle": reference_handle})
     await driver._dispatch("DeleteCredential", {**owner.model_dump(), "handle": internal_handle})
     assert harness.values == {USER_SECRET: "synthetic-provider-token"}
+
+
+@pytest.mark.asyncio
+async def test_cleanup_retries_redacts_failures_and_stops_with_server(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    interval = asyncio.Event()
+    attempted = asyncio.Event()
+    recovered = asyncio.Event()
+    attempts = 0
+    delays: list[float] = []
+
+    async def reconcile() -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            attempted.set()
+            raise RuntimeError("private credential material")
+        recovered.set()
+
+    async def next_interval(seconds: float) -> None:
+        delays.append(seconds)
+        await interval.wait()
+        interval.clear()
+
+    owned = AsyncMock(spec=OwnedCredentials)
+    owned.reconcile.side_effect = reconcile
+    monkeypatch.setattr(server.asyncio, "sleep", next_interval)
+    async with server.owned_credential_recovery(owned):
+        await asyncio.wait_for(attempted.wait(), timeout=1)
+        assert attempts == 1
+        interval.set()
+        await asyncio.wait_for(recovered.wait(), timeout=1)
+        assert attempts == 2
+    assert "retained deletion intent" in caplog.text
+    assert "private credential material" not in caplog.text
+    assert delays and all(seconds == 30 for seconds in delays)
+    assert not any(task.get_name() == "owned-credential-cleanup" for task in asyncio.all_tasks())
+
+
+@pytest.mark.asyncio
+async def test_pending_cleanup_does_not_block_startup_and_is_cancelled_at_shutdown() -> None:
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def reconcile() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    owned = AsyncMock(spec=OwnedCredentials)
+    owned.reconcile.side_effect = reconcile
+    async with asyncio.timeout(1), server.owned_credential_recovery(owned):
+        await started.wait()
+    assert cancelled.is_set()

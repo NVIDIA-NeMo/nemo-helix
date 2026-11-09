@@ -9,7 +9,9 @@ The scenarios exercise auth-disabled Jobs and Deployments: uninterrupted request
 
 The test requires an isolated installation with both controllers, the driver in auth-disabled mode, and an approved injection profile for `API_TOKEN` with `stable_placeholder: true`. OpenShell's profile client must confirm gateway support before enabling it; raw clients check `LintProviderProfilesResponse.supports_stable_placeholder`. This keeps the process's original reference valid across externally renewed values while retaining credential expiry and detach behavior.
 
-The profile endpoint allows only `POST /probe`. An authored sandbox rule allows `GET /health` on the same service; the probe checks that rule survives the Helix policy merge. `/expect` and `/observations` belong to the test runner and must not be reachable through sandbox policy. `receiver.py` hosts those endpoints.
+The profile endpoint allows only `POST /probe`. An authored sandbox rule allows `GET /health` on the same service; the probe checks that rule survives the Helix policy merge. `/expect` and `/observations` belong to the test runner and must not be reachable through sandbox policy.
+
+`receiver.py` hosts those endpoints outside the sandbox. It runs in Helix's Python environment, which includes FastAPI and Uvicorn; a separate receiver image needs those dependencies too. For the example configuration below, start it with `uv run python e2e/resources/openshell_credentials/receiver.py --port 18081`. The optional `--cert-file` and `--key-file` arguments enable TLS together.
 
 `probe.py` runs at `/app/credential_probe.py` in an image containing Python 3.13, `/tools/jobs-launcher`, curl and the configured sandbox user. The deployment executor's `platform_egress.binaries` must include `/usr/local/bin/python3.13`, the probe interpreter. This lets its Helix request reach the HTTP policy so the test can distinguish a denied Secrets route from a binary that cannot contact Helix at all.
 

@@ -233,6 +233,51 @@ def deployment_removed(client: NemoClient, workload: CredentialWorkload) -> bool
     return False
 
 
+def cleanup_credential_workload(
+    client: NemoClient,
+    gateway: GatewayObserver,
+    workload: CredentialWorkload,
+    config: CredentialTestConfig,
+    *,
+    providers: set[str],
+    internal_secrets_before: set[str],
+    deadline: float,
+) -> None:
+    """Confirm runtime cleanup before removing the metadata controllers need."""
+    stop_credential_workload(client, workload)
+    wait_until(
+        lambda: gateway.sandboxes(workload),
+        lambda rows: not rows,
+        timeout=config.timeout_seconds,
+        description="sandbox teardown",
+        deadline=deadline,
+    )
+    secrets = SecretsClient.from_client(client)
+    wait_until(
+        lambda: owned_secret_names(secrets, config.owned_secrets_workspace),
+        lambda names: not names - internal_secrets_before,
+        timeout=config.timeout_seconds,
+        description="deletion of sandbox-owned keys from Helix Secrets",
+        deadline=deadline,
+    )
+    wait_until(
+        lambda: gateway.providers(providers, sandbox_name=workload.sandbox_name),
+        lambda rows: not rows,
+        timeout=config.timeout_seconds,
+        description="provider teardown",
+        deadline=deadline,
+    )
+    if workload.kind == "deployment":
+        wait_until(
+            lambda: deployment_removed(client, workload),
+            bool,
+            timeout=config.timeout_seconds,
+            description="deployment record deletion",
+            deadline=deadline,
+        )
+    remove_credential_workload_metadata(client, workload)
+
+
 def workload_observations(
     client: NemoClient, receiver: Receiver, workload: CredentialWorkload, probe_id: str, *, after: int = 0
 ) -> list[Observation]:
@@ -413,37 +458,15 @@ def test_original_placeholder_survives_rotation_then_secret_deletion_revokes_acc
     finally:
         try:
             if workload is not None:
-                stop_credential_workload(client, workload)
-                wait_until(
-                    lambda: gateway.sandboxes(workload),
-                    lambda rows: not rows,
-                    timeout=config.timeout_seconds,
-                    description="sandbox teardown",
+                cleanup_credential_workload(
+                    client,
+                    gateway,
+                    workload,
+                    config,
+                    providers=providers,
+                    internal_secrets_before=internal_secrets_before,
                     deadline=cleanup_deadline,
                 )
-                wait_until(
-                    lambda: owned_secret_names(secrets, credential_config.owned_secrets_workspace),
-                    lambda names: not names - internal_secrets_before,
-                    timeout=config.timeout_seconds,
-                    description="deletion of sandbox-owned keys from Helix Secrets",
-                    deadline=cleanup_deadline,
-                )
-                wait_until(
-                    lambda: gateway.providers(providers, sandbox_name=workload.sandbox_name),
-                    lambda rows: not rows,
-                    timeout=config.timeout_seconds,
-                    description="provider teardown",
-                    deadline=cleanup_deadline,
-                )
-                if workload.kind == "deployment":
-                    wait_until(
-                        lambda: deployment_removed(client, workload),
-                        bool,
-                        timeout=config.timeout_seconds,
-                        description="deployment record deletion",
-                        deadline=cleanup_deadline,
-                    )
-                remove_credential_workload_metadata(client, workload)
         finally:
             try:
                 secrets.delete_secret(workspace=config.workspace, name=probe_id)
