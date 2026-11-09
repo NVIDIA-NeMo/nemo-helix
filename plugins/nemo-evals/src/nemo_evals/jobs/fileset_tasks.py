@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import logging
 import re
 import tempfile
@@ -153,12 +154,18 @@ def build_task_inputs(
     Synchronous and CPU-bound: run it off the event loop. Errors name the line in the source file,
     never the temporary copy discovery reads.
     """
-    rows = sum(1 for line in source_file.body.splitlines() if line.strip())
-    if rows > max_rows:
-        raise ValueError(
-            f"dataset file {source_file.fileset.root} has {rows} rows, more than the {max_rows}-row limit "
-            "(evals config `fileset_task_source_max_rows`)"
-        )
+    # Counted lazily and stopped at the limit: materializing every line first (``splitlines``) would
+    # cost one object per line, which for a file of tiny rows dwarfs the byte cap meant to bound memory.
+    # BytesIO splits on "\n" only, the same lines ``iter_jsonl_objects`` reads.
+    rows = 0
+    for line in io.BytesIO(source_file.body):
+        if line.strip():
+            rows += 1
+            if rows > max_rows:
+                raise ValueError(
+                    f"dataset file {source_file.fileset.root} has more than the {max_rows}-row limit "
+                    "(evals config `fileset_task_source_max_rows`)"
+                )
     _, _, path = parse_fileset_ref(source_file.fileset.root, workspace_fallback="_unused")
     with tempfile.TemporaryDirectory(prefix="fileset-task-source-") as scratch:
         local = Path(scratch) / (PurePosixPath(path).name or "dataset.jsonl")
