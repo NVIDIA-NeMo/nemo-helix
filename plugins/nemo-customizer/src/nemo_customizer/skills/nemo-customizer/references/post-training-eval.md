@@ -120,6 +120,7 @@ An image row keeps the part list on the user turn, and its `image_url` is the fi
 ```
 
 - The reference stays `{{ item.messages[-1].content }}`: the assistant label is a string.
+- The template's indices follow the importers' row shape: `messages[0]` is the user turn, `content[0]` is its image part, and `content[1]` is its text part. Rows with a different shape need different indices.
 - The template names the fileset, so a copy of the dataset under another name needs it changed.
 - The request must go through the gateway. A deployment called directly reads only `data:` and `http(s)` URLs.
 - The images are found only if the fileset was uploaded with a trailing slash on the source directory (`hf-conversion.md` § **Image rows**).

@@ -276,7 +276,7 @@ Dataset rows usually hold image paths relative to the fileset they were uploaded
 from nemo_evals.sdk import FilesetRef
 from nhx_evals_sdk import InferenceParams, ModelRef, RunConfigOnlineModel, SequenceSimilarityMetric
 
-# A row: {"messages": [
+# An example row: {"messages": [
 #   {"role": "user", "content": [
 #     {"type": "image_url", "image_url": {"url": "validation/images/00000.png"}},
 #     {"type": "text", "text": "Describe this image."}]},
@@ -312,6 +312,7 @@ job = evaluator.submit(
 
 For the first row, the request carries `fileset://default/cord-v2#validation/images/00000.png`. The job downloads only the JSONL, and the gateway fetches each image as its request arrives, so saved results hold the short reference rather than the image bytes.
 
+- The template's indices follow the row shown in the comment: `messages[0]` is the user turn, `content[0]` is its image part, and `content[1]` is its text part. Rows with a different shape need different indices.
 - The request must go through the Inference Gateway, as a `ModelRef` target's requests do. A model server called directly reads only `data:` and `http(s)` URLs.
 - The template names the fileset, so a copy of the dataset under another name needs the template changed.
 - When rows already hold `data:`, `http(s)`, or `fileset://` URLs, `{"messages": "{{ item.messages[:-1] }}"}` sends their image parts unchanged.
