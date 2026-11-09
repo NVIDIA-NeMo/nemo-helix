@@ -17,7 +17,6 @@ import {
   AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
   AGENT_OPTIMIZATION_FORM_ENABLED,
   AGENT_OPTIMIZATIONS_ENABLED,
-  AGENT_OVERVIEW_ENABLED,
   OPTIMIZER_ENABLED,
 } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
@@ -338,19 +337,17 @@ export const AgentDetailRoute: FC = () => {
           </>
         }
       >
-        {AGENT_OVERVIEW_ENABLED && (
-          <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="overview">
-            <OverviewTab
-              workspace={workspace}
-              agent={agent}
-              modelNames={modelNames}
-              evals={agentEvals}
-              isEvalsPending={isAgentEvalsPending}
-              onRunAgent={() => setSelectedTab('chat')}
-              onRunEvaluation={canRunEvaluation ? runEvaluation : undefined}
-            />
-          </TabsContent>
-        )}
+        <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="overview">
+          <OverviewTab
+            workspace={workspace}
+            agent={agent}
+            modelNames={modelNames}
+            evals={agentEvals}
+            isEvalsPending={isAgentEvalsPending}
+            onRunAgent={() => setSelectedTab('chat')}
+            onRunEvaluation={canRunEvaluation ? runEvaluation : undefined}
+          />
+        </TabsContent>
 
         <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="evaluations">
           <EvaluationsTab
