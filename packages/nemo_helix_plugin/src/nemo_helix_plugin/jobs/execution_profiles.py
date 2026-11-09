@@ -137,6 +137,11 @@ class DockerVolumeMount(BaseModel):
     allow_create_volume: bool = Field(
         default=False, description="Whether to allow the creation of the volume if it does not exist (default: false)."
     )
+    read_only: bool = Field(
+        default=False,
+        description="Mount the volume read-only in the job container, so job code cannot change what it holds "
+        "(default: false).",
+    )
 
 
 class DockerJobStorageConfig(BaseModel):

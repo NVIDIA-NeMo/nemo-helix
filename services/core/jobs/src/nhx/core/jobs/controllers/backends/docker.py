@@ -711,6 +711,7 @@ fi
                     type=vol_mount.kind,
                     source=vol_mount.volume_name,
                     target=vol_mount.mount_path,
+                    read_only=vol_mount.read_only,
                 )
                 if vol_mount.options:
                     mount["VolumeOptions"] = vol_mount.options

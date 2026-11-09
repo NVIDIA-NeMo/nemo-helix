@@ -258,9 +258,10 @@ def test_rl_dpo_smoke(
     _train_and_serve(client, ws, "rl", spec, base_entity=rl_base_entity, output=output, lora=False)
 
 
-# GRPO runs every environment format with each policy configuration that should train. Sandbox
-# internet is platform-wide, and turning it on stops forcing the wheels formats offline, so
-# the native-v1 formats (which install from an index) run in a second phase with it on.
+# GRPO runs math_with_judge (wheels-v1 and native-v1) and the converted deepscaler-math
+# adapter package, with each policy that should train. Sandbox internet is platform-wide,
+# and turning it on stops forcing the wheels formats offline, so the native-v1 formats
+# (which install from an index) run in a second phase with it on.
 GRPO_POLICIES = {
     "am-fw": {"policy_backend": "automodel", "finetuning_type": "all_weights"},
     "am-lr": {"policy_backend": "automodel", "finetuning_type": "lora"},
@@ -311,22 +312,25 @@ def _grpo_smoke(
 @pytest.mark.parametrize("policy", GRPO_POLICIES)
 @pytest.mark.parametrize("env_format", ["wheels-v1", "adapter-wheels-v1"])
 def test_rl_grpo_offline_formats_smoke(
+    request: pytest.FixtureRequest,
     client: NemoClient,
     customizer_workspace: str,
-    grpo_math_env_fileset: str,
-    grpo_math_smoke_fileset: str,
-    grpo_ascii_tree_env_fileset: str,
-    grpo_ascii_tree_smoke_fileset: str,
     rl_base_entity: str,
     vllm_lora_template: str,
     env_format: str,
     policy: str,
 ) -> None:
     """Vendored wheels: the sandbox installs them with no package index."""
-    cell, environment, dataset = {
-        "wheels-v1": ("wv", grpo_math_env_fileset, grpo_math_smoke_fileset),
-        "adapter-wheels-v1": ("aw", grpo_ascii_tree_env_fileset, grpo_ascii_tree_smoke_fileset),
-    }[env_format]
+    if env_format == "wheels-v1":
+        # Resolved only for this case, so an adapter-wheels run does not stage the math package.
+        cell = "wv"
+        environment = request.getfixturevalue("grpo_math_env_fileset")
+        dataset = request.getfixturevalue("grpo_math_smoke_fileset")
+    else:
+        # Resolved only for this case, so a wheels-v1 run does not need the hub conversion.
+        cell = "ds"
+        environment = request.getfixturevalue("grpo_deepscaler_env_fileset")
+        dataset = request.getfixturevalue("grpo_deepscaler_smoke_fileset")
     _grpo_smoke(
         client,
         customizer_workspace,
