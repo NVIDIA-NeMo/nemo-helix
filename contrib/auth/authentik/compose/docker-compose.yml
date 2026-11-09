@@ -37,7 +37,7 @@ services:
       - no-new-privileges:true
     environment:
       MODE: development
-      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      DOCKER_HOST: unix:///run/docker-proxy/docker.sock
       NHX_CONFIG_FILE_PATH: /etc/nhx/config.yaml
       NHX_CONFIG_WARNINGS_DISABLED: "1"
       NHX_AUTH_POLICY_DECISION_POINT_BASE_URL: http://127.0.0.1:8080
@@ -69,23 +69,23 @@ services:
       - ../.generated/workload-token-private-key.pem:/var/run/secrets/nemo-helix/workload-token-signing/private-key.pem:ro
       - gateway-tls:/etc/nhx/gateway-tls:ro
       - nemo-data:/data
+      - docker-proxy-socket:/run/docker-proxy
     networks:
-      nemo-internal: {}
-      docker-api: {}
+      - nemo-internal
 
   # Narrows the Docker API the local jobs and deployments backends can reach to the
   # groups below; swarm, secrets, plugins, system, ... are denied. This does not make
   # the nemo container unable to become host root: it can still create containers,
   # including privileged ones or ones with host bind mounts, because the proxy cannot
-  # inspect request bodies. Only nemo shares the docker-api network with the proxy, so
-  # the other services (the IdP in particular) cannot reach the Docker API. The
-  # network is internal, so nothing outside Docker can route to it from the network;
-  # on a Linux host, though, a local user can still reach the proxy's bridge address
-  # and its unauthenticated API, which is root-equivalent. Run this stack only on
-  # hosts where every local user is trusted with Docker access.
+  # inspect request bodies. The filter listens on a root-only Unix socket on the
+  # docker-proxy-socket volume, mounted only by this service and nemo, so neither the
+  # other services (the IdP in particular) nor local host users can reach the Docker
+  # API through it. There is no TCP listener.
   docker-socket-proxy:
     image: docker.io/tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    entrypoint: ["/bin/sh", "/usr/local/bin/docker-proxy-entrypoint.sh"]
     environment:
+      PROXY_SOCKET_PATH: /run/docker-proxy/docker.sock
       CONTAINERS: "1"
       EXEC: "1"
       IMAGES: "1"
@@ -96,15 +96,15 @@ services:
       POST: "1"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker-proxy-entrypoint.sh:/usr/local/bin/docker-proxy-entrypoint.sh:ro
+      - docker-proxy-socket:/run/docker-proxy
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "wget", "-q", "-Y", "off", "-O", "/dev/null", "http://127.0.0.1:2375/_ping"]
+      test: ["CMD-SHELL", "test -S /run/docker-proxy/docker.sock"]
       interval: 5s
       timeout: 3s
       retries: 12
-    networks:
-      docker-api: {}
 
   gateway:
     image: envoyproxy/envoy:v1.36.2@sha256:4972515dd9a069b44beb43cebba7851596e72a8c61cd7a7c33d8f48efc5280ba
@@ -249,6 +249,7 @@ services:
 
 volumes:
   nemo-data:
+  docker-proxy-socket:
   authentik-pgdata:
   authentik-redisdata:
   authentik-media:
@@ -257,8 +258,5 @@ volumes:
 
 networks:
   nemo-internal: {}
-  # Reaches only the docker-socket-proxy; see the comment on that service.
-  docker-api:
-    internal: true
   workload:
     name: ${AUTHENTIK_WORKLOAD_NETWORK_NAME:-authentik_workload}
