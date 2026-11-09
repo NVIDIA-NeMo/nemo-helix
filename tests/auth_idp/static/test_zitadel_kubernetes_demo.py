@@ -667,7 +667,12 @@ def test_zitadel_chart_references_precreated_workload_token_secrets_and_tokenrev
         "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
         "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
     }
-    assert workload_config["storage"] == jobs_config["executor_defaults"]["kubernetes_job"]["storage"]
+    # executor_defaults don't apply to cpu/workload, so its storage sets the core PVC beside the CA volume.
+    assert workload_config["storage"] == {
+        "pvc_name": '{{ include "nhx-core.persistentVolumeClaim" . }}',
+        "volume_permissions_image": "{{ .Values.core.storage.volumePermissionsImage }}",
+        **jobs_config["executor_defaults"]["kubernetes_job"]["storage"],
+    }
     assert not (HELM_DIR / "templates" / "workload-token-signing-key-secret.yaml").exists()
     assert not (HELM_DIR / "templates" / "workload-token-tls.yaml").exists()
     assert 'resources: ["tokenreviews"]' in tokenreview_template
