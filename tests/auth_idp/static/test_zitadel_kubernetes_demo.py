@@ -654,8 +654,9 @@ def test_zitadel_chart_references_precreated_workload_token_secrets_and_tokenrev
     assert any(mount["name"] == "workload-token-tls-ca" for mount in values["nemo-helix"]["api"]["extraVolumeMounts"])
     jobs_config = values["nemo-helix"]["platformConfig"]["jobs"]
     assert jobs_config["executor_defaults"]["kubernetes_job"]["env"] == {
-        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
+        "NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
+        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
     }
     workload_executor = next(
         executor
@@ -664,10 +665,15 @@ def test_zitadel_chart_references_precreated_workload_token_secrets_and_tokenrev
     )
     workload_config = workload_executor["config"]
     assert workload_config["env"] == {
-        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
+        "NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
+        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
     }
     assert workload_config["storage"] == jobs_config["executor_defaults"]["kubernetes_job"]["storage"]
+    job_ca_items = jobs_config["executor_defaults"]["kubernetes_job"]["storage"]["additional_volumes"][0]["secret"][
+        "items"
+    ]
+    assert {"key": "ca-bundle.crt", "path": "ca-bundle.crt"} in job_ca_items
     assert not (HELM_DIR / "templates" / "workload-token-signing-key-secret.yaml").exists()
     assert not (HELM_DIR / "templates" / "workload-token-tls.yaml").exists()
     assert 'resources: ["tokenreviews"]' in tokenreview_template

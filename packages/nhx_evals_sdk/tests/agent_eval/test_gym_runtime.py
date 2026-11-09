@@ -62,6 +62,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     require_full_coverage,
     trials_from_rollouts,
 )
+from nhx_evals_sdk.agent_eval.runtimes.gym.runtime import FIRST_ERROR_CONTEXT_LINES, FIRST_ERROR_LINE_MAX_CHARS
 from nhx_evals_sdk.agent_eval.trials import UNKNOWN_ERROR_TYPE, AgentEvalTrialStatus, TrialError, TrialMeasurements
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nhx_evals_sdk.values import SecretRef
@@ -1656,6 +1657,195 @@ def test_startup_timeout_bounds_inline_startup_output(tmp_path: Path) -> None:
 
     assert "old diagnostic" not in startup_output
     assert len(startup_output) == 16000
+
+
+# As uv 0.11 printed it under `gym env start` on a deployment whose SSL_CERT_FILE held a private CA.
+_UV_CA_FAILURE = (
+    "(mcqa) error: Failed to install seed packages into virtual environment\n"
+    "(mcqa)   cause: No solution found when resolving: `pip`\n"
+    "(mcqa)   cause: Failed to fetch: https://pypi.org/simple/pip/\n"
+    "(mcqa)   cause: invalid peer certificate: UnknownIssuer"
+)
+
+
+@pytest.mark.asyncio
+async def test_early_exit_carries_the_reason_gym_printed(tmp_path: Path) -> None:
+    # Observed on a deployment whose SSL_CERT_FILE held only a private CA: uv could not reach PyPI,
+    # and the job failed with nothing but "`gym env start` exited early", the log on job storage.
+    env_log = tmp_path / "gym_env.log"
+    script = f"cat <<'EOF'\n{_UV_CA_FAILURE}\nProcess `mcqa` finished unexpectedly!\nEOF\nexit 3\n"
+    proc = await asyncio.create_subprocess_exec(
+        "sh", "-c", script, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+    )
+    pump = asyncio.create_task(pump_stream(proc.stdout, env_log, label="gym env start"))
+    await proc.wait()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await GymAgentTaskRunner(config=_config())._wait_for_servers(env_log, proc, pump)
+
+    message = str(excinfo.value)
+    assert "exited early (rc=3)" in message
+    assert "invalid peer certificate: UnknownIssuer" in message
+    assert "Process `mcqa` finished unexpectedly!" in message
+    assert str(env_log) in message
+
+
+def test_early_exit_shows_an_error_that_other_servers_pushed_out_of_the_tail(tmp_path: Path) -> None:
+    # One component's install fails while the others keep downloading, so its error can be hundreds
+    # of lines above the end of the log.
+    noise = "\n".join(f"(policy_model) Downloading package-{i}" for i in range(LOG_TAIL_LINES * 5))
+    transcript = f"{_UV_CA_FAILURE}\n{noise}\nProcess `mcqa` finished unexpectedly!"
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    tail, first_error = message.split("--- first error in startup output ---", 1)
+    assert "Process `mcqa` finished unexpectedly!" in tail
+    assert "invalid peer certificate: UnknownIssuer" not in tail
+    # Last, because the task record on Kubernetes keeps only the end of the pod log.
+    assert "invalid peer certificate: UnknownIssuer" in first_error
+
+
+def test_early_exit_does_not_repeat_an_error_already_in_the_tail(tmp_path: Path) -> None:
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(_UV_CA_FAILURE, tmp_path / "gym_env.log", 1)
+
+    assert "first error" not in message
+    assert message.count("UnknownIssuer") == 1
+
+
+def _traceback(prefix: str, frames: int, exception: str) -> list[str]:
+    lines = [f"{prefix}Traceback (most recent call last):"]
+    for frame in range(frames):
+        lines += [f'{prefix}  File "/app/server.py", line {frame}, in step_{frame}', f"{prefix}    step_{frame + 1}()"]
+    return [*lines, f"{prefix}{exception}"]
+
+
+def test_early_exit_keeps_the_exception_that_ends_a_long_traceback(tmp_path: Path) -> None:
+    # Six frames put the exception past a 12-line window; the frames alone don't say what failed.
+    exception = "PermissionError: [Errno 13] cannot create server environment: '/opt/Gym'"
+    traceback = _traceback("(mcqa) ", 6, exception)
+    noise = [f"(policy_model) Downloading package-{i}" for i in range(LOG_TAIL_LINES + 10)]
+    transcript = "\n".join([*traceback, *noise, "Process `mcqa` finished unexpectedly!"])
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    first_error = message.split("--- first error in startup output ---", 1)[1]
+    assert "(mcqa) Traceback (most recent call last):" in first_error
+    assert f"(mcqa) {exception}" in first_error
+    assert "line(s) omitted" in first_error
+    assert len(first_error.strip().splitlines()) <= FIRST_ERROR_CONTEXT_LINES
+
+
+def test_early_exit_reads_a_traceback_through_other_servers_output(tmp_path: Path) -> None:
+    # Servers start in parallel, so another server's lines can land between a traceback's frames.
+    exception = "RuntimeError: resources server failed to bind"
+    frames = _traceback("(mcqa) ", 2, exception)
+    interleaved = [frames[0], "(policy_model) Downloading pyarrow", *frames[1:]]
+    noise = [f"(policy_model) Downloading package-{i}" for i in range(LOG_TAIL_LINES + 10)]
+    transcript = "\n".join([*interleaved, *noise])
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    first_error = message.split("--- first error in startup output ---", 1)[1]
+    assert f"(mcqa) {exception}" in first_error
+    assert "Downloading pyarrow" not in first_error
+
+
+def test_early_exit_finds_a_traceback_end_far_below_its_start(tmp_path: Path) -> None:
+    # Heavy parallel installs can put hundreds of other servers' lines between a traceback's frames.
+    exception = "RuntimeError: resources server failed to bind"
+    frames = _traceback("(mcqa) ", 3, exception)
+    spread: list[str] = []
+    for frame in frames:
+        spread += [frame, *(f"(policy_model) Downloading package-{i}" for i in range(300))]
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message("\n".join(spread), tmp_path / "gym_env.log", 1)
+
+    first_error = message.split("--- first error in startup output ---", 1)[1]
+    assert "(mcqa) Traceback (most recent call last):" in first_error
+    assert f"(mcqa) {exception}" in first_error
+    assert "Downloading" not in first_error
+
+
+def _first_error_section(transcript_lines: list[str], tmp_path: Path) -> str:
+    noise = [f"(policy_model) Downloading package-{i}" for i in range(LOG_TAIL_LINES + 10)]
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(
+        "\n".join([*transcript_lines, *noise]), tmp_path / "gym_env.log", 1
+    )
+    return message.split("--- first error in startup output ---\n", 1)[1]
+
+
+def test_early_exit_keeps_every_line_of_a_report_that_fits(tmp_path: Path) -> None:
+    # Exactly at the limit: nothing is omitted, so no line may be dropped and no marker shown.
+    report = [
+        "(mcqa) error: Failed to install",
+        *(f"(mcqa)   cause: reason {i}" for i in range(FIRST_ERROR_CONTEXT_LINES - 1)),
+    ]
+
+    first_error = _first_error_section(report, tmp_path)
+
+    assert first_error.strip().splitlines() == report
+
+
+def test_early_exit_shortens_a_long_line_without_losing_the_exception(tmp_path: Path) -> None:
+    # One frame repeats a huge value; the exception after it must still be shown.
+    exception = "ValueError: config rejected"
+    report = [
+        "(mcqa) Traceback (most recent call last):",
+        '(mcqa)   File "/app/server.py", line 3, in start',
+        f"(mcqa)     load({'x' * 50_000!r})",
+        f"(mcqa) {exception}",
+    ]
+
+    first_error = _first_error_section(report, tmp_path)
+
+    assert f"(mcqa) {exception}" in first_error
+    assert "characters omitted)" in first_error
+    assert all(len(line) <= FIRST_ERROR_LINE_MAX_CHARS for line in first_error.splitlines())
+
+
+def test_early_exit_keeps_both_ends_of_a_long_exception_line(tmp_path: Path) -> None:
+    # The part of an exception line that explains it often comes after a long value.
+    cause = "because the policy server refused the connection"
+    exception = f"RuntimeError: startup failed for {'y' * 5_000} {cause}"
+    report = [
+        "(mcqa) Traceback (most recent call last):",
+        '(mcqa)   File "/app/server.py", line 3, in start',
+        f"(mcqa) {exception}",
+    ]
+
+    first_error = _first_error_section(report, tmp_path)
+    exception_line = first_error.strip().splitlines()[-1]
+
+    assert exception_line.startswith("(mcqa) RuntimeError: startup failed for ")
+    assert exception_line.endswith(cause)
+    assert len(exception_line) <= FIRST_ERROR_LINE_MAX_CHARS
+    omitted = int(exception_line.split(" ... (", 1)[1].split(" characters omitted", 1)[0])
+    assert omitted == len(f"(mcqa) {exception}") - len(
+        exception_line.replace(f" ... ({omitted} characters omitted) ... ", "")
+    )
+
+
+def test_early_exit_shows_an_error_that_long_lines_pushed_past_the_character_limit(tmp_path: Path) -> None:
+    # The error is among the last 40 lines, but the long lines after it fill the character limit.
+    long_lines = [f"(policy_model) {'z' * 2_000} {i}" for i in range(10)]
+    transcript = "\n".join([*_UV_CA_FAILURE.splitlines(), *long_lines])
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    tail, first_error = message.split("--- first error in startup output ---", 1)
+    assert "invalid peer certificate: UnknownIssuer" not in tail
+    assert "invalid peer certificate: UnknownIssuer" in first_error
+
+
+def test_early_exit_ignores_gym_deprecation_text_that_mentions_errors(tmp_path: Path) -> None:
+    # Gym's startup warning talks about errors without being one; only a line that starts an error
+    # report should be pulled out of the log.
+    warning = "To make this an error now, set error_on_agent_without_environment_server: true in your config."
+    transcript = warning + "\n" + "\n".join("(mcqa) ok" for _ in range(LOG_TAIL_LINES))
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    assert "first error" not in message
 
 
 @pytest.mark.asyncio

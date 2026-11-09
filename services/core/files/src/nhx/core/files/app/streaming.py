@@ -90,6 +90,7 @@ async def streaming_file_upload(
     chunk_processor: ChunkProcessor,
     queue_size: int = DEFAULT_QUEUE_SIZE,
     inactivity_timeout_seconds: float = DEFAULT_INACTIVITY_TIMEOUT_SECONDS,
+    content_length: int | None = None,
 ) -> AsyncIterator[AsyncIterator[bytes]]:
     """
     A context manager for streaming file uploads without spooling to disk.
@@ -107,6 +108,7 @@ async def streaming_file_upload(
         inactivity_timeout_seconds: Timeout in seconds for receiving data. If no bytes
             are received within this period, the connection will be terminated with
             InactivityTimeoutError.
+        content_length: Expected request size, including multipart framing.
 
     Usage:
         >>> async with streaming_file_upload(request, OctetStreamChunkProcessor()) as upload:
@@ -119,11 +121,17 @@ async def streaming_file_upload(
         """Background task that reads from request stream and sends data with timeout monitoring."""
         async with send_stream:
             try:
+                received = 0
                 async for raw_chunk in await iter_with_inactivity_timeout(
                     request.stream(),
                     inactivity_timeout_seconds,
                 ):
+                    received += len(raw_chunk)
+                    if content_length is not None and received > content_length:
+                        raise ValueError("Request body exceeds Content-Length")
                     await chunk_processor.process(raw_chunk, send_stream)
+                if content_length is not None and received != content_length:
+                    raise ValueError("Request body does not match Content-Length")
                 await chunk_processor.process_remaining_buffer(send_stream)
 
             except ClientDisconnect:

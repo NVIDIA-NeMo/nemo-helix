@@ -14183,6 +14183,12 @@ components:
           description: 'Whether to allow the creation of the volume if it does not
             exist (default: false).'
           default: false
+        read_only:
+          type: boolean
+          title: Read Only
+          description: 'Mount the volume read-only in the job container, so job code
+            cannot change what it holds (default: false).'
+          default: false
       type: object
       required:
       - volume_name
