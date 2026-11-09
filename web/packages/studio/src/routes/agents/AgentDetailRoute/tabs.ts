@@ -10,26 +10,37 @@ import {
 
 export const TAB_SEARCH_PARAM = 'tab';
 
-export type AgentDetailTab =
-  | 'overview'
-  | 'chat'
-  | 'evaluations'
-  | 'insights'
-  | 'optimizations'
-  | 'deployments'
-  | 'logs';
+const DETAIL_TABS = [
+  'overview',
+  'chat',
+  'evaluations',
+  'insights',
+  'optimizations',
+  'deployments',
+  'logs',
+] as const;
 
-export const AGENT_DETAIL_TABS: DetailPageTab<AgentDetailTab>[] = [
-  ...(AGENT_OVERVIEW_ENABLED ? [{ value: 'overview' as const, label: 'Overview' }] : []),
-  { value: 'chat', label: 'Chat' },
-  { value: 'evaluations', label: 'Evaluations' },
-  ...(OPTIMIZER_ENABLED ? [{ value: 'insights' as const, label: 'Insights' }] : []),
-  ...(AGENT_OPTIMIZATIONS_ENABLED
-    ? [{ value: 'optimizations' as const, label: 'Optimizations' }]
-    : []),
-  { value: 'deployments', label: 'Deployment' },
-  { value: 'logs', label: 'Logs' },
-];
+export type AgentDetailTab = (typeof DETAIL_TABS)[number];
+
+const TAB_LABELS: Record<AgentDetailTab, string> = {
+  overview: 'Overview',
+  chat: 'Chat',
+  evaluations: 'Evaluations',
+  insights: 'Insights',
+  optimizations: 'Optimizations',
+  deployments: 'Deployment',
+  logs: 'Logs',
+};
+
+const TAB_ENABLED: Partial<Record<AgentDetailTab, boolean>> = {
+  overview: AGENT_OVERVIEW_ENABLED,
+  insights: OPTIMIZER_ENABLED,
+  optimizations: AGENT_OPTIMIZATIONS_ENABLED,
+};
+
+export const AGENT_DETAIL_TABS: DetailPageTab<AgentDetailTab>[] = DETAIL_TABS.filter(
+  (tab) => TAB_ENABLED[tab] ?? true
+).map((value) => ({ value, label: TAB_LABELS[value] }));
 
 export const EVAL_TABS: ReadonlySet<AgentDetailTab> = new Set([
   'overview',

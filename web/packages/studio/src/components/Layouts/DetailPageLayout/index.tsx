@@ -64,7 +64,9 @@ export const DetailPageLayout = <T extends string>({
       value={selectedTab}
       onValueChange={(value) => {
         const tab = tabs.find((candidate) => candidate.value === value);
-        if (tab) onTabChange(tab.value);
+        if (tab) {
+          onTabChange(tab.value);
+        }
       }}
     >
       <Flex className="shrink-0" align="center" gap="4">
