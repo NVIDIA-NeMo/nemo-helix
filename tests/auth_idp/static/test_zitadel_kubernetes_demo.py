@@ -113,7 +113,7 @@ def test_zitadel_kubernetes_runner_is_provider_specific() -> None:
 
 
 def test_zitadel_kubernetes_runtime_is_in_auth_idp_ci_matrix() -> None:
-    workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
+    workflow = Path(".github/workflows/e2e.yaml").read_text(encoding="utf-8")
     job = _workflow_job_block(workflow, "python-auth-idp-e2e-test")
 
     assert "runtime: authentik-compose" in job
@@ -134,7 +134,7 @@ def test_zitadel_kubernetes_runtime_is_in_auth_idp_ci_matrix() -> None:
     assert "playwright install --with-deps chromium" in job
     assert 'kind delete cluster --name "${AUTH_IDP_K8S_CLUSTER_NAME}"' in job
 
-    workflow_document = _load_yaml(Path(".github/workflows/ci.yaml"))
+    workflow_document = _load_yaml(Path(".github/workflows/e2e.yaml"))
     commands = {
         entry["runtime"]: entry["command"]
         for entry in workflow_document["jobs"]["python-auth-idp-e2e-test"]["strategy"]["matrix"]["include"]
