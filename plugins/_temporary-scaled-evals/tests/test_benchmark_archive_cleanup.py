@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("scaled_evals")
 
 from scaled_evals.api import artifacts
-from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
+from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveWorkerRepository
 from scaled_evals.api.repositories.base_repository import Conflict
 from scaled_evals.benchmark_archive import build_benchmark_archive
 from scaled_evals.benchmark_archive_cleanup import cleanup_benchmark_archives
@@ -51,10 +51,10 @@ def test_upload_failure_or_lease_loss_removes_uploaded_object(monkeypatch, failu
 @pytest.mark.parametrize("failure", ["success", "fenced", "members_changed", "commit_ack_lost", "database_down"])
 def test_worker_cleans_only_unpublished_objects(monkeypatch, failure):
     state = job(object_key=None)
-    repo = MagicMock(spec=BenchmarkArchiveStore)
+    repo = MagicMock(spec=BenchmarkArchiveWorkerRepository)
     repo.for_cleanup.side_effect = lambda run_id: state
-    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveStore", lambda: repo)
-    monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveStore", lambda: repo)
+    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveWorkerRepository", lambda: repo)
+    monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveWorkerRepository", lambda: repo)
     monkeypatch.setattr(
         "scaled_evals.dispatch.worker.build_benchmark_archive",
         lambda *args, **kwargs: {"object_key": KEY, "size_bytes": 123},
@@ -101,9 +101,9 @@ def test_worker_cleans_only_unpublished_objects(monkeypatch, failure):
 
 @pytest.mark.parametrize("status", ["building", "ready", "failed"])
 def test_reconciliation_protects_current_upload_and_published_object(monkeypatch, status):
-    repo = MagicMock(spec=BenchmarkArchiveStore)
+    repo = MagicMock(spec=BenchmarkArchiveWorkerRepository)
     repo.for_cleanup.return_value = job(status=status, object_key=KEY if status != "building" else None)
-    monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveStore", lambda: repo)
+    monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveWorkerRepository", lambda: repo)
     keys = [
         KEY,
         OTHER,
@@ -118,9 +118,9 @@ def test_reconciliation_protects_current_upload_and_published_object(monkeypatch
 
 
 def test_cleanup_delete_failure_can_be_retried(monkeypatch):
-    repo = MagicMock(spec=BenchmarkArchiveStore)
+    repo = MagicMock(spec=BenchmarkArchiveWorkerRepository)
     repo.for_cleanup.return_value = job(status="failed", object_key=None)
-    monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveStore", lambda: repo)
+    monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveWorkerRepository", lambda: repo)
     monkeypatch.setattr(artifacts, "list_objects", lambda prefix: [{"key": KEY}])
     deleted = MagicMock(side_effect=[OSError("store unavailable"), None])
     monkeypatch.setattr(artifacts, "delete_object", deleted)
@@ -131,9 +131,9 @@ def test_cleanup_delete_failure_can_be_retried(monkeypatch):
 
 
 def test_repeated_reconciliation_catches_upload_that_finished_after_worker_death(monkeypatch):
-    repo = MagicMock(spec=BenchmarkArchiveStore)
+    repo = MagicMock(spec=BenchmarkArchiveWorkerRepository)
     repo.for_cleanup.return_value = job(status="failed", object_key=None)
-    monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveStore", lambda: repo)
+    monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveWorkerRepository", lambda: repo)
     objects = []
     monkeypatch.setattr(artifacts, "list_objects", lambda prefix: objects.copy())
     deleted = MagicMock()
@@ -146,10 +146,10 @@ def test_repeated_reconciliation_catches_upload_that_finished_after_worker_death
 
 
 def test_reconciliation_rechecks_reference_after_listing(monkeypatch):
-    repo = MagicMock(spec=BenchmarkArchiveStore)
+    repo = MagicMock(spec=BenchmarkArchiveWorkerRepository)
     state = job(status="building", object_key=None)
     repo.for_cleanup.side_effect = lambda run_id: state
-    monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveStore", lambda: repo)
+    monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveWorkerRepository", lambda: repo)
 
     def list_objects(prefix):
         state.update(status="ready", object_key=KEY)

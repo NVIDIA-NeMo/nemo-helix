@@ -7,7 +7,7 @@ import pytest
 
 try:
     from scaled_evals.api.benchmark_store import BenchmarkStore
-    from scaled_evals.api.evaluation_store import EvaluationStore
+    from scaled_evals.api.evaluation_store import EvaluationGlobalQueries
     from scaled_evals.api.routers import ops
     from scaled_evals.api.task_store import TaskStore
     from task_fixtures import seed_benchmark, seed_evaluation, seed_task_revision, stored_revision
@@ -84,7 +84,7 @@ def test_operations_counts_and_snapshot_derive_from_stored_evaluations() -> None
             "n_trials": 3,
         }
     )
-    store = EvaluationStore()
+    store = EvaluationGlobalQueries()
 
     assert store.status_counts() == {"queued": 1, "running": 1, "failed": 1}
     assert ops._fleet_totals() == {
