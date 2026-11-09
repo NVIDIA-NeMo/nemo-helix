@@ -577,7 +577,7 @@ async def test_create_rejects_legacy_policy_path_before_file_or_gateway_access(
     path: str,
 ) -> None:
     with (
-        patch("builtins.open") as open_file,
+        patch("nemo_deployments_plugin.backends.openshell.policy.open", create=True) as open_file,
         pytest.raises(ValueError, match="Per-deployment OpenShell policy paths are not supported") as exc,
     ):
         await openshell_backend.create_deployment(
