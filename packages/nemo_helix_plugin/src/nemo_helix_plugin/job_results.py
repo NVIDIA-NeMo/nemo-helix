@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import shutil
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
@@ -156,7 +157,7 @@ def _copy(src: Path, dst: Path, rules: _IgnoreRules | None) -> None:
         shutil.copyfile(src, dst)
 
 
-def _make_ignore(rules: _IgnoreRules | None, root: Path):
+def _make_ignore(rules: _IgnoreRules | None, root: Path) -> Callable[[str, list[str]], set[str]] | None:
     """Build a copytree callback using the hosted uploader's root-relative matching rules."""
     if rules is None:
         return None
