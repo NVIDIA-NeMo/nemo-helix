@@ -137,6 +137,23 @@ const workspaceSourcePlugin = (): RolldownPlugin => ({
   },
 });
 
+// Shared code imports SVGs as React components (`*.svg?react`), which only the
+// svgr() plugin in Studio's Vite graph understands. The raw rolldown vendor
+// build needs the same loader. vite-plugin-svgr is a single context-free
+// `load` hook, but its Plugin type targets Vite's bundled rolldown, so adapt
+// the hook rather than pass the Vite plugin in.
+const svgrVendorPlugin = (): RolldownPlugin => {
+  const hook = svgr().load;
+  const loadSvg = typeof hook === 'function' ? hook : hook?.handler;
+  return {
+    name: 'vendor-svgr',
+    async load(id) {
+      const result = await loadSvg?.call(this as never, id);
+      return typeof result === 'object' && result !== null ? { code: result.code } : null;
+    },
+  };
+};
+
 // React's CJS uses `module.exports = require(...)` double-indirection that
 // static CJS analysis can't split into named ESM exports, so `export *`
 // only catches `default`. We introspect the real module at build time and
@@ -257,7 +274,7 @@ async function buildVendorBundles(
       outfile: 'common.js',
       external: [...VENDOR_EXTERNALS],
       banner: buildRequireShim(VENDOR_EXTERNALS),
-      plugins: [workspaceSourcePlugin()],
+      plugins: [workspaceSourcePlugin(), svgrVendorPlugin()],
     },
   ];
 
