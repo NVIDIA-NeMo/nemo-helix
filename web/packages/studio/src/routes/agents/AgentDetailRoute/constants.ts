@@ -3,3 +3,6 @@
 
 // Evaluation discovery is independent of the overview's five-experiment preview.
 export const AGENT_EVALUATIONS_PAGE_SIZE = 100;
+
+// Intake can publish records and scores after the job has finished.
+export const EVALUATION_PUBLICATION_GRACE_MS = 5 * 60 * 1000;

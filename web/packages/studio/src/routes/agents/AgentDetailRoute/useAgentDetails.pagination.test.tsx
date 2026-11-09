@@ -6,7 +6,10 @@ import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import type { EvaluationResponse, HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { makeEvaluatorJob } from '@studio/mocks/evaluation/jobs';
 import { server } from '@studio/mocks/node';
-import { AGENT_EVALUATIONS_PAGE_SIZE } from '@studio/routes/agents/AgentDetailRoute/constants';
+import {
+  AGENT_EVALUATIONS_PAGE_SIZE,
+  EVALUATION_PUBLICATION_GRACE_MS,
+} from '@studio/routes/agents/AgentDetailRoute/constants';
 import { useAgentDetails } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -129,6 +132,12 @@ it('bounds publication hydration to 100 recent jobs but links displayed evaluati
   expect(result.current.agentJobs.find((row) => row.evaluationName === 'eval-150')?.name).toBe(
     'job-150'
   );
+  // Already-published jobs outside the displayed page must not reappear as scoreless rows.
+  await waitFor(() => expect(result.current.agentJobs).toHaveLength(AGENT_EVALUATIONS_PAGE_SIZE));
+  const displayedNames = new Set(result.current.agentEvals.map((row) => row.name));
+  expect(
+    result.current.agentJobs.every((row) => displayedNames.has(row.evaluationName ?? ''))
+  ).toBe(true);
 });
 
 it('ignores unrelated live jobs and retries only unpublished evaluations until discovery', async () => {
@@ -145,6 +154,9 @@ it('ignores unrelated live jobs and retries only unpublished evaluations until d
     ...['ready', 'delayed'].map((name) =>
       makeEvaluatorJob({
         id: name,
+        updated_at: new Date(
+          Date.now() - (name === 'ready' ? EVALUATION_PUBLICATION_GRACE_MS + 1 : 0)
+        ).toISOString(),
         spec: {
           target: { kind: 'fabric', source: { agent: agentName } },
           publication: { intake: { evaluation_id: name } },
@@ -182,4 +194,79 @@ it('ignores unrelated live jobs and retries only unpublished evaluations until d
   expect(lookups.filter((name) => name === 'ready')).toHaveLength(1);
   expect(lookups.filter((name) => name === 'delayed')).toHaveLength(2);
   expect(jobRequests).toBe(1);
+});
+
+it('refreshes an existing blank evaluation until scores arrive and stops after terminal grace', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  let scoresPublished = false;
+  let lookups = 0;
+  const job = makeEvaluatorJob({ status: 'active', updated_at: new Date().toISOString() });
+  server.use(
+    http.get('*/apis/jobs/v2/workspaces/:workspace/jobs', () => HttpResponse.json({ data: [job] })),
+    http.get(evaluationsUrl, () => HttpResponse.json({ data: [] })),
+    http.get(`${evaluationsUrl}/:name`, () => {
+      lookups++;
+      return HttpResponse.json({
+        ...evaluation('published-eval'),
+        aggregate_scores: scoresPublished
+          ? { 'judge.accuracy': { mean: 0.83, count: 1, failed_count: 0 } }
+          : {},
+      });
+    })
+  );
+  const { result } = renderHook(
+    () => useAgentDetails({ workspace: DEFAULT_WORKSPACE, agentName }),
+    { wrapper: TestProviders }
+  );
+  await waitFor(() => expect(result.current.agentEvals).toHaveLength(1));
+  expect(result.current.agentEvals[0]?.aggregate_scores).toEqual({});
+  job.status = 'completed';
+  job.updated_at = new Date().toISOString();
+  scoresPublished = true;
+  await act(() => vi.advanceTimersByTimeAsync(JOB_POLLING_INTERVAL_LONG + 1));
+  await waitFor(() =>
+    expect(result.current.agentEvals[0]?.aggregate_scores?.['judge.accuracy']?.mean).toBe(0.83)
+  );
+  await act(() => vi.advanceTimersByTimeAsync(EVALUATION_PUBLICATION_GRACE_MS));
+  const settledLookups = lookups;
+  await act(() => vi.advanceTimersByTimeAsync(2 * JOB_POLLING_INTERVAL_LONG));
+  expect(lookups).toBe(settledLookups);
+});
+
+it('stops terminal 404 lookups even when another live job keeps refreshing history', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  let missingLookups = 0;
+  let jobRequests = 0;
+  const jobs = [
+    // No updated_at: exercise the stable first-observed-terminal fallback.
+    makeEvaluatorJob(),
+    makeEvaluatorJob({
+      id: 'live',
+      status: 'active',
+      spec: { target: { kind: 'agent', agent: { name: agentName } } },
+    }),
+  ];
+  server.use(
+    http.get('*/apis/jobs/v2/workspaces/:workspace/jobs', () => {
+      jobRequests++;
+      return HttpResponse.json({ data: jobs });
+    }),
+    http.get(evaluationsUrl, () => HttpResponse.json({ data: [] })),
+    http.get(`${evaluationsUrl}/:name`, () => {
+      missingLookups++;
+      return new HttpResponse(null, { status: 404 });
+    })
+  );
+  renderHook(() => useAgentDetails({ workspace: DEFAULT_WORKSPACE, agentName }), {
+    wrapper: TestProviders,
+  });
+  await waitFor(() => expect(missingLookups).toBe(1));
+  await act(() =>
+    vi.advanceTimersByTimeAsync(EVALUATION_PUBLICATION_GRACE_MS + JOB_POLLING_INTERVAL_LONG)
+  );
+  expect(missingLookups).toBeGreaterThan(1);
+  expect(jobRequests).toBeGreaterThan(1);
+  const settledLookups = missingLookups;
+  await act(() => vi.advanceTimersByTimeAsync(2 * JOB_POLLING_INTERVAL_LONG));
+  expect(missingLookups).toBe(settledLookups);
 });

@@ -36,9 +36,11 @@ export type AgentEvalAggregateScore =
 /** Re-export so callers continue to import AgentEvalResult from this module. */
 export type { AgentEvalResult };
 
-/** The registered agent evaluated by either an ordinary agent or a registered runner target. */
-export const agentNameForJob = (job: AgentEvaluateJob): string | null =>
-  agentNameForTarget(job.spec?.target, job.workspace);
+/** The local registered agent a job evaluated. Foreign refs cannot form a local breadcrumb. */
+export const agentNameForJob = (job: AgentEvaluateJob): string | null => {
+  const name = agentNameForTarget(job.spec?.target, job.workspace);
+  return name?.includes('/') ? null : name;
+};
 
 export const evalConfigName = (job: AgentEvaluateJob): string | null => {
   // Formerly ``spec.benchmark.eval_config_fileset``; AgentEvalSpec now carries
