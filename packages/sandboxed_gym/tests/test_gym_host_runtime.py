@@ -6,6 +6,7 @@ import collections
 import io
 import json
 import os
+import shutil
 import socket
 import subprocess
 import threading
@@ -14,6 +15,7 @@ import urllib.error
 import zipfile
 from email.message import Message
 from http.server import HTTPServer, ThreadingHTTPServer
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -744,40 +746,23 @@ def test_an_operators_own_uv_offline_setting_is_not_overwritten(tmp_path, monkey
     assert runtime.os.environ[runtime.UV_OFFLINE_ENV_KEY] == "0"
 
 
+_PACKAGED_SERVER_STAGING = Path(__file__).parent / "fixtures" / "packaged_server_staging"
+
+
 def test_packaged_server_is_staged_onto_the_gym_checkout_and_searched_first(tmp_path, monkeypatch):
-    package = tmp_path / "pkg" / "resources_servers" / "math_with_judge"
-    package.mkdir(parents=True)
-    (package / "app.py").write_text("print('packaged')\n")
-    (package / "requirements.txt").write_text("-e nemo-gym[dev] @ ../../\nmath-verify==0.8.0\n")
-    shared = tmp_path / "pkg" / "shared"
-    shared.mkdir()
-    (shared / "settings.json").write_text('{"from": "package"}\n')
-    (tmp_path / "pkg" / "resources_servers" / "settings.json").write_text('{"beside": "server"}\n')
-    reference = tmp_path / "pkg" / "resources_servers" / "builtin_judge" / "configs"
-    reference.mkdir(parents=True)
-    (reference / "builtin_judge.yaml").write_text("entrypoint: app.py\n")
-    image_reference = tmp_path / "gym" / "resources_servers" / "builtin_judge"
-    image_reference.mkdir(parents=True)
-    (image_reference / "app.py").write_text("print('image builtin')\n")
-    image_server = tmp_path / "gym" / "resources_servers" / "math_with_judge"
-    image_server.mkdir(parents=True)
-    (image_server / "app.py").write_text("print('image')\n")
-    (image_server / "requirements.txt").write_text("image\n")
-    (tmp_path / "gym" / "pyproject.toml").write_text("[project]\nname='gym'\n")
-    checkout_shared = tmp_path / "gym" / "shared"
-    checkout_shared.mkdir()
-    (checkout_shared / "settings.json").write_text('{"from": "checkout"}\n')
-    (checkout_shared / "keep.txt").write_text("keep\n")
-    (tmp_path / "gym" / "nemo_gym").mkdir()
-    (tmp_path / "gym" / "nemo_gym" / "__init__.py").write_text("image\n")
-    (tmp_path / "pkg" / "nemo_gym").mkdir()
-    (tmp_path / "pkg" / "nemo_gym" / "__init__.py").write_text("package\n")
+    """Stage tests/fixtures/packaged_server_staging onto a writable copy of its image checkout."""
+    package_src = _PACKAGED_SERVER_STAGING / "package"
+    image_src = _PACKAGED_SERVER_STAGING / "image"
+    package = tmp_path / "pkg"
+    image = tmp_path / "gym"
+    shutil.copytree(package_src, package)
+    shutil.copytree(image_src, image)
     monkeypatch.delenv(runtime.IMAGE_GYM_SRC_ENV_KEY, raising=False)
-    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(tmp_path / "gym"))
+    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(image))
     monkeypatch.delenv(runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY, raising=False)
 
     loaded = NativeV1Package(
-        root=tmp_path / "pkg",
+        root=package,
         manifest=NativeV1Manifest(
             metadata=EnvironmentMetadata(name="math-with-judge"),
             config_paths=("resources_servers/math_with_judge/configs/math_with_judge.yaml",),
@@ -787,16 +772,26 @@ def test_packaged_server_is_staged_onto_the_gym_checkout_and_searched_first(tmp_
     assert runtime._stage_packaged_servers_into_gym_checkout(loaded)
     runtime._prepend_environment_search_root(str(loaded.root), checkout_first=True)
 
-    assert (image_server / "app.py").read_text() == "print('packaged')\n"
-    assert (tmp_path / "gym" / "shared" / "settings.json").read_text() == '{"from": "package"}\n'
-    assert (tmp_path / "gym" / "shared" / "keep.txt").read_text() == "keep\n"
-    assert (tmp_path / "gym" / "nemo_gym" / "__init__.py").read_text() == "image\n"
-    assert (tmp_path / "gym" / "resources_servers" / "settings.json").read_text() == '{"beside": "server"}\n'
-    assert (image_reference / "app.py").read_text() == "print('image builtin')\n"
-    assert not (image_reference / "configs").exists()
-    assert (tmp_path / "gym" / "pyproject.toml").is_file()
+    server = Path("resources_servers/math_with_judge")
+    # The packaged server replaces the image server. Shared data from the package root
+    # overlays the checkout, and a checkout file the package does not ship stays.
+    assert (image / server / "app.py").read_bytes() == (package_src / server / "app.py").read_bytes()
+    assert (image / server / "requirements.txt").read_bytes() == (
+        package_src / server / "requirements.txt"
+    ).read_bytes()
+    assert (image / "shared/settings.json").read_bytes() == (package_src / "shared/settings.json").read_bytes()
+    assert (image / "shared/keep.txt").read_bytes() == (image_src / "shared/keep.txt").read_bytes()
+    assert (image / "resources_servers/settings.json").read_bytes() == (
+        package_src / "resources_servers/settings.json"
+    ).read_bytes()
+    # nemo_gym and a configs-only reference stay the image's. The reference is not copied over.
+    builtin = Path("resources_servers/builtin_judge")
+    assert (image / "nemo_gym/__init__.py").read_bytes() == (image_src / "nemo_gym/__init__.py").read_bytes()
+    assert (image / builtin / "app.py").read_bytes() == (image_src / builtin / "app.py").read_bytes()
+    assert not (image / builtin / "configs").exists()
+    assert (image / "pyproject.toml").is_file()
     roots = runtime.os.environ[runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY].split(os.pathsep)
-    assert roots[0] == str((tmp_path / "gym").resolve())
+    assert roots[0] == str(image.resolve())
     assert roots[1] == str(loaded.root)
 
 
