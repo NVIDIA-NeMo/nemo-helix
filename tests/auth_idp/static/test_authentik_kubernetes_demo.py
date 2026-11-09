@@ -262,14 +262,63 @@ def test_authentik_static_ci_prepares_envoy_validation_inputs() -> None:
     assert "helm dependency build contrib/auth/authentik/helm" in job
 
 
-def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:
-    ci_workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
-    job = _workflow_job_block(ci_workflow, "python-auth-idp-e2e-test")
+def test_cpu_smoke_image_build_is_required_in_ci_without_e2e_opt_in() -> None:
+    ci = _load_yaml(Path(".github/workflows/ci.yaml"))
+    e2e = _load_yaml(Path(".github/workflows/e2e.yaml"))
+    job = ci["jobs"]["build-cpu-smoke-images"]
 
-    assert "needs.policy-wasm.result == 'success'" in job
-    assert "needs.build-cpu-smoke-images.result == 'success'" in job
-    assert "needs.build-cpu-smoke-images.outputs.publish_images == 'true'" in job
-    assert "needs.python-auth-idp-static-test.result == 'success'" in job
+    assert job["needs"] == ["changes"]
+    assert job["if"].strip() == (
+        "!cancelled() && (\n"
+        "  github.event_name == 'workflow_dispatch' ||\n"
+        "  needs.changes.outputs.cpu-smoke == 'true' ||\n"
+        "  needs.changes.outputs.auth-idp == 'true' ||\n"
+        "  needs.changes.outputs.customization-auth == 'true' ||\n"
+        "  needs.changes.outputs.builder-e2e == 'true'\n"
+        ")"
+    )
+    assert "build-cpu-smoke-images" in ci["jobs"]["ci-status"]["needs"]
+    assert "build-cpu-smoke-images" in ci["jobs"]["post-merge-image-status"]["needs"]
+    assert job["steps"] == e2e["jobs"]["build-cpu-smoke-images"]["steps"]
+    assert job["permissions"] == e2e["jobs"]["build-cpu-smoke-images"]["permissions"]
+
+
+def test_builder_e2e_moves_to_opt_in_workflow_with_both_auth_modes() -> None:
+    ci = _load_yaml(Path(".github/workflows/ci.yaml"))
+    e2e_path = Path(".github/workflows/e2e.yaml")
+    e2e = _load_yaml(e2e_path)
+    job = e2e["jobs"]["kind-builder-e2e"]
+    block = _workflow_job_block(e2e_path.read_text(encoding="utf-8"), "kind-builder-e2e")
+
+    assert "kind-builder-e2e" not in ci["jobs"]
+    assert "kind-builder-e2e" not in ci["jobs"]["ci-status"]["needs"]
+    assert "kind-builder-e2e" not in ci["jobs"]["post-merge-image-status"]["needs"]
+    assert "kind-builder-e2e" in e2e["jobs"]["post-merge-e2e-status"]["needs"]
+    assert job["needs"] == ["eligibility", "build-cpu-smoke-images"]
+    assert job["if"] == "needs.build-cpu-smoke-images.outputs.publish_images == 'true'"
+    assert job["strategy"]["matrix"]["auth"] == ["off", "on"]
+    assert "needs.changes.outputs" not in block
+    steps = {step["name"]: step for step in job["steps"]}
+    run = steps["Run builder e2e tests"]["run"]
+    assert "e2e/test_builder.py" in run
+    assert "features+=(--feature auth --config e2e/quickstart/auth.yaml)" in run
+    assert "if tests == 0 or skipped:" in run
+    assert steps["Finalize Kind builder e2e"]["if"] == "always()"
+
+
+def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:
+    workflow_path = Path(".github/workflows/e2e.yaml")
+    workflow = _load_yaml(workflow_path)
+    runtime_job = workflow["jobs"]["python-auth-idp-e2e-test"]
+    job = _workflow_job_block(workflow_path.read_text(encoding="utf-8"), "python-auth-idp-e2e-test")
+
+    assert set(runtime_job["needs"]) == {
+        "eligibility",
+        "policy-wasm",
+        "build-cpu-smoke-images",
+        "python-auth-idp-static-test",
+    }
+    assert runtime_job["if"] == "needs.build-cpu-smoke-images.outputs.publish_images == 'true'"
     assert '--image "${IMAGE_REGISTRY}/nhx-api:${BAKE_TAG}"' in job
 
 
@@ -1232,7 +1281,7 @@ def test_authentik_kubernetes_runner_uses_helm_not_kustomize() -> None:
     run_sh = (AUTHENTIK_DIR / "run.sh").read_text(encoding="utf-8")
     live_test_path = Path("tests/auth_idp/k8s/test_authentik_kubernetes_live.py")
     live_test = live_test_path.read_text(encoding="utf-8")
-    ci_workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
+    ci_workflow = Path(".github/workflows/e2e.yaml").read_text(encoding="utf-8")
 
     assert "NHX_AUTHENTIK_K8S_HELM_RELEASE" in run_sh
     assert 'K8S_RUNTIME="${NHX_AUTHENTIK_K8S_RUNTIME:-kind}"' in run_sh
@@ -1365,7 +1414,7 @@ def test_authentik_runner_rejects_removed_bare_compose_and_k8s_aliases() -> None
 
 
 def test_authentik_ci_workflow_uses_explicit_test_actions() -> None:
-    workflow = _load_yaml(Path(".github/workflows/ci.yaml"))
+    workflow = _load_yaml(Path(".github/workflows/e2e.yaml"))
     matrix_include = workflow["jobs"]["python-auth-idp-e2e-test"]["strategy"]["matrix"]["include"]
 
     commands_by_runtime = {
@@ -1379,7 +1428,7 @@ def test_authentik_ci_workflow_uses_explicit_test_actions() -> None:
 
 
 def test_authentik_ci_workflow_does_not_carry_separate_k3d_runner() -> None:
-    workflow = _load_yaml(Path(".github/workflows/ci.yaml"))
+    workflow = _load_yaml(Path(".github/workflows/e2e.yaml"))
 
     assert "python-auth-idp-k3d-e2e-test" not in workflow["jobs"]
 
@@ -1932,7 +1981,12 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
         "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
         "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
     }
-    expected_storage = nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["storage"]
+    # executor_defaults don't apply to cpu/workload, so its storage sets the core PVC beside the CA volume.
+    expected_storage = {
+        "pvc_name": '{{ include "nhx-core.persistentVolumeClaim" . }}',
+        "volume_permissions_image": "{{ .Values.core.storage.volumePermissionsImage }}",
+        **nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["storage"],
+    }
     assert workload_config["storage"] == expected_storage
     assert not any(
         executor["provider"] == "gpu_distributed" and executor["profile"] == "default"

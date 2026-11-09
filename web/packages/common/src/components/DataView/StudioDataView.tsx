@@ -123,12 +123,20 @@ export const StudioDataView = <DataType,>({
     className: rowClickClassName,
   } = useRowClick(onRowClick, data);
 
+  const isLoading = attributes?.DataViewRoot?.requestStatus === 'loading';
+
   const effectiveMakeColumns: typeof makeColumns = useMemo(() => {
     const withRowClick = wrapColumns(makeColumns);
-    if (!maxTwoLines) return withRowClick;
+    const withRowActionsGuard: typeof makeColumns = isLoading
+      ? (helper, prebuilt) =>
+          withRowClick(helper, prebuilt).map((col) =>
+            col.id === 'row-actions' ? { ...col, cell: () => null } : col
+          )
+      : withRowClick;
+    if (!maxTwoLines) return withRowActionsGuard;
 
     return (helper, prebuilt) => {
-      const columns = withRowClick(helper, prebuilt);
+      const columns = withRowActionsGuard(helper, prebuilt);
 
       return columns.map((col) => {
         if (PREBUILT_COLUMN_IDS.has(col.id ?? '')) return col;
@@ -153,7 +161,7 @@ export const StudioDataView = <DataType,>({
         };
       });
     };
-  }, [makeColumns, wrapColumns, maxTwoLines]);
+  }, [makeColumns, wrapColumns, maxTwoLines, isLoading]);
 
   return (
     <DataView.Root

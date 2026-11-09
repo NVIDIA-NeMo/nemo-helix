@@ -203,6 +203,7 @@ opensandbox_ext_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
   --show-only templates/opensandbox-ext.yaml \
   --set sandboxClusterCapable=true \
   --set opensandbox.namespace=os-ns \
+  --set opensandbox.domain=opensandbox-server.os-ns.svc.cluster.local \
   --set opensandbox.composeServices.enabled=true)
 test "$(grep -c "namespace: release-ns" <<<"${opensandbox_ext_output}")" = 2   # the Role and the RoleBinding
 test "$(grep -c "namespace: os-ns" <<<"${opensandbox_ext_output}")" = 2        # the ConfigMap, and the RoleBinding's subject
