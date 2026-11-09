@@ -3,11 +3,12 @@
 
 """SQLAlchemy implementation of FilterRepository."""
 
-from datetime import datetime
+from datetime import date, datetime, timezone
 from typing import Any, List, NamedTuple, Optional, Set
 
 from nemo_helix_plugin.filter_ops import ElemMatchCondition
 from nhx.common.api.filter import FilterOperation, FilterOperator, FilterRepository
+from nhx.core.entities.app.repository.exceptions import InvalidFilterError
 from sqlalchemy import (
     JSON,
     ColumnElement,
@@ -19,6 +20,7 @@ from sqlalchemy import (
     cast,
     false,
     func,
+    inspect,
     literal,
     literal_column,
     not_,
@@ -91,19 +93,27 @@ class SQLAlchemyFilterRepository(FilterRepository):
             whether the column is a JSON element accessor
 
         Raises:
-            ValueError: If field doesn't exist on the model
+            InvalidFilterError: If field is not a mapped column or valid JSON data path
         """
-        # explicit field check
-        if hasattr(self.model, field):
-            return getattr(self.model, field), False
+        # Inspect the mapper rather than accepting arbitrary ORM/Python attributes.
+        # Use getattr only after validation so aliased models retain their SQL alias.
+        mapped = inspect(self.model)
+        mapper = mapped.mapper
+        if field in mapper.column_attrs:
+            column = getattr(self.model, field)
+            if isinstance(column.type, JSON):
+                raise InvalidFilterError(
+                    f"Cannot filter on JSON column '{field}' directly; use dotted data paths such as 'data.key'"
+                )
+            return column, False
 
-        # check for data access
-        if field.startswith("data."):
+        if field.startswith("data.") and "data" in mapper.column_attrs:
             column = getattr(self.model, "data")
             path = field.split(".")[1:]
-            return self._get_json_element(column, path), isinstance(column.type, JSON)
+            if all(path) and isinstance(column.type, JSON):
+                return self._get_json_element(column, path), True
 
-        raise ValueError(f"Field '{field}' does not exist on model {self.model.__name__}")
+        raise InvalidFilterError(f"Invalid filter field '{field}'")
 
     def _coerce_value_for_column(self, column: ColumnElement, value: Any) -> Any:
         """Coerce Python types from filter inputs based on column type.
@@ -112,13 +122,27 @@ class SQLAlchemyFilterRepository(FilterRepository):
         handles formatting: PostgreSQL's psycopg2 sends it as a native TIMESTAMP,
         while SQLite's bind_processor formats it to a string with microseconds.
 
-        Timezone info is stripped because our columns are TIMESTAMP WITHOUT TIME ZONE;
-        a tz-aware datetime would cause type mismatches on PostgreSQL.
+        Stored timestamps are naive UTC. Normalize aware operands to UTC before
+        removing timezone info, and preserve naive operands' existing wall time.
         """
-        if isinstance(column.type, DateTime) and isinstance(value, str):
-            return datetime.fromisoformat(value).replace(tzinfo=None)
-
-        return value
+        if not isinstance(column.type, DateTime) or value is None:
+            return value
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value)
+            except ValueError as exc:
+                raise InvalidFilterError(f"Invalid timestamp filter value '{value}'") from exc
+        if isinstance(value, datetime):
+            if value.tzinfo is not None:
+                try:
+                    return value.astimezone(timezone.utc).replace(tzinfo=None)
+                except OverflowError as exc:
+                    raise InvalidFilterError(f"Invalid timestamp filter value '{value}'") from exc
+            return value
+        # Preserve date operands already accepted by SQLAlchemy's DateTime binder.
+        if isinstance(value, date):
+            return value
+        raise InvalidFilterError(f"Invalid timestamp filter value '{value}'")
 
     def _cast_json_to_raw_text(self, column: Any) -> Any:
         """Cast a JSON column element to its raw serialized text, quotes and all.
@@ -164,7 +188,9 @@ class SQLAlchemyFilterRepository(FilterRepository):
         ``$startsWith``/``$endsWith``/``$nin``.
         """
         if operator == FilterOperator.EQ:
-            return self._json_eq(element, value) if is_json else element == value
+            return (
+                self._json_eq(element, value) if is_json else element == self._coerce_value_for_column(element, value)
+            )
         comparison = self._non_eq_compare(element, is_json, operator, value)
         if is_json and operator in self._NULL_EXCLUDING_OPS:
             return and_(not_(self._json_eq(element, None)), comparison)
@@ -180,7 +206,7 @@ class SQLAlchemyFilterRepository(FilterRepository):
         if operator == FilterOperator.LIKE:
             return text.ilike(f"%{value}%")
         if operator in (FilterOperator.IN, FilterOperator.NIN):
-            values = [str(v) for v in value] if is_json else value
+            values = [str(v) for v in value] if is_json else [self._coerce_value_for_column(element, v) for v in value]
             return text.in_(values) if operator == FilterOperator.IN else text.not_in(values)
         op = self._ORDERED_OPS[operator]
         if not is_json:

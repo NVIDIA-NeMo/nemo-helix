@@ -43,11 +43,11 @@ from typing import Any
 import yaml
 
 from scaled_evals.api import artifacts
-from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
-from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
+from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveWorkerRepository
+from scaled_evals.api.benchmark_run_store import BenchmarkRunWorkerRepository
 from scaled_evals.api.build.task_image_identity import verify_stored_task_image
 from scaled_evals.api.config_profile_store import ConfigProfileStore
-from scaled_evals.api.evaluation_store import EvaluationStore
+from scaled_evals.api.evaluation_store import EvaluationWorkerRepository
 from scaled_evals.api.execution_analytics import emit_execution_span
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
@@ -241,9 +241,9 @@ def teardown_orphaned_execution(
             cleanup["execution_number"],
             detail,
         )
-        EvaluationStore().mark_cleanup_failed(str(cleanup["id"]), worker_id=worker_id, detail=detail)
+        EvaluationWorkerRepository().mark_cleanup_failed(str(cleanup["id"]), worker_id=worker_id, detail=detail)
         return
-    EvaluationStore().complete_execution_cleanup(
+    EvaluationWorkerRepository().complete_execution_cleanup(
         str(cleanup["id"]),
         worker_id=worker_id,
         retry_delay_seconds=_retry_delay_seconds(str(cleanup["evaluation_id"]), int(cleanup["execution_number"])),
@@ -380,7 +380,7 @@ class Dispatcher:
         def keep_claim() -> None:
             while not stop.wait(max(0.1, min(30.0, self.claim_timeout / 3))):
                 try:
-                    owned = BenchmarkArchiveStore().heartbeat(job["benchmark_run_id"], job["claim_token"])
+                    owned = BenchmarkArchiveWorkerRepository().heartbeat(job["benchmark_run_id"], job["claim_token"])
                     if not owned:
                         lost.set()
                         return
@@ -396,17 +396,17 @@ class Dispatcher:
         archive: dict | None = None
         published = False
         try:
-            BenchmarkArchiveStore().validate_members(job["benchmark_run_id"], job["members"])
+            BenchmarkArchiveWorkerRepository().validate_members(job["benchmark_run_id"], job["members"])
             archive = build_benchmark_archive(job, check_claim=check_claim)
             check_claim()
-            published = BenchmarkArchiveStore().finish(job, **archive)
+            published = BenchmarkArchiveWorkerRepository().finish(job, **archive)
             if not published:
                 raise RuntimeError("benchmark archive claim lost before publication")
         except Exception as exc:  # noqa: BLE001 — record a retryable export failure
             # Object-store errors may contain URLs; expose only a redacted message.
             detail = redact_secret_text(str(exc))[:2000]
             LOG.warning("benchmark archive failed for %s: %s", job["benchmark_run_id"], detail)
-            BenchmarkArchiveStore().fail(job, detail)
+            BenchmarkArchiveWorkerRepository().fail(job, detail)
         finally:
             stop.set()
             keeper.join(timeout=5)
@@ -417,7 +417,7 @@ class Dispatcher:
 
     def claim_next_archive(self, evaluation_id: str | None = None, *, min_age: float = 0.0) -> str | None:
         """Claim one terminal evaluation that requested an archive rebuild."""
-        row = EvaluationStore().claim_next_archive(
+        row = EvaluationWorkerRepository().claim_next_archive(
             claim_timeout=self.claim_timeout,
             worker_id=self.worker_id,
             evaluation_id=evaluation_id,
@@ -427,7 +427,7 @@ class Dispatcher:
 
     def claim_next_evidence(self, evaluation_id: str | None = None, *, min_age: float = 0.0) -> str | None:
         """Claim one terminal evaluation needing provenance/SBOM generation."""
-        row = EvaluationStore().claim_next_evidence(
+        row = EvaluationWorkerRepository().claim_next_evidence(
             claim_timeout=self.claim_timeout,
             worker_id=self.worker_id,
             evaluation_id=evaluation_id,
@@ -447,7 +447,7 @@ class Dispatcher:
         execution_number: int | None = None
         row: dict[str, Any] | None = None
         try:
-            row = EvaluationStore().load_for_dispatch(evaluation_id)
+            row = EvaluationWorkerRepository().load_for_dispatch(evaluation_id)
             if row is None:
                 raise RuntimeError(f"evaluation not found: {evaluation_id}")
             if row.get("status") not in _DB_TERMINAL_STATUSES:
@@ -502,13 +502,13 @@ class Dispatcher:
                     evidence_root,
                     artifacts.evaluation_artifact_prefix(evaluation_id),
                 )
-            EvaluationStore().mark_evidence_ready(
+            EvaluationWorkerRepository().mark_evidence_ready(
                 evaluation_id,
                 expected_execution_number=execution_number,
             )
         except Exception as exc:  # noqa: BLE001 — durable queue retries up to its limit
             LOG.warning("evidence generation failed for %s: %s", evaluation_id, exc)
-            EvaluationStore().mark_evidence_failed(
+            EvaluationWorkerRepository().mark_evidence_failed(
                 evaluation_id,
                 str(exc),
                 expected_execution_number=execution_number,
@@ -522,7 +522,7 @@ class Dispatcher:
     def _record_analytics(self, row: dict[str, Any]) -> None:
         """Record the terminal evaluation in Intake; analytics never block evidence."""
         try:
-            usage = EvaluationStore().resource_totals_for(str(row["id"]))
+            usage = EvaluationWorkerRepository().resource_totals_for(str(row["id"]))
         except Exception:  # noqa: BLE001 — analytics are best-effort
             LOG.warning("could not read resource usage for %s", row["id"], exc_info=True)
             usage = {}
@@ -532,7 +532,7 @@ class Dispatcher:
         """Build ``results.tar.gz`` for an evaluation from synced artifacts."""
         runtime = None
         execution_number = None
-        row = EvaluationStore().load_status_runtime(evaluation_id)
+        row = EvaluationWorkerRepository().load_status_runtime(evaluation_id)
         if row is not None:
             runtime = row.get("runtime")
             execution_number = int(row.get("current_execution") or 1)
@@ -619,7 +619,7 @@ class Dispatcher:
         if row is None:
             return
         if row["status"] == "cancelled" and row.get("cancel_teardown_status") == "pending":
-            EvaluationStore().record_cancel_teardown_succeeded(evaluation_id)
+            EvaluationWorkerRepository().record_cancel_teardown_succeeded(evaluation_id)
             return
         if row["status"] not in _RESUMABLE_STATUSES:
             return
@@ -881,7 +881,7 @@ class Dispatcher:
                 )
                 return
 
-        db_status = EvaluationStore().load_runtime_status(
+        db_status = EvaluationWorkerRepository().load_runtime_status(
             evaluation_id,
             expected_execution_number=execution_number,
         )
@@ -983,7 +983,7 @@ class Dispatcher:
             if teardown_note is not None:
                 detail = f"{detail}; {teardown_note}"
             if is_retryable_failure(failure_code, detail):
-                scheduled = EvaluationStore().schedule_retry(
+                scheduled = EvaluationWorkerRepository().schedule_retry(
                     evaluation_id,
                     execution_number=execution_number,
                     failure_code=failure_code,
@@ -1166,7 +1166,7 @@ class Dispatcher:
             samples = list(sampler(handle))
             if not samples:
                 return
-            EvaluationStore().record_resource_samples(
+            EvaluationWorkerRepository().record_resource_samples(
                 evaluation_id,
                 execution_number=execution_number,
                 samples=samples,
@@ -1191,7 +1191,7 @@ class Dispatcher:
         *,
         execution_number: int,
     ) -> str:
-        repo = EvaluationStore()
+        repo = EvaluationWorkerRepository()
         status = repo.load_runtime_status(
             evaluation_id,
             expected_execution_number=execution_number,
@@ -1212,7 +1212,7 @@ class Dispatcher:
         try:
             backend.teardown(handle)
         except Exception as exc:  # noqa: BLE001 — cancellation must stay durable
-            EvaluationStore().record_cancel_teardown_failure(
+            EvaluationWorkerRepository().record_cancel_teardown_failure(
                 evaluation_id,
                 f"cancelled; evaluation-runtime cleanup failed: {exc}",
             )
@@ -1229,7 +1229,7 @@ class Dispatcher:
                 execution_id=str(row.get("execution_id") or handle.external_id),
                 execution_number=int(row.get("execution_number") or 1),
             )
-            EvaluationStore().record_cancel_teardown_succeeded(evaluation_id)
+            EvaluationWorkerRepository().record_cancel_teardown_succeeded(evaluation_id)
             self._build_archive_warn(
                 evaluation_id,
                 runtime=handle.backend,
@@ -1428,7 +1428,7 @@ class Dispatcher:
             "benchmark_run_id": benchmark_run_id,
         }
         if benchmark_run_id:
-            identity = BenchmarkRunStore().load_experiment_identity(benchmark_run_id) or {}
+            identity = BenchmarkRunWorkerRepository().load_experiment_identity(benchmark_run_id) or {}
             benchmark = identity.get("benchmark_slug") or row.get("task_slug") or "eval"
             metadata["benchmark_run_name"] = identity.get("run_name")
             run_key = str(benchmark_run_id)
@@ -1495,7 +1495,7 @@ class Dispatcher:
                 # execution overwrite the shared prefix. The archive build
                 # below has the same gap. Upgrade path: a prefix per
                 # execution, with the evaluation pointing at the current one.
-                if not EvaluationStore().current_execution_is(
+                if not EvaluationWorkerRepository().current_execution_is(
                     evaluation_id,
                     expected_execution_number=execution_number,
                 ):
@@ -1506,7 +1506,7 @@ class Dispatcher:
                     else artifacts.sync_directory_to_prefix
                 )
                 count = sync(artifact_root, artifact_prefix)
-                EvaluationStore().record_artifact_sync(
+                EvaluationWorkerRepository().record_artifact_sync(
                     evaluation_id,
                     execution_number=execution_number,
                     status="succeeded",
@@ -1518,7 +1518,7 @@ class Dispatcher:
             LOG.warning("artifact sync failed for %s: %s", evaluation_id, exc)
             if execution_number is not None:
                 try:
-                    EvaluationStore().record_artifact_sync(
+                    EvaluationWorkerRepository().record_artifact_sync(
                         evaluation_id,
                         execution_number=execution_number,
                         status="failed",
@@ -1547,10 +1547,10 @@ class Dispatcher:
             if diagnostic_path.exists():
                 loaded = json.loads(diagnostic_path.read_text(encoding="utf-8"))
                 diagnostic = loaded if isinstance(loaded, dict) else {}
-            row = EvaluationStore().load_for_dispatch(evaluation_id)
+            row = EvaluationWorkerRepository().load_for_dispatch(evaluation_id)
             if row is None:
                 return
-            repository = EvaluationStore()
+            repository = EvaluationWorkerRepository()
             repository.record_summary(
                 evaluation_id,
                 execution_number=execution_number,
@@ -1604,14 +1604,14 @@ class Dispatcher:
         """Build the downloadable results archive, warning on errors."""
         try:
             if runtime is not None and not get_backend_capabilities(runtime).supports_archive:
-                EvaluationStore().mark_archive_missing(
+                EvaluationWorkerRepository().mark_archive_missing(
                     evaluation_id,
                     detail=f"runtime {runtime} does not support result archives",
                     expected_execution_number=execution_number,
                 )
                 return None
             if not already_claimed:
-                EvaluationStore().mark_archive_building(
+                EvaluationWorkerRepository().mark_archive_building(
                     evaluation_id,
                     worker_id=self.worker_id,
                     expected_execution_number=execution_number,
@@ -1624,13 +1624,13 @@ class Dispatcher:
                     )
                 else:
                     archive = artifacts.build_evaluation_archive(evaluation_id)
-                EvaluationStore().mark_archive_ready(
+                EvaluationWorkerRepository().mark_archive_ready(
                     evaluation_id,
                     object_key=archive["object_key"],
                     size_bytes=archive["size_bytes"],
                 )
             else:
-                if not EvaluationStore().current_execution_is(
+                if not EvaluationWorkerRepository().current_execution_is(
                     evaluation_id,
                     expected_execution_number=execution_number,
                 ):
@@ -1642,7 +1642,7 @@ class Dispatcher:
                     )
                 else:
                     archive = artifacts.build_evaluation_archive(evaluation_id)
-                EvaluationStore().mark_archive_ready(
+                EvaluationWorkerRepository().mark_archive_ready(
                     evaluation_id,
                     object_key=archive["object_key"],
                     size_bytes=archive["size_bytes"],
@@ -1654,7 +1654,7 @@ class Dispatcher:
             detail = str(exc)
             LOG.warning("archive build failed for %s: %s", evaluation_id, detail)
             try:
-                EvaluationStore().mark_archive_missing(
+                EvaluationWorkerRepository().mark_archive_missing(
                     evaluation_id,
                     detail=detail,
                     expected_execution_number=execution_number,
@@ -1666,12 +1666,12 @@ class Dispatcher:
 
     @staticmethod
     def _load(evaluation_id: str) -> dict | None:
-        return EvaluationStore().load_for_dispatch(evaluation_id)
+        return EvaluationWorkerRepository().load_for_dispatch(evaluation_id)
 
     @staticmethod
     def _load_state(evaluation_id: str, inputs: Mapping[str, Any]) -> dict | None:
         """Overlay the row's live state, which the API still writes, on the immutable inputs."""
-        state = EvaluationStore().load_dispatch_state(evaluation_id)
+        state = EvaluationWorkerRepository().load_dispatch_state(evaluation_id)
         return None if state is None else {**inputs, **state}
 
     def _set_status(
@@ -1684,7 +1684,7 @@ class Dispatcher:
         handle: str | None = None,
         failure_code: str | None = None,
     ) -> None:
-        telemetry = EvaluationStore()
+        telemetry = EvaluationWorkerRepository()
         if status in {"provisioning", "running"}:
             telemetry.record_phase(
                 evaluation_id,
@@ -1698,7 +1698,7 @@ class Dispatcher:
                 phase="terminal",
                 terminal_status=status,
             )
-        updated = EvaluationStore().set_status(
+        updated = EvaluationWorkerRepository().set_status(
             evaluation_id,
             status,
             detail=detail,
@@ -1729,13 +1729,13 @@ class Dispatcher:
         note from :meth:`_maybe_upload_atif`) is appended to the trial-count
         ``status_detail`` when present.
         """
-        EvaluationStore().record_phase(
+        EvaluationWorkerRepository().record_phase(
             evaluation_id,
             execution_number=execution_number,
             phase="terminal",
             terminal_status=terminal_status,
         )
-        updated = EvaluationStore().persist_result(
+        updated = EvaluationWorkerRepository().persist_result(
             evaluation_id,
             EvaluationResultWrite(result=result, summary=summary, extra_detail=extra_detail),
             terminal_status=terminal_status,

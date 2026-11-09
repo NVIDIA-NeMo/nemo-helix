@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ActionMenuItem } from '@nemo/common/src/components/ActionsMenu';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
-import * as DataView from '@nemo/common/src/components/DataView/internal';
+import type * as DataView from '@nemo/common/src/components/DataView/internal';
 import {
   ROW_ACTIONS_COLUMN_SIZE,
   ROW_SELECTION_COLUMN_SIZE,
@@ -11,6 +12,7 @@ import {
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
@@ -29,7 +31,7 @@ import type {
   ModelEntitySortField,
   ModelsListModelsParams,
 } from '@nemo/sdk/generated/platform/schema';
-import { Anchor, Button, type DropdownEntry, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { Anchor, Button, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';
 import {
   DEFAULT_CUSTOM_MODELS_FILTER,
@@ -50,7 +52,7 @@ import {
   getWorkspaceCustomizationJobDetailsRoute,
 } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
-import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
+import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
 type SearchQuery = Record<string, unknown>;
@@ -104,7 +106,9 @@ function buildCustomModelsFilter(fields: CustomModelsFilterParams): string | und
     conditions.push({ updated_at });
   }
 
-  if (conditions.length === 0) return undefined;
+  if (conditions.length === 0) {
+    return undefined;
+  }
   const query = conditions.length === 1 ? conditions[0] : { $and: conditions };
   return JSON.stringify(query);
 }
@@ -252,7 +256,9 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
 
   const handleDelete = async () => {
     try {
-      if (!deleteTarget) return false;
+      if (!deleteTarget) {
+        return false;
+      }
       if (deleteTarget.kind === 'model') {
         await deleteModel({ workspace, name: deleteTarget.name });
       } else {
@@ -371,7 +377,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
         rowActionsColumn({
           size: ROW_ACTIONS_COLUMN_SIZE,
           enableResizing: false,
-          rowActions: (row: ModelTableRow): DropdownEntry[] => {
+          cell: ({ row: { original: row } }) => {
             const isAdapter = Boolean(row._parentModel);
             const parentModel = row._parentModel;
             // Adapter rows deploy their parent: an adapter is loaded by whatever serves
@@ -380,8 +386,8 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
               deploymentStatuses.get(row.id),
               parentModel ?? row
             );
-            const deployEntries: DropdownEntry[] = deployAction
-              ? [{ children: deployAction.label, onSelect: () => navigate(deployAction.href) }]
+            const deployEntries: ActionMenuItem[] = deployAction
+              ? [{ label: deployAction.label, onSelect: () => navigate(deployAction.href) }]
               : [];
 
             // Keyed on the row's own name either way: an adapter row links to the run that
@@ -389,10 +395,10 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
             // rather than disabled when nothing matched -- a model can be registered
             // outside a customization run, and then there is no job to show.
             const jobName = jobsByOutputName.get(row.name);
-            const jobEntries: DropdownEntry[] = jobName
+            const jobEntries: ActionMenuItem[] = jobName
               ? [
                   {
-                    children: 'Job details',
+                    label: 'Job details',
                     onSelect: () =>
                       navigate(getWorkspaceCustomizationJobDetailsRoute(workspace, jobName)),
                   },
@@ -400,58 +406,61 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
               : [];
 
             if (isAdapter && parentModel) {
-              return [
-                {
-                  children: 'Model details',
-                  onSelect: () => {
-                    const adapter = adapterMap.get(parentModel.id)?.get(row.name);
-                    onRowClick?.(parentModel, 'model-details', adapter);
-                  },
-                },
-                ...jobEntries,
-                ...deployEntries,
-                { kind: 'divider' as const },
-                {
-                  children: 'Delete Adapter',
-                  danger: true,
-                  onSelect: () =>
-                    setDeleteTarget({
-                      kind: 'adapter',
-                      adapterName: row.name,
-                      modelName: parentModel.name,
-                    }),
-                },
-              ];
-            }
-
-            return [
-              {
-                children: 'Model details',
-                onSelect: () => onRowClick?.(row, 'model-details'),
-              },
-              {
-                children: 'Chat Playground',
-                onSelect: () => onRowClick?.(row, 'chat-playground'),
-              },
-              ...jobEntries,
-              ...deployEntries,
-              ...(INTAKE_ENABLED
-                ? [
+              return (
+                <QuickActionsMenuRoot
+                  actions={[
                     {
-                      children: 'View Intake',
+                      label: 'Model details',
                       onSelect: () => {
-                        navigate(getIntakeTracesRoute(workspace));
+                        const adapter = adapterMap.get(parentModel.id)?.get(row.name);
+                        onRowClick?.(parentModel, 'model-details', adapter);
                       },
                     },
-                  ]
-                : []),
-              { kind: 'divider' as const },
-              {
-                children: 'Delete',
-                danger: true,
-                onSelect: () => setDeleteTarget({ kind: 'model', name: row.name }),
-              },
-            ];
+                    ...jobEntries,
+                    ...deployEntries,
+                  ]}
+                  deleteAction={{
+                    label: 'Delete Adapter',
+                    onSelect: () =>
+                      setDeleteTarget({
+                        kind: 'adapter',
+                        adapterName: row.name,
+                        modelName: parentModel.name,
+                      }),
+                  }}
+                />
+              );
+            }
+
+            return (
+              <QuickActionsMenuRoot
+                actions={[
+                  {
+                    label: 'Model details',
+                    onSelect: () => onRowClick?.(row, 'model-details'),
+                  },
+                  {
+                    label: 'Chat Playground',
+                    onSelect: () => onRowClick?.(row, 'chat-playground'),
+                  },
+                  ...jobEntries,
+                  ...deployEntries,
+                  ...(INTAKE_ENABLED
+                    ? [
+                        {
+                          label: 'View Intake',
+                          onSelect: () => {
+                            navigate(getIntakeTracesRoute(workspace));
+                          },
+                        },
+                      ]
+                    : []),
+                ]}
+                deleteAction={{
+                  onSelect: () => setDeleteTarget({ kind: 'model', name: row.name }),
+                }}
+              />
+            );
           },
         }),
       ],

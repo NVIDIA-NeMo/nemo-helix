@@ -5,7 +5,7 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { CancelJobModal } from '@nemo/common/src/components/CancelJobModal';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
-import * as DataView from '@nemo/common/src/components/DataView/internal';
+import type * as DataView from '@nemo/common/src/components/DataView/internal';
 import {
   ROW_ACTIONS_COLUMN_SIZE,
   ROW_SELECTION_COLUMN_SIZE,
@@ -29,7 +29,7 @@ import {
   getSafeSynthesizerListJobsQueryKey,
   useSafeSynthesizerListJobs,
 } from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
-import {
+import type {
   GenerateJob,
   GenerateJobsListFilter,
   GenerateJobsSortField,
@@ -46,7 +46,7 @@ import {
   getGenerateJobRoute,
 } from '@studio/routes/utils';
 import { keepPreviousData, useQueries, useQueryClient } from '@tanstack/react-query';
-import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
+import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
 type GenerateJobWithId = GenerateJob & { id: string };
@@ -301,10 +301,6 @@ export const GenerateJobsDataView: FC = () => {
                       },
                     ]
                   : []),
-                {
-                  label: 'Delete',
-                  onSelect: () => setDeleteJobs([row.original]),
-                },
                 ...(isCancellableJob(row.original.status)
                   ? [
                       {
@@ -314,6 +310,7 @@ export const GenerateJobsDataView: FC = () => {
                     ]
                   : []),
               ]}
+              deleteAction={{ onSelect: () => setDeleteJobs([row.original]) }}
             />
           ),
         }),

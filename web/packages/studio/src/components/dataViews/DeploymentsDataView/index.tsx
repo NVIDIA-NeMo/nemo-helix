@@ -15,16 +15,17 @@ import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useModelsListDeployments } from '@nemo/sdk/generated/platform/model-deployments';
 import {
-  ModelDeployment,
-  ModelDeploymentFilter,
+  type ModelDeployment,
+  type ModelDeploymentFilter,
   ModelDeploymentStatus,
 } from '@nemo/sdk/generated/platform/schema';
-import { type DropdownEntry, Stack, Text } from '@nvidia/foundations-react-core';
+import { Stack, Text } from '@nvidia/foundations-react-core';
 import { keepPreviousData } from '@tanstack/react-query';
 import { type ComponentProps, type FC, useCallback } from 'react';
 
@@ -112,16 +113,17 @@ export const DeploymentsDataView: FC<DeploymentsDataViewProps> = ({
         rowActionsColumn({
           size: 58,
           enableResizing: false,
-          rowActions: (deployment: ModelDeployment): DropdownEntry[] => [
-            {
-              children: 'Delete',
-              disabled:
-                deployment.status === ModelDeploymentStatus.DELETED ||
-                deployment.status === ModelDeploymentStatus.DELETING,
-              danger: true,
-              onSelect: () => onRequestDeleteDeployment(deployment),
-            },
-          ],
+          cell: ({ row: { original: deployment } }) => (
+            <QuickActionsMenuRoot
+              actions={[]}
+              deleteAction={{
+                disabled:
+                  deployment.status === ModelDeploymentStatus.DELETED ||
+                  deployment.status === ModelDeploymentStatus.DELETING,
+                onSelect: () => onRequestDeleteDeployment(deployment),
+              }}
+            />
+          ),
         }),
       ],
       [onRequestDeleteDeployment]

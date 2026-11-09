@@ -1,0 +1,86 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# NHX Agent Installer - the self-contained installer an agent layer's build mounts to install an agent.
+#
+# An agent layer is a task's environment image with an agent already installed (nemo-evals agent layers). Its build
+# runs the agent's own Harbor setup inside the image, which may have no Python at all, so it mounts this: a standalone
+# CPython and a relocatable venv with Harbor, NeMo Fabric's Harbor agent and the SDK's agent installer, under
+# /opt/nhx-agent-installer. The agent-layer Job copies /nhx-agent-installer.tar.gz from this image into each build's
+# context. The build mounts it at the same path, so the venv's interpreter path holds.
+#
+# HARBOR_VERSION and NEMO_FABRIC_VERSION match uv.lock (a test checks); nemo-fabric[harbor] 0.6 caps harbor below
+# 0.24, overridden as the workspace's own override-dependencies do.
+#
+# Sources: the venv's packages and CPython are collected from the interpreter, and docker/sources pins the rest.
+# nhx-agent-installer.json pins the python-build-standalone release uv installs (its build scripts and patches, and
+# the libraries it links into CPython or ships beside it, at the versions its pythonbuild/downloads.json names) and
+# the interpreter's own pip. The build fails when uv installs another release: re-pin the manifest from that release's
+# downloads.json and the libraries its PYTHON.json says it links. kaniko-busybox.json pins the BusyBox the image runs
+# for the Job's copy, taken from the same digest-pinned kaniko image as Dockerfile.nhx-kaniko.
+
+ARG NHX_PYTHON_BASE=nhx-python-base
+
+FROM ghcr.io/osscontainertools/kaniko:v1.28.5-debug@sha256:d6d74217dc077acfd3094992e917c357080a2d3fdd1042a49e34e29a7e57c572 AS kaniko
+
+FROM ${NHX_PYTHON_BASE} AS builder
+ARG PYTHON_VERSION=3.12.15
+ARG PYTHON_BUILD_STANDALONE_RELEASE=20261013
+ARG HARBOR_VERSION=0.24.0
+ARG NEMO_FABRIC_VERSION=0.6.0
+# The SDK goes in without its dependencies: these are the ones its Fabric agent imports that Harbor and Fabric don't bring.
+ARG OPENTELEMETRY_PROTO_VERSION=1.43.0
+ARG PROTOBUF_VERSION=6.33.6
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+ENV INSTALLER=/opt/nhx-agent-installer
+COPY packages/nhx_evals_sdk /src/nhx_evals_sdk
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv python install "${PYTHON_VERSION}" --install-dir "${INSTALLER}/python" && \
+    build="$(cat "${INSTALLER}/python/cpython-${PYTHON_VERSION}"-*/BUILD)" && \
+    { [ "${build}" = "${PYTHON_BUILD_STANDALONE_RELEASE}" ] || \
+        { echo "uv installed python-build-standalone ${build}, not ${PYTHON_BUILD_STANDALONE_RELEASE}: re-pin docker/sources/nhx-agent-installer.json" >&2; exit 1; }; } && \
+    uv venv --relocatable --python "$(ls -d "${INSTALLER}/python/cpython-${PYTHON_VERSION}"-*/bin/python3)" "${INSTALLER}/venv" && \
+    printf 'harbor==%s\n' "${HARBOR_VERSION}" > /tmp/overrides.txt && \
+    uv pip install --python "${INSTALLER}/venv/bin/python" --override /tmp/overrides.txt \
+        "harbor==${HARBOR_VERSION}" "nemo-fabric[harbor]==${NEMO_FABRIC_VERSION}" \
+        "opentelemetry-proto==${OPENTELEMETRY_PROTO_VERSION}" "protobuf==${PROTOBUF_VERSION}" && \
+    uv pip install --python "${INSTALLER}/venv/bin/python" --no-deps /src/nhx_evals_sdk
+# The installer's entry point, and the agents it installs, import without the SDK's other dependencies.
+RUN "${INSTALLER}/venv/bin/python" -c 'import nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer_install, \
+nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_installed_agent, harbor.agents.installed.codex, \
+harbor.agents.installed.claude_code'
+COPY docker/sources/nhx-agent-installer.json docker/sources/kaniko-busybox.json /tmp/sources/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    python3 /usr/local/bin/collect-pinned-sources.py \
+        --manifest /tmp/sources/nhx-agent-installer.json \
+        --manifest /tmp/sources/kaniko-busybox.json \
+        --output /source-distributions/nhx-agent-installer && \
+    uv run --no-project --python "${INSTALLER}/venv/bin/python" \
+        /usr/local/bin/collect-python-sdists.py \
+        --python "${INSTALLER}/venv/bin/python" \
+        --output /source-distributions/nhx-agent-installer && \
+    uv run --no-project --python "${INSTALLER}/venv/bin/python" \
+        /usr/local/bin/collect-cpython-source.py \
+        --python "${INSTALLER}/venv/bin/python" \
+        --output /source-distributions/nhx-agent-installer && \
+    mkdir -p /source-distributions/nhx-agent-installer && \
+    tar -C /opt -czf /nhx-agent-installer.tar.gz nhx-agent-installer
+
+# Only BusyBox's static binary, for the Job's `cp`. The source check unpacks the archive the label names and checks
+# what it holds as well.
+FROM scratch AS runtime
+COPY --from=kaniko /busybox/busybox /bin/busybox
+RUN ["/bin/busybox", "ln", "-s", "busybox", "/bin/cp"]
+COPY --from=builder /nhx-agent-installer.tar.gz /nhx-agent-installer.tar.gz
+COPY --from=builder /source-distributions/nhx-agent-installer/ /usr/share/nemo-helix/source-distributions/nhx-agent-installer/
+LABEL com.nvidia.nemo-helix.source-scan-archives="/nhx-agent-installer.tar.gz"
+
+FROM runtime AS smoke-test
+# The Job's copy works, and unpacked where a layer's build mounts it, the venv's interpreter link resolves inside the
+# bundle.
+RUN ["/bin/busybox", "sh", "-c", "busybox mkdir -p /tmp /opt && /bin/cp /nhx-agent-installer.tar.gz /tmp/ && \
+busybox tar -xzf /tmp/nhx-agent-installer.tar.gz -C /opt && busybox test -x /opt/nhx-agent-installer/venv/bin/python"]
+
+FROM runtime

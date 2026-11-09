@@ -6,7 +6,7 @@ import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { logger } from '@nemo/common/src/utils/logger';
 import { IconDocument } from '@nemo/icons/icons';
 import { Flex, PageHeader, Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import { ComponentProps, FC, ReactNode, useEffect } from 'react';
+import { type ComponentProps, type FC, type ReactNode, useEffect } from 'react';
 import { useRouteError, isRouteErrorResponse } from 'react-router';
 
 const DEFAULT_ERROR_MESSAGE =

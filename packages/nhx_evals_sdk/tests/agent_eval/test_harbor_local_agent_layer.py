@@ -15,6 +15,7 @@ import textwrap
 import time
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -233,14 +234,16 @@ async def test_a_layer_is_the_setup_of_a_bare_container_committed_with_its_start
             set_up.append(environment)
 
     monkeypatch.setattr(local_agent_layer, "_docker", fake_docker)
-    monkeypatch.setattr(local_agent_layer.AgentFactory, "create_agent_from_config", lambda *a, **k: _Agent())
+    monkeypatch.setattr(
+        local_agent_layer, "AgentFactory", SimpleNamespace(create_agent_from_config=lambda *a, **k: _Agent())
+    )
 
     agent = _AGENT.model_copy(update={"env": {"HTTPS_PROXY": "http://proxy.example:3128"}})
     await build_agent_layer("task-image", "nemo-agent-layer:abc", _INSTALL, agent, user="agent")
 
     run = next(call for call in calls if call[0] == "run")
     # The task's entrypoint doesn't run: state it initializes belongs to each trial, not the shared layer.
-    assert run[-5:] == ("--entrypoint", "sh", "task-image", "-c", "sleep infinity")
+    assert run[-6:] == ("--entrypoint", "", "task-image", "sh", "-c", "sleep infinity")
     (environment,) = set_up
     assert isinstance(environment, ContainerExecEnvironment) and environment.default_user == "agent"
     assert environment.env == {"HTTPS_PROXY": "http://proxy.example:3128"}
@@ -267,7 +270,9 @@ async def test_a_failed_setup_still_stops_the_build_container(monkeypatch) -> No
             raise RuntimeError("npm unreachable")
 
     monkeypatch.setattr(local_agent_layer, "_docker", fake_docker)
-    monkeypatch.setattr(local_agent_layer.AgentFactory, "create_agent_from_config", lambda *a, **k: _Agent())
+    monkeypatch.setattr(
+        local_agent_layer, "AgentFactory", SimpleNamespace(create_agent_from_config=lambda *a, **k: _Agent())
+    )
 
     with pytest.raises(RuntimeError, match="npm unreachable"):
         await build_agent_layer("task-image", "nemo-agent-layer:abc", _INSTALL, _AGENT, user=None)
@@ -288,7 +293,7 @@ async def test_container_exec_runs_as_the_default_user_unless_told_otherwise(mon
         ran.append(args)
         return _Process()
 
-    monkeypatch.setattr(local_agent_layer.asyncio, "create_subprocess_exec", create)
+    monkeypatch.setattr(local_agent_layer, "create_subprocess_exec", create)
     environment = ContainerExecEnvironment("box", default_user="agent")
 
     result = await environment.exec("npm -v", cwd="/app", env={"A": "1"})
@@ -326,7 +331,7 @@ async def test_the_install_env_reaches_every_exec_over_the_execs_own(monkeypatch
         ran.append(args)
         return _Process()
 
-    monkeypatch.setattr(local_agent_layer.asyncio, "create_subprocess_exec", create)
+    monkeypatch.setattr(local_agent_layer, "create_subprocess_exec", create)
     environment = ContainerExecEnvironment(
         "box", default_user=None, env={"HTTPS_PROXY": "http://proxy.example:3128", "A": "install"}
     )
@@ -389,7 +394,7 @@ async def _validated(
             raise layer
         return layer
 
-    monkeypatch.setattr(local_agent_layer.DockerEnvironment, "_validate_image_os", parent_validate)
+    monkeypatch.setattr(AgentLayerDockerEnvironment, "_harbor_validate_image_os", parent_validate)
     monkeypatch.setattr(local_agent_layer, "ensure_agent_layer", ensure)
     await environment._validate_image_os("hb__task")
     return asked
@@ -425,7 +430,7 @@ async def test_a_fabric_layer_is_built_without_the_trials_config_bundle(tmp_path
         built.append(agent)
         return "nemo-agent-layer:abc"
 
-    monkeypatch.setattr(local_agent_layer.DockerEnvironment, "_validate_image_os", _no_validate)
+    monkeypatch.setattr(AgentLayerDockerEnvironment, "_harbor_validate_image_os", _no_validate)
     monkeypatch.setattr(local_agent_layer, "ensure_agent_layer", ensure)
     await environment._validate_image_os("hb__task")
 
@@ -524,7 +529,7 @@ async def test_teardown_removes_the_trials_own_image_not_the_shared_layer(
     async def parent_stop(self: Any, delete: bool) -> None:
         stopped.append((self._use_prebuilt, self._env_vars.prebuilt_image_name))
 
-    monkeypatch.setattr(local_agent_layer.DockerEnvironment, "stop", parent_stop)
+    monkeypatch.setattr(AgentLayerDockerEnvironment, "_harbor_stop", parent_stop)
     await environment.stop(delete=True)
 
     assert stopped == [(prebuilt, image)]
@@ -601,7 +606,9 @@ def _fake_build_docker(monkeypatch, *, ready_after: int) -> list[tuple[str, ...]
     monkeypatch.setattr(local_agent_layer, "_docker", fake_docker)
     monkeypatch.setattr(local_agent_layer, "_docker_status", fake_status)
     monkeypatch.setattr(local_agent_layer, "LOCK_POLL_INTERVAL_SEC", 0.001)
-    monkeypatch.setattr(local_agent_layer.AgentFactory, "create_agent_from_config", lambda *a, **k: _Agent())
+    monkeypatch.setattr(
+        local_agent_layer, "AgentFactory", SimpleNamespace(create_agent_from_config=lambda *a, **k: _Agent())
+    )
     return calls
 
 
@@ -653,12 +660,10 @@ async def test_a_trial_on_a_restricted_network_asks_for_a_layer_behind_harbors_s
         network_mode=NetworkMode.ALLOWLIST, allowed_hosts=["registry.npmjs.org"]
     )
 
-    async def sidecar_built(self: Any) -> None:
-        self._env_vars.egress_control_sidecar_image_name = "harbor-prebuilt:harbor-docker-egress-control-sidecar"
+    async def sidecar_built() -> None:
+        environment._env_vars.egress_control_sidecar_image_name = "harbor-prebuilt:harbor-docker-egress-control-sidecar"
 
-    monkeypatch.setattr(
-        local_agent_layer.DockerEnvironment, "_ensure_egress_control_sidecar_image_built", sidecar_built
-    )
+    monkeypatch.setattr(environment, "_ensure_egress_control_sidecar_image_built", sidecar_built)
     egress: list[SetupEgress | None] = []
 
     await _validated(environment, monkeypatch, "nemo-agent-layer:abc", egress)

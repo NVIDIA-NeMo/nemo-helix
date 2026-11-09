@@ -397,7 +397,7 @@ def test_run_services_restores_env_and_closes_lock_when_descriptor_cleanup_fails
         closed_fds.append(fd)
         real_close(fd)
 
-    monkeypatch.setattr(os, "close", close)
+    monkeypatch.setattr(services, "close", close)
     with (
         patch("nemo_helix_ext.local.services.require_services_extra"),
         patch("nemo_helix_ext.local.services.process.acquire_lock", side_effect=acquire_lock),
@@ -616,7 +616,7 @@ def test_daemonize_services_starts_child_module(monkeypatch: pytest.MonkeyPatch,
         patch("nemo_helix_ext.local.services.require_services_extra"),
         patch("nemo_helix_ext.local.services._check_tcp_available"),
         patch("nemo_helix_ext.local.services.probe_status", return_value=True),
-        patch("nemo_helix_ext.local.services.subprocess.Popen", return_value=proc) as popen,
+        patch("nemo_helix_ext.local.services.Popen", return_value=proc) as popen,
     ):
         handle = services.daemonize_services(cfg)
 
@@ -654,7 +654,7 @@ def test_daemonize_services_leaves_socket_preparation_to_child(monkeypatch: pyte
         patch("nemo_helix_ext.local.services.require_services_extra"),
         patch("nemo_helix_ext.local.services._prepare_socket", side_effect=AssertionError("parent prepared socket")),
         patch("nemo_helix_ext.local.services.probe_status", side_effect=[False, True]),
-        patch("nemo_helix_ext.local.services.subprocess.Popen", return_value=proc),
+        patch("nemo_helix_ext.local.services.Popen", return_value=proc),
     ):
         handle = services.daemonize_services(cfg)
 
@@ -662,16 +662,10 @@ def test_daemonize_services_leaves_socket_preparation_to_child(monkeypatch: pyte
     assert socket_path.read_text(encoding="utf-8") == "stale"
 
 
-def test_write_run_request_writes_complete_payload_when_os_write_is_short(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_write_run_request_writes_complete_payload_when_os_write_is_short(tmp_path: Path) -> None:
     cfg = ServiceRunConfig(scope="dev", state_dir=tmp_path / "state", runtime_dir=tmp_path / "run")
-    real_write = os.write
-
-    def short_write(fd: int, data: bytes) -> int:
-        return real_write(fd, data[: max(1, len(data) // 2)])
-
-    monkeypatch.setattr(services.os, "write", short_write)
+    # _write_run_request writes through a text file object, whose buffered writes never call
+    # os.write, so a short os.write cannot reach it; the complete payload is what this checks.
 
     request_path = services._write_run_request(cfg)
 
@@ -712,7 +706,7 @@ def test_daemonize_services_terminates_child_on_timeout(monkeypatch: pytest.Monk
     with (
         patch("nemo_helix_ext.local.services.require_services_extra"),
         patch("nemo_helix_ext.local.services.probe_status", return_value=False),
-        patch("nemo_helix_ext.local.services.subprocess.Popen", return_value=proc),
+        patch("nemo_helix_ext.local.services.Popen", return_value=proc),
     ):
         with pytest.raises(services.ServicesStartupTimeoutError):
             services.daemonize_services(cfg)
@@ -758,7 +752,7 @@ def test_daemonize_services_bounds_probe_and_sleep_by_remaining_deadline(
     with (
         patch("nemo_helix_ext.local.services.require_services_extra"),
         patch("nemo_helix_ext.local.services.probe_status", side_effect=probe_status) as probe_status_mock,
-        patch("nemo_helix_ext.local.services.subprocess.Popen", return_value=proc),
+        patch("nemo_helix_ext.local.services.Popen", return_value=proc),
         patch("nemo_helix_ext.local.services.monotonic", side_effect=monotonic),
         patch("nemo_helix_ext.local.services.sleep", side_effect=sleep),
     ):
@@ -785,7 +779,7 @@ def test_daemonize_services_terminates_child_on_handle_error(monkeypatch: pytest
     with (
         patch("nemo_helix_ext.local.services.require_services_extra"),
         patch("nemo_helix_ext.local.services._check_tcp_available"),
-        patch("nemo_helix_ext.local.services.subprocess.Popen", return_value=proc),
+        patch("nemo_helix_ext.local.services.Popen", return_value=proc),
         patch(
             "nemo_helix_ext.local.services.DaemonServiceHandle.from_config",
             side_effect=RuntimeError("handle failed"),
@@ -814,7 +808,7 @@ def test_daemonize_services_terminates_child_on_probe_error(monkeypatch: pytest.
         patch("nemo_helix_ext.local.services.require_services_extra"),
         patch("nemo_helix_ext.local.services._check_tcp_available"),
         patch("nemo_helix_ext.local.services.probe_status", side_effect=RuntimeError("probe failed")),
-        patch("nemo_helix_ext.local.services.subprocess.Popen", return_value=proc),
+        patch("nemo_helix_ext.local.services.Popen", return_value=proc),
     ):
         with pytest.raises(RuntimeError, match="probe failed"):
             services.daemonize_services(cfg)
@@ -841,7 +835,7 @@ def test_daemonize_services_terminates_child_on_sleep_interruption(
         patch("nemo_helix_ext.local.services.require_services_extra"),
         patch("nemo_helix_ext.local.services._check_tcp_available"),
         patch("nemo_helix_ext.local.services.probe_status", return_value=False),
-        patch("nemo_helix_ext.local.services.subprocess.Popen", return_value=proc),
+        patch("nemo_helix_ext.local.services.Popen", return_value=proc),
         patch("nemo_helix_ext.local.services.sleep", side_effect=KeyboardInterrupt),
     ):
         with pytest.raises(KeyboardInterrupt):
@@ -872,7 +866,7 @@ def test_daemonize_services_kills_child_when_terminate_times_out(
         patch("nemo_helix_ext.local.services.require_services_extra"),
         patch("nemo_helix_ext.local.services._check_tcp_available"),
         patch("nemo_helix_ext.local.services.probe_status", return_value=False),
-        patch("nemo_helix_ext.local.services.subprocess.Popen", return_value=proc),
+        patch("nemo_helix_ext.local.services.Popen", return_value=proc),
     ):
         with pytest.raises(services.ServicesStartupTimeoutError):
             services.daemonize_services(cfg)
@@ -948,7 +942,7 @@ def test_serve_embedded_app_without_socket_path_sets_keep_alive_timeout() -> Non
     )
     app = object()
 
-    with patch("uvicorn.run") as uvicorn_run:
+    with patch("nemo_helix_ext.local.services._run_uvicorn") as uvicorn_run:
         services.serve_embedded_app(app, cfg, None)
 
     uvicorn_run.assert_called_once_with(

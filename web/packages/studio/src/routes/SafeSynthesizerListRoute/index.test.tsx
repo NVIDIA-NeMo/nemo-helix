@@ -35,7 +35,8 @@ describe('SafeSynthesizerListRoute', () => {
   it('should render the Safe Synthesizer list page', async () => {
     vi.stubEnv('VITE_PLATFORM_BASE_URL', PLATFORM_BASE_URL);
 
-    const { SafeSynthesizerListRoute } = await import('./index');
+    const { SafeSynthesizerListRoute } =
+      await import('@studio/routes/SafeSynthesizerListRoute/index');
 
     render(
       <TestProviders>

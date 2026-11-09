@@ -4,9 +4,9 @@
 import { Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import { LiveTestPanel } from '@studio/components/evaluation/ModelEvaluationWizard/LiveTestPanel';
-import { type EvaluationFormValues } from '@studio/components/evaluation/ModelEvaluationWizard/types';
+import type { EvaluationFormValues } from '@studio/components/evaluation/ModelEvaluationWizard/types';
 import { useMessagesBinding } from '@studio/components/evaluation/ModelEvaluationWizard/useMessagesBinding';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 /**
  * The run itself: which model to evaluate, and an optional single-row check.

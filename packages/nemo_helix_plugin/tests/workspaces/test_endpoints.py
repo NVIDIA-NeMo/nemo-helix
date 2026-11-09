@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from typing import get_origin
 
+import pytest
 from nemo_helix_plugin.client.types import Paginated, PreparedRequest
 from nemo_helix_plugin.entities.types import DeleteResponse
 from nemo_helix_plugin.workspaces import endpoints
@@ -21,6 +22,7 @@ from nemo_helix_plugin.workspaces.types import (
     WorkspaceMember,
     WorkspaceMemberListResponse,
 )
+from pydantic import ValidationError
 
 
 def _json_body(prepared: PreparedRequest) -> dict:
@@ -177,3 +179,17 @@ def test_delete_workspace_member() -> None:
     assert prepared.query_params == {"wait_role_propagation": False}
     assert prepared.content is None
     assert prepared.response_type is DeleteResponse
+
+
+@pytest.mark.parametrize("length", [257, 70005])
+def test_member_request_rejects_long_principal(length: int) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        CreateWorkspaceMemberRequest(principal="a" * length)
+    error = exc_info.value.errors()[0]
+    assert error["loc"] == ("principal",)
+    assert error["type"] == "string_too_long"
+
+
+def test_member_request_accepts_max_length_principal() -> None:
+    principal = "a" * 256
+    assert CreateWorkspaceMemberRequest(principal=principal).principal == principal

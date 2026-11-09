@@ -10,8 +10,12 @@
  * its affiliates is strictly prohibited.
  */
 
-import { booleanFlag, FlagDescriptor, previewFlag } from '@studio/constants/featureFlags/utils';
-import { z } from 'zod';
+import {
+  booleanFlag,
+  type FlagDescriptor,
+  previewFlag,
+} from '@studio/constants/featureFlags/utils';
+import type { z } from 'zod';
 
 // ============================================================================
 // FEATURE FLAGS CONFIGURATION
@@ -86,7 +90,6 @@ export const flagDefinitions = {
   modelEvaluationFormEnabled: previewFlag('VITE_FF_MODEL_EVALUATION_FORM_ENABLED', true),
   monitorEnabled: previewFlag('VITE_FF_MONITOR_ENABLED'),
   optimizerEnabled: previewFlag('VITE_FF_OPTIMIZER_ENABLED', true),
-  traceGraphEnabled: booleanFlag('VITE_FF_TRACE_GRAPH_ENABLED', true),
 } as const;
 
 // --- Types ---

@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from enum import StrEnum
 from pathlib import Path
+from shutil import copytree
 
 from nhx.automodel.tasks.training.chat_templates import (
     apply_chat_template_to_checkpoint,
@@ -38,6 +39,7 @@ from nhx.automodel.tasks.training.schemas import (
     Precision,
     TrainingStepConfig,
 )
+from nhx.customization_common.training.lora import merge_lora_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -277,83 +279,6 @@ def sanitize_encoder_hf(output_path: Path, base_model_path: Path) -> None:
     )
 
 
-def merge_lora_adapter(
-    adapter_path: Path,
-    base_model_path: str,
-    output_path: Path,
-    trust_remote_code: bool,
-) -> None:
-    """
-    Merge LoRA adapter weights into the base model.
-
-    Uses HuggingFace's PEFT library to:
-    1. Load the base model
-    2. Attach the LoRA adapter
-    3. Merge weights using merge_and_unload()
-    4. Save as a standard HuggingFace checkpoint
-
-    Note: This function only supports LLM models. For embedding models,
-    use merge_lora_embedding_adapter() instead.
-
-    Args:
-        adapter_path: Path to the LoRA adapter checkpoint
-        base_model_path: Path to the base model (for loading weights)
-        output_path: Where to save the merged model
-        trust_remote_code: Job flag for loading the *base* fileset.
-    """
-    try:
-        import torch
-        from peft import PeftModel
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-    except ImportError as e:
-        raise ImportError(
-            "LoRA merge requires 'peft' and 'transformers' packages. Ensure they are installed in the container."
-        ) from e
-
-    logger.info(f"Merging LoRA adapter from {adapter_path} with base model {base_model_path}")
-
-    # Use scratch directory if available for better I/O performance
-    tmp_path = Path("/scratch/merged_lora") if Path("/scratch").is_dir() else Path("/tmp/merged_lora")
-    shutil.rmtree(tmp_path, ignore_errors=True)
-    tmp_path.mkdir(parents=True, exist_ok=True)
-
-    try:
-        # 1. Load base model in mergeable dtype (not quantized)
-        logger.info("Loading base model...")
-        model = AutoModelForCausalLM.from_pretrained(
-            base_model_path,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-            trust_remote_code=trust_remote_code,
-        )
-
-        # 2. Attach the LoRA adapter
-        logger.info("Loading LoRA adapter...")
-        model = PeftModel.from_pretrained(model, str(adapter_path))
-
-        # 3. Merge LoRA weights into base model
-        logger.info("Merging LoRA weights...")
-        model = model.merge_and_unload()
-
-        # 4. Save merged model
-        logger.info(f"Saving merged model to {tmp_path}...")
-        model.save_pretrained(tmp_path, safe_serialization=True)
-
-        # 5. Save tokenizer from base model
-        tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=trust_remote_code)
-        tokenizer.save_pretrained(tmp_path)
-
-        # 6. Copy to output path
-        output_path.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(tmp_path, output_path, dirs_exist_ok=True)
-
-        logger.info(f"Successfully merged LoRA adapter to {output_path}")
-
-    finally:
-        # Cleanup temp directory
-        shutil.rmtree(tmp_path, ignore_errors=True)
-
-
 def merge_lora_embedding_adapter(
     adapter_path: Path,
     base_model_path: str,
@@ -416,7 +341,7 @@ def merge_lora_embedding_adapter(
             logger.warning("Could not save tokenizer: %s", e)
 
         output_path.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(tmp_path, output_path, dirs_exist_ok=True)
+        copytree(tmp_path, output_path, dirs_exist_ok=True)
         logger.info("Successfully merged embedding LoRA adapter to %s", output_path)
 
     finally:
@@ -481,7 +406,7 @@ def merge_lora_cross_encoder_adapter(
             logger.warning("Could not save tokenizer: %s", e)
 
         output_path.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(tmp_path, output_path, dirs_exist_ok=True)
+        copytree(tmp_path, output_path, dirs_exist_ok=True)
         logger.info("Successfully merged cross-encoder LoRA adapter to %s", output_path)
 
     finally:
@@ -844,6 +769,7 @@ def process_checkpoint(
                 base_model_path=base_model_path,
                 output_path=output_path,
                 trust_remote_code=job_trust_remote_code,
+                has_vision_tower=customizer_config.model.has_vision_tower,
             )
         checkpoint_format = CheckpointFormat.HF
 
@@ -856,7 +782,7 @@ def process_checkpoint(
     elif finetuning_type == FinetuningType.LORA:
         # LoRA unmerged: just copy the adapter files
         logger.info(f"Copying {type_label} LoRA adapter from {checkpoint_path} to {output_path}".replace("  ", " "))
-        shutil.copytree(checkpoint_path, output_path, dirs_exist_ok=True)
+        copytree(checkpoint_path, output_path, dirs_exist_ok=True)
         checkpoint_format = CheckpointFormat.HF_PEFT
         # Note: For hf-peft, chat template is inherited from base model at inference time
 
@@ -866,7 +792,7 @@ def process_checkpoint(
         logger.info(
             f"Copying {type_label} full weights checkpoint from {checkpoint_path} to {output_path}".replace("  ", " ")
         )
-        shutil.copytree(checkpoint_path, output_path, dirs_exist_ok=True)
+        copytree(checkpoint_path, output_path, dirs_exist_ok=True)
         checkpoint_format = CheckpointFormat.HF
 
         # Fix FSDP2 architecture naming

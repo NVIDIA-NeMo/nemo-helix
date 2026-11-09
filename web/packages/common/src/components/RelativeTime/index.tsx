@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  DateStringISO,
+  type DateStringISO,
   getDifferenceBetween,
   formatAbsoluteTimestamp,
   getTimeRelativeToNow,

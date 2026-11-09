@@ -48,7 +48,6 @@ checkpoint:
   restore_from: LATEST
   save_consolidated: true
   dequantize_base_checkpoint: true
-  v4_compatible: true
 dataset:
   _target_: nemo_automodel.components.datasets.llm.chat_dataset.ChatDataset
   path_or_dataset_id: ./sample-datasets/chat/training.jsonl

@@ -178,7 +178,7 @@ async def test_parent_survives_the_get_update_round_trip() -> None:
     """
     mock_api = Mock()
     mock_api.get_entity_by_name = AsyncMock(return_value=_stored_child("parent-1"))
-    mock_api.update_entity_by_name = AsyncMock(return_value=_stored_child("parent-1"))
+    mock_api.update_entity_by_id = AsyncMock(return_value=_stored_child("parent-1"))
     client = EntityClient(mock_api)
 
     fetched = await client.get(_Child, "child-1", workspace="default", parent="parent-1")
@@ -190,8 +190,9 @@ async def test_parent_survives_the_get_update_round_trip() -> None:
     fetched.note = "after"
     await client.update(fetched)
 
-    update_call = mock_api.update_entity_by_name.await_args
+    update_call = mock_api.update_entity_by_id.await_args
     assert update_call is not None
+    assert update_call.kwargs["entity_id"] == fetched.id
     assert update_call.kwargs["query_params"] == {"parent": "parent-1"}
 
 

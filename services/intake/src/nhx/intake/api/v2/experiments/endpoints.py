@@ -19,6 +19,7 @@ from typing import Annotated, Any, Literal, NamedTuple, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.routing import APIRoute
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -161,8 +162,7 @@ async def list_experiments(
     request: Request,
     entity_client: EntityClientDep,
     parsed: ExperimentFilterDep,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: ExperimentSortField = Query(default="-created_at", description="Sort field; prefix with '-' for descending."),
 ) -> Page[ExperimentResponse]:
     validate_list_query_params(request)
@@ -174,8 +174,8 @@ async def list_experiments(
         workspace=workspace,
         filter_operation=parsed.operation,
         sort=sort,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
     )
     responses = [ExperimentResponse.from_entity(e) for e in result.data]
     counts = await _count_live_evaluations_by_group(
@@ -417,8 +417,7 @@ async def list_evaluations(
     read_service: EvaluationReadServiceDep,
     parsed: EvaluationFilterDep,
     denormalizer: DenormalizerDep,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: str | None = Query(
         default=None,
         description=(
@@ -500,12 +499,14 @@ async def list_evaluations(
     if metric_predicates:
         responses = [r for r in responses if _matches_metric_predicates(r, metric_predicates)]
     ordered = _sort_evaluations(responses, keys=sort_keys, pinned_first=pinned_first)
-    start = (page - 1) * page_size
-    page_items = ordered[start : start + page_size]
+    page_items = ordered[page_params.offset : page_params.offset + page_params.page_size]
     return Page(
         data=page_items,
         pagination=make_pagination(
-            page=page, page_size=page_size, current_page_size=len(page_items), total_results=len(ordered)
+            page=page_params.page,
+            page_size=page_params.page_size,
+            current_page_size=len(page_items),
+            total_results=len(ordered),
         ),
         sort=sort,
         filter=parsed.to_response(),
@@ -765,8 +766,7 @@ async def list_evaluation_sessions(
     request: Request,
     read_service: EvaluationReadServiceDep,
     parsed: EvaluationSessionFilterDep,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     mode: EvaluationSessionMode = Query(
         default="detailed",
         description=(
@@ -794,8 +794,8 @@ async def list_evaluation_sessions(
             evaluation_name=name,
             status=status_raw,
             test_case_name=test_case_name,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             mode=mode,
             sort_keys=sort_keys,
         )
@@ -825,8 +825,8 @@ async def list_evaluation_sessions(
     return Page(
         data=data,
         pagination=make_pagination(
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             current_page_size=len(data),
             total_results=result.total,
         ),

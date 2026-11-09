@@ -4,7 +4,7 @@
 import { filesCreateFileset, filesUploadFile } from '@nemo/sdk/generated/platform/files';
 import type { CreateFilesetRequest, FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { resetDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
-import { useMutation, UseMutationOptions } from '@tanstack/react-query';
+import { useMutation, type UseMutationOptions } from '@tanstack/react-query';
 
 export interface CreateDatasetWithFilesParams {
   /** Workspace for the fileset */

@@ -3,7 +3,7 @@
 
 import { Eye, EyeOff } from '@nemo/icons/icons';
 import { Button, TextInput } from '@nvidia/foundations-react-core';
-import { ComponentProps, forwardRef, useState } from 'react';
+import { type ComponentProps, forwardRef, useState } from 'react';
 
 type TextInputProps = ComponentProps<typeof TextInput>;
 

@@ -96,6 +96,9 @@ import { AssistantChat, StudioDataView, useStudioDataViewState } from '@nemo/com
   fine (they erase). A shared component that needs data takes it as a prop or
   callback and the caller supplies it from `host.sdk`; `CreateSecretModal`'s
   `onCreate` and `fetchAllPages`' page fetcher are the pattern.
+- **Model pickers take their fetcher.** `WorkspaceModelSelect` and
+  `useModelSearch` search the server and load models a page at a time as the
+  list scrolls; pass `listModels={host.sdk.platform.modelsListModels}`.
 - **`AssistantChat` is shared.** A plugin can point it at an authenticated,
   OpenAI-compatible `baseURL`; Studio supplies its current configured bearer and
   chat runtime. Use `messageContentProps.markdownLinkComponent` when a plugin
@@ -113,10 +116,9 @@ import { AssistantChat, StudioDataView, useStudioDataViewState } from '@nemo/com
   resolve — check the `import` lines at the top of it rather than assuming this
   list is current. Published packages (`class-variance-authority`,
   `@assistant-ui/react` once the chat surface lands) are plain type-only
-  devDependencies. Only `@nemo/sdk/generated/platform/schema` needs a local stub,
-  because it is unpublished; it contributes `HelixJobLog` and
-  `HelixJobStatus`, reached solely through `LogViewer` and the job-status
-  constants, so a dozen structural lines cover it.
+  devDependencies. Only the unpublished `@nemo/sdk` schemas need local stubs:
+  stub the names on the file's `@nemo/sdk/generated/*/schema` import lines with
+  structural types.
 - **Regenerate with `pnpm --filter @nemo/common types:plugin` when you change
   `plugin.ts`.** The `web-plugin-types` CI job regenerates and fails on a diff,
   so the artifact can't drift from the surface it describes. It can still drift

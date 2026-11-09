@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as featureFlagsModule from '@studio/constants/featureFlags';
-import { FeatureFlags } from '@studio/constants/featureFlags/featureFlags';
+import type { FeatureFlags } from '@studio/constants/featureFlags/featureFlags';
 
 // Capture the real flags before any mocking occurs
 const originalFlags = { ...featureFlagsModule.featureFlags };

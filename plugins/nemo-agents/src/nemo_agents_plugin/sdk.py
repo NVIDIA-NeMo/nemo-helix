@@ -53,7 +53,7 @@ Usage::
     result = agents.invoke(agent="calculator", input="What is 2+2?")
     result = agents.invoke(
         deployment="calculator-a1b2",
-        session_id="session-entity-id",
+        session_id="c46d3588-d205-497f-b96b-37f938263064",
         input="Continue",
     )
 
@@ -321,8 +321,9 @@ class AgentsResource:
             input: The user message / query string.
             agent: Agent name (gateway resolves the active deployment).
             deployment: Deployment name (direct targeting).
-            session_id: Optional persisted Platform session entity ID. Sent in
-                the ``X-Nemo-Session-Id`` request header.
+            session_id: Optional ``session_uuid`` from a Platform session response.
+                Sent unchanged in the ``X-Nemo-Session-Id`` request header.
+                Legacy session entity IDs are also accepted.
             workspace: Workspace.
             timeout: Request timeout in seconds.
 

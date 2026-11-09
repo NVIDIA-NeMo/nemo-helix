@@ -4,10 +4,10 @@
 import { InfoCircle } from '@nemo/icons/icons';
 import { Badge, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { featureFlags } from '@studio/constants/featureFlags';
-import { FeatureFlags } from '@studio/constants/featureFlags/featureFlags';
+import type { FeatureFlags } from '@studio/constants/featureFlags/featureFlags';
 import { PREVIEW } from '@studio/constants/featureFlags/utils';
 import { tooltipClassName } from '@studio/styles/common';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface FeatureFlagBadgeProps {
   flag: keyof FeatureFlags;

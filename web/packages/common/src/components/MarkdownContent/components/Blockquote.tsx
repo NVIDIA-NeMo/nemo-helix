@@ -6,7 +6,7 @@ import { isCalloutKind } from '@nemo/common/src/components/MarkdownContent/utils
 import { Text } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
 import type { ComponentProps, FC } from 'react';
-import { type ExtraProps } from 'react-markdown';
+import type { ExtraProps } from 'react-markdown';
 
 type BlockquoteProps = ComponentProps<'blockquote'> & ExtraProps;
 

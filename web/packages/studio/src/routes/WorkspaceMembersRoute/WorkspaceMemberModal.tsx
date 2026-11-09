@@ -23,8 +23,8 @@ import {
   WORKSPACE_ROLE_DESCRIPTIONS,
   type WorkspaceMemberRole,
 } from '@studio/routes/WorkspaceMembersRoute/workspaceMemberRoles';
-import { FC, useEffect, useMemo } from 'react';
-import { Controller, SubmitHandler, useForm } from 'react-hook-form';
+import { type FC, useEffect, useMemo } from 'react';
+import { Controller, type SubmitHandler, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 export type WorkspaceMemberModalMode = 'add' | 'edit';

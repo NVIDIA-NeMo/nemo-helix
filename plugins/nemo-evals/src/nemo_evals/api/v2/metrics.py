@@ -20,6 +20,7 @@ from nemo_evals.api.service.metric_service import MetricService
 from nemo_evals.authz import scope
 from nemo_evals.entities import MAX_NAME_LENGTH, NAME_PATTERN
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricsDisabledError
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.entities import EntityValidationError
@@ -59,8 +60,7 @@ router = APIRouter()
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[MetricPerms.LIST])
 async def list_metrics(
     workspace: str,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: MetricSort = Query(
         default=MetricSort.CREATED_AT_ASC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -78,8 +78,8 @@ async def list_metrics(
     try:
         return await service.list_metrics(
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_operation=parsed_filter.operation,
             include_derived=include_derived,

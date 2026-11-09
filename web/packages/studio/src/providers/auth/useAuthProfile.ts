@@ -1,11 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { User } from 'oidc-client-ts';
+import { useWebSession } from '@studio/providers/auth/useWebSession';
+import type { User } from 'oidc-client-ts';
 import { useMemo } from 'react';
 import { useAuth } from 'react-oidc-context';
-
-import { useWebSession } from './useWebSession';
 
 export type AuthProfile = {
   /** Principal id the platform records as `created_by` on resources this user creates. */

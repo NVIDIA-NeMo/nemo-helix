@@ -73,7 +73,7 @@ def _install_mock_transport(handler):
             kwargs["transport"] = transport
             super().__init__(*args, **kwargs)
 
-    return patch(f"{_PATCH_PREFIX}.httpx.Client", _Client)
+    return patch("nemo_helix_plugin.client.client.Client", _Client)
 
 
 def _recording_delete_handler(requests: list[httpx.Request]):

@@ -3,16 +3,15 @@
 
 import {
   isFilesetFileOutput,
-  isListFileEntry,
   isBrowserFile,
   formatFileSize,
   getExistingFileId,
   sanitizeFilenameForDatasetName,
 } from '@nemo/common/src/components/UploadModal/utils';
-import { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 
 describe('UploadModal utils', () => {
-  describe('isFilesetFileOutput / isListFileEntry', () => {
+  describe('isFilesetFileOutput', () => {
     it('returns true for FilesetFileOutput objects', () => {
       const filesetFile: FilesetFileOutput = {
         path: 'test.jsonl',
@@ -22,18 +21,15 @@ describe('UploadModal utils', () => {
       };
 
       expect(isFilesetFileOutput(filesetFile)).toBe(true);
-      expect(isListFileEntry(filesetFile)).toBe(true); // deprecated alias
     });
 
     it('returns false for File objects', () => {
       const file = new File(['content'], 'test.jsonl');
       expect(isFilesetFileOutput(file)).toBe(false);
-      expect(isListFileEntry(file)).toBe(false);
     });
 
     it('returns false for undefined', () => {
       expect(isFilesetFileOutput(undefined)).toBe(false);
-      expect(isListFileEntry(undefined)).toBe(false);
     });
   });
 

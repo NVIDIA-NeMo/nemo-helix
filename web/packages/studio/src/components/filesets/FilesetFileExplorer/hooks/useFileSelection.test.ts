@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useFileSelection } from '@studio/components/filesets/FilesetFileExplorer/hooks/useFileSelection';
-import { FileSystemNode } from '@studio/components/FilesTable/utils';
+import type { FileSystemNode } from '@studio/components/FilesTable/utils';
 import { act, renderHook } from '@testing-library/react';
 
 describe('useFileSelection', () => {

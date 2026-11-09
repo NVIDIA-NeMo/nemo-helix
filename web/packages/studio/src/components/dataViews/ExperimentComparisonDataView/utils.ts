@@ -3,9 +3,9 @@
 
 import { formatEvaluatorScore } from '@nemo/common/src/utils/formatters';
 import { evalDurationMs } from '@studio/api/evaluation/utils';
-import {
-  type MetricDirection,
-  type ParetoMetric,
+import type {
+  MetricDirection,
+  ParetoMetric,
 } from '@studio/components/charts/ExperimentParetoChart/utils';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 

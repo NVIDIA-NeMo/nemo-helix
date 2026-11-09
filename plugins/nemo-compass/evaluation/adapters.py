@@ -3,14 +3,13 @@
 """Per-type evaluation adapters that turn a subject into Compass insights."""
 
 import os
-import shutil
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from shutil import which
 from typing import Protocol
 
-import httpx
 from evaluation.ingest import (
     create_experiment,
     ensure_experiment_group,
@@ -23,6 +22,7 @@ from evaluation.otlp_build import session_id_for, sim_to_spans
 from evaluation.otlp_ingest import export_spans, post_evaluator_results, trace_id_for
 from evaluation.registry import Subject
 from evaluation.tau2run import load_tasks, policy_version, read_policy, resolve_paths, run_tau2
+from httpx import Client
 from nemo_compass_plugin.analysis.observability import CompassEvaluationContext
 from nemo_compass_plugin.analysis.run import run_compass
 from nemo_compass_plugin.platform_client import make_client
@@ -145,7 +145,7 @@ class BenchmarkAdapter:
         else:
             if not data_dir.is_dir():
                 missing.append(f"tau2 data dir ({data_dir}) — clone tau2-bench + `uv sync`")
-            if shutil.which(tau2_bin) is None:
+            if which(tau2_bin) is None:
                 missing.append(f"tau2 binary ({tau2_bin}) — run `uv sync` in the tau2 repo")
         for env_key in ("OPENAI_API_KEY", "OPENAI_API_BASE"):
             if not os.environ.get(env_key):
@@ -201,7 +201,7 @@ class BenchmarkAdapter:
                 metadata=experiment_metadata,
             )
         session_ids: set[str] = set()
-        client = httpx.Client(timeout=30.0)
+        client = Client(timeout=30.0)
         try:
             for sim in sims:
                 task = tasks.get(str(sim.get("task_id")))

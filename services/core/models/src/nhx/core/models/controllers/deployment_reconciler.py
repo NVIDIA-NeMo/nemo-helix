@@ -3,12 +3,12 @@
 
 """Model deployment reconciliation logic for Models Controller."""
 
-import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 from logging import getLogger
 from typing import Awaitable, Callable, Optional
+from uuid import uuid4
 
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
@@ -766,7 +766,7 @@ class ModelDeploymentReconciler:
 
         try:
             await self._models_client.get_provider(name=provider_name, workspace=provider_workspace)
-            unique_suffix = uuid.uuid4().hex[:8]
+            unique_suffix = uuid4().hex[:8]
             provider_name = f"{deployment.name}_{unique_suffix}"
             logger.info(
                 f"ModelProvider {provider_workspace}/{deployment.name} already exists, "

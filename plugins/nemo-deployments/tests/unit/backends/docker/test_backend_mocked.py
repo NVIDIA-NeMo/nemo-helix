@@ -62,6 +62,7 @@ from nemo_helix_plugin.auth.workload_identity import (
     WORKLOAD_IDENTITY_VOLUME_PATH,
     build_docker_opaque_workload_delegation,
 )
+from nemo_helix_plugin.capabilities import ProbeResult
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from requests.exceptions import ConnectionError as RequestsConnectionError
@@ -121,7 +122,11 @@ def test_init_raises_missing_dependency_when_docker_daemon_unavailable(mock_clie
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", side_effect=DockerException("Error while fetching server API version")),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch(
+            "nemo_deployments_plugin.backends.docker.backend._docker_from_env",
+            side_effect=DockerException("Error while fetching server API version"),
+        ),
     ):
         with pytest.raises(MissingBackendDependencyError, match="Docker daemon is unavailable"):
             DockerDeploymentBackend(mock_client, {"docker_timeout": 5, "pull_images": False})
@@ -134,7 +139,8 @@ def test_init_raises_missing_dependency_when_docker_ping_fails(mock_client: Magi
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=client),
     ):
         with pytest.raises(MissingBackendDependencyError, match="Docker daemon is unavailable"):
             DockerDeploymentBackend(mock_client, {"docker_timeout": 5, "pull_images": False})
@@ -173,7 +179,8 @@ async def test_create_deployment_mounts_executor_additional_volumes(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
             mock_client,
@@ -729,7 +736,8 @@ async def test_create_deployment_uses_executor_default_network(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
             mock_client,
@@ -764,7 +772,8 @@ async def test_create_deployment_backend_config_network_overrides_executor_defau
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
             mock_client,
@@ -806,7 +815,8 @@ async def test_create_deployment_network_endpoint_mode_reports_container_url(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
             mock_client,
@@ -1203,7 +1213,8 @@ async def test_create_falls_back_to_local_image_when_pull_fails(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         # pull_images enabled so the pull path runs
         backend = DockerDeploymentBackend(mock_client, {"docker_timeout": 60, "pull_images": True})
@@ -1241,7 +1252,8 @@ async def test_create_fails_when_pull_fails_and_no_local_image(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(mock_client, {"docker_timeout": 60, "pull_images": True})
         backend._client = mock_docker_client
@@ -1305,7 +1317,8 @@ async def test_delete_scoped_deployment_does_not_remove_foreign_primary(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
             mock_client,
@@ -1363,7 +1376,8 @@ async def test_create_lora_group_does_not_remove_foreign_stale_init_container(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
             mock_client,
@@ -1573,7 +1587,8 @@ async def test_read_status_network_endpoint_mode_probes_container_url(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
             mock_client,
@@ -1911,7 +1926,8 @@ async def test_read_status_treats_foreign_container_as_missing(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=gpu_pool),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
             mock_client,
@@ -2050,7 +2066,8 @@ async def test_create_never_job_uses_configured_oneshot_observe_timeout(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
             mock_client,
@@ -2317,7 +2334,8 @@ async def test_list_managed_deployment_names_scopes_docker_query(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
             mock_client,
@@ -2357,7 +2375,8 @@ async def test_get_logs_treats_foreign_container_as_missing(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
             mock_client,
@@ -2398,3 +2417,24 @@ async def test_create_volume_bound(
     )
 
     assert update.status == "BOUND"
+
+
+@pytest.mark.parametrize(
+    ("shm_size", "expected"),
+    [("32Gi", 32 * 2**30), ("8G", 8 * 10**9), ("1Ti", 2**40), ("512Mi", 512 * 2**20), (None, None)],
+)
+def test_build_run_kwargs_sizes_dev_shm(
+    docker_backend: DockerDeploymentBackend, shm_size: str | None, expected: str | None
+) -> None:
+    config = sample_config().model_copy(update={"shm_size": shm_size})
+    run_kwargs = docker_backend._build_run_kwargs(
+        workspace="default",
+        config=config,
+        container=config.containers[0],
+        name="srv",
+        labels={},
+        host_ports={},
+        gpu_ids=[],
+        network=None,
+    )
+    assert run_kwargs.get("shm_size") == expected

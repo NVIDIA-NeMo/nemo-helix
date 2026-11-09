@@ -11,7 +11,7 @@ import { Flex, Stack, Tag, Text } from '@nvidia/foundations-react-core';
 import { SeriesButtonGroup } from '@studio/components/charts/MetricTrend/SeriesButtonGroup';
 import { useNvColorMode } from '@studio/components/DagCanvas/useNvColorMode';
 import { StackedSkeleton } from '@studio/components/StackedSkeleton';
-import { FC, useId, useMemo, useState } from 'react';
+import { type FC, useId, useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,

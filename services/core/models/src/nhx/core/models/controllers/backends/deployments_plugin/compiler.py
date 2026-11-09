@@ -82,6 +82,7 @@ _SCRATCH_VOLUME_SIZE = "1Gi"
 # SGLang's health check waits a second before it answers, so the 1s probe default
 # never sees the SGLang model-free NIM become ready.
 _READINESS_PROBE_TIMEOUT_SECONDS = 5
+_SHM_GIB_PER_GPU = 8
 
 
 @dataclass(frozen=True)
@@ -343,7 +344,12 @@ def compile_model_deployment(
         image_name, image_tag = resolve_vllm_image(
             resolved.view, config.default_vllm_image, config.default_vllm_image_tag
         )
-        args = compile_vllm_args(resolved.view, resolved.model_entity, tool_call_plugin_path=tool_call_plugin_path)
+        args = compile_vllm_args(
+            resolved.view,
+            resolved.model_entity,
+            tool_call_plugin_path=tool_call_plugin_path,
+            max_lora_rank=config.default_vllm_max_lora_rank,
+        )
         env = compile_vllm_env_vars(resolved.view)
     elif engine == ENGINE_NIM:
         image_name, image_tag = (
@@ -459,6 +465,12 @@ def compile_model_deployment(
             engine=engine,
             runtime=resolved.runtime,
         )
+    # Multi-GPU servers exchange data through /dev/shm. Size it from the GPUs the server finally
+    # requests (NIM overrides can change them), the same sizing as GPU jobs; a CPU server keeps the
+    # deployments plugin's 8Gi default.
+    server_gpus = int((server.resources.limits or {}).get("nvidia.com/gpu") or 0)
+    if server_gpus > 0:
+        server_config.shm_size = f"{_SHM_GIB_PER_GPU * server_gpus}Gi"
     return CompiledModelDeployment(
         names=names,
         volume=volume,

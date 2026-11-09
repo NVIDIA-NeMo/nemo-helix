@@ -22,6 +22,8 @@ from nhx.core.models.constants import (
     FILESET_REF_PATTERN_DESCRIPTION,
     MODEL_REF_MAX_LEN,
     MODEL_REF_PATTERN_DESCRIPTION,
+    RESOURCE_LOOKUP_NAME_PATTERN,
+    RESOURCE_LOOKUP_NAME_PATTERN_DESCRIPTION,
     is_valid_model_ref,
 )
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -217,6 +219,12 @@ class ModelSpec(BaseModel):
     # Basic model information
     checkpoint_model_name: str = Field(description="Checkpoint Model identifier or model path")
     family: str = Field(description="Model architecture family (e.g., 'llama', 'mixtral', 'gpt2')")
+    architectures: Optional[list[str]] = Field(
+        default=None,
+        description="Architectures declared in the checkpoint's top-level config.json. For a multimodal "
+        "checkpoint this names the whole model (e.g., 'NemotronH_Omni_Reasoning_V3'), while the other fields "
+        "describe its language model.",
+    )
 
     # Architecture dimensions
     num_layers: int = Field(description="Number of transformer layers")
@@ -768,9 +776,9 @@ class GetModelProviderRequest(BaseModel):
         pattern=constants.REGEX_WORD_CHARACTER_DOT_DASH,
     )
     name: str = Field(
-        description=f"Name of the model provider. {constants.REGEX_WORD_CHARACTER_DOT_DASH_DESCRIPTION}",
+        description=f"Name of the model provider. {RESOURCE_LOOKUP_NAME_PATTERN_DESCRIPTION}",
         max_length=constants.MAX_LENGTH_255,
-        pattern=constants.REGEX_WORD_CHARACTER_DOT_DASH,
+        pattern=RESOURCE_LOOKUP_NAME_PATTERN,
     )
 
 
@@ -812,9 +820,9 @@ class DeleteModelProviderRequest(BaseModel):
         pattern=constants.REGEX_WORD_CHARACTER_DOT_DASH,
     )
     name: str = Field(
-        description=f"Name of the model provider. {constants.REGEX_WORD_CHARACTER_DOT_DASH_DESCRIPTION}",
+        description=f"Name of the model provider. {RESOURCE_LOOKUP_NAME_PATTERN_DESCRIPTION}",
         max_length=constants.MAX_LENGTH_255,
-        pattern=constants.REGEX_WORD_CHARACTER_DOT_DASH,
+        pattern=RESOURCE_LOOKUP_NAME_PATTERN,
     )
 
 
@@ -997,9 +1005,9 @@ class GetPromptRequest(BaseModel):
         pattern=constants.REGEX_WORD_CHARACTER_DOT_DASH,
     )
     name: str = Field(
-        description=f"Name of the prompt. {constants.REGEX_WORD_CHARACTER_DOT_DASH_DESCRIPTION}",
+        description=f"Name of the prompt. {RESOURCE_LOOKUP_NAME_PATTERN_DESCRIPTION}",
         max_length=constants.MAX_LENGTH_255,
-        pattern=constants.REGEX_WORD_CHARACTER_DOT_DASH,
+        pattern=RESOURCE_LOOKUP_NAME_PATTERN,
     )
 
 
@@ -1012,9 +1020,9 @@ class DeletePromptRequest(BaseModel):
         pattern=constants.REGEX_WORD_CHARACTER_DOT_DASH,
     )
     name: str = Field(
-        description=f"Name of the prompt. {constants.REGEX_WORD_CHARACTER_DOT_DASH_DESCRIPTION}",
+        description=f"Name of the prompt. {RESOURCE_LOOKUP_NAME_PATTERN_DESCRIPTION}",
         max_length=constants.MAX_LENGTH_255,
-        pattern=constants.REGEX_WORD_CHARACTER_DOT_DASH,
+        pattern=RESOURCE_LOOKUP_NAME_PATTERN,
     )
 
 

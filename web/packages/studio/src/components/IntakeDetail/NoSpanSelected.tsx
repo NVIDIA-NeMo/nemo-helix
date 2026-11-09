@@ -3,7 +3,7 @@
 
 import { HandPoint } from '@nemo/icons/icons';
 import { Flex, StatusMessage } from '@nvidia/foundations-react-core';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 export const NoSpanSelected: FC = () => (
   <Flex

@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { BreadcrumbsContextValue } from '@studio/providers/breadcrumbs/types';
+import type { BreadcrumbsContextValue } from '@studio/providers/breadcrumbs/types';
 import {
   BreadcrumbsContext,
-  BreadcrumbsItemProps,
+  type BreadcrumbsItemProps,
 } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { FC, PropsWithChildren, useState } from 'react';
+import { type FC, type PropsWithChildren, useState } from 'react';
 
 export const BreadcrumbsProvider: FC<PropsWithChildren> = ({ children }) => {
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbsItemProps[]>([]);

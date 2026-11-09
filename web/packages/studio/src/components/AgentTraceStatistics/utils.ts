@@ -8,8 +8,6 @@ import type {
 } from '@studio/components/AgentTraceStatistics/types';
 
 const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
-const WEEK_MS = 7 * DAY_MS;
 
 export const RANGE_LABELS: Record<TraceStatisticsRange, string> = {
   day: 'Day',
@@ -26,12 +24,6 @@ export const bucketParamForRange = (range: TraceStatisticsRange): TraceMetricBuc
   if (range === 'day') return 'hour';
   if (range === 'max') return 'week';
   return 'day';
-};
-
-export const bucketMsForRange = (range: TraceStatisticsRange): number => {
-  if (range === 'day') return HOUR_MS;
-  if (range === 'max') return WEEK_MS;
-  return DAY_MS;
 };
 
 /**

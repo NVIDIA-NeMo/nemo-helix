@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { ControlledJsonInput } from '@studio/components/NewCustomizationForm/ControlledJsonInput';
 import { act, render, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
-import { FC } from 'react';
+import type { FC } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 

@@ -3,13 +3,11 @@
 
 import { EntityCard } from '@nemo/common/src/components/EntityCard';
 import type { ToolParameter } from '@nemo/common/src/components/ToolCard/types';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import { Code, Star, Wrench } from '@nemo/icons/icons';
 import type { ChatCompletionTool } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const asString = (value: unknown): string | undefined =>
   typeof value === 'string' ? value : undefined;
@@ -24,7 +22,7 @@ const schemaType = (schema: Record<string, unknown>): string | undefined => {
 
 /** Flattens a function's top-level JSON Schema `properties` into display rows. */
 export const getToolParameters = (parameters: unknown): ToolParameter[] => {
-  if (!isRecord(parameters) || !isRecord(parameters.properties)) {
+  if (!isPlainObject(parameters) || !isPlainObject(parameters.properties)) {
     return [];
   }
   const required = new Set(
@@ -34,8 +32,8 @@ export const getToolParameters = (parameters: unknown): ToolParameter[] => {
   );
   return Object.entries(parameters.properties).map(([name, schema]) => ({
     name,
-    type: isRecord(schema) ? schemaType(schema) : undefined,
-    description: isRecord(schema) ? asString(schema.description) : undefined,
+    type: isPlainObject(schema) ? schemaType(schema) : undefined,
+    description: isPlainObject(schema) ? asString(schema.description) : undefined,
     required: required.has(name),
   }));
 };

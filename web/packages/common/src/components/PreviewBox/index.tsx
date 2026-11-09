@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { TextArea } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 /** Dataset text shown back verbatim, read-only. `rows` fixes the height at that
  *  many lines; omit it to grow with the content. */

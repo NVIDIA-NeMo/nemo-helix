@@ -11,6 +11,7 @@ from nhx_evals_sdk.values.otlp import (
     final_output_text,
     parse_resource_spans,
     resource_spans_from_text,
+    root_span,
     root_span_id,
     set_span_attributes,
     span_text_strings,
@@ -199,7 +200,7 @@ def json_overflows(monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise(*args: object, **kwargs: object) -> object:
         raise RecursionError("maximum recursion depth exceeded while decoding a JSON object")
 
-    monkeypatch.setattr(otlp_module.json, "loads", _raise)
+    monkeypatch.setattr(otlp_module, "loads", _raise)
 
 
 @pytest.mark.usefixtures("json_overflows")
@@ -360,6 +361,9 @@ def test_root_span_id_skips_childless_roots_beside_the_run() -> None:
         {"traceId": _HEX_TRACE_ID, "spanId": "aabbccddeeff0011", "parentSpanId": _HEX_SPAN_ID, "name": "llm"},
     )
 
+    selected = root_span(request)
+    assert selected is request[0].scope_spans[0].spans[1]
+    assert selected.name == "turn"
     assert root_span_id(request) == _HEX_SPAN_ID
 
 

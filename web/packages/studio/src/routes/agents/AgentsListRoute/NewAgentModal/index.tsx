@@ -13,6 +13,8 @@ import {
 } from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import {
+  Anchor,
+  Banner,
   Button,
   Flex,
   Label,
@@ -34,15 +36,18 @@ import { type DeployOnCreatePlan, useDeployOnCreate } from '@studio/api/agents/u
 import { CodingAgentPromptEditor } from '@studio/components/CodingAgentPromptEditor';
 import { DeployOnCreateFields } from '@studio/components/DeployOnCreateFields';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { LINK_GITHUB_NEW_FINE_GRAINED_TOKEN } from '@studio/constants/links';
 import { agentIntegrationPrompt } from '@studio/routes/agents/AgentDetailRoute/overview/codingAgentPrompts';
 import {
   AGENT_CONFIG_FILENAME,
+  isNewAgentTab,
   UPLOAD_AGENT_FORM_DEFAULTS,
   uploadAgentFormSchema,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import {
   type GitHubAgentSource,
   agentNameFromSource,
+  githubTokenSecretDefaults,
   parseGitHubSource,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/github';
 import type {
@@ -73,6 +78,7 @@ import {
   type DragEventHandler,
   type FC,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -84,6 +90,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   onClose,
   workspace,
   initialName,
+  initialTab = 'upload',
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -97,7 +104,14 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const [sourceLabel, setSourceLabel] = useState('');
   const [selectionError, setSelectionError] = useState<string | undefined>(undefined);
   const [replaceArmedFor, setReplaceArmedFor] = useState<string | null>(null);
-  const [tab, setTab] = useState<NewAgentTab>('upload');
+  const [tab, setTab] = useState<NewAgentTab>(initialTab);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setTab(initialTab);
+    }
+  }
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
   const [repoBlurred, setRepoBlurred] = useState(false);
   const [tracedAgent, setTracedAgent] = useState('');
@@ -198,7 +212,6 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     setSelectionError(undefined);
     setReplaceArmedFor(null);
     setRepoBlurred(false);
-    setTab('upload');
     setTracedAgent('');
     onClose();
   };
@@ -345,7 +358,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     if (!tracedAgent) return;
     deployAfterCreate.current = null;
     await createTracedAgent({ workspace, data: { name: tracedAgent, config: {} } }).catch(() => {
-      // Rendered through errorText.
+      // Rendered in the error banner.
     });
   };
 
@@ -361,6 +374,13 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       : failure
         ? getErrorMessage(failure) || 'Failed to create agent'
         : undefined;
+
+  const errorBannerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (errorMessage) {
+      errorBannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+    }
+  }, [errorMessage]);
 
   const busy = isPending || isCreatingTraced || deployOnCreate.isDeploying;
   const awaitingDeployModes = deployOnCreate.blocksSubmit(Boolean(watchedDeploy));
@@ -400,7 +420,6 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
               ? !tracedAgent
               : entries.length === 0 || awaitingDeployModes
         }
-        errorText={onCreateTab ? errorMessage : undefined}
         slotFooterRight={
           onCreateTab ? undefined : (
             <Button color="brand" type="button" onClick={resetAndClose}>
@@ -409,7 +428,14 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
           )
         }
       >
-        <TabsRoot value={tab} onValueChange={(value) => setTab(value as NewAgentTab)}>
+        <TabsRoot
+          value={tab}
+          onValueChange={(value) => {
+            if (isNewAgentTab(value)) {
+              setTab(value);
+            }
+          }}
+        >
           <TabsList aria-label="Ways to register an agent">
             <TabsTrigger value="upload">Register with code upload</TabsTrigger>
             <TabsTrigger value="github">Register from GitHub</TabsTrigger>
@@ -478,7 +504,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
           <TabsContent value="github" className="items-stretch p-0 pt-density-lg">
             <Stack gap="density-md">
               <ControlledTextInput
-                label="Repository"
+                label="Repository URL"
+                placeholder="https://github.com/owner/repo"
                 disabled={isPending}
                 useControllerProps={{ control, name: 'repoUrl' }}
                 formFieldProps={{
@@ -500,7 +527,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                 formFieldProps={{
                   slotLabel: 'Access token secret',
                   slotInfo:
-                    'Required for a private repository. The token stays in the platform and is never sent to your browser.',
+                    "Needed only for a private repository: a workspace secret holding a GitHub personal access token that can read the repository's contents. Choose New Secret to store one.",
                   slotError: errors.secretKey?.message,
                 }}
               />
@@ -562,10 +589,26 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
             />
           </TabsContent>
         </TabsRoot>
+        {onCreateTab && errorMessage && (
+          <Banner ref={errorBannerRef} kind="inline" status="error">
+            {errorMessage}
+          </Banner>
+        )}
       </FormModal>
       {isSecretModalOpen ? (
         <CreateSecretModal
           workspace={workspace}
+          instruction="Store a GitHub personal access token so NeMo Helix can read the repository. A fine-grained token limited to that repository, with Contents set to read-only, is enough."
+          initialValues={githubTokenSecretDefaults(repoSource)}
+          valueHelp={
+            <Anchor
+              href={LINK_GITHUB_NEW_FINE_GRAINED_TOKEN}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Create a token on GitHub
+            </Anchor>
+          }
           open
           onClose={() => setSecretModalOpen(false)}
           onSecretCreated={(secretName) => {

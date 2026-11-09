@@ -9,9 +9,9 @@
  * without an express license agreement from NVIDIA CORPORATION or
  * its affiliates is strictly prohibited.
  */
-import { UploadDataset, UploadFile } from '@nemo/common/src/components/UploadModal/types';
+import type { UploadDataset, UploadFile } from '@nemo/common/src/components/UploadModal/types';
 import { isFileTypeAllowed } from '@nemo/common/src/components/UploadModal/utils';
-import { DATASET_NAME_REGEX } from '@nemo/common/src/datasets/constants';
+import { FILESET_NAME_REGEX } from '@nemo/common/src/datasets/constants';
 
 interface ValidateUploadFormParams {
   selectedFiles: UploadFile[];
@@ -58,7 +58,7 @@ export const validateUploadForm = ({
   if (selectedDataset && selectedDataset.type === 'new') {
     if (selectedDataset.name === '') {
       errors.datasetName = 'Fileset name is required.';
-    } else if (!DATASET_NAME_REGEX.test(selectedDataset.name)) {
+    } else if (!FILESET_NAME_REGEX.test(selectedDataset.name)) {
       errors.datasetName =
         'Fileset name must only contain alphanumeric characters, dashes, underscores, or dots.';
     }

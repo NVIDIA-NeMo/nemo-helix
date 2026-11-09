@@ -97,7 +97,7 @@ def lora_config(*, restart_policy: RestartPolicy = "Always") -> DeploymentConfig
         containers=[
             Container(
                 name="server",
-                image="vllm/vllm-openai:v0.22.1",
+                image="vllm/vllm-openai:v0.32.0",
                 command=["vllm", "serve"],
                 args=["/model-store"],
                 ports=[ContainerPort(name="http", containerPort=8000)],

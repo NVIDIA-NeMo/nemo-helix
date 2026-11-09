@@ -77,15 +77,12 @@ def test_generic_os_error_uses_neutral_could_not_be_read_wording(tmp_path: Path)
     assert exc_info.value.__cause__ is None
 
 
-def test_validate_treats_disappearance_at_read_boundary_as_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "insights.yaml"
+def test_validate_treats_disappearance_at_read_boundary_as_missing(tmp_path: Path) -> None:
+    class _VanishingPath(Path):
+        def read_text(self, *args: object, **kwargs: object) -> str:
+            raise FileNotFoundError(2, "No such file or directory", str(self))
+
+    path = _VanishingPath(tmp_path / "insights.yaml")
     path.write_text("insights: []\n", encoding="utf-8")
-
-    def _vanished(self: Path, *args: object, **kwargs: object) -> str:
-        raise FileNotFoundError(2, "No such file or directory", str(self))
-
-    monkeypatch.setattr(Path, "read_text", _vanished)
 
     validate_insights_file(path)

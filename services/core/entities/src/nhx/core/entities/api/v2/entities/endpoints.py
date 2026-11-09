@@ -11,8 +11,10 @@ Name-Based Operations (Primary):
 - PUT    /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/{name}        - Update entity by name
 - DELETE /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/{name}        - Delete entity by name
 
-ID-Based Operations (Debug/Internal):
+ID-Based Operations:
 - GET    /apis/entities/v2/entities/{entity_id}                                        - Get entity by ID
+- PUT    /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id} - Update entity by ID
+- DELETE /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id} - Delete entity by ID
 
 Cross-Workspace Queries:
 - GET    /apis/entities/v2/workspaces/-/entities/{entity_type}                         - List entities across all accessible workspaces
@@ -20,9 +22,10 @@ Cross-Workspace Queries:
 
 import logging
 import textwrap
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Body, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE, EntityWriteValidationErrorResponse
 from nhx.common.api.common import DeleteResponse, Page, PaginationData
 from nhx.common.auth import ALL_WORKSPACES
@@ -192,36 +195,6 @@ async def validate_workspace_not_deleting(
         )
 
 
-async def _invalidate_role_binding_cache_if_present(
-    repository: EntityRepository,
-    workspace: str,
-    entity_type: str,
-    name: str,
-    parent: str | None = None,
-) -> None:
-    """For ``role_binding`` rows, evict the principal's cached bindings before an update or delete.
-
-    No-op for other entity types. If the type is ``role_binding`` and no row
-    exists at the given name, raises 404.
-    """
-    if entity_type != ROLE_BINDING_ENTITY_TYPE:
-        return
-
-    entity = await repository.get_entity_by_name(
-        workspace=workspace,
-        entity_type=entity_type,
-        name=name,
-        parent=parent,
-    )
-
-    if entity is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found")
-
-    principal = entity.data.get("principal")
-    if principal is not None:
-        await bindings_cache_delete(principal)
-
-
 @router.post(
     "/v2/workspaces/{workspace}/entities/{entity_type}",
     response_model=Entity,
@@ -382,8 +355,7 @@ async def list_entities(
     workspace_repository: WorkspaceRepository,
     filter: FilterDep,
     auth_client: AuthClientDep,
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(100, ge=1, le=1000, description="Items per page"),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: str = Query(
         "-created_at",
         description=(
@@ -427,8 +399,8 @@ async def list_entities(
         entities, total = await repository.list_entities(
             workspace=query_workspace,
             entity_type=entity_type,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_op=effective_filter,
             relationship_child_workspaces=accessible_workspaces,
@@ -451,11 +423,11 @@ async def list_entities(
     return EntitiesPage(
         data=entities,
         pagination=PaginationData(
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             current_page_size=len(entities),
             total_results=total,
-            total_pages=(total + page_size - 1) // page_size,
+            total_pages=(total + page_params.page_size - 1) // page_params.page_size,
         ),
         sort=sort,
         filter=filter.to_dict() if filter else None,
@@ -543,35 +515,40 @@ async def update_entity_by_name(
     auth_client: AuthClientDep,
     parent: str | None = Query(default=None, description="Parent entity ID for nested entities"),
 ) -> Entity:
-    """Update entity by name."""
-    await require_control_entity_access(auth_client, workspace, entity_type, "update")
-    # Check if workspace is being deleted (404 for user requests)
-    await validate_workspace_not_deleting(
-        workspace_repository,
-        auth_client,
-        workspace,
-        missing_workspace_status=status.HTTP_422_UNPROCESSABLE_CONTENT,
-    )
+    await _require_mutation_access(workspace, entity_type, "update", repository, workspace_repository, auth_client)
+    target = await repository.get_entity_by_name(workspace=workspace, entity_type=entity_type, name=name, parent=parent)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Entity not found")
+    return await _update_entity_target(target, entity_data, repository, workspace_repository, auth_client)
 
-    await require_workspace_access(
-        repository,
-        workspace,
-        detail=f"Not allowed to update entities in workspace '{workspace}'",
-    )
 
-    await _invalidate_role_binding_cache_if_present(repository, workspace, entity_type, name, parent)
+async def _invalidate_target_bindings(target: Entity) -> None:
+    """Evict cached authorization for the selected role binding."""
+    if target.entity_type == ROLE_BINDING_ENTITY_TYPE:
+        principal = target.data.get("principal")
+        if principal is not None:
+            await bindings_cache_delete(principal)
+
+
+async def _update_entity_target(
+    target: Entity,
+    entity_data: EntityUpdate,
+    repository: EntityRepository,
+    workspace_repository: WorkspaceRepository,
+    auth_client: AuthClientDep,
+) -> Entity:
+    """Apply the existing update policy to an immutable target."""
+    workspace, entity_type, name = target.workspace, target.entity_type, target.name
+    await _invalidate_target_bindings(target)
 
     # Validate project exists if specified
     await validate_project_exists(repository, workspace, entity_data.project)
 
     try:
-        entity = await repository.update_entity_by_name(
-            workspace=workspace,
-            entity_type=entity_type,
-            name=name,
+        entity = await repository.update_entity(
+            entity_id=target.id,
             data=entity_data.data,
-            new_name=entity_data.new_name,
-            parent=parent,
+            name=entity_data.new_name,
             project=entity_data.project,
             updated_by=auth_client.principal.effective_id,
             expected_db_version=entity_data.expected_db_version,
@@ -663,24 +640,25 @@ async def delete_entity_by_name(
         description="Optional database version for optimistic locking. Delete only succeeds if the entity still has this version.",
     ),
 ) -> DeleteResponse:
-    """Delete entity by name."""
-    await require_control_entity_access(auth_client, workspace, entity_type, "delete")
-    # Check if workspace is being deleted (404 for user requests)
-    await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
-    await require_workspace_access(
-        repository,
-        workspace,
-        detail=f"Not allowed to delete entities in workspace '{workspace}'",
-    )
+    await _require_mutation_access(workspace, entity_type, "delete", repository, workspace_repository, auth_client)
+    target = await repository.get_entity_by_name(workspace=workspace, entity_type=entity_type, name=name, parent=parent)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Entity not found")
+    await _delete_entity_target(target, expected_db_version, repository)
+    return DeleteResponse(id=f"{workspace}/{entity_type}/{name}")
 
-    await _invalidate_role_binding_cache_if_present(repository, workspace, entity_type, name, parent)
+
+async def _delete_entity_target(
+    target: Entity,
+    expected_db_version: int | None,
+    repository: EntityRepository,
+) -> DeleteResponse:
+    """Apply the existing delete policy to an immutable target."""
+    await _invalidate_target_bindings(target)
 
     try:
-        deleted_count = await repository.delete_entity_by_name(
-            workspace=workspace,
-            entity_type=entity_type,
-            name=name,
-            parent=parent,
+        deleted_count = await repository.delete_entity(
+            entity_id=target.id,
             expected_db_version=expected_db_version,
         )
     except EntityVersionConflictError as e:
@@ -690,17 +668,16 @@ async def delete_entity_by_name(
         ) from e
     if deleted_count == 0:
         raise HTTPException(status_code=404, detail="Entity not found")
-    return DeleteResponse(id=f"{workspace}/{entity_type}/{name}")
+    return DeleteResponse(id=target.id)
 
 
 @router.get(
     "/v2/entities/{id}",
     response_model=Entity,
     tags=[API_TAG],
-    summary="Get entity by ID (debug/internal)",
+    summary="Get entity by ID",
     description=textwrap.dedent("""
         Get a specific entity by its unique identifier.
-        This endpoint is primarily for debugging and internal use.
 
         Example:
         ```
@@ -714,7 +691,7 @@ async def get_entity_by_id(
     workspace_repository: WorkspaceRepository,
     auth_client: AuthClientDep,
 ) -> Entity:
-    """Get entity by id (debug/internal use)."""
+    """Get an entity by its immutable ID."""
 
     entity = await repository.get_entity_by_id(entity_id=id)
 
@@ -725,3 +702,90 @@ async def get_entity_by_id(
     await validate_workspace_not_deleting(workspace_repository, auth_client, entity.workspace)
 
     return entity
+
+
+async def _require_mutation_access(
+    workspace: str,
+    entity_type: str,
+    operation: Literal["update", "delete"],
+    repository: EntityRepository,
+    workspace_repository: WorkspaceRepository,
+    auth_client: AuthClientDep,
+) -> None:
+    """Apply mutation access checks and workspace lifecycle restrictions."""
+    await require_control_entity_access(auth_client, workspace, entity_type, operation)
+    await validate_workspace_not_deleting(
+        workspace_repository,
+        auth_client,
+        workspace,
+        missing_workspace_status=status.HTTP_422_UNPROCESSABLE_CONTENT
+        if operation == "update"
+        else status.HTTP_404_NOT_FOUND,
+    )
+    await require_workspace_access(
+        repository, workspace, detail=f"Not allowed to {operation} entities in workspace '{workspace}'"
+    )
+
+
+async def _get_mutation_target(
+    workspace: str, entity_type: str, entity_id: str, repository: EntityRepository, parent: str | None
+) -> Entity:
+    """Resolve an immutable ID within the requested workspace, type and parent."""
+    target = await repository.get_entity_by_id(entity_id=entity_id)
+    if (
+        target is None
+        or target.workspace != workspace
+        or target.entity_type != entity_type
+        or (parent is not None and target.parent != parent)
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Entity not found")
+    return target
+
+
+@router.put(
+    "/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id}",
+    response_model=Entity,
+    tags=[API_TAG],
+    summary="Update entity by ID",
+    responses=_ENTITY_WRITE_ERROR_RESPONSES,
+)
+async def update_entity_by_id(
+    workspace: str,
+    entity_type: str,
+    entity_id: str,
+    entity_data: EntityUpdate,
+    repository: EntityRepository,
+    workspace_repository: WorkspaceRepository,
+    auth_client: AuthClientDep,
+    parent: str | None = Query(default=None, description="Optional parent scope for the selected ID."),
+) -> Entity:
+    await _require_mutation_access(workspace, entity_type, "update", repository, workspace_repository, auth_client)
+    target = await _get_mutation_target(workspace, entity_type, entity_id, repository, parent)
+    return await _update_entity_target(target, entity_data, repository, workspace_repository, auth_client)
+
+
+@router.delete(
+    "/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id}",
+    response_model=DeleteResponse,
+    tags=[API_TAG],
+    summary="Delete entity by ID",
+    responses={
+        403: {"description": "Not allowed to delete entities in the requested workspace."},
+        404: {"description": "Entity not found in the requested scope."},
+        409: {"description": "Entity version conflict."},
+    },
+)
+async def delete_entity_by_id(
+    workspace: str,
+    entity_type: str,
+    entity_id: str,
+    repository: EntityRepository,
+    workspace_repository: WorkspaceRepository,
+    auth_client: AuthClientDep,
+    parent: str | None = Query(default=None, description="Optional parent scope for the selected ID."),
+    expected_db_version: int | None = Query(default=None, description="Delete only this entity version."),
+) -> DeleteResponse:
+    """Delete the selected ID while preserving scope and optional version checks."""
+    await _require_mutation_access(workspace, entity_type, "delete", repository, workspace_repository, auth_client)
+    target = await _get_mutation_target(workspace, entity_type, entity_id, repository, parent)
+    return await _delete_entity_target(target, expected_db_version, repository)

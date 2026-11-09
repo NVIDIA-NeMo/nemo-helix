@@ -3,7 +3,7 @@
 
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import type { CategoricalHistogramData } from '@studio/routes/DataDesignerJobDetailsRoute/datasetProfilerTypes';
-import { FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 import {
   Bar,
   BarChart,

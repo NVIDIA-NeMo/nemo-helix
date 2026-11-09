@@ -9,5 +9,11 @@ accelerate; sys_platform == 'never'
 safetensors; sys_platform == 'never'
 numpy; sys_platform == 'never'
 
+# Fixed networking/filesystem versions; Datasets 5.1 admits the fsspec fix.
+# Match the reviewed root workspace Datasets override (unsloth-zoo#1341).
+datasets==5.1.0
+fsspec==2026.7.0
+urllib3==2.8.0
+
 # Keep W&B's bundled wandb-core binary on a build with patched Go stdlib/modules.
 wandb>=0.30.0

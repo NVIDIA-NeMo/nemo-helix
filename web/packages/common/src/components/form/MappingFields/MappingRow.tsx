@@ -20,7 +20,7 @@ import { Trash } from '@nemo/icons/icons';
 import { Button, Flex } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
 import { memo } from 'react';
-import { Control, FieldValues } from 'react-hook-form';
+import type { Control, FieldValues } from 'react-hook-form';
 
 interface Props<TFieldValues extends FieldValues> {
   control: Control<TFieldValues>;

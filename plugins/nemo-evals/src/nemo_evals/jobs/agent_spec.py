@@ -383,7 +383,8 @@ class HarborRunnerTarget(_EvalTarget):
         description="Run the trials closed-book. Each trial's gateway calls are held to closed-book capable "
         "VirtualModels (ones whose request_middleware ends with nemo-evals-closed-book), and the closed-book "
         "middleware applies to them. Every VirtualModel the agent can reach, a router's routes_to included, "
-        "must be closed-book capable. Taskset runs set it for tasks whose agent runs with no network.",
+        "must be closed-book capable. Off by default, also for no-network tasks: their sandbox has no network, but "
+        "the model provider may. Set it to hold the run closed-book.",
     )
     agent_setup_timeout_multiplier: float | None = Field(
         default=None,
@@ -937,6 +938,13 @@ class _AgentEvalSpecCommon(BaseModel):
     labels: dict[str, str] = Field(
         default_factory=dict,
         description="Caller-supplied tags recorded on the run's metadata (e.g. benchmark, mode, backend).",
+    )
+    result_ignore_patterns: list[Annotated[str, Field(min_length=1)]] = Field(
+        default_factory=list,
+        description="Files to leave out of the saved result bundle. `*.ext` and `name` match files at any "
+        "depth, `name/` matches directories with that name at any depth (folder globs allowed), "
+        "and `dir/sub/` matches that directory at "
+        "the bundle root, with each folder name a glob such as `sub*`. Omit to keep every file.",
     )
     publication: PublicationSpec | None = Field(
         default=None,

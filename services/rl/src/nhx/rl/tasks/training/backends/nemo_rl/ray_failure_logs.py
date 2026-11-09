@@ -113,11 +113,13 @@ def diagnose_ray_startup(logs: dict[str, list[str]], startup_failure: bool) -> s
     During training, a diagnosis is reported only when the raylet actually fate-shared with an agent.
     A stale "address already in use" from an earlier attempt in the same session must not replace the
     training error. A failure before the driver starts is a startup failure, so the agent log is the cause
-    even when the raylet never got as far as the fate-share line.
+    even when the raylet never got as far as the fate-share line. A training worker's exit code 137 is
+    recorded in the same raylet files and is not the agent being killed.
     """
     agent_text = _text(logs, _AGENT_LOG_NAMES)
     raylet_text = _text(logs, set(RAY_FAILURE_LOG_NAMES) - _AGENT_LOG_NAMES)
-    evidence = agent_text + "\n" + _CANNED_HINT_RE.sub("", raylet_text)
+    raylet_evidence = _CANNED_HINT_RE.sub("", raylet_text)
+    evidence = agent_text + "\n" + raylet_evidence
     fate_agent = _fate_share_agent(raylet_text)
     if not startup_failure and fate_agent is None:
         return None
@@ -126,7 +128,7 @@ def diagnose_ray_startup(logs: dict[str, list[str]], startup_failure: bool) -> s
         return f"RuntimeError: {RAY_AGENT_PORT_CONFLICT}"
     if _SEGV_RE.search(evidence) or _GRPCIO_VERSION_RE.search(agent_text):
         return f"RuntimeError: {RAY_AGENT_GRPCIO_MISMATCH}"
-    if _OOM_RE.search(evidence):
+    if _agent_was_killed(agent_text, raylet_evidence):
         return f"RuntimeError: {RAY_AGENT_KILLED}"
 
     excerpt = _last_exception(logs)
@@ -142,6 +144,20 @@ def diagnose_ray_startup(logs: dict[str, list[str]], startup_failure: bool) -> s
 
 def _text(logs: dict[str, list[str]], names: frozenset[str] | set[str]) -> str:
     return "\n".join("\n".join(lines) for name, lines in logs.items() if name in names)
+
+
+def _agent_was_killed(agent_text: str, raylet_evidence: str) -> bool:
+    """True when runtime_env_agent or dashboard_agent was killed, not a training worker.
+
+    Ray's agent monitor writes one line, ``Agent process with name runtime_env_agent exited,
+    exit code 137.`` A worker death is a different line in the same file and does not name the agent.
+    """
+    if _OOM_RE.search(agent_text):
+        return True
+    return any(
+        _OOM_RE.search(line) and any(agent in line for agent in _FATE_SHARE_AGENTS)
+        for line in raylet_evidence.splitlines()
+    )
 
 
 def _fate_share_agent(raylet_text: str) -> str | None:

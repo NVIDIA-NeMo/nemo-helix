@@ -12,8 +12,8 @@ workspace before persisting the session.
 from __future__ import annotations
 
 import logging
-import secrets
 from collections.abc import Awaitable
+from secrets import token_hex
 from typing import cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -25,8 +25,10 @@ from nemo_agents_plugin.entities import AgentDeployment, AgentSession, SessionSt
 from nemo_agents_plugin.schema import CreateSessionRequest, SessionFilter, SessionPage
 from nemo_agents_plugin.session_lifecycle import cleanup_fabric_runtime as _cleanup_fabric_runtime
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.dependencies import get_effective_principal_id
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -70,7 +72,7 @@ async def create_session(
         workspace=workspace,
         deployment_id=body.deployment_id,
     )
-    session_name = body.name or f"{deployment.name}-{secrets.token_hex(4)}"
+    session_name = body.name or f"{deployment.name}-{token_hex(4)}"
     session = AgentSession(
         name=session_name,
         workspace=workspace,
@@ -86,6 +88,8 @@ async def create_session(
         ) from exc
     except NemoEntityValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to create session for deployment '%s'", body.deployment_id)
         raise HTTPException(status_code=500, detail="Failed to create session.") from exc
@@ -104,8 +108,7 @@ async def create_session(
 )
 async def list_sessions(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: SessionFilter | dict[str, object] = Depends(_session_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -119,11 +122,13 @@ async def list_sessions(
         result = await entity_client.list(
             AgentSession,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_obj=filter_dict or None,
         )
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list sessions in workspace '%s'", workspace)
         raise HTTPException(status_code=500, detail="Failed to list sessions.") from exc
@@ -212,6 +217,8 @@ async def close_session(
                 effective_principal_id=effective_principal_id,
             )
             continue
+        except CLIENT_ERRORS:
+            raise
         except Exception as exc:
             logger.exception("Failed to close session '%s'", name)
             raise HTTPException(status_code=500, detail="Failed to close session.") from exc
@@ -257,6 +264,8 @@ async def delete_session(
             status_code=409,
             detail=f"Session '{name}' is being modified concurrently.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to delete session '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to delete session.") from exc
@@ -279,6 +288,8 @@ async def _get_deployment_for_session(
         )
     except NemoEntityNotFoundError as exc:
         raise _deployment_not_found(workspace, deployment_id) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to look up deployment ID '%s'", deployment_id)
         raise HTTPException(status_code=500, detail="Failed to look up deployment.") from exc

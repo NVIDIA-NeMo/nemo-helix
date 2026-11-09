@@ -15,6 +15,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Self
 
+from nemo_agents_plugin.session_protocol import session_id_to_uuid
 from nemo_helix_plugin.agents.types import (
     CONTEXT_SCHEMA_DESCRIPTION,
     DEFAULT_INPUT_DESCRIPTION,
@@ -455,3 +456,10 @@ class AgentSession(NemoEntity, entity_type="agent_session"):
         description="UTC rolling idle deadline derived from the latest session activity.",
         json_schema_extra={"nullable": True},
     )
+
+    @computed_field(
+        description="Unique identifier for the session. Can be used to group and retrieve the session's traces in Intake."
+    )
+    @property
+    def session_uuid(self) -> str:
+        return session_id_to_uuid(self.id) if self.id else ""

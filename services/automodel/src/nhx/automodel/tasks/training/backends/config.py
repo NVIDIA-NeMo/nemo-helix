@@ -804,7 +804,6 @@ def _build_checkpoint(
         # Required for models with quantized base weights (e.g., GPT-OSS)
         # Safe to enable even for non-quantized models
         "dequantize_base_checkpoint": True,
-        "v4_compatible": customizer_config.model.v4_compatible,
     }
 
 

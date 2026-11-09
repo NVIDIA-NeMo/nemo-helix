@@ -38,6 +38,7 @@ import sys
 import tempfile
 import time
 import uuid
+from asyncio import create_subprocess_exec
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -48,7 +49,11 @@ from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.environments.docker.docker import DockerEnvironment, _sanitize_docker_compose_project_name
 from harbor.models.task.config import NetworkMode, NetworkPolicy, TaskConfig
 from harbor.models.trial.config import AgentConfig
-from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import AgentInstall, agent_install
+from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import (
+    FABRIC_CONFIG_BUNDLE_KWARG,
+    AgentInstall,
+    agent_install,
+)
 
 if sys.platform != "win32":
     import fcntl
@@ -61,8 +66,6 @@ LOCK_POLL_INTERVAL_SEC = 0.5
 #: How long a failed or cancelled layer build stops other trials from trying the same build: they install the agent in setup
 #: instead, at once, rather than each repeating the failure in turn while holding the build's lock.
 FAILED_BUILD_COOLDOWN_SEC = 600
-#: The kwarg holding a Fabric agent's config bundle, a directory its setup uploads; never part of a layer.
-FABRIC_CONFIG_BUNDLE_KWARG = "fabric_config_bundle"
 _COMPOSE_LABEL_PREFIX = "com.docker.compose."
 #: Where Harbor's egress sidecar marks itself ready; Harbor's compose healthcheck reads the same file.
 EGRESS_SIDECAR_READY_FILE = "/tmp/harbor-docker-egress-control-sidecar.ready"
@@ -87,7 +90,7 @@ class AgentLayerDockerEnvironment(DockerEnvironment):
     @override
     async def _validate_image_os(self, image_name: str) -> None:
         """Harbor calls this with the image the container will run, once it exists; switch to its agent layer."""
-        await super()._validate_image_os(image_name)
+        await self._harbor_validate_image_os(image_name)
         built = not self._use_prebuilt
         if built:
             digest = await asyncio.to_thread(environment_digest, self.environment_dir)
@@ -104,6 +107,14 @@ class AgentLayerDockerEnvironment(DockerEnvironment):
         """Tear down as Harbor would have without the layer, so ``down --rmi local`` still removes this trial's build."""
         if self._before_layer is not None:
             self._use_prebuilt, self._env_vars.prebuilt_image_name = self._before_layer
+        await self._harbor_stop(delete)
+
+    async def _harbor_validate_image_os(self, image_name: str) -> None:
+        """Harbor's own check; a seam so tests can stand in for it without patching ``DockerEnvironment``."""
+        await super()._validate_image_os(image_name)
+
+    async def _harbor_stop(self, delete: bool) -> None:
+        """Harbor's own teardown; a seam so tests can stand in for it without patching ``DockerEnvironment``."""
         await super().stop(delete)
 
     @property
@@ -309,8 +320,9 @@ async def build_agent_layer(
             sidecar = f"{container}-egress"
             await _start_egress_sidecar(sidecar, egress)
             network = ["--network", f"container:{sidecar}"]
-        # The image's ENTRYPOINT is overridden too: a task's entrypoint may initialize state each trial must make
-        # for itself, which a layer would otherwise share.
+        # The image's ENTRYPOINT is cleared too: a task's entrypoint may initialize state each trial must make
+        # for itself, which a layer would otherwise share. Cleared, not replaced: `docker commit` can't put back an
+        # absent ENTRYPOINT, so a replacement would stay in the layer.
         await _docker(
             "run",
             "--detach",
@@ -319,8 +331,9 @@ async def build_agent_layer(
             container,
             *network,
             "--entrypoint",
-            "sh",
+            "",
             image,
+            "sh",
             "-c",
             "sleep infinity",
         )
@@ -426,7 +439,7 @@ class ContainerExecEnvironment:
         for name, value in {**(env or {}), **self.env}.items():
             args += ["--env", f"{name}={value}"]
         args += [self.container, "bash", "-c", command]
-        process = await asyncio.create_subprocess_exec(
+        process = await create_subprocess_exec(
             "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         try:
@@ -453,7 +466,7 @@ async def _image_id(image: str) -> str:
 
 
 async def _image_exists(image: str) -> bool:
-    process = await asyncio.create_subprocess_exec(
+    process = await create_subprocess_exec(
         "docker", "image", "inspect", image, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
     )
     return await process.wait() == 0
@@ -461,14 +474,14 @@ async def _image_exists(image: str) -> bool:
 
 async def _docker_status(*args: str) -> int:
     """The exit status of ``docker *args``, its output discarded."""
-    process = await asyncio.create_subprocess_exec(
+    process = await create_subprocess_exec(
         "docker", *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
     )
     return await process.wait()
 
 
 async def _docker(*args: str, check: bool = True) -> str:
-    process = await asyncio.create_subprocess_exec(
+    process = await create_subprocess_exec(
         "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
     stdout, stderr = await process.communicate()

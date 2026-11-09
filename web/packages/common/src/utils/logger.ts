@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable no-console */
-import { Logger, logs, SeverityNumber } from '@opentelemetry/api-logs';
+import { type Logger, logs, SeverityNumber } from '@opentelemetry/api-logs';
 
 // The service name lives in Studio's env config, which a shared library must not
 // import. Studio calls configureLogger() at bootstrap; until then, logs still go

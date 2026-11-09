@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import httpx
+import nemo_helix_ext.client.bootstrap as client_bootstrap
 import pytest
 import yaml
 from nemo_helix_ext.cli.app import app
@@ -70,7 +71,7 @@ def _invoke_agents_list(*global_args: str) -> httpx.Request:
         kwargs["transport"] = transport
         return real_client(*args, **kwargs)
 
-    with patch.object(httpx, "Client", _factory):
+    with patch.object(client_bootstrap, "Client", _factory):
         result = runner.invoke(app, [*global_args, "agents", "list", "-f", "json"])
 
     assert result.exit_code == 0, result.output

@@ -1,11 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Toast } from '@nvidia/foundations-react-core';
-import { ComponentProps, FC, PropsWithChildren, useState } from 'react';
-
-import { ToastContextValue } from '../providers/toast/types';
-import { ToastContext } from '../providers/toast/useToast';
+import type { ToastContextValue } from '@nemo/common/src/providers/toast/types';
+import { ToastContext } from '@nemo/common/src/providers/toast/useToast';
+import type { Toast } from '@nvidia/foundations-react-core';
+import { type ComponentProps, type FC, type PropsWithChildren, useState } from 'react';
 
 /**
  * Mock ToastProvider that eliminates timeouts and provides a clean testing interface.
