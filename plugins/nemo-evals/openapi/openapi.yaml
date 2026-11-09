@@ -806,11 +806,12 @@ paths:
         \  active: Restrict to accepted and running phases when True.\n    mine: Restrict\
         \ to the effective caller's records when True.\n    page: One-based page number,\
         \ validated by FastAPI.\n    page_size: Maximum page size, from 1 to 1000.\n\
-        \    caller: Effective principal supplied by the platform dependency.\n  \
-        \  service: Shared request-scoped run service.\n\nReturns:\n    Stored statuses\
-        \ and filtered pagination counts, excluding null optionals.\n\nRaises:\n \
-        \   HTTPException: Permission denied (403), or unexpected storage or projection\
-        \ failure (500)."
+        \    progress: Include each run's progress when True.\n    caller: Effective\
+        \ principal supplied by the platform dependency.\n    service: Shared request-scoped\
+        \ run service.\n\nReturns:\n    Stored statuses and filtered pagination counts,\
+        \ excluding null optionals; each status includes its\n    progress when ``progress``\
+        \ is True.\n\nRaises:\n    HTTPException: Permission denied (403), or unexpected\
+        \ storage or projection failure (500)."
       operationId: list_taskset_runs_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_get
       parameters:
       - name: workspace
@@ -837,6 +838,17 @@ paths:
           default: false
           title: Mine
         description: Include only runs created by the effective caller.
+      - name: progress
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include each run's progress (task and trial counts), the same
+            as getting a single run does.
+          default: false
+          title: Progress
+        description: Include each run's progress (task and trial counts), the same
+          as getting a single run does.
       - name: page
         in: query
         required: false
@@ -9395,6 +9407,14 @@ components:
           title: Task Jobs
           description: 'Registered members by their task Job''s status as the controller
             last read it, for example {"active": 18, "pending": 2}.'
+        trial_counts:
+          allOf:
+          - $ref: '#/components/schemas/TrialCounts'
+          description: 'Trial counts summed across the run''s tasks. The reward is
+            the mean of each task''s mean reward, so every task counts equally regardless
+            of how many trials it ran. None when any task has no counts, as in a run
+            that was already going when trial counts were added: a total over only
+            some of its tasks would read as the whole run''s.'
       type: object
       required:
       - tasks
@@ -9493,8 +9513,9 @@ components:
         progress:
           allOf:
           - $ref: '#/components/schemas/TasksetRunProgress'
-          description: Counted from the run's members on each GET of this run; None
-            before the controller creates them, and in run lists and submit responses.
+          description: Counted from the run's members on each GET of this run, and
+            in run lists that ask for it; None before the controller creates them,
+            and in other run lists and submit responses.
       additionalProperties: false
       type: object
       required:
@@ -9614,8 +9635,9 @@ components:
         progress:
           allOf:
           - $ref: '#/components/schemas/TasksetRunProgress'
-          description: Counted from the run's members on each GET of this run; None
-            before the controller creates them, and in run lists and submit responses.
+          description: Counted from the run's members on each GET of this run, and
+            in run lists that ask for it; None before the controller creates them,
+            and in other run lists and submit responses.
         warnings:
           items:
             type: string
@@ -9650,6 +9672,11 @@ components:
           minimum: 0.0
           title: Task Index
           description: Zero-based index of the task in the run's resolved task list.
+        task_name:
+          title: Task Name
+          description: The task's id in the run's taskset (a Harbor task's native
+            id); omitted for runs from before it.
+          type: string
         phase:
           allOf:
           - $ref: '#/components/schemas/MemberPhase'
@@ -9673,6 +9700,11 @@ components:
           - $ref: '#/components/schemas/PublicationOutcome'
           description: What the task published to Intake, as its Job reported it when
             the task settled; omitted when it reported nothing.
+        trial_counts:
+          allOf:
+          - $ref: '#/components/schemas/TrialCounts'
+          description: The task Job's trials counted by phase, as the controller last
+            read them; every planned trial counts as pending until the Job reports.
       additionalProperties: false
       type: object
       required:
@@ -9746,6 +9778,45 @@ components:
       required:
       - data
       title: TasksetsPage
+    TrialCounts:
+      properties:
+        total:
+          type: integer
+          minimum: 0.0
+          title: Total
+          description: Trials the task Job planned.
+        phases:
+          additionalProperties:
+            type: integer
+          propertyNames:
+            $ref: '#/components/schemas/TrialPhase'
+          type: object
+          title: Phases
+          description: 'Trials by phase, for example {"pending": 1, "agent_running":
+            1, "succeeded": 2}; a phase with no trials is left out.'
+        rewarded:
+          type: integer
+          minimum: 0.0
+          title: Rewarded
+          description: Trials with a reward; reward averages over them.
+          default: 0
+        reward:
+          title: Reward
+          description: Mean reward over the rewarded trials; None without any.
+          type: number
+        errors:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Errors
+          description: 'Errored trials by exception type, for example {''AgentTimeoutError'':
+            1}.'
+      type: object
+      required:
+      - total
+      title: TrialCounts
+      description: 'A task''s trials counted by phase, with their mean reward: what
+        run and task lists show per task.'
     TrialError:
       properties:
         type:
@@ -9840,6 +9911,20 @@ components:
       type: object
       title: TrialMeasurements
       description: Validated usage, runtime, and cost measurements for one trial.
+    TrialPhase:
+      type: string
+      enum:
+      - pending
+      - starting
+      - agent_running
+      - verifying
+      - retrying
+      - succeeded
+      - errored
+      - cancelled
+      title: TrialPhase
+      description: Where a Harbor trial is in its lifecycle, following the events
+        Harbor raises for it.
     ValidationError:
       properties:
         loc:
