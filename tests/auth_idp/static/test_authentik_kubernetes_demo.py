@@ -262,14 +262,63 @@ def test_authentik_static_ci_prepares_envoy_validation_inputs() -> None:
     assert "helm dependency build contrib/auth/authentik/helm" in job
 
 
-def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:
-    ci_workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
-    job = _workflow_job_block(ci_workflow, "python-auth-idp-e2e-test")
+def test_cpu_smoke_image_build_is_required_in_ci_without_e2e_opt_in() -> None:
+    ci = _load_yaml(Path(".github/workflows/ci.yaml"))
+    e2e = _load_yaml(Path(".github/workflows/e2e.yaml"))
+    job = ci["jobs"]["build-cpu-smoke-images"]
 
-    assert "needs.policy-wasm.result == 'success'" in job
-    assert "needs.build-cpu-smoke-images.result == 'success'" in job
-    assert "needs.build-cpu-smoke-images.outputs.publish_images == 'true'" in job
-    assert "needs.python-auth-idp-static-test.result == 'success'" in job
+    assert job["needs"] == ["changes"]
+    assert job["if"].strip() == (
+        "!cancelled() && (\n"
+        "  github.event_name == 'workflow_dispatch' ||\n"
+        "  needs.changes.outputs.cpu-smoke == 'true' ||\n"
+        "  needs.changes.outputs.auth-idp == 'true' ||\n"
+        "  needs.changes.outputs.customization-auth == 'true' ||\n"
+        "  needs.changes.outputs.builder-e2e == 'true'\n"
+        ")"
+    )
+    assert "build-cpu-smoke-images" in ci["jobs"]["ci-status"]["needs"]
+    assert "build-cpu-smoke-images" in ci["jobs"]["post-merge-image-status"]["needs"]
+    assert job["steps"] == e2e["jobs"]["build-cpu-smoke-images"]["steps"]
+    assert job["permissions"] == e2e["jobs"]["build-cpu-smoke-images"]["permissions"]
+
+
+def test_builder_e2e_moves_to_opt_in_workflow_with_both_auth_modes() -> None:
+    ci = _load_yaml(Path(".github/workflows/ci.yaml"))
+    e2e_path = Path(".github/workflows/e2e.yaml")
+    e2e = _load_yaml(e2e_path)
+    job = e2e["jobs"]["kind-builder-e2e"]
+    block = _workflow_job_block(e2e_path.read_text(encoding="utf-8"), "kind-builder-e2e")
+
+    assert "kind-builder-e2e" not in ci["jobs"]
+    assert "kind-builder-e2e" not in ci["jobs"]["ci-status"]["needs"]
+    assert "kind-builder-e2e" not in ci["jobs"]["post-merge-image-status"]["needs"]
+    assert "kind-builder-e2e" in e2e["jobs"]["post-merge-e2e-status"]["needs"]
+    assert job["needs"] == ["eligibility", "build-cpu-smoke-images"]
+    assert job["if"] == "needs.build-cpu-smoke-images.outputs.publish_images == 'true'"
+    assert job["strategy"]["matrix"]["auth"] == ["off", "on"]
+    assert "needs.changes.outputs" not in block
+    steps = {step["name"]: step for step in job["steps"]}
+    run = steps["Run builder e2e tests"]["run"]
+    assert "e2e/test_builder.py" in run
+    assert "features+=(--feature auth --config e2e/quickstart/auth.yaml)" in run
+    assert "if tests == 0 or skipped:" in run
+    assert steps["Finalize Kind builder e2e"]["if"] == "always()"
+
+
+def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:
+    workflow_path = Path(".github/workflows/e2e.yaml")
+    workflow = _load_yaml(workflow_path)
+    runtime_job = workflow["jobs"]["python-auth-idp-e2e-test"]
+    job = _workflow_job_block(workflow_path.read_text(encoding="utf-8"), "python-auth-idp-e2e-test")
+
+    assert set(runtime_job["needs"]) == {
+        "eligibility",
+        "policy-wasm",
+        "build-cpu-smoke-images",
+        "python-auth-idp-static-test",
+    }
+    assert runtime_job["if"] == "needs.build-cpu-smoke-images.outputs.publish_images == 'true'"
     assert '--image "${IMAGE_REGISTRY}/nhx-api:${BAKE_TAG}"' in job
 
 
@@ -1094,6 +1143,65 @@ def test_authentik_umbrella_values_configure_nemo_envoy_as_the_only_edge_proxy()
     }
 
 
+_PEM = "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n"
+
+
+def test_kubernetes_job_trust_bundle_uses_the_one_run_sh_prepared(tmp_path) -> None:
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    (tmp_path / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
+    (tmp_path / "ca-bundle.crt").write_text(_PEM.format("prepared"), encoding="utf-8")
+
+    assert live_test._job_trust_bundle(tmp_path) == tmp_path / "ca-bundle.crt"
+
+
+def test_kubernetes_job_trust_bundle_is_built_when_the_tls_dir_has_none(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A TLS directory prepared without run.sh has no bundle; the secret still needs one.
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+    (tls_dir / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
+    public = tmp_path / "public.pem"
+    public.write_text(_PEM.format("public"), encoding="utf-8")
+    monkeypatch.setenv(live_test.PUBLIC_CA_BUNDLE_ENV, str(public))
+
+    bundle = live_test._job_trust_bundle(tls_dir).read_text(encoding="utf-8")
+
+    assert bundle == _PEM.format("public") + _PEM.format("gateway")
+    assert not (tls_dir / "ca-bundle.crt").exists()
+
+
+def test_kubernetes_job_trust_bundle_refuses_a_public_bundle_without_certificates(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    (tmp_path / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
+    not_pem = tmp_path / "hosts"
+    not_pem.write_text("127.0.0.1 localhost\n", encoding="utf-8")
+    monkeypatch.setenv(live_test.PUBLIC_CA_BUNDLE_ENV, str(not_pem))
+
+    with pytest.raises(RuntimeError, match="no PEM certificates"):
+        live_test._job_trust_bundle(tmp_path)
+
+
+def test_kubernetes_job_trust_bundle_names_the_override_when_no_public_bundle_exists(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    (tmp_path / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
+    monkeypatch.delenv(live_test.PUBLIC_CA_BUNDLE_ENV, raising=False)
+    monkeypatch.setattr(live_test, "_PUBLIC_CA_BUNDLE_CANDIDATES", ())
+    monkeypatch.setattr(live_test, "certifi_bundle_path", lambda: str(tmp_path / "missing.pem"))
+
+    with pytest.raises(RuntimeError, match=live_test.PUBLIC_CA_BUNDLE_ENV):
+        live_test._job_trust_bundle(tmp_path)
+
+
 def test_kubernetes_deployment_workload_runtime_config_targets_in_cluster_envoy(tmp_path) -> None:
     from tests.auth_idp import runtime_kubernetes as live_test
 
@@ -1232,7 +1340,7 @@ def test_authentik_kubernetes_runner_uses_helm_not_kustomize() -> None:
     run_sh = (AUTHENTIK_DIR / "run.sh").read_text(encoding="utf-8")
     live_test_path = Path("tests/auth_idp/k8s/test_authentik_kubernetes_live.py")
     live_test = live_test_path.read_text(encoding="utf-8")
-    ci_workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
+    ci_workflow = Path(".github/workflows/e2e.yaml").read_text(encoding="utf-8")
 
     assert "NHX_AUTHENTIK_K8S_HELM_RELEASE" in run_sh
     assert 'K8S_RUNTIME="${NHX_AUTHENTIK_K8S_RUNTIME:-kind}"' in run_sh
@@ -1365,7 +1473,7 @@ def test_authentik_runner_rejects_removed_bare_compose_and_k8s_aliases() -> None
 
 
 def test_authentik_ci_workflow_uses_explicit_test_actions() -> None:
-    workflow = _load_yaml(Path(".github/workflows/ci.yaml"))
+    workflow = _load_yaml(Path(".github/workflows/e2e.yaml"))
     matrix_include = workflow["jobs"]["python-auth-idp-e2e-test"]["strategy"]["matrix"]["include"]
 
     commands_by_runtime = {
@@ -1379,7 +1487,7 @@ def test_authentik_ci_workflow_uses_explicit_test_actions() -> None:
 
 
 def test_authentik_ci_workflow_does_not_carry_separate_k3d_runner() -> None:
-    workflow = _load_yaml(Path(".github/workflows/ci.yaml"))
+    workflow = _load_yaml(Path(".github/workflows/e2e.yaml"))
 
     assert "python-auth-idp-k3d-e2e-test" not in workflow["jobs"]
 
@@ -1795,8 +1903,8 @@ def test_authentik_compose_mounts_gateway_ca_without_test_runner_overlay() -> No
     services = compose_config["services"]
     nemo_environment = services["nemo"]["environment"]
 
-    assert nemo_environment["SSL_CERT_FILE"] == "/etc/nhx/gateway-tls/tls.crt"
-    assert nemo_environment["REQUESTS_CA_BUNDLE"] == "/etc/nhx/gateway-tls/tls.crt"
+    assert nemo_environment["SSL_CERT_FILE"] == "/etc/nhx/gateway-tls/ca-bundle.crt"
+    assert nemo_environment["REQUESTS_CA_BUNDLE"] == "/etc/nhx/gateway-tls/ca-bundle.crt"
     assert "gateway-tls:/etc/nhx/gateway-tls:ro" in services["nemo"]["volumes"]
     assert "auth-idp-e2e" not in services
 
@@ -1812,6 +1920,8 @@ def test_authentik_compose_e2e_config_uses_global_docker_workload_identity_switc
     )
 
     assert "workload_identity" not in workload_executor["config"]
+    # The volume holds the gateway key and the platform's CA files; job code must not change them.
+    assert workload_executor["config"]["storage"]["additional_volume_mounts"][0]["read_only"] is True
 
 
 def test_authentik_compose_e2e_config_sets_deployments_workload_network() -> None:
@@ -1849,6 +1959,7 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     assert tls_values["secretName"] == "nemo-helix-envoy-tls"
     assert tls_values["mountPath"] == "/etc/nhx/workload-token-tls"
     assert tls_values["caBundleFile"] == "/etc/nhx/workload-token-ca/ca.crt"
+    assert tls_values["trustBundleFile"] == "/etc/nhx/workload-token-ca/ca-bundle.crt"
     assert "create" not in tls_values
     assert "durationDays" not in tls_values
     assert "dnsNames" not in tls_values
@@ -1897,8 +2008,9 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     assert seed_job["extraVolumes"] == controller["extraVolumes"]
     assert seed_job["extraVolumeMounts"] == controller["extraVolumeMounts"]
     assert nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["env"] == {
-        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
+        "NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
+        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
     }
     assert "service_discovery" not in nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]
     assert nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["storage"] == {
@@ -1907,7 +2019,10 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
                 "name": "workload-token-tls-ca",
                 "secret": {
                     "secret_name": "nemo-helix-envoy-tls",
-                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "items": [
+                        {"key": "ca.crt", "path": "ca.crt"},
+                        {"key": "ca-bundle.crt", "path": "ca-bundle.crt"},
+                    ],
                 },
             }
         ],
@@ -1929,8 +2044,9 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     assert "default_task_image" not in workload_config
     assert "service_discovery" not in workload_config
     assert workload_config["env"] == {
-        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
+        "NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
+        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
     }
     # executor_defaults don't apply to cpu/workload, so its storage sets the core PVC beside the CA volume.
     expected_storage = {

@@ -34,3 +34,19 @@ The tests assume there's some data locally on your machine:
 uv run --frozen services/core/files/script/e2e_filesets_api.py
 uv run --frozen services/core/files/script/e2e_duckdb_httpfs.py
 ```
+
+## S3 uploads
+
+Uploads use boto3 managed transfers through an AnyIO worker, preserving the configured storage
+credentials and endpoint. Small files use PUT; large files use multipart with SDK retries and
+abort cleanup. Transfers use the classic serial implementation to bound buffering and keep
+async stream reads on the worker. Raw-body uploads need no whole-file buffer or disk spool.
+Multipart form uploads spool the parsed file to a temporary file so storage receives its
+exact length rather than the request length (which includes framing). Temporary files are
+closed after success or failure; provision enough local temporary disk space for these uploads.
+The multipart request length is validated separately from the parsed file length.
+Supported AWS SDK configuration applies in the Files process; AWS CLI S3 transfer settings do
+not configure TransferConfig. Storage authorization failures return HTTP 403.
+
+Cancellation during network I/O waits for the SDK call and retries to return. Configure storage
+lifecycle expiry for incomplete multipart uploads after abrupt process loss or failed cleanup.

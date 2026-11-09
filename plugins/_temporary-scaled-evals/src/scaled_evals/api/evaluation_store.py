@@ -11,11 +11,12 @@ same way, so of two claimants racing for one evaluation exactly one wins.
 
 from __future__ import annotations
 
-# `EvaluationStore.list` shadows the builtin inside the class body.
+# `EvaluationRequestRepository.list` shadows the builtin inside the class body.
 import builtins
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
+from itertools import batched
 from typing import Any, Literal, TypeVar
 
 from nemo_helix_plugin.entities.base import EntityConflictError, EntityNotFoundError, SyncEntityClient
@@ -33,6 +34,7 @@ from scaled_evals.api.benchmark_store import BenchmarkStore
 from scaled_evals.api.failure_diagnostics import failure_category_for_code
 from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.api.repositories.base_repository import Conflict, InvalidReference
+from scaled_evals.api.resource_access import INTERNAL_ACCESS, ResourceAccess
 from scaled_evals.api.schemas.common import decode_cursor
 from scaled_evals.api.task_store import TaskStore
 from scaled_evals.models.evaluations import EvaluationResultWrite
@@ -242,16 +244,23 @@ def _event_rows(entity: ScaledEvalsEvaluation) -> builtins.list[dict[str, Any]]:
     return [event.model_dump() for event in entity.events]
 
 
-class EvaluationStore:
-    def __init__(self, client: SyncEntityClient | None = None) -> None:
+class _EvaluationReadRepositoryBase:
+    """Shared read-only persistence and owner views."""
+
+    def __init__(self, client: SyncEntityClient | None = None, *, access: ResourceAccess) -> None:
+        """Use service storage with explicit request access or privileged internal access."""
         self._client = client or entity_store.entity_client()
+        self._access = access
 
     def _get(self, evaluation_id: str, *, include_deleted: bool = False) -> ScaledEvalsEvaluation | None:
+        """Authorize a fresh entity before exposing it or enriching its task metadata."""
         try:
             entity = self._client.get(ScaledEvalsEvaluation, evaluation_id, workspace=entity_store.private_workspace())
         except EntityNotFoundError:
             return None
-        return entity if include_deleted or entity.deleted_at is None else None
+        if entity.deleted_at is not None and not (include_deleted and self._access.internal):
+            return None
+        return entity if self._access.can_read(entity.owner_id, entity.visibility) else None
 
     def _scan(
         self, *, include_deleted: bool = False, **where: Iterable[str | bool]
@@ -260,10 +269,100 @@ class EvaluationStore:
         # store's pagination; the queue scans filter to rows with work, but the
         # list endpoint pages in memory and analytics read every live
         # evaluation. Upgrade path: push the keyset and limit into the store.
+        """Filter live entities by request access before search and pagination."""
         filters = {field: list(values) for field, values in where.items()}
-        if not include_deleted:
+        if not include_deleted or not self._access.internal:
             filters["deleted"] = [False]
-        return entity_store.list_all(self._client, ScaledEvalsEvaluation, filters)
+        return [
+            entity
+            for entity in entity_store.list_all(self._client, ScaledEvalsEvaluation, filters)
+            if self._access.can_read(entity.owner_id, entity.visibility)
+        ]
+
+    def _list(
+        self,
+        *,
+        limit: int,
+        cursor: str | None,
+        order: str,
+        status: str | None,
+        task_id: str | None,
+        shared: bool,
+        benchmark_run_id: str | None = None,
+        owner_id: str | None = None,
+        q: str | None = None,
+    ) -> builtins.list[dict]:
+        """Return up to `limit + 1` evaluations after `cursor`.
+
+        Without `benchmark_run_id` only standalone evaluations are listed; the
+        members of a benchmark run are listed through their run.
+        """
+        where: dict[str, Any] = {}
+        for field, value in (("status", status), ("task_id", task_id), ("owner_id", owner_id)):
+            if value is not None:
+                where[field] = [value]
+        if benchmark_run_id is not None:
+            where["benchmark_run_id"] = [benchmark_run_id]
+        else:
+            where["standalone"] = [True]
+        rows = [
+            row(entity)
+            for entity in self._scan(**where)
+            if (not shared or entity.visibility != "private")
+            and entity_store.contains(
+                q, entity.name, entity.display_name, entity.task_id, entity.status, entity.framework, entity.runtime
+            )
+        ]
+        return entity_store.keyset_page(rows, cursor=cursor, order=order, limit=limit)
+
+    def summary(self, owner_id: str) -> dict[str, Any]:
+        """Return the owner's evaluation counts and task counts."""
+        cutoff = _now() - timedelta(hours=24)
+        owned = self._scan(owner_id=[owner_id])
+        evaluations = {
+            "active": sum(entity.status in ("blocked", *_ACTIVE) for entity in owned),
+            "queued": sum(entity.status == "queued" for entity in owned),
+            "failed_24h": sum(entity.status == "failed" and entity.changed_at >= cutoff for entity in owned),
+            "succeeded_24h": sum(entity.status == "succeeded" and entity.changed_at >= cutoff for entity in owned),
+        }
+        return {"evaluations": evaluations, "tasks": TaskStore().owner_summary(owner_id)}
+
+    def quota_usage(self, owner_id: str) -> dict[str, int]:
+        owned = self._scan(owner_id=[owner_id])
+        return {
+            "evaluations_active": sum(entity.status in _CLAIMABLE for entity in owned),
+            "sandbox_slots_active": sum(entity.parallelism for entity in owned if entity.status in _ACTIVE),
+            "tasks_owned": TaskStore().count(owner_id=owner_id),
+        }
+
+    def recent_activity(self, owner_id: str, *, limit: int) -> builtins.list[dict]:
+        rows = [
+            {
+                "id": entity.name,
+                "kind": "evaluation",
+                "name": entity.display_name,
+                "status": entity.status,
+                "created_at": entity.created_at,
+            }
+            for entity in self._scan(owner_id=[owner_id])
+        ]
+        rows += TaskStore().owner_activity(owner_id)
+        rows.sort(key=lambda item: (item["created_at"], item["id"]), reverse=True)
+        return rows[:limit]
+
+    def _members_for_runs(self, run_ids: builtins.list[str]) -> builtins.list[dict]:
+        """Return live members from bounded run-ID batches, following every result page."""
+        if not run_ids:
+            return []
+        return [
+            row(entity)
+            for batch in batched(dict.fromkeys(run_ids), entity_store.FILTER_BATCH_SIZE)
+            for entity in self._scan(benchmark_run_id=batch)
+        ]
+
+
+class EvaluationRequestRepository(_EvaluationReadRepositoryBase):
+    """Evaluation operations constrained by the authenticated request scope."""
 
     def _mutate(
         self,
@@ -281,7 +380,7 @@ class EvaluationStore:
         """
         for _ in range(_MAX_WRITE_ATTEMPTS):
             entity = self._get(evaluation_id, include_deleted=include_deleted)
-            if entity is None:
+            if entity is None or not self._access.can_write(entity.owner_id):
                 return None
             now = _now()
             result, write = change(entity, now)
@@ -304,7 +403,7 @@ class EvaluationStore:
         """Claim the first candidate whose write lands, rescanning after a lost race."""
         for _ in range(_MAX_WRITE_ATTEMPTS):
             now = _now()
-            ordered = candidates(now)
+            ordered = [entity for entity in candidates(now) if self._access.can_write(entity.owner_id)]
             if not ordered:
                 return None
             entity = ordered[0]
@@ -320,38 +419,22 @@ class EvaluationStore:
     @staticmethod
     def _run_available(benchmark_run_id: str | None) -> bool:
         """Return whether the evaluation's benchmark run, if any, is still live and not cancelled."""
-        from scaled_evals.api.benchmark_run_store import BenchmarkRunStore  # noqa: PLC0415 - imports this module
+        from scaled_evals.api.benchmark_run_store import (
+            BenchmarkRunWorkerRepository,
+        )
 
         if benchmark_run_id is None:
             return True
-        run = BenchmarkRunStore().get(benchmark_run_id)
-        return run is not None and run["cancelled_at"] is None
-
-    # Creation
-
-    def task_in_active_use(self, task_id: str) -> bool:
-        """Return whether an unfinished evaluation runs the task."""
-        return bool(self._scan(task_id=[task_id], status=_CANCELLABLE))
-
-    def profile_in_active_use(self, profile_id: str) -> bool:
-        """Return whether an unfinished evaluation references the config profile."""
-        return any(
-            profile_id in (entity.framework_profile_id, entity.harbor_profile_id, entity.intake_profile_id)
-            for entity in self._scan(status=_CANCELLABLE)
-        )
+        run = BenchmarkRunWorkerRepository().get(benchmark_run_id)
+        return run is not None and run["initialization_status"] == "complete" and run["cancelled_at"] is None
 
     @staticmethod
-    def _benchmark_variant_snapshot(benchmark_run_id: str | None) -> dict[str, Any] | None:
+    def _benchmark_variant_snapshot(run: dict[str, Any] | None) -> dict[str, Any] | None:
         """Freeze the run's benchmark-variant lineage and operational policy.
 
         Dispatch and provenance read the frozen copy, so editing a variant later
         cannot change how an already-submitted evaluation runs or reports.
         """
-        from scaled_evals.api.benchmark_run_store import BenchmarkRunStore  # noqa: PLC0415 - imports this module
-
-        if not benchmark_run_id:
-            return None
-        run = BenchmarkRunStore().get(benchmark_run_id)
         if run is None:
             return None
         meta = BenchmarkStore().get_revision_meta(run["benchmark_id"], run["benchmark_revision"])
@@ -417,9 +500,6 @@ class EvaluationStore:
                 raise InvalidReference(f"config profile not found: {profile_id}")
             profile = profiles_by_id[profile_id]
             profiles[role] = {key: profile[key] for key in ("id", "name", "type", "config", "updated_at")}
-        variant = EvaluationStore._benchmark_variant_snapshot(evaluation.get("benchmark_run_id"))
-        if variant is not None:
-            evaluation = {**evaluation, "benchmark_variant": variant}
         return build_execution_snapshot(
             captured_at=_now().isoformat(),
             evaluation=evaluation,
@@ -428,6 +508,72 @@ class EvaluationStore:
             credentials=credentials,
             submission_identity=current_process_identity(),
         )
+
+    def _claim_artifact(
+        self,
+        kind: Literal["archive", "evidence"],
+        *,
+        claim_timeout: float,
+        worker_id: str,
+        evaluation_id: str | None,
+        min_age: float,
+    ) -> dict | None:
+        def candidates(now: datetime) -> builtins.list[ScaledEvalsEvaluation]:
+            def ready(entity: ScaledEvalsEvaluation) -> bool:
+                claimed_at = getattr(entity, f"{kind}_claimed_at")
+                requested_at = getattr(entity, f"{kind}_requested_at") or entity.changed_at
+                if kind == "archive":
+                    precondition = entity.evidence_status in ("ready", "missing") or entity.execution_snapshot is None
+                else:
+                    precondition = entity.evidence_build_attempts < 5
+                return (
+                    entity.status in TERMINAL_STATUSES
+                    and precondition
+                    and (evaluation_id is None or entity.name == evaluation_id)
+                    and (
+                        (claimed_at is not None and _stale(claimed_at, now, claim_timeout))
+                        or (claimed_at is None and requested_at <= now - timedelta(seconds=min_age))
+                    )
+                )
+
+            building: dict[str, Any] = {f"{kind}_status": ["building"]}
+            found = [entity for entity in self._scan(**building) if ready(entity)]
+            return sorted(
+                found,
+                key=lambda entity: (getattr(entity, f"{kind}_requested_at") or entity.changed_at, entity.name),
+            )
+
+        def claim(entity: ScaledEvalsEvaluation, now: datetime) -> dict:
+            setattr(entity, f"{kind}_claimed_at", now)
+            setattr(entity, f"{kind}_claimed_by", worker_id)
+            setattr(entity, f"{kind}_build_attempts", getattr(entity, f"{kind}_build_attempts") + 1)
+            return {"id": entity.name}
+
+        return self._claim(candidates, claim)
+
+    def _on_execution(
+        self,
+        evaluation_id: str,
+        expected_execution_number: int | None,
+        apply: Callable[[ScaledEvalsEvaluation, datetime], bool],
+        *,
+        include_deleted: bool = True,
+    ) -> None:
+        def change(entity: ScaledEvalsEvaluation, now: datetime) -> tuple[None, bool]:
+            if expected_execution_number not in (None, entity.current_execution):
+                return None, False
+            return None, apply(entity, now)
+
+        self._mutate(evaluation_id, change, include_deleted=include_deleted)
+
+    def _record_telemetry(
+        self, evaluation_id: str, execution_number: int, apply: Callable[[ScaledEvalsExecutionTelemetry], None]
+    ) -> None:
+        def change(entity: ScaledEvalsEvaluation, now: datetime) -> tuple[None, bool]:
+            apply(_telemetry(entity, execution_number, now))
+            return None, True
+
+        self._mutate(evaluation_id, change, touch=False, include_deleted=True)
 
     def create(
         self,
@@ -466,9 +612,19 @@ class EvaluationStore:
 
         Raises:
             InvalidReference: when the task revision or a config profile is missing.
-            Conflict: when the evaluation id is already taken.
+            Conflict: when the evaluation id is already taken or run membership is closed.
 
         """
+
+        from scaled_evals.api.benchmark_run_store import BenchmarkRunWorkerRepository  # noqa: PLC0415
+
+        run = None
+        if benchmark_run_id is not None:
+            run = BenchmarkRunWorkerRepository(self._client).get(benchmark_run_id)
+            if run is None:
+                raise InvalidReference(f"benchmark run not found: {benchmark_run_id}")
+            if run["initialization_status"] != "created" or run["cancelled_at"] is not None:
+                raise Conflict("benchmark_run_members_closed", "benchmark run member creation is complete")
         fields: dict[str, Any] = {
             "framework": framework,
             "requested_framework_version": requested_framework_version,
@@ -490,8 +646,12 @@ class EvaluationStore:
             "instruction_postfix": instruction_postfix,
             "initial_user_turns": initial_user_turns or [],
         }
+        evaluation = {"id": evaluation_id, "name": name, **fields}
+        variant = self._benchmark_variant_snapshot(run)
+        if variant is not None:
+            evaluation["benchmark_variant"] = variant
         snapshot = self._capture_execution_snapshot(
-            evaluation={"id": evaluation_id, "name": name, **fields},
+            evaluation=evaluation,
             task_id=task_id,
             task_revision=task_revision,
             profile_ids={"framework": framework_profile_id, "harbor": harbor_profile_id, "intake": intake_profile_id},
@@ -521,8 +681,6 @@ class EvaluationStore:
             raise Conflict("evaluation_exists", f"evaluation already exists: {evaluation_id}") from None
         return row(created)
 
-    # Reads
-
     def list(
         self,
         *,
@@ -536,34 +694,20 @@ class EvaluationStore:
         owner_id: str | None = None,
         q: str | None = None,
     ) -> builtins.list[dict]:
-        """Return up to `limit + 1` evaluations after `cursor`.
-
-        Without `benchmark_run_id` only standalone evaluations are listed; the
-        members of a benchmark run are listed through their run.
-        """
-        where: dict[str, Any] = {}
-        for field, value in (("status", status), ("task_id", task_id), ("owner_id", owner_id)):
-            if value is not None:
-                where[field] = [value]
-        if benchmark_run_id is not None:
-            where["benchmark_run_id"] = [benchmark_run_id]
-        else:
-            where["standalone"] = [True]
-        rows = [
-            row(entity)
-            for entity in self._scan(**where)
-            if (not shared or entity.visibility != "private")
-            and entity_store.contains(
-                q, entity.name, entity.display_name, entity.task_id, entity.status, entity.framework, entity.runtime
-            )
-        ]
-        return entity_store.keyset_page(rows, cursor=cursor, order=order, limit=limit)
+        return self._list(
+            limit=limit,
+            cursor=cursor,
+            order=order,
+            status=status,
+            task_id=task_id,
+            shared=shared,
+            benchmark_run_id=benchmark_run_id,
+            owner_id=owner_id,
+            q=q,
+        )
 
     def list_for_runs(self, run_ids: builtins.list[str]) -> builtins.list[dict]:
-        """Return the live member evaluations of the given benchmark runs."""
-        if not run_ids:
-            return []
-        return [row(entity) for entity in self._scan(benchmark_run_id=run_ids)]
+        return self._members_for_runs(run_ids)
 
     def get(self, evaluation_id: str) -> dict | None:
         """Return one live evaluation with its task revision's image, None when absent."""
@@ -578,6 +722,13 @@ class EvaluationStore:
 
     def exists(self, evaluation_id: str) -> bool:
         return self._get(evaluation_id) is not None
+
+    def get_for_mutation(self, evaluation_id: str) -> dict | None:
+        """Require write access before inspecting secrets or reporting mutation state."""
+        entity = self._get(evaluation_id)
+        if entity is None or not self._access.can_write(entity.owner_id):
+            return None
+        return row(entity)
 
     def load_observability_row(self, evaluation_id: str) -> dict | None:
         entity = self._get(evaluation_id)
@@ -594,52 +745,6 @@ class EvaluationStore:
     def load_stream_status(self, evaluation_id: str) -> str | None:
         entity = self._get(evaluation_id)
         return None if entity is None else entity.status
-
-    def load_runtime_status(self, evaluation_id: str, *, expected_execution_number: int | None = None) -> str | None:
-        entity = self._get(evaluation_id)
-        if entity is None or expected_execution_number not in (None, entity.current_execution):
-            return None
-        return entity.status
-
-    def current_execution_is(self, evaluation_id: str, *, expected_execution_number: int) -> bool:
-        """Return whether the evaluation is live and still on `expected_execution_number`."""
-        # ponytail: a check, not a lock. A retry landing between this check and
-        # the caller's publish lets a superseded execution publish once more.
-        # Upgrade path: publish under a compare-and-swap on the evaluation.
-        entity = self._get(evaluation_id)
-        return entity is not None and entity.current_execution == expected_execution_number
-
-    def load_for_dispatch(self, evaluation_id: str) -> dict | None:
-        """Return the evaluation with the task revision fields dispatch launches from."""
-        entity = self._get(evaluation_id)
-        if entity is None:
-            return None
-        revision = TaskStore().revision(entity.task_id, entity.task_revision)
-        if not revision:
-            return None
-        return {
-            **row(entity),
-            "task_slug": revision["task_slug"],
-            **{field: revision[field] for field in _DISPATCH_REVISION_FIELDS},
-        }
-
-    def load_dispatch_state(self, evaluation_id: str) -> dict | None:
-        """Return only the fields of the dispatch row that change during a run."""
-        entity = self._get(evaluation_id)
-        if entity is None:
-            return None
-        found = row(entity)
-        return {column: found[column] for column in DISPATCH_STATE_COLUMNS}
-
-    def list_cancelled_platform_jobs(self, *, limit: int = 100) -> builtins.list[dict[str, Any]]:
-        """List cancelled evaluations whose outer Platform Job may still run."""
-        entities = [
-            entity
-            for entity in self._scan(status=["cancelled"], cancel_teardown_status=["pending"])
-            if (entity.dispatch_job_name or "").startswith("scaled-evals-evaluation-")
-        ]
-        entities.sort(key=lambda entity: (entity.cancel_teardown_updated_at or entity.changed_at, entity.name))
-        return [row(entity) for entity in entities[:limit]]
 
     def list_events(self, evaluation_id: str, *, limit: int, cursor: str | None, offset: int) -> builtins.list[dict]:
         """Return up to `limit + 1` status-history entries after `cursor`, skipping `offset`."""
@@ -670,8 +775,6 @@ class EvaluationStore:
         if after_id is not None:
             events = [event for event in events if event["id"] > after_id]
         return events[:limit]
-
-    # Lifecycle
 
     def retry_failed(self, evaluation_id: str) -> dict | None:
         """Queue the next execution of a failed logical evaluation."""
@@ -712,7 +815,7 @@ class EvaluationStore:
     def retry_block_reason(self, evaluation_id: str) -> RetryBlockReason | None:
         """Explain why a failed evaluation cannot transition to a retry."""
         entity = self._get(evaluation_id)
-        if entity is None or entity.status != "failed":
+        if entity is None or not self._access.can_write(entity.owner_id) or entity.status != "failed":
             return None
         if entity.evidence_claimed_by is not None or entity.archive_claimed_by is not None:
             return "terminal_artifacts_finalizing"
@@ -789,7 +892,281 @@ class EvaluationStore:
 
         return self._mutate(evaluation_id, change)
 
-    # Dispatch
+    def telemetry_for(self, evaluation_id: str) -> builtins.list[dict]:
+        entity = self._get(evaluation_id, include_deleted=True)
+        if entity is None:
+            return []
+        return [record.model_dump() for record in sorted(entity.telemetry, key=lambda item: item.execution_number)]
+
+    def cleanups_for(self, evaluation_id: str) -> builtins.list[dict]:
+        """Return attempt-aware cleanup state without exposing backend handles."""
+        entity = self._get(evaluation_id, include_deleted=True)
+        if entity is None:
+            return []
+        return [
+            cleanup.model_dump(
+                include={
+                    "execution_number",
+                    "runtime",
+                    "failure_code",
+                    "retry_after_cleanup",
+                    "status",
+                    "teardown_attempts",
+                    "delete_error",
+                    "created_at",
+                    "updated_at",
+                    "deleted_at",
+                }
+            )
+            for cleanup in sorted(entity.cleanups, key=lambda item: item.execution_number)
+        ]
+
+    def resource_usage_for(self, evaluation_id: str) -> builtins.list[dict]:
+        """Return bounded, attempt-aware aggregates for the public telemetry API."""
+        entity = self._get(evaluation_id, include_deleted=True)
+        if entity is None:
+            return []
+
+        def average(total: float, count: int) -> float | None:
+            return total / count if count else None
+
+        rows = []
+        for usage in sorted(entity.resource_usage, key=lambda item: (item.execution_number, item.component)):
+            rows.append(
+                {
+                    **usage.model_dump(
+                        include={
+                            "execution_number",
+                            "component",
+                            "source",
+                            "collection_status",
+                            "collection_error",
+                            "sample_count",
+                            "first_observed_at",
+                            "last_observed_at",
+                            "cpu_sample_count",
+                            "memory_sample_count",
+                            "cpu_request_cores",
+                            "cpu_limit_cores",
+                            "memory_request_bytes",
+                            "memory_limit_bytes",
+                            "gpu_request",
+                            "gpu_sample_count",
+                            "gpu_memory_sample_count",
+                        }
+                    ),
+                    "avg_cpu_cores": average(usage.cpu_usage_cores_sum, usage.cpu_sample_count),
+                    "peak_cpu_cores": usage.cpu_usage_cores_max if usage.cpu_sample_count else None,
+                    "avg_memory_bytes": average(usage.memory_usage_bytes_sum, usage.memory_sample_count),
+                    "peak_memory_bytes": usage.memory_usage_bytes_max if usage.memory_sample_count else None,
+                    "avg_gpu_usage_percent": average(usage.gpu_usage_percent_sum, usage.gpu_sample_count),
+                    "peak_gpu_usage_percent": usage.gpu_usage_percent_max if usage.gpu_sample_count else None,
+                    "avg_gpu_memory_usage_bytes": average(
+                        usage.gpu_memory_usage_bytes_sum, usage.gpu_memory_sample_count
+                    ),
+                    "peak_gpu_memory_usage_bytes": (
+                        usage.gpu_memory_usage_bytes_max if usage.gpu_memory_sample_count else None
+                    ),
+                }
+            )
+        return rows
+
+
+class EvaluationGlobalQueries(_EvaluationReadRepositoryBase):
+    """Read-only checks and operational reports across all owners."""
+
+    def __init__(self, client: SyncEntityClient | None = None) -> None:
+        super().__init__(client, access=INTERNAL_ACCESS)
+
+    def task_in_active_use(self, task_id: str) -> bool:
+        """Return whether an unfinished evaluation runs the task."""
+        return bool(self._scan(task_id=[task_id], status=_CANCELLABLE))
+
+    def profile_in_active_use(self, profile_id: str) -> bool:
+        """Return whether an unfinished evaluation references the config profile."""
+        return any(
+            profile_id in (entity.framework_profile_id, entity.harbor_profile_id, entity.intake_profile_id)
+            for entity in self._scan(status=_CANCELLABLE)
+        )
+
+    def capacity(self) -> dict[str, int]:
+        live = self._scan(status=_CANCELLABLE)
+        return {
+            "active_runs": sum(entity.status in ("blocked", *_ACTIVE) for entity in live),
+            "queued_runs": sum(entity.status == "queued" for entity in live),
+            "active_slots": sum(entity.parallelism for entity in live if entity.status in _ACTIVE),
+        }
+
+    def live_usage(self) -> dict:
+        """Return queued and active run counts overall and per owner, plus the task total."""
+        live = self._scan(status=_CANCELLABLE)
+
+        def counts(entities: builtins.list[ScaledEvalsEvaluation]) -> dict[str, int]:
+            return {
+                "queued_runs": sum(entity.status == "queued" for entity in entities),
+                "active_runs": sum(entity.status != "queued" for entity in entities),
+                "total_parallelism": sum(entity.parallelism for entity in entities),
+            }
+
+        by_owner: dict[str | None, builtins.list[ScaledEvalsEvaluation]] = {}
+        for entity in live:
+            by_owner.setdefault(entity.owner_id, []).append(entity)
+        actors = [
+            {
+                "owner_id": owner_id,
+                **counts(owned),
+                "last_run_at": max(entity.created_at for entity in owned if entity.created_at is not None),
+            }
+            for owner_id, owned in by_owner.items()
+        ]
+        return {**counts(live), "total_tasks": TaskStore().count(), "actors": actors}
+
+    def status_counts(self) -> dict[str, int]:
+        return dict(Counter(entity.status for entity in self._scan()))
+
+    def fleet_totals(self) -> dict[str, int]:
+        """Return all-time evaluation totals, deleted evaluations included."""
+        everything = self._scan(include_deleted=True)
+        return {
+            "tasks_run": len({entity.task_id for entity in everything}),
+            "evaluation_jobs": len(everything),
+            "evaluation_executions": sum(entity.current_execution for entity in everything),
+            "completed_trials": sum(entity.n_trials or 0 for entity in everything),
+        }
+
+    def dispatch_snapshot(
+        self,
+        *,
+        stuck_queued_seconds: float,
+        stuck_provisioning_seconds: float,
+        stuck_running_seconds: float,
+        stale_worker_seconds: float,
+    ) -> dict:
+        """Return low-cardinality queue, worker and stuck-job diagnostics for metrics."""
+        now = _now()
+        active = self._scan(status=_CLAIMABLE)
+        stuck_after = {
+            "queued": stuck_queued_seconds,
+            "provisioning": stuck_provisioning_seconds,
+            "running": stuck_running_seconds,
+        }
+
+        def stuck(entity: ScaledEvalsEvaluation) -> bool:
+            since = (entity.created_at or now) if entity.status == "queued" else entity.changed_at
+            return since < now - timedelta(seconds=stuck_after[entity.status])
+
+        claimed = [entity for entity in active if entity.dispatch_claimed_by is not None]
+        fresh_cutoff = now - timedelta(seconds=stale_worker_seconds)
+        queued_ages = [
+            (now - entity.created_at).total_seconds()
+            for entity in active
+            if entity.status == "queued" and entity.created_at is not None
+        ]
+        lease_ages = [
+            (now - entity.dispatch_claimed_at).total_seconds()
+            for entity in claimed
+            if entity.dispatch_claimed_at is not None
+        ]
+        stuck_jobs = Counter((entity.status, entity.runtime) for entity in active if stuck(entity))
+        hour_ago = now - timedelta(hours=1)
+        backend_failures = Counter(
+            entity.runtime
+            for entity in self._scan(status=["failed"])
+            if entity.changed_at >= hour_ago
+            and any(
+                marker in (entity.status_detail or "").lower()
+                for marker in ("backend", "launch", "status read", "timed out")
+            )
+        )
+        return {
+            "oldest_queued_seconds": float(max(queued_ages, default=0)),
+            "unclaimed_queued": sum(
+                entity.status == "queued" and entity.dispatch_claimed_by is None for entity in active
+            ),
+            "live_workers": len(
+                {
+                    entity.dispatch_claimed_by
+                    for entity in claimed
+                    if entity.dispatch_claimed_at is not None and entity.dispatch_claimed_at >= fresh_cutoff
+                }
+            ),
+            "stale_workers": len(
+                {
+                    entity.dispatch_claimed_by
+                    for entity in claimed
+                    if entity.dispatch_claimed_at is not None and entity.dispatch_claimed_at < fresh_cutoff
+                }
+            ),
+            "oldest_worker_lease_seconds": float(max(lease_ages, default=0)),
+            "stuck_jobs": [
+                {"status": status, "runtime": runtime, "count": count}
+                for (status, runtime), count in stuck_jobs.items()
+            ],
+            "backend_failures": [{"runtime": runtime, "count": count} for runtime, count in backend_failures.items()],
+        }
+
+    def members_for_runs(self, run_ids: builtins.list[str]) -> builtins.list[dict]:
+        """Read the complete live member set for authorization or export validation."""
+        return self._members_for_runs(run_ids)
+
+    def list_for_owner(self, owner_id: str, *, limit: int, cursor: str | None, order: str) -> builtins.list[dict]:
+        """List one owner's standalone evaluations for an authorized administrative report."""
+        return self._list(
+            limit=limit, cursor=cursor, order=order, status=None, task_id=None, shared=False, owner_id=owner_id
+        )
+
+
+class EvaluationWorkerRepository(EvaluationRequestRepository):
+    """Service execution, claims, and cleanup across owners."""
+
+    def __init__(self, client: SyncEntityClient | None = None) -> None:
+        super().__init__(client, access=INTERNAL_ACCESS)
+
+    def load_runtime_status(self, evaluation_id: str, *, expected_execution_number: int | None = None) -> str | None:
+        entity = self._get(evaluation_id)
+        if entity is None or expected_execution_number not in (None, entity.current_execution):
+            return None
+        return entity.status
+
+    def current_execution_is(self, evaluation_id: str, *, expected_execution_number: int) -> bool:
+        """Return whether the evaluation is live and still on `expected_execution_number`."""
+        # ponytail: a check, not a lock. A retry landing between this check and
+        # the caller's publish lets a superseded execution publish once more.
+        # Upgrade path: publish under a compare-and-swap on the evaluation.
+        entity = self._get(evaluation_id)
+        return entity is not None and entity.current_execution == expected_execution_number
+
+    def load_for_dispatch(self, evaluation_id: str) -> dict | None:
+        """Return the evaluation with the task revision fields dispatch launches from."""
+        entity = self._get(evaluation_id)
+        if entity is None:
+            return None
+        revision = TaskStore().revision(entity.task_id, entity.task_revision)
+        if not revision:
+            return None
+        return {
+            **row(entity),
+            "task_slug": revision["task_slug"],
+            **{field: revision[field] for field in _DISPATCH_REVISION_FIELDS},
+        }
+
+    def load_dispatch_state(self, evaluation_id: str) -> dict | None:
+        """Return only the fields of the dispatch row that change during a run."""
+        entity = self._get(evaluation_id)
+        if entity is None:
+            return None
+        found = row(entity)
+        return {column: found[column] for column in DISPATCH_STATE_COLUMNS}
+
+    def list_cancelled_platform_jobs(self, *, limit: int = 100) -> builtins.list[dict[str, Any]]:
+        """List cancelled evaluations whose outer Platform Job may still run."""
+        entities = [
+            entity
+            for entity in self._scan(status=["cancelled"], cancel_teardown_status=["pending"])
+            if (entity.dispatch_job_name or "").startswith("scaled-evals-evaluation-")
+        ]
+        entities.sort(key=lambda entity: (entity.cancel_teardown_updated_at or entity.changed_at, entity.name))
+        return [row(entity) for entity in entities[:limit]]
 
     def claim_next(
         self,
@@ -806,12 +1183,13 @@ class EvaluationStore:
         evaluation of the owner using the fewest sandbox slots, oldest first, so
         one large benchmark cannot monopolize the cluster.
         """
-        from scaled_evals.api.benchmark_run_store import BenchmarkRunStore  # noqa: PLC0415 - imports this module
 
         # ponytail: admission counts active slots without a lock, so claimants
         # running at the same time can each admit one queued evaluation past a
         # cap. Upgrade path: a platform core quota on sandboxes, then delete
         # these caps.
+        from scaled_evals.api.benchmark_run_store import BenchmarkRunWorkerRepository  # noqa: PLC0415
+
         def candidates(now: datetime) -> builtins.list[ScaledEvalsEvaluation]:
             live = self._scan(status=_CLAIMABLE)
             active = [entity for entity in live if entity.status in _ACTIVE]
@@ -823,6 +1201,7 @@ class EvaluationStore:
                 if entity.benchmark_run_id is not None:
                     run_members[entity.benchmark_run_id] += 1
             caps: dict[str, int | None] = {}
+            unavailable_runs: set[str] = set()
 
             def admitted(entity: ScaledEvalsEvaluation) -> bool:
                 if entity.status != "queued":
@@ -837,8 +1216,12 @@ class EvaluationStore:
                 if run_id is None:
                     return True
                 if run_id not in caps:
-                    run = BenchmarkRunStore().get(run_id)
+                    run = BenchmarkRunWorkerRepository().get(run_id)
                     caps[run_id] = None if run is None else run["max_concurrent_members"]
+                    if run is None or run["initialization_status"] != "complete" or run["cancelled_at"] is not None:
+                        unavailable_runs.add(run_id)
+                if run_id in unavailable_runs:
+                    return False
                 cap = caps[run_id]
                 return cap is None or run_members[run_id] < cap
 
@@ -1245,50 +1628,6 @@ class EvaluationStore:
 
         return bool(self._mutate(evaluation_id, change, include_deleted=True))
 
-    # Terminal artifacts
-
-    def _claim_artifact(
-        self,
-        kind: Literal["archive", "evidence"],
-        *,
-        claim_timeout: float,
-        worker_id: str,
-        evaluation_id: str | None,
-        min_age: float,
-    ) -> dict | None:
-        def candidates(now: datetime) -> builtins.list[ScaledEvalsEvaluation]:
-            def ready(entity: ScaledEvalsEvaluation) -> bool:
-                claimed_at = getattr(entity, f"{kind}_claimed_at")
-                requested_at = getattr(entity, f"{kind}_requested_at") or entity.changed_at
-                if kind == "archive":
-                    precondition = entity.evidence_status in ("ready", "missing") or entity.execution_snapshot is None
-                else:
-                    precondition = entity.evidence_build_attempts < 5
-                return (
-                    entity.status in TERMINAL_STATUSES
-                    and precondition
-                    and (evaluation_id is None or entity.name == evaluation_id)
-                    and (
-                        (claimed_at is not None and _stale(claimed_at, now, claim_timeout))
-                        or (claimed_at is None and requested_at <= now - timedelta(seconds=min_age))
-                    )
-                )
-
-            building: dict[str, Any] = {f"{kind}_status": ["building"]}
-            found = [entity for entity in self._scan(**building) if ready(entity)]
-            return sorted(
-                found,
-                key=lambda entity: (getattr(entity, f"{kind}_requested_at") or entity.changed_at, entity.name),
-            )
-
-        def claim(entity: ScaledEvalsEvaluation, now: datetime) -> dict:
-            setattr(entity, f"{kind}_claimed_at", now)
-            setattr(entity, f"{kind}_claimed_by", worker_id)
-            setattr(entity, f"{kind}_build_attempts", getattr(entity, f"{kind}_build_attempts") + 1)
-            return {"id": entity.name}
-
-        return self._claim(candidates, claim)
-
     def claim_next_archive(
         self, *, claim_timeout: float, worker_id: str, evaluation_id: str | None = None, min_age: float = 0.0
     ) -> dict | None:
@@ -1304,21 +1643,6 @@ class EvaluationStore:
         return self._claim_artifact(
             "evidence", claim_timeout=claim_timeout, worker_id=worker_id, evaluation_id=evaluation_id, min_age=min_age
         )
-
-    def _on_execution(
-        self,
-        evaluation_id: str,
-        expected_execution_number: int | None,
-        apply: Callable[[ScaledEvalsEvaluation, datetime], bool],
-        *,
-        include_deleted: bool = True,
-    ) -> None:
-        def change(entity: ScaledEvalsEvaluation, now: datetime) -> tuple[None, bool]:
-            if expected_execution_number not in (None, entity.current_execution):
-                return None, False
-            return None, apply(entity, now)
-
-        self._mutate(evaluation_id, change, include_deleted=include_deleted)
 
     def mark_evidence_ready(self, evaluation_id: str, *, expected_execution_number: int | None = None) -> None:
         def apply(entity: ScaledEvalsEvaluation, now: datetime) -> bool:
@@ -1382,17 +1706,6 @@ class EvaluationStore:
             return True
 
         self._on_execution(evaluation_id, expected_execution_number, apply, include_deleted=False)
-
-    # Per-execution telemetry
-
-    def _record_telemetry(
-        self, evaluation_id: str, execution_number: int, apply: Callable[[ScaledEvalsExecutionTelemetry], None]
-    ) -> None:
-        def change(entity: ScaledEvalsEvaluation, now: datetime) -> tuple[None, bool]:
-            apply(_telemetry(entity, execution_number, now))
-            return None, True
-
-        self._mutate(evaluation_id, change, touch=False, include_deleted=True)
 
     def record_phase(
         self, evaluation_id: str, *, execution_number: int, phase: str, terminal_status: str | None = None
@@ -1474,35 +1787,6 @@ class EvaluationStore:
 
         self._record_telemetry(evaluation_id, execution_number, apply)
 
-    def telemetry_for(self, evaluation_id: str) -> builtins.list[dict]:
-        entity = self._get(evaluation_id, include_deleted=True)
-        if entity is None:
-            return []
-        return [record.model_dump() for record in sorted(entity.telemetry, key=lambda item: item.execution_number)]
-
-    def cleanups_for(self, evaluation_id: str) -> builtins.list[dict]:
-        """Return attempt-aware cleanup state without exposing backend handles."""
-        entity = self._get(evaluation_id, include_deleted=True)
-        if entity is None:
-            return []
-        return [
-            cleanup.model_dump(
-                include={
-                    "execution_number",
-                    "runtime",
-                    "failure_code",
-                    "retry_after_cleanup",
-                    "status",
-                    "teardown_attempts",
-                    "delete_error",
-                    "created_at",
-                    "updated_at",
-                    "deleted_at",
-                }
-            )
-            for cleanup in sorted(entity.cleanups, key=lambda item: item.execution_number)
-        ]
-
     def record_resource_samples(
         self, evaluation_id: str, *, execution_number: int, samples: builtins.list[ResourceUsageSample]
     ) -> None:
@@ -1555,56 +1839,6 @@ class EvaluationStore:
 
         self._mutate(evaluation_id, change, touch=False, include_deleted=True)
 
-    def resource_usage_for(self, evaluation_id: str) -> builtins.list[dict]:
-        """Return bounded, attempt-aware aggregates for the public telemetry API."""
-        entity = self._get(evaluation_id, include_deleted=True)
-        if entity is None:
-            return []
-
-        def average(total: float, count: int) -> float | None:
-            return total / count if count else None
-
-        rows = []
-        for usage in sorted(entity.resource_usage, key=lambda item: (item.execution_number, item.component)):
-            rows.append(
-                {
-                    **usage.model_dump(
-                        include={
-                            "execution_number",
-                            "component",
-                            "source",
-                            "collection_status",
-                            "collection_error",
-                            "sample_count",
-                            "first_observed_at",
-                            "last_observed_at",
-                            "cpu_sample_count",
-                            "memory_sample_count",
-                            "cpu_request_cores",
-                            "cpu_limit_cores",
-                            "memory_request_bytes",
-                            "memory_limit_bytes",
-                            "gpu_request",
-                            "gpu_sample_count",
-                            "gpu_memory_sample_count",
-                        }
-                    ),
-                    "avg_cpu_cores": average(usage.cpu_usage_cores_sum, usage.cpu_sample_count),
-                    "peak_cpu_cores": usage.cpu_usage_cores_max if usage.cpu_sample_count else None,
-                    "avg_memory_bytes": average(usage.memory_usage_bytes_sum, usage.memory_sample_count),
-                    "peak_memory_bytes": usage.memory_usage_bytes_max if usage.memory_sample_count else None,
-                    "avg_gpu_usage_percent": average(usage.gpu_usage_percent_sum, usage.gpu_sample_count),
-                    "peak_gpu_usage_percent": usage.gpu_usage_percent_max if usage.gpu_sample_count else None,
-                    "avg_gpu_memory_usage_bytes": average(
-                        usage.gpu_memory_usage_bytes_sum, usage.gpu_memory_sample_count
-                    ),
-                    "peak_gpu_memory_usage_bytes": (
-                        usage.gpu_memory_usage_bytes_max if usage.gpu_memory_sample_count else None
-                    ),
-                }
-            )
-        return rows
-
     def resource_totals_for(self, evaluation_id: str) -> dict[str, float | None]:
         """Return one evaluation's usage summed over executions and components."""
         entity = self._get(evaluation_id, include_deleted=True)
@@ -1627,157 +1861,4 @@ class EvaluationStore:
             "memory_limit_bytes": peak(item.memory_limit_bytes for item in usage),
             "gpu_request": peak(item.gpu_request for item in usage),
             "gpu_samples": float(sum(item.gpu_sample_count for item in usage)),
-        }
-
-    # Owner and fleet views
-
-    def summary(self, owner_id: str) -> dict[str, Any]:
-        """Return the owner's evaluation counts and task counts."""
-        cutoff = _now() - timedelta(hours=24)
-        owned = self._scan(owner_id=[owner_id])
-        evaluations = {
-            "active": sum(entity.status in ("blocked", *_ACTIVE) for entity in owned),
-            "queued": sum(entity.status == "queued" for entity in owned),
-            "failed_24h": sum(entity.status == "failed" and entity.changed_at >= cutoff for entity in owned),
-            "succeeded_24h": sum(entity.status == "succeeded" and entity.changed_at >= cutoff for entity in owned),
-        }
-        return {"evaluations": evaluations, "tasks": TaskStore().owner_summary(owner_id)}
-
-    def capacity(self) -> dict[str, int]:
-        live = self._scan(status=_CANCELLABLE)
-        return {
-            "active_runs": sum(entity.status in ("blocked", *_ACTIVE) for entity in live),
-            "queued_runs": sum(entity.status == "queued" for entity in live),
-            "active_slots": sum(entity.parallelism for entity in live if entity.status in _ACTIVE),
-        }
-
-    def live_usage(self) -> dict:
-        """Return queued and active run counts overall and per owner, plus the task total."""
-        live = self._scan(status=_CANCELLABLE)
-
-        def counts(entities: builtins.list[ScaledEvalsEvaluation]) -> dict[str, int]:
-            return {
-                "queued_runs": sum(entity.status == "queued" for entity in entities),
-                "active_runs": sum(entity.status != "queued" for entity in entities),
-                "total_parallelism": sum(entity.parallelism for entity in entities),
-            }
-
-        by_owner: dict[str | None, builtins.list[ScaledEvalsEvaluation]] = {}
-        for entity in live:
-            by_owner.setdefault(entity.owner_id, []).append(entity)
-        actors = [
-            {
-                "owner_id": owner_id,
-                **counts(owned),
-                "last_run_at": max(entity.created_at for entity in owned if entity.created_at is not None),
-            }
-            for owner_id, owned in by_owner.items()
-        ]
-        return {**counts(live), "total_tasks": TaskStore().count(), "actors": actors}
-
-    def quota_usage(self, owner_id: str) -> dict[str, int]:
-        owned = self._scan(owner_id=[owner_id])
-        return {
-            "evaluations_active": sum(entity.status in _CLAIMABLE for entity in owned),
-            "sandbox_slots_active": sum(entity.parallelism for entity in owned if entity.status in _ACTIVE),
-            "tasks_owned": TaskStore().count(owner_id=owner_id),
-        }
-
-    def recent_activity(self, owner_id: str, *, limit: int) -> builtins.list[dict]:
-        rows = [
-            {
-                "id": entity.name,
-                "kind": "evaluation",
-                "name": entity.display_name,
-                "status": entity.status,
-                "created_at": entity.created_at,
-            }
-            for entity in self._scan(owner_id=[owner_id])
-        ]
-        rows += TaskStore().owner_activity(owner_id)
-        rows.sort(key=lambda item: (item["created_at"], item["id"]), reverse=True)
-        return rows[:limit]
-
-    def status_counts(self) -> dict[str, int]:
-        return dict(Counter(entity.status for entity in self._scan()))
-
-    def fleet_totals(self) -> dict[str, int]:
-        """Return all-time evaluation totals, deleted evaluations included."""
-        everything = self._scan(include_deleted=True)
-        return {
-            "tasks_run": len({entity.task_id for entity in everything}),
-            "evaluation_jobs": len(everything),
-            "evaluation_executions": sum(entity.current_execution for entity in everything),
-            "completed_trials": sum(entity.n_trials or 0 for entity in everything),
-        }
-
-    def dispatch_snapshot(
-        self,
-        *,
-        stuck_queued_seconds: float,
-        stuck_provisioning_seconds: float,
-        stuck_running_seconds: float,
-        stale_worker_seconds: float,
-    ) -> dict:
-        """Return low-cardinality queue, worker and stuck-job diagnostics for metrics."""
-        now = _now()
-        active = self._scan(status=_CLAIMABLE)
-        stuck_after = {
-            "queued": stuck_queued_seconds,
-            "provisioning": stuck_provisioning_seconds,
-            "running": stuck_running_seconds,
-        }
-
-        def stuck(entity: ScaledEvalsEvaluation) -> bool:
-            since = (entity.created_at or now) if entity.status == "queued" else entity.changed_at
-            return since < now - timedelta(seconds=stuck_after[entity.status])
-
-        claimed = [entity for entity in active if entity.dispatch_claimed_by is not None]
-        fresh_cutoff = now - timedelta(seconds=stale_worker_seconds)
-        queued_ages = [
-            (now - entity.created_at).total_seconds()
-            for entity in active
-            if entity.status == "queued" and entity.created_at is not None
-        ]
-        lease_ages = [
-            (now - entity.dispatch_claimed_at).total_seconds()
-            for entity in claimed
-            if entity.dispatch_claimed_at is not None
-        ]
-        stuck_jobs = Counter((entity.status, entity.runtime) for entity in active if stuck(entity))
-        hour_ago = now - timedelta(hours=1)
-        backend_failures = Counter(
-            entity.runtime
-            for entity in self._scan(status=["failed"])
-            if entity.changed_at >= hour_ago
-            and any(
-                marker in (entity.status_detail or "").lower()
-                for marker in ("backend", "launch", "status read", "timed out")
-            )
-        )
-        return {
-            "oldest_queued_seconds": float(max(queued_ages, default=0)),
-            "unclaimed_queued": sum(
-                entity.status == "queued" and entity.dispatch_claimed_by is None for entity in active
-            ),
-            "live_workers": len(
-                {
-                    entity.dispatch_claimed_by
-                    for entity in claimed
-                    if entity.dispatch_claimed_at is not None and entity.dispatch_claimed_at >= fresh_cutoff
-                }
-            ),
-            "stale_workers": len(
-                {
-                    entity.dispatch_claimed_by
-                    for entity in claimed
-                    if entity.dispatch_claimed_at is not None and entity.dispatch_claimed_at < fresh_cutoff
-                }
-            ),
-            "oldest_worker_lease_seconds": float(max(lease_ages, default=0)),
-            "stuck_jobs": [
-                {"status": status, "runtime": runtime, "count": count}
-                for (status, runtime), count in stuck_jobs.items()
-            ],
-            "backend_failures": [{"runtime": runtime, "count": count} for runtime, count in backend_failures.items()],
         }

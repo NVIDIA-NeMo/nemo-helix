@@ -19,7 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from scaled_evals.api import artifacts
 from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
-from scaled_evals.api.db import Database, get_db, get_stream_database_factory
+from scaled_evals.api.db import RequestDatabase, get_request_db, get_request_stream_database_factory
 from scaled_evals.api.evaluation_logs import collect_log_lines
 from scaled_evals.api.runnability import BlockedPreflight, SecretReadable, caller_secret_readable, preflight_evaluation
 from scaled_evals.api.schemas.common import (
@@ -72,10 +72,12 @@ from scaled_evals.models.sbom import SBOM_FILE_NAME
 
 router = APIRouter(prefix="/evaluations", tags=["evaluations"])
 
-Db = Annotated[Database, Depends(get_db)]
+Db = Annotated[RequestDatabase, Depends(get_request_db)]
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
 Secrets = Annotated[SecretReadable, Depends(caller_secret_readable)]
-StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]], Depends(get_stream_database_factory)]
+StreamRequestDatabaseFactory = Annotated[
+    Callable[[], AbstractContextManager[RequestDatabase]], Depends(get_request_stream_database_factory)
+]
 
 _TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 
@@ -110,14 +112,14 @@ def _release_sse_connection() -> None:
 
 
 def _ensure_stream_evaluation_exists(
-    database_factory: Callable[[], AbstractContextManager[Database]], evaluation_id: str
+    database_factory: Callable[[], AbstractContextManager[RequestDatabase]], evaluation_id: str
 ) -> None:
     with database_factory() as db:
         _ensure_evaluation_exists(db, evaluation_id)
 
 
 def _load_stream_log_snapshot(
-    database_factory: Callable[[], AbstractContextManager[Database]], evaluation_id: str
+    database_factory: Callable[[], AbstractContextManager[RequestDatabase]], evaluation_id: str
 ) -> tuple[Mapping[str, Any], list[str]]:
     with database_factory() as db:
         row = _load_observability_row(db, evaluation_id)
@@ -125,7 +127,7 @@ def _load_stream_log_snapshot(
 
 
 def _load_stream_event_batch(
-    database_factory: Callable[[], AbstractContextManager[Database]],
+    database_factory: Callable[[], AbstractContextManager[RequestDatabase]],
     evaluation_id: str,
     last_created_at: datetime | None,
     last_id: int | None,
@@ -140,7 +142,7 @@ def _load_stream_event_batch(
 
 
 def _load_stream_status(
-    database_factory: Callable[[], AbstractContextManager[Database]], evaluation_id: str
+    database_factory: Callable[[], AbstractContextManager[RequestDatabase]], evaluation_id: str
 ) -> str | None:
     with database_factory() as db:
         return db.evaluations.load_stream_status(evaluation_id)
@@ -306,19 +308,19 @@ def _response(row: dict[str, Any]) -> EvaluationResponse:
     return EvaluationResponse(**body, links=links)
 
 
-def _load_observability_row(db: Database, evaluation_id: str) -> dict[str, Any]:
+def _load_observability_row(db: RequestDatabase, evaluation_id: str) -> dict[str, Any]:
     row = db.evaluations.load_observability_row(evaluation_id)
     if row is None:
         raise _http_error(404, "not_found", "evaluation not found")
     return row
 
 
-def _ensure_evaluation_exists(db: Database, evaluation_id: str) -> None:
+def _ensure_evaluation_exists(db: RequestDatabase, evaluation_id: str) -> None:
     if not db.evaluations.exists(evaluation_id):
         raise _http_error(404, "not_found", "evaluation not found")
 
 
-def _load_archive_row(db: Database, evaluation_id: str) -> dict[str, Any]:
+def _load_archive_row(db: RequestDatabase, evaluation_id: str) -> dict[str, Any]:
     row = db.evaluations.load_archive_row(evaluation_id)
     if row is None:
         raise _http_error(404, "not_found", "evaluation not found")
@@ -415,7 +417,7 @@ def _launch_handle_from_row(row: Mapping[str, Any]) -> LaunchHandle | None:
 
 
 def _record_cancel_teardown_failure(
-    db: Database,
+    db: RequestDatabase,
     evaluation_id: str,
     detail: str,
 ) -> dict[str, Any]:
@@ -425,7 +427,7 @@ def _record_cancel_teardown_failure(
     return row
 
 
-def _record_cancel_teardown_succeeded(db: Database, evaluation_id: str) -> dict[str, Any]:
+def _record_cancel_teardown_succeeded(db: RequestDatabase, evaluation_id: str) -> dict[str, Any]:
     row = db.evaluations.record_cancel_teardown_succeeded(evaluation_id)
     if row is None:
         current = db.evaluations.get(evaluation_id)
@@ -435,7 +437,8 @@ def _record_cancel_teardown_succeeded(db: Database, evaluation_id: str) -> dict[
     return row
 
 
-def teardown_cancelled_evaluation(db: Database, row: dict[str, Any]) -> dict[str, Any]:
+def teardown_cancelled_runtime(row: dict[str, Any]) -> str | None:
+    """Clean up the cancelled runtime, returning a failure detail for the caller to persist."""
     failures: list[str] = []
     handle: LaunchHandle | None = None
     try:
@@ -451,12 +454,14 @@ def teardown_cancelled_evaluation(db: Database, row: dict[str, Any]) -> dict[str
                 backend.teardown(handle)
     except Exception as exc:  # noqa: BLE001 — cancellation must remain durable
         failures.append(f"evaluation-runtime cleanup failed: {exc}")
-    if failures:
-        return _record_cancel_teardown_failure(
-            db,
-            row["id"],
-            "cancelled; " + "; ".join(failures),
-        )
+    return "cancelled; " + "; ".join(failures) if failures else None
+
+
+def teardown_cancelled_evaluation(db: RequestDatabase, row: dict[str, Any]) -> dict[str, Any]:
+    """Clean up one evaluation and persist the result under its request access policy."""
+    failure = teardown_cancelled_runtime(row)
+    if failure is not None:
+        return _record_cancel_teardown_failure(db, row["id"], failure)
     if row.get("dispatch_job_name"):
         return row
     return _record_cancel_teardown_succeeded(db, row["id"])
@@ -775,7 +780,9 @@ def retry_evaluation(evaluation_id: str, db: Db, secrets: Secrets) -> Evaluation
     result and artifact paths are reused for the newest execution. The caller
     must be able to read every referenced credential secret (422 `invalid_reference`).
     """
-    existing = db.evaluations.get(evaluation_id)
+    existing = db.evaluations.get_for_mutation(evaluation_id)
+    if existing is None:
+        raise _http_error(404, "not_found", "evaluation not found")
     for provider, ref in sorted(((existing or {}).get("credentials") or {}).items()):
         try:
             qualified_secret_ref(ref)
@@ -792,6 +799,7 @@ def retry_evaluation(evaluation_id: str, db: Db, secrets: Secrets) -> Evaluation
             )
     row = db.evaluations.retry_failed(evaluation_id)
     if row is None:
+        existing = db.evaluations.get_for_mutation(evaluation_id)
         if existing is None:
             raise _http_error(404, "not_found", "evaluation not found")
         if existing["status"] != "failed":
@@ -862,19 +870,26 @@ def get_logs(evaluation_id: str, db: Db, tail_lines: int = 100) -> EvaluationLog
 
 
 @router.get("/{evaluation_id}/logs/stream")
-async def logs_stream(evaluation_id: str, request: Request, database_factory: StreamDatabaseFactory) -> Any:
+async def logs_stream(evaluation_id: str, request: Request, database_factory: StreamRequestDatabaseFactory) -> Any:
+    """Authorize stream admission and stop polling when live resource access is revoked."""
     await run_in_threadpool(_ensure_stream_evaluation_exists, database_factory, evaluation_id)
     if not _acquire_sse_connection():
         raise _http_error(429, "stream_limit_exceeded", "too many active event streams")
 
     async def generate():
+        """Poll through the scoped factory and release the stream slot on exit."""
         try:
             sent = 0
             deadline = monotonic() + settings.api_sse_max_duration_seconds
             while monotonic() < deadline:
                 if await request.is_disconnected():
                     break
-                row, lines = await run_in_threadpool(_load_stream_log_snapshot, database_factory, evaluation_id)
+                try:
+                    row, lines = await run_in_threadpool(_load_stream_log_snapshot, database_factory, evaluation_id)
+                except HTTPException as exc:
+                    if exc.status_code == 404:
+                        break
+                    raise
                 for line in lines[sent:]:
                     yield f"event: log\ndata: {json.dumps({'line': line})}\n\n"
                 sent = len(lines)
@@ -916,7 +931,7 @@ def list_events(
 
 
 @router.get("/{evaluation_id}/events/stream")
-async def events_stream(evaluation_id: str, request: Request, database_factory: StreamDatabaseFactory) -> Any:
+async def events_stream(evaluation_id: str, request: Request, database_factory: StreamRequestDatabaseFactory) -> Any:
     await run_in_threadpool(_ensure_stream_evaluation_exists, database_factory, evaluation_id)
     if not _acquire_sse_connection():
         raise _http_error(429, "stream_limit_exceeded", "too many active event streams")
@@ -1007,7 +1022,7 @@ def list_artifacts(evaluation_id: str, db: Db, prefix: str = "") -> ListEnvelope
 
 
 @router.get("/{evaluation_id}/artifacts/{path:path}")
-def get_artifact(evaluation_id: str, path: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
+def get_artifact(evaluation_id: str, path: str, database_factory: StreamRequestDatabaseFactory) -> StreamingResponse:
     try:
         object_key = artifacts.evaluation_artifact_key(evaluation_id, path)
     except ValueError:
@@ -1028,7 +1043,7 @@ def get_artifact(evaluation_id: str, path: str, database_factory: StreamDatabase
 
 
 @router.get("/{evaluation_id}/archive/download")
-def download_archive(evaluation_id: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
+def download_archive(evaluation_id: str, database_factory: StreamRequestDatabaseFactory) -> StreamingResponse:
     with database_factory() as db:
         row = _load_archive_row(db, evaluation_id)
     if row.get("archive_status") != "ready" or not row.get("archive_object_key"):
@@ -1041,7 +1056,9 @@ def download_archive(evaluation_id: str, database_factory: StreamDatabaseFactory
 
 
 @router.get("/{evaluation_id}/harbor-viewer/archive")
-def download_harbor_viewer_archive(evaluation_id: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
+def download_harbor_viewer_archive(
+    evaluation_id: str, database_factory: StreamRequestDatabaseFactory
+) -> StreamingResponse:
     with database_factory() as db:
         row = _load_observability_row(db, evaluation_id)
     if not harbor_viewer_archive_available_from_result(row.get("result")):
@@ -1065,7 +1082,10 @@ def build_archive(
     db: Db,
     response: Response,
 ) -> EvaluationArchiveResponse:
-    row = _load_archive_row(db, evaluation_id)
+    """Require mutation access before returning a ready archive or queuing its rebuild."""
+    row = db.evaluations.get_for_mutation(evaluation_id)
+    if row is None:
+        raise _http_error(404, "not_found", "evaluation not found")
     if row["archive_status"] == "ready" and not body.force:
         response.status_code = 200
         return _archive_response(row)

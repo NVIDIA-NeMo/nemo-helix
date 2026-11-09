@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { DetailPageTab } from '@studio/components/Layouts/DetailPageLayout';
 import { AGENT_OPTIMIZATIONS_ENABLED, OPTIMIZER_ENABLED } from '@studio/constants/environment';
 
 export const TAB_SEARCH_PARAM = 'tab';
 
-export const DETAIL_TABS = [
+const DETAIL_TABS = [
   'overview',
   'chat',
   'evaluations',
@@ -16,6 +17,25 @@ export const DETAIL_TABS = [
 ] as const;
 
 export type AgentDetailTab = (typeof DETAIL_TABS)[number];
+
+const TAB_LABELS: Record<AgentDetailTab, string> = {
+  overview: 'Overview',
+  chat: 'Chat',
+  evaluations: 'Evaluations',
+  insights: 'Insights',
+  optimizations: 'Optimizations',
+  deployments: 'Deployment',
+  logs: 'Logs',
+};
+
+const TAB_ENABLED: Partial<Record<AgentDetailTab, boolean>> = {
+  insights: OPTIMIZER_ENABLED,
+  optimizations: AGENT_OPTIMIZATIONS_ENABLED,
+};
+
+export const AGENT_DETAIL_TABS: DetailPageTab<AgentDetailTab>[] = DETAIL_TABS.filter(
+  (tab) => TAB_ENABLED[tab] ?? true
+).map((value) => ({ value, label: TAB_LABELS[value] }));
 
 export const EVAL_TABS: ReadonlySet<AgentDetailTab> = new Set([
   'overview',
@@ -50,7 +70,4 @@ export const isOptimizationView = (value: string | null): value is OptimizationV
   Object.values(OptimizationView).some((view) => view === value);
 
 export const isAgentDetailTab = (value: string | null): value is AgentDetailTab =>
-  !!value &&
-  DETAIL_TABS.includes(value as AgentDetailTab) &&
-  (value !== 'optimizations' || AGENT_OPTIMIZATIONS_ENABLED) &&
-  (value !== 'insights' || OPTIMIZER_ENABLED);
+  AGENT_DETAIL_TABS.some((tab) => tab.value === value);
