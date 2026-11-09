@@ -7,11 +7,7 @@ import ModelEvaluationIcon from '@nemo/common/src/svgs/model_evaluation.svg?reac
 import SafeSynthesizerLogo from '@nemo/common/src/svgs/safe_synthesizer_logo.svg?react';
 import { CubeStack } from '@nemo/icons/icons';
 import { Grid, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
-import {
-  CUSTOMIZER_ENABLED,
-  EVALS_ENABLED,
-  MODEL_COMPARE_ENABLED,
-} from '@studio/constants/environment';
+import { CUSTOMIZER_ENABLED, EVALS_ENABLED } from '@studio/constants/environment';
 import { LINK_DOCS_SAFE_SYNTHESIZER, LINK_DOCS_STUDIO_EVALUATION } from '@studio/constants/links';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -50,15 +46,13 @@ export const WorkspaceDashboardRoute: FC = () => {
               </Text>
             </Stack>
             <Grid cols={{ md: 1, lg: 3 }} gap="density-xl">
-              {MODEL_COMPARE_ENABLED && (
-                <DashboardCard
-                  icon={<CubeStack className="w-8 h-8" />}
-                  title="Chat with a Model"
-                  description="Chat with base models and explore capabilities."
-                  actionLabel="Chat"
-                  actionHref={getModelCompareRoute(workspace)}
-                />
-              )}
+              <DashboardCard
+                icon={<CubeStack className="w-8 h-8" />}
+                title="Chat with a Model"
+                description="Chat with base models and explore capabilities."
+                actionLabel="Chat"
+                actionHref={getModelCompareRoute(workspace)}
+              />
               {/* Evaluate a Model or Dataset */}
               {EVALS_ENABLED && (
                 <DashboardCard

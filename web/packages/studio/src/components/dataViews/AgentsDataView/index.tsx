@@ -33,7 +33,6 @@ import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Button, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
 import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
-import { MODEL_COMPARE_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getModelCompareRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
@@ -78,7 +77,7 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
   onCreateDeployment,
   onCloneAgent,
   onAgentsLoaded,
-  canTestModels = MODEL_COMPARE_ENABLED,
+  canTestModels = true,
 }) => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();

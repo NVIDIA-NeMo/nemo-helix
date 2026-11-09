@@ -20,7 +20,6 @@ import {
   INFERENCE_PROVIDER_ENABLED,
   INTAKE_ENABLED,
   MEMBERS_ENABLED,
-  MODEL_COMPARE_ENABLED,
   MODEL_DETAILS_ENABLED,
   MODEL_EVALUATION_FORM_ENABLED,
   OPTIMIZER_ENABLED,
@@ -84,9 +83,6 @@ export const gateMembersRoutes = (routes: RouteObject | RouteObject[]) =>
 
 export const gateAssistantStudioRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(ASSISTANT_STUDIO_ENABLED, routes);
-
-export const gateModelCompareRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(MODEL_COMPARE_ENABLED, routes);
 
 export const gateOptimizerRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(OPTIMIZER_ENABLED, routes);

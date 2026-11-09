@@ -48,7 +48,6 @@ export const FILESET_DETAILS_ENABLED = featureFlags.filesetDetailsEnabled !== fa
 export const INFERENCE_PROVIDER_ENABLED = featureFlags.inferenceProviderEnabled !== false;
 export const INTAKE_ENABLED = featureFlags.intakeEnabled !== false;
 export const MEMBERS_ENABLED = featureFlags.membersEnabled !== false;
-export const MODEL_COMPARE_ENABLED = featureFlags.modelCompareEnabled !== false;
 export const MODEL_DETAILS_ENABLED = featureFlags.modelDetailsEnabled !== false;
 export const MODEL_EVALUATION_FORM_ENABLED = featureFlags.modelEvaluationFormEnabled !== false;
 export const MONITOR_ENABLED = featureFlags.monitorEnabled !== false;
