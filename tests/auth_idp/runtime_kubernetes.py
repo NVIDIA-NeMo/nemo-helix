@@ -23,9 +23,9 @@ from time import sleep as pause
 from typing import TypeVar
 from urllib.parse import urlparse
 
-import certifi
 import httpx
 import pytest
+from certifi import where as certifi_bundle_path
 from httpx import Client as HttpClient
 from httpx import get as http_get
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig
@@ -904,7 +904,7 @@ def _job_trust_bundle(tls_dir: Path) -> Path:
     prepared = tls_dir / "ca-bundle.crt"
     if prepared.is_file():
         return prepared
-    candidates = [os.environ.get(PUBLIC_CA_BUNDLE_ENV, ""), *_PUBLIC_CA_BUNDLE_CANDIDATES, certifi.where()]
+    candidates = [os.environ.get(PUBLIC_CA_BUNDLE_ENV, ""), *_PUBLIC_CA_BUNDLE_CANDIDATES, certifi_bundle_path()]
     public = next(
         (Path(path) for path in candidates if path and Path(path).is_file() and Path(path).stat().st_size), None
     )

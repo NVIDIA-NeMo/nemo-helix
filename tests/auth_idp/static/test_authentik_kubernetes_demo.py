@@ -1147,7 +1147,7 @@ def test_kubernetes_job_trust_bundle_names_the_override_when_no_public_bundle_ex
     (tmp_path / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
     monkeypatch.delenv(live_test.PUBLIC_CA_BUNDLE_ENV, raising=False)
     monkeypatch.setattr(live_test, "_PUBLIC_CA_BUNDLE_CANDIDATES", ())
-    monkeypatch.setattr(live_test.certifi, "where", lambda: str(tmp_path / "missing.pem"))
+    monkeypatch.setattr(live_test, "certifi_bundle_path", lambda: str(tmp_path / "missing.pem"))
 
     with pytest.raises(RuntimeError, match=live_test.PUBLIC_CA_BUNDLE_ENV):
         live_test._job_trust_bundle(tmp_path)
