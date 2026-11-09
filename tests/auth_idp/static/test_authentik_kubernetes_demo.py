@@ -1139,6 +1139,20 @@ def test_kubernetes_job_trust_bundle_refuses_a_public_bundle_without_certificate
         live_test._job_trust_bundle(tmp_path)
 
 
+def test_kubernetes_job_trust_bundle_names_the_override_when_no_public_bundle_exists(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    (tmp_path / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
+    monkeypatch.delenv(live_test.PUBLIC_CA_BUNDLE_ENV, raising=False)
+    monkeypatch.setattr(live_test, "_PUBLIC_CA_BUNDLE_CANDIDATES", ())
+    monkeypatch.setattr(live_test.certifi, "where", lambda: str(tmp_path / "missing.pem"))
+
+    with pytest.raises(RuntimeError, match=live_test.PUBLIC_CA_BUNDLE_ENV):
+        live_test._job_trust_bundle(tmp_path)
+
+
 def test_kubernetes_deployment_workload_runtime_config_targets_in_cluster_envoy(tmp_path) -> None:
     from tests.auth_idp import runtime_kubernetes as live_test
 

@@ -905,7 +905,11 @@ def _job_trust_bundle(tls_dir: Path) -> Path:
     if prepared.is_file():
         return prepared
     candidates = [os.environ.get(PUBLIC_CA_BUNDLE_ENV, ""), *_PUBLIC_CA_BUNDLE_CANDIDATES, certifi.where()]
-    public = next(Path(path) for path in candidates if path and Path(path).is_file() and Path(path).stat().st_size)
+    public = next(
+        (Path(path) for path in candidates if path and Path(path).is_file() and Path(path).stat().st_size), None
+    )
+    if public is None:
+        raise RuntimeError(f"no public CA bundle found for job pods; set {PUBLIC_CA_BUNDLE_ENV} to a PEM bundle")
     public_roots = public.read_text(encoding="utf-8")
     if "BEGIN CERTIFICATE" not in public_roots:
         raise RuntimeError(f"public CA bundle has no PEM certificates: {public}; set {PUBLIC_CA_BUNDLE_ENV}")
