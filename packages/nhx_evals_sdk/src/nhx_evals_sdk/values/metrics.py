@@ -453,6 +453,27 @@ class ROUGE(MetricBase):
         return _input_schema_from_templates(templates)
 
 
+class SequenceSimilarity(MetricBase):
+    """Sequence similarity metric configuration: ``difflib.SequenceMatcher(None, candidate, reference).ratio()``."""
+
+    type: Literal[MetricType.SEQUENCE_SIMILARITY] = MetricType.SEQUENCE_SIMILARITY
+    reference: str = Field(
+        description="The template for the ground truth reference to compare the candidate with.",
+        examples=["{{item.expected}}"],
+    )
+    candidate: str | None = Field(
+        default=None,
+        description="The template for the candidate to score. If not provided, the output text from the model is used.",
+        examples=["{{sample.output_text | trim}}"],
+    )
+
+    def input_schema(self) -> InputSchema:
+        templates = [self.reference]
+        if self.candidate is not None:
+            templates.append(self.candidate)
+        return _input_schema_from_templates(templates)
+
+
 StringCheckOperation = Literal[
     "equals",
     "==",
