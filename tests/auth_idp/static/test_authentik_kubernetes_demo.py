@@ -1094,6 +1094,51 @@ def test_authentik_umbrella_values_configure_nemo_envoy_as_the_only_edge_proxy()
     }
 
 
+_PEM = "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n"
+
+
+def test_kubernetes_job_trust_bundle_uses_the_one_run_sh_prepared(tmp_path) -> None:
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    (tmp_path / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
+    (tmp_path / "ca-bundle.crt").write_text(_PEM.format("prepared"), encoding="utf-8")
+
+    assert live_test._job_trust_bundle(tmp_path) == tmp_path / "ca-bundle.crt"
+
+
+def test_kubernetes_job_trust_bundle_is_built_when_the_tls_dir_has_none(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A TLS directory prepared without run.sh has no bundle; the secret still needs one.
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+    (tls_dir / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
+    public = tmp_path / "public.pem"
+    public.write_text(_PEM.format("public"), encoding="utf-8")
+    monkeypatch.setenv(live_test.PUBLIC_CA_BUNDLE_ENV, str(public))
+
+    bundle = live_test._job_trust_bundle(tls_dir).read_text(encoding="utf-8")
+
+    assert bundle == _PEM.format("public") + _PEM.format("gateway")
+    assert not (tls_dir / "ca-bundle.crt").exists()
+
+
+def test_kubernetes_job_trust_bundle_refuses_a_public_bundle_without_certificates(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    (tmp_path / "ca.crt").write_text(_PEM.format("gateway"), encoding="utf-8")
+    not_pem = tmp_path / "hosts"
+    not_pem.write_text("127.0.0.1 localhost\n", encoding="utf-8")
+    monkeypatch.setenv(live_test.PUBLIC_CA_BUNDLE_ENV, str(not_pem))
+
+    with pytest.raises(RuntimeError, match="no PEM certificates"):
+        live_test._job_trust_bundle(tmp_path)
+
+
 def test_kubernetes_deployment_workload_runtime_config_targets_in_cluster_envoy(tmp_path) -> None:
     from tests.auth_idp import runtime_kubernetes as live_test
 

@@ -23,6 +23,7 @@ from time import sleep as pause
 from typing import TypeVar
 from urllib.parse import urlparse
 
+import certifi
 import httpx
 import pytest
 from httpx import Client as HttpClient
@@ -885,6 +886,36 @@ def _reconcile_secret(
     )
 
 
+PUBLIC_CA_BUNDLE_ENV = "NHX_HARNESS_PUBLIC_CA_BUNDLE"
+_PUBLIC_CA_BUNDLE_CANDIDATES = (
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/cert.pem",
+)
+
+
+def _job_trust_bundle(tls_dir: Path) -> Path:
+    """The job pods' SSL_CERT_FILE: public roots with the gateway CA appended.
+
+    run.sh writes it into the prepared TLS directory. A directory prepared some other way may not
+    have one, so build it the same way: SSL_CERT_FILE replaces a client's trust store, and the
+    gateway CA alone would stop jobs from reaching public hosts such as PyPI.
+    """
+    prepared = tls_dir / "ca-bundle.crt"
+    if prepared.is_file():
+        return prepared
+    candidates = [os.environ.get(PUBLIC_CA_BUNDLE_ENV, ""), *_PUBLIC_CA_BUNDLE_CANDIDATES, certifi.where()]
+    public = next(Path(path) for path in candidates if path and Path(path).is_file() and Path(path).stat().st_size)
+    public_roots = public.read_text(encoding="utf-8")
+    if "BEGIN CERTIFICATE" not in public_roots:
+        raise RuntimeError(f"public CA bundle has no PEM certificates: {public}; set {PUBLIC_CA_BUNDLE_ENV}")
+    bundle = Path(tempfile.mkdtemp(prefix="nhx-job-ca-")) / "ca-bundle.crt"
+    bundle.write_text(
+        public_roots.rstrip("\n") + "\n" + (tls_dir / "ca.crt").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    return bundle
+
+
 def _prepare_precreated_secrets(context: str, kubeconfig: Path | None = None) -> None:
     settings = _settings_for_provider(PROVIDER_NAME)
     namespace_manifest = json.dumps({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": NAMESPACE}})
@@ -905,8 +936,7 @@ def _prepare_precreated_secrets(context: str, kubeconfig: Path | None = None) ->
             f"--from-file=tls.crt={tls_dir / 'tls.crt'}",
             f"--from-file=tls.key={tls_dir / 'tls.key'}",
             f"--from-file=ca.crt={tls_dir / 'ca.crt'}",
-            # Job pods' SSL_CERT_FILE: public roots plus the gateway CA, written by run.sh.
-            f"--from-file=ca-bundle.crt={tls_dir / 'ca-bundle.crt'}",
+            f"--from-file=ca-bundle.crt={_job_trust_bundle(tls_dir)}",
         ],
         kubeconfig,
     )
