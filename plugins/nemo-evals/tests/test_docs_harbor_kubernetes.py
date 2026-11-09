@@ -34,6 +34,21 @@ def _blocks(path: Path, language: str) -> list[str]:
     return ["\n".join(line.removeprefix(indent) for line in body.splitlines()) for indent, body in blocks]
 
 
+def _json_blocks(kind: str) -> list[dict]:
+    """The guide's JSON blocks of one kind, told apart by their keys.
+
+    ``request``: a whole request file (``"spec"``); ``closed_book``: the closed-book target fragment; ``sizing``: the
+    request fragment that sizes sandboxes and limits concurrency.
+    """
+    blocks = _blocks(GUIDE, "json")
+    kinds = {
+        "request": lambda block: '"spec"' in block and '"closed_book"' not in block,
+        "closed_book": lambda block: '"closed_book"' in block,
+        "sizing": lambda block: '"spec"' not in block and '"closed_book"' not in block,
+    }
+    return [json.loads(block) for block in blocks if kinds[kind](block)]
+
+
 def _evals_commands(path: Path) -> list[tuple[str, str, str]]:
     """Every ``nemo evals runs|tasksets <command> <arguments>`` in the file's bash blocks."""
     commands = "\n".join(_blocks(path, "bash")).replace("\\\n", " ")
@@ -67,8 +82,7 @@ def test_commands_use_supported_subcommands_and_flags(path: Path) -> None:
 
 
 def test_guide_openhands_request_is_the_skill_asset() -> None:
-    requests = [json.loads(block) for block in _blocks(GUIDE, "json") if '"spec"' in block]
-    assert requests == [json.loads(OPENHANDS_SPEC.read_text())]
+    assert _json_blocks("request") == [json.loads(OPENHANDS_SPEC.read_text())]
 
 
 def test_openhands_request_is_valid_once_the_task_source_supplies_the_taskset(tmp_path: Path) -> None:
@@ -80,13 +94,13 @@ def test_openhands_request_is_valid_once_the_task_source_supplies_the_taskset(tm
     assert isinstance(request.spec.target, HarborRunnerTarget)
     assert request.spec.target.source.model_dump(exclude_none=True) == {
         "name": "openhands",
-        "model": {"ref": "default/nemotron-super-closed-book"},
+        "model": {"ref": "default/nvidia-nemotron-3-5-super-vl-120b-a12b"},
     }
     assert request.spec.target.model_dump(mode="json")["env_secrets"] == {"LLM_API_KEY": "evals-inference-key"}
 
 
 def test_guide_sizing_fragment_is_valid_in_a_request() -> None:
-    fragments = [json.loads(block) for block in _blocks(GUIDE, "json") if '"spec"' not in block]
+    fragments = _json_blocks("sizing")
     assert len(fragments) == 1
     openhands = json.loads(OPENHANDS_SPEC.read_text())
     request = TasksetRunInput.model_validate(
@@ -95,6 +109,26 @@ def test_guide_sizing_fragment_is_valid_in_a_request() -> None:
     assert request.execution.sandbox is not None
     assert request.execution.max_concurrent_task_jobs == 5
     assert request.timeout_seconds == 7200
+
+
+def test_guide_closed_book_fragment_makes_the_openhands_request_closed_book(tmp_path: Path) -> None:
+    """The opt-in fragment merges into the default request's target: labelled closed-book, on the closed-book model."""
+    (fragment,) = _json_blocks("closed_book")
+    openhands = json.loads(OPENHANDS_SPEC.read_text())
+    openhands["spec"]["target"].update(fragment)
+    spec_file = tmp_path / "openhands-closed-book.json"
+    spec_file.write_text(json.dumps(openhands))
+
+    request = run_request(
+        TASKSET_REF, spec_file=spec_file, agent="ignored", dispatcher_profile=None, idempotency_key="docs-cb"
+    )
+
+    assert isinstance(request.spec.target, HarborRunnerTarget)
+    assert request.spec.target.closed_book is True
+    assert request.spec.target.source.model_dump(exclude_none=True) == {
+        "name": "openhands",
+        "model": {"ref": "default/nemotron-super-closed-book"},
+    }
 
 
 def test_quickstart_suite_exists_with_one_task() -> None:
