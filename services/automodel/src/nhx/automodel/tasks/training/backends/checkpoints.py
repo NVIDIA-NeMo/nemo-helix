@@ -26,6 +26,10 @@ from enum import StrEnum
 from pathlib import Path
 from shutil import copytree
 
+from nhx.automodel.tasks.training.backends.registry import (
+    is_causal_reranker_checkpoint,
+    uses_custom_automodel_impl,
+)
 from nhx.automodel.tasks.training.chat_templates import (
     apply_chat_template_to_checkpoint,
     resolve_chat_template,
@@ -96,6 +100,23 @@ def extract_precision_from_model_config(model_path: str | Path) -> Precision | N
     except (json.JSONDecodeError, IOError) as e:
         logger.warning(f"Failed to read config.json: {e}")
         return None
+
+
+def trained_automodel_model_class(customizer_config: TrainingStepConfig) -> bool:
+    """Whether Automodel trained its own implementation rather than the HF class.
+
+    Its implementations save adapters under the module names of transformers' own class
+    for the model type. With ``override_custom_impl`` it trains the HF class the job
+    loads, remote code included, and the adapter follows that class's names.
+    """
+    if customizer_config.model.override_custom_impl:
+        return False
+    try:
+        config = json.loads((Path(customizer_config.model.path) / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    architectures = config.get("architectures") if isinstance(config, dict) else None
+    return bool(architectures) and uses_custom_automodel_impl(architectures[0])
 
 
 def extract_step_number(path: Path) -> int:
@@ -471,11 +492,36 @@ def _onnx_safe_bidirectional_mask():
                 setattr(sys.modules[mod_name], "create_bidirectional_mask", orig)
 
 
-def _build_export_module(inner, model_type: ModelType, cfg: ExportConfig):
-    """Pool embeddings or emit logits, matching the NIM graph contract."""
+def _build_export_module(
+    inner,
+    model_type: ModelType,
+    cfg: ExportConfig,
+    score_token_ids: tuple[int, int] | None = None,
+):
+    """Pool embeddings or emit logits, matching the NIM graph contract.
+
+    ``score_token_ids`` (yes, no) selects a causal reranker, whose ``inner`` is a causal LM.
+    """
     import torch
     import torch.nn.functional as F
     from torch import nn
+
+    class _CausalRerankerForExport(nn.Module):
+        """``logit("yes") - logit("no")`` at the last attended token, as Automodel trains it."""
+
+        def __init__(self, model, yes_token_id: int, no_token_id: int):
+            super().__init__()
+            self.model = model
+            self.yes_token_id = yes_token_id
+            self.no_token_id = no_token_id
+
+        def forward(self, input_ids, attention_mask):
+            hidden = self.model.model(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+            # The highest attended position per row, for either padding side.
+            positions = torch.arange(hidden.shape[1], device=hidden.device).expand_as(attention_mask)
+            last = positions.masked_fill(~attention_mask.bool(), -1).argmax(dim=1)
+            logits = self.model.lm_head(hidden[torch.arange(hidden.shape[0], device=hidden.device), last])
+            return (logits[:, self.yes_token_id] - logits[:, self.no_token_id]).unsqueeze(-1)
 
     class _CrossEncoderForExport(nn.Module):
         def __init__(self, model):
@@ -524,8 +570,21 @@ def _build_export_module(inner, model_type: ModelType, cfg: ExportConfig):
             return embeddings
 
     if model_type == ModelType.CROSS_ENCODER:
+        if score_token_ids is not None:
+            return _CausalRerankerForExport(inner, *score_token_ids)
         return _CrossEncoderForExport(inner)
     return _EmbeddingForExport(inner, pooling=cfg.pooling, normalize=cfg.normalize)
+
+
+def _reranker_token_ids(config, tokenizer) -> tuple[int, int]:
+    """The (yes, no) ids a causal reranker scores with: its config's, else the tokenizer's."""
+    yes_token_id = getattr(config, "yes_token_id", None)
+    no_token_id = getattr(config, "no_token_id", None)
+    if yes_token_id is None:
+        yes_token_id = tokenizer.convert_tokens_to_ids("yes")
+    if no_token_id is None:
+        no_token_id = tokenizer.convert_tokens_to_ids("no")
+    return int(yes_token_id), int(no_token_id)
 
 
 def export_onnx(
@@ -536,19 +595,28 @@ def export_onnx(
     cfg: ExportConfig | None = None,
     trust_remote_code: bool = False,
     load_trust_remote_code: bool = False,
+    causal_reranker: bool = False,
 ) -> Path:
-    """Write ``model.onnx`` and ``tokenizer/``. Optionally verify against the traced module."""
+    """Write ``model.onnx`` and ``tokenizer/``. Optionally verify against the traced module.
+
+    ``causal_reranker`` exports a cross-encoder that scores with a causal LM's yes/no
+    next-token logits (see ``is_causal_reranker_checkpoint``) rather than a score head.
+    """
     import torch
-    from transformers import AutoModel, AutoModelForSequenceClassification, AutoTokenizer
+    from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
 
     cfg = cfg or ExportConfig()
     is_cross_encoder = model_type == ModelType.CROSS_ENCODER
+    causal_reranker = causal_reranker and is_cross_encoder
     logger.info("Exporting %s at %s to ONNX at %s", model_type.value, model_path, output_path)
     output_path.mkdir(parents=True, exist_ok=True)
 
     torch_dtype = getattr(torch, _TORCH_DTYPES[cfg.precision])
 
-    loader = AutoModelForSequenceClassification if is_cross_encoder else AutoModel
+    if causal_reranker:
+        loader = AutoModelForCausalLM
+    else:
+        loader = AutoModelForSequenceClassification if is_cross_encoder else AutoModel
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=trust_remote_code)
     inner = loader.from_pretrained(
         str(model_path),
@@ -557,7 +625,8 @@ def export_onnx(
         trust_remote_code=load_trust_remote_code,
     ).eval()
 
-    export_model = _build_export_module(inner, model_type, cfg)
+    score_token_ids = _reranker_token_ids(inner.config, tokenizer) if causal_reranker else None
+    export_model = _build_export_module(inner, model_type, cfg, score_token_ids)
     device = torch.device("cuda")
     export_model = export_model.to(device=device, dtype=torch_dtype).eval()
 
@@ -571,7 +640,7 @@ def export_onnx(
         output_name: {0: "batch_size", 1: "num_labels" if is_cross_encoder else "embedding_dim"},
     }
 
-    if is_cross_encoder and "token_type_ids" in getattr(tokenizer, "model_input_names", []):
+    if is_cross_encoder and not causal_reranker and "token_type_ids" in getattr(tokenizer, "model_input_names", []):
         token_type_ids = tokenized.get("token_type_ids")
         if token_type_ids is None:
             token_type_ids = torch.zeros_like(tokenized["input_ids"])
@@ -660,6 +729,30 @@ def verify_onnx_matches_reference(
     return max_diff
 
 
+def mark_text_ranking(hf_dir: Path) -> None:
+    """Mark a causal-LM checkpoint that scores as a reranker so it registers as one.
+
+    Its config is a plain causal LM, so only the model card can say that it ranks text.
+    ``pipeline_tag: text-ranking`` is the cross-encoder signal model-spec inspection reads.
+    """
+    import yaml
+
+    readme = hf_dir / "README.md"
+    frontmatter: dict = {}
+    body = ""
+    if readme.is_file():
+        text = readme.read_text(encoding="utf-8")
+        match = re.match(r"\A---\s*\n(.*?)\n---\s*\n?", text, re.DOTALL)
+        if match:
+            parsed = yaml.safe_load(match.group(1))
+            frontmatter = parsed if isinstance(parsed, dict) else {}
+            body = text[match.end() :]
+        else:
+            body = text
+    frontmatter["pipeline_tag"] = "text-ranking"
+    readme.write_text(f"---\n{yaml.safe_dump(frontmatter, sort_keys=False)}---\n{body}", encoding="utf-8")
+
+
 def _resolve_export_config(customizer_config: TrainingStepConfig) -> ExportConfig:
     """``retrieval.export``, or defaults if unset."""
     retrieval = getattr(customizer_config, "retrieval", None)
@@ -728,6 +821,8 @@ def process_checkpoint(
     is_embedding = model_type == ModelType.EMBEDDING
     is_cross_encoder = model_type == ModelType.CROSS_ENCODER
     is_llm = model_type == ModelType.LLM
+    # A cross-encoder that scores with a causal LM's yes/no logits saves a plain causal LM.
+    causal_reranker = is_cross_encoder and is_causal_reranker_checkpoint(base_model_path)
     type_label = "" if is_llm else model_type.value
 
     # Resolve chat template using the same priority logic as training:
@@ -756,7 +851,7 @@ def process_checkpoint(
                 output_path=output_path,
                 trust_remote_code=job_trust_remote_code,
             )
-        elif is_cross_encoder:
+        elif is_cross_encoder and not causal_reranker:
             merge_lora_cross_encoder_adapter(
                 adapter_path=checkpoint_path,
                 base_model_path=base_model_path,
@@ -764,12 +859,14 @@ def process_checkpoint(
                 trust_remote_code=job_trust_remote_code,
             )
         else:
+            # Causal LMs, and rerankers that score with a causal LM's yes/no logits.
             merge_lora_adapter(
                 adapter_path=checkpoint_path,
                 base_model_path=base_model_path,
                 output_path=output_path,
                 trust_remote_code=job_trust_remote_code,
                 has_vision_tower=customizer_config.model.has_vision_tower,
+                builtin_model_class=trained_automodel_model_class(customizer_config),
             )
         checkpoint_format = CheckpointFormat.HF
 
@@ -813,9 +910,12 @@ def process_checkpoint(
             cfg=export_cfg,
             trust_remote_code=job_trust_remote_code,
             load_trust_remote_code=load_trust_remote_code,
+            causal_reranker=causal_reranker,
         )
         if not job_trust_remote_code:
             sanitize_encoder_hf(output_path, Path(base_model_path))
+        if causal_reranker:
+            mark_text_ranking(output_path)
         _restructure_encoder_output(output_path, export_cfg.primary)
 
     # Determine precision: use explicit config value, or extract from base model

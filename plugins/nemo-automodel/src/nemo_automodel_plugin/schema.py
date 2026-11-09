@@ -170,7 +170,7 @@ class MTPSpec(AutomodelSchema):
         default=None,
         description=(
             "Share one weight-tied layer across the prediction depths. Only some Automodel models accept it "
-            "(Nemotron-H in r0.6.0); omit it for others."
+            "(Nemotron-H in r0.7.0); omit it for others."
         ),
     )
     loss_scaling_factor: float | None = Field(
@@ -201,7 +201,8 @@ class BackendSpec(AutomodelSchema):
     rope_fusion: bool | None = Field(default=None, description="Fuse the rotary embedding into the attention kernel.")
     experts: Literal["torch", "te", "gmm", "torch_mm", "torch_mm_mxfp8"] | None = Field(
         default=None,
-        description="MoE expert compute kernel. 'gmm' is the grouped-matmul path used by the large MoE recipes.",
+        description="MoE expert compute kernel. 'torch_mm' is the grouped-matmul path used by the large MoE "
+        "recipes; 'gmm' is a deprecated alias for it.",
     )
     dispatcher: Literal["torch", "deepep", "hybridep", "uccl_ep"] | None = Field(
         default=None,

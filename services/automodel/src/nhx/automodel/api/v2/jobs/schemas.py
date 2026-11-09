@@ -294,7 +294,7 @@ class MTPParams(BaseModel):
         default=None,
         description=(
             "Share one weight-tied layer across the prediction depths. Only some Automodel models accept it "
-            "(Nemotron-H in r0.6.0); omit it for others."
+            "(Nemotron-H in r0.7.0); omit it for others."
         ),
     )
     loss_scaling_factor: Optional[float] = Field(

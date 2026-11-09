@@ -10472,7 +10472,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--training.retrieval.export.dimensions`: Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.
 * `--training.activation-checkpointing`: Recompute intermediate activations in the backward pass instead of storing them. Substantially lowers memory use for a modest slowdown, and is commonly enabled when training large MoE models.
 * `--training.mtp.num-nextn-predict-layers <INTEGER>`: How many tokens ahead to predict. Omit to keep the checkpoint's own value.
-* `--training.mtp.use-repeated-layer`: Share one weight-tied layer across the prediction depths. Only some Automodel models accept it (Nemotron-H in r0.6.0); omit it for others.
+* `--training.mtp.use-repeated-layer`: Share one weight-tied layer across the prediction depths. Only some Automodel models accept it (Nemotron-H in r0.7.0); omit it for others.
 * `--training.mtp.loss-scaling-factor <FLOAT>`: Weight of the MTP loss term relative to the main loss. Omit to keep the model's default (0.1).
 * `--training.backend.rope-fusion`: Fuse the rotary embedding into the attention kernel.
 * `--training.backend.fake-balanced-gate`: Route tokens evenly across experts instead of using the trained router. Benchmarking aid.

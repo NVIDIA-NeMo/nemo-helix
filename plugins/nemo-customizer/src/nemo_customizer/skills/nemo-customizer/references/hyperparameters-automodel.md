@@ -231,7 +231,7 @@ Use `"recipe": "cross_encoder"` and the rerank model entity for ranking. Leave b
 
 Dataset, collator, and export knobs for `bi_encoder` / `cross_encoder`. Use `training.retrieval` only; `training.embedding` is rejected.
 
-`retrieval.export` writes ONNX plus the HF checkpoint. `primary` (`onnx` by default, or `hf`) selects the fileset root; the other artifact goes under `alternates/`. `precision` defaults to `fp16` to match typical Hugging Face checkpoints. Embeddings emit pooled `embeddings`; cross-encoders emit `logits`. Set `dimensions: true` for Matryoshka truncation. Unmerged LoRA is not exported.
+`retrieval.export` writes ONNX plus the HF checkpoint. `primary` (`onnx` by default, or `hf`) selects the fileset root; the other artifact goes under `alternates/`. `precision` defaults to `fp16` to match typical Hugging Face checkpoints. Embeddings emit pooled `embeddings`; cross-encoders emit `logits`. A Qwen3 causal-LM base (e.g. Qwen3-Reranker) has no score head: its `logits` is `logit("yes") - logit("no")` at the last token, and the HF output stays a plain Qwen3 causal LM tagged `text-ranking`. Set `dimensions: true` for Matryoshka truncation. Unmerged LoRA is not exported.
 
 ### `parallelism`
 

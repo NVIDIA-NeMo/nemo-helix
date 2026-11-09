@@ -32,7 +32,7 @@ Each backend can also print its live schema, and the generated REST shapes are i
 
 The training libraries publish benchmarked recipes per model. Start a job from the closest one instead of from defaults:
 
-- **Automodel jobs**: [Automodel `r0.6.0` LLM fine-tuning recipes](https://github.com/NVIDIA-NeMo/Automodel/tree/r0.6.0/examples/llm_finetune). Nemotron recipes are under [`llm_finetune/nemotron`](https://github.com/NVIDIA-NeMo/Automodel/tree/r0.6.0/examples/llm_finetune/nemotron).
+- **Automodel jobs**: [Automodel `r0.7.0` LLM fine-tuning recipes](https://github.com/NVIDIA-NeMo/Automodel/tree/r0.7.0/examples/llm_finetune). Nemotron recipes are under [`llm_finetune/nemotron`](https://github.com/NVIDIA-NeMo/Automodel/tree/r0.7.0/examples/llm_finetune/nemotron).
 - **RL jobs (DPO, GRPO)**: [NeMo-RL `r0.8.0` recipes](https://github.com/NVIDIA-NeMo/RL/tree/r0.8.0/examples/configs/recipes/llm). Only the `fsdp2` and `automodel` recipes apply; Megatron recipes do not.
 
 Copy the learning rate, LoRA rank and alpha, batch sizes, sequence length, and parallel layout into the job, then scale the batch to your GPU count. Ignore `max_steps` and the `ci` block; those are CI smoke-test settings.

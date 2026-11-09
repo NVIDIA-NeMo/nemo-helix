@@ -1,22 +1,26 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Whether an architecture has an Automodel implementation.
+"""Which Automodel implementation a checkpoint trains with.
 
 ``MODEL_ARCH_MAPPING`` matches the Automodel pin in
-``docker/automodel/Dockerfile.nhx-automodel-base`` (r0.6.0 @
-``b916107a5ce8e77a3f18682f8b0eaa46a4b54389``),
+``docker/automodel/Dockerfile.nhx-automodel-base`` (v0.7.0 @
+``48c88e16798246e8c7f1b9ea3974bfc488bd0849``),
 ``nemo_automodel/_transformers/registry.py``. Re-copy it when that pin moves.
 The API compiler image does not install ``nemo_automodel``.
 """
 
+import json
 from collections import OrderedDict
+from pathlib import Path
 
 # Static mapping: architecture name → (module_path, class_name[, tags]).
 # Analogous to HuggingFace transformers' MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.
 # Models are loaded lazily on first access rather than imported at startup.
 # Optional third element is a set of tags (e.g. {"retrieval"}) used by
 # downstream code to classify model archs without importing them.
+# "hf_parallelizer" opts the HF wrapper into the owning package's
+# parallelization.PARALLELIZER; it requires compatibility with the HF layout.
 MODEL_ARCH_MAPPING = OrderedDict(
     [
         (
@@ -51,7 +55,11 @@ MODEL_ARCH_MAPPING = OrderedDict(
         ),
         (
             "DeepseekV4ForCausalLM",
-            ("nemo_automodel.components.models.deepseek_v4.model", "DeepseekV4ForCausalLM"),
+            ("nemo_automodel.components.models.deepseek_v4.model", "DeepseekV4ForCausalLM", {"hf_parallelizer"}),
+        ),
+        (
+            "DeepseekV41ForCausalLM",
+            ("nemo_automodel.components.models.deepseek_v41.model", "DeepseekV41ForCausalLM"),
         ),
         (
             "DiffusionGemmaForBlockDiffusion",
@@ -74,8 +82,22 @@ MODEL_ARCH_MAPPING = OrderedDict(
             ("nemo_automodel.components.models.glm_moe_dsa.model", "GlmMoeDsaForCausalLM"),
         ),
         (
+            "Glm5NextForConditionalGeneration",
+            (
+                "nemo_automodel.components.models.glm5_next.model",
+                "Glm5NextForConditionalGeneration",
+            ),
+        ),
+        (
             "Gemma4ForConditionalGeneration",
             ("nemo_automodel.components.models.gemma4_moe.model", "Gemma4ForConditionalGeneration"),
+        ),
+        (
+            "Gemma4UnifiedForConditionalGeneration",
+            (
+                "nemo_automodel.components.models.gemma4_unified.model",
+                "Gemma4UnifiedForConditionalGeneration",
+            ),
         ),
         (
             "Gemma4AssistantForCausalLM",
@@ -104,6 +126,10 @@ MODEL_ARCH_MAPPING = OrderedDict(
         (
             "KimiVLForConditionalGeneration",
             ("nemo_automodel.components.models.kimivl.model", "KimiVLForConditionalGeneration"),
+        ),
+        (
+            "KimiLinear48BForCausalLM",
+            ("nemo_automodel.components.models.kimi_linear.model", "KimiLinear48BForCausalLM"),
         ),
         (
             "LlamaBidirectionalForSequenceClassification",
@@ -141,6 +167,14 @@ MODEL_ARCH_MAPPING = OrderedDict(
             ("nemo_automodel.components.models.mimo_v2_flash.model", "MiMoV2FlashForCausalLM"),
         ),
         (
+            "MiMoV2ForCausalLM",
+            ("nemo_automodel.components.models.mimo_v2_flash.model", "MiMoV2ForCausalLM"),
+        ),
+        (
+            "MiMoV25ForCausalLM",
+            ("nemo_automodel.components.models.mimo_v25.model", "MiMoV2ForCausalLM"),
+        ),
+        (
             "LagunaForCausalLM",
             ("nemo_automodel.components.models.laguna.model", "LagunaForCausalLM"),
         ),
@@ -153,6 +187,22 @@ MODEL_ARCH_MAPPING = OrderedDict(
             (
                 "nemo_automodel.components.models.ministral_bidirectional.model",
                 "Ministral3BidirectionalModel",
+                {"retrieval"},
+            ),
+        ),
+        (
+            "Mistral3BidirectionalModel",
+            (
+                "nemo_automodel.components.models.ministral_bidirectional.model",
+                "Mistral3BidirectionalModel",
+                {"retrieval"},
+            ),
+        ),
+        (
+            "Mistral3VLBidirectionalForSequenceClassification",
+            (
+                "nemo_automodel.components.models.ministral_bidirectional.model",
+                "Mistral3VLBidirectionalForSequenceClassification",
                 {"retrieval"},
             ),
         ),
@@ -172,8 +222,12 @@ MODEL_ARCH_MAPPING = OrderedDict(
             ),
         ),
         (
+            "Qwen3RerankerForCausalReranking",
+            ("nemo_automodel.components.models.qwen3_reranker.model", "Qwen3RerankerForCausalReranking"),
+        ),
+        (
             "NemotronHForCausalLM",
-            ("nemo_automodel.components.models.nemotron_v3.model", "NemotronHForCausalLM"),
+            ("nemo_automodel.components.models.nemotron_v3.model", "NemotronHForCausalLM", {"hf_parallelizer"}),
         ),
         (
             "NemotronH_Nano_Omni_Reasoning_V3",
@@ -194,6 +248,10 @@ MODEL_ARCH_MAPPING = OrderedDict(
             ("nemo_automodel.components.models.nemotron_parse.model", "NemotronParseForConditionalGeneration"),
         ),
         (
+            "MuseGlimmerForConditionalGeneration",
+            ("nemo_automodel.components.models.muse_glimmer.model", "MuseGlimmerForConditionalGeneration"),
+        ),
+        (
             "LLaVAOneVision1_5_ForConditionalGeneration",
             (
                 "nemo_automodel.components.models.llava_onevision.model",
@@ -207,6 +265,10 @@ MODEL_ARCH_MAPPING = OrderedDict(
         (
             "HyMT2ForCausalLM",
             ("nemo_automodel.components.models.hy_mt2.model", "HyMT2ForCausalLM"),
+        ),
+        (
+            "HunyuanImage3ForCausalMM",
+            ("nemo_automodel.components.models.hunyuan_image3.model", "HunyuanImage3ForCausalMM"),
         ),
         (
             "Qwen2ForCausalLM",
@@ -247,11 +309,11 @@ MODEL_ARCH_MAPPING = OrderedDict(
         ),
         (
             "Qwen3_5ForCausalLM",
-            ("nemo_automodel.components.models.qwen3_5.model", "Qwen3_5ForCausalLM"),
+            ("nemo_automodel.components.models.qwen3_5.model", "Qwen3_5ForCausalLM", {"hf_parallelizer"}),
         ),
         (
             "Qwen3_5ForConditionalGeneration",
-            ("nemo_automodel.components.models.qwen3_5.model", "Qwen3_5ForConditionalGeneration"),
+            ("nemo_automodel.components.models.qwen3_5.model", "Qwen3_5ForConditionalGeneration", {"hf_parallelizer"}),
         ),
         (
             "Qwen3OmniMoeForConditionalGeneration",
@@ -275,6 +337,15 @@ MODEL_ARCH_MAPPING = OrderedDict(
         (
             "Qwen3_5MoeForConditionalGeneration",
             ("nemo_automodel.components.models.qwen3_5_moe.model", "Qwen3_5MoeForConditionalGeneration"),
+        ),
+        (
+            "Qwen3_8_FlashNextForConditionalGeneration",
+            ("nemo_automodel.components.models.qwen3_8_flash_next.model", "Qwen3_8_FlashNextForConditionalGeneration"),
+        ),
+        (
+            # Immutable checkpoint dumps predate the Qwen3.8-Flash-Next rename.
+            "Qwen4ExpForConditionalGeneration",
+            ("nemo_automodel.components.models.qwen3_8_flash_next.model", "Qwen3_8_FlashNextForConditionalGeneration"),
         ),
         (
             "Step3p6ForConditionalGeneration",
@@ -305,3 +376,29 @@ def uses_custom_automodel_impl(architecture: str | None) -> bool:
     if not architecture or "/" in architecture:
         return False
     return architecture in MODEL_ARCH_MAPPING
+
+
+# Model types whose causal-LM checkpoints Automodel trains as a cross-encoder with its yes/no
+# reranker (``nemo_automodel/_transformers/retrieval.py`` SUPPORTED_BACKBONES, and
+# ``Qwen3RerankerForCausalReranking.supports_config``). Other architectures of these model
+# types, such as an already-converted ``*ForSequenceClassification``, keep the classifier path.
+_CAUSAL_RERANKER_ARCHITECTURES = {
+    "qwen3": frozenset({"Qwen3ForCausalLM", "Qwen3RerankerForCausalReranking"}),
+}
+
+
+def is_causal_reranker_checkpoint(model_path: str | Path) -> bool:
+    """True when Automodel scores this checkpoint as a cross-encoder by its yes/no next-token logits.
+
+    That reranker reuses the language-model head instead of adding a score head. It rejects the
+    classifier ``pooling`` and a model-level ``temperature``, and it saves a plain causal LM.
+    """
+    try:
+        config = json.loads((Path(model_path) / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(config, dict):
+        return False
+    architectures = _CAUSAL_RERANKER_ARCHITECTURES.get(str(config.get("model_type", "")).lower())
+    declared = config.get("architectures")
+    return bool(architectures) and isinstance(declared, list) and not architectures.isdisjoint(declared)

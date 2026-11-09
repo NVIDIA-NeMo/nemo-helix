@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from nhx.automodel.tasks.training.backends.config import (
     _build_base_model,
+    _build_integrations,
     _build_peft,
     _configure_chat_dataset,
     _configure_moe_backend,
@@ -612,6 +613,27 @@ def test_peft_forwards_use_memory_efficient_lora_only_when_set(requested: bool |
 
 
 @pytest.mark.parametrize(
+    ("wandb_block", "base_url"),
+    [
+        ({"project": "p", "settings": {"base_url": "https://wandb.internal"}}, "https://wandb.internal"),
+        ({"project": "p"}, None),
+    ],
+    ids=["self-hosted", "cloud"],
+)
+def test_wandb_block_never_carries_settings(wandb_block: dict[str, Any], base_url: str | None) -> None:
+    """Automodel passes its own ``settings=`` to ``wandb.init``, so a second one would be a TypeError."""
+    cfg: dict[str, Any] = {}
+    with (
+        patch(f"{CONFIG_MODULE}.build_wandb_config", return_value=dict(wandb_block)),
+        patch(f"{CONFIG_MODULE}.build_mlflow_config", return_value=None),
+    ):
+        _build_integrations(cfg, _lora_step_config(), MagicMock())
+
+    assert cfg["wandb"] == {"project": "p"}
+    assert cfg.get("_wandb_base_url") == base_url
+
+
+@pytest.mark.parametrize(
     ("mtp", "expected"),
     [
         (None, {}),
@@ -797,10 +819,26 @@ def test_the_reporting_block_reaches_the_recipe_config(tmp_path: Path) -> None:
     assert compiled["_recipe"] == "sft"
 
 
-def test_compile_cross_encoder_recipe_selects_cross_encoder_model(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("base_config", "classifier_head"),
+    [
+        ({"model_type": "llama_bidirec", "architectures": ["LlamaBidirectionalModel"]}, True),
+        ({"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]}, False),
+        ({"model_type": "qwen3", "architectures": ["Qwen3ForSequenceClassification"]}, True),
+    ],
+    ids=["classifier-head", "qwen3-causal-reranker", "qwen3-converted-classifier"],
+)
+def test_compile_cross_encoder_recipe_selects_cross_encoder_model(
+    tmp_path: Path, base_config: dict[str, Any], classifier_head: bool
+) -> None:
+    """A Qwen3 causal LM scores by its yes/no logits; Automodel rejects classifier options for it."""
     fixture = Path(__file__).parents[3] / "contract" / "input_configs" / "embed-1b" / "embed_1b_full_sft.json"
     raw = json.loads(fixture.read_text())
     raw.pop("backend")
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "config.json").write_text(json.dumps(base_config))
+    raw["model"]["path"] = str(base)
     config = TrainingStepConfig.model_validate(raw)
     config.training.recipe = TrainingRecipe.CROSS_ENCODER
 
@@ -823,6 +861,9 @@ def test_compile_cross_encoder_recipe_selects_cross_encoder_model(tmp_path: Path
 
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelCrossEncoder.from_pretrained")
     assert compiled["model"]["num_labels"] == 1
+    assert ("pooling" in compiled["model"]) is classifier_head
+    assert ("temperature" in compiled["model"]) is classifier_head
+    assert compiled["temperature"] == 1.0
     assert compiled["_recipe"] == "cross_encoder"
     assert "loss_fn" not in compiled
 
@@ -1098,7 +1139,8 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
     assert compiled["dataset"]["chat_template"] == "vision-template"
     assert compiled["validation_dataset"]["chat_template"] == "vision-template"
     assert compiled["_resolved_chat_template"] == "vision-template"
-    assert compiled["freeze_config"]["freeze_vision_tower"] is True
+    # Automodel rejects any freeze_config key outside its own option set.
+    assert compiled["freeze_config"] == {"freeze_vision_tower": True, "freeze_language_model": False}
     assert compiled["distributed"]["ep_size"] == 1
     assert "num_nextn_predict_layers" not in compiled["model"]
     assert compiled["peft"]["exclude_modules"] == [
@@ -1200,5 +1242,9 @@ def test_omni_experts_are_read_from_the_nested_config(tmp_path: Path) -> None:
 
     assert compiled["distributed"]["ep_size"] == 4
     assert compiled["model"]["num_nextn_predict_layers"] == 0
-    assert compiled["freeze_config"]["freeze_audio_tower"] is True
+    assert compiled["freeze_config"] == {
+        "freeze_vision_tower": True,
+        "freeze_language_model": False,
+        "freeze_audio_tower": True,
+    }
     assert compiled["model"]["backend"]["dispatcher"] == "torch"

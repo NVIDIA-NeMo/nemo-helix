@@ -17,6 +17,7 @@ from typing import Any
 
 from nemo_automodel._transformers.registry import ModelRegistry
 from nhx.automodel.app.constants import PAUSE_SENTINEL_FILE_NAME, PAUSE_SIGNAL
+from nhx.automodel.tasks.training.backends.registry import is_causal_reranker_checkpoint
 from nhx.automodel.tasks.training.backends.vlm import CONVERSATION_DATASET_TARGET, rewrite_fileset_rows
 from nhx.automodel.tasks.training.chat_templates import resolve_chat_template
 from nhx.automodel.tasks.training.datasets.preparation import (
@@ -191,7 +192,12 @@ def _compile_retrieval_config(
         cfg["model"]["do_distributed_inbatch_negative"] = retrieval_config.do_distributed_inbatch_negative
     else:
         cfg["model"]["num_labels"] = 1
-        cfg["model"]["temperature"] = 1.0
+        if is_causal_reranker_checkpoint(customizer_config.model.path):
+            # Automodel scores a Qwen3 causal LM by its yes/no next-token logits. That reranker
+            # has no classifier head to pool for, and takes the recipe's temperature (above).
+            del cfg["model"]["pooling"]
+        else:
+            cfg["model"]["temperature"] = 1.0
     if customizer_config.model.attn_implementation:
         cfg["model"]["attn_implementation"] = customizer_config.model.attn_implementation
 
@@ -370,7 +376,6 @@ def _compile_vlm_config(
         "trust_remote_code": trust_remote_code,
     }
     freeze_config: dict[str, bool] = {
-        "freeze_embeddings": True,
         "freeze_vision_tower": True,
         "freeze_language_model": False,
     }
@@ -538,7 +543,7 @@ def _build_base_model(cfg: dict[str, Any], customizer_config: TrainingStepConfig
     if mtp is not None:
         # Automodel reads these off the model block as model constructor arguments, and
         # support differs per model (``mtp_use_repeated_layer`` is Nemotron-H only in
-        # r0.6.0). Forward only what the caller set, so an unset field keeps the
+        # r0.7.0). Forward only what the caller set, so an unset field keeps the
         # checkpoint's own value instead of reaching a model that does not accept it.
         for field_name, model_key in _MTP_MODEL_KEYS.items():
             value = getattr(mtp, field_name)
@@ -855,6 +860,12 @@ def _build_integrations(
         framework="automodel",
     )
     if wandb_config:
+        # Automodel passes its own ``settings=`` to ``wandb.init``, so a ``settings`` entry here
+        # would raise a duplicate-keyword TypeError. A self-hosted server reaches the workers as
+        # WANDB_BASE_URL instead, which the launcher sets from ``_wandb_base_url``.
+        settings = wandb_config.pop("settings", None) or {}
+        if base_url := settings.get("base_url"):
+            cfg["_wandb_base_url"] = base_url
         cfg["wandb"] = wandb_config
         logger.info(f"WandB enabled: project={wandb_config.get('project')}")
 

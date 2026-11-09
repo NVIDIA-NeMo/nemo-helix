@@ -432,8 +432,12 @@ def test_backend_rejects_an_unknown_kernel() -> None:
     [{"attn": "cudnn"}, {"dispatcher": "mok"}],
     ids=["attn-cudnn", "dispatcher-mok"],
 )
-def test_backend_rejects_kernels_the_pinned_automodel_lacks(backend: dict[str, str]) -> None:
-    """Automodel r0.6.0 has neither; it would fall back or fail inside the training container."""
+def test_backend_rejects_kernels_the_training_image_cannot_run(backend: dict[str, str]) -> None:
+    """Automodel 0.7.0 has both, but neither runs in a Customizer job.
+
+    'mok' needs the mixture-of-kittens extra, which the nhx-automodel image does not install.
+    'cudnn' attention exists only for a few sparse-attention models (GLM DSA, Qwen3.8 Flash-Next).
+    """
     with pytest.raises(ValidationError, match="backend"):
         AutomodelJobInput.model_validate(
             {
