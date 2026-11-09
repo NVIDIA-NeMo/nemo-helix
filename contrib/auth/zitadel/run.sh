@@ -729,6 +729,10 @@ write_k8s_gateway_tls_trust_bundle() {
         printf "+ cat %q %q > %q\n" "${public_roots}" "${ca}" "${bundle}"
         return
     fi
+    # A file that exists but holds no certificates would leave every job pod trusting nothing.
+    if ! grep -q "BEGIN CERTIFICATE" "${public_roots}"; then
+        fail "public CA bundle has no PEM certificates: ${public_roots}; set NHX_HARNESS_PUBLIC_CA_BUNDLE"
+    fi
     {
         cat "${public_roots}"
         printf "\n"
