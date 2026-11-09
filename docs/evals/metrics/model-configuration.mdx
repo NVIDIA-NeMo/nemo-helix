@@ -261,3 +261,57 @@ job = evaluator.submit(
 For evaluating agentic systems, use an `Agent` request target instead of a `Model`. See [Agent Configuration](/documentation/evaluate-models/metrics/agent-configuration).
 
 </Note>
+
+## Images in the Prompt
+
+A vision-language model reads images from `image_url` parts in a chat message. A request through the Inference Gateway can give the image in three forms:
+
+- `data:image/png;base64,...`: the image bytes, inline in the request.
+- `http(s)://...`: the model server downloads the image itself.
+- `fileset://<workspace>/<fileset>#<path>`: the gateway downloads the file from the fileset with the caller's permissions, and inlines it as a `data:` URL. PNG, JPEG, GIF, or WebP, up to 25 MiB.
+
+Dataset rows usually hold image paths relative to the fileset they were uploaded to, which is what training reads. Write the `fileset://` reference in the prompt template, and leave the rows as they are. This example scores a receipt-reading model on the CORD-v2 validation split. Each row's user turn is one image part followed by one text part, and its assistant turn is the expected answer:
+
+```python
+from nemo_evals.sdk import FilesetRef
+from nhx_evals_sdk import InferenceParams, ModelRef, RunConfigOnlineModel, SequenceSimilarityMetric
+
+# A row: {"messages": [
+#   {"role": "user", "content": [
+#     {"type": "image_url", "image_url": {"url": "validation/images/00000.png"}},
+#     {"type": "text", "text": "Describe this image."}]},
+#   {"role": "assistant", "content": "<s_total><s_total_price>45,500</s_total_price>..."}]}
+job = evaluator.submit(
+    metric=SequenceSimilarityMetric(
+        reference="{{ item.messages[-1].content }}",
+        candidate="{{ sample.output_text | trim }}",
+    ),
+    dataset=FilesetRef(root="default/cord-v2#validation/validation.jsonl"),
+    config=RunConfigOnlineModel(
+        inference=InferenceParams(temperature=0, max_tokens=1024),
+    ),
+    target=ModelRef(root="default/my-vision-model"),
+    prompt_template={
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "fileset://default/cord-v2#{{ item.messages[0].content[0].image_url.url }}"
+                        },
+                    },
+                    {"type": "text", "text": "{{ item.messages[0].content[1].text }}"},
+                ],
+            },
+        ],
+    },
+)
+```
+
+For the first row, the request carries `fileset://default/cord-v2#validation/images/00000.png`. The job downloads only the JSONL, and the gateway fetches each image as its request arrives, so saved results hold the short reference rather than the image bytes.
+
+- The request must go through the Inference Gateway, as a `ModelRef` target's requests do. A model server called directly reads only `data:` and `http(s)` URLs.
+- The template names the fileset, so a copy of the dataset under another name needs the template changed.
+- When rows already hold `data:`, `http(s)`, or `fileset://` URLs, `{"messages": "{{ item.messages[:-1] }}"}` sends their image parts unchanged.

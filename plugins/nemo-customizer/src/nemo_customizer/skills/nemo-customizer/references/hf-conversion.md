@@ -90,8 +90,10 @@ uv run --no-project --with datasets --with pillow \
   plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_cord.py \
   --output /tmp/cord-v2
 nemo files filesets create cord-v2 --workspace default --purpose dataset
-nemo files upload /tmp/cord-v2 cord-v2 --workspace default
+nemo files upload /tmp/cord-v2/ cord-v2 --workspace default
 ```
+
+Keep the trailing slash on the upload source, here and for the finance directories below. Without it, `nemo files upload` puts the files under `cord-v2/` in the fileset, and the fileset-relative image urls no longer resolve.
 
 `cord-v2` contains `train/train.jsonl` and `validation/validation.jsonl`, each with `images/` beside the JSONL. Image urls are fileset-relative (`train/images/00000.png`, `validation/images/00000.png`). Automodel selects training files from `train/` and validation files from `validation/`. Job JSON names this one fileset. The Evaluator scores `validation/validation.jsonl` in it: that official validation file is CORD's frozen split, and the script does not write `test.jsonl`. That is an exception to the own-fileset test-split rule (`post-training-eval.md`): the scored file lives in the training fileset because CORD has no separate test split.
 
