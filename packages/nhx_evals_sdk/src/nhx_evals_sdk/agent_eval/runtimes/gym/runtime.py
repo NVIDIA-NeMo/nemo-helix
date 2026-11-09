@@ -439,11 +439,48 @@ class GymAgentTaskRunner:
 
 #: Characters of Gym startup output inlined into an exception.
 STARTUP_OUTPUT_MAX_CHARS = 16000
-#: Lines kept after the first error line, which is where uv puts its ``Caused by:`` chain.
+#: Lines of the first error report inlined into an exception. A longer report keeps its first line
+#: and its end, which is where a traceback names the exception.
 FIRST_ERROR_CONTEXT_LINES = 12
-#: A line that starts an error report: uv's ``error:`` or a Python traceback, after the
-#: ``(server_name) `` prefix Gym adds to each component's output.
+#: How far past the first error line to look for the end of its report.
+_FIRST_ERROR_SCAN_LINES = 500
+#: The ``(server_name) `` prefix Gym adds to each component's output.
+_SERVER_PREFIX_RE = re.compile(r"^\([^)\s]+\) ")
+_TRACEBACK_HEADER = "Traceback (most recent call last)"
+#: A line that starts an error report: uv's ``error:`` or a Python traceback, after the prefix.
 _ERROR_START_RE = re.compile(r"^(?:\([^)\s]+\)\s+)?(?:error:|Traceback \(most recent call last\))")
+
+
+def _first_error_block(lines: Sequence[str], start: int, end: int) -> str:
+    """The error report that begins at ``lines[start]``, read no further than ``lines[end]``.
+
+    A report is its first line plus the indented lines that follow it from the same server: uv's
+    ``cause:`` chain, or a traceback's frames. A traceback also takes the unindented line that ends
+    it, the exception itself. Lines other servers print in between are skipped. A report longer than
+    :data:`FIRST_ERROR_CONTEXT_LINES` keeps its first line and its end, so a deep traceback still
+    names its exception.
+    """
+    first = lines[start]
+    prefix_match = _SERVER_PREFIX_RE.match(first)
+    prefix = prefix_match.group(0) if prefix_match else ""
+    is_traceback = first[len(prefix) :].lstrip().startswith(_TRACEBACK_HEADER)
+    block = [first]
+    for line in lines[start + 1 : min(end, start + 1 + _FIRST_ERROR_SCAN_LINES)]:
+        if prefix and not line.startswith(prefix):
+            continue
+        if not prefix and _SERVER_PREFIX_RE.match(line):
+            continue
+        content = line[len(prefix) :]
+        if content[:1].isspace():
+            block.append(line)
+            continue
+        if is_traceback and content:
+            block.append(line)
+        break
+    if len(block) > FIRST_ERROR_CONTEXT_LINES:
+        omitted = len(block) - FIRST_ERROR_CONTEXT_LINES + 1
+        block = [block[0], f"... {omitted} line(s) omitted ...", *block[-(FIRST_ERROR_CONTEXT_LINES - 2) :]]
+    return "\n".join(block)
 
 
 def startup_output_excerpt(env_log_text: str) -> str:
@@ -463,7 +500,7 @@ def startup_output_excerpt(env_log_text: str) -> str:
     ]
     first_error = next((index for index, line in enumerate(lines) if _ERROR_START_RE.match(line)), None)
     if first_error is not None and first_error < tail_start:
-        block = "\n".join(lines[first_error : min(first_error + FIRST_ERROR_CONTEXT_LINES, tail_start)])
+        block = _first_error_block(lines, first_error, tail_start)
         sections.append(f"--- first error in startup output ---\n{block[:STARTUP_OUTPUT_MAX_CHARS]}")
     return "\n".join(sections)
 

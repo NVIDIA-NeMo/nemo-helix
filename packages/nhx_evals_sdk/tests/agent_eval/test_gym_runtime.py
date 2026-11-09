@@ -62,6 +62,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     require_full_coverage,
     trials_from_rollouts,
 )
+from nhx_evals_sdk.agent_eval.runtimes.gym.runtime import FIRST_ERROR_CONTEXT_LINES
 from nhx_evals_sdk.agent_eval.trials import UNKNOWN_ERROR_TYPE, AgentEvalTrialStatus, TrialError, TrialMeasurements
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nhx_evals_sdk.values import SecretRef
@@ -1709,6 +1710,44 @@ def test_early_exit_does_not_repeat_an_error_already_in_the_tail(tmp_path: Path)
 
     assert "first error" not in message
     assert message.count("UnknownIssuer") == 1
+
+
+def _traceback(prefix: str, frames: int, exception: str) -> list[str]:
+    lines = [f"{prefix}Traceback (most recent call last):"]
+    for frame in range(frames):
+        lines += [f'{prefix}  File "/app/server.py", line {frame}, in step_{frame}', f"{prefix}    step_{frame + 1}()"]
+    return [*lines, f"{prefix}{exception}"]
+
+
+def test_early_exit_keeps_the_exception_that_ends_a_long_traceback(tmp_path: Path) -> None:
+    # Six frames put the exception past a 12-line window; the frames alone don't say what failed.
+    exception = "PermissionError: [Errno 13] cannot create server environment: '/opt/Gym'"
+    traceback = _traceback("(mcqa) ", 6, exception)
+    noise = [f"(policy_model) Downloading package-{i}" for i in range(LOG_TAIL_LINES + 10)]
+    transcript = "\n".join([*traceback, *noise, "Process `mcqa` finished unexpectedly!"])
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    first_error = message.split("--- first error in startup output ---", 1)[1]
+    assert "(mcqa) Traceback (most recent call last):" in first_error
+    assert f"(mcqa) {exception}" in first_error
+    assert "line(s) omitted" in first_error
+    assert len(first_error.strip().splitlines()) <= FIRST_ERROR_CONTEXT_LINES
+
+
+def test_early_exit_reads_a_traceback_through_other_servers_output(tmp_path: Path) -> None:
+    # Servers start in parallel, so another server's lines can land between a traceback's frames.
+    exception = "RuntimeError: resources server failed to bind"
+    frames = _traceback("(mcqa) ", 2, exception)
+    interleaved = [frames[0], "(policy_model) Downloading pyarrow", *frames[1:]]
+    noise = [f"(policy_model) Downloading package-{i}" for i in range(LOG_TAIL_LINES + 10)]
+    transcript = "\n".join([*interleaved, *noise])
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    first_error = message.split("--- first error in startup output ---", 1)[1]
+    assert f"(mcqa) {exception}" in first_error
+    assert "Downloading pyarrow" not in first_error
 
 
 def test_early_exit_ignores_gym_deprecation_text_that_mentions_errors(tmp_path: Path) -> None:
