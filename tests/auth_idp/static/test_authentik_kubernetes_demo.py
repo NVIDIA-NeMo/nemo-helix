@@ -1932,7 +1932,12 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
         "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
         "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
     }
-    expected_storage = nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["storage"]
+    # The executor's storage replaces the defaults, so it repeats the core PVC alongside the CA volume.
+    expected_storage = {
+        "pvc_name": '{{ include "nhx-core.persistentVolumeClaim" . }}',
+        "volume_permissions_image": "{{ .Values.core.storage.volumePermissionsImage }}",
+        **nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["storage"],
+    }
     assert workload_config["storage"] == expected_storage
     assert not any(
         executor["provider"] == "gpu_distributed" and executor["profile"] == "default"
