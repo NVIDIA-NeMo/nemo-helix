@@ -15,7 +15,11 @@ export const MESSAGE_ACTIONS_CLASS =
 
 const COPIED_DURATION_MS = 3000;
 
-export const MessageActionButton = (props: ComponentProps<typeof Button>) => (
+interface MessageActionButtonProps extends ComponentProps<typeof Button> {
+  'aria-label': string;
+}
+
+export const MessageActionButton = (props: MessageActionButtonProps) => (
   <Button kind="tertiary" size="tiny" type="button" {...props} />
 );
 

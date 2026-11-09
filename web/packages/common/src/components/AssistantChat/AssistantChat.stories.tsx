@@ -228,7 +228,7 @@ Compare the tuned agent against the baseline on **accuracy**, *tone*, and refusa
 
 Want me to draft \`lora.yaml\` next?`;
 
-const richResponseMessages: readonly ThreadMessageLike[] = [
+const RICH_RESPONSE_MESSAGES: readonly ThreadMessageLike[] = [
   {
     role: 'user',
     content: [
@@ -244,13 +244,13 @@ const richResponseMessages: readonly ThreadMessageLike[] = [
 
 export const RichFormatting: Story = {
   args: {
-    initialMessages: richResponseMessages,
+    initialMessages: RICH_RESPONSE_MESSAGES,
   },
 };
 
 export const RichFormattingWithLinks: Story = {
   args: {
-    initialMessages: richResponseMessages,
+    initialMessages: RICH_RESPONSE_MESSAGES,
     messageContentProps: {
       markdownLinkComponent: ({ href, children }) => (
         <Anchor href={href} external>

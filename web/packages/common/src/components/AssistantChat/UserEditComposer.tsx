@@ -13,7 +13,7 @@ export const UserEditComposer = ({
 }) => (
   <MessagePrimitive.Root
     data-testid="assistant-chat-edit-composer"
-    className="w-full ml-density-5xl min-w-0 self-stretch rounded-xl rounded-br-none bg-surface-raised px-density-xl py-density-lg"
+    className="ml-density-5xl min-w-0 self-stretch rounded-xl rounded-br-none bg-surface-raised px-density-xl py-density-lg"
   >
     <ComposerPrimitive.Root className="flex w-full flex-col gap-density-sm">
       {enableImageAttachments && <ComposerAttachmentsRow />}
