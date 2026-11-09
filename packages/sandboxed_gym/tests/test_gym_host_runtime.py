@@ -927,6 +927,36 @@ def test_opensandbox_yaml_must_match_when_the_image_checkout_has_it(tmp_path, mo
         runtime._require_vendored_gym_matches_image(package)
 
 
+def test_a_packaged_wheel_is_rejected_before_the_sandbox_copies_the_checkout(tmp_path):
+    image, package = _nemo_gym_wheel(tmp_path, "x = 1\n", "x = 2\n")
+    environment = tmp_path / "env" / "wheels"
+    environment.mkdir(parents=True)
+    packaged = environment / package.wheel_files[0].name
+    packaged.write_bytes(package.wheel_files[0].read_bytes())
+
+    with pytest.raises(RuntimeError, match="Rebuild the wheelhouse"):
+        runtime.require_packaged_nemo_gym_matches_image(environment.parent, image_gym_root=image)
+
+
+def test_a_packaged_wheel_that_matches_the_image_checkout_is_accepted(tmp_path):
+    image, package = _nemo_gym_wheel(tmp_path, "x = 1\n", "x = 1\n")
+    environment = tmp_path / "env" / "wheels"
+    environment.mkdir(parents=True)
+    (environment / package.wheel_files[0].name).write_bytes(package.wheel_files[0].read_bytes())
+
+    assert runtime.require_packaged_nemo_gym_matches_image(environment.parent, image_gym_root=image)
+
+
+def test_a_package_without_a_nemo_gym_wheel_is_not_a_mismatch(tmp_path):
+    image = tmp_path / "gym"
+    (image / "nemo_gym").mkdir(parents=True)
+    environment = tmp_path / "env" / "wheels"
+    environment.mkdir(parents=True)
+    (environment / "other-1.0-py3-none-any.whl").write_bytes(b"")
+
+    assert not runtime.require_packaged_nemo_gym_matches_image(environment.parent, image_gym_root=image)
+
+
 def test_opensandbox_yaml_with_the_same_bytes_is_accepted(tmp_path, monkeypatch):
     image, package = _nemo_gym_wheel(
         tmp_path,
