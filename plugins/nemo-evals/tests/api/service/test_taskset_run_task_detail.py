@@ -37,6 +37,7 @@ async def test_a_task_with_a_job_has_its_jobs_trials(service, seed_run, add_memb
         trial_counts=TrialCounts(total=1, phases={TrialPhase.PENDING: 1}),
     )
     fake_task_jobs.details[job] = {"trials": [{"trial": "hello__a", "phase": "agent_running", "attempts": 2}]}
+    fake_task_jobs.job_ids[job] = "job-3"
 
     task = await service.get_task("default", run.name, 3)
 
@@ -49,11 +50,43 @@ async def test_a_task_with_a_job_has_its_jobs_trials(service, seed_run, add_memb
     assert task.trial_counts == TrialCounts(total=1, phases={TrialPhase.AGENT_RUNNING: 1})
 
 
+async def test_a_replacement_job_under_the_name_does_not_supply_trials(service, seed_run, add_member, fake_task_jobs):
+    """Jobs deletes only ended Jobs, so once ours ended and was deleted another Job can take its name."""
+    run = await seed_run()
+    job = f"{run.name}-task-3"
+    controllers_copy = TrialCounts(total=1, phases={TrialPhase.SUCCEEDED: 1}, rewarded=1, reward=1.0)
+    await add_member(run, 3, phase=MemberPhase.REGISTERED, task_job=job, job_id="job-3", trial_counts=controllers_copy)
+    fake_task_jobs.details[job] = {"trials": [{"trial": "other__a", "phase": "agent_running", "attempts": 1}]}
+    fake_task_jobs.job_ids[job] = "job-9"  # not the Job the member registered
+
+    task = await service.get_task("default", run.name, 3)
+
+    assert task is not None
+    assert task.trials is None
+    assert task.trial_counts == controllers_copy  # the stored counts stand, not the other Job's
+
+
+async def test_a_foreign_job_that_rejected_registration_does_not_supply_trials(
+    service, seed_run, add_member, fake_task_jobs
+):
+    """A foreign Job already owned the name, so the member holds the slot (task_job) but never registered a job_id."""
+    run = await seed_run()
+    job = f"{run.name}-task-0"
+    await add_member(run, 0, phase=MemberPhase.FAILED, task_job=job, error="job_name_conflict")
+    fake_task_jobs.details[job] = {"trials": [{"trial": "foreign__a", "phase": "agent_running", "attempts": 1}]}
+    fake_task_jobs.job_ids[job] = "job-foreign"
+
+    task = await service.get_task("default", run.name, 0)
+
+    assert task is not None and task.error == "job_name_conflict"
+    assert task.trials is None
+
+
 async def test_a_queued_task_never_reads_jobs(service, seed_run, add_member, fake_task_jobs, monkeypatch):
     run = await seed_run()
     await add_member(run, 0, phase=MemberPhase.IMAGE_READY)
 
-    monkeypatch.setattr(fake_task_jobs, "status_details", AsyncMock(side_effect=AssertionError("Jobs call")))
+    monkeypatch.setattr(fake_task_jobs, "job_details", AsyncMock(side_effect=AssertionError("Jobs call")))
 
     task = await service.get_task("default", run.name, 0)
 
@@ -64,10 +97,11 @@ async def test_a_queued_task_never_reads_jobs(service, seed_run, add_member, fak
 async def test_a_task_whose_trials_cant_be_read_still_reads(service, seed_run, add_member, fake_task_jobs, job_state):
     run = await seed_run()
     job = f"{run.name}-task-0"
-    await add_member(run, 0, phase=MemberPhase.FAILED, task_job=job, error="job_failed")
+    await add_member(run, 0, phase=MemberPhase.FAILED, task_job=job, job_id="job-0", error="job_failed")
 
     if job_state == "no trials reported":
         fake_task_jobs.details[job] = {"publication": {}}
+        fake_task_jobs.job_ids[job] = "job-0"  # ours, so it's the missing trials that leave the task bare
     elif job_state == "denied":
         response = httpx.Response(403, request=httpx.Request("GET", "http://jobs.test"))
         fake_task_jobs.failures[job] = PermissionDeniedError(response)

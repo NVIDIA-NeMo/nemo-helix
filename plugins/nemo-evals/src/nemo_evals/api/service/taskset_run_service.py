@@ -430,7 +430,8 @@ class TasksetRunService:
         """Read one task of a run, with its trials read from its task Job on this request.
 
         The Job is read as the caller. If the caller can't read it, the Job no longer exists or can't be reached,
-        or it reported no trials, the task is returned without ``trials``.
+        it isn't the Job the run registered for this task, or it reported no trials, the task is returned without
+        ``trials``.
 
         Returns:
             The task with its trials, or None when the run or that task's member doesn't exist.
@@ -448,13 +449,19 @@ class TasksetRunService:
             return task
 
         try:
-            details = await self._task_jobs.status_details(workspace, member.task_job)
+            job = await self._task_jobs.job_details(workspace, member.task_job)
         except NemoClientError as exc:
             # Trials are display-only: a Jobs read that fails mustn't fail a read of the stored task.
             logger.info("Can't read the trials of task Job %s: %s", member.task_job, type(exc).__name__)
             return task
 
-        trials = reported_trials(details)
+        # Only the Job the member registered speaks for it. The name outlives that Job once it ends and is deleted,
+        # and a foreign Job may hold the name from before registration; either would show another Job's trials as
+        # this task's. A member with no job_id never registered one, so no Job under its name is its own.
+        if job is None or member.job_id is None or job.job_id != member.job_id:
+            return task
+
+        trials = reported_trials(job.status_details)
         if not trials:
             return task
 

@@ -410,6 +410,7 @@ async def test_get_task_returns_its_trials_and_omits_nulls(read_client, seed_run
     fake_task_jobs.details["run-selected-task-2"] = {
         "trials": [{"trial": "hello__a", "phase": "verifying", "attempts": 1}]
     }
+    fake_task_jobs.job_ids["run-selected-task-2"] = "job-2"
 
     response = await read_client.get(f"{PATH}/run-selected/tasks/2")
 
