@@ -1861,6 +1861,8 @@ def test_authentik_compose_e2e_config_uses_global_docker_workload_identity_switc
     )
 
     assert "workload_identity" not in workload_executor["config"]
+    # The volume holds the gateway key and the platform's CA files; job code must not change them.
+    assert workload_executor["config"]["storage"]["additional_volume_mounts"][0]["read_only"] is True
 
 
 def test_authentik_compose_e2e_config_sets_deployments_workload_network() -> None:

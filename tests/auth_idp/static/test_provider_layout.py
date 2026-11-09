@@ -353,6 +353,7 @@ def test_authentik_compose_mounts_gateway_ca_into_docker_workloads():
         {
             "volume_name": gateway_tls_volume_name,
             "mount_path": "/etc/nhx/gateway-tls",
+            "read_only": True,
         }
     ]
 

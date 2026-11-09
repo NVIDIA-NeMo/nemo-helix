@@ -85,6 +85,9 @@ jobs:
           additional_volume_mounts:
             - volume_name: "authentik_gateway_tls"
               mount_path: "/etc/nhx/gateway-tls"
+              # The volume also holds the gateway's private key and the CA files the platform
+              # trusts, so job code must not be able to change it.
+              read_only: true
   executor_defaults:
     docker:
       cleanup_completed_jobs_immediately: true
