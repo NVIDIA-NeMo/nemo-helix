@@ -6,7 +6,8 @@
 Focus: the hand-written flat backend command installed by
 ``apply_job_cli_overrides`` must resolve ``--workspace`` the same way the
 auto-generated verbs do — explicit flag > ``$NHX_WORKSPACE`` > the active
-CLI context's configured workspace > ``"default"``.
+CLI context's configured workspace > ``"default"``. It must also report a bad
+job JSON as a CLI error rather than a traceback.
 """
 
 from __future__ import annotations
@@ -17,7 +18,20 @@ from pathlib import Path
 import pytest
 import typer
 from nhx.customization_common.cli.overrides import apply_job_cli_overrides
+from nhx.customization_common.contributor.jobs import BaseSubmitJob
+from pydantic import BaseModel, ConfigDict
 from typer.testing import CliRunner
+
+
+class _Job(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: dict[str, str]
+
+
+def _load_job_json(path: Path) -> str:
+    """Read and validate the file against a strict schema, as each backend's loader does."""
+    return _Job.model_validate(json.loads(path.read_text())).model_dump_json()
 
 
 class _ContextState:
@@ -45,8 +59,9 @@ def _build_app(calls: list[dict[str, object]]) -> typer.Typer:
     apply_job_cli_overrides(
         app,
         backend="plugin",
-        load_job_json=lambda path: json.dumps(json.loads(Path(path).read_text())),
+        load_job_json=_load_job_json,
         job_json_help="Path to the job JSON.",
+        job_cls=BaseSubmitJob,
     )
     return app
 
@@ -133,3 +148,33 @@ class TestSubmitWorkspaceResolution:
         assert "Error: --job-json is required." in result.output
         assert "Usage:" in result.output
         assert calls == []
+
+
+@pytest.mark.parametrize("flags", [[], ["--dry-run"]], ids=["submit", "dry-run"])
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ('{"model": {"name": "m"}, "unrecognized_option": true}', ["invalid job JSON", "unrecognized_option"]),
+        ('{"model": ', ["could not read"]),
+        (None, ["could not read", "No such file"]),
+    ],
+    ids=["unknown-field", "malformed-json", "missing-file"],
+)
+def test_a_bad_job_json_is_a_cli_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: list[str], content: str | None, expected: list[str]
+) -> None:
+    monkeypatch.delenv("NHX_WORKSPACE", raising=False)
+    job_file = tmp_path / "job.json"
+    if content is not None:
+        job_file.write_text(content)
+    calls: list[dict[str, object]] = []
+    parent = _app_with_state(_build_app(calls), None)
+
+    result = CliRunner().invoke(parent, ["plugin", "--job-json", str(job_file), *flags])
+
+    # An unhandled error would surface as result.exception and print a traceback from the real CLI.
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert result.exit_code == 2, result.output
+    for text in expected:
+        assert text in result.output
+    assert calls == []

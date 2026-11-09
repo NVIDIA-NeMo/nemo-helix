@@ -247,7 +247,7 @@ def _replace_job_callback(
             )
 
         if upload_model is None and upload_dataset is None and upload_environment is None:
-            spec_json = load_job_json(job_json)
+            spec_json = _load(job_json, load_job_json)
         else:
             if spec_refs is None or validate_job_spec is None:
                 raise typer.BadParameter(f"The {backend} backend cannot create resources at submit time.")
@@ -358,7 +358,7 @@ def _dry_run(
         dry_run_remote(
             typer_ctx,
             job_cls,
-            load_job_json(job_json),
+            _load(job_json, load_job_json),
             backend=backend,
             workspace=workspace,
             profile=profile,
@@ -397,6 +397,18 @@ def _reject_conflicts(
         err=True,
     )
     raise typer.Exit(code=2)
+
+
+def _load(job_json: Path, load_job_json: LoadJobJson) -> str:
+    """Run the backend's ``load_job_json``, reporting a bad file or schema as a CLI error."""
+    try:
+        return load_job_json(job_json)
+    except (OSError, json.JSONDecodeError) as exc:
+        typer.echo(f"Error: could not read {job_json}: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except ValidationError as exc:
+        typer.echo(f"Error: invalid job JSON — {exc}", err=True)
+        raise typer.Exit(code=2) from exc
 
 
 def _read_job_json(job_json: Path) -> dict:
