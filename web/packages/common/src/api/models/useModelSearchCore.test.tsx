@@ -1,19 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useModelSearch } from '@nemo/common/src/api/models/useModelSearch';
-import { modelsListModels } from '@nemo/sdk/generated/platform/models';
+import type { ListModels } from '@nemo/common/src/api/models/modelPages';
+import { useModelSearchCore } from '@nemo/common/src/api/models/useModelSearchCore';
 import type { ModelEntity, ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-vi.mock('@nemo/sdk/generated/platform/models', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/models')>();
-  return { ...actual, modelsListModels: vi.fn() };
-});
-
-const mockListModels = vi.mocked(modelsListModels);
+const mockListModels = vi.fn<ListModels>();
 
 const createWrapper = () => {
   const queryClient = new QueryClient({
@@ -30,21 +25,28 @@ const makeModel = (name: string, overrides: Partial<ModelEntity> = {}): ModelEnt
 const makePage = (data: ModelEntity[], page: number, totalPages: number): ModelEntitysPage =>
   ({ data, pagination: { page, total_pages: totalPages } }) as ModelEntitysPage;
 
-const renderSearch = (options: Partial<Parameters<typeof useModelSearch>[0]> = {}) =>
-  renderHook(() => useModelSearch({ workspace: 'ws1', ...options }), { wrapper: createWrapper() });
+const renderSearch = (options: Partial<Parameters<typeof useModelSearchCore>[0]> = {}) =>
+  renderHook(
+    () => useModelSearchCore({ workspace: 'ws1', listModels: mockListModels, ...options }),
+    {
+      wrapper: createWrapper(),
+    }
+  );
 
 beforeEach(() => {
   mockListModels.mockReset();
 });
 
-describe('useModelSearch', () => {
+describe('useModelSearchCore', () => {
   it('stays idle while disabled', () => {
     renderSearch({ enabled: false });
     expect(mockListModels).not.toHaveBeenCalled();
   });
 
   it('stays idle without a workspace', () => {
-    renderHook(() => useModelSearch({ workspace: null }), { wrapper: createWrapper() });
+    renderHook(() => useModelSearchCore({ workspace: null, listModels: mockListModels }), {
+      wrapper: createWrapper(),
+    });
     expect(mockListModels).not.toHaveBeenCalled();
   });
 
@@ -98,6 +100,20 @@ describe('useModelSearch', () => {
     await waitFor(() => expect(result.current.models.map((m) => m.name)).toEqual(['served']));
     expect(mockListModels).toHaveBeenCalledTimes(2);
     expect(result.current.hasMore).toBe(false);
+  });
+
+  it('stops auto-paging after a next page fails', async () => {
+    mockListModels
+      .mockResolvedValueOnce(makePage([makeModel('no-provider')], 1, 3))
+      .mockImplementation(
+        () => new Promise((_, reject) => setTimeout(() => reject(new Error('boom')), 10))
+      );
+
+    const { result } = renderSearch({ include: (model) => !!model.model_providers?.length });
+
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(mockListModels).toHaveBeenCalledTimes(2);
   });
 
   it('appends the next page on demand', async () => {
