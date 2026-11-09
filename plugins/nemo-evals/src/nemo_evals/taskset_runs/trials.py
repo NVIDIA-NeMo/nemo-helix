@@ -5,13 +5,18 @@
 
 A task Job runs its task's Harbor trials one at a time and can take hours, while the run only learns a task's
 outcome when its Job ends. So the Job reports each trial's progress under :data:`TRIALS_STATUS_KEY` as Harbor
-moves through it (see ``nemo_evals.harbor.trial_progress``).
+moves through it (see ``nemo_evals.harbor.trial_progress``): the run's task API reads the list as it is, and the run
+controller copies a :class:`TrialCounts` summary onto the task's member each time it reads the Job, so run and task
+pages can show trial progress without reading every Job.
 """
 
+from collections import Counter
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from enum import StrEnum
+from statistics import fmean
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 TRIALS_STATUS_KEY = "trials"
 """Status-details key under which a task Job reports its trials, as a list of :class:`TrialProgress`."""
@@ -50,3 +55,79 @@ class TrialProgress(BaseModel):
     reward: float | None = Field(default=None, description="The verifier's primary reward for the last attempt.")
     error_type: str | None = Field(default=None, description="Exception type of the last failed attempt.")
     error: str | None = Field(default=None, description="Exception message of the last failed attempt, truncated.")
+
+
+class TrialCounts(BaseModel):
+    """A task's trials counted by phase, with their mean reward: what run and task lists show per task."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    total: int = Field(ge=0, description="Trials the task Job planned.")
+    phases: dict[TrialPhase, int] = Field(
+        default_factory=dict,
+        description=(
+            'Trials by phase, for example {"pending": 1, "agent_running": 1, "succeeded": 2}; a phase with no '
+            "trials is left out."
+        ),
+    )
+    rewarded: int = Field(default=0, ge=0, description="Trials with a reward; reward averages over them.")
+    reward: float | None = Field(default=None, description="Mean reward over the rewarded trials; None without any.")
+    errors: dict[str, int] = Field(
+        default_factory=dict, description="Errored trials by exception type, for example {'AgentTimeoutError': 1}."
+    )
+
+
+def count_trials(trials: Sequence[TrialProgress]) -> TrialCounts:
+    """Count ``trials`` by phase and average their rewards."""
+    rewards = [trial.reward for trial in trials if trial.reward is not None]
+    errors = Counter(trial.error_type or "error" for trial in trials if trial.phase is TrialPhase.ERRORED)
+
+    return TrialCounts(
+        total=len(trials),
+        phases=dict(Counter(trial.phase for trial in trials)),
+        rewarded=len(rewards),
+        reward=fmean(rewards) if rewards else None,
+        errors=dict(errors),
+    )
+
+
+def reported_trials(status_details: object) -> list[TrialProgress] | None:
+    """The trials a task Job reported in ``status_details``; None when it reported none or a shape we can't read.
+
+    The Job reports them best effort, and an older dispatcher reports nothing: neither may break a read.
+    """
+    if not isinstance(status_details, dict):
+        return None
+    reported = status_details.get(TRIALS_STATUS_KEY)
+    if not isinstance(reported, list):
+        return None
+    try:
+        return [TrialProgress.model_validate(item) for item in reported]
+    except ValidationError:
+        return None
+
+
+def sum_trial_counts(counts: Iterable[TrialCounts]) -> TrialCounts | None:
+    """Sum trial counts across tasks; None when no task has any.
+
+    ``reward`` is the mean of each task's mean reward, so every task counts equally regardless of how many trials
+    it ran, as Harbor scores a benchmark.
+    """
+    counts = list(counts)
+    if not counts:
+        return None
+
+    phases: Counter[TrialPhase] = Counter()
+    errors: Counter[str] = Counter()
+    for count in counts:
+        phases.update(count.phases)
+        errors.update(count.errors)
+    task_rewards = [count.reward for count in counts if count.reward is not None]
+
+    return TrialCounts(
+        total=sum(count.total for count in counts),
+        phases=dict(phases),
+        rewarded=sum(count.rewarded for count in counts),
+        reward=fmean(task_rewards) if task_rewards else None,
+        errors=dict(errors),
+    )
