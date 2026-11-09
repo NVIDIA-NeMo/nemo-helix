@@ -263,13 +263,18 @@ def test_authentik_static_ci_prepares_envoy_validation_inputs() -> None:
 
 
 def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:
-    ci_workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
-    job = _workflow_job_block(ci_workflow, "python-auth-idp-e2e-test")
+    workflow_path = Path(".github/workflows/e2e.yaml")
+    workflow = _load_yaml(workflow_path)
+    runtime_job = workflow["jobs"]["python-auth-idp-e2e-test"]
+    job = _workflow_job_block(workflow_path.read_text(encoding="utf-8"), "python-auth-idp-e2e-test")
 
-    assert "needs.policy-wasm.result == 'success'" in job
-    assert "needs.build-cpu-smoke-images.result == 'success'" in job
-    assert "needs.build-cpu-smoke-images.outputs.publish_images == 'true'" in job
-    assert "needs.python-auth-idp-static-test.result == 'success'" in job
+    assert set(runtime_job["needs"]) == {
+        "eligibility",
+        "policy-wasm",
+        "build-cpu-smoke-images",
+        "python-auth-idp-static-test",
+    }
+    assert runtime_job["if"] == "needs.build-cpu-smoke-images.outputs.publish_images == 'true'"
     assert '--image "${IMAGE_REGISTRY}/nhx-api:${BAKE_TAG}"' in job
 
 
@@ -1232,7 +1237,7 @@ def test_authentik_kubernetes_runner_uses_helm_not_kustomize() -> None:
     run_sh = (AUTHENTIK_DIR / "run.sh").read_text(encoding="utf-8")
     live_test_path = Path("tests/auth_idp/k8s/test_authentik_kubernetes_live.py")
     live_test = live_test_path.read_text(encoding="utf-8")
-    ci_workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
+    ci_workflow = Path(".github/workflows/e2e.yaml").read_text(encoding="utf-8")
 
     assert "NHX_AUTHENTIK_K8S_HELM_RELEASE" in run_sh
     assert 'K8S_RUNTIME="${NHX_AUTHENTIK_K8S_RUNTIME:-kind}"' in run_sh
@@ -1365,7 +1370,7 @@ def test_authentik_runner_rejects_removed_bare_compose_and_k8s_aliases() -> None
 
 
 def test_authentik_ci_workflow_uses_explicit_test_actions() -> None:
-    workflow = _load_yaml(Path(".github/workflows/ci.yaml"))
+    workflow = _load_yaml(Path(".github/workflows/e2e.yaml"))
     matrix_include = workflow["jobs"]["python-auth-idp-e2e-test"]["strategy"]["matrix"]["include"]
 
     commands_by_runtime = {
@@ -1379,7 +1384,7 @@ def test_authentik_ci_workflow_uses_explicit_test_actions() -> None:
 
 
 def test_authentik_ci_workflow_does_not_carry_separate_k3d_runner() -> None:
-    workflow = _load_yaml(Path(".github/workflows/ci.yaml"))
+    workflow = _load_yaml(Path(".github/workflows/e2e.yaml"))
 
     assert "python-auth-idp-k3d-e2e-test" not in workflow["jobs"]
 
