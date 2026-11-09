@@ -20,17 +20,19 @@ import hashlib
 import json
 from typing import Final
 
-from nemo_evals.jobs.utils import run_with_isolated_async_client
-from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.job_context import JobContext
-from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
-from nemo_helix_plugin.jobs.types import HelixJobAttemptResponse
+from nemo_helix_plugin.jobs.client import JobsClient
 
 TASKS_FROM_KEY: Final = "tasks_from"
 TASKS_DIGEST_KEY: Final = "tasks_digest"
 TASKS_FROM_ATTEMPT: Final = "attempt"
 _DIGEST_PREFIX: Final = "sha256-v1:"
 _FROZEN_KEYS: Final = ("tasks", "trials")
+
+#: The service the agent-evaluate task runs as (see :mod:`nemo_evals.tasks.agent_evaluate`).
+TASK_SERVICE_NAME: Final = "evals"
 
 
 class AttemptTasksError(RuntimeError):
@@ -52,15 +54,19 @@ def step_config_without_tasks(spec: dict) -> dict:
     return config
 
 
-def load_attempt_tasks(config: dict, *, ctx: JobContext, client: NemoClient | AsyncNemoClient | None) -> dict:
+def load_attempt_tasks(config: dict, *, ctx: JobContext, client: NemoClient | None = None) -> dict:
     """``config`` with its frozen tasks and trials restored from the job attempt it runs in.
 
     A config without :data:`TASKS_FROM_KEY` (a local run, a taskset-run task Job, a job compiled before
     the tasks moved out) is returned unchanged, and nothing is read.
 
+    ``client`` reads the attempt. Without one (the async worker), the platform's client provider builds a sync
+    task client for the read, the same way the task runner builds the worker's clients, so the read uses the
+    deployment's CA bundle, transport and routing.
+
     Raises:
         AttemptTasksError: The config names an unknown source or carries no digest; the run has no job
-            attempt or client to read from; the read fails; or the attempt's tasks don't match the digest.
+            attempt; the read fails; or the attempt's tasks don't match the digest.
     """
     if TASKS_FROM_KEY not in config:
         return config
@@ -71,16 +77,17 @@ def load_attempt_tasks(config: dict, *, ctx: JobContext, client: NemoClient | As
         raise AttemptTasksError(f"step config names an unknown task source {source!r}; expected {TASKS_FROM_ATTEMPT!r}")
     if not isinstance(expected, str) or not expected.startswith(_DIGEST_PREFIX):
         raise AttemptTasksError(f"step config's {TASKS_DIGEST_KEY} is missing or not a {_DIGEST_PREFIX} digest")
-    if ctx.job_id is None or ctx.attempt_id is None or client is None:
-        raise AttemptTasksError(
-            "step config's tasks are on its job attempt, but this run has no job attempt or platform client to read them"
-        )
+    if ctx.job_id is None or ctx.attempt_id is None:
+        raise AttemptTasksError("step config's tasks are on its job attempt, but this run has no job attempt")
     job, attempt_id = ctx.job_id, ctx.attempt_id
     try:
-        attempt = _get_attempt(client, workspace=ctx.workspace, job=job, attempt=attempt_id)
+        if client is not None:
+            spec = _attempt_spec(client, workspace=ctx.workspace, job=job, attempt=attempt_id)
+        else:
+            with get_task_nemo_client(TASK_SERVICE_NAME, workspace=ctx.workspace) as task_client:
+                spec = _attempt_spec(task_client, workspace=ctx.workspace, job=job, attempt=attempt_id)
     except Exception as exc:
         raise AttemptTasksError(f"could not read the tasks of job {job!r} from its attempt {attempt_id!r}") from exc
-    spec = attempt.spec
     if not isinstance(spec.get("tasks"), list):
         raise AttemptTasksError(f"attempt {attempt_id!r} of job {job!r} has no task list in its spec")
     actual = frozen_tasks_digest(spec)
@@ -94,25 +101,15 @@ def load_attempt_tasks(config: dict, *, ctx: JobContext, client: NemoClient | As
     return rest
 
 
-def _get_attempt(
-    client: NemoClient | AsyncNemoClient, *, workspace: str, job: str, attempt: str
-) -> HelixJobAttemptResponse:
-    if isinstance(client, AsyncNemoClient):
-
-        async def _read(async_client: AsyncNemoClient) -> HelixJobAttemptResponse:
-            response = await AsyncJobsClient.from_client(async_client).get_job_attempt(
-                workspace=workspace, job=job, attempt=attempt
-            )
-            return response.data()
-
-        return run_with_isolated_async_client(client, _read)
-    return JobsClient.from_client(client).get_job_attempt(workspace=workspace, job=job, attempt=attempt).data()
+def _attempt_spec(client: NemoClient, *, workspace: str, job: str, attempt: str) -> dict:
+    return JobsClient.from_client(client).get_job_attempt(workspace=workspace, job=job, attempt=attempt).data().spec
 
 
 __all__ = [
     "TASKS_DIGEST_KEY",
     "TASKS_FROM_ATTEMPT",
     "TASKS_FROM_KEY",
+    "TASK_SERVICE_NAME",
     "AttemptTasksError",
     "frozen_tasks_digest",
     "load_attempt_tasks",

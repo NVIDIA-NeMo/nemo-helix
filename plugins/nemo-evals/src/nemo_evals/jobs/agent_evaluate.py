@@ -903,5 +903,5 @@ class AsyncAgentEvalJob(_AgentEvalJobBase):
         async_client: AsyncNemoClient,
     ) -> dict:
         """Run the agent evaluation in a task container and persist async side effects."""
-        config = load_attempt_tasks(config, ctx=ctx, client=async_client)
+        config = load_attempt_tasks(config, ctx=ctx)
         return self._run_with_client(config, ctx=ctx, platform_client=async_client, async_client=async_client)

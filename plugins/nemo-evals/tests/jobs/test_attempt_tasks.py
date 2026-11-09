@@ -3,9 +3,8 @@
 
 """Agent-evaluate step configs leave their tasks on the job attempt, and workers read them back."""
 
-import asyncio
 import json
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
@@ -18,6 +17,7 @@ from nemo_evals.jobs.agent_compiler import compile_agent_eval_job
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob, AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec
 from nemo_evals.jobs.attempt_tasks import (
+    TASK_SERVICE_NAME,
     TASKS_DIGEST_KEY,
     TASKS_FROM_ATTEMPT,
     TASKS_FROM_KEY,
@@ -92,23 +92,24 @@ class _Platform:
 
     def sync_client(self) -> NemoClient:
         return NemoClient(
-            base_url=BASE, workspace="default", http_client=httpx.Client(transport=httpx.MockTransport(self))
+            base_url=BASE,
+            workspace="default",
+            http_client=httpx.Client(transport=httpx.MockTransport(self)),
+            owns_http_client=True,
         )
 
-    def async_client(self) -> AsyncNemoClient:
-        return AsyncNemoClient(
-            base_url=BASE, workspace="default", http_client=httpx.AsyncClient(transport=httpx.MockTransport(self))
-        )
 
+class _TaskClients:
+    """Stands in for the platform's client provider and records each task client it builds."""
 
-@pytest.fixture(autouse=True)
-def _same_transport_for_isolated_async_calls(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The production helper clones the client onto a fresh httpx client; keep the mock transport instead."""
+    def __init__(self, platform: _Platform) -> None:
+        self.platform = platform
+        self.built: list[tuple[str, str | None, NemoClient]] = []
 
-    def run(client: AsyncNemoClient, fn: Callable[[AsyncNemoClient], Coroutine[Any, Any, Any]]) -> Any:
-        return asyncio.run(fn(client))
-
-    monkeypatch.setattr(attempt_tasks_module, "run_with_isolated_async_client", run)
+    def __call__(self, service_name: str, *, workspace: str | None = None) -> NemoClient:
+        client = self.platform.sync_client()
+        self.built.append((service_name, workspace, client))
+        return client
 
 
 # --- Compile -----------------------------------------------------------------------------------------------
@@ -220,9 +221,31 @@ def test_both_workers_run_the_attempts_tasks(
         AgentEvalJob().run(config, ctx=_ctx(), client=platform.sync_client())
     else:
         monkeypatch.setattr(AsyncAgentEvalJob, "_run_with_client", run)
-        AsyncAgentEvalJob().run(config, ctx=_ctx(), async_client=platform.async_client())
+        monkeypatch.setattr(attempt_tasks_module, "get_task_nemo_client", _TaskClients(platform))
+        AsyncAgentEvalJob().run(config, ctx=_ctx(), async_client=MagicMock(spec=AsyncNemoClient))
     assert seen == [harbor_spec]
     assert len(platform.paths) == 1
+
+
+def test_the_async_worker_reads_through_a_provider_built_task_client(
+    harbor_spec: AgentEvalSpec, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The read uses a task client the platform's provider builds (its CA, transport and routing), then closes it.
+
+    The async worker's own client is never used for it: a loop-local copy of it would lose those settings.
+    """
+    stored, compiled, config = _stored_and_compiled(harbor_spec)
+    task_clients = _TaskClients(_Platform(_attempt_body(stored, compiled)))
+    monkeypatch.setattr(attempt_tasks_module, "get_task_nemo_client", task_clients)
+    async_client = MagicMock(spec=AsyncNemoClient)
+    monkeypatch.setattr(AsyncAgentEvalJob, "_run_with_client", lambda self, config, **_: {"status": "completed"})
+
+    AsyncAgentEvalJob().run(config, ctx=_ctx(), async_client=async_client)
+
+    ((service_name, workspace, client),) = task_clients.built
+    assert (service_name, workspace) == (TASK_SERVICE_NAME, "default")
+    assert client.http_client.is_closed
+    assert async_client.mock_calls == []
 
 
 def test_a_config_without_the_marker_reads_nothing(harbor_spec: AgentEvalSpec) -> None:
@@ -250,7 +273,7 @@ def test_a_failed_read_fails_the_run(harbor_spec: AgentEvalSpec) -> None:
     [
         ({TASKS_FROM_KEY: "fileset"}, _ctx(), "unknown task source 'fileset'"),
         ({TASKS_DIGEST_KEY: "md5:abc"}, _ctx(), "missing or not a sha256-v1: digest"),
-        ({}, _ctx(attempt_id=None), "no job attempt or platform client"),
+        ({}, _ctx(attempt_id=None), "this run has no job attempt"),
     ],
 )
 def test_a_config_the_worker_cannot_trust_is_refused(
