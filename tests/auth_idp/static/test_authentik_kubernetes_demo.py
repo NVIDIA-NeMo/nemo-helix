@@ -481,7 +481,7 @@ def test_authentik_kubernetes_platform_client_uses_runtime_timeout(monkeypatch: 
             self.http_client = http_client
             self.owns_http_client = owns_http_client
 
-    monkeypatch.setattr(live_test.httpx, "Client", FakeHttpClient)
+    monkeypatch.setattr(live_test, "HttpClient", FakeHttpClient)
     monkeypatch.setattr(live_test, "NemoClient", FakeNemoClient)
 
     runtime = object.__new__(live_test.KubernetesAuthIdpRuntime)
@@ -707,7 +707,7 @@ def test_authentik_kubernetes_port_forward_times_out_without_readiness(monkeypat
 
     monotonic_values = iter([0.0, 0.0, 31.0])
     monkeypatch.setattr(live_test, "_free_port", lambda: 19001)
-    monkeypatch.setattr(live_test.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(live_test, "Popen", lambda *args, **kwargs: FakeProcess())
     monkeypatch.setattr(live_test, "monotonic", lambda: next(monotonic_values))
     monkeypatch.setattr(live_test, "pause", lambda seconds: None)
     requested_urls = []
@@ -716,7 +716,7 @@ def test_authentik_kubernetes_port_forward_times_out_without_readiness(monkeypat
         requested_urls.append(url)
         raise live_test.httpx.ConnectError("not ready")
 
-    monkeypatch.setattr(live_test.httpx, "get", fake_get)
+    monkeypatch.setattr(live_test, "http_get", fake_get)
 
     with pytest.raises(TimeoutError, match="timed out waiting for port-forward readiness"):
         live_test._start_port_forward_service("kind-ci", "nemo-helix-envoy", Path("ca.crt"))
@@ -750,7 +750,7 @@ def test_authentik_kubernetes_port_forward_reports_process_log(monkeypatch: pyte
         getattr(stdout, "flush")()
         return FakeProcess()
 
-    monkeypatch.setattr(live_test.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(live_test, "Popen", fake_popen)
 
     with pytest.raises(AssertionError, match="address already in use"):
         live_test._start_port_forward_service("kind-ci", "nemo-helix-envoy", Path("ca.crt"))
@@ -784,12 +784,12 @@ def test_authentik_kubernetes_port_forward_waits_after_kill(monkeypatch: pytest.
 
     monotonic_values = iter([0.0, 0.0, 31.0])
     monkeypatch.setattr(live_test, "_free_port", lambda: 19001)
-    monkeypatch.setattr(live_test.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(live_test, "Popen", lambda *args, **kwargs: FakeProcess())
     monkeypatch.setattr(live_test, "monotonic", lambda: next(monotonic_values))
     monkeypatch.setattr(live_test, "pause", lambda seconds: None)
     monkeypatch.setattr(
-        live_test.httpx,
-        "get",
+        live_test,
+        "http_get",
         lambda *args, **kwargs: (_ for _ in ()).throw(live_test.httpx.ConnectError("not ready")),
     )
 
@@ -819,7 +819,7 @@ def test_authentik_kubernetes_diagnostics_records_pod_discovery_timeout(
             stderr="kubectl timed out\n",
         )
 
-    monkeypatch.setattr(live_test.subprocess, "run", raise_timeout)
+    monkeypatch.setattr(live_test, "run_process", raise_timeout)
 
     log_dir = live_test._collect_kubernetes_diagnostics("kind-ci", "ci")
 
@@ -1932,7 +1932,12 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
         "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
         "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
     }
-    expected_storage = nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["storage"]
+    # executor_defaults don't apply to cpu/workload, so its storage sets the core PVC beside the CA volume.
+    expected_storage = {
+        "pvc_name": '{{ include "nhx-core.persistentVolumeClaim" . }}',
+        "volume_permissions_image": "{{ .Values.core.storage.volumePermissionsImage }}",
+        **nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["storage"],
+    }
     assert workload_config["storage"] == expected_storage
     assert not any(
         executor["provider"] == "gpu_distributed" and executor["profile"] == "default"

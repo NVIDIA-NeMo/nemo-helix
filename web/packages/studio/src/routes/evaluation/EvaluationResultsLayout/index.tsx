@@ -8,7 +8,7 @@ import { MODEL_EVALUATION_FORM_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getEvaluationNewRoute } from '@studio/routes/utils';
-import { FC, useEffect } from 'react';
+import { type FC, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 
 export const EvaluationResultsLayout: FC = () => {

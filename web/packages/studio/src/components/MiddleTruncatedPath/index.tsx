@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { splitLastSegment } from '@studio/components/MiddleTruncatedPath/splitLastSegment';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 /** Ellipsizes a path in the middle so its last segment (the file name) stays visible at any width. */
 export const MiddleTruncatedPath: FC<{ children: string }> = ({ children }) => {

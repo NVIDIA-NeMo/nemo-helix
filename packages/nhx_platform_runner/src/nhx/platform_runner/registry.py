@@ -6,10 +6,13 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from functools import cache
+from importlib.metadata import EntryPoint
 
-from nemo_helix_plugin.discovery import discover_controllers, discover_services
+from nemo_helix_plugin.controller import NemoController
+from nemo_helix_plugin.discovery import discover_entry_points
+from nemo_helix_plugin.service import NemoService
 from nhx.common.service import Service
 from nhx.platform_runner.loader import ControllerRunFunc
 from nhx.platform_runner.plugin_adapter import NemoServiceAdapter, make_controller_run_func
@@ -85,37 +88,18 @@ OPENAPI_SERVICES = [
 
 
 @cache
-def get_available_controllers() -> dict[str, str | ControllerRunFunc]:
-    """Return all available controller run functions for the current run.
+def get_available_controllers() -> PluginRegistry[ControllerRunFunc]:
+    """Return all available controllers for the current run, loading plugin controllers on lookup.
 
-    Merges built-in core controllers (stored as ``"module:object"`` import
-    strings) with plugin controllers discovered via the ``nemo.controllers``
-    entry-point group (converted to ``run(stop_signal)`` callables via
-    :func:`~nhx.platform_runner.plugin_adapter.make_controller_run_func`).
-
-    Returns:
-        Mapping of controller name → string import path or run callable.
+    Built-in core controllers are ``"module:object"`` import strings. Plugin controllers come from
+    the ``nemo.controllers`` entry-point group and become ``run(stop_signal)`` callables via
+    :func:`~nhx.platform_runner.plugin_adapter.make_controller_run_func` when looked up.
     """
-    controllers: dict[str, str | ControllerRunFunc] = dict(AVAILABLE_CONTROLLERS)
-
-    for name, controller_cls in discover_controllers().items():
-        try:
-            controllers[name] = make_controller_run_func(controller_cls)
-            logger.debug("Registered plugin controller %r", name)
-        except Exception:
-            logger.warning(
-                "Failed to create run function for plugin controller %r from %s.%s",
-                name,
-                controller_cls.__module__,
-                controller_cls.__qualname__,
-                exc_info=True,
-            )
-
-    return controllers
+    return PluginRegistry(AVAILABLE_CONTROLLERS, discover_entry_points("nemo.controllers"), _load_plugin_controller)
 
 
 def get_controller_groups(
-    available_controllers: dict[str, str | ControllerRunFunc] | None = None,
+    available_controllers: Mapping[str, str | ControllerRunFunc] | None = None,
 ) -> dict[str, list[str]]:
     """Return dynamic controller groups for the current run."""
     available_controllers = available_controllers or get_available_controllers()
@@ -146,28 +130,115 @@ def get_default_controllers(
     return get_controllers_for_group(controller_groups, "all")
 
 
+class PluginRegistry[V](Mapping[str, str | V]):
+    """Built-in ``"module:object"`` import strings plus installed plugins, keyed by name.
+
+    A plugin is imported only when looked up: importing every installed plugin costs seconds per
+    process, and most runs start only a few of them.
+    """
+
+    def __init__(
+        self,
+        core: Mapping[str, str],
+        plugins: Mapping[str, EntryPoint],
+        load: Callable[[str, EntryPoint], V | None],
+    ) -> None:
+        self._core = dict(core)
+        self._plugins = dict(plugins)
+        self._load = load
+        self._loaded: dict[str, V] = {}
+        self._failed: set[str] = set()
+
+    def __getitem__(self, name: str) -> str | V:
+        if name in self._loaded:
+            return self._loaded[name]
+        if name in self._plugins and name not in self._failed:
+            value = self._load(name, self._plugins[name])
+            if value is not None:
+                self._loaded[name] = value
+                return value
+            self._failed.add(name)
+        return self._core[name]
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._core or (name in self._plugins and name not in self._failed)
+
+    def __iter__(self) -> Iterator[str]:
+        names = dict.fromkeys([*self._core, *self._plugins])
+        return iter([name for name in names if name in self])
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+
+def _load_plugin_class[T](group: str, name: str, entry_point: EntryPoint, base: type[T]) -> type[T] | None:
+    try:
+        cls = entry_point.load()
+    except Exception:
+        logger.warning("Failed to load %r from %r (%s) — skipping", name, group, entry_point.value)
+        logger.debug("Traceback for failed load of %r from %r:", name, group, exc_info=True)
+        return None
+    if not (isinstance(cls, type) and issubclass(cls, base)):
+        logger.warning(
+            "%s entry %r (%s) is not a %s subclass — skipping", group, name, entry_point.value, base.__name__
+        )
+        return None
+    cls_name = getattr(cls, "name", None)
+    if cls_name != name:
+        logger.warning(
+            "%s entry %r: class %s declares name=%r — name must match the pyproject.toml entry-point key",
+            group,
+            name,
+            getattr(cls, "__qualname__", cls),
+            cls_name,
+        )
+    return cls
+
+
+def _load_plugin_controller(name: str, entry_point: EntryPoint) -> ControllerRunFunc | None:
+    controller_cls = _load_plugin_class("nemo.controllers", name, entry_point, NemoController)
+    if controller_cls is None:
+        return None
+    try:
+        run_func = make_controller_run_func(controller_cls)
+    except Exception:
+        logger.warning(
+            "Failed to create run function for plugin controller %r from %s.%s",
+            name,
+            controller_cls.__module__,
+            controller_cls.__qualname__,
+            exc_info=True,
+        )
+        return None
+    logger.debug("Registered plugin controller %r", name)
+    return run_func
+
+
+def _load_plugin_service(name: str, entry_point: EntryPoint) -> Service | None:
+    service_cls = _load_plugin_class("nemo.services", name, entry_point, NemoService)
+    if service_cls is None:
+        return None
+    try:
+        return NemoServiceAdapter(service_cls())
+    except Exception:
+        logger.warning(
+            "Failed to instantiate plugin service %r from %s.%s",
+            name,
+            service_cls.__module__,
+            service_cls.__qualname__,
+            exc_info=True,
+        )
+        return None
+
+
 @cache
-def get_available_services() -> dict[str, str | Service]:
-    """Return all available services for the current run."""
-    services: dict[str, str | Service] = dict(AVAILABLE_SERVICES)
-
-    for name, service_cls in discover_services().items():
-        try:
-            services[name] = NemoServiceAdapter(service_cls())
-        except Exception:
-            logger.warning(
-                "Failed to instantiate plugin service %r from %s.%s",
-                name,
-                service_cls.__module__,
-                service_cls.__qualname__,
-                exc_info=True,
-            )
-
-    return services
+def get_available_services() -> PluginRegistry[Service]:
+    """Return all available services for the current run, loading plugin services on lookup."""
+    return PluginRegistry(AVAILABLE_SERVICES, discover_entry_points("nemo.services"), _load_plugin_service)
 
 
 def get_service_groups(
-    available_services: dict[str, str | Service] | None = None,
+    available_services: Mapping[str, str | Service] | None = None,
 ) -> dict[str, list[str]]:
     """Return dynamic service groups for the current run."""
     available_services = available_services or get_available_services()
@@ -190,7 +261,7 @@ def get_services_for_group(service_groups: dict[str, list[str]], group: str) -> 
     return service_groups[group]
 
 
-def get_openapi_service_names(available_services: dict[str, str | Service] | None = None) -> list[str]:
+def get_openapi_service_names(available_services: Mapping[str, str | Service] | None = None) -> list[str]:
     """Return the intentionally included services for platform OpenAPI generation."""
     available_services = available_services or get_available_services()
     return [service_name for service_name in OPENAPI_SERVICES if service_name in available_services]

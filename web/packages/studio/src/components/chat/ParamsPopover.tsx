@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { InfoCircle, Retry, Sliders } from '@nemo/icons/icons';
+import { InfoCircle, Reset, Faders } from '@nemo/icons/icons';
 import {
   Button,
   Flex,
@@ -13,7 +13,7 @@ import {
   Tooltip,
 } from '@nvidia/foundations-react-core';
 import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface ParamsPopoverProps {
   value: InferenceParams;
@@ -107,7 +107,7 @@ export const ParamsPopover: FC<ParamsPopoverProps> = ({ value, onChange }) => {
                   className="shrink-0"
                   type="button"
                 >
-                  <Retry size="14" />
+                  <Reset size="14" />
                 </Button>
               </Flex>
             );
@@ -116,7 +116,7 @@ export const ParamsPopover: FC<ParamsPopoverProps> = ({ value, onChange }) => {
       }
     >
       <Button kind="secondary" aria-label="Inference parameters" title="Inference parameters">
-        <Sliders size="14" />
+        <Faders size="14" />
       </Button>
     </Popover>
   );

@@ -12,7 +12,7 @@ import {
 } from '@nvidia/foundations-react-core';
 import { FilePreview } from '@studio/components/SafeSynthesizerFilesetPreview/FilePreview';
 import { parseFileContent } from '@studio/components/SafeSynthesizerFilesetPreview/util';
-import { FC, ReactNode, useCallback, useMemo, useState } from 'react';
+import { type FC, type ReactNode, useCallback, useMemo, useState } from 'react';
 
 interface FilesetFilePreviewLinkProps {
   /** Fileset URL (e.g., fileset://workspace/name/path/to/file.csv) */

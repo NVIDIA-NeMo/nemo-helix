@@ -15,7 +15,7 @@ Select it with ``agent_import_path`` and hand it the agent through ``agent_kwarg
         agent_import_path="nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent",
         agent_kwargs={
             "fabric_config": {...},  # a Fabric agent.yaml as a mapping; see NemoFabricAgent
-            "fabric_package": "nemo-fabric[deepagents,relay]==0.5.0",
+            "fabric_package": "nemo-fabric[deepagents,relay]==0.6.0",
         },
         env_secrets={"NVIDIA_API_KEY": SecretRef("NVIDIA_API_KEY")},
     )
@@ -24,7 +24,7 @@ It accepts every :class:`NemoFabricAgent` keyword -- ``fabric_config`` plus Fabr
 keywords -- and this class's ``fabric_python_version`` and ``fabric_uv_version``. ``fabric_package`` is
 required: the harness extra to install cannot be derived from the config. It is split like a shell
 command line, so a caller can pin a harness's own dependencies next to the Fabric distribution
-(``"nemo-fabric[deepagents,relay]==0.5.0 mcp==1.29.0"``); a specifier that contains spaces, such as
+(``"nemo-fabric[deepagents,relay]==0.6.0 mcp==1.29.0"``); a specifier that contains spaces, such as
 one with an environment marker, must be quoted (``"'pkg==1.0; python_version<\"3.13\"'"``).
 
 Three things the task image must still provide: bash, a supported package manager (apt-get, dnf,
@@ -32,12 +32,13 @@ yum, or apk) when it has no curl, and glibc. Bash because Harbor's ``BaseInstall
 prefixes ``set -o pipefail`` onto every command it runs for every installed agent, so a ``/bin/sh``
 backend cannot run any of them; Docker and Daytona execute through bash, Harbor's HF sandbox does
 not. glibc because ``nemo-fabric-runtime`` publishes no musllinux wheels, so Alpine-based tasks fail
-at the final ``uv pip install`` with an unsatisfiable resolution -- 0.5.0 publishes macOS arm64, Windows, and
+at the final ``uv pip install`` with an unsatisfiable resolution -- 0.6.0 publishes macOS arm64 and
 manylinux wheels only, and this is not something the agent can work around.
 """
 
 from __future__ import annotations
 
+import json
 import shlex
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
@@ -49,6 +50,7 @@ from harbor.agents.options import InstalledAgentOptions
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.task.config import MCPServerConfig
+from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import INSTALL_ENV_NAMES
 from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_agent import NemoFabricAgent
 
 #: Interpreter uv provisions for the Fabric virtualenv. Fabric's Harbor extra needs >= 3.12.
@@ -73,7 +75,7 @@ DEFAULT_UV_VERSION = "0.12.17"
 _UV_INSTALLER_URL_TEMPLATE = "https://astral.sh/uv/{version}/install.sh"
 _FABRIC_PACKAGE_REQUIRED = (
     "fabric_package is required: name the Fabric distribution and harness extra to "
-    'install into the task container, e.g. "nemo-fabric[deepagents,relay]==0.5.0"'
+    'install into the task container, e.g. "nemo-fabric[deepagents,relay]==0.6.0"'
 )
 #: Versions this class resolves itself; everything else in ``agent_kwargs`` is the wrapped agent's.
 _VERSION_KWARGS = ("fabric_python_version", "fabric_uv_version")
@@ -83,27 +85,10 @@ _INSTALLED_AGENT_KWARGS = frozenset({*_VERSION_KWARGS, *InstalledAgentOptions.mo
 #: an archive mirror that rate-limits or blips takes the whole trial with it, and Harbor's own retry
 #: works at trial granularity. Backoff between attempts is ``attempt * _RETRY_BACKOFF_SEC``.
 _PACKAGE_MANAGER_ATTEMPTS = 3
+#: Written into the venv, last, by a finished install: what it installed. A later install that would install the
+#: same thing (an image with the agent already installed, or a retried setup) skips curl, uv and the venv build.
+INSTALL_MARKER = ".nemo-fabric-install"
 _RETRY_BACKOFF_SEC = 5
-#: Proxy and TLS settings ``FabricAgent`` forwards to its install step, mirrored for this one.
-_INSTALL_ENV_NAMES = frozenset(
-    {
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "NO_PROXY",
-        "PIP_CERT",
-        "PIP_CLIENT_CERT",
-        "PIP_EXTRA_INDEX_URL",
-        "PIP_FIND_LINKS",
-        "PIP_INDEX_URL",
-        "PIP_TRUSTED_HOST",
-        "REQUESTS_CA_BUNDLE",
-        "SSL_CERT_DIR",
-        "SSL_CERT_FILE",
-        "http_proxy",
-        "https_proxy",
-        "no_proxy",
-    }
-)
 
 
 def _version_string(name: str, value: str | float | int) -> str:
@@ -120,6 +105,13 @@ def _version_string(name: str, value: str | float | int) -> str:
     if not value.strip():
         raise ValueError(f"{name} must not be empty")
     return value
+
+
+def fabric_install_spec(package: str, python_version: str, uv_version: str) -> str:
+    """What an install of ``package`` puts in the venv, as :data:`INSTALL_MARKER` records it."""
+    return json.dumps(
+        {"package": package, "python": python_version, "uv": uv_version}, sort_keys=True, separators=(",", ":")
+    )
 
 
 def _quoted_requirements(package: str) -> str:
@@ -246,19 +238,38 @@ class FabricInstalledAgent(BaseInstalledAgent):
         )
 
     async def install(self, environment: BaseEnvironment) -> None:
-        """Provision curl, uv, a uv-managed interpreter, and the Fabric virtualenv."""
-        await self._ensure_curl(environment)
+        """Provision curl, uv, a uv-managed interpreter, and the Fabric virtualenv, unless they're already installed.
+
+        The agent's config bundle is uploaded either way: it belongs to this agent config, not to the install.
+        """
+        installed = await self._already_installed(environment)
+        if not installed:
+            await self._ensure_curl(environment)
         await self._prepare_directories(environment)
         bundle = self.fabric.fabric_config_bundle
         if bundle is not None:
             await environment.upload_dir(bundle, self.fabric.fabric_config_target)
+        if installed:
+            self.logger.info("NeMo Fabric is already installed in %s; skipping the install", self._venv_path)
+            return
         await self.exec_as_agent(
             environment,
             command=self._install_fabric_command(),
-            env={name: value for name, value in self.extra_env.items() if name in _INSTALL_ENV_NAMES},
+            env={name: value for name, value in self.extra_env.items() if name in INSTALL_ENV_NAMES},
             timeout_sec=self.fabric.fabric_timeout_sec,
         )
         await self.fabric.prepare_relay(environment)
+
+    @property
+    def install_spec(self) -> str:
+        """What an install puts in the venv; :data:`INSTALL_MARKER` holds it once the install finished."""
+        assert self.fabric.fabric_package is not None  # checked in __init__
+        return fabric_install_spec(self.fabric.fabric_package, self.fabric_python_version, self.fabric_uv_version)
+
+    async def _already_installed(self, environment: BaseEnvironment) -> bool:
+        marker = shlex.quote(str(PurePosixPath(self._venv_path) / INSTALL_MARKER))
+        result = await environment.exec(f"cat {marker} 2>/dev/null")
+        return result.return_code == 0 and (result.stdout or "").strip() == self.install_spec
 
     async def _ensure_curl(self, environment: BaseEnvironment) -> None:
         """Install curl and CA certificates through whichever package manager the image has.
@@ -343,7 +354,8 @@ class FabricInstalledAgent(BaseInstalledAgent):
             'if [ -f "$HOME/.local/bin/env" ]; then . "$HOME/.local/bin/env"; fi; '
             f"uv python install {python_version}; "
             f"uv venv {shlex.quote(self._venv_path)} --python {python_version} --clear; "
-            f"uv pip install --python {shlex.quote(self._venv_python)} {_quoted_requirements(package)}"
+            f"uv pip install --python {shlex.quote(self._venv_python)} {_quoted_requirements(package)}; "
+            f"printf %s {shlex.quote(self.install_spec)} > {shlex.quote(str(PurePosixPath(self._venv_path) / INSTALL_MARKER))}"
         )
 
     @property

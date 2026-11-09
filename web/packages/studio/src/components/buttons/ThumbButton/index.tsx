@@ -3,7 +3,7 @@
 
 import { ThumbDown, ThumbUp } from '@nemo/icons/icons';
 import { Button } from '@nvidia/foundations-react-core';
-import { ComponentProps, FC } from 'react';
+import type { ComponentProps, FC } from 'react';
 
 interface Props extends ComponentProps<typeof Button> {
   direction: 'up' | 'down';

@@ -1891,7 +1891,7 @@ class TestStreamingLeaseLifecycle:
         observed_active: list[bool] = []
 
         @contextmanager
-        def _platform_context(_sdk: Any):
+        def _platform_context(_sdk: Any, _request_headers: Any):
             nonlocal active
             active = True
             try:
@@ -1928,14 +1928,120 @@ class TestStreamingLeaseLifecycle:
         assert observed_active == [True, True]
         assert active is False
 
+    async def test_streaming_runs_on_iorails_without_leasing_llmrails(self, middleware: GuardrailsMiddleware) -> None:
+        """A supported config guards the stream on IORails; the LLMRails lease path is never entered."""
+        observed: list[Any] = []
+
+        def _on_iorails(runtime: Any, stable: Any, *_args: Any, **_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
+            async def _inner() -> AsyncIterator[dict[str, Any]]:
+                observed.append((runtime, stable))
+                yield {"choices": [{"delta": {"content": "checked on iorails"}}]}
+
+            return _inner()
+
+        runtime, stable = MagicMock(close=AsyncMock()), MagicMock()
+        middleware._iorails_runtime = runtime
+        lease = AsyncMock(side_effect=AssertionError("LLMRails lease must not be used"))
+
+        with patch.object(middleware, "_stable_config_for_iorails", return_value=stable):
+            with patch.object(middleware, "_prepare_lease", new=lease):
+                with patch(
+                    "nemo_guardrails_plugin.middleware.handle_streaming_output_check_on_iorails", new=_on_iorails
+                ):
+                    result = await _process_response(
+                        middleware,
+                        self._stream_one_chunk(),
+                        self._streaming_request(),
+                        {},
+                        {},
+                        _entity_source(output_flows=["self check output"]),
+                    )
+                    assert is_streaming_response_result(result)
+                    chunks = [chunk async for chunk in result]
+
+        assert chunks == [{"choices": [{"delta": {"content": "checked on iorails"}}]}]
+        assert observed == [(runtime, stable)]
+        lease.assert_not_awaited()
+
+    async def test_iorails_input_check_carries_the_callers_trace_but_not_custom_headers(
+        self, middleware: GuardrailsMiddleware
+    ) -> None:
+        """The caller's trace reaches the rail model calls IORails makes, and a custom header does not."""
+        request_body = {"messages": [{"role": "user", "content": "Hi"}], "model": "ws/llama"}
+        inbound_headers = {
+            "traceparent": "00-c2ed2936886c4a9eb796a1f78c2cafd8-a39abb1b346c4988-01",
+            "tracestate": "qa=f4fbf03024e344d09aff76adac4d86f4",
+            "X-Custom-Trace-Id": "custom",
+        }
+        ctx = _make_ctx(request_body, inbound_headers)
+        ctx.request_nemo_client = _request_scoped_client(middleware, {"X-NHX-Principal-Id": "service:guardrails"})
+        observed_headers: list[dict[str, str]] = []
+
+        async def _check(*_args: Any, **_kwargs: Any) -> GenerationResponse:
+            observed_headers.append(dict(get_request_headers()))
+            return _make_generation_response(is_blocked=False)
+
+        runtime = MagicMock(check=_check, close=AsyncMock())
+        middleware._iorails_runtime = runtime
+
+        with patch.object(middleware, "_stable_config_for_iorails", return_value=MagicMock()):
+            await _process_request(middleware, request_body, inbound_headers, _entity_source(), ctx=ctx)
+
+        assert observed_headers == [
+            {
+                "traceparent": "00-c2ed2936886c4a9eb796a1f78c2cafd8-a39abb1b346c4988-01",
+                "tracestate": "qa=f4fbf03024e344d09aff76adac4d86f4",
+                "X-NHX-Principal-Id": "service:guardrails",
+            }
+        ]
+
+    async def test_iorails_streamed_output_check_carries_the_callers_trace(
+        self, middleware: GuardrailsMiddleware
+    ) -> None:
+        """The stream's rail calls run after the response is returned, and still carry the caller's trace."""
+        request_body = self._streaming_request()
+        inbound_headers = {"traceparent": "00-streamed-trace", "X-Custom-Trace-Id": "custom"}
+        ctx = _make_ctx(request_body, inbound_headers)
+        ctx.request_nemo_client = _request_scoped_client(middleware, {"X-NHX-Principal-Id": "service:guardrails"})
+        observed_headers: list[dict[str, str]] = []
+
+        def _on_iorails(*_args: Any, **_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
+            async def _inner() -> AsyncIterator[dict[str, Any]]:
+                observed_headers.append(dict(get_request_headers()))
+                yield {"choices": [{"delta": {"content": "checked"}}]}
+
+            return _inner()
+
+        middleware._iorails_runtime = MagicMock(close=AsyncMock())
+
+        with patch.object(middleware, "_stable_config_for_iorails", return_value=MagicMock()):
+            with patch("nemo_guardrails_plugin.middleware.handle_streaming_output_check_on_iorails", new=_on_iorails):
+                result = await _process_response(
+                    middleware,
+                    self._stream_one_chunk(),
+                    request_body,
+                    inbound_headers,
+                    {},
+                    _entity_source(output_flows=["self check output"]),
+                    ctx=ctx,
+                )
+                assert is_streaming_response_result(result)
+                [chunk async for chunk in result]
+
+        assert observed_headers == [{"traceparent": "00-streamed-trace", "X-NHX-Principal-Id": "service:guardrails"}]
+
     async def test_streaming_uses_request_scoped_client_headers(self, middleware: GuardrailsMiddleware) -> None:
         request_body = self._streaming_request()
-        request_headers = {
+        # The client carries identity only. The caller's trace arrives on the inbound request,
+        # alongside a custom header that task models must not receive.
+        client_headers = {"X-NHX-Principal-On-Behalf-Of": "user:bob"}
+        inbound_headers = {
             "traceparent": "00-stream-request-trace",
-            "X-NHX-Principal-On-Behalf-Of": "user:bob",
+            "tracestate": "qa=stream",
+            "X-Custom-Trace-Id": "custom-stream",
         }
-        ctx = _make_ctx(request_body)
-        ctx.request_nemo_client = _request_scoped_client(middleware, request_headers)
+        ctx = _make_ctx(request_body, inbound_headers)
+        ctx.request_nemo_client = _request_scoped_client(middleware, client_headers)
         observed_headers: list[dict[str, str]] = []
 
         def _handle_streaming_output_check(*_args: Any, **_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
@@ -1963,7 +2069,13 @@ class TestStreamingLeaseLifecycle:
                 chunks = [chunk async for chunk in result]
 
         assert chunks == [{"choices": [{"delta": {"content": "checked"}}]}]
-        assert observed_headers == [request_headers]
+        assert observed_headers == [
+            {
+                "traceparent": "00-stream-request-trace",
+                "tracestate": "qa=stream",
+                "X-NHX-Principal-On-Behalf-Of": "user:bob",
+            }
+        ]
 
     async def test_natural_completion_returns_rails_to_pool(self, middleware: GuardrailsMiddleware) -> None:
         async def stream_async_impl(generator: Any, messages: Any) -> AsyncIterator[str]:
@@ -2637,7 +2749,7 @@ class TestProcessRequestErrorSurfacing:
         observed_active: list[bool] = []
 
         @contextmanager
-        def _platform_context(_sdk: Any):
+        def _platform_context(_sdk: Any, _request_headers: Any):
             nonlocal active
             active = True
             try:
@@ -2662,12 +2774,16 @@ class TestProcessRequestErrorSurfacing:
             "messages": [{"role": "user", "content": "Hi"}],
             "model": "ws/llama",
         }
-        request_headers = {
+        # The client carries identity only. The caller's trace arrives on the inbound request,
+        # alongside a custom header that task models must not receive.
+        client_headers = {"X-NHX-Principal-On-Behalf-Of": "user:alice"}
+        inbound_headers = {
             "traceparent": "00-request-trace",
-            "X-NHX-Principal-On-Behalf-Of": "user:alice",
+            "tracestate": "qa=request",
+            "X-Custom-Trace-Id": "custom-request",
         }
-        ctx = _make_ctx(request_body)
-        ctx.request_nemo_client = _request_scoped_client(middleware, request_headers)
+        ctx = _make_ctx(request_body, inbound_headers)
+        ctx.request_nemo_client = _request_scoped_client(middleware, client_headers)
         observed_headers: list[dict[str, str]] = []
 
         def _generate(*_args: Any, **_kwargs: Any) -> GenerationResponse:
@@ -2676,9 +2792,15 @@ class TestProcessRequestErrorSurfacing:
 
         with patch.object(middleware, "_prepare_lease", new=_patch_prepare_lease()):
             with patch("nemo_guardrails_plugin.middleware.run_generate_in_new_loop", side_effect=_generate):
-                await _process_request(middleware, request_body, {}, _entity_source(), ctx=ctx)
+                await _process_request(middleware, request_body, inbound_headers, _entity_source(), ctx=ctx)
 
-        assert observed_headers == [request_headers]
+        assert observed_headers == [
+            {
+                "traceparent": "00-request-trace",
+                "tracestate": "qa=request",
+                "X-NHX-Principal-On-Behalf-Of": "user:alice",
+            }
+        ]
 
     async def test_runtime_error_from_prepare_lease_wraps_to_503(self, middleware: GuardrailsMiddleware) -> None:
         """A non-caller-shape failure during eager lease setup (here: a

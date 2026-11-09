@@ -5,7 +5,7 @@ import type { StatTileDiagnosticProps, StatTileStatus } from '@nemo/common/src/c
 import { formatFileSize } from '@nemo/common/src/components/UploadModal/utils';
 import { formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
-import { GraphNode, Gpu } from '@nemo/icons/icons';
+import { ShapeCircle, GpuCard } from '@nemo/icons/icons';
 import type { RlGRPOTraining, RlJobOutput } from '@nemo/sdk/generated/customizer/schema';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
@@ -27,8 +27,6 @@ import { getTextWithCount } from '@studio/util/strings';
 import type { ReactNode } from 'react';
 
 export { formatFinetuningType };
-
-export type FileType = 'training' | 'testing' | 'validation';
 
 /** Training/finetuning type for display (e.g. training.training_type / training.finetuning_type). */
 export const getFormattedTrainingType = (type?: string) => {
@@ -762,12 +760,17 @@ export const getGrpoRunConfig = (
   const expertParallel = parallelism.expert_parallel_size ?? 1;
 
   // Megatron is inert for GRPO. The policy worker is always AutomodelPolicyWorker.
-  const isLora = training.finetuning_type === 'lora';
+  const trainingLabel =
+    training.finetuning_type === 'lora'
+      ? 'LoRA'
+      : training.finetuning_type === 'lora_merged'
+        ? 'LoRA (merged)'
+        : 'Full weights';
 
   return {
     environment: spec.environment,
     promptDataset: spec.dataset,
-    trainingBackend: joinParts('Automodel', isLora ? 'LoRA' : 'Full weights'),
+    trainingBackend: joinParts('Automodel', trainingLabel),
     parallelism: joinParts(
       `TP ${tensorParallel}`,
       `PP ${parallelism.pipeline_parallel_size ?? 1}`,
@@ -802,11 +805,11 @@ export const getTrainingOptionBadges = (job: CustomizationJob | null | undefined
   if (isAutomodelJob(job)) {
     const p = job.spec.parallelism;
     const badges: ReactNode[] = [
-      badge('num_gpus_per_node', <Gpu />, getTextWithCount('GPU', p.num_gpus_per_node ?? 0)),
-      badge('num_nodes', <GraphNode />, getTextWithCount('Node', p.num_nodes ?? 0)),
+      badge('num_gpus_per_node', <GpuCard />, getTextWithCount('GPU', p.num_gpus_per_node ?? 0)),
+      badge('num_nodes', <ShapeCircle />, getTextWithCount('Node', p.num_nodes ?? 0)),
       badge(
         'tensor_parallel_size',
-        <Gpu />,
+        <GpuCard />,
         getTextWithCount('Tensor Parallel', p.tensor_parallel_size ?? 0)
       ),
     ];
@@ -821,7 +824,7 @@ export const getTrainingOptionBadges = (job: CustomizationJob | null | undefined
     const badges: ReactNode[] = [];
     if (gpus) {
       const gpuCount = gpus.split(',').filter(Boolean).length;
-      badges.push(badge('gpus', <Gpu />, getTextWithCount('GPU', gpuCount)));
+      badges.push(badge('gpus', <GpuCard />, getTextWithCount('GPU', gpuCount)));
     }
     badges.push(badge('precision', undefined, `Precision: ${precision}`));
     return badges;

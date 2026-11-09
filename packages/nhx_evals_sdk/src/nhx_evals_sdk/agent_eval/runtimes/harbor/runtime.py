@@ -43,16 +43,16 @@ import hashlib
 import importlib.machinery
 import json
 import logging
-import os
 import re
-import shutil
 import sys
 import threading
 import warnings
 from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timezone
+from os import readlink
 from pathlib import Path
+from shutil import rmtree
 from types import ModuleType
 from typing import Any
 
@@ -72,6 +72,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.env import (
     warn_unscrubbed_secret_keys,
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.scoring import harbor_scoring_metrics
+from nhx_evals_sdk.agent_eval.runtimes.harbor.setup_slots import SetupSlots, default_slot_dir, max_concurrent_setups
 from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import (
     HARBOR_DATASET_PATH_KEY,
     HARBOR_TASK_DIR_KEY,
@@ -702,7 +703,7 @@ def _digest_directory(root: Path, *, exclude: frozenset[Path] = frozenset()) -> 
             if path.is_symlink():
                 # Record where the link points, so retargeting counts as a change.
                 try:
-                    target = os.readlink(path).encode("utf-8")
+                    target = readlink(path).encode("utf-8")
                 except OSError as exc:
                     # The link vanished mid-walk. Same contract as an unreadable
                     # file: degrade to a marker rather than kill the run.
@@ -984,6 +985,22 @@ def _resolve_job_dir(config: HarborRuntimeConfig) -> tuple[str, Path]:
     return job_name, _validated_job_dir(jobs_dir, job_name)
 
 
+async def _create_harbor_job(job_config: Any) -> Any:
+    """Harbor's ``Job.create``; a seam so tests can stand in for Harbor's ``Job`` without patching it."""
+    from harbor.job import Job  # ty: ignore[unresolved-import,unused-ignore-comment]
+
+    return await Job.create(job_config)
+
+
+def _trial_network_plan(task_config: Any, agent: Any, environment: Any, step: Any, *, verifier_mode: Any) -> Any:
+    """Harbor's network plan for one task step; a seam so tests can stand in for it without patching Harbor."""
+    from harbor.trial.network_policy import (  # ty: ignore[unresolved-import,unused-ignore-comment]
+        resolve_trial_network_plan,
+    )
+
+    return resolve_trial_network_plan(task_config, agent, environment, step, verifier_mode=verifier_mode)
+
+
 def _build_native_job(
     config: HarborRuntimeConfig,
     dataset_path: Path,
@@ -1032,6 +1049,9 @@ def _build_native_job(
         # field validator: `model_copy(update=...)` skips validators, and a run that refuses after
         # deleting the job dir has destroyed completed trials to reach the same refusal.
         require_no_plaintext_credentials(config.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
+        # Local Docker trials of every run of this user share these, so concurrent setups don't time out. Read
+        # before the force_rerun rmtree too: a bad slot count must refuse the run before it deletes anything.
+        setup_slots = SetupSlots(max_concurrent_setups(), default_slot_dir())
         if config.environment is not None:
             require_no_plaintext_credentials(
                 config.environment.kwargs, field="environment.kwargs", alternative="worker environment"
@@ -1040,7 +1060,7 @@ def _build_native_job(
         # Warn rather than refuse: some agents read a fixed variable name the caller can't rename.
         warn_unscrubbed_secret_keys(config.env_secrets)
         try:
-            from harbor.job import DatasetConfig, Job, JobConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
+            from harbor.job import DatasetConfig, JobConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
             from harbor.models.job.config import RetryConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
             from harbor.models.trial.config import (  # ty: ignore[unresolved-import,unused-ignore-comment]
                 AgentConfig,
@@ -1052,7 +1072,7 @@ def _build_native_job(
             raise ModuleNotFoundError(_HARBOR_EXTRA_REQUIRED_MESSAGE) from exc
 
         if effective_force_rerun and job_dir.exists():
-            shutil.rmtree(job_dir)
+            rmtree(job_dir)
 
         artifacts: list[str | ArtifactConfig] = list(config.artifacts)
         verifier_kwargs: dict[str, Any] = {}
@@ -1078,6 +1098,7 @@ def _build_native_job(
         ) -> None:
             """Run one Harbor job, ``parent/name``, over the ``selected`` task folders (all when None)."""
             harbor_job_dir = parent / name
+            environment = _with_agent_layers(environment, agent, agent_dir=config.agent_dir)
             job_config = JobConfig(
                 job_name=name,
                 jobs_dir=parent,
@@ -1094,7 +1115,8 @@ def _build_native_job(
             )
 
             async def _attempt() -> None:
-                job = await Job.create(job_config)
+                job = await _create_harbor_job(job_config)
+                setup_slots.attach(job)
                 async with job_scope(job) if job_scope is not None else contextlib.nullcontext():
                     await job.run()
 
@@ -1125,7 +1147,7 @@ def _build_native_job(
                     exc,
                     f" Differing config: {drift}." if drift else "",
                 )
-                shutil.rmtree(harbor_job_dir)
+                rmtree(harbor_job_dir)
                 await _attempt()
 
         def _discard_other_layout(split: bool) -> None:
@@ -1139,7 +1161,7 @@ def _build_native_job(
                     "a single-job" if split else "a split",
                     "a split" if split else "a single-job",
                 )
-                shutil.rmtree(job_dir)
+                rmtree(job_dir)
 
         async def _create_and_run(agent: Any) -> None:
             # A custom environment replaces Harbor's Docker one, and only Docker takes compose overlays.
@@ -1263,9 +1285,6 @@ async def _partition_by_egress_control(
         resolve_task_verifier_mode,
     )
     from harbor.models.trial.config import EnvironmentConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
-    from harbor.trial.network_policy import (  # ty: ignore[unresolved-import,unused-ignore-comment]
-        resolve_trial_network_plan,
-    )
 
     selected = await DatasetConfig(
         path=dataset_path, task_names=list(task_names) if task_names else None
@@ -1286,7 +1305,7 @@ async def _partition_by_egress_control(
                     if step is None
                     else resolve_step_verifier_mode(task_config, step)
                 )
-                plan = resolve_trial_network_plan(task_config, agent, EnvironmentConfig(), step, verifier_mode=mode)
+                plan = _trial_network_plan(task_config, agent, EnvironmentConfig(), step, verifier_mode=mode)
                 policies = [plan.agent_env_baseline, plan.agent_phase]
                 if plan.verifier_env_baseline is None:
                     policies.append(plan.verifier_phase)
@@ -1299,6 +1318,40 @@ async def _partition_by_egress_control(
             logger.debug("Could not read Harbor task %s's network policy", name, exc_info=True)
             unknown.append(name)
     return public, restricted, unknown
+
+
+def _with_agent_layers(environment: Any, agent: Any, *, agent_dir: Path | None) -> Any:
+    """Harbor's default Docker environment for ``agent``, switched to one that reuses agent installs when it can.
+
+    Only the default local Docker environment switches: a custom one (by ``type`` or ``import_path``) is the
+    caller's. So does an agent whose setup can't be reused (``oracle``, an ``agent_dir`` wrapper), and every agent
+    when :data:`~nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer.AGENT_LAYERS_ENV` is ``0``.
+    """
+    from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import (
+        AGENT_LAYER_DOCKER_ENVIRONMENT,
+        AGENT_LAYER_KWARG,
+        agent_install,
+        agent_layer_kwarg,
+        agent_layers_enabled,
+    )
+
+    if not agent_layers_enabled() or getattr(environment, "import_path", "") is not None:
+        return environment
+    if getattr(environment, "type", None) not in (None, "docker"):
+        return environment
+    name, import_path, kwargs, env = agent.name, agent.import_path, dict(agent.kwargs), dict(agent.env)
+    install = agent_install(
+        agent_name=name, agent_import_path=import_path, agent_dir=agent_dir, agent_kwargs=kwargs, agent_env=env
+    )
+    if install is None:
+        return environment
+    layer = agent_layer_kwarg(name=name, import_path=import_path, kwargs=kwargs, env=env)
+    return environment.model_copy(
+        update={
+            "import_path": AGENT_LAYER_DOCKER_ENVIRONMENT,
+            "kwargs": {**environment.kwargs, AGENT_LAYER_KWARG: layer},
+        }
+    )
 
 
 def _is_harbor_resume_refusal(exc: FileExistsError, job_dir: Path) -> bool:

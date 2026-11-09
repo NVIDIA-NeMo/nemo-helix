@@ -13,7 +13,7 @@ import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { UploadModalProvider } from '@nemo/common/src/components/UploadModal/Context/UploadModalProvider';
 import { useUploadModalContext } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import { uploadModalInitialState } from '@nemo/common/src/components/UploadModal/Context/useUploadModalReducer';
-import { UploadModalProps } from '@nemo/common/src/components/UploadModal/types';
+import type { UploadModalProps } from '@nemo/common/src/components/UploadModal/types';
 import { UploadPickerBody } from '@nemo/common/src/components/UploadModal/UploadPickerBody';
 import { useUploadSubmit } from '@nemo/common/src/components/UploadModal/useUploadSubmit';
 import {
@@ -25,7 +25,7 @@ import {
   ModalMain,
   ModalRoot,
 } from '@nvidia/foundations-react-core';
-import { FC, MouseEvent, useId, useMemo } from 'react';
+import { type FC, type MouseEvent, useId, useMemo } from 'react';
 
 const UploadModalContent: FC<UploadModalProps> = ({
   workspace,

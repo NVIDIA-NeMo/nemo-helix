@@ -25,7 +25,7 @@ import {
 } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
 import { useMessagesBinding } from '@studio/components/evaluation/ModelEvaluationWizard/useMessagesBinding';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { FC, useEffect, useMemo, useState } from 'react';
+import { type FC, useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 const asText = (value: unknown): string =>

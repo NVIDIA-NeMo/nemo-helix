@@ -22,8 +22,12 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import sys
 from pathlib import Path
 from typing import Any, Iterator
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gym_rows import write_rows  # noqa: E402
 
 # The `agent_ref.name` is the *config key* under `responses_api_agents:` in
 # math_with_judge.yaml, not the server directory name (`simple_agent`).
@@ -33,6 +37,36 @@ SYSTEM_PROMPT = (
     "Your task is to solve a math problem.  Make sure to put the answer (and only the answer) inside \\boxed{}."
 )
 
+# DAPO-Math-17k wraps every problem in an instruction to end with an "Answer: $Answer" line. The
+# math_with_judge server grades only the last \boxed{} answer and scores a response without one
+# 0, so a model that follows that instruction never earns a reward. The rows keep the problem
+# and ask for \boxed{} instead, like the AIME rows.
+_DAPO_PREFIX = (
+    "Solve the following math problem step by step. The last line of your response should be of the form "
+    "Answer: $Answer (without quotes) where $Answer is the answer to the problem.\n\n"
+)
+_DAPO_SUFFIX = '\n\nRemember to put your answer on its own line after "Answer:".'
+
+
+def _boxed_row(problem: str, expected_answer: str) -> dict[str, Any]:
+    return {
+        "responses_create_params": {
+            "input": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": problem},
+            ]
+        },
+        "question": problem,
+        "expected_answer": expected_answer,
+    }
+
+
+def _dapo_problem(prompt: str) -> str:
+    """The problem inside a DAPO-Math-17k prompt, without its "Answer:" instructions."""
+    if not (prompt.startswith(_DAPO_PREFIX) and prompt.endswith(_DAPO_SUFFIX)):
+        raise ValueError(f"DAPO-Math-17k prompt does not have the expected wrapper: {prompt[:120]!r}")
+    return prompt[len(_DAPO_PREFIX) : -len(_DAPO_SUFFIX)]
+
 
 def _dapo17k_rows() -> Iterator[dict[str, Any]]:
     """DAPO-Math-17k, the train split NeMo-RL's `grpo-dapomath17k-*` recipes use."""
@@ -41,11 +75,7 @@ def _dapo17k_rows() -> Iterator[dict[str, Any]]:
     dataset = load_dataset("YouJiacheng/DAPO-Math-17k-dedup", split="train")
     assert isinstance(dataset, Dataset)  # a single split, not a DatasetDict
     for example in dataset:
-        yield {
-            "responses_create_params": {"input": example["prompt"]},
-            "question": example["prompt"][0]["content"],
-            "expected_answer": example["reward_model"]["ground_truth"],
-        }
+        yield _boxed_row(_dapo_problem(example["prompt"][0]["content"]), example["reward_model"]["ground_truth"])
 
 
 def _aime24_rows() -> Iterator[dict[str, Any]]:
@@ -55,32 +85,7 @@ def _aime24_rows() -> Iterator[dict[str, Any]]:
     dataset = load_dataset("HuggingFaceH4/aime_2024", split="train")
     assert isinstance(dataset, Dataset)  # a single split, not a DatasetDict
     for example in dataset:
-        yield {
-            "responses_create_params": {
-                "input": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": example["problem"]},
-                ]
-            },
-            "question": example["problem"],
-            "expected_answer": str(example["answer"]),
-        }
-
-
-def _write(path: Path, rows: list[dict[str, Any]], repeats: int) -> int:
-    """Write rows with agent_ref and a stable task_idx, repeating each `repeats` times.
-
-    task_idx is not read by the resources server, but Gym sorts rollouts by it and the
-    platform's dataset validators expect an int, so number the emitted rows rather than
-    the source rows.
-    """
-    written = 0
-    with path.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            for _ in range(repeats):
-                handle.write(json.dumps({**row, "task_idx": written, "agent_ref": AGENT_REF}) + "\n")
-                written += 1
-    return written
+        yield _boxed_row(example["problem"], str(example["answer"]))
 
 
 def main() -> int:
@@ -142,8 +147,8 @@ def main() -> int:
 
     train_rows = rows if args.train_size == -1 else rows[: args.train_size]
 
-    n_train = _write(args.out_dir / "training.jsonl", train_rows, repeats=1)
-    n_val = _write(args.out_dir / "validation.jsonl", val_rows, repeats=args.val_repeats)
+    n_train = write_rows(args.out_dir / "training.jsonl", train_rows, AGENT_REF, repeats=1)
+    n_val = write_rows(args.out_dir / "validation.jsonl", val_rows, AGENT_REF, repeats=args.val_repeats)
 
     print(
         json.dumps(

@@ -350,6 +350,9 @@ class SubmitAgentEvalJobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     spec: dict[str, Any]
+    output_location: str | None = None
+
+    _validate_output_location = field_validator("output_location")(validate_output_location)
 
 
 class SubmitRetrieveEvalJobRequest(BaseModel):

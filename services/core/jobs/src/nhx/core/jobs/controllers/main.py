@@ -7,6 +7,7 @@ import threading
 import time
 
 from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.jobs.client import JobsClient
 from nhx.common.client_factory import get_nemo_client
 from nhx.common.config import get_platform_config
 from nhx.common.controller import ControllerManager, Loop, TimedLoopWaiter, TrackLastExecutionTime
@@ -14,6 +15,7 @@ from nhx.common.service.api.health import wait_for_service_ready
 from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.config import profiles
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
+from nhx.core.jobs.controllers.concurrency_admission import ConcurrencyAdmission
 from nhx.core.jobs.controllers.reconciler import JobReconciler
 from nhx.core.jobs.controllers.scheduler import JobScheduler
 
@@ -67,7 +69,17 @@ def run(parent_stop_signal: threading.Event | None = None):
         logger.warning("Server did not become ready in time, starting loops anyway")
 
     # Job scheduling loop
-    job_scheduler = JobScheduler(backend_registry, nemo_client, stop_signal=local_stop_signal)
+    admission = ConcurrencyAdmission(
+        JobsClient.from_client(nemo_client),
+        executor_limits={
+            (p.provider, p.profile): limit
+            for p in profiles
+            if (limit := getattr(p.config, "max_active_jobs", None)) is not None
+        },
+        max_active_jobs_per_workspace=jobs_config.max_active_jobs_per_workspace,
+        max_active_jobs_per_user=jobs_config.max_active_jobs_per_user,
+    )
+    job_scheduler = JobScheduler(backend_registry, nemo_client, stop_signal=local_stop_signal, admission=admission)
     job_scheduler_monitored = TrackLastExecutionTime(job_scheduler)
     job_scheduler_loop = Loop(
         TimedLoopWaiter(jobs_config.schedule_interval_seconds, stop_signal=local_stop_signal),

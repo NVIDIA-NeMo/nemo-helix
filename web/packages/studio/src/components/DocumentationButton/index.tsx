@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button } from '@nvidia/foundations-react-core';
-import { ComponentProps, FC } from 'react';
+import type { ComponentProps, FC } from 'react';
 
 type DocumentationButtonProps = {
   href: string;

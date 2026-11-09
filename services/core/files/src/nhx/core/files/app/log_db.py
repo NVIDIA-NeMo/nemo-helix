@@ -24,6 +24,7 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 import duckdb
+from duckdb import connect as duckdb_connect
 from nhx.common.files.storage_config import S3StorageConfig
 from nhx.common.jobs.schemas import (
     HelixJobLog,
@@ -160,7 +161,7 @@ class DuckDBLogRepository:
     @classmethod
     def _connect(cls, storage: StorageImpl) -> duckdb.DuckDBPyConnection:
         with tracer.start_as_current_span("logs.duckdb.connect"):
-            conn = duckdb.connect(
+            conn = duckdb_connect(
                 ":memory:",
                 config={
                     "autoload_known_extensions": "false",
@@ -322,14 +323,32 @@ class DuckDBLogRepository:
         return [QueriedLogEntry.model_validate(dict(zip(columns, row))) for row in result.fetchall()]
 
     @staticmethod
-    def _platform_logs(rows: list[QueriedLogEntry]) -> list[HelixJobLog]:
+    def _collapse_carriage_returns(message: str) -> str:
+        """Return what a terminal would show for a message redrawn with ``\\r``.
+
+        Progress bars (tqdm, pip, git) redraw with ``\\r`` and no newline, so one stored message can
+        hold hundreds of redraws (30 KB). Within each line only the last non-empty redraw is worth
+        returning. ``\\r\\n`` is a line break, not a redraw, and lines are kept, so multi-line messages such
+        as tracebacks are returned intact. This runs on the returned page only, after ordering, row
+        hashes and cursors are computed from the stored text, so pagination is unaffected.
+        """
+        if "\r" not in message:
+            return message
+        collapsed_lines = []
+        for line in message.replace("\r\n", "\n").split("\n"):
+            redraws = [segment for segment in line.split("\r") if segment]
+            collapsed_lines.append(redraws[-1] if redraws else "")
+        return "\n".join(collapsed_lines)
+
+    @classmethod
+    def _platform_logs(cls, rows: list[QueriedLogEntry]) -> list[HelixJobLog]:
         return [
             HelixJobLog(
                 timestamp=row.timestamp,
                 job=row.job,
                 job_step=row.job_step,
                 job_task=row.job_task,
-                message=row.log_message,
+                message=cls._collapse_carriage_returns(row.log_message),
             )
             for row in rows
         ]
@@ -666,7 +685,7 @@ class DuckDBLogRepository:
         nested logs directory. This method is synchronous; ``LogStorage`` runs it in
         a thread pool to avoid blocking the event loop.
         """
-        conn = duckdb.connect(":memory:")
+        conn = duckdb_connect(":memory:")
         table_name = f"temp_logs_{uuid.uuid4().hex[:8]}"
 
         try:

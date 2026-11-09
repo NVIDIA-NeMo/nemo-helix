@@ -309,6 +309,12 @@ class RetryPolicy:
         instead.  Retry those where the body can be rebuilt from its
         source.
 
+    ``resend_after_body_sent=False`` stops the policy from resending a request
+    after a transport failure that may have delivered its body (a read timeout or
+    a dropped connection), where the server may have acted on it without
+    answering. Connection failures, which happen before any body byte is sent,
+    stay retryable. Use it for expensive, non-idempotent-in-cost POSTs.
+
     Usage::
 
         # Client-level default
@@ -324,6 +330,7 @@ class RetryPolicy:
     retry_all_server_errors: bool = False
     respect_retry_decision_headers: bool = False
     respect_retry_after_headers: bool = False
+    resend_after_body_sent: bool = True
 
 
 # Platform-wide retry contract: retries timeouts, conflicts, rate limits, and all

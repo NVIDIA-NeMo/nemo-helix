@@ -62,12 +62,18 @@ def _model_path(model_entity: Optional[ModelEntity]) -> str:
 
 
 def _user_set_args(additional_args: list[str] | None) -> set[str]:
-    """Flag names the user already supplied via additional_args (so we don't inject ours)."""
+    """Flag names the user already supplied via additional_args (so we don't inject ours).
+
+    vLLM reads ``_`` in a flag name as ``-`` and lets a JSON flag be set one key at a
+    time (``--speculative-config.method mtp``), so those spellings count as the flag.
+    """
     flags: set[str] = set()
     for arg in additional_args or []:
         if isinstance(arg, str) and arg.startswith("--"):
             # Handle both "--flag value" and "--flag=value".
-            flags.add(arg.split("=", 1)[0])
+            name = "--" + arg[2:].split("=", 1)[0].replace("_", "-")
+            flags.add(name)
+            flags.add(name.split(".", 1)[0])
     return flags
 
 
@@ -84,11 +90,12 @@ def compute_tensor_parallel_size(
 ) -> int:
     """Compute ``--tensor-parallel-size`` from GPU count and model architecture.
 
-    Mirrors the constraints the NeMo parallelism heuristic applies: a valid TP
-    degree must divide the GPU count and the model's ``hidden_size``,
-    ``num_attention_heads``, and ``num_kv_heads`` (critical for GQA/MQA). We pick
-    the largest valid divisor so every allocated GPU is used. When ``gpu <= 1``
-    (including CPU-only) TP is 1 and no computation runs.
+    Mirrors the constraints vLLM checks at startup: a valid TP degree must divide
+    the GPU count and the model's ``hidden_size`` and ``num_attention_heads``, and
+    must either divide ``num_kv_heads`` or be a multiple of it (vLLM copies KV
+    heads across ranks when there are fewer of them than ranks, as with GQA/MQA).
+    We pick the largest valid divisor so every allocated GPU is used. When
+    ``gpu <= 1`` (including CPU-only) TP is 1 and no computation runs.
 
     This intentionally re-implements the small divisor/divisibility check inline
     rather than importing ``nhx.core.models.parallelism`` -- that package pulls in
@@ -118,7 +125,10 @@ def compute_tensor_parallel_size(
     candidates = [
         tp
         for tp in _divisors(gpu)
-        if tp <= tp_cap and hidden_size % tp == 0 and num_heads % tp == 0 and num_kv_heads % tp == 0
+        if tp <= tp_cap
+        and hidden_size % tp == 0
+        and num_heads % tp == 0
+        and (num_kv_heads % tp == 0 or tp % num_kv_heads == 0)
     ]
     if not candidates:
         logger.warning("No valid tensor-parallel-size candidates for model; defaulting to 1")
@@ -133,6 +143,7 @@ def compile_vllm_args(
     model_entity: Optional[ModelEntity],
     *,
     tool_call_plugin_path: str | None = None,
+    max_lora_rank: int | None = None,
 ) -> list[str]:
     """Build the ``vllm serve`` argument vector for the container.
 
@@ -140,6 +151,8 @@ def compile_vllm_args(
     ``additional_args`` are appended verbatim, and any flag the user set there is
     not auto-injected by the compiler. ``tool_call_plugin_path`` is the backend's
     materialized in-container path, never the configured plugin fileset reference.
+    ``max_lora_rank`` is the ``--max-lora-rank`` a LoRA deployment gets when the user
+    did not set one.
     """
     user_flags = _user_set_args(view.additional_args)
     args: list[str] = [_model_path(model_entity)]
@@ -187,6 +200,9 @@ def compile_vllm_args(
 
     if view.lora_enabled and "--enable-lora" not in user_flags:
         args.append("--enable-lora")
+    if view.lora_enabled and max_lora_rank and "--max-lora-rank" not in user_flags:
+        # vLLM's own default is 16, below common training ranks.
+        args.extend(["--max-lora-rank", str(max_lora_rank)])
 
     # vLLM has no env var for trust-remote-code; it is a `vllm serve` CLI flag
     # (EngineArgs.trust_remote_code -> --trust-remote-code).

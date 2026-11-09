@@ -3,12 +3,15 @@
 
 """Focused request serialization, response handling, and source-example contracts."""
 
+import builtins
 import json
 import shlex
 import shutil
 import subprocess
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import yaml
@@ -47,6 +50,34 @@ def test_curl_arguments_round_trip_through_shell_tokenization():
     ]
 
 
+def test_every_custom_sample_overrides_every_fern_example(spec):
+    for path, item in spec["paths"].items():
+        for method, operation in item.items():
+            if not isinstance(operation, dict) or not operation.get("x-codeSamples"):
+                continue
+            expected = {s["lang"].lower(): s["source"] for s in operation["x-codeSamples"]}
+            assert operation.get("x-fern-examples"), (method, path)
+            for example in operation["x-fern-examples"]:
+                actual = {s["sdk"]: s["code"] for s in example["code-samples"]}
+                assert expected.items() <= actual.items(), (method, path)
+
+
+def test_authored_samples_override_fallbacks_without_losing_examples():
+    operation = {
+        "x-codeSamples": [{"lang": "Python", "source": "print('authored')"}],
+        "x-fern-examples": [
+            {"request": {"name": "first"}, "code-samples": [{"sdk": "python", "code": "stale"}]},
+            {"request": {"name": "second"}, "code-samples": [{"sdk": "curl", "code": "keep"}]},
+        ],
+    }
+    spec = {"paths": {"/example": {"head": operation}}}
+    add_code_samples(spec)
+    for example in operation["x-fern-examples"]:
+        assert {"sdk": "python", "code": "print('authored')"} in example["code-samples"]
+    assert operation["x-fern-examples"][0]["request"] == {"name": "first"}
+    assert {"sdk": "curl", "code": "keep"} in operation["x-fern-examples"][1]["code-samples"]
+
+
 def test_language_policy_covers_authored_samples_and_default_curl(spec):
     docs = yaml.safe_load((Path(__file__).resolve().parents[2] / "docs/fern/docs.yml").read_text())
     assert set(docs["settings"]["http-snippets"]) == {"python", "javascript", "curl"}
@@ -63,14 +94,32 @@ def test_language_policy_covers_authored_samples_and_default_curl(spec):
     assert shlex.split(curl["code"].replace("\\\n", ""))[4] == "http://localhost:8080/example"
 
 
+def _exec_with_fake_requests(source: str, request: Mock) -> None:
+    """Run a Python sample whose ``import requests`` resolves to a fake, inside the sample only."""
+    real_import = builtins.__import__
+
+    def sample_import(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "requests":
+            return SimpleNamespace(request=request)
+        return real_import(name, globals, locals, fromlist, level)
+
+    exec(source, {"__builtins__": {**vars(builtins), "__import__": sample_import}})
+
+
 @pytest.mark.parametrize("binary", [False, True], ids=["empty-201", "binary-download"])
 def test_python_response_handling_without_json_decode(binary, capsys):
     request = SampleRequest("GET", "http://localhost:8080/example", reads_body=binary, binary_response=binary)
     response = Mock(status_code=201, content=b"\x00\xff")
     response.json.side_effect = AssertionError("This response is not JSON")
     source = next(s["source"] for s in render_samples(request) if s["lang"] == "Python")
-    with patch("requests.request", return_value=response) as send:
-        exec(source, {})
+    send = Mock(return_value=response)
+    _exec_with_fake_requests(source, send)
     send.assert_called_once_with("GET", request.url)
     response.raise_for_status.assert_called_once()
     response.json.assert_not_called()

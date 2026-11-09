@@ -4,6 +4,8 @@
 """ATIF ingest tests."""
 
 import json
+import os
+import signal
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -1043,6 +1045,116 @@ def test_atif_ingest_rejects_unknown_keys_outside_content_parts(
     ingest_response = client.post("/apis/intake/v2/workspaces/default/ingest/atif", json=body)
     assert ingest_response.status_code == 422, ingest_response.text
     assert forbidden_key in ingest_response.text
+
+
+def _verifier_trajectory_body(session_id: str) -> dict:
+    """A minimal trajectory whose verifier scores become evaluator_results rows."""
+    verifier_started_at = _BASE_TIME + timedelta(minutes=1)
+    verifier_finished_at = _BASE_TIME + timedelta(minutes=2)
+    return {
+        "schema_version": "ATIF-v1.6",
+        "session_id": session_id,
+        "agent": {"name": "test-agent", "version": "1.0"},
+        "steps": [
+            {"step_id": 1, "source": "user", "message": "hello"},
+            {"step_id": 2, "source": "agent", "message": "done"},
+        ],
+        "extra": {
+            "verifier": {
+                "started_at": _atif_timestamp(verifier_started_at),
+                "finished_at": _atif_timestamp(verifier_finished_at),
+            },
+            "verifier_result": {"rewards": {"reward": 0.5, "format_check": 1}},
+        },
+    }
+
+
+def test_atif_ingest_stores_verifier_rewards_as_evaluator_results(client: TestClient):
+    """One ingest returns 201 and the stored evaluator results still match the mapper."""
+    body = _verifier_trajectory_body("atif-evaluator-results")
+
+    ingest_response = client.post("/apis/intake/v2/workspaces/default/ingest/atif", json=body)
+    assert ingest_response.status_code == 201, ingest_response.text
+
+    spans_response = client.get(
+        "/apis/intake/v2/workspaces/default/spans",
+        params={
+            "filter[session_id]": body["session_id"],
+            "filter[started_at][gte]": _HISTORICAL_GTE,
+            "page_size": 50,
+            "sort": "started_at",
+        },
+    )
+    assert spans_response.status_code == 200, spans_response.text
+    evaluator_span = next(span for span in spans_response.json()["data"] if span["kind"] == "EVALUATOR")
+
+    results_response = client.get(
+        "/apis/intake/v2/workspaces/default/evaluator-results",
+        params={"filter[session_id]": body["session_id"], "page_size": 50},
+    )
+    assert results_response.status_code == 200, results_response.text
+    by_name = {result["name"]: result for result in results_response.json()["data"]}
+    assert set(by_name) == {"reward", "format_check"}
+    reward = by_name["reward"]
+    assert reward["span_id"] == evaluator_span["span_id"]
+    assert reward["session_id"] == body["session_id"]
+    assert reward["workspace"] == "default"
+    assert reward["value"] == 0.5
+    assert reward["data_type"] == "NUMERIC"
+    assert reward["status"] == "SCORED"
+    assert reward["created_by"] == "intake:atif_importer"
+    assert by_name["format_check"]["value"] == 1
+
+
+def _kill_atif_worker() -> None:
+    """Kill the pool worker that runs this, permanently breaking that pool."""
+    os.kill(os.getpid(), signal.SIGKILL)
+
+
+def test_atif_ingest_recovers_after_a_worker_dies(client: TestClient, intake_service: IntakeService):
+    """A dead worker 503s that request (nothing stored); the pool heals and a retry stores."""
+    executor = intake_service.atif_ingest_executor
+    assert executor is not None
+    broke = executor.submit(_kill_atif_worker)
+    assert broke.exception(timeout=60) is not None, "worker was expected to die and break the pool"
+
+    body = _verifier_trajectory_body("atif-pool-recovery")
+    first_response = client.post("/apis/intake/v2/workspaces/default/ingest/atif", json=body)
+    assert first_response.status_code == 503, first_response.text
+
+    retry_response = client.post("/apis/intake/v2/workspaces/default/ingest/atif", json=body)
+    assert retry_response.status_code == 201, retry_response.text
+    assert intake_service.atif_ingest_executor is not executor
+
+    spans_response = client.get(
+        "/apis/intake/v2/workspaces/default/spans",
+        params={
+            "filter[session_id]": body["session_id"],
+            "filter[started_at][gte]": _HISTORICAL_GTE,
+            "page_size": 50,
+            "sort": "started_at",
+        },
+    )
+    assert spans_response.status_code == 200, spans_response.text
+    # The 503 attempt inserted nothing, so the retry stored each span exactly once.
+    spans = spans_response.json()["data"]
+    assert len({span["span_id"] for span in spans}) == len(spans)
+    assert any(span["kind"] == "EVALUATOR" for span in spans)
+
+
+def test_intake_service_shuts_down_atif_process_pool(intake_config: IntakeConfig, intake_service: IntakeService):
+    """Shutdown closes the pool, so no late offload can outlive the service."""
+    with create_test_client(
+        lambda: intake_service,
+        client_type=TestClient,
+        service_configs={IntakeService: intake_config},
+    ):
+        executor = intake_service.atif_ingest_executor
+        assert executor is not None
+
+    assert intake_service.atif_ingest_executor is None
+    with pytest.raises(RuntimeError, match="shutdown"):
+        executor.submit(int)
 
 
 def _create_experiment(client: TestClient, name: str) -> str:

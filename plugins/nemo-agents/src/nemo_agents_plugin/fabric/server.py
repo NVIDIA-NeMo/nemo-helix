@@ -11,7 +11,7 @@ import logging
 import sys
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -22,6 +22,7 @@ from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
 from nemo_agents_plugin.fabric.environment import release_runtime_base_dir, resolve_runtime_base_dir
+from nemo_agents_plugin.fabric.mcp_status import McpServerStatus, McpStatusCache, McpStatusResponse
 from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
     FabricRuntimeExecutionError,
@@ -50,8 +51,9 @@ from nemo_agents_plugin.fabric.streaming import (
     iter_fabric_chat_completion_sse,
     openai_chat_completion_error_sse,
 )
-from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER, session_id_to_uuid
 from starlette.types import Receive, Scope, Send
+from uvicorn import run
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +91,17 @@ def _to_fabric_invocation_request(
         else "\n\n".join(f"{message.role}: {message.content}" for message in messages)
     )
     caller_context = {"session_id": session_id} if session_id is not None else {}
+    relay_session_root = None
+    if session_id is not None:
+        try:
+            relay_session_root = session_id_to_uuid(session_id)
+        except ValueError:
+            with suppress(ValueError):
+                relay_session_root = str(uuid.UUID(session_id))
     return FabricInvocationRequest(
         input=input_text,
         caller_context=caller_context,
+        relay_session_root=relay_session_root,
     )
 
 
@@ -375,6 +385,19 @@ def create_fabric_serving_app(
             "runtime_started_at": runtime_started_at.isoformat(),
         }
 
+    mcp_status_cache = McpStatusCache()
+
+    @app.get("/v1/mcp/servers")
+    async def list_mcp_servers() -> McpStatusResponse:
+        return await mcp_status_cache.get(app.state.agent_config)
+
+    @app.get("/v1/mcp/servers/{name}")
+    async def get_mcp_server(name: str) -> McpServerStatus:
+        status = await mcp_status_cache.get_server(app.state.agent_config, name)
+        if status is None:
+            raise HTTPException(status_code=404, detail=f"MCP server '{name}' is not declared by this agent.")
+        return status
+
     @app.post("/v1/chat/completions", response_model=None, response_model_exclude_none=True)
     async def chat_completions(
         request: ChatCompletionRequest,
@@ -513,10 +536,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    import uvicorn
-
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run(
+    run(
         create_fabric_serving_app(
             args.agent_config,
             settings=FabricServingSettings(

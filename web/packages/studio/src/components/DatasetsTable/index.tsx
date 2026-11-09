@@ -12,7 +12,7 @@ import { Button } from '@nvidia/foundations-react-core';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
 import { makeDatasetsTableColumns } from '@studio/components/DatasetsTable/columns';
-import { type DatasetsTableProps } from '@studio/components/DatasetsTable/types';
+import type { DatasetsTableProps } from '@studio/components/DatasetsTable/types';
 import { useDatasetsTable } from '@studio/components/DatasetsTable/useDatasetsTable';
 import { FilesetCreateModal } from '@studio/components/FilesetCreateModal';
 import { Loading } from '@studio/components/Layouts/Loading';
@@ -20,7 +20,7 @@ import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
 import { DatasetBulkDeleteModal } from '@studio/routes/FilesetListRoute/DatasetBulkDeleteModal';
 import { getNewFilesetRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
 export type { DatasetsTableProps } from '@studio/components/DatasetsTable/types';

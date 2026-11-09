@@ -13,6 +13,7 @@ from nemo_helix_ext.cli.commands.skills.registry import (
     DuplicateSkillError,
     SkillProvider,
     _load_skills_cached,
+    load_skills,
 )
 from nemo_helix_ext.skills import skills_dir as platform_skills_dir
 from typer.testing import CliRunner
@@ -69,7 +70,7 @@ def example_plugin_skills(monkeypatch):
     _load_skills_cached.cache_clear()
     monkeypatch.setattr(
         "nemo_helix_ext.cli.commands.skills.registry._discover_skill_providers",
-        lambda: {
+        lambda _warnings: {
             "platform": SkillProvider(name="platform", path=platform_skills_dir(), dist_name="nemo-helix-ext"),
             "example": SkillProvider(
                 name="example", path=_example_plugin_skills_root(), dist_name="nemo-example-plugin"
@@ -308,7 +309,7 @@ class TestInstall:
     def test_install_duplicate_skill_error_is_clean(self, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(
-            "nemo_helix_ext.cli.commands.skills.cli.load_skills",
+            "nemo_helix_ext.cli.commands.skills.cli.load_skills_with_warnings",
             lambda: (_ for _ in ()).throw(DuplicateSkillError("duplicate skill")),
         )
         result = runner.invoke(app, "skills install --agent claude --skill inference")
@@ -341,7 +342,7 @@ class TestInstall:
 
     def test_install_cursor_user_scope(self, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
         result = runner.invoke(app, "skills install --agent cursor --user --skill inference")
         assert_exit_code(result, 0)
         assert (tmp_path / ".cursor" / "skills" / "nemo-inference" / "SKILL.md").exists()
@@ -396,6 +397,123 @@ class TestInstall:
         )
         assert_exit_code(result, 0)
         assert (skills_path / "nemo-inference" / "SKILL.md").exists()
+
+    def test_full_install_prunes_recorded_directory_and_keeps_unrecorded(self, tmp_path: Path, monkeypatch):
+        """End-to-end manifest behavior through the CLI.
+
+        A full install records every directory it writes. A later full install
+        removes a recorded directory that is no longer in the install set,
+        while an unrecorded neighbor (e.g. a user-written skill) survives.
+        """
+        import json
+
+        monkeypatch.chdir(tmp_path)
+        skills_root = tmp_path / ".claude" / "skills"
+        manifest_path = skills_root / ".nemo-helix-installed-skills.json"
+
+        result = runner.invoke(app, "skills install --agent claude")
+        assert_exit_code(result, 0)
+        manifest = json.loads(manifest_path.read_text())
+        assert installed_skill_name("inference") in manifest["owned"]
+
+        # A directory recorded by an older install that this build no longer
+        # ships, plus an unrecorded user-written skill.
+        stale = skills_root / "nemo-stale"
+        stale.mkdir()
+        (stale / "SKILL.md").write_text("stale")
+        manifest["owned"].append("nemo-stale")
+        manifest_path.write_text(json.dumps(manifest))
+        user_skill = skills_root / "nemo-user-skill"
+        user_skill.mkdir()
+        (user_skill / "SKILL.md").write_text("user skill")
+
+        result = runner.invoke(app, "skills install --agent claude --skill inference")
+        assert_exit_code(result, 0)
+        # A subset install removes nothing.
+        assert (skills_root / "nemo-inference" / "SKILL.md").exists()
+        assert stale.is_dir()
+        assert "nemo-stale" in json.loads(manifest_path.read_text())["owned"]
+
+        result = runner.invoke(app, "skills install --agent claude")
+        assert_exit_code(result, 0)
+        assert not stale.exists()
+        assert (user_skill / "SKILL.md").read_text() == "user skill"
+        # The removal is reported, not silent.
+        assert "Removed 1 skill(s) no longer shipped:" in result.stdout
+        assert "nemo-stale" in result.stdout
+        owned = json.loads(manifest_path.read_text())["owned"]
+        assert "nemo-stale" not in owned
+        assert installed_skill_name("inference") in owned
+
+    def test_full_install_skips_prune_when_discovery_reports_warnings(self, tmp_path: Path, monkeypatch):
+        """A degraded plugin discovery must never read as "no longer shipped"."""
+        import json
+
+        monkeypatch.chdir(tmp_path)
+        skills_root = tmp_path / ".claude" / "skills"
+        manifest_path = skills_root / ".nemo-helix-installed-skills.json"
+
+        result = runner.invoke(app, "skills install --agent claude")
+        assert_exit_code(result, 0)
+        manifest = json.loads(manifest_path.read_text())
+        stale = skills_root / "nemo-stale"
+        stale.mkdir()
+        (stale / "SKILL.md").write_text("stale")
+        manifest["owned"].append("nemo-stale")
+        manifest_path.write_text(json.dumps(manifest))
+
+        # Simulate a plugin that failed to load: the loaded set shrinks and the
+        # registry emits a warning.
+        degraded = {name: skill for name, skill in load_skills().items() if name != "inference"}
+        monkeypatch.setattr(
+            "nemo_helix_ext.cli.commands.skills.cli.load_skills_with_warnings",
+            lambda: (degraded, ["Failed to load 'nemo.skills' entry point 'broken' - skipping"]),
+        )
+
+        result = runner.invoke(app, "skills install --agent claude")
+        assert_exit_code(result, 0)
+        assert stale.is_dir()
+        assert "skipping removal of previously installed skills" in result.output
+        assert "Failed to load 'nemo.skills' entry point" in result.output
+        assert "Removed" not in result.stdout
+
+    def test_full_install_skips_prune_when_allowlist_hides_a_skill_provider(self, tmp_path: Path, monkeypatch):
+        """Skills of a plugin hidden by the allowlist are still installed, not "no longer shipped"."""
+        import json
+
+        monkeypatch.chdir(tmp_path)
+        skills_root = tmp_path / ".claude" / "skills"
+        manifest_path = skills_root / ".nemo-helix-installed-skills.json"
+
+        result = runner.invoke(app, "skills install --agent claude")
+        assert_exit_code(result, 0)
+        manifest = json.loads(manifest_path.read_text())
+        hidden = skills_root / "nemo-hidden-plugin-skill"
+        hidden.mkdir()
+        (hidden / "SKILL.md").write_text("hidden")
+        manifest["owned"].append("nemo-hidden-plugin-skill")
+        manifest_path.write_text(json.dumps(manifest))
+
+        monkeypatch.setattr(
+            "nemo_helix_ext.cli.commands.skills.cli.skill_providers_excluded_by_allowlist", lambda: ["hidden"]
+        )
+
+        result = runner.invoke(app, "skills install --agent claude")
+        assert_exit_code(result, 0)
+        assert hidden.is_dir()
+        assert "Plugin allowlist excludes skill provider(s): hidden" in result.output
+        assert "Removed" not in result.stdout
+
+    def test_install_to_custom_path_writes_its_own_manifest(self, tmp_path: Path):
+        """Each skills root keeps its own manifest file."""
+        import json
+
+        skills_path = tmp_path / "custom" / "skills"
+        result = runner.invoke(app, ["skills", "install", "--path", str(skills_path), "--skill", "inference"])
+        assert_exit_code(result, 0)
+        manifest_path = skills_path / ".nemo-helix-installed-skills.json"
+        manifest = json.loads(manifest_path.read_text())
+        assert manifest["owned"] == [installed_skill_name("inference")]
 
 
 class TestFindProjectRoot:

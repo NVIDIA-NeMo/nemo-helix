@@ -108,26 +108,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -139,6 +119,27 @@ paths:
           default: -created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -358,22 +359,6 @@ paths:
         schema:
           type: string
           title: Name
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          default: 1
-          title: Page
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          default: 25
-          title: Page Size
       - name: sort
         in: query
         required: false
@@ -390,6 +375,27 @@ paths:
         schema:
           title: Filter
           type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -793,23 +799,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          default: 1
-          title: Page
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          default: 20
-          title: Page Size
       - name: sort
         in: query
         required: false
@@ -817,6 +806,27 @@ paths:
           type: string
           default: -created_at
           title: Sort
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Page size.
+          default: 20
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -1019,26 +1029,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -1050,6 +1040,27 @@ paths:
           default: -created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -1269,22 +1280,6 @@ paths:
         schema:
           type: string
           title: Name
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          default: 1
-          title: Page
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          default: 25
-          title: Page Size
       - name: sort
         in: query
         required: false
@@ -1301,6 +1296,27 @@ paths:
         schema:
           title: Filter
           type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -1748,26 +1764,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -1779,6 +1775,27 @@ paths:
           default: -created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -1998,22 +2015,6 @@ paths:
         schema:
           type: string
           title: Name
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          default: 1
-          title: Page
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          default: 25
-          title: Page Size
       - name: sort
         in: query
         required: false
@@ -2030,6 +2031,27 @@ paths:
         schema:
           title: Filter
           type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -2638,6 +2660,16 @@ components:
       - training
       title: AutomodelJobInput
       description: POST body / CLI JSON.
+      x-learning-rate-defaults:
+      - value: 1.0e-05
+        when:
+          training.recipe: bi_encoder
+      - value: 3.0e-06
+        when:
+          training.recipe: cross_encoder
+      - value: 5.0e-06
+        when:
+          training.finetuning_type: all_weights
     AutomodelJobOutput:
       properties:
         name:
@@ -4376,7 +4408,7 @@ components:
           exclusiveMinimum: 0.0
           title: Learning Rate
           description: Peak learning rate. Left unset, 5e-6 for finetuning_type 'all_weights'
-            and 1e-5 for 'lora'.
+            and 1e-5 for 'lora' and 'lora_merged'.
           default: 5.0e-06
         min_learning_rate:
           title: Min Learning Rate
@@ -4502,9 +4534,10 @@ components:
           enum:
           - all_weights
           - lora
+          - lora_merged
           title: Finetuning Type
-          description: Full-weight GRPO or LoRA adapter training. lora_merged is not
-            supported.
+          description: Full-weight GRPO, a LoRA adapter, or LoRA merged into the base
+            model at export.
           default: all_weights
         lora:
           allOf:
@@ -4520,13 +4553,6 @@ components:
             `dtensor` is read as `automodel`: full-weight jobs saved that value, and
             it is not a separate worker.'
           default: automodel
-        v4_compatible:
-          type: boolean
-          title: V4 Compatible
-          description: Keep the base checkpoint's transformers-v4 config.json on the
-            trained export. The platform's vLLM cannot read the v5 config Automodel
-            otherwise writes. Set false to export that v5 config instead.
-          default: true
         val_at_start:
           type: boolean
           title: Val At Start
@@ -4848,9 +4874,18 @@ components:
       description: 'Group Relative Policy Optimization with NeMo Gym environments.
 
 
-        ``finetuning_type`` is ``all_weights`` (default) or ``lora`` only.
+        ``finetuning_type`` is ``all_weights`` (default), ``lora``, or ``lora_merged``.
 
-        ``lora_merged`` is not supported for GRPO on the Automodel path.'
+        ``lora`` publishes the HF PEFT adapter. ``lora_merged`` trains the same adapter
+
+        and folds it into the base model at export.'
+      x-learning-rate-defaults:
+      - value: 1.0e-05
+        when:
+          finetuning_type: lora
+      - value: 1.0e-05
+        when:
+          finetuning_type: lora_merged
     RlJobInput:
       properties:
         name:
@@ -5270,8 +5305,8 @@ components:
       additionalProperties: false
       type: object
       title: RlLoRAParams
-      description: LoRA hyperparameters for GRPO (``automodel_cfg.lora_cfg``). No
-        merge-at-export.
+      description: LoRA hyperparameters for GRPO (``automodel_cfg.lora_cfg``). Merge-at-export
+        follows ``finetuning_type``.
     RlOutputRequest:
       properties:
         name:
@@ -5342,7 +5377,7 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Expert Parallel Size
-          description: Expert parallel size for MoE models. GRPO only.
+          description: Expert parallel size for MoE models. DPO and GRPO.
           default: 1
         sequence_parallel:
           type: boolean
@@ -5603,6 +5638,10 @@ components:
       - dataset
       title: UnslothJobInput
       description: POST body / CLI JSON for ``nemo customization unsloth --job-json``.
+      x-learning-rate-defaults:
+      - value: 2.0e-05
+        when:
+          training.finetuning_type: all_weights
     UnslothJobOutput:
       properties:
         name:

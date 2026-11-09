@@ -4,7 +4,7 @@
 import { Block, Button, Flex } from '@nvidia/foundations-react-core';
 import { INTAKE_ENABLED } from '@studio/constants/environment';
 import type { AgentDetailTab } from '@studio/routes/agents/AgentDetailRoute/tabs';
-import { type FC, type RefObject } from 'react';
+import type { FC, RefObject } from 'react';
 
 /** The action each tab promotes to the brand-colored slot. Tabs left out promote `deploy`, which
  *  is the only action every tab can offer — the others depend on a tab-specific target. */

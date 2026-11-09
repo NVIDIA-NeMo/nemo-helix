@@ -9,6 +9,7 @@ import asyncio
 import json
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
+from importlib.metadata import version
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -469,6 +470,108 @@ def test_agent_eval_job_reconstructs_tasks_and_persists_bundle(tmp_path: Path, m
     assert (ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME).exists()
     assert (ctx.storage.persistent / "results" / SUMMARY_RESULT_NAME).exists()
     assert result["artifact"]["name"] == DEFAULT_RESULT_NAME
+
+
+class _EvidenceWritingEvaluator(_FakeEvaluator):
+    """Writes runner evidence into the run's work directory, which the job saves as the bundle."""
+
+    def run_sync(
+        self,
+        *,
+        tasks: Sequence[AgentEvalTask],
+        trials: Sequence[AgentEvalTrial] | None = None,
+        target: AgentEvalTarget | None = None,
+        config: AgentEvalRunConfig | None = None,
+    ) -> AgentEvalResult:
+        """Create plugin checkout fixtures in the native bundle before returning trials."""
+        assert config is not None and config.work_dir is not None
+        for relative in (
+            "evidence/home/.tmp/plugins/catalog.json",
+            "evidence/home/.tmp/plugins-clone-a1/catalog.json",
+            "evidence/home/.tmp/plugins.sha",
+        ):
+            path = config.work_dir / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(relative)
+        return super().run_sync(tasks=tasks, trials=trials, target=target, config=config)
+
+
+def test_agent_eval_job_leaves_ignored_paths_out_of_the_saved_bundle(tmp_path: Path, mocker: MockerFixture) -> None:
+    """Filter only the authored directory roots while retaining core bundle files."""
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_EvidenceWritingEvaluator())
+    ctx = _job_context(tmp_path)
+
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=_runner_target("openai/gpt-5.4"),
+        result_ignore_patterns=["evidence/home/.tmp/plugins*/"],
+    )
+    AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+
+    saved = ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME
+    assert (saved / "trials.jsonl").exists()
+    assert (saved / "evidence/home/.tmp/plugins.sha").exists()
+    assert not (saved / "evidence/home/.tmp/plugins").exists()
+    assert not (saved / "evidence/home/.tmp/plugins-clone-a1").exists()
+
+
+def test_agent_eval_spec_rejects_an_empty_result_ignore_pattern() -> None:
+    """Reject ambiguous empty patterns before a job can be submitted."""
+    with pytest.raises(ValidationError, match="result_ignore_patterns"):
+        AgentEvalSpec(tasks=[_task_spec()], target=_runner_target("openai/gpt-5.4"), result_ignore_patterns=[""])
+
+
+def test_agent_eval_job_keeps_every_bundle_file_by_default(tmp_path: Path, mocker: MockerFixture) -> None:
+    """Preserve all evidence unless the caller opts into exclusions."""
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_EvidenceWritingEvaluator())
+    ctx = _job_context(tmp_path)
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=_runner_target())
+
+    AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+
+    saved = ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME
+    assert (saved / "evidence/home/.tmp/plugins/catalog.json").is_file()
+    assert (saved / "evidence/home/.tmp/plugins-clone-a1/catalog.json").is_file()
+
+
+async def test_result_ignore_patterns_survive_spec_resolution() -> None:
+    """Carry exclusions from the authoring spec into the resolved job spec."""
+    input_spec = AgentEvalInputSpec(
+        tasks=[AgentEvalTaskInput(id="task-1", intent="Answer.", inputs=_task_inputs(), metrics=[_inline_metric()])],
+        target=_runner_target(),
+        result_ignore_patterns=["evidence/home/.tmp/plugins*/"],
+    )
+
+    spec = await AgentEvalJob.to_spec(
+        input_spec, workspace="dev", entity_client=None, async_sdk=_async_sdk(), is_local=True
+    )
+
+    assert isinstance(spec, AgentEvalSpec)
+    assert spec.result_ignore_patterns == input_spec.result_ignore_patterns
+
+
+def test_cli_agent_evaluate_forwards_result_ignore_patterns(tmp_path: Path, mocker: MockerFixture) -> None:
+    """Pass configured exclusions through generated CLI spec-file submission."""
+    spec = AgentEvalInputSpec(
+        tasks=[AgentEvalTaskInput(id="task-1", intent="Answer.", inputs=_task_inputs(), metrics=[_inline_metric()])],
+        target=_runner_target(),
+        result_ignore_patterns=["evidence/home/.tmp/plugins*/"],
+    )
+    spec_file = tmp_path / "job.json"
+    spec_file.write_text(spec.model_dump_json())
+    submit = mocker.patch(
+        "nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", autospec=True, return_value={"id": "job-123"}
+    )
+    cli = EvaluatorPluginCLI()
+    app = cli.get_cli()
+    add_job_commands(app, {"evals.agent-evaluate": AgentEvalJob}, cli=cli)
+
+    result = CliRunner().invoke(app, ["agent-evaluate", "--spec-file", str(spec_file), "--workspace", "dev"])
+
+    assert result.exit_code == 0, result.output
+    submit.assert_called_once()
+    submitted_spec = submit.call_args.args[2]
+    assert submitted_spec["result_ignore_patterns"] == spec.result_ignore_patterns
 
 
 def _run_sandboxed_gym_job(ctx: JobContext, mocker: MockerFixture) -> Path:
@@ -1095,7 +1198,7 @@ def test_harbor_agent_kwargs_round_trip_the_wire_unchanged() -> None:
     """Nested kwargs survive JSON serialization, so what the submitter wrote is what the agent's ``__init__`` gets."""
     agent_kwargs: dict[str, JsonValue] = {
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.5.0",
+        "fabric_package": f"nemo-fabric[codex]=={version('nemo-fabric')}",
         "fabric_harness_settings": {"max_turns": 3, "tools": ["shell", None], "strict": True},
     }
     spec = AgentEvalSpec(
@@ -2937,7 +3040,7 @@ def test_resolve_target_raises_a_relay_version_persisted_under_an_older_fabric(t
 
     harbor_target = HarborRunnerTarget(
         source=RegisteredAgentSource(agent=AgentRef(root="dev/a")),
-        agent_kwargs={"fabric_config": persisted, "fabric_package": "nemo-fabric[codex]==0.5.0"},
+        agent_kwargs={"fabric_config": persisted, "fabric_package": f"nemo-fabric[codex]=={version('nemo-fabric')}"},
     )
     runner, _, _ = AgentEvalJob._resolve_target(harbor_target, ctx)
     assert isinstance(runner, HarborAgentTaskRunner)

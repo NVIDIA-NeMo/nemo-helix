@@ -18,7 +18,7 @@ import type { WorkspaceMember } from '@nemo/sdk/generated/platform/schema';
 import { type DropdownEntry, Text } from '@nvidia/foundations-react-core';
 import { useWorkspaceMembers } from '@studio/api/entity-store/useWorkspaceMembers';
 import { Loading } from '@studio/components/Layouts/Loading';
-import { ComponentProps, FC, useCallback, useMemo } from 'react';
+import { type ComponentProps, type FC, useCallback, useMemo } from 'react';
 
 export interface MembersDataViewProps {
   workspace: string;

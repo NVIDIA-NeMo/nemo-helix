@@ -30,12 +30,14 @@ import logging
 import os
 import re
 import shutil
-import socket
 import subprocess
-import sys
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from shutil import which
+from socket import AF_INET, SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET, socket
+from subprocess import Popen
+from sys import executable
 from typing import Any
 
 import httpx
@@ -55,6 +57,7 @@ from nemo_agents_plugin.utils import get_base_url
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import FilesetRef
 
 # Match characters not safe for filesystem paths.  Deployment names are
@@ -94,9 +97,9 @@ def _resolve_nat_bin() -> str:
        agentic container if the ``PATH`` lookup somehow fails. Kept for
        backwards compatibility with prior behavior.
     """
-    if found := shutil.which("nat"):
+    if found := which("nat"):
         return found
-    sibling = Path(sys.executable).parent / "nat"
+    sibling = Path(executable).parent / "nat"
     if sibling.is_file():
         return str(sibling)
     return "/app/.venv/bin/nat"
@@ -273,13 +276,13 @@ class InMemoryRunnerBackend(RunnerBackend):
         return candidate
 
     @contextmanager
-    def reserve_socket(self) -> Generator[socket.socket, None, None]:
+    def reserve_socket(self) -> Generator[socket, None, None]:
         """Reserve a listening loopback socket until context exit for handoff to a child."""
         for candidate in self._port_candidates():
             if self._has_wildcard_listener(candidate):
                 continue
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            with socket(AF_INET, SOCK_STREAM) as sock:
+                sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
                 try:
                     sock.bind(("127.0.0.1", candidate))
                     # Listening makes the reservation exclusive even with SO_REUSEADDR.
@@ -309,8 +312,8 @@ class InMemoryRunnerBackend(RunnerBackend):
     @staticmethod
     def _is_port_free(port: int) -> bool:
         """Return ``True`` if nothing is currently bound to *port* on loopback."""
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        with socket(AF_INET, SOCK_STREAM) as sock:
+            sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
             try:
                 if InMemoryRunnerBackend._has_wildcard_listener(port):
                     return False
@@ -324,8 +327,8 @@ class InMemoryRunnerBackend(RunnerBackend):
         """Return ``True`` if a wildcard listener, such as a Docker publisher, holds *port*."""
         # macOS lets a SO_REUSEADDR loopback bind succeed beside a wildcard listener; a
         # SO_REUSEADDR wildcard bind still fails there but tolerates TIME_WAIT.
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        with socket(AF_INET, SOCK_STREAM) as sock:
+            sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
             try:
                 sock.bind(("0.0.0.0", port))
             except OSError as exc:
@@ -347,9 +350,12 @@ class InMemoryRunnerBackend(RunnerBackend):
         auth_context: AuthContext | None = None,
         resources: ComputeResources | None = None,
         secrets: dict[str, str] | None = None,
+        providers: dict[str, GatewayProviderBinding] | None = None,
         use_image_entrypoint: bool = False,
     ) -> DeploymentInfo:
         """Start a local deployment for NAT workflows or Platform-owned agents."""
+        if providers:
+            return DeploymentInfo(name=name, status="failed", error="Gateway providers require OpenShell execution.")
         # created_by drives on-behalf-of delegation only for container modes (via
         # the auth-proxy sidecar). Subprocess deployments run in-process on the
         # platform host and do not use the sidecar, so it does not apply here.
@@ -631,7 +637,7 @@ class InMemoryRunnerBackend(RunnerBackend):
         logger.info("Spawning: %s  (log: %s)", " ".join(cmd), log_path)
         log_file = log_path.open("w")
         try:
-            return subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
+            return Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
         finally:
             # Parent closes its copy of the fd; the child retains its inherited
             # copy for the lifetime of the subprocess.
@@ -649,7 +655,7 @@ class InMemoryRunnerBackend(RunnerBackend):
     ) -> subprocess.Popen[bytes]:
         """Spawn the Platform-owned Fabric server on a loopback port."""
         cmd = [
-            sys.executable,
+            executable,
             "-m",
             "nemo_agents_plugin.fabric.server",
             "--agent-config",
@@ -667,9 +673,7 @@ class InMemoryRunnerBackend(RunnerBackend):
         child_env = os.environ.copy()
         child_env.update(credential_env or {})
         try:
-            return subprocess.Popen(
-                cmd, stdout=log_file, stderr=subprocess.STDOUT, env=child_env, pass_fds=(socket_fd,)
-            )
+            return Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, env=child_env, pass_fds=(socket_fd,))
         finally:
             log_file.close()
 

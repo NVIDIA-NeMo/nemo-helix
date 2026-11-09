@@ -7,7 +7,7 @@ import { DataDesignerJobsDataView } from '@studio/components/dataViews/DataDesig
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getNewDataDesignerJobRoute } from '@studio/routes/utils';
-import { FC } from 'react';
+import type { FC } from 'react';
 import { Link, Outlet } from 'react-router';
 
 export const DataDesignerJobListRoute: FC = () => {

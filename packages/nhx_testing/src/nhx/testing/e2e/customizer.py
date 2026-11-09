@@ -331,7 +331,7 @@ def wait_for_model_spec(
     The platform launches a background job (using the customizer-tasks image)
     when a model entity is created with a fileset.  Until that job completes,
     me.spec remains None, which causes the customizer training compiler to
-    skip critical flags like force_hf and v4_compatible.
+    skip critical flags like force_hf.
     """
     deadline = time.time() + timeout
     while time.time() < deadline:

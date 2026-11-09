@@ -3,9 +3,11 @@
 
 import datetime
 import logging
+from collections.abc import Callable
 from typing import Any, Literal
 
 from kubernetes import client
+from kubernetes.client import BatchV1Api, CoreV1Api, CustomObjectsApi
 from kubernetes.client.rest import ApiException
 from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
@@ -69,6 +71,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     update_all_tasks,
     update_tasks_with_pause_outcome,
 )
+from nhx.core.jobs.controllers.backends.kubernetes.configmaps import StepConfigMapSweeper, adopt_step_configmap
 from nhx.core.jobs.controllers.backends.kubernetes.workload_delegations import (
     KubernetesPodBoundWorkloadDelegationManager,
     KubernetesPodBoundWorkloadDelegationTarget,
@@ -125,11 +128,17 @@ class VolcanoJobBackend(
 
     def init(self):
         load_kubernetes_config()
-        self._core_v1 = client.CoreV1Api()
-        self._custom_v1 = client.CustomObjectsApi()
-        self._batch_v1 = client.BatchV1Api()
+        self._core_v1 = CoreV1Api()
+        self._custom_v1 = CustomObjectsApi()
+        self._batch_v1 = BatchV1Api()
         self._networking_v1 = client.NetworkingV1Api()
         self.namespace = self._execution_profile_config.namespace or get_namespace_from_environment()
+        self._configmap_sweeper = StepConfigMapSweeper(
+            self._core_v1,
+            self._batch_v1,
+            self.namespace,
+            self.check_step_is_terminal,
+        )
         self._workload_delegation_store = create_authenticated_workload_delegation_store(self._nemo_client)
         self._workload_delegations = KubernetesPodBoundWorkloadDelegationManager(
             core_v1=self._core_v1,
@@ -442,6 +451,13 @@ class VolcanoJobBackend(
             raise
         logger.info("Scheduled job step with Volcano job", extra={"job_name": job_name, "namespace": self.namespace})
         uid = created.get("metadata", {}).get("uid") if isinstance(created, dict) else None
+        if uid:
+            adopt_step_configmap(
+                self._core_v1,
+                self.namespace,
+                configmap_name,
+                client.V1OwnerReference(api_version="batch.volcano.sh/v1alpha1", kind="Job", name=job_name, uid=uid),
+            )
         if network_policy_name and uid:
             adopt_step_network_policy(
                 self._networking_v1,
@@ -582,9 +598,16 @@ class VolcanoJobBackend(
             pod_security_context=self._execution_profile_config.pod_security_context,
         )
 
-    def cleanup_steps(self):
+    def cleanup_steps(self, on_progress: Callable[[], None] | None = None):
+        self._configmap_sweeper.sweep(on_progress)
         jobs = self.get_volcano_job_list_by_labels(labels=KUBE_JOB_SELECTOR_LABELS)
-        for job in jobs:
+        jobs_by_name = {job["metadata"]["name"]: job for job in jobs}
+        labels_by_name = {name: job["metadata"].get("labels", {}) for name, job in jobs_by_name.items()}
+        for name in self.cancelled_step_workloads(labels_by_name, on_progress):
+            self.terminate_job(jobs_by_name.pop(name))
+            if on_progress is not None:
+                on_progress()
+        for job in jobs_by_name.values():
             # Extract job_id and step_name from labels
             job_id = job.get("metadata", {}).get("labels", {}).get(JOB_ID_LABEL)
             attempt_id = job.get("metadata", {}).get("labels", {}).get(JOB_ATTEMPT_ID_LABEL)

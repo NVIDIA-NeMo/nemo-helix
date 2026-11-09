@@ -91,7 +91,7 @@ export interface PluginManifest {
 /** A single navigation item contributed by a plugin. */
 export interface PluginNavItem {
   id: string;
-  /** Kebab-case Lucide icon name, e.g. `"flask-conical"`. */
+  /** Kebab-case NVIDIA GUI icon name, e.g. `"beaker"`. */
   iconName: string;
   label: string;
   /**

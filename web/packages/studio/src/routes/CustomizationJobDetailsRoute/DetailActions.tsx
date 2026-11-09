@@ -22,7 +22,7 @@ import { hasMetrics } from '@studio/types/customization';
 import { CustomizationBackend, type CustomizationJob } from '@studio/util/customizationBackend';
 import { customizationMetricsExport } from '@studio/util/resultExports';
 import { useQueryClient } from '@tanstack/react-query';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 interface DetailActionsProps {

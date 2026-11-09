@@ -77,11 +77,11 @@ def kubernetes_client_mock():
     custom_v1_mock = MagicMock()
     with (
         patch(
-            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.client.CoreV1Api",
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.CoreV1Api",
             return_value=core_v1_mock,
         ),
         patch(
-            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.client.CustomObjectsApi",
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.CustomObjectsApi",
             return_value=custom_v1_mock,
         ),
     ):
@@ -152,7 +152,7 @@ def volcano_job(
 ) -> Generator[VolcanoJobBackend, None, None]:
     """Create a namespaced custom object (Volcano Job) instance with mocked clients."""
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -555,7 +555,7 @@ def test_volcano_job_profile_environment_applied(
         **{**volcano_execution_profile_config.model_dump(), "env": {"HOME": "/tmp"}}
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -928,7 +928,7 @@ def test_networking_annotations_disabled_via_config(
     )
 
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -2309,3 +2309,23 @@ def test_terminate_volcano_job_deletes_network_policy(
     volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
         name=name_for_step(test_step_pending), namespace="test-namespace"
     )
+
+
+@pytest.mark.parametrize("immediate", [False, True])
+@pytest.mark.parametrize(
+    "platform_status", [HelixJobStatus.CANCELLED, HelixJobStatus.ACTIVE, HelixJobStatus.ERROR, HelixJobStatus.COMPLETED]
+)
+def test_cleanup_unfinished_volcano_job_only_for_cancelled_step(
+    volcano_job, test_step_pending, immediate, platform_status
+):
+    step = test_step_pending.model_copy(update={"status": platform_status})
+    job = _volcano_job_for_step(step)
+    volcano_job._execution_profile_config.cleanup_completed_jobs_immediately = immediate
+    with (
+        patch.object(volcano_job, "get_volcano_job_list_by_labels", return_value=[job]),
+        patch.object(volcano_job, "get_step_safe", return_value=step),
+        patch.object(volcano_job, "check_step_is_terminal", return_value=platform_status.is_terminal()),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        volcano_job.cleanup_steps()
+    assert terminate.call_count == (1 if platform_status == HelixJobStatus.CANCELLED else 0)

@@ -81,6 +81,8 @@ scaled-evals = [
   # server image in k8s/helm/examples/opensandbox.
   "opensandbox-server==0.2.1",
 ]
+# Third-party Tavily plugin, published to PyPI by Tavily.
+tavily = ["nemo-helix-tavily-plugin"]
 dev = [
   "pre-commit>=3.8.0",
   "pydantic-settings>=2.6.1",
@@ -104,6 +106,9 @@ dev = [
   # agent-hardener itself, which stays in its own venv (garak pulls litellm/torch, incompatible pins).
   "nemo-agent-hardener-plugin",
   "nemo-agents-plugin[deepagents]", # Fabric agent E2E runtime
+  # Dev only, so its unit tests and type checks run with the rest; it stays out of
+  # `enabled-plugins` and `nemo-helix[all]`, so no shipped image carries Strands.
+  "strands-harness-optimizer-plugin",
   "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for intake ATIF ingest
   "nemo-helix-tools",               # License and package-layout maintenance tooling
   "nhx-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
@@ -197,6 +202,7 @@ enabled-plugins = [
   "nemo-data-designer-plugin[retrieval-sdg]",
   "nemo-evals-plugin",
   { include-group = "compass" },
+  { include-group = "tavily" },
   "nemo-guardrails-plugin",
   "nemo-garak-plugin",
   "nemo-safe-synthesizer-plugin",
@@ -314,6 +320,14 @@ environments = [
   "sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
 
+# Workspace members read as 0.0.0, so the Tavily plugin's `nemo-helix-plugin>=0.9` floor can't resolve. Declare its
+# other requirements here and keep them in sync with its pyproject on each bump.
+dependency-metadata = [
+  { name = "nemo-helix-tavily-plugin", version = "0.2.0", requires-dist = [
+    "httpx>=0.27.0,<1",
+    "pydantic>=2.0.0",
+  ], requires-python = ">=3.12,<3.15" },
+]
 constraint-dependencies = [
   "GitPython>=3.1.60",
   "Mako>=1.3.12",
@@ -344,17 +358,17 @@ constraint-dependencies = [
   "mcp>=1.28.1",
   "mlflow-skinny>=3.15.0,<3.16.0",
   "msgpack>=1.2.1",
-  "nemo-fabric-adapter-contract>=0.5.0,<0.6.0",
-  "nemo-fabric-adapters-claude>=0.5.0,<0.6.0",
-  "nemo-fabric-adapters-codex>=0.5.0,<0.6.0",
-  "nemo-fabric-adapters-common>=0.5.0,<0.6.0",
-  "nemo-fabric-adapters-deepagents>=0.5.0,<0.6.0",
-  "nemo-fabric-adapters-hermes>=0.5.0,<0.6.0",
-  "nemo-fabric-adapters-mini-swe-agent>=0.5.0,<0.6.0",
-  "nemo-fabric-adapters-nooa>=0.5.0,<0.6.0",
-  "nemo-fabric-adapters-remote-agent>=0.5.0,<0.6.0",
-  "nemo-fabric-collector>=0.5.0,<0.6.0",
-  "nemo-fabric-runtime>=0.5.0,<0.6.0",
+  "nemo-fabric-adapter-contract>=0.6.0,<0.7.0",
+  "nemo-fabric-adapters-claude>=0.6.0,<0.7.0",
+  "nemo-fabric-adapters-codex>=0.6.0,<0.7.0",
+  "nemo-fabric-adapters-common>=0.6.0,<0.7.0",
+  "nemo-fabric-adapters-deepagents>=0.6.0,<0.7.0",
+  "nemo-fabric-adapters-hermes>=0.6.0,<0.7.0",
+  "nemo-fabric-adapters-mini-swe-agent>=0.6.0,<0.7.0",
+  "nemo-fabric-adapters-nooa>=0.6.0,<0.7.0",
+  "nemo-fabric-adapters-remote-agent>=0.6.0,<0.7.0",
+  "nemo-fabric-collector>=0.6.0,<0.7.0",
+  "nemo-fabric-runtime>=0.6.0,<0.7.0",
   "nbconvert>=7.17.1",
   "nltk>=3.10.3",
   "opensandbox==1.2.0",                          # Authenticates proxied SDK requests on multi-tenant servers.
@@ -377,10 +391,6 @@ override-dependencies = [
   # Only datasets>=5.1 admits the fsspec>=2026.6 the Fabric mini-swe-agent/nooa adapters require. Overrides
   # unsloth (<5) and verifiers (<4.7); unsloth-zoo#1341 measured its data path identical on datasets 5.0.1.
   "datasets>=5.1.0,<6",
-  # nemo-fabric[harbor] 0.5 caps harbor <0.24; 0.24 installs only an agent's missing system packages.
-  # The published extra allows 0.23 too, so the wheel stays installable; this lock and our images get 0.24.
-  # Remove once a Fabric release allows 0.24 (NVIDIA/NeMo-Fabric#482) and Helix's Fabric pin admits it.
-  "harbor>=0.24,<0.25",
   "jsonpath-ng>=1.6.1",
   "grpcio>=1.71.0",
   "huggingface-hub>=1.31.0,<2.0.0",
@@ -403,7 +413,7 @@ override-dependencies = [
   "simpleeval>=1.0.5",        # High – nhx-api + nhx-gpu-tasks
   "ujson>=5.12.0",            # High – nhx-api/cpu-tasks/gpu-tasks
   "xgrammar>=0.1.32",         # High – customizer + nhx-gpu-tasks
-  "fastmcp>=3.2.0",           # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High)
+  "fastmcp>=3.4.4",           # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High)
   "wandb>=0.30.0",            # wandb-core Go CVEs (nspect); optional integrations + training images
   "cryptography>=50.0.0,<51", # GHSA-g6cj-pr64-35w5; overrides nvidia-nat-core's <47 cap after changelog review
   "click>=8.2.0",             # Below CVEs are based on constraints that garak has
@@ -461,6 +471,7 @@ nemo-compass-plugin = { workspace = true }
 
 nemo-evals-plugin = { workspace = true }
 nemo-scaled-evals-plugin = { path = "plugins/_temporary-scaled-evals", editable = true }
+strands-harness-optimizer-plugin = { path = "plugins/strands-harness-optimizer", editable = true }
 nemo-guardrails-plugin = { workspace = true }
 nemo-garak-plugin = { workspace = true }
 nemo-safe-synthesizer-plugin = { workspace = true }
@@ -647,6 +658,8 @@ extra-paths = [
   "plugins/nemo-agent-hardener/tests/unit",
   # So ``helpers`` and ``reconciler.conftest`` resolve in the deployments plugin's unit tests.
   "plugins/nemo-deployments/tests/unit",
+  # Match pytest's sibling-module resolution for the deployments K8s integration fixtures.
+  "plugins/nemo-deployments/tests/integration",
   # nemo-evals plugin is not a workspace member; add its src so ty can
   # resolve nemo_evals imports when checking plugin test files.
   "plugins/nemo-evals/src",

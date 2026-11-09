@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from kubernetes import client
 from kubernetes.client.rest import ApiException
+from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.jobs.execution_profiles import KubernetesKeyToPath
 from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork, TcpPortRange
 from nhx.common.auth import (
@@ -49,6 +50,7 @@ from nhx.core.jobs.app.schemas import (
     StepLifecycle,
 )
 from nhx.core.jobs.controllers.backends.base import (
+    CANCELLED_WORKLOAD_BATCH_SIZE,
     NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
@@ -188,11 +190,11 @@ def kubernetes_client_mock():
     core_v1_mock = MagicMock()
     with (
         patch(
-            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.client.BatchV1Api",
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.BatchV1Api",
             return_value=batch_v1_mock,
         ),
         patch(
-            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.client.CoreV1Api",
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.CoreV1Api",
             return_value=core_v1_mock,
         ),
     ):
@@ -254,7 +256,7 @@ def kubernetes_job(
 ):
     """Create a KubernetesJob instance with mocked clients."""
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -1060,7 +1062,7 @@ def test_kubernetes_job_profile_environment_applied(
         **{**kubernetes_execution_profile_config.model_dump(), "env": {"HOME": "/tmp"}}
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -1099,7 +1101,7 @@ def test_kubernetes_job_uses_service_discovery_urls_for_job_runtime(
         loopback_address="nemo-gateway",
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=platform_config,
@@ -2331,7 +2333,7 @@ def test_schedule_kubernetes_gpu(mock_nemo_client, kubernetes_execution_profile_
     )
 
     # patch the check for kubernetes
-    with patch("kubernetes.config.load_incluster_config"):
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"):
         assert step is not None
         executor = GPUKubernetesJobBackend(
             nemo_client=mock_nemo_client,
@@ -3467,7 +3469,7 @@ def test_scheduler_name_applied_to_pod_spec(
         ),
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -3499,7 +3501,7 @@ def test_scheduler_name_not_set_by_default(
         storage=DEFAULT_STORAGE,
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -4087,3 +4089,107 @@ def test_image_digest_comes_from_the_task_container():
     pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task]))
 
     assert first_task_image_id([pod]) == "sha256:training"
+
+
+@pytest.mark.parametrize("immediate", [False, True])
+@pytest.mark.parametrize(
+    "platform_status",
+    [
+        HelixJobStatus.CANCELLED,
+        HelixJobStatus.PENDING,
+        HelixJobStatus.ACTIVE,
+        HelixJobStatus.ERROR,
+        HelixJobStatus.COMPLETED,
+    ],
+)
+def test_cleanup_unfinished_job_only_for_cancelled_step(kubernetes_job, test_step_pending, immediate, platform_status):
+    step = test_step_pending.model_copy(update={"status": platform_status})
+    job = _kubernetes_job_for_step(step)
+    kubernetes_job._execution_profile_config.cleanup_completed_jobs_immediately = immediate
+    progress = MagicMock()
+    with (
+        patch.object(kubernetes_job, "get_kubernetes_job_list_by_labels", return_value=[job]),
+        patch.object(kubernetes_job, "get_step_safe", return_value=step) as lookup,
+        patch.object(kubernetes_job, "terminate_job") as terminate,
+    ):
+        kubernetes_job.cleanup_steps(progress)
+    assert terminate.call_count == (1 if platform_status == HelixJobStatus.CANCELLED else 0)
+    lookup.assert_called_once_with(
+        job=step.job, step_name=step.name, workspace=step.workspace, attempt_id=step.attempt_id
+    )
+    assert progress.called
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "missing-attempt",
+        "missing-step-id",
+        "unmanaged",
+        "other-type",
+        "missing-record",
+        "different-step",
+        "unavailable",
+    ],
+)
+def test_cancelled_cleanup_preserves_uncertain_identity(kubernetes_job, test_step_pending, reason):
+    step = test_step_pending.model_copy(update={"status": HelixJobStatus.CANCELLED})
+    job = _kubernetes_job_for_step(step)
+    if reason == "missing-attempt":
+        del job.metadata.labels["nhx.nvidia.com/job_attempt_id"]
+    elif reason == "missing-step-id":
+        del job.metadata.labels[JOB_STEP_ID_LABEL]
+    elif reason == "unmanaged":
+        job.metadata.labels[JOB_MANAGED_BY_LABEL] = "other"
+    elif reason == "other-type":
+        job.metadata.labels[JOB_TYPE_LABEL] = JOB_TYPE_STORAGE_CLEANUP
+    response = None if reason == "missing-record" else step
+    if reason == "different-step":
+        response = step.model_copy(update={"id": "different-step"})
+    with (
+        patch.object(kubernetes_job, "get_kubernetes_job_list_by_labels", return_value=[job]),
+        patch.object(kubernetes_job, "get_step_safe", return_value=response) as lookup,
+        patch.object(kubernetes_job, "terminate_job") as terminate,
+    ):
+        if reason == "unavailable":
+            lookup.side_effect = NemoClientError("platform unavailable")
+        kubernetes_job.cleanup_steps()
+    terminate.assert_not_called()
+
+
+def test_cancelled_cleanup_rotates_past_active_prefix(kubernetes_job, test_step_pending):
+    steps = [
+        test_step_pending.model_copy(
+            update={
+                "id": f"id-{i:02}",
+                "name": f"step-{i:02}",
+                "status": HelixJobStatus.CANCELLED if i >= CANCELLED_WORKLOAD_BATCH_SIZE else HelixJobStatus.ACTIVE,
+            }
+        )
+        for i in range(2 * CANCELLED_WORKLOAD_BATCH_SIZE)
+    ]
+    workloads = {step.id: common_labels_for_step(step) for step in steps}
+    by_step = {step.name: step for step in steps}
+    with patch.object(kubernetes_job, "get_step_safe", side_effect=lambda **kw: by_step[kw["step_name"]]) as lookup:
+        assert list(kubernetes_job.cancelled_step_workloads(workloads)) == []
+        assert lookup.call_count == CANCELLED_WORKLOAD_BATCH_SIZE
+        assert list(kubernetes_job.cancelled_step_workloads(workloads)) == [
+            step.id for step in steps[CANCELLED_WORKLOAD_BATCH_SIZE:]
+        ]
+        assert lookup.call_count == 2 * CANCELLED_WORKLOAD_BATCH_SIZE
+        assert list(kubernetes_job.cancelled_step_workloads(workloads)) == []
+
+
+def test_cancelled_cleanup_budget_resumes_next_workload(kubernetes_job, test_step_pending):
+    first = test_step_pending.model_copy(update={"id": "a", "name": "first", "status": HelixJobStatus.CANCELLED})
+    second = first.model_copy(update={"id": "b", "name": "second"})
+    workloads = {step.id: common_labels_for_step(step) for step in [first, second]}
+    with patch("nhx.core.jobs.controllers.backends.base.monotonic", return_value=100.0) as clock:
+
+        def lookup(**kwargs):
+            clock.return_value += 3
+            return first if kwargs["step_name"] == "first" else second
+
+        with patch.object(kubernetes_job, "get_step_safe", side_effect=lookup):
+            assert list(kubernetes_job.cancelled_step_workloads(workloads)) == ["a"]
+            assert list(kubernetes_job.cancelled_step_workloads(workloads)) == ["b"]

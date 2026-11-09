@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
-import { FileListItem } from '@nemo/common/src/components/FileList';
+import type { FileListItem } from '@nemo/common/src/components/FileList';
 import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';

@@ -27,7 +27,7 @@ dependencies = [
   # Guardrails has no separate task containers - all deps are API deps
   "fastapi>=0.109.0",
   "fsspec>=2024.10.0",
-  "nemoguardrails[tracing]==0.23.0",
+  "nemoguardrails[tracing]==0.24.1",
   "openai>=1.61.0",
   "opentelemetry-distro>=0.64b0",
   "opentelemetry-exporter-otlp>=1.22.0",

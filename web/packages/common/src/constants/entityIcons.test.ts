@@ -21,6 +21,8 @@ const INTENTIONAL_ALIASES: Record<string, string> = {
   guardrailChecks: 'guardrails',
   recentJobs: 'jobs',
   insightJobs: 'jobs',
+  // Files and their containing fileset share the mapped folder glyph.
+  filesetFiles: 'filesets',
 };
 
 describe('ENTITY_ICONS', () => {

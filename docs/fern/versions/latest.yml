@@ -44,12 +44,15 @@ navigation:
         contents:
           - page: Register Agents
             path: ../../agents/register-agents.mdx
-          - page: Fabric 0.5 Upgrade and Adapter Support
+          - page: Fabric 0.6 Upgrade and Adapter Support
             slug: fabric-upgrade
             path: ../../agents/fabric-upgrade.mdx
           - page: Run Mini-SWE-Agent
             slug: mini-swe-agent
             path: ../../agents/mini-swe-agent.mdx
+          - page: Web Search with Tavily
+            slug: web-search-tavily
+            path: ../../agents/web-search-tavily.mdx
           - section: Deploy Agents
             path: ../../agents/deploy-agents.mdx
             contents:
@@ -104,6 +107,9 @@ navigation:
               - page: Evaluate a Harbor Task Suite
                 slug: harbor-runner
                 path: ../../evals/agent-eval/harbor-runner.mdx
+              - page: Run a Harbor Task Suite on Kubernetes
+                slug: harbor-kubernetes
+                path: ../../evals/agent-eval/harbor-kubernetes.mdx
               - page: Run a NeMo Fabric Agent inside Harbor
                 slug: harbor-fabric-agent
                 path: ../../evals/agent-eval/harbor-fabric-agent.mdx
@@ -465,6 +471,9 @@ navigation:
                   - page: OpenSandbox
                     slug: open-sandbox
                     path: ../../set-up/helm/opensandbox.mdx
+                  - page: Configure Harbor Taskset Runs
+                    slug: harbor-sandbox-profiles
+                    path: ../../set-up/helm/harbor-sandbox-profiles.mdx
                   - page: Secure Sandboxed GRPO
                     slug: sandboxed-grpo
                     path: ../../set-up/helm/sandboxed-grpo.mdx
@@ -566,6 +575,12 @@ navigation:
           - section: Release Notes
             path: ../../about/release-notes/index.mdx
             contents:
+              - page: v0.10.0
+                slug: release-0-10-0
+                path: ../../about/release-notes/release-0-10-0.mdx
+              - page: v0.9.1
+                slug: release-0-9-1
+                path: ../../about/release-notes/release-0-9-1.mdx
               - page: v0.9.0
                 slug: release-0-9-0
                 path: ../../about/release-notes/release-0-9-0.mdx

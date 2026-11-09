@@ -340,6 +340,30 @@ paths:
           code: "curl --fail-with-body \\\n  --request POST \\\n  http://localhost:8080/apis/auth/token\
             \ \\\n  --header 'Content-Type: application/x-www-form-urlencoded' \\\n\
             \  --data-binary 'grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt'\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/auth/token"
+
+            headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+            payload = "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt"
+
+
+            response = requests.request("POST", url, headers=headers, data=payload)
+
+            response.raise_for_status()
+
+            print(response.json())
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/auth/token\"\
+            , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/x-www-form-urlencoded\"\
+            },\n  body: \"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt\"\
+            ,\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+            console.log(await response.json());\n"
   /apis/auth/v2/access-keys:
     post:
       tags:
@@ -410,10 +434,10 @@ paths:
         schema:
           type: integer
           minimum: 1
-          description: Page number to retrieve.
+          description: Page number.
           default: 1
           title: Page
-        description: Page number to retrieve.
+        description: Page number.
       - name: page_size
         in: query
         required: false
@@ -421,10 +445,10 @@ paths:
           type: integer
           maximum: 100
           minimum: 1
-          description: Number of keys to retrieve per page.
+          description: Page size.
           default: 100
           title: Page Size
-        description: Number of keys to retrieve per page.
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -735,24 +759,6 @@ paths:
       description: List all role bindings (Platform Admin only)
       operationId: list_role_bindings_apis_auth_v2_iam_role_bindings_get
       parameters:
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -764,6 +770,27 @@ paths:
           title: Sort
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -997,6 +1024,19 @@ paths:
           \  credentials: \"include\",\n});\nif (!response.ok) throw new Error(`Logout\
           \ failed: ${response.status}`);\nconsole.log(response.status); // 204: no\
           \ response body\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: python
+          code: "import requests\n\nresponse = requests.post(\n    \"http://localhost:8080/apis/auth/v2/logout\"\
+            ,\n    headers={\"X-Source\": \"NeMo Studio\"},\n    cookies={\"nhx_session\"\
+            : \"YOUR_SESSION_COOKIE\"},\n)\nresponse.raise_for_status()\nprint(response.status_code)\
+            \  # 204: no response body\n"
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/auth/v2/logout\"\
+            , {\n  method: \"POST\",\n  headers: {\"X-Source\": \"NeMo Studio\"},\n\
+            \  credentials: \"include\",\n});\nif (!response.ok) throw new Error(`Logout\
+            \ failed: ${response.status}`);\nconsole.log(response.status); // 204:\
+            \ no response body\n"
   /apis/auth/v2/session:
     get:
       tags:
@@ -1070,10 +1110,8 @@ paths:
     get:
       tags:
       - Entity Store
-      summary: Get entity by ID (debug/internal)
+      summary: Get entity by ID
       description: 'Get a specific entity by its unique identifier.
-
-        This endpoint is primarily for debugging and internal use.
 
 
         Example:
@@ -1232,27 +1270,6 @@ paths:
         ```'
       operationId: list_workspaces_apis_entities_v2_workspaces_get
       parameters:
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number
-          default: 1
-          title: Page
-        description: Page number
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Items per page
-          default: 100
-          title: Page Size
-        description: Items per page
       - name: sort
         in: query
         required: false
@@ -1290,6 +1307,27 @@ paths:
           - Bracket notation: ?filter[name][$like]=value
 
           - Relationship traversal: ?filter[relationship][$exists]=true or ?filter[relationship][field]=value'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -1518,27 +1556,6 @@ paths:
         schema:
           type: string
           title: Entity Type
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number
-          default: 1
-          title: Page
-        description: Page number
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Items per page
-          default: 100
-          title: Page Size
-        description: Items per page
       - name: sort
         in: query
         required: false
@@ -1607,6 +1624,27 @@ paths:
           - Bracket notation: ?filter[name][$like]=value
 
           - Relationship traversal: ?filter[relationship][$exists]=true or ?filter[relationship][field]=value'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -1616,6 +1654,120 @@ paths:
                 $ref: '#/components/schemas/EntitiesPage'
         '403':
           description: Not allowed to list entities in the requested workspace.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id}:
+    put:
+      tags:
+      - Entity Store
+      summary: Update entity by ID
+      operationId: update_entity_by_id_apis_entities_v2_workspaces__workspace__entities__entity_type__by_id__entity_id__put
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: entity_type
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entity Type
+      - name: entity_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entity Id
+      - name: parent
+        in: query
+        required: false
+        schema:
+          description: Optional parent scope for the selected ID.
+          title: Parent
+          type: string
+        description: Optional parent scope for the selected ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntityUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entity'
+        '422':
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
+    delete:
+      tags:
+      - Entity Store
+      summary: Delete entity by ID
+      description: Delete the selected ID while preserving scope and optional version
+        checks.
+      operationId: delete_entity_by_id_apis_entities_v2_workspaces__workspace__entities__entity_type__by_id__entity_id__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: entity_type
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entity Type
+      - name: entity_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entity Id
+      - name: parent
+        in: query
+        required: false
+        schema:
+          description: Optional parent scope for the selected ID.
+          title: Parent
+          type: string
+        description: Optional parent scope for the selected ID.
+      - name: expected_db_version
+        in: query
+        required: false
+        schema:
+          description: Delete only this entity version.
+          title: Expected Db Version
+          type: integer
+        description: Delete only this entity version.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '403':
+          description: Not allowed to delete entities in the requested workspace.
+        '404':
+          description: Entity not found in the requested scope.
+        '409':
+          description: Entity version conflict.
         '422':
           description: Validation Error
           content:
@@ -2080,27 +2232,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number
-          default: 1
-          title: Page
-        description: Page number
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Items per page
-          default: 100
-          title: Page Size
-        description: Items per page
       - name: sort
         in: query
         required: false
@@ -2138,6 +2269,27 @@ paths:
           - Bracket notation: ?filter[name][$like]=value
 
           - Relationship traversal: ?filter[relationship][$exists]=true or ?filter[relationship][field]=value'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -2296,6 +2448,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[\w\-\+.@:]+$
           title: Workspace
       requestBody:
         required: true
@@ -2335,6 +2488,17 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/GenericSortField'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: -created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
       - name: page
         in: query
         required: false
@@ -2356,17 +2520,6 @@ paths:
           default: 10
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/GenericSortField'
-          description: The field to sort by. To sort in decreasing order, use `-`
-            in front of the field name.
-          default: -created_at
-        description: The field to sort by. To sort in decreasing order, use `-` in
-          front of the field name.
       - in: query
         name: filter
         style: deepObject
@@ -2587,6 +2740,25 @@ paths:
         source: "const response = await fetch(\n  \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
           ,\n  { method: \"HEAD\" },\n);\n\nif (!response.ok) {\n  throw new Error(`HTTP\
           \ ${response.status}`);\n}\nconsole.log(response.status);\nconsole.log(Object.fromEntries(response.headers));"
+      x-fern-examples:
+      - code-samples:
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt"
+
+            response = requests.head(url)
+
+            response.raise_for_status()
+
+            print(response.status_code)
+
+            print(response.headers)'
+        - sdk: javascript
+          code: "const response = await fetch(\n  \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
+            ,\n  { method: \"HEAD\" },\n);\n\nif (!response.ok) {\n  throw new Error(`HTTP\
+            \ ${response.status}`);\n}\nconsole.log(response.status);\nconsole.log(Object.fromEntries(response.headers));"
     get:
       tags:
       - Files
@@ -2658,6 +2830,24 @@ paths:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request GET \\\n  http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\
             \ \\\n  --output example.txt\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt"
+
+
+            response = requests.request("GET", url)
+
+            response.raise_for_status()
+
+            print(response.content)  # raw file bytes, not JSON
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
+            , {\n  method: \"GET\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(await response.arrayBuffer());\n"
     put:
       tags:
       - Files
@@ -2735,6 +2925,29 @@ paths:
           code: "curl --fail-with-body \\\n  --request PUT \\\n  http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\
             \ \\\n  --header 'Content-Type: application/octet-stream' \\\n  --data-binary\
             \ 'Hello, Helix!\n'\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt"
+
+            headers = {"Content-Type": "application/octet-stream"}
+
+            payload = "Hello, Helix!\n"
+
+
+            response = requests.request("PUT", url, headers=headers, data=payload)
+
+            response.raise_for_status()
+
+            print(response.json())
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
+            , {\n  method: \"PUT\",\n  headers: {\"Content-Type\": \"application/octet-stream\"\
+            },\n  body: \"Hello, Helix!\\n\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(await response.json());\n"
     delete:
       tags:
       - Files
@@ -2943,6 +3156,38 @@ paths:
             scopeLogs\":[{\"logRecords\":[{\"timeUnixNano\":\"1767225600000000000\"\
             ,\"severityText\":\"INFO\",\"body\":{\"stringValue\":\"Training started\"\
             }}]}]}]}'\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs"
+
+            headers = {"Content-Type": "application/json"}
+
+            payload = "{\"resourceLogs\":[{\"resource\":{\"attributes\":[{\"key\":\"job\",\"value\":{\"stringValue\":\"my-job\"}},{\"key\":\"job_attempt\",\"value\":{\"stringValue\":\"1\"}},{\"key\":\"job_step\",\"value\":{\"stringValue\":\"train\"}},{\"key\":\"job_task\",\"value\":{\"stringValue\":\"0\"}}]},\"scopeLogs\":[{\"logRecords\":[{\"timeUnixNano\":\"1767225600000000000\",\"severityText\":\"INFO\",\"body\":{\"stringValue\":\"Training
+            started\"}}]}]}]}"
+
+
+            response = requests.request("POST", url, headers=headers, data=payload)
+
+            response.raise_for_status()
+
+            print(response.json())
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs\"\
+            , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/json\"\
+            },\n  body: \"{\\\"resourceLogs\\\":[{\\\"resource\\\":{\\\"attributes\\\
+            \":[{\\\"key\\\":\\\"job\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"my-job\\\
+            \"}},{\\\"key\\\":\\\"job_attempt\\\",\\\"value\\\":{\\\"stringValue\\\
+            \":\\\"1\\\"}},{\\\"key\\\":\\\"job_step\\\",\\\"value\\\":{\\\"stringValue\\\
+            \":\\\"train\\\"}},{\\\"key\\\":\\\"job_task\\\",\\\"value\\\":{\\\"stringValue\\\
+            \":\\\"0\\\"}}]},\\\"scopeLogs\\\":[{\\\"logRecords\\\":[{\\\"timeUnixNano\\\
+            \":\\\"1767225600000000000\\\",\\\"severityText\\\":\\\"INFO\\\",\\\"\
+            body\\\":{\\\"stringValue\\\":\\\"Training started\\\"}}]}]}]}\",\n});\n\
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(await\
+            \ response.json());\n"
   /apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query:
     post:
       tags:
@@ -3128,24 +3373,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -3157,6 +3384,27 @@ paths:
           default: created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -4339,27 +4587,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number (1-indexed).
-          default: 1
-          title: Page
-        description: Page number (1-indexed).
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          description: Number of results per page.
-          default: 20
-          title: Page Size
-        description: Number of results per page.
       - name: sort
         in: query
         required: false
@@ -4380,6 +4607,27 @@ paths:
           title: Exclude Autoprovisioned
         description: When true, controller-managed (autoprovisioned) passthrough VirtualModels
           are excluded from the results.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          description: Page size.
+          default: 20
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -4550,6 +4798,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/intake/v2/workspaces/{workspace}/annotations:
     post:
       tags:
@@ -4601,6 +4868,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/AnnotationSortField'
+          default: -created_at
       - name: page
         in: query
         required: false
@@ -4622,13 +4896,6 @@ paths:
           default: 10
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/AnnotationSortField'
-          default: -created_at
       - in: query
         name: filter
         style: deepObject
@@ -4737,6 +5004,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/intake/v2/workspaces/{workspace}/evaluations:
     post:
       tags:
@@ -4783,27 +5069,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Page size.
-          default: 100
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -4826,6 +5091,27 @@ paths:
           \ tokens.<stat>, or evaluators.<name>.<stat>, where <stat> is one of mean,\
           \ median, p90, p95, p99, sum, count. When omitted, defaults to -created_at\
           \ with pinned evaluations first."
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -4988,6 +5274,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation"
+
+          headers = {"Content-Type": "application/json"}
+
+          payload = "{\"description\": \"Reviewed evaluation results\"}"
+
+
+          response = requests.request("PATCH", url, headers=headers, data=payload)
+
+          response.raise_for_status()
+
+          print(response.json())
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
+          , {\n  method: \"PATCH\",\n  headers: {\"Content-Type\": \"application/json\"\
+          },\n  body: \"{\\\"description\\\": \\\"Reviewed evaluation results\\\"\
+          }\",\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+          console.log(await response.json());\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request PATCH \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\
+            \ \\\n  --header 'Content-Type: application/json' \\\n  --data-binary\
+            \ '{\"description\": \"Reviewed evaluation results\"}'\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation"
+
+            headers = {"Content-Type": "application/json"}
+
+            payload = "{\"description\": \"Reviewed evaluation results\"}"
+
+
+            response = requests.request("PATCH", url, headers=headers, data=payload)
+
+            response.raise_for_status()
+
+            print(response.json())
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
+            , {\n  method: \"PATCH\",\n  headers: {\"Content-Type\": \"application/json\"\
+            },\n  body: \"{\\\"description\\\": \\\"Reviewed evaluation results\\\"\
+            }\",\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+            console.log(await response.json());\n"
     delete:
       tags:
       - Evaluations
@@ -5042,6 +5383,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/intake/v2/workspaces/{workspace}/evaluations/{name}/pin:
     post:
       tags:
@@ -5137,27 +5497,6 @@ paths:
         schema:
           type: string
           title: Name
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Page size.
-          default: 100
-          title: Page Size
-        description: Page size.
       - name: mode
         in: query
         required: false
@@ -5191,6 +5530,27 @@ paths:
           \ e.g. '-cost_total_usd,latency_ms'. Fields: test_case_name, started_at,\
           \ ended_at, latency_ms, status, cost_total_usd, tokens. When omitted, sessions\
           \ are ordered by started_at ascending."
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -5273,6 +5633,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/EvaluatorResultSortField'
+          default: -created_at
       - name: page
         in: query
         required: false
@@ -5294,13 +5661,6 @@ paths:
           default: 10
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/EvaluatorResultSortField'
-          default: -created_at
       - in: query
         name: filter
         style: deepObject
@@ -5401,6 +5761,22 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - -created_at
+          - created_at
+          - -updated_at
+          - updated_at
+          - -name
+          - name
+          type: string
+          description: Sort field; prefix with '-' for descending.
+          default: -created_at
+          title: Sort
+        description: Sort field; prefix with '-' for descending.
       - name: page
         in: query
         required: false
@@ -5422,22 +5798,6 @@ paths:
           default: 100
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          enum:
-          - -created_at
-          - created_at
-          - -updated_at
-          - updated_at
-          - -name
-          - name
-          type: string
-          description: Sort field; prefix with '-' for descending.
-          default: -created_at
-          title: Sort
-        description: Sort field; prefix with '-' for descending.
       - in: query
         name: filter
         style: deepObject
@@ -5591,6 +5951,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/intake/v2/workspaces/{workspace}/ingest/atif:
     post:
       tags:
@@ -5656,6 +6035,35 @@ paths:
             \ '{\"schema_version\": \"ATIF-v1.7\", \"agent\": {\"name\": \"my-agent\"\
             , \"version\": \"1.0\"}, \"steps\": [{\"step_id\": 1, \"source\": \"user\"\
             , \"message\": \"Hello!\"}]}'\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/atif"
+
+            headers = {"Content-Type": "application/json"}
+
+            payload = "{\"schema_version\": \"ATIF-v1.7\", \"agent\": {\"name\": \"my-agent\",
+            \"version\": \"1.0\"}, \"steps\": [{\"step_id\": 1, \"source\": \"user\",
+            \"message\": \"Hello!\"}]}"
+
+
+            response = requests.request("POST", url, headers=headers, data=payload)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/ingest/atif\"\
+            , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/json\"\
+            },\n  body: \"{\\\"schema_version\\\": \\\"ATIF-v1.7\\\", \\\"agent\\\"\
+            : {\\\"name\\\": \\\"my-agent\\\", \\\"version\\\": \\\"1.0\\\"}, \\\"\
+            steps\\\": [{\\\"step_id\\\": 1, \\\"source\\\": \\\"user\\\", \\\"message\\\
+            \": \\\"Hello!\\\"}]}\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/intake/v2/workspaces/{workspace}/ingest/chat-completions:
     post:
       tags:
@@ -5728,6 +6136,66 @@ paths:
               format: binary
               description: Serialized OTLP ExportTraceServiceRequest protobuf
         required: true
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
+
+          headers = {"Content-Type": "application/x-protobuf"}
+
+          import base64
+
+          payload = base64.b64decode("CiYSJBIiChAwMTIzNDU2Nzg5YWJjZGVmEggwMTIzNDU2NyoEZGVtbw==")
+
+
+          response = requests.request("POST", url, headers=headers, data=payload)
+
+          response.raise_for_status()
+
+          print(response.json())
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces\"\
+          , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/x-protobuf\"\
+          },\n  body: Uint8Array.from(atob(\"CiYSJBIiChAwMTIzNDU2Nzg5YWJjZGVmEggwMTIzNDU2NyoEZGVtbw==\"\
+          ), c => c.charCodeAt(0)),\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(await response.json());\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "printf %s CiYSJBIiChAwMTIzNDU2Nzg5YWJjZGVmEggwMTIzNDU2NyoEZGVtbw==\
+            \ | base64 -d | curl --fail-with-body \\\n  --request POST \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces\
+            \ \\\n  --header 'Content-Type: application/x-protobuf' \\\n  --data-binary\
+            \ @-\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
+
+            headers = {"Content-Type": "application/x-protobuf"}
+
+            import base64
+
+            payload = base64.b64decode("CiYSJBIiChAwMTIzNDU2Nzg5YWJjZGVmEggwMTIzNDU2NyoEZGVtbw==")
+
+
+            response = requests.request("POST", url, headers=headers, data=payload)
+
+            response.raise_for_status()
+
+            print(response.json())
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces\"\
+            , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/x-protobuf\"\
+            },\n  body: Uint8Array.from(atob(\"CiYSJBIiChAwMTIzNDU2Nzg5YWJjZGVmEggwMTIzNDU2NyoEZGVtbw==\"\
+            ), c => c.charCodeAt(0)),\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(await response.json());\n"
   /apis/intake/v2/workspaces/{workspace}/ingest/spans:
     post:
       tags:
@@ -5756,6 +6224,86 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/spans"
+
+          headers = {"Content-Type": "application/json"}
+
+          payload = "{\"source\": \"my-agent\", \"spans\": [{\"trace_id\": \"my-trace\",
+          \"span_id\": \"my-span\", \"name\": \"Agent request\", \"started_at\": \"__NHX_CURRENT_TIMESTAMP__\",
+          \"input\": \"Hello!\", \"output\": \"Hello from Helix!\"}]}"
+
+          from datetime import datetime, timezone
+
+          payload = payload.replace("__NHX_CURRENT_TIMESTAMP__", datetime.now(timezone.utc).isoformat())
+
+
+          response = requests.request("POST", url, headers=headers, data=payload)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const payload = \"{\\\"source\\\": \\\"my-agent\\\", \\\"spans\\\"\
+          : [{\\\"trace_id\\\": \\\"my-trace\\\", \\\"span_id\\\": \\\"my-span\\\"\
+          , \\\"name\\\": \\\"Agent request\\\", \\\"started_at\\\": \\\"__NHX_CURRENT_TIMESTAMP__\\\
+          \", \\\"input\\\": \\\"Hello!\\\", \\\"output\\\": \\\"Hello from Helix!\\\
+          \"}]}\".replace(\"__NHX_CURRENT_TIMESTAMP__\", new Date().toISOString());\n\
+          const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/ingest/spans\"\
+          , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/json\"\
+          },\n  body: payload,\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+          console.log(response.status); // no response body\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)\ncurl --fail-with-body \\\
+            \n  --request POST \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/ingest/spans\
+            \ \\\n  --header 'Content-Type: application/json' \\\n  --data-binary\
+            \ '{\"source\": \"my-agent\", \"spans\": [{\"trace_id\": \"my-trace\"\
+            , \"span_id\": \"my-span\", \"name\": \"Agent request\", \"started_at\"\
+            : \"'\"${timestamp}\"'\", \"input\": \"Hello!\", \"output\": \"Hello from\
+            \ Helix!\"}]}'\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/spans"
+
+            headers = {"Content-Type": "application/json"}
+
+            payload = "{\"source\": \"my-agent\", \"spans\": [{\"trace_id\": \"my-trace\",
+            \"span_id\": \"my-span\", \"name\": \"Agent request\", \"started_at\":
+            \"__NHX_CURRENT_TIMESTAMP__\", \"input\": \"Hello!\", \"output\": \"Hello
+            from Helix!\"}]}"
+
+            from datetime import datetime, timezone
+
+            payload = payload.replace("__NHX_CURRENT_TIMESTAMP__", datetime.now(timezone.utc).isoformat())
+
+
+            response = requests.request("POST", url, headers=headers, data=payload)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const payload = \"{\\\"source\\\": \\\"my-agent\\\", \\\"spans\\\"\
+            : [{\\\"trace_id\\\": \\\"my-trace\\\", \\\"span_id\\\": \\\"my-span\\\
+            \", \\\"name\\\": \\\"Agent request\\\", \\\"started_at\\\": \\\"__NHX_CURRENT_TIMESTAMP__\\\
+            \", \\\"input\\\": \\\"Hello!\\\", \\\"output\\\": \\\"Hello from Helix!\\\
+            \"}]}\".replace(\"__NHX_CURRENT_TIMESTAMP__\", new Date().toISOString());\n\
+            const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/ingest/spans\"\
+            , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/json\"\
+            },\n  body: payload,\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+            console.log(response.status); // no response body\n"
   /apis/intake/v2/workspaces/{workspace}/sessions/{id}:
     get:
       tags:
@@ -5803,27 +6351,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -5848,6 +6375,27 @@ paths:
         description: Response mode. summary omits payloads and raw attributes; preview
           includes input and output truncated to 300 characters; detailed returns
           full payloads and raw attributes.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -5895,6 +6443,23 @@ paths:
           - trace_id
           title: By
         description: Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/SpanGroupSortField'
+          description: Sort groups by size or by start time. Use -started_at for the
+            traces or sessions that began most recently, which answers 'what ran lately'
+            in one call instead of paging through spans. A group's time is its earliest
+            matching span, so this orders by when work started and not by when it
+            was last active.
+          default: -span_count
+        description: Sort groups by size or by start time. Use -started_at for the
+          traces or sessions that began most recently, which answers 'what ran lately'
+          in one call instead of paging through spans. A group's time is its earliest
+          matching span, so this orders by when work started and not by when it was
+          last active.
       - name: page
         in: query
         required: false
@@ -5916,23 +6481,6 @@ paths:
           default: 10
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/SpanGroupSortField'
-          description: Sort groups by size or by start time. Use -started_at for the
-            traces or sessions that began most recently, which answers 'what ran lately'
-            in one call instead of paging through spans. A group's time is its earliest
-            matching span, so this orders by when work started and not by when it
-            was last active.
-          default: -span_count
-        description: Sort groups by size or by start time. Use -started_at for the
-          traces or sessions that began most recently, which answers 'what ran lately'
-          in one call instead of paging through spans. A group's time is its earliest
-          matching span, so this orders by when work started and not by when it was
-          last active.
       - in: query
         name: filter
         style: deepObject
@@ -6047,27 +6595,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -6092,6 +6619,27 @@ paths:
         description: Response mode. summary returns root-span fields without payloads
           or rollups; preview adds token, cost, and span-count rollups plus 300-character
           input/output previews; detailed returns rollups and full payloads.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -6287,6 +6835,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[\w\-\+.@:]+$
           title: Workspace
       requestBody:
         required: true
@@ -6341,26 +6890,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -6372,6 +6901,27 @@ paths:
           default: -created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -6414,26 +6964,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 25
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -6443,6 +6973,27 @@ paths:
           description: Sort attempts by sequence. Prefix with `-` for descending order.
           default: -seq
         description: Sort attempts by sequence. Prefix with `-` for descending order.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -6599,12 +7150,19 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobSortField'
+          default: created_at
       - name: page
         in: query
         required: false
         schema:
           type: integer
-          exclusiveMinimum: 0
+          minimum: 1
           description: Page number.
           default: 1
           title: Page
@@ -6614,18 +7172,12 @@ paths:
         required: false
         schema:
           type: integer
-          exclusiveMinimum: 0
+          maximum: 1000
+          minimum: 1
           description: Page size.
           default: 25
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/HelixJobSortField'
-          default: created_at
       - in: query
         name: filter
         style: deepObject
@@ -7085,6 +7637,24 @@ paths:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request GET \\\n  http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job/results/my-result/download\
             \ \\\n  --output example.txt\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job/results/my-result/download"
+
+
+            response = requests.request("GET", url)
+
+            response.raise_for_status()
+
+            print(response.content)  # raw file bytes, not JSON
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job/results/my-result/download\"\
+            , {\n  method: \"GET\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(await response.arrayBuffer());\n"
   /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/steps/{name}:
     get:
       tags:
@@ -7396,6 +7966,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/cancel:
     post:
       tags:
@@ -7747,26 +8336,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 25
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -7778,6 +8347,27 @@ paths:
           default: created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -7845,11 +8435,23 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: created_at
+          title: Sort
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
       - name: page
         in: query
         required: false
         schema:
           type: integer
+          minimum: 1
           description: Page number.
           default: 1
           title: Page
@@ -7865,17 +8467,6 @@ paths:
           default: 100
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          type: string
-          description: The field to sort by. To sort in decreasing order, use `-`
-            in front of the field name.
-          default: created_at
-          title: Sort
-        description: The field to sort by. To sort in decreasing order, use `-` in
-          front of the field name.
       - in: query
         name: filter
         style: deepObject
@@ -7989,6 +8580,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
     patch:
       tags:
       - Adapters
@@ -8043,24 +8653,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page size.
-          default: 100
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -8072,6 +8664,27 @@ paths:
           title: Sort
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -8245,6 +8858,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/models/v2/workspaces/{workspace}/deployment-configs/{name}:
     get:
       tags:
@@ -8394,6 +9026,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/models/v2/workspaces/{workspace}/deployment-configs/{name}/versions:
     get:
       tags:
@@ -8448,24 +9099,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page size.
-          default: 100
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -8488,6 +9121,27 @@ paths:
           title: All Versions
         description: If true, return all versions of each deployment. If false (default),
           return only the latest version.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -8969,24 +9623,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page size.
-          default: 100
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -9007,6 +9643,27 @@ paths:
           default: false
           title: Verbose
         description: Whether to include full spec details
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -9132,6 +9789,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
     patch:
       tags:
       - Models
@@ -9337,6 +10013,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/models/my-model"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/models/v2/workspaces/{workspace}/prompts:
     get:
       tags:
@@ -9351,6 +10046,17 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/PromptSort'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
       - name: page
         in: query
         required: false
@@ -9372,17 +10078,6 @@ paths:
           default: 100
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/PromptSort'
-          description: The field to sort by. To sort in decreasing order, use `-`
-            in front of the field name.
-          default: created_at
-        description: The field to sort by. To sort in decreasing order, use `-` in
-          front of the field name.
       - in: query
         name: filter
         style: deepObject
@@ -9450,12 +10145,16 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '200':
@@ -9526,12 +10225,16 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '204':
@@ -9565,6 +10268,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/models/v2/workspaces/{workspace}/providers:
     get:
       tags:
@@ -9578,25 +10300,9 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page size.
-          default: 100
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -9608,6 +10314,27 @@ paths:
           default: created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -9645,6 +10372,8 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       requestBody:
         required: true
@@ -9694,6 +10423,8 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
@@ -9743,12 +10474,16 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '200':
@@ -9781,12 +10516,16 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '204':
@@ -9820,6 +10559,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/models/v2/workspaces/{workspace}/providers/{name}/status:
     put:
       tags:
@@ -9848,6 +10606,8 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
@@ -9901,6 +10661,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[\w\-\+.@:]+$
           title: Workspace
       requestBody:
         required: true
@@ -9939,7 +10700,7 @@ paths:
         required: false
         schema:
           type: integer
-          exclusiveMinimum: 0
+          minimum: 1
           description: Page number.
           default: 1
           title: Page
@@ -9949,7 +10710,8 @@ paths:
         required: false
         schema:
           type: integer
-          exclusiveMinimum: 0
+          maximum: 1000
+          minimum: 1
           description: Page size.
           default: 10
           title: Page Size
@@ -10101,6 +10863,25 @@ paths:
       - code-samples:
         - sdk: curl
           code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/secrets/v2/workspaces/{workspace}/secrets/{name}/access:
     get:
       tags:
@@ -11642,6 +12423,7 @@ components:
       enum:
       - OPENAI_CHAT
       - ANTHROPIC_MESSAGES
+      - SYSTEMONE
       title: BackendFormat
       description: Inference backend API wire formats understood by IGW and middleware
         plugins.
@@ -14792,6 +15574,52 @@ components:
       - name
       title: ExperimentUpdateRequest
       description: Request body for updating an Experiment.
+    F5GuardrailsRailConfig:
+      properties:
+        api_url:
+          type: string
+          title: Api Url
+          description: Base URL for the F5 Guardrails API.
+          default: https://us1.calypsoai.app
+        fail_open:
+          type: boolean
+          title: Fail Open
+          description: If True, allow content through when the F5 Guardrails API is
+            unreachable or returns an error. This changes the security posture of
+            the rail and should be reviewed as part of the guardrails config.
+          default: false
+        max_retries:
+          type: integer
+          minimum: 0.0
+          title: Max Retries
+          description: Number of additional attempts after receiving HTTP 429 from
+            the F5 Guardrails API. Total attempts equal max_retries + 1. Set to 0
+            to disable rate-limit retries.
+          default: 2
+        max_retry_after_seconds:
+          type: number
+          minimum: 0.0
+          title: Max Retry After Seconds
+          description: Upper bound (in seconds) on how long to honor a Retry-After
+            header returned by the F5 Guardrails API. Larger values are clamped to
+            this cap to prevent unbounded waits.
+          default: 30.0
+        retry_backoff_seconds:
+          type: number
+          minimum: 0.0
+          title: Retry Backoff Seconds
+          description: Base delay (in seconds) used with exponential backoff when
+            a 429 response has no usable Retry-After header. The delay for attempt
+            N (zero-indexed) is retry_backoff_seconds * 2**N, still clamped to max_retry_after_seconds.
+          default: 1.0
+      type: object
+      title: F5GuardrailsRailConfig
+      description: 'Configuration for the F5 Guardrails integration.
+
+
+        Note: The API key is intentionally not part of this config. It is a secret
+
+        and must be provided via the F5_GUARDRAILS_API_KEY environment variable.'
     FactCheckingRailConfig:
       properties:
         parameters:
@@ -15229,6 +16057,8 @@ components:
           type: string
         threshold:
           type: number
+          maximum: 1.0
+          minimum: 0.0
           title: Threshold
           description: Confidence threshold for entity detection (0.0 to 1.0).
           default: 0.5
@@ -15548,6 +16378,28 @@ components:
           type: boolean
           title: Dialog
           description: Whether the dialog rails are enabled or not.
+          default: true
+        tool_output:
+          anyOf:
+          - type: boolean
+          - items:
+              type: string
+            type: array
+          title: Tool Output
+          description: Whether the tool output rails are enabled or not. If a list
+            of names is specified, then only the specified tool output rails will
+            be applied.
+          default: true
+        tool_input:
+          anyOf:
+          - type: boolean
+          - items:
+              type: string
+            type: array
+          title: Tool Input
+          description: Whether the tool input rails are enabled or not. If a list
+            of names is specified, then only the specified tool input rails will be
+            applied.
           default: true
       type: object
       title: GenerationRailsOptions
@@ -18251,6 +19103,22 @@ components:
           description: The name of the model use for the LLM call.
           default: unknown
           type: string
+        request_id:
+          title: Request Id
+          description: The unique identifier assigned to the request by the downstream
+            model inference service.
+          type: string
+        llm_provider_name:
+          title: Llm Provider Name
+          description: The provider of the model used for the LLM call, e.g. 'openai',
+            'nvidia'.
+          default: unknown
+          type: string
+        from_cache:
+          type: boolean
+          title: From Cache
+          description: Whether this response was retrieved from cache.
+          default: false
       type: object
       title: LLMCallInfo
     LabelAnnotation:
@@ -19810,6 +20678,14 @@ components:
           type: string
           title: Family
           description: Model architecture family (e.g., 'llama', 'mixtral', 'gpt2')
+        architectures:
+          title: Architectures
+          description: Architectures declared in the checkpoint's top-level config.json.
+            For a multimodal checkpoint this names the whole model (e.g., 'NemotronH_Omni_Reasoning_V3'),
+            while the other fields describe its language model.
+          items:
+            type: string
+          type: array
         num_layers:
           type: integer
           title: Num Layers
@@ -19863,6 +20739,26 @@ components:
           allOf:
           - $ref: '#/components/schemas/SlidingWindowConfig'
           description: Sliding window attention config if applicable
+        has_vision_tower:
+          type: boolean
+          title: Has Vision Tower
+          description: True when the checkpoint config contains a vision tower.
+          default: false
+        has_audio_tower:
+          type: boolean
+          title: Has Audio Tower
+          description: True when the checkpoint config contains an audio tower.
+          default: false
+        num_experts:
+          title: Num Experts
+          description: Routed expert count when the checkpoint declares more than
+            one. None for a dense model.
+          type: integer
+        num_nextn_predict_layers:
+          title: Num Nextn Predict Layers
+          description: Multi-token prediction depth declared by the checkpoint. None
+            when the config has no such field.
+          type: integer
         linear_layers:
           title: Linear Layers
           description: List of all linear/Conv1D layers with their dimensions. Used
@@ -21284,6 +22180,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/ClavataRailConfig'
           description: Configuration for Clavata.
+        f5:
+          allOf:
+          - $ref: '#/components/schemas/F5GuardrailsRailConfig'
+          description: Configuration for F5 Guardrails.
         crowdstrike_aidr:
           allOf:
           - $ref: '#/components/schemas/CrowdStrikeAIDRRailConfig'
@@ -21540,6 +22440,7 @@ components:
       properties:
         principal:
           type: string
+          maxLength: 256
           title: Principal
           description: The principal identifier (email, user ID, or group ID)
         workspace:
@@ -21547,6 +22448,7 @@ components:
           description: The workspace this binding applies to. None for platform-level
             roles.
           type: string
+          pattern: ^[\w\-\+.@:]+$
         role:
           type: string
           title: Role
@@ -24022,6 +24924,7 @@ components:
       properties:
         principal:
           type: string
+          maxLength: 256
           title: Principal
           description: The principal identifier (email, user ID, or group ID)
           examples:

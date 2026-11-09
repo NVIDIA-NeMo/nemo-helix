@@ -218,7 +218,7 @@ uv sync ${UV_SYNC_MODE} --extra nemo_gym --no-install-project "${SKIP[@]}"
 uv sync ${UV_SYNC_MODE} --extra mcore --extra nemo_gym --no-install-project "${SKIP[@]}"
 uv sync ${UV_SYNC_MODE} --extra vllm --extra nemo_gym --no-install-project "${SKIP[@]}"
 uv sync ${UV_SYNC_MODE} --all-groups --no-install-project "${SKIP[@]}"
-
+# Drop Ray's vendored aiohttp, yarl, and jars, and PyNvVideoCodec's bundled FFmpeg.
 find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty_files/aiohttp*" -prune -exec rm -rf {} + || true
 find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty_files/yarl*" -prune -exec rm -rf {} + || true
 find "${UV_CACHE_DIR}" -type d -path "*/ray/jars" -exec rm -rf {} + || true
@@ -472,6 +472,24 @@ for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
 done
 set -x
 chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs
+EOF
+
+# cuDNN dlopens sublibraries as libcudnn_*.so.9.26.0. The wheel only ships .so.9,
+# so the lookup falls through to the system copy and the first convolution fails
+# with CUDNN_STATUS_SUBLIBRARY_LOADING_FAILED. This directory is on LD_LIBRARY_PATH.
+# The 9.26.0 suffix matches nvidia-cudnn-cu13==9.26.0.51.
+RUN <<'EOF' bash -eu
+cd /opt/nemo_rl_venv/lib/python3.13/site-packages/nvidia/cudnn/lib
+ln -s libcudnn.so.9 libcudnn.so.9.26.0
+ln -s libcudnn_adv.so.9 libcudnn_adv.so.9.26.0
+ln -s libcudnn_cnn.so.9 libcudnn_cnn.so.9.26.0
+ln -s libcudnn_engines_precompiled.so.9 libcudnn_engines_precompiled.so.9.26.0
+ln -s libcudnn_engines_runtime_compiled.so.9 libcudnn_engines_runtime_compiled.so.9.26.0
+ln -s libcudnn_engines_tensor_ir.so.9 libcudnn_engines_tensor_ir.so.9.26.0
+ln -s libcudnn_ext.so.9 libcudnn_ext.so.9.26.0
+ln -s libcudnn_graph.so.9 libcudnn_graph.so.9.26.0
+ln -s libcudnn_heuristic.so.9 libcudnn_heuristic.so.9.26.0
+ln -s libcudnn_ops.so.9 libcudnn_ops.so.9.26.0
 EOF
 
 USER root

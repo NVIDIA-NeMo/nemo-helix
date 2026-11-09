@@ -54,7 +54,8 @@ from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 from nemo_agent_hardener_plugin.jobs.manifest import _apply_agent_port
 from nemo_agent_hardener_plugin.model_config import ModelConfigDefaults, WarGameModels, model_config_defaults
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
-from nemo_agent_hardener_plugin.project_resolver import build_project_manifest_dict, inspect_project
+from nemo_agent_hardener_plugin.project_resolver import HERMES_RUNTIME_ENV, build_project_manifest_dict, inspect_project
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.entity_client import (
@@ -110,8 +111,7 @@ _manifest_filter_dep = make_filter_dep(ManifestFilter)
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AgentHardenerManifestPerms.LIST])
 async def list_manifests(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: ManifestFilter = Depends(_manifest_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -122,8 +122,8 @@ async def list_manifests(
         result = await entity_client.list(
             AgentHardenerManifest,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_obj=filter_dict or None,
         )
@@ -345,6 +345,7 @@ async def _resolve_and_store_scaffold(
     port: int | None,
     secrets: list[str] | None,
     backends: list[dict[str, Any]],
+    env: dict[str, str] | None = None,
 ) -> tuple[ResolvedManifest, str]:
     """Resolve *agent_ref* and persist its scaffold as a fileset; return the resolution and the ref.
 
@@ -369,6 +370,7 @@ async def _resolve_and_store_scaffold(
                 port=port,
                 secrets=secrets,
                 backends=backends,
+                env=env,
             )
             return resolved, upload_project_dir(client, resolved.project_dir, workspace=workspace)
 
@@ -394,6 +396,7 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
         port=body.port,
         secrets=secret_names,
         backends=_backends_or_422(body.backends),
+        env=body.env,
     )
 
     manifest = AgentHardenerManifest.from_agent_resolution(
@@ -413,7 +416,6 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
         declared_secrets=secret_names or [],
         deployed_secret_refs=resolved.deployed_secret_refs,
     )
-    # resolve_agent_to_manifest has no `env` parameter, so it is absent from the YAML it produced.
     manifest.manifest_yaml = _yaml_with_agent_settings(manifest.manifest_yaml, manifest)
     return manifest
 
@@ -434,6 +436,7 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
             return inspect_project(
                 download_and_extract_project(client, body.project_fileset or "", Path(tmp)),
                 dockerfile=body.dockerfile or None,
+                env_overrides=body.env,
             )
 
     try:
@@ -461,6 +464,10 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
             f"explicitly. {' '.join(derived.get('warnings', []))}".strip(),
         )
 
+    runtime_env = derived.get("env", {})
+    if body.env:
+        runtime_env = {**{key: value for key, value in runtime_env.items() if key in HERMES_RUNTIME_ENV}, **body.env}
+
     manifest_dict = build_project_manifest_dict(
         agent_name=body.name,
         project_dir=".",
@@ -473,7 +480,7 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
         backends=backends,
         harness=body.harness,
         relay_integration_confirmed=body.relay_integration_confirmed,
-        env=body.env or derived.get("env", {}),
+        env=runtime_env,
     )
     manifest = AgentHardenerManifest.from_project_upload(
         name=body.name,
@@ -571,6 +578,7 @@ async def refresh_manifest(
         port=existing.port or None,
         secrets=kept_secrets or None,
         backends=_stored_user_backends(existing.manifest_yaml),
+        env=existing.env,
     )
     stale = existing.agent_fileset
 

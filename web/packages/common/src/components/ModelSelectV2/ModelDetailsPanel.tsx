@@ -7,7 +7,7 @@ import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Divider, Flex, Stack, Tag, Text } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface ModelDetailsPanelProps {
   model: ModelEntity;

@@ -16,12 +16,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol, Self, get_args
 
-from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.harbor.compose.models import ComposeError, ComposeTask
 from nemo_evals.harbor.compose.spec import check_compose_task
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy, ResourceClass
-from nemo_evals.harbor.remote.sandbox_policy import compose_resources_violation, task_resources_violation
+from nemo_evals.harbor.remote.sandbox_policy import (
+    compose_resources_violation,
+    task_gpus_violation,
+    task_resources_violation,
+)
 from nemo_evals.image_builds.models import ImageBuild
 from nemo_evals.image_builds.planning import (
     MAIN_SERVICE,
@@ -199,8 +202,9 @@ class ImageBuildPreparer:
     async def check(
         self, task: ResolvedTask, *, policy: ResolvedHarborSandboxPolicy, clients: PreparationClients
     ) -> PreparationCheck:
-        """Reject non-Harbor, GPU (agent or separate verifier) and compose tasks, and tasks whose sandboxes exceed
-        the profile's ceilings. A compose file's notices are returned with an accepted task.
+        """Reject non-Harbor tasks, tasks whose sandboxes (agent or separate verifier) ask for GPUs the profile
+        doesn't have or exceed its ceilings, and compose files that can't run as a pod. A compose file's notices
+        are returned with an accepted task.
 
         Build roles can't show compose: a compose file whose only service is ``main`` builds just ``main``.
         So the archive is still read, for its compose file only.
@@ -213,9 +217,9 @@ class ImageBuildPreparer:
             return _rejected(code="invalid_task_config", detail=f"task {task.id} is not a Harbor task")
         try:
             task_config = parse_task_config(task.spec.config)
-            verifier = resolve_effective_verifier_env_config(task_config, None)
-            if task_config.environment.gpus or (verifier is not None and verifier.gpus):
-                return _rejected(code="gpu_unsupported", detail="GPU tasks aren't supported on Kubernetes runs yet")
+            if (refusal := task_gpus_violation(task_config, policy)) is not None:
+                code, detail = refusal
+                return _rejected(code=code, detail=detail)
             if (violation := task_resources_violation(task_config, policy)) is not None:
                 return _rejected(code="resources_exceed_policy", detail=violation)
             archive = await read_task_archive(clients.files, task.spec.source)

@@ -771,12 +771,9 @@ class TestRenderFabricDockerfile:
         assert f'"nemo-helix[nemo-agents-plugin]=={get_contract_version()}"' in result
         assert "apt-get install -y --no-install-recommends g++ gcc ca-certificates curl git" in result
         assert "uv venv --python 3.14 /opt/hermes-venv" in result
-        assert 'm.version("nemo-fabric")' in result
-        assert '"nemo-fabric[relay]==${FABRIC_VERSION}"' in result
-        assert '"nemo-fabric-adapters-hermes==${FABRIC_VERSION}"' in result
+        assert "python -m nemo_agents_plugin.container.install_hermes" in result
+        assert "--checkout /opt/hermes-agent --python /opt/hermes-venv/bin/python" in result
         assert f"git -C /opt/hermes-agent fetch --depth 1 origin {PINNED_HERMES_COMMIT}" in result
-        assert "--editable /opt/hermes-agent" in result
-        assert "uv pip check --python /opt/hermes-venv/bin/python" in result
         assert "ENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python" in result
 
     def test_pi_harness_installs_node_adapter_and_stages_descriptor(self, tmp_path: Path) -> None:
@@ -809,9 +806,10 @@ class TestRenderFabricDockerfile:
         assert f"setup_{PINNED_NODE_MAJOR}.x" in result
         assert "apt-get install -y --no-install-recommends nodejs" in result
         assert PI_ADAPTER_NPM_SPEC in result
-        assert "@earendil-works/pi-coding-agent@^1.0.0" in result
-        assert "@earendil-works/pi-ai@^1.0.0" in result
-        assert "@earendil-works/pi-mcp@^1.0.0" in result
+        assert "@earendil-works/pi-coding-agent@1.0.3" in result
+        assert "@earendil-works/pi-ai@1.0.3" in result
+        assert "@earendil-works/pi-mcp@1.0.3" in result
+        assert "@earendil-works/pi-codemode@1.0.3" in result
         # The Pi SDK peers must be installed into the ADAPTER'S OWN node_modules (not
         # as flat siblings under the npm prefix), so the adapter's ESM `import()` —
         # which walks up from the importing file and ignores NODE_PATH — resolves the
@@ -842,7 +840,7 @@ class TestRenderFabricDockerfile:
         global_install_line = next(line for line in result.splitlines() if "npm install -g" in line)
         assert PI_ADAPTER_NPM_SPEC in global_install_line
         assert "@earendil-works/pi-coding-agent" not in global_install_line
-        # Relay 0.9 CLI for telemetry and git for the agent's own GitHub work.
+        # Relay 0.11 CLI for telemetry and git for the agent's own GitHub work.
         assert "nemo-relay-cli-bin" in result
         assert "ca-certificates curl git" in result
         # The RUN block must render as a real multi-line Dockerfile instruction with
@@ -854,7 +852,7 @@ class TestRenderFabricDockerfile:
         # The descriptor is linked into the Fabric share/ tree for preinstalled discovery.
         assert "share/nemo-fabric/adapters/pi" in result
         assert "pi.fabric-adapter.json" in result
-        # The Relay Pi extension is fetched from the pinned Relay 0.9 ref and staged
+        # The Relay Pi extension is fetched from the pinned Relay 0.11 ref and staged
         # in-image (the npm adapter + CLI wheel do not ship it), so a Relay-enabled
         # Pi agent has an extension to point relay_extension_path at.
         assert f"fetch --depth 1 origin {PI_RELAY_EXTENSION_REF}" in result
@@ -1091,7 +1089,7 @@ class TestExtractAgentMetadata:
     def test_parses_agent_config_once(self, agent_config: Path) -> None:
         import nemo_agents_plugin.container.metadata as metadata
 
-        with patch.object(metadata.yaml, "safe_load", wraps=metadata.yaml.safe_load) as mock_safe_load:
+        with patch.object(metadata, "safe_load", wraps=metadata.safe_load) as mock_safe_load:
             metadata.extract_agent_metadata(agent_config, agent_author="x")
 
         mock_safe_load.assert_called_once()
@@ -3215,27 +3213,25 @@ class TestFabricWheelInstall:
         mock_build: MagicMock,
         fabric_agent_config: Path,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from nemo_agents_plugin.container.builder import build_fabric_agent_image
 
+        source_reads = 0
+
+        class _CountingPath(Path):
+            def open(self, *args: Any, **kwargs: Any) -> Any:
+                nonlocal source_reads
+                mode = args[0] if args else kwargs.get("mode", "r")
+                if mode == "rb":
+                    source_reads += 1
+                return super().open(*args, **kwargs)
+
         source = tmp_path / "dist"
         source.mkdir()
-        wheel = source / "nemo_helix-0.4.0-py3-none-any.whl"
+        wheel = _CountingPath(source / "nemo_helix-0.4.0-py3-none-any.whl")
         wheel.write_bytes(b"not really a wheel")
         context = fabric_agent_config.parent
         staged_during_build: dict[str, bool] = {}
-        source_reads = 0
-        original_open = Path.open
-
-        def _count_source_reads(self: Path, *args: Any, **kwargs: Any) -> Any:
-            nonlocal source_reads
-            mode = args[0] if args else kwargs.get("mode", "r")
-            if self == wheel and mode == "rb":
-                source_reads += 1
-            return original_open(self, *args, **kwargs)
-
-        monkeypatch.setattr(Path, "open", _count_source_reads)
         mock_build.side_effect = lambda **kwargs: staged_during_build.setdefault(
             "present", (context / wheel.name).exists()
         )
@@ -3610,18 +3606,18 @@ class TestFabricWheelInstall:
     def test_exclusive_dockerfile_create_handles_a_race(
         self, mock_build: MagicMock, fabric_agent_config: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        import nemo_agents_plugin.container.metadata as metadata
         from nemo_agents_plugin.container.builder import build_fabric_agent_image
 
         generated = fabric_agent_config.parent / "Dockerfile.generated"
-        generated.write_text("USER OWNED\n")
-        original_exists = Path.exists
+        original_extract = metadata.extract_agent_metadata
 
-        def _miss_generated(self: Path) -> bool:
-            if self == generated:
-                return False
-            return original_exists(self)
+        def _create_generated_concurrently(*args: Any, **kwargs: Any) -> Any:
+            # Another writer creates the file after the build has looked for it.
+            generated.write_text("USER OWNED\n")
+            return original_extract(*args, **kwargs)
 
-        monkeypatch.setattr(Path, "exists", _miss_generated)
+        monkeypatch.setattr(metadata, "extract_agent_metadata", _create_generated_concurrently)
 
         with pytest.raises(ManagedFileConflictError):
             build_fabric_agent_image(fabric_agent_config, skip_validation=True, agent_author="x")

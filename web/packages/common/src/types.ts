@@ -5,7 +5,6 @@ import type { FormFieldProps } from '@nvidia/foundations-react-core';
 import type { UseControllerProps } from 'react-hook-form';
 import { z } from 'zod';
 
-export type RepoURL = `hf://${string}`;
 export type ResourceRef = `${string}/${string}`;
 /** @deprecated Use ResourceRef for workspace/name references. */
 export type URN = ResourceRef;
@@ -49,8 +48,3 @@ export enum InputFileSchemaType {
  * Type for file format detection
  */
 export type FileFormatType = `${FileFormat}`;
-
-/**
- * Type for input file schema type detection
- */
-export type InputFileSchemaTypeValue = `${InputFileSchemaType}`;

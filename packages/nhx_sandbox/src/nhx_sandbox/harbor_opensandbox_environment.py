@@ -63,6 +63,7 @@ from harbor.environments.capabilities import EnvironmentCapabilities, Environmen
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
+from httpx import AsyncClient
 from nhx_sandbox.backends.opensandbox.termination import OpenSandboxTerminationDiagnostics
 from nhx_sandbox.compose_env import expand_env
 from nhx_sandbox.core.termination import check_termination, write_termination
@@ -93,6 +94,7 @@ from nhx_sandbox.opensandbox_policy import (
     EgressVerificationError,
     EgressVerificationMode,
     canonical_egress_target,
+    egress_target_covers,
     to_opensandbox_policy,
     verify_applied_egress,
 )
@@ -165,6 +167,15 @@ TERMINATION_CHECK_BUDGET_SEC = 10
 TERMINATION_POLL_INTERVAL_SEC = 1.0
 
 
+def _is_address(target: str) -> bool:
+    """Whether ``target`` is an IP address or CIDR rather than a hostname."""
+    try:
+        ipaddress.ip_network(target, strict=False)
+    except ValueError:
+        return False
+    return True
+
+
 def sandbox_role(session_id: str, trial_name: str) -> str:
     """Return ``agent`` or ``verifier`` for a sandbox, from the session ID Harbor gave it.
 
@@ -202,7 +213,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         domain: OpenSandbox server address; defaults to ``OPENSANDBOX_DOMAIN``.
         api_key: OpenSandbox API key; defaults to ``OPENSANDBOX_API_KEY``. An explicit ``""`` means no auth.
         protocol: ``http`` or ``https``.
-        use_server_proxy: Route execd traffic through the server instead of to the pod directly.
+        use_server_proxy: Route execd traffic through the server instead of to the pod directly. On by default:
+            a deployment that isolates sandbox pods admits only the server, so a direct connection can't reach them.
         ready_timeout_sec: How long a new sandbox may take to become healthy.
         sandbox_timeout_sec: The sandbox's server-side lifetime.
         sandbox_expires_at: ISO-8601 time, with its UTC offset, no sandbox may outlive. Each create gets ``sandbox_timeout_sec``
@@ -254,7 +266,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         domain: str | None = None,
         api_key: str | None = None,
         protocol: str = "https",
-        use_server_proxy: bool = False,
+        use_server_proxy: bool = True,
         ready_timeout_sec: float = DEFAULT_READY_TIMEOUT_SEC,
         sandbox_timeout_sec: float = DEFAULT_SANDBOX_TIMEOUT_SEC,
         sandbox_expires_at: str | None = None,
@@ -302,7 +314,6 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._health_check_poll_interval_sec = health_check_poll_interval_sec
         self._metadata = dict(metadata or {})
         self._trusted_allowed_hosts = tuple(trusted_allowed_hosts or ())
-        self._trusted_targets = frozenset(canonical_egress_target(host) for host in self._trusted_allowed_hosts)
         self._resolver_addresses = tuple(resolver_addresses) if resolver_addresses is not None else None
         self._image_entrypoints = dict(image_entrypoints or {})
         self._runtime: SandboxRuntime = runtime
@@ -412,7 +423,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         if network_policy.network_mode != NetworkMode.ALLOWLIST:
             return
         outside = sorted(
-            host for host in network_policy.allowed_hosts if canonical_egress_target(host) not in self._trusted_targets
+            host
+            for host in network_policy.allowed_hosts
+            if not any(egress_target_covers(trusted, host) for trusted in self._trusted_allowed_hosts)
         )
         if outside:
             raise ValueError(
@@ -428,7 +441,45 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         targets = (
             tuple(self._network_policy.allowed_hosts) if mode == NetworkMode.ALLOWLIST else self._trusted_allowed_hosts
         )
-        return build_egress_policy(EgressAllowlist(targets=targets, resolver_addresses=self._resolver_addresses))
+        return build_egress_policy(self._egress_allowlist(targets))
+
+    async def _build_egress_policy(self) -> EgressPolicy:
+        """:meth:`egress_policy`, run in a worker thread.
+
+        Building a policy does blocking DNS lookups and reads ``/etc/resolv.conf``. Harbor runs every
+        trial on one event loop, so doing that inline would pause all of them for as long as a slow or
+        unresolvable host takes to time out. The policy is rebuilt for every sandbox rather than cached,
+        so a long run always sees current DNS answers.
+        """
+        return await asyncio.to_thread(self.egress_policy)
+
+    def _operator_hosts(self) -> tuple[str, ...]:
+        """Egress targets from the operator rather than the task; their addresses may be carved out."""
+        return self._trusted_allowed_hosts
+
+    def _egress_allowlist(
+        self, targets: tuple[str, ...], *, extra_operator_hosts: tuple[str, ...] = ()
+    ) -> EgressAllowlist:
+        """Allow ``targets``, carving out the addresses of operator hostnames only.
+
+        A task hostname admitted through an operator ``*.`` wildcard is allowed by name only, as the
+        wildcard is: carving out its resolved addresses would let it reach private space the operator's
+        own policy denies, such as ``internal.example.com`` resolving to ``10.0.0.51`` under ``*.com``.
+        ``extra_operator_hosts`` are trusted for this policy only, such as hosts open for a limited window.
+        """
+        operator_names = {canonical_egress_target(host) for host in (*self._operator_hosts(), *extra_operator_hosts)}
+        name_only = tuple(
+            target
+            for target in targets
+            if not target.startswith("*")
+            and not _is_address(target)
+            and canonical_egress_target(target) not in operator_names
+        )
+        return EgressAllowlist(
+            targets=tuple(target for target in targets if target not in name_only),
+            name_only_targets=name_only,
+            resolver_addresses=self._resolver_addresses,
+        )
 
     def _resource(self) -> dict[str, str]:
         """CPU, memory, GPU and disk limits from the task.
@@ -474,7 +525,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         if uses_extension:
             await self._require_extension()
 
-        egress_policy = self.egress_policy()
+        # Built once and shared by the create, the verification and the applied-egress record, so all
+        # three describe the same policy. Off the event loop: it resolves hostnames and reads resolv.conf.
+        egress_policy = await self._build_egress_policy()
         entrypoint = self._sandbox_entrypoint()
         sandbox = await self._driver.create(
             CreateRequest(
@@ -627,7 +680,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         """Replace *path* with *record* in one rename, so a failed write leaves the previous record whole."""
         temporary = path.with_name(f"{path.name}.tmp")
         try:
-            temporary.write_text(json.dumps(record, indent=2))
+            _write_text(temporary, json.dumps(record, indent=2))
             temporary.replace(path)
         except OSError:
             temporary.unlink(missing_ok=True)
@@ -1113,6 +1166,11 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 )
 
 
+def _write_text(path: Path, text: str) -> None:
+    """Write *text* to *path*; a seam so a test can fail the write without patching ``Path``."""
+    path.write_text(text)
+
+
 def _error_text(response: httpx.Response) -> str:
     """A short error message from a server response: ``code: message`` when it has the server's error shape."""
     try:
@@ -1167,7 +1225,7 @@ class _ServerClient:
             response: httpx.Response | None = None
 
             try:
-                async with httpx.AsyncClient(timeout=attempt_timeout) as client:
+                async with AsyncClient(timeout=attempt_timeout) as client:
                     response = await client.request(method, f"{self.base_url}{path}", json=body, headers=self.headers)
             except retry_errors as exc:
                 error = exc

@@ -15,6 +15,13 @@ the verifier rewards through agent-eval — the same
 [`AgentEvaluator`](/documentation/evaluate-models/agent-eval) and the same result and bundle as the
 [quickstart](/documentation/evaluate-models/agent-eval/quickstart). Only the runner changes.
 
+<Tip>
+
+To run Harbor tasks on a Kubernetes deployment instead of Docker, see
+[Run a Harbor Task Suite on Kubernetes](/documentation/evaluate-models/agent-eval/harbor-kubernetes).
+
+</Tip>
+
 <Warning>
 
 Unlike the quickstart, this runner is **not** zero-dependency — it shells out to Harbor and Docker:
@@ -25,7 +32,7 @@ Unlike the quickstart, this runner is **not** zero-dependency — it shells out 
   `nemo-helix`'s own; a source checkout resolves up to 3.14.
 - **A Docker-compatible container runtime** — Harbor invokes the `docker` executable on `PATH`
   (`docker info` must succeed) and uses `docker compose`.
-- **Harbor** `>=0.23,<0.24` — see [Install Harbor](#install-harbor).
+- **Harbor** `>=0.24,<0.25` — see [Install Harbor](#install-harbor).
 
 </Warning>
 
@@ -48,7 +55,7 @@ To add Harbor to an environment you already have, install it against the same co
 declares:
 
 ```bash
-uv pip install "harbor>=0.23,<0.25"
+uv pip install "harbor>=0.24,<0.25"
 ```
 
 Use `pip install` in place of `uv pip install` if you prefer; both work here.
@@ -662,7 +669,7 @@ Loose wrapper source through `agent_dir` is supported only by standalone `nhx-ev
 It is not supported by submitted `nemo-evals` plugin jobs.
 
 For example, NeMo Fabric's
-[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.5.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
+[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.6.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
 is one of Harbor's [existing agents](https://www.harborframework.com/docs/agents#existing-agents);
 its constructor requires `fabric_adapter_id` and accepts `fabric_package` and `fabric_telemetry`. For a
 complete, runnable version with a Nemotron model, see
@@ -674,7 +681,7 @@ config = HarborRuntimeConfig(
     agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
     agent_kwargs={
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.5.0",
+        "fabric_package": "nemo-fabric[codex]==0.6.0",
         "fabric_telemetry": "relay",
     },
 )
@@ -695,7 +702,7 @@ source directory:
     "source": {"import_path": "nemo_fabric.integrations.harbor:FabricAgent"},
     "agent_kwargs": {
       "fabric_adapter_id": "nvidia.fabric.codex",
-      "fabric_package": "nemo-fabric[codex]==0.5.0"
+      "fabric_package": "nemo-fabric[codex]==0.6.0"
     },
     "env_secrets": {
       "OPENAI_API_KEY": "my-workspace/openai-key"
@@ -745,6 +752,7 @@ from nemo_evals.jobs.agent_spec import HarborBuiltinAgentSource, HarborGatewayMo
 from nhx_evals_sdk.values import ModelRef
 
 target = HarborRunnerTarget(
+    closed_book=True,
     source=HarborBuiltinAgentSource(
         name="codex", model=HarborGatewayModel(ref=ModelRef("my-workspace/closed-book-model"))
     ),
@@ -811,16 +819,17 @@ before any trial runs unless every virtual model the agent can reach, including 
 virtual model lists in `routes_to`, ends its `request_middleware` with `nemo-evals-closed-book`.
 Without the label, the same virtual models serve the run open.
 
-A taskset run on Kubernetes labels the run closed-book itself for tasks whose agent runs with
+A taskset run on Kubernetes is closed-book only when labelled so. Tasks whose agent runs with
 `network_mode = "no-network"`, whether set under `[environment]`, `[agent]` or one of the task's
-steps. Their sandbox still reaches the agent's model route, so a closed-book run, labelled or not, is
-refused at submit, naming those tasks, unless every model the agent calls through the gateway, and
+steps, don't label it: their sandbox still reaches the agent's model route, so such a run is
+open-book by default, and submit warns once per run. A labelled taskset run is
+refused at submit unless every model the agent calls through the gateway, and
 each virtual model those list in `routes_to`, is a virtual model whose `request_middleware` ends with
 `nemo-evals-closed-book`, and you can read each one. For a built-in agent that's the virtual model its
 `model` names as a `ref`; for a registered agent it's each shared and harness model whose `base_url`
 is a gateway route. Agents that call no model, `oracle` and `nop`, are exempt. A built-in agent with a
-model by `name`, an imported agent, and a registered agent with no gateway model are refused for such
-tasks, since evals can't check where their model calls go.
+model by `name`, an imported agent, and a registered agent with no gateway model are refused for a
+labelled run, since evals can't check where their model calls go.
 
 ## How scoring works
 
@@ -919,6 +928,55 @@ The error changes `a2`'s status and error rollup; it does not discard or replace
 
 - **`n_attempts`** — desired attempts per task. On resume, Harbor runs only the missing attempts.
 - **`n_concurrent_trials`** — maximum trials Harbor runs concurrently.
+- **`NHX_HARBOR_MAX_CONCURRENT_SETUPS`** (environment variable, default `4`) — the maximum number of local Docker trials, across every run of one user on the machine, that can start their container and set up their agent at once. Setups that overlap slow each other down until they pass the agent setup timeout. A trial waiting for a slot starts its timers only once it has one. Set the variable to `0` to turn the cap off. Give every run the same value. Each user has their own slots, and the cap doesn't apply on Windows or to trials in OpenSandbox or other remote environments. If the slot directory, `/tmp/nemo-harbor-setup-slots-<uid>`, belongs to another user, others can write to it, or something other than a directory is at its path, the run logs a warning and sets up without the cap; remove the directory to restore it.
+
+## Agent install reuse
+
+A local Docker trial normally installs its agent from scratch during setup. Instead, the runtime installs each agent once per task environment and reuses that install in every later trial of the environment. This covers Harbor's `codex` and `claude-code` agents and registered Fabric agents. Harbor's other installed agents reinstall in every trial, so they get no layer.
+
+1. The first trial that needs the install builds an *agent layer*. It starts a container from the task's environment image, runs the agent's setup in it as the task's agent user, and saves the result as the image `nemo-agent-layer:<key>`.
+2. Every later trial with the same environment, agent version, agent user and Harbor version starts from that image, in this run and in later runs on the same machine. Its setup only confirms the install, which takes seconds.
+3. Trials that need a layer another trial is still building wait for it, rather than building their own.
+
+The key leaves out the model, prompts and turn limits, so changing those reuses the same layer. It includes the proxy, package-index and certificate variables of the agent's environment, such as `HTTPS_PROXY` and `PIP_INDEX_URL`. These are the only variables a layer's build runs with, so API keys never reach a layer. A Fabric agent's config bundle isn't part of its layer either: every trial's setup uploads its own.
+
+A layer's install reaches the same network as the trial's setup. When a task's `[environment]` network is `no-network` or an allowlist, the build runs behind Harbor's egress sidecar with that policy, as the trial would. The policy is part of the key, so a trial never starts from a layer installed with more network than its own setup gets.
+
+An agent without a pinned `version` installs the newest release. Its layer is reused for one UTC day, then built again.
+
+If a layer can't be built, the trial installs its agent during setup, as it would without layers. For the next 10 minutes, other trials that need the same layer don't try to build it again; they install the agent during setup straight away.
+
+Layers apply only to Harbor's default local Docker environment, and not to tasks that bring their own `docker-compose.yaml`.
+
+To turn layers off, set `NHX_HARBOR_AGENT_LAYERS=0`.
+
+To list layers:
+
+```bash
+docker images --filter label=nemo.agent-layer
+```
+
+To remove them:
+
+```bash
+docker image prune --all --filter label=nemo.agent-layer
+```
+
+### On Kubernetes
+
+A Kubernetes run reuses installs the same way, through Builder:
+
+1. Submit starts one agent layer for each task in the run: the task's image with the run's agent installed. Tasks whose environments hold the same files share one Builder build, so each install runs once per environment.
+2. Each task waits for its own layer, then runs on it. Its trials' setup only confirms the install, and the run opens no setup egress for them.
+3. If a layer fails, or isn't ready within `evals.runs.harbor.agent_layer_wait_seconds` (30 minutes by default), the task runs on its own image and its trials install the agent during setup.
+
+A task whose `[environment]` network is `no-network` or an allowlist gets no layer, and its trials install the agent during setup. A layer's install runs in a Builder build, which can reach more of the network than that task's setup can.
+
+A layer expires after the `timeout_seconds` of the run that started it. A later run then builds a new one, from a Builder build no older than its own `timeout_seconds`.
+
+To turn Kubernetes layers off, set `evals.runs.harbor.agent_layers: false`.
+
+Builder pushes layers to repositories named `<repository_prefix>/<workspace>/harbor-agent-<key>`, and deletes none of them. To reclaim the space, add a lifecycle rule to your registry for repositories that match `*/harbor-agent-*`. Keep each image for at least twice `evals.runs.max_timeout_seconds`, plus `evals.runs.queue_timeout_seconds`, plus `evals.runs.max_timeout_seconds` again. With the defaults, that's 11 days. A rule that deletes a layer sooner can remove an image that a queued or running task still needs.
 
 ## Retries
 

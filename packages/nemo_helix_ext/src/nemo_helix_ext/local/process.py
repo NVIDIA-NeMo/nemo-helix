@@ -28,16 +28,18 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import signal
-import socket
 import subprocess
 import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from os import kill, killpg
 from pathlib import Path
+from shutil import rmtree
+from socket import AI_PASSIVE, SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET, getaddrinfo, socket
+from subprocess import Popen
 from typing import Literal, Self
 
 import psutil
@@ -47,6 +49,7 @@ from nhx.platform_runner.config import (
     default_state_root,
     validate_scope,
 )
+from psutil import wait_procs
 from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -248,7 +251,7 @@ def port_bind_error(host: str, port: int) -> OSError | None:
     can tell a denied bind apart from an occupied port.
     """
     try:
-        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE)
+        infos = getaddrinfo(host, port, type=SOCK_STREAM, flags=AI_PASSIVE)
     except OSError as err:
         return err
     if not infos:
@@ -256,8 +259,8 @@ def port_bind_error(host: str, port: int) -> OSError | None:
     errors: list[OSError] = []
     for family, socktype, proto, _, sockaddr in infos:
         try:
-            with socket.socket(family, socktype, proto) as sock:
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            with socket(family, socktype, proto) as sock:
+                sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
                 sock.bind(sockaddr)  # noqa: S104  # nosec B104
         except OSError as err:
             errors.append(err)
@@ -513,7 +516,7 @@ def _signal_saved_process_group(pgid: int, leader_create_time: float) -> None:
 
     def _send(sig: int) -> bool:
         try:
-            os.killpg(pgid, sig)
+            killpg(pgid, sig)
         except ProcessLookupError:
             return False
         except OSError:
@@ -564,7 +567,7 @@ def list_instances(*, base_dir: Path | None = None) -> list[InstanceInfo]:
             desc = None
         if is_removable_ghost(scope, base_dir=base_dir, descriptor=desc):
             try:
-                shutil.rmtree(child)
+                rmtree(child)
             except OSError:
                 logger.debug("Could not remove ghost scope directory %s", child, exc_info=True)
             else:
@@ -585,7 +588,7 @@ def remove_instance(scope: str, *, base_dir: Path | None = None) -> bool:
     if not scope_dir_path.is_dir():
         return False
     with contextlib.suppress(OSError):
-        shutil.rmtree(scope_dir_path)
+        rmtree(scope_dir_path)
     return not scope_dir_path.is_dir()
 
 
@@ -679,7 +682,7 @@ def _sweep_orphans(children: list[psutil.Process], timeout: float = 5.0) -> list
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass  # Already exited or not owned by us — skip.
 
-    _, still_alive = psutil.wait_procs(alive_children, timeout=timeout)
+    _, still_alive = wait_procs(alive_children, timeout=timeout)
     kill_sent: list[psutil.Process] = []
     for child in still_alive:
         try:
@@ -689,7 +692,7 @@ def _sweep_orphans(children: list[psutil.Process], timeout: float = 5.0) -> list
             pass  # Raced with exit or not owned — nothing to do.
 
     if kill_sent:
-        _, unreaped = psutil.wait_procs(kill_sent, timeout=timeout)
+        _, unreaped = wait_procs(kill_sent, timeout=timeout)
         if unreaped:
             logger.warning("Orphaned child %s still alive after SIGKILL", [c.pid for c in unreaped])
 
@@ -765,7 +768,7 @@ def stop_instance(
     children = _snapshot_children(pid)
 
     try:
-        os.kill(pid, signal.SIGTERM)
+        kill(pid, signal.SIGTERM)
         logger.debug("Sent SIGTERM to pid %d", pid)
     except OSError:
         logger.debug("Failed to send SIGTERM to pid %d", pid, exc_info=True)
@@ -778,7 +781,7 @@ def stop_instance(
     else:
         if _pid_alive(pid):
             try:
-                os.kill(pid, signal.SIGKILL)
+                kill(pid, signal.SIGKILL)
                 logger.debug("Sent SIGKILL to pid %d", pid)
             except PermissionError:
                 logger.warning("No permission to SIGKILL pid %d; process may still be running", pid)
@@ -962,7 +965,7 @@ def start_background(
     env["_NHX_LAUNCH_MODE"] = "background"
 
     try:
-        proc = subprocess.Popen(
+        proc = Popen(
             args,
             stdout=log_file,
             stderr=subprocess.STDOUT,

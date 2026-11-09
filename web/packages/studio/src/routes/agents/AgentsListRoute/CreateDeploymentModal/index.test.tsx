@@ -5,9 +5,9 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_AGENT_CONTAINER_DEPLOYMENTS_ENABLED', 'true');
 });
 
+import { FABRIC_CONFIG_FORMAT } from '@nemo/common/src/utils/agents';
 import { getAgentsListDeploymentsQueryKey } from '@nemo/sdk/generated/agents/agent-deployments';
 import { getBuildThenDeployRequest } from '@studio/api/agents/buildThenDeploy';
-import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';

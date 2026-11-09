@@ -5,7 +5,9 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nemo_helix_plugin.client.errors import NemoClientError, PermissionDeniedError
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
+from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entities.types import EntityWriteValidationErrorResponse
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.api_factory import (
@@ -40,7 +42,6 @@ from nhx.core.models.api.service.model_entity_service import (
     is_trusted_repo_id,
     validate_tool_call_plugin_allowed,
 )
-from nhx.core.models.api.v2.utils import NOT_FOUND_ERRORS
 from nhx.core.models.config import config as models_config
 from nhx.core.models.entities import Model
 from nhx.core.models.schemas import (
@@ -158,7 +159,7 @@ async def create_model(
             )
         logger.warning(f"Model creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception as e:
         logger.exception(f"Failed to create model entity - {e}")
@@ -188,8 +189,7 @@ async def create_model(
 )
 async def list_models(
     workspace: str,
-    page: int = Query(default=1, description="Page number."),
-    page_size: int = Query(default=100, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: ModelEntitySortField = Query(
         default="created_at",
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -214,8 +214,8 @@ async def list_models(
         result = await service.list_model_entities(
             workspace=filter_workspace,
             parsed_filter=parsed_filter,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             verbose=verbose,
         )
@@ -226,9 +226,7 @@ async def list_models(
         raise
     except InvalidFilterError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except NOT_FOUND_ERRORS:
-        raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Failed to list model entities")
@@ -273,7 +271,7 @@ async def get_model(
 
     except HTTPException:
         raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception as e:
         logger.exception(f"Failed to get model entity - {e}")
@@ -436,7 +434,7 @@ async def update_model(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except HTTPException:
         raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception as e:
         logger.exception(f"Failed to update model entity - {e}")
@@ -486,7 +484,7 @@ async def delete_model(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Failed to delete model entity")
@@ -550,7 +548,7 @@ async def create_model_adapter(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
     except HTTPException:
         raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception as e:
         logger.exception(f"Failed to create model adapter - {e}")
@@ -604,7 +602,7 @@ async def delete_model_adapter(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception as e:
         logger.exception(f"Failed to delete model entity - {e}")
@@ -670,7 +668,7 @@ async def update_model_adapter(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except HTTPException:
         raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception as e:
         logger.exception(f"Failed to update model adapter entity - {e}")

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import httpx
 import pytest
 from docker.errors import APIError, NotFound
+from nemo_helix_plugin.capabilities import ProbeResult
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.jobs.types import AuthContext as JobStepAuthContext
 from nhx.common.auth import (
@@ -145,7 +146,13 @@ def docker_client_mock(monkeypatch):
     mock_container = MagicMock()
     mock_container.attrs = {"NetworkSettings": {"Networks": {"mock_network": "network_settings"}}}
 
-    with patch("docker.from_env") as mock_docker_client:
+    with (
+        patch(
+            "nhx.core.jobs.controllers.backends.docker.probe_docker",
+            return_value=ProbeResult(available=True),
+        ),
+        patch("nhx.core.jobs.controllers.backends.docker.docker_from_env") as mock_docker_client,
+    ):
         client = MagicMock()
         mock_docker_client.return_value = client
 

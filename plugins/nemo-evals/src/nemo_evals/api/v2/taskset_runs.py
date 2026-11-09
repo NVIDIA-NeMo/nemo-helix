@@ -37,6 +37,7 @@ from nemo_evals.taskset_runs.store import (
     TasksetRunStore,
 )
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_effective_principal_id
@@ -221,8 +222,7 @@ async def list_taskset_runs(
     workspace: str,
     active: bool = Query(default=False, description="Include only accepted and running runs."),
     mine: bool = Query(default=False, description="Include only runs created by the effective caller."),
-    page: int = Query(default=1, ge=1, description="One-based page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Maximum runs on the requested page."),
+    page_params: PageParams = Depends(make_page_dep()),
     caller: str = Depends(get_effective_principal_id),
     service: TasksetRunService = Depends(get_taskset_run_service),
 ) -> Page[TasksetRunStatus]:
@@ -249,8 +249,8 @@ async def list_taskset_runs(
             caller=caller,
             active=active,
             mine=mine,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
         )
     except PermissionDeniedError as exc:
         logger.warning(
@@ -383,8 +383,7 @@ async def list_taskset_run_tasks(
     workspace: str,
     run_id: str,
     phase: MemberPhase | None = Query(default=None, description="Include only members in this stored phase."),
-    page: int = Query(default=1, ge=1, description="One-based page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Maximum tasks on the requested page."),
+    page_params: PageParams = Depends(make_page_dep()),
     service: TasksetRunService = Depends(get_taskset_run_service),
 ) -> Page[TasksetRunTask]:
     """Read stored run members in numeric task-index order without inspecting Jobs.
@@ -406,7 +405,9 @@ async def list_taskset_run_tasks(
             storage or projection failure occurs (sanitized 500).
     """
     try:
-        result = await service.list_tasks(workspace, run_id, phase=phase, page=page, page_size=page_size)
+        result = await service.list_tasks(
+            workspace, run_id, phase=phase, page=page_params.page, page_size=page_params.page_size
+        )
     except PermissionDeniedError as exc:
         logger.warning(
             "Downstream permission denied while attempting to list taskset run tasks %s/%s (status=%s, request_id=%s)",

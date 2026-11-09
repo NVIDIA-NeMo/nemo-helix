@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import subprocess
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -248,7 +249,7 @@ async def test_nemo_fabric_agent_runs_deepagents_on_nemotron_inside_harbor(tmp_p
                     }
                 },
             },
-            "fabric_package": "nemo-fabric[deepagents]==0.5.0",
+            "fabric_package": f"nemo-fabric[deepagents]=={version('nemo-fabric')}",
             "fabric_workspace": "/app",
         },
         env_secrets={"NVIDIA_API_KEY": SecretRef("NVIDIA_API_KEY")},

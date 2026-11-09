@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
-import { LayoutGrid } from '@nemo/icons/icons';
+import { Apps } from '@nemo/icons/icons';
 import {
   ASSISTANT_STUDIO_ENABLED,
   DASHBOARD_ROUTE_ENABLED,
@@ -69,7 +69,7 @@ export const getDashboardSideNavItems = (workspace: string) =>
     ? [
         {
           id: 'dashboard',
-          slotIcon: <LayoutGrid className={iconColorClass} />,
+          slotIcon: <Apps className={iconColorClass} />,
           slotLabel: 'Dashboard',
           href: getWorkspaceDashboardRoute(workspace),
         },

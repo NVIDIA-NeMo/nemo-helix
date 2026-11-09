@@ -17,6 +17,7 @@ from nemo_evals.entities import MAX_NAME_LENGTH, NAME_PATTERN
 from nemo_evals.harbor.materialization import HarborArtifactError
 from nemo_evals.revisions import RevisionConflictError, RevisionNotFoundError
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricsDisabledError
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.entities import EntityValidationError
@@ -57,8 +58,7 @@ router = APIRouter()
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[TaskPerms.LIST])
 async def list_tasks(
     workspace: str,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: TaskSort = Query(
         default=TaskSort.CREATED_AT_ASC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -73,8 +73,8 @@ async def list_tasks(
     try:
         return await service.list_tasks(
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_operation=filter_operation,
         )
@@ -216,8 +216,7 @@ async def replace_task(
 async def list_task_revisions(
     workspace: str,
     name: Annotated[str, Path(max_length=MAX_NAME_LENGTH, pattern=NAME_PATTERN)],
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     service: TaskService = Depends(get_task_service),
 ) -> Page[Revision]:
     """List a task's published revisions.
@@ -226,7 +225,9 @@ async def list_task_revisions(
     goes in a reference's ``#fragment``.
     """
     try:
-        revisions = await service.list_revisions(workspace, name, page=page, page_size=page_size)
+        revisions = await service.list_revisions(
+            workspace, name, page=page_params.page, page_size=page_params.page_size
+        )
     except Exception:
         logger.exception("Failed to list task revisions")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")

@@ -9,7 +9,7 @@ import {
   generateTestResourceName,
   generateTestWorkspaceName,
 } from '@e2e-tests/utils/constants';
-import { TestWorkspaceFixture, testWorkspaceFixture } from '@e2e-tests/utils/fixtures';
+import { type TestWorkspaceFixture, testWorkspaceFixture } from '@e2e-tests/utils/fixtures';
 import { disableAuthForTest } from '@e2e-tests/utils/pageUtils';
 import { expect, test as baseTest } from '@playwright/test';
 

@@ -128,14 +128,22 @@ def main() -> None:
     print("Applied CLI overrides")
     print(f"Config sections loaded: {sorted(type(config).model_fields)}")
 
-    config.logger["log_dir"] = get_next_experiment_dir(config.logger["log_dir"])
-    print(f"Using log directory: {config.logger['log_dir']}")
+    # logger is a LoggerConfig model. policy and checkpointing stay TypedDicts.
+    config.logger.log_dir = get_next_experiment_dir(config.logger.log_dir)
+    print(f"Using log directory: {config.logger.log_dir}")
     if config.checkpointing["enabled"]:
         print(f"Using checkpoint directory: {config.checkpointing['checkpoint_dir']}")
 
     _maybe_bootstrap_environment(config)
 
-    tokenizer = get_tokenizer(config.policy["tokenizer"])
+    # A vision policy is constructed with the processor. The text tokenizer is
+    # the processor's tokenizer, so generation and the Gym env see the same one.
+    if config.policy.get("is_vlm"):
+        processor = get_tokenizer(config.policy["tokenizer"], get_processor=True)
+        tokenizer = processor.tokenizer
+    else:
+        processor = None
+        tokenizer = get_tokenizer(config.policy["tokenizer"])
     assert config.policy["generation"] is not None, "A generation config is required for GRPO"
     config.policy["generation"] = configure_generation_config(
         config.policy["generation"],
@@ -171,7 +179,7 @@ def main() -> None:
             master_config,
             _teacher_worker_groups,
             _alias_to_group_alias,
-        ) = setup(config, tokenizer, train_dataset, val_dataset)
+        ) = setup(config, tokenizer, train_dataset, val_dataset, processor=processor)
 
         task_to_env = {"nemo_gym": nemo_gym}
         val_task_to_env = task_to_env
@@ -222,6 +230,7 @@ def main() -> None:
                 checkpointer,
                 grpo_state,
                 master_config,
+                processor=processor,
             )
     finally:
         # Flushes the final training step. NeMo-RL never closes the loggers it is handed, and

@@ -273,7 +273,7 @@ FLOX_EXEC :=
 else
 $(error TOOLCHAIN must be either flox or system)
 endif
-UV := $(FLOX_EXEC) uv
+UV := "$(CURDIR)/script/uv"
 ifeq ($(TOOLCHAIN),flox)
 FLOX_NODE_EXEC := $(FLOX_QUIET) activate --dir "$(CURDIR)/tools/nodejs" --
 PNPM := $(FLOX_NODE_EXEC) pnpm
@@ -446,13 +446,19 @@ PYTEST_CI_OPTS := --cov=src --cov=packages \
 	--junitxml=report.xml \
 	--cov-report json:coverage.json \
 	--cov-report xml:coverage.xml \
-	--durations=25
+	--durations=25 \
+	-p no:faulthandler
+
+# Per-worker crash dumps (see conftest.py), uploaded by CI when a job fails. pytest's own
+# faulthandler would point them at stderr, which xdist never forwards, hence -p no:faulthandler.
+PYTEST_CRASH_DUMP_DIR ?= crash-dumps
 
 # CI-only wall-clock timeout. Send SIGINT first so pytest can flush junit,
 # coverage, and crash artifacts; if cleanup hangs, SIGKILL follows later.
 PYTEST_CI_TIMEOUT ?= 1800
 PYTEST_CI_KILL_AFTER ?= 600
-PYTEST_CI_CMD = timeout --signal=INT --kill-after=$(PYTEST_CI_KILL_AFTER)s $(PYTEST_CI_TIMEOUT)s $(PYTEST_CMD)
+PYTEST_CI_CMD = timeout --signal=INT --kill-after=$(PYTEST_CI_KILL_AFTER)s $(PYTEST_CI_TIMEOUT)s \
+	env PYTEST_CRASH_DUMP_DIR=$(PYTEST_CRASH_DUMP_DIR) $(PYTEST_CMD)
 
 # Unit/default runs keep ``loadscope`` so tests from the same module/class stay
 # on one worker and reuse normal pytest fixtures efficiently. The integration
@@ -466,6 +472,11 @@ test-integration test-integration-ci: PYTEST_DIST := loadgroup
 # A killed integration worker never tears down its containers and ports, so replacing it re-runs
 # the group against resources the dead worker still holds. Unit workers own nothing external.
 test-integration test-integration-ci: PYTEST_MAX_WORKER_RESTART := 0
+
+# A lost CI unit worker is almost always a test past --timeout. loadscope requeues that test with
+# its scope, so each replacement re-collects the suite only to time out again and the job hits its
+# wall clock without naming the test. Fail fast in CI; local runs keep the default restarts.
+test-unit-ci: PYTEST_MAX_WORKER_RESTART := 0
 
 .PHONY: test-unit
 test-unit: ## Run Python unit tests across all packages and services

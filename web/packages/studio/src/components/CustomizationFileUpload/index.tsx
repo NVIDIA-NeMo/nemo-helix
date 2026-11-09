@@ -1,17 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { RenderFileTagFn } from '@nemo/common/src/components/FileUpload';
+import type { RenderFileTagFn } from '@nemo/common/src/components/FileUpload';
 import {
   CustomizationFileTag,
-  CustomizationFileTagFile,
+  type CustomizationFileTagFile,
 } from '@studio/components/CustomizationFileTag';
 import { DatasetFileUpload } from '@studio/components/DatasetFileUpload';
 import {
   CUSTOMIZATION_FILESET_FILE_PREFIXES,
-  CustomizationFileType,
+  type CustomizationFileType,
 } from '@studio/constants/customization';
-import { ComponentProps, FC } from 'react';
+import type { ComponentProps, FC } from 'react';
 
 interface Props extends ComponentProps<typeof DatasetFileUpload> {
   customizationFileType: CustomizationFileType;

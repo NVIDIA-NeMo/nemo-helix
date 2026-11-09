@@ -6,10 +6,12 @@
 import ipaddress
 import logging
 import os
-import platform
 import socket
 from collections.abc import Generator
 from contextlib import closing, contextmanager
+from platform import system as platform_system
+from socket import socket as new_socket
+from types import ModuleType
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,13 @@ def _loopback(host: str) -> bool:
         return False
 
 
+def _docker_module() -> ModuleType:
+    """Import the Docker SDK only when a local bridge is looked up; it is slow to import."""
+    import docker
+
+    return docker
+
+
 def docker_listener_host(host: str) -> str | None:
     """Find a local Docker bridge interface without changing the primary bind.
 
@@ -33,7 +42,7 @@ def docker_listener_host(host: str) -> str | None:
     locally too: a platform in a separate container/rootless namespace cannot
     bind the daemon host's interface, while a host-network process can.
     """
-    if platform.system() != "Linux" or not _loopback(host):
+    if platform_system() != "Linux" or not _loopback(host):
         return None
     docker_host = os.environ.get("DOCKER_HOST", "")
     if docker_host and not docker_host.startswith("unix://"):
@@ -46,10 +55,8 @@ def docker_listener_host(host: str) -> str | None:
 
     from docker.errors import DockerException
 
-    import docker
-
     try:
-        with closing(docker.from_env(timeout=3)) as client:
+        with closing(_docker_module().from_env(timeout=3)) as client:
             configs = client.networks.get("bridge").attrs.get("IPAM", {}).get("Config", [])
         for config in configs:
             gateway = config.get("Gateway")
@@ -58,7 +65,7 @@ def docker_listener_host(host: str) -> str | None:
             address = ipaddress.ip_address(gateway)
             if address.version != 4 or address.is_loopback or address.is_unspecified:
                 continue
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            with new_socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
                 probe.bind((str(address), 0))
             return str(address)
     except (DockerException, OSError, ValueError):

@@ -16,18 +16,40 @@ import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { CloneAgentModal } from '@studio/routes/agents/AgentsListRoute/CloneAgentModal';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentsListRoute/CreateDeploymentModal';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
-import { getAgentDetailRoute } from '@studio/routes/utils';
-import { type FC, useState } from 'react';
+import { isNewAgentTab } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
+import type { NewAgentTab } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
+import { getAgentDetailRoute, REGISTER_AGENT_SEARCH_PARAM } from '@studio/routes/utils';
+import { type FC, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router';
 
 export const AgentsListRoute: FC = () => {
   const pluginsLoaded = usePluginsLoaded();
   const pluginsError = usePluginsError();
   const agentsInstalled = usePluginInstalled('agents');
   const workspace = useWorkspaceFromPath();
+  const [searchParams, setSearchParams] = useSearchParams();
   const openRow = useRowNavigation();
   const [createDeploymentAgent, setCreateDeploymentAgent] = useState<string | null>(null);
-  const [isNewAgentOpen, setNewAgentOpen] = useState(false);
+  const [newAgentTab, setNewAgentTab] = useState<NewAgentTab | null>(null);
   const [cloneSource, setCloneSource] = useState<AgentTableRow | null>(null);
+
+  const requestedTab = searchParams.get(REGISTER_AGENT_SEARCH_PARAM);
+  useEffect(() => {
+    if (requestedTab === null) {
+      return;
+    }
+    if (isNewAgentTab(requestedTab)) {
+      setNewAgentTab(requestedTab);
+    }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete(REGISTER_AGENT_SEARCH_PARAM);
+        return next;
+      },
+      { replace: true }
+    );
+  }, [requestedTab, setSearchParams]);
 
   useBreadcrumbs({
     items: [{ slotLabel: 'Agents' }],
@@ -62,7 +84,7 @@ export const AgentsListRoute: FC = () => {
           slotHeading="Agents"
           slotDescription="View and manage AI agents and their deployments."
           slotActions={
-            <Button color="brand" onClick={() => setNewAgentOpen(true)}>
+            <Button color="brand" onClick={() => setNewAgentTab('upload')}>
               Register Agent
             </Button>
           }
@@ -74,9 +96,10 @@ export const AgentsListRoute: FC = () => {
         />
       </Stack>
       <NewAgentModal
-        open={isNewAgentOpen}
-        onClose={() => setNewAgentOpen(false)}
+        open={newAgentTab !== null}
+        onClose={() => setNewAgentTab(null)}
         workspace={workspace}
+        initialTab={newAgentTab ?? 'upload'}
       />
       <CloneAgentModal
         open={cloneSource !== null}

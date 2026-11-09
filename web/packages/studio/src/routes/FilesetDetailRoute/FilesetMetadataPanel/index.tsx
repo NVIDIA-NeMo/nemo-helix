@@ -5,7 +5,7 @@ import { KVPair } from '@nemo/common/src/components/KVPair';
 import type { FilesetOutput, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Divider, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { getMetadataSections } from '@studio/routes/FilesetDetailRoute/FilesetMetadataPanel/utils';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 export interface FilesetMetadataPanelProps {
   fileset: FilesetOutput;

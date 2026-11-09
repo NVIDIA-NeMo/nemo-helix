@@ -190,7 +190,14 @@ async def publish_to_intake(
 
     Agent identity (``agent_name``/``agent_version``/``model_name``) is taken as
     arguments because it lives on the run *target*, which ``AgentEvalResult`` does
-    not carry (design §3.9 #6).
+    not carry (design §3.9 #6). Both publish paths carry it: the ATIF path writes it
+    onto the trajectory's agent block, and the OTLP path stamps it onto the published
+    root span alone, keeping whatever identity child spans recorded. The default
+    ``agent_name="agent"`` is an explicit name: it overrides the trace's producer
+    identity, because existing callers relied on it labelling the trace. A caller
+    who wants the producer's own identity kept must call ``otlp_ingest_for_trial``
+    directly with ``agent_name=None``. An empty string is not a name: it keeps the
+    producer value, because Intake treats a blank agent name as no agent at all.
     """
     if max_otlp_request_bytes <= 0:
         raise ValueError(f"max_otlp_request_bytes must be positive, got {max_otlp_request_bytes}")
@@ -217,6 +224,7 @@ async def publish_to_intake(
             f"workspace {resolved_workspace!r}, or has been deleted."
         ) from error
 
+    tasks_by_id = {task.id: task for task in result.tasks}
     output_names_by_metric: dict[tuple[str, str], list[str]] = {
         (task.id, metric_type_name(metric)): [spec.name for spec in metric.output_spec()]
         for task in result.tasks
@@ -238,6 +246,10 @@ async def publish_to_intake(
             measurements=measurements,
             started_at=started_at,
             usage_superseded=usage_superseded_by_gateway,
+            agent_name=agent_name,
+            agent_version=agent_version,
+            model_name=model_name,
+            task=tasks_by_id.get(trial.task_id),
         )
         if otlp is None:
             return None

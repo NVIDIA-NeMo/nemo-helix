@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ArrowUp, Retry, ShapeSquare } from '@nemo/icons/icons';
+import { ArrowUp, Reset, ShapeSquare } from '@nemo/icons/icons';
 import { Button } from '@nvidia/foundations-react-core';
 import { SeedQuestions } from '@studio/components/chat/SeedQuestions';
 import type { ComposerSeed } from '@studio/routes/ModelCompareRoute/types';
@@ -127,7 +127,7 @@ export const CompareComposer: FC<CompareComposerProps> = ({
           title="Clear all panels"
           aria-label="Clear all panels"
         >
-          <Retry />
+          <Reset />
         </Button>
         {isAnyRunning ? (
           <Button

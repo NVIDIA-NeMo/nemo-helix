@@ -7,15 +7,16 @@ import datetime
 import json
 import logging
 import os
-import shutil
 import signal
 import subprocess
-import sys
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from shutil import rmtree
+from sys import executable as python_executable
 from typing import Literal
 
 from nemo_helix_plugin.client.constants import ACCESS_TOKEN_FILE_ENVVAR
@@ -366,18 +367,24 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
         self._refresh_task_auth(metadata)
 
-        # The TTLs bound running and scheduling time. A pausing step is bounded by its pause
-        # deadline, and a cancelling step was just terminated above, so neither is timed out here.
-        if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING):
+        # The TTL bounds running time. A pausing step is bounded by its pause deadline, and a
+        # cancelling step was just terminated above, so neither is timed out here. A step stays
+        # pending until the first sync after schedule(), but its process is already running, so
+        # the active TTL applies rather than the before-active one. A process that has exited is
+        # not timed out: its exit code decides.
+        exited = metadata.process.poll() is not None
+        if exited:
+            self._remove_task_auth_token_file(metadata)
+        if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING) or exited:
             return self._create_step_update(step, metadata)
-        ttl_seconds = (
-            step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active)
-            if step.status == HelixJobStatus.ACTIVE
-            else self._execution_profile_config.ttl_seconds_before_active
-        )
+        ttl_seconds = step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active)
         if self.check_step_ttl(step, ttl_seconds):
+            if not self._terminate_process(metadata, force=True):
+                if metadata.process.poll() is not None:
+                    self._remove_task_auth_token_file(metadata)
+                return self._create_step_update(step, metadata)
             message = f"Job timed out after reaching max TTL of {ttl_seconds} seconds"
-            self._terminate_process(metadata, force=True)
+            self._finish_logs(metadata)
             self._remove_task_auth_token_file(metadata)
             self._update_task(
                 step,
@@ -427,12 +434,12 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
     def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
         try:
-            shutil.rmtree(self._root_dir / workspace / job)
+            rmtree(self._root_dir / workspace / job)
         except FileNotFoundError:
             pass
         return True
 
-    def cleanup_steps(self) -> None:
+    def cleanup_steps(self, on_progress: Callable[[], None] | None = None) -> None:
         for key, metadata in self._process_registry.items():
             if metadata.process.poll() is None:
                 continue
@@ -456,7 +463,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                     should_cleanup = expires_at < datetime.datetime.now(datetime.timezone.utc)
 
             if should_cleanup:
-                shutil.rmtree(metadata.work_dir, ignore_errors=True)
+                rmtree(metadata.work_dir, ignore_errors=True)
                 self._process_registry.pop(key)
 
     def _get_task_fallback_update(self, step: HelixJobStepWithContext) -> JobUpdate | None:
@@ -502,7 +509,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
     @staticmethod
     def _cleanup_failed_startup_dirs(work_dir: Path, persistent_dir: Path) -> None:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        rmtree(work_dir, ignore_errors=True)
         # Drop empty attempt and step directories. Leave job storage in place when
         # a previous attempt already wrote into it.
         for path in (
@@ -612,10 +619,10 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         # deploys. Prefer VIRTUAL_ENV when set, else fall back to the controller's own
         # interpreter dir -- which IS the venv bin even when launched directly (e.g.
         # `.venv/bin/nemo-helix` with no activation, where VIRTUAL_ENV is unset).
-        bin_dir = Path(virtual_env) / "bin" if virtual_env else Path(sys.executable).parent
+        bin_dir = Path(virtual_env) / "bin" if virtual_env else Path(python_executable).parent
         if command[0] in {"python", "python3"}:
             venv_python = SubprocessJobBackend._resolve_in_bin("python", bin_dir)
-            return [venv_python or sys.executable, *command[1:]]
+            return [venv_python or python_executable, *command[1:]]
         # Resolve a bare console-script name against the venv bin before falling back to
         # a bare PATH lookup; a command carrying a path separator is left untouched.
         if os.sep not in command[0] and (os.altsep is None or os.altsep not in command[0]):
@@ -734,34 +741,38 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             pass
         return details
 
-    def _terminate_process(self, metadata: SubprocessProcessMetadata, force: bool = False) -> None:
+    def _terminate_process(self, metadata: SubprocessProcessMetadata, force: bool = False) -> bool:
+        """Signal the process group. Return False when no signal was sent because it had already exited."""
         if metadata.process.poll() is not None:
-            return
-        self._terminate_process_group(metadata.process, force=force)
-        if force:
-            try:
-                metadata.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                logger.exception("Subprocess did not exit after SIGKILL", extra={"pid": metadata.process.pid})
-            return
+            return False
+        signalled = self._terminate_process_group(metadata.process, force=force)
+        timeout = 5 if force else self._execution_profile_config.graceful_shutdown_timeout_seconds
         try:
-            metadata.process.wait(timeout=self._execution_profile_config.graceful_shutdown_timeout_seconds)
+            metadata.process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            self._terminate_process(metadata, force=True)
+            if not force:
+                return self._terminate_process(metadata, force=True)
+            logger.exception("Subprocess did not exit after SIGKILL", extra={"pid": metadata.process.pid})
+        return signalled
 
     @staticmethod
-    def _terminate_process_group(process: subprocess.Popen[str], force: bool = False) -> None:
+    def _terminate_process_group(process: subprocess.Popen[str], force: bool = False) -> bool:
+        """Signal the process group. Return False when no signal was sent."""
         sig = signal.SIGKILL if force else signal.SIGTERM
         try:
             os.killpg(os.getpgid(process.pid), sig)
         except ProcessLookupError:
-            return
+            return False
         except Exception:
             logger.exception("Failed to signal subprocess group", extra={"pid": process.pid})
             try:
                 process.send_signal(sig)
+            except ProcessLookupError:
+                return False
             except Exception:
                 logger.exception("Failed to signal subprocess", extra={"pid": process.pid})
+                return False
+        return True
 
     def _finish_logs(self, metadata: SubprocessProcessMetadata) -> None:
         for thread in metadata.log_threads:

@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from abc import abstractmethod
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
@@ -134,6 +135,7 @@ from opentelemetry import trace
 from pydantic import Field
 
 import docker
+from docker import from_env as docker_from_env
 
 tracer = trace.get_tracer(__name__)
 logger = logging.getLogger(__name__)
@@ -242,7 +244,7 @@ class DockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig], G
         probe = probe_docker()
         if not probe.available:
             raise CapabilityUnavailableError(probe.detail or "Docker daemon is unavailable")
-        self._client = docker.from_env(timeout=180)
+        self._client = docker_from_env(timeout=180)
         if NEMO_JOBS_IMAGE_REGISTRY:
             logger.info(
                 f"Got image registry config, logging into {NEMO_JOBS_IMAGE_REGISTRY} with {NEMO_JOBS_IMAGE_REGISTRY_USER_NAME}"
@@ -2142,7 +2144,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
 
         return container_args
 
-    def cleanup_steps(self):
+    def cleanup_steps(self, on_progress: Callable[[], None] | None = None):
         containers = self._client.containers.list(
             all=True,
             filters=self._cleanup_container_filters(),

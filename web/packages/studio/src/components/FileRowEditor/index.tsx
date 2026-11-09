@@ -4,6 +4,7 @@
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { triggerDownload } from '@nemo/common/src/utils/file';
 import { Trash } from '@nemo/icons/icons';
 import { Button, Stack } from '@nvidia/foundations-react-core';
 import { makeDataFileColumns } from '@studio/components/FileRowEditor/columns';
@@ -246,15 +247,7 @@ export const FileRowEditor: FC<FileRowEditorProps> = ({
       : 'json';
     const downloadName =
       downloadFormat === fileFormat ? fileName : `${fileName.replace(/\.[^.]+$/, '')}.json`;
-    const blob = new Blob([serializeDataFile(rows, downloadFormat)], {
-      type: 'application/octet-stream',
-    });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = downloadName;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    triggerDownload(serializeDataFile(rows, downloadFormat), downloadName);
   };
 
   const handleFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {

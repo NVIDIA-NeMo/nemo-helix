@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from nhx.core.auth.app.embedded_pdp import policy_wasm
 from nhx.core.auth.app.embedded_pdp.policy_wasm import (
     PolicyWasmError,
     ensure_embedded_policy_wasm,
@@ -39,7 +40,7 @@ def test_ensure_builds_missing_wasm_from_source_checkout(tmp_path: Path, monkeyp
         wasm.write_bytes(b"wasm")
         return subprocess.CompletedProcess(args[0], 0, stdout="built", stderr="")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(policy_wasm, "run", fake_run)
 
     assert (
         ensure_embedded_policy_wasm(
@@ -77,7 +78,7 @@ def test_ensure_reports_build_failure(tmp_path: Path, monkeypatch: pytest.Monkey
     def fake_run(*args, **kwargs):
         return subprocess.CompletedProcess(args[0], 2, stdout="out", stderr="err")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(policy_wasm, "run", fake_run)
 
     with pytest.raises(PolicyWasmError, match="OPA_BIN"):
         ensure_embedded_policy_wasm(

@@ -8,7 +8,7 @@ import {
   isValidationErrorArray,
   swallowConflict,
 } from '@nemo/common/src/api/common/utils';
-import { AxiosError, AxiosHeaders, InternalAxiosRequestConfig } from 'axios';
+import { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from 'axios';
 
 describe('isValidationErrorArray', () => {
   it('returns true for valid validation error array', () => {

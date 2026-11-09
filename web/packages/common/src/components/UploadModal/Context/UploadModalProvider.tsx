@@ -12,10 +12,10 @@
 
 import { UploadModalContext } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import {
-  UploadModalState,
+  type UploadModalState,
   useUploadModalReducer,
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalReducer';
-import { FC, PropsWithChildren } from 'react';
+import type { FC, PropsWithChildren } from 'react';
 
 interface Props {
   initialState?: UploadModalState;

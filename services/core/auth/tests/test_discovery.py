@@ -83,6 +83,7 @@ async def test_discovery_advertises_self_contained_public_and_confidential_clien
     _set_config(
         OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             public_client=_public_client(),
             confidential_client=_confidential_client(),
@@ -151,6 +152,7 @@ async def test_single_interactive_profile_is_default(
     _set_config(
         OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             public_client=public,
             confidential_client=confidential,
@@ -169,6 +171,7 @@ async def test_public_endpoints_fall_back_to_provider_discovery() -> None:
     _set_config(
         OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             public_client=_public_client(
                 authorization_endpoint=None,
@@ -184,7 +187,7 @@ async def test_public_endpoints_fall_back_to_provider_discovery() -> None:
         "userinfo_endpoint": "https://discovered.example/userinfo",
     }
 
-    with patch("httpx.AsyncClient") as mock_client_class:
+    with patch("nhx.core.auth.api.v2.discovery.endpoints.AsyncClient") as mock_client_class:
         mock_client = AsyncMock()
         mock_response = MagicMock(is_success=True)
         mock_response.json.return_value = discovery_doc
@@ -208,6 +211,7 @@ async def test_brokered_public_client_advertises_helix_endpoints() -> None:
     _set_config(
         OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             public_client=_public_client(server_side_sessions=True),
             server_sessions=OIDCServerSessionsConfig(encryption_key_env_var="NHX_AUTH_SESSION_ENCRYPTION_KEY"),
@@ -232,6 +236,7 @@ async def test_workload_capability_is_sourced_from_workload_profile() -> None:
     _set_config(
         OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             workload=OIDCWorkloadConfig(
                 client_id="test-workload",
@@ -262,7 +267,7 @@ class TestIdpDiscoveryCache:
     @pytest.mark.asyncio
     async def test_cache_hit_avoids_http_call(self) -> None:
         discovery_doc = {"token_endpoint": "https://sso.example.com/token"}
-        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock(is_success=True)
             mock_response.json.return_value = discovery_doc
@@ -280,7 +285,7 @@ class TestIdpDiscoveryCache:
         import nhx.core.auth.api.v2.discovery.endpoints as endpoints
 
         discovery_doc = {"token_endpoint": "https://sso.example.com/token"}
-        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock(is_success=True)
             mock_response.json.return_value = discovery_doc

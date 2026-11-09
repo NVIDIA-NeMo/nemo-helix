@@ -35,6 +35,7 @@ from nemo_agents_plugin.entities import (
     supports_image_entrypoint,
 )
 from nemo_agents_plugin.fabric.gateway_credentials import platform_gateway_credential_env
+from nemo_agents_plugin.fabric.gateway_models import is_gateway_url, model_configs
 from nemo_agents_plugin.runner.backend import DeploymentInfo, ExternalLog, LogLocation, RunnerBackend
 from nemo_agents_plugin.runner.fabric_artifact_staging import (
     FabricArtifactStagingError,
@@ -76,6 +77,7 @@ from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import FilesetRef
 from pydantic import ValidationError
 
@@ -251,33 +253,16 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
     reachable = urlsplit(gateway_url.rstrip("/"))
     reachable_origin = f"{reachable.scheme}://{reachable.netloc}"
     config = copy.deepcopy(agent_config)
-    model_configs: list[Any] = []
-
-    models = config.get("models")
-    if isinstance(models, dict):
-        model_configs.extend(models.values())
-
-    harnesses = config.get("harnesses")
-    if isinstance(harnesses, dict):
-        for harness in harnesses.values():
-            if isinstance(harness, dict) and "model" in harness:
-                model_configs.append(harness["model"])
-
-    for model_config in model_configs:
+    for model_config in model_configs(config):
         if not isinstance(model_config, dict):
             continue
         current = model_config.get("base_url")
-        if isinstance(current, str) and "/apis/inference-gateway/" in current:
-            parts = urlsplit(current)
-            model_config["base_url"] = f"{reachable_origin}{parts.path}"
+        if is_gateway_url(current):
+            model_config["base_url"] = f"{reachable_origin}{urlsplit(current).path}"
         settings = model_config.get("settings")
-        if not isinstance(settings, dict):
-            continue
-        current = settings.get("base_url")
-        if not isinstance(current, str) or "/apis/inference-gateway/" not in current:
-            continue
-        parts = urlsplit(current)
-        settings["base_url"] = f"{reachable_origin}{parts.path}"
+        current = settings.get("base_url") if isinstance(settings, dict) else None
+        if isinstance(settings, dict) and is_gateway_url(current):
+            settings["base_url"] = f"{reachable_origin}{urlsplit(current).path}"
 
     for exporter, key in telemetry_url_fields(config):
         endpoint = exporter.get(key)
@@ -774,10 +759,13 @@ class DeploymentsRunnerBackend(RunnerBackend):
         auth_context: AuthContext | None = None,
         resources: ComputeResources | None = None,
         secrets: dict[str, str] | None = None,
+        providers: dict[str, GatewayProviderBinding] | None = None,
         use_image_entrypoint: bool = False,
     ) -> DeploymentInfo:
         """Create DeploymentConfig + Deployment entities for the agent container."""
         del port  # Host port is allocated by the deployments executor, not agents.
+        if providers and deployment_mode != "openshell":
+            return DeploymentInfo(name=name, status="failed", error="Gateway providers require OpenShell execution.")
         if deployment_mode not in CONTAINER_DEPLOYMENT_MODES:
             return DeploymentInfo(
                 name=name,
@@ -913,6 +901,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
         except (ReservedSecretEnvVarError, ImageEntrypointUnsupportedError) as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)
             return DeploymentInfo(name=name, status="failed", error=str(exc))
+        deployment_config.gateway_providers = providers or {}
         await entities.create(deployment_config)
         try:
             deployment = Deployment(

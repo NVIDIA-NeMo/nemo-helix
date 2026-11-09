@@ -14,6 +14,7 @@ from nhx.customization_common.integrations import (
     build_wandb_config,
     find_mlflow_run_id,
 )
+from nhx.customization_common.integrations import runtime as runtime_mod
 from nhx.customization_common.service.context import NHXJobContext
 
 
@@ -266,7 +267,7 @@ class TestTrackerRunContinuity:
                 searches.append({"experiment_ids": experiment_ids, **kwargs})
                 return [SimpleNamespace(info=SimpleNamespace(run_id="run-1"))]
 
-        monkeypatch.setattr("mlflow.tracking.MlflowClient", _Client)
+        monkeypatch.setattr(runtime_mod, "_mlflow_client_class", lambda: _Client)
 
         run_id = find_mlflow_run_id(
             {"tracking_uri": "http://mlflow", "experiment_name": "exp", "tags": {"job_uid": "platform-job-abc123"}}
@@ -288,7 +289,7 @@ class TestTrackerRunContinuity:
         def fail(*_args: Any, **_kwargs: Any) -> None:
             raise AssertionError("MLflow should not be called")
 
-        monkeypatch.setattr("mlflow.tracking.MlflowClient", fail)
+        monkeypatch.setattr(runtime_mod, "_mlflow_client_class", lambda: fail)
 
         assert find_mlflow_run_id(config) is None
 
@@ -297,7 +298,7 @@ class TestTrackerRunContinuity:
             def __init__(self, tracking_uri: str) -> None:
                 raise ConnectionError("tracking server unavailable")
 
-        monkeypatch.setattr("mlflow.tracking.MlflowClient", _Client)
+        monkeypatch.setattr(runtime_mod, "_mlflow_client_class", lambda: _Client)
 
         config = {"tracking_uri": "http://mlflow", "experiment_name": "exp", "tags": {"job_uid": "platform-job-abc123"}}
         assert find_mlflow_run_id(config) is None

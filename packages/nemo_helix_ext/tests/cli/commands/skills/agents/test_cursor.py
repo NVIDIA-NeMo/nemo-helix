@@ -43,7 +43,7 @@ def test_project_install_path_keeps_existing_nemo_prefix(tmp_path: Path):
 
 
 def test_user_install_path(monkeypatch, tmp_path):
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
     installer = CursorInstaller()
     path = installer.get_install_path(Scope.USER, tmp_path / "project", "inference")
     assert path == tmp_path / ".cursor" / "skills" / "nemo-inference" / "SKILL.md"

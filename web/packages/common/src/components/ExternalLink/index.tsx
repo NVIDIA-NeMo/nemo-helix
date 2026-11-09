@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Anchor } from '@nvidia/foundations-react-core';
-import { type ComponentProps, type FC, type ReactNode } from 'react';
+import type { ComponentProps, FC, ReactNode } from 'react';
 
 interface ExternalLinkProps {
   href: string;

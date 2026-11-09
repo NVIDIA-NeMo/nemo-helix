@@ -3,7 +3,8 @@
 
 """Tests for automatic loopback address detection."""
 
-from unittest.mock import mock_open, patch
+from pathlib import Path
+from unittest.mock import patch
 
 from nemo_helix_plugin.config import (
     HelixConfig,
@@ -21,38 +22,44 @@ class TestIsRunningInDocker:
             mock_path.return_value.exists.return_value = True
             assert _is_running_in_docker() is True
 
-    def test_detects_docker_in_cgroup(self):
+    def test_detects_docker_in_cgroup(self, tmp_path: Path):
         """Test detection via /proc/self/cgroup containing 'docker'."""
+        cgroup_file = tmp_path / "cgroup"
+        cgroup_file.write_text("1:name=systemd:/docker/abc123\n")
         with (
             patch("nemo_helix_plugin.config.Path") as mock_path,
-            patch("builtins.open", mock_open(read_data="1:name=systemd:/docker/abc123\n")),
+            patch("nemo_helix_plugin.config._CGROUP_FILE", str(cgroup_file)),
         ):
             mock_path.return_value.exists.return_value = False
             assert _is_running_in_docker() is True
 
-    def test_detects_containerd_in_cgroup(self):
+    def test_detects_containerd_in_cgroup(self, tmp_path: Path):
         """Test detection via /proc/self/cgroup containing 'containerd'."""
+        cgroup_file = tmp_path / "cgroup"
+        cgroup_file.write_text("1:name=systemd:/containerd/abc123\n")
         with (
             patch("nemo_helix_plugin.config.Path") as mock_path,
-            patch("builtins.open", mock_open(read_data="1:name=systemd:/containerd/abc123\n")),
+            patch("nemo_helix_plugin.config._CGROUP_FILE", str(cgroup_file)),
         ):
             mock_path.return_value.exists.return_value = False
             assert _is_running_in_docker() is True
 
-    def test_returns_false_when_not_in_docker(self):
+    def test_returns_false_when_not_in_docker(self, tmp_path: Path):
         """Test returns False when not running in Docker."""
+        cgroup_file = tmp_path / "cgroup"
+        cgroup_file.write_text("1:name=systemd:/user.slice\n")
         with (
             patch("nemo_helix_plugin.config.Path") as mock_path,
-            patch("builtins.open", mock_open(read_data="1:name=systemd:/user.slice\n")),
+            patch("nemo_helix_plugin.config._CGROUP_FILE", str(cgroup_file)),
         ):
             mock_path.return_value.exists.return_value = False
             assert _is_running_in_docker() is False
 
-    def test_handles_missing_cgroup_file(self):
+    def test_handles_missing_cgroup_file(self, tmp_path: Path):
         """Test handles missing /proc/self/cgroup file gracefully."""
         with (
             patch("nemo_helix_plugin.config.Path") as mock_path,
-            patch("builtins.open", side_effect=FileNotFoundError),
+            patch("nemo_helix_plugin.config._CGROUP_FILE", str(tmp_path / "missing-cgroup")),
         ):
             mock_path.return_value.exists.return_value = False
             assert _is_running_in_docker() is False
@@ -64,7 +71,7 @@ class TestDetermineLoopbackOverride:
     def test_macos_returns_host_docker_internal(self):
         """Test macOS returns 'host.docker.internal'."""
         with (
-            patch("nemo_helix_plugin.config.platform.system", return_value="Darwin"),
+            patch("nemo_helix_plugin.config.platform_system", return_value="Darwin"),
             patch("nemo_helix_plugin.config._is_running_in_docker", return_value=False),
         ):
             result = determine_loopback_override()
@@ -72,13 +79,10 @@ class TestDetermineLoopbackOverride:
 
     def test_docker_container_returns_hostname(self, monkeypatch):
         """Test running in Docker container returns container hostname."""
-        # Mock socket.gethostname using monkeypatch
-        import socket as socket_module
-
-        monkeypatch.setattr(socket_module, "gethostname", lambda: "container-abc123")
+        monkeypatch.setattr("nemo_helix_plugin.config.gethostname", lambda: "container-abc123")
 
         with (
-            patch("nemo_helix_plugin.config.platform.system", return_value="Linux"),
+            patch("nemo_helix_plugin.config.platform_system", return_value="Linux"),
             patch("nemo_helix_plugin.config._is_running_in_docker", return_value=True),
         ):
             result = determine_loopback_override()
@@ -87,7 +91,7 @@ class TestDetermineLoopbackOverride:
     def test_linux_host_network_returns_none(self):
         """Test Linux host network returns None (no override needed)."""
         with (
-            patch("nemo_helix_plugin.config.platform.system", return_value="Linux"),
+            patch("nemo_helix_plugin.config.platform_system", return_value="Linux"),
             patch("nemo_helix_plugin.config._is_running_in_docker", return_value=False),
         ):
             result = determine_loopback_override()
@@ -102,7 +106,7 @@ class TestHelixConfigSharedEnvvars:
         config = HelixConfig(base_url="http://localhost:8000")
 
         with (
-            patch("nemo_helix_plugin.config.platform.system", return_value="Darwin"),
+            patch("nemo_helix_plugin.config.platform_system", return_value="Darwin"),
             patch("nemo_helix_plugin.config._is_running_in_docker", return_value=False),
         ):
             envvars = config.to_shared_envvars()
@@ -120,7 +124,7 @@ class TestHelixConfigSharedEnvvars:
 
         # Even on macOS, the configured value should be used
         with (
-            patch("nemo_helix_plugin.config.platform.system", return_value="Darwin"),
+            patch("nemo_helix_plugin.config.platform_system", return_value="Darwin"),
             patch("nemo_helix_plugin.config._is_running_in_docker", return_value=False),
         ):
             envvars = config.to_shared_envvars()
@@ -161,7 +165,7 @@ class TestHelixConfigSharedEnvvars:
         config = HelixConfig(base_url="http://my-service:8000")
 
         with (
-            patch("nemo_helix_plugin.config.platform.system", return_value="Darwin"),
+            patch("nemo_helix_plugin.config.platform_system", return_value="Darwin"),
             patch("nemo_helix_plugin.config._is_running_in_docker", return_value=False),
         ):
             envvars = config.to_shared_envvars()
@@ -175,7 +179,7 @@ class TestHelixConfigSharedEnvvars:
         config = HelixConfig(base_url="http://localhost:8000")
 
         with (
-            patch("nemo_helix_plugin.config.platform.system", return_value="Linux"),
+            patch("nemo_helix_plugin.config.platform_system", return_value="Linux"),
             patch("nemo_helix_plugin.config._is_running_in_docker", return_value=False),
         ):
             envvars = config.to_shared_envvars()
