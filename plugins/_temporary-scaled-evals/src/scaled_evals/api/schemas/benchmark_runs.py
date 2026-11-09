@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
+from nemo_scaled_evals_plugin.entities import BenchmarkRunInitializationStatus
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from scaled_evals.api.schemas.common import CredentialRefs, validate_scoped_egress_config
@@ -14,6 +15,8 @@ from scaled_evals.api.schemas.evaluations import (
     NetworkPolicyMode,
 )
 from scaled_evals.api.schemas.tasks import Visibility
+
+BenchmarkRunStatus = EvaluationStatus | Literal["initializing"]
 
 
 # Request body: POST /v1/benchmark-runs
@@ -120,7 +123,7 @@ class BenchmarkRunLinks(BaseModel):
 
 class ReproduceBenchmarkRunResponse(BaseModel):
     benchmark_run_id: str
-    source_status: EvaluationStatus
+    source_status: BenchmarkRunStatus
     request: CreateBenchmarkRunRequest
     cli_command: list[str]
     notes: list[str] = Field(default_factory=list)
@@ -151,7 +154,11 @@ class BenchmarkRun(BaseModel):
     parallelism: int
     max_concurrent_members: int | None = None
     visibility: Visibility
-    status: EvaluationStatus
+    initialization_status: BenchmarkRunInitializationStatus = Field(
+        default="complete",
+        description="created while member records are being written; complete after all writes succeed. Older runs default to complete.",
+    )
+    status: BenchmarkRunStatus
     status_detail: str | None = None
     # Aggregate summary, written by the worker once all members finish.
     reward: float | None = None
