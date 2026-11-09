@@ -206,7 +206,7 @@ describe('Assistant chat artifacts', () => {
       {
         label: 'Dataset file',
         destination: 'fileset_file',
-        href: '/workspaces/default/filesets/training%20data/file/nested%2Fexamples.jsonl',
+        href: '/workspaces/default/filesets/training%20data/detail?tab=files&file=nested%2Fexamples.jsonl',
       },
     ]);
   });

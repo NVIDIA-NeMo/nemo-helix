@@ -5,7 +5,6 @@ import {
   getErrorMessage as getApiErrorMessage,
   isConflictError,
 } from '@nemo/common/src/api/common/utils';
-import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   filesUploadFile,
@@ -21,7 +20,6 @@ import {
 } from '@nemo/sdk/generated/platform/schema';
 import { filesetNameTakenMessage } from '@studio/components/filesets/filesetNames';
 import { invalidateFilesetNameCheck } from '@studio/components/filesets/hooks/useFilesetNameStatus';
-import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
 import {
   getExternalStorageCreateErrorMessage,
   toFileList,
@@ -30,7 +28,7 @@ import {
   DatasetCreateFilesetFormSchema,
   type DatasetFormFields,
 } from '@studio/routes/FilesetNewRoute/types';
-import { getFilesetDetailRoute, getFilesetDetailsRoute } from '@studio/routes/utils';
+import { getFilesetDetailRoute } from '@studio/routes/utils';
 import { storageConfigFromUrl } from '@studio/util/storageConfigFromUrl';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
@@ -208,14 +206,7 @@ export function useCreateFileset({
       }
 
       setIsSubmitPending(false);
-      if (
-        FILESET_DETAILS_ENABLED &&
-        (fileset.purpose === FilesetPurpose.dataset || fileset.purpose === FilesetPurpose.model)
-      ) {
-        navigate(getFilesetDetailRoute(workspace, fileset.name));
-        return;
-      }
-      navigate(getFilesetDetailsRoute(workspace, getEntityReference(fileset), undefined, true));
+      navigate(getFilesetDetailRoute(workspace, fileset.name));
     },
     [
       createFilesetStep,

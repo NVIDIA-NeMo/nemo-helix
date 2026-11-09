@@ -16,12 +16,9 @@ import type { DatasetsTableProps } from '@studio/components/DatasetsTable/types'
 import { useDatasetsTable } from '@studio/components/DatasetsTable/useDatasetsTable';
 import { FilesetCreateModal } from '@studio/components/FilesetCreateModal';
 import { Loading } from '@studio/components/Layouts/Loading';
-import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
 import { DatasetBulkDeleteModal } from '@studio/routes/FilesetListRoute/DatasetBulkDeleteModal';
-import { getNewFilesetRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
 import type { FC } from 'react';
-import { useNavigate } from 'react-router';
 
 export type { DatasetsTableProps } from '@studio/components/DatasetsTable/types';
 
@@ -72,15 +69,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
     purposeFilter,
   });
 
-  const navigate = useNavigate();
   const [createModalOpen, openCreateModal, closeCreateModal] = useBoolean(false);
-  const handleCreateFileset = () => {
-    if (FILESET_DETAILS_ENABLED) {
-      openCreateModal();
-    } else {
-      navigate(getNewFilesetRoute(workspace));
-    }
-  };
 
   // Column definitions
   const makeColumns = makeDatasetsTableColumns({
@@ -162,7 +151,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
                 <EntityEmptyState
                   entity="filesets"
                   variant="first-use"
-                  onCreate={handleCreateFileset}
+                  onCreate={openCreateModal}
                 />
               ),
           },

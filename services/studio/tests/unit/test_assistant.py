@@ -1259,7 +1259,7 @@ def test_studio_link_destinations_cover_registered_workspace_routes():
         "experimentDetail": "experiment_detail",
         "experimentGroupDetail": "experiment_group",
         "filesetDetail": "fileset",
-        "filesetDetails": "fileset_panel",
+        "filesetDetails": "fileset",
         "filesetFile": "fileset_file",
         "filesetNew": "fileset_new",
         "filesets": "filesets",
@@ -1604,9 +1604,12 @@ def test_mcp_studio_link_returns_fileset_file_markdown(service_client: TestClien
     assert json.loads(result_text) == {
         "workspace": "default",
         "destination": "fileset_file",
-        "path": "/workspaces/default/filesets/training%20data/file/nested%2Fexamples.jsonl",
+        "path": "/workspaces/default/filesets/training%20data/detail?tab=files&file=nested%2Fexamples.jsonl",
         "url": None,
-        "markdown": "[File nested/examples.jsonl](/workspaces/default/filesets/training%20data/file/nested%2Fexamples.jsonl)",
+        "markdown": (
+            "[File nested/examples.jsonl]"
+            "(/workspaces/default/filesets/training%20data/detail?tab=files&file=nested%2Fexamples.jsonl)"
+        ),
     }
 
 

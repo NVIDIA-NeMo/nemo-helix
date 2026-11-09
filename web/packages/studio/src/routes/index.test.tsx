@@ -134,6 +134,7 @@ describe('Routes', () => {
         ROUTES.workspace.deploymentsDeployment,
         ROUTES.workspace.filesets,
         ROUTES.workspace.filesetNew,
+        ROUTES.workspace.filesetDetail,
         ROUTES.workspace.filesetDetails,
         ROUTES.workspace.filesetFile,
         ROUTES.workspace.jobs,
