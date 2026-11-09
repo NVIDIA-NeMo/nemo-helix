@@ -128,7 +128,7 @@ describe('useCustomAssistantChatRuntime', () => {
     const messages = getMockRuntime(result.current.runtime).messages;
     expect(messages.map(getMessageText)).toEqual([
       'Create a guardrail',
-      'NeMo Assistant stopped before completing: Connection to NeMo Assistant was interrupted.',
+      'NeMo Assistant stopped before completing.',
     ]);
     expect(messages[1]?.status).toEqual({
       type: 'incomplete',
@@ -152,10 +152,9 @@ describe('useCustomAssistantChatRuntime', () => {
     });
 
     const messages = getMockRuntime(result.current.runtime).messages;
-    expect(messages.map(getMessageText)).toEqual([
-      'Create a guardrail',
-      'I inspected the current configuration.\n\n' +
-        'NeMo Assistant stopped before completing: Connection to NeMo Assistant was interrupted.',
+    expect(messages[1]?.content).toEqual([
+      { type: 'text', text: 'I inspected the current configuration.' },
+      { type: 'text', text: 'NeMo Assistant stopped before completing.' },
     ]);
     expect(messages[1]?.status).toEqual({
       type: 'incomplete',

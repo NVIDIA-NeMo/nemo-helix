@@ -65,6 +65,9 @@ interface CompleteAssistantMessageOptions {
   readonly collapseAssistantContent?: boolean;
 }
 
+// Kept as its own trailing text part so the error banner can tell it apart from the partial answer.
+const FAILED_RUN_EXPLANATION = 'NeMo Assistant stopped before completing.';
+
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === 'AbortError';
 
@@ -388,14 +391,11 @@ export const useCustomAssistantChatRuntime = ({
 
         const errorMessage = error instanceof Error ? error.message : 'Unknown Error';
         ensureAssistantMessage();
-        const currentResponseContent = getCurrentResponseContent();
-        const failureMessage = `NeMo Assistant stopped before completing: ${errorMessage}`;
-        const incompleteContent = mergeAssistantParts(currentResponseContent, [
-          {
-            type: 'text',
-            text: `${hasVisibleAssistantContent(currentResponseContent) ? '\n\n' : ''}${failureMessage}`,
-          },
-        ]);
+        const partialContent = getCurrentResponseContent();
+        const incompleteContent: readonly ThreadAssistantMessagePart[] = [
+          ...(hasVisibleAssistantContent(partialContent) ? partialContent : []),
+          { type: 'text', text: FAILED_RUN_EXPLANATION },
+        ];
         completeActiveAssistantMessage(
           {
             type: 'incomplete',
