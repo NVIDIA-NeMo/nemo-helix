@@ -5,8 +5,8 @@
  * Regression for every Agent Hardener plugin screen.
  *
  * Read-only by default: the suite asserts against whatever the target platform already holds and
- * opens dialogs without submitting them. Only the BYO test creates anything, and it removes what it
- * created. Nothing here drives a real war-game — a run takes tens of minutes and its outcome depends
+ * opens dialogs without submitting them. The BYO detail test supplies a browser-local API fixture.
+ * Nothing here drives a real war-game — a run takes tens of minutes and its outcome depends
  * on a model, so a browser test that waited for one would be slow *and* flaky.
  *
  * Requires a running platform with the plugin installed:
@@ -72,7 +72,10 @@ test.describe('Agent Hardener plugin', () => {
     await agentHardener.gotoManifests();
     await agentHardener.waitForTable();
 
-    await page.getByRole('link', { name: /new manifest/i }).click();
+    await page
+      .getByRole('link', { name: /new manifest/i })
+      .first()
+      .click();
     await expect(page).toHaveURL(/manifests\/new/);
   });
 
@@ -124,8 +127,24 @@ test.describe('Agent Hardener plugin', () => {
     // A project manifest has no registered agent behind it. Any screen that assumes one renders
     // "undefined" here and nowhere else, so this is the assertion the registered-agent tests cannot
     // make.
+    await page.route('**/apis/agent-hardener/v2/workspaces/default/manifests/byo-ledger', (route) =>
+      route.fulfill({
+        json: {
+          name: 'byo-ledger',
+          workspace: WORKSPACE,
+          source_type: 'project',
+          agent: '',
+          project_fileset: 'default/e2e-project',
+          port: 8123,
+          benign_suite: [],
+          models: {},
+        },
+      })
+    );
     await agentHardener.gotoManifest('byo-ledger');
 
+    // A run button alone also renders for missing manifests; prove the target loaded.
+    await expect(page.getByText('8123', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: /run war-game/i })).toBeVisible({
       timeout: 30_000,
     });

@@ -52,7 +52,10 @@ export class AgentHardenerPage {
    */
   async waitForTable() {
     await expect(
-      this.page.getByRole('table').or(this.page.getByText(/no .*(found|yet)/i))
+      this.page
+        .getByRole('table')
+        .or(this.page.getByText(/no .*(found|yet)/i))
+        .first()
     ).toBeVisible({ timeout: 30_000 });
   }
 

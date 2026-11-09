@@ -19,6 +19,10 @@ export type PlatformHealthStatus = 'live' | 'not-found' | 'unreachable';
 
 export const PLATFORM_HEALTH_QUERY_KEY = ['platform-health'] as const;
 
+// Liveness is public and must not inherit the SDK's global auth interceptors:
+// broken auth discovery should surface as a session error, not a platform outage.
+const healthClient = axios.create();
+
 const HEALTH_TIMEOUT_MS = 10_000;
 export const PLATFORM_HEALTH_RETRY_INTERVAL_MS = 5_000;
 
@@ -31,7 +35,7 @@ const isLiveResponse = (data: unknown): boolean =>
 
 export const checkPlatformHealth = async (): Promise<PlatformHealthStatus> => {
   try {
-    const { data, status } = await axios.get<unknown>(getPlatformHealthUrl(), {
+    const { data, status } = await healthClient.get<unknown>(getPlatformHealthUrl(), {
       timeout: HEALTH_TIMEOUT_MS,
       validateStatus: (status) => status === 200 || status === 404,
     });

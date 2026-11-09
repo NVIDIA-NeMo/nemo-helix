@@ -3,11 +3,23 @@
 
 import { checkPlatformHealth, getPlatformHealthUrl } from '@studio/api/platformHealth';
 import { server } from '@studio/mocks/node';
+import axios from 'axios';
 import { http, HttpResponse } from 'msw';
 
 describe('checkPlatformHealth', () => {
   it('probes /health/live on the platform base URL', () => {
     expect(getPlatformHealthUrl()).toBe('http://localhost:8080/health/live');
+  });
+
+  it('probes liveness independently of global auth interceptors', async () => {
+    const interceptor = axios.interceptors.request.use(() => {
+      throw new Error('Auth discovery failed');
+    });
+    try {
+      await expect(checkPlatformHealth()).resolves.toBe('live');
+    } finally {
+      axios.interceptors.request.eject(interceptor);
+    }
   });
 
   it('resolves "live" on the platform liveness response', async () => {

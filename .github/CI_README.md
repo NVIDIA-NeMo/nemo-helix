@@ -103,6 +103,19 @@ UI E2E tests. Policy-WASM is built within the E2E workflow, and successful
 published image prerequisites remain enforced. E2E jobs no longer participate
 in the required `CI status` aggregate; auth-IDP static tests remain in CI too.
 
+The Studio job builds the FastAPI Studio bundle and Agent Hardener plugin UI,
+then `.github/scripts/run-studio-e2e.sh` starts a credential-free local platform
+using `e2e/configs/studio.yaml`. It waits for platform readiness and Studio,
+runs Playwright against `http://127.0.0.1:8080/studio/`, and shuts the platform
+down on success or failure. Each run uses disposable state and refuses an
+already-occupied port 8080. Browser reports, traces, and platform logs are uploaded.
+Existing tests requiring provider credentials or populated run history remain skipped.
+
+To reproduce, install dependencies and build both bundles as in the Studio job
+(including `CI=1 VITE_AUTH_CLIENT_ID=studio-e2e` for the Studio build), then run
+`bash .github/scripts/run-studio-e2e.sh --retries=0` from the repository root.
+`STUDIO_E2E_LOG_DIR` optionally selects where platform logs are retained.
+
 CI also builds CPU smoke images without E2E opt-in when CPU-smoke, auth-IDP,
 or customization-auth inputs change (including on PRs and merge groups), or
 on manual dispatch. This build is included in required `CI status` and the

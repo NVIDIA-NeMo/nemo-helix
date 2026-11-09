@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { INTAKE_ENABLED, TRACE_GRAPH_ENABLED } from '@e2e-tests/utils/environment';
+import {
+  INTAKE_ENABLED,
+  STUDIO_URL_BASE_PATH,
+  TRACE_GRAPH_ENABLED,
+} from '@e2e-tests/utils/environment';
 import { disableAuthForTest } from '@e2e-tests/utils/pageUtils';
 import { expect, test, type Page, type Route } from '@playwright/test';
 
@@ -103,6 +107,9 @@ const setupApiMocks = async (page: Page): Promise<void> => {
   await page.route('**/apis/**', (route) => {
     throw new Error(`Unexpected API request: ${route.request().url()}`);
   });
+  await page.route('**/apis/auth/discovery', (route) =>
+    fulfillJson(route, { auth_enabled: false })
+  );
   await page.route('**/apis/plugins', (route) => fulfillJson(route, []));
   await page.route('**/apis/entities/v2/workspaces?*', (route) =>
     fulfillJson(route, pageOf([workspace]))
@@ -142,10 +149,10 @@ test.describe('Intake trace graph', () => {
   });
 
   test('opens a trace and keeps context while exploring its graph @record', async ({ page }) => {
-    await page.goto('/workspaces/default/intake/traces');
+    await page.goto('workspaces/default/intake/traces');
     await page.getByText(trace.name, { exact: true }).click();
     await expect(page).toHaveURL(
-      `/workspaces/default/intake/sessions/${session.id}?traceId=${trace.id}`
+      `${STUDIO_URL_BASE_PATH.replace(/\/$/, '')}/workspaces/default/intake/sessions/${session.id}?traceId=${trace.id}`
     );
 
     await page.getByText('Graph', { exact: true }).click();

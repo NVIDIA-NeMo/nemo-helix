@@ -815,6 +815,7 @@ jobs:
     # Pinned: ubuntu-latest is 26.04, which Playwright 1.58 cannot install browsers on.
     # Return to ubuntu-latest once @playwright/test is bumped to a release that supports it.
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: web
@@ -830,17 +831,43 @@ jobs:
         run: npm i -g corepack@0.31.0 && corepack enable pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install platform dependencies
+        working-directory: .
+        run: uv sync --frozen
+      - name: Build Studio
+        # Keep discovery enabled so auth tests exercise server-session/error flows.
+        # The local platform itself has auth disabled; tests mock discovery as needed.
+        env:
+          CI: "1"
+          VITE_AUTH_CLIENT_ID: studio-e2e
+        run: pnpm --filter nemo-studio-ui build:fastapi
+      - name: Build Agent Hardener plugin UI
+        working-directory: plugins/nemo-agent-hardener/web
+        run: pnpm install --frozen-lockfile && pnpm build
       - name: Install Playwright browsers
-        run: pnpm --filter nemo-studio-ui exec playwright install --with-deps
-      - name: Run E2E tests
-        run: CI=1 pnpm --filter nemo-studio-ui test:e2e
+        run: pnpm --filter nemo-studio-ui exec playwright install --with-deps chromium
+      - name: Run E2E tests against local Studio
+        working-directory: .
+        env:
+          STUDIO_E2E_LOG_DIR: ${{ runner.temp }}/studio-e2e-logs
+        run: bash .github/scripts/run-studio-e2e.sh
       - name: Upload E2E artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: studio-e2e-results
           retention-days: 7
-          path: web/packages/studio/playwright-report/
+          path: |
+            web/packages/studio/playwright-report/
+            web/packages/studio/test-results/
+            ${{ runner.temp }}/studio-e2e-logs/
 
   post-merge-e2e-status:
     name: Post-merge E2E status
