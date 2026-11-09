@@ -468,6 +468,7 @@ class SequenceSimilarity(MetricBase):
     )
 
     def input_schema(self) -> InputSchema:
+        """Return the dataset fields the reference and candidate templates read."""
         templates = [self.reference]
         if self.candidate is not None:
             templates.append(self.candidate)

@@ -55,6 +55,7 @@ class TestSequenceSimilarityMetric:
 
     @pytest.mark.asyncio
     async def test_does_not_normalize(self):
+        """Whitespace and case count; templates normalize when a caller wants that."""
         metric = SequenceSimilarityMetric(reference="{{item.reference}}")
         for output_text in ("Paris ", "paris"):
             result = await compute_scores(metric, {"reference": "Paris"}, {"output_text": output_text})

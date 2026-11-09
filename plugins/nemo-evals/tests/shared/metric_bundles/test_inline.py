@@ -76,6 +76,7 @@ def _embeddings_model() -> Model:
 
 
 def _builtin_metric_cases() -> Sequence[tuple[str, Metric]]:
+    """One configured instance of each built-in metric the inline packager must round-trip."""
     judge_model = _judge_model()
     return [
         ("exact_match", ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")),
