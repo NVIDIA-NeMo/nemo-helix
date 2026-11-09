@@ -262,6 +262,26 @@ def test_authentik_static_ci_prepares_envoy_validation_inputs() -> None:
     assert "helm dependency build contrib/auth/authentik/helm" in job
 
 
+def test_cpu_smoke_image_build_is_required_in_ci_without_e2e_opt_in() -> None:
+    ci = _load_yaml(Path(".github/workflows/ci.yaml"))
+    e2e = _load_yaml(Path(".github/workflows/e2e.yaml"))
+    job = ci["jobs"]["build-cpu-smoke-images"]
+
+    assert job["needs"] == ["changes"]
+    assert job["if"].strip() == (
+        "!cancelled() && (\n"
+        "  github.event_name == 'workflow_dispatch' ||\n"
+        "  needs.changes.outputs.cpu-smoke == 'true' ||\n"
+        "  needs.changes.outputs.auth-idp == 'true' ||\n"
+        "  needs.changes.outputs.customization-auth == 'true'\n"
+        ")"
+    )
+    assert "build-cpu-smoke-images" in ci["jobs"]["ci-status"]["needs"]
+    assert "build-cpu-smoke-images" in ci["jobs"]["post-merge-image-status"]["needs"]
+    assert job["steps"] == e2e["jobs"]["build-cpu-smoke-images"]["steps"]
+    assert job["permissions"] == e2e["jobs"]["build-cpu-smoke-images"]["permissions"]
+
+
 def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:
     workflow_path = Path(".github/workflows/e2e.yaml")
     workflow = _load_yaml(workflow_path)

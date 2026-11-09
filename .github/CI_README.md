@@ -103,6 +103,15 @@ UI E2E tests. Policy-WASM is built within the E2E workflow, and successful
 published image prerequisites remain enforced. E2E jobs no longer participate
 in the required `CI status` aggregate; auth-IDP static tests remain in CI too.
 
+CI also builds CPU smoke images without E2E opt-in when CPU-smoke, auth-IDP,
+or customization-auth inputs change (including on PRs and merge groups), or
+on manual dispatch. This build is included in required `CI status` and the
+main-push image failure notification. The CI and E2E build steps are duplicated
+so each workflow runs independently; a static test keeps those steps aligned.
+Fork PRs build locally without publishing; same-repository PRs, merge groups,
+and `main` pushes retain publication. Manual CI publication requires
+`publish: true`, and `image_tag` can override the default commit-SHA tag.
+
 Separate garak and Safe Synthesizer image builds are not enabled by the label.
 Docker source-image smoke remains manual-only. Manual
 `publish: false` still skips tests needing published images. These opt-in checks
@@ -112,8 +121,8 @@ Lint, unit tests, integration tests, wheel build/install checks, Helm validation
 and Docker bake-graph validation stay pre-merge. Printing the bake graph does
 not build an image. Integration required-check policy is unchanged.
 
-On automatic `main` runs, `Post-merge image status` still reports CI's garak
-and Safe Synthesizer image builds and prerequisites through the existing
+On automatic `main` runs, `Post-merge image status` reports CI's CPU smoke,
+garak, and Safe Synthesizer image builds and prerequisites through the existing
 `SLACK_ALERTS_WEBHOOK`. It no longer observes E2E results across workflows.
 `Post-merge E2E status` independently waits for every E2E job and prerequisite,
 then uses the same helper and webhook to send one failure alert per E2E run.
