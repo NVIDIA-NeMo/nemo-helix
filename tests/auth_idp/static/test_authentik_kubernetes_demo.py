@@ -1795,8 +1795,8 @@ def test_authentik_compose_mounts_gateway_ca_without_test_runner_overlay() -> No
     services = compose_config["services"]
     nemo_environment = services["nemo"]["environment"]
 
-    assert nemo_environment["SSL_CERT_FILE"] == "/etc/nhx/gateway-tls/tls.crt"
-    assert nemo_environment["REQUESTS_CA_BUNDLE"] == "/etc/nhx/gateway-tls/tls.crt"
+    assert nemo_environment["SSL_CERT_FILE"] == "/etc/nhx/gateway-tls/ca-bundle.crt"
+    assert nemo_environment["REQUESTS_CA_BUNDLE"] == "/etc/nhx/gateway-tls/ca-bundle.crt"
     assert "gateway-tls:/etc/nhx/gateway-tls:ro" in services["nemo"]["volumes"]
     assert "auth-idp-e2e" not in services
 
@@ -1849,6 +1849,7 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     assert tls_values["secretName"] == "nemo-helix-envoy-tls"
     assert tls_values["mountPath"] == "/etc/nhx/workload-token-tls"
     assert tls_values["caBundleFile"] == "/etc/nhx/workload-token-ca/ca.crt"
+    assert tls_values["trustBundleFile"] == "/etc/nhx/workload-token-ca/ca-bundle.crt"
     assert "create" not in tls_values
     assert "durationDays" not in tls_values
     assert "dnsNames" not in tls_values
@@ -1897,8 +1898,9 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     assert seed_job["extraVolumes"] == controller["extraVolumes"]
     assert seed_job["extraVolumeMounts"] == controller["extraVolumeMounts"]
     assert nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["env"] == {
-        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
+        "NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
+        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
     }
     assert "service_discovery" not in nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]
     assert nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["storage"] == {
@@ -1907,7 +1909,10 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
                 "name": "workload-token-tls-ca",
                 "secret": {
                     "secret_name": "nemo-helix-envoy-tls",
-                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "items": [
+                        {"key": "ca.crt", "path": "ca.crt"},
+                        {"key": "ca-bundle.crt", "path": "ca-bundle.crt"},
+                    ],
                 },
             }
         ],
@@ -1929,8 +1934,9 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     assert "default_task_image" not in workload_config
     assert "service_discovery" not in workload_config
     assert workload_config["env"] == {
-        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
+        "NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
+        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
     }
     # executor_defaults don't apply to cpu/workload, so its storage sets the core PVC beside the CA volume.
     expected_storage = {

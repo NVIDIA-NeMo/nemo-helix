@@ -85,10 +85,15 @@ NHX_WORKLOAD_IDENTITY_TOKEN_FILE=/var/run/secrets/nemo-helix/workload/token
 ```
 
 The SDK reads that file and sends an RFC 8693 token exchange request to the
-NeMo Helix auth service over HTTPS. The chart mounts `ca.crt` from
-`Secret/nemo-helix-envoy-tls` into Kubernetes workload pods and sets
-`SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` so in-pod Python HTTP clients verify
-the demo Envoy certificate. Host-side `nemo` commands should use
+NeMo Helix auth service over HTTPS. The chart mounts `ca.crt` and
+`ca-bundle.crt` from `Secret/nemo-helix-envoy-tls` into Kubernetes job pods.
+`NHX_CLIENT_SSL_CERT_FILE` names `ca.crt` for platform calls. `SSL_CERT_FILE`
+and `REQUESTS_CA_BUNDLE` name `ca-bundle.crt`, which `run.sh` builds from the
+host's public CA bundle with the demo CA appended. Those variables replace a
+client's trust store rather than adding to it, so the demo CA alone would stop
+jobs from reaching public hosts such as PyPI or Hugging Face. Set
+`NHX_HARNESS_PUBLIC_CA_BUNDLE` to use a different public bundle. Host-side
+`nemo` commands should use
 `NHX_CLIENT_SSL_CERT_FILE` instead so unrelated tools keep their normal trust
 store.
 

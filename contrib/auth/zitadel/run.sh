@@ -697,6 +697,45 @@ k8s_gateway_tls_matches_runtime() {
     [[ "${sans}" == *"IP Address:127.0.0.1"* ]]
 }
 
+k8s_gateway_tls_trust_bundle_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/ca-bundle.crt" "$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+}
+
+# Job pods get SSL_CERT_FILE/REQUESTS_CA_BUNDLE, which replace a client's trust store. Pointing them
+# at the gateway CA alone leaves jobs unable to reach public hosts such as PyPI, so give them the
+# host's public roots with the gateway CA appended. Override the source with
+# NHX_HARNESS_PUBLIC_CA_BUNDLE.
+write_k8s_gateway_tls_trust_bundle() {
+    local cluster_name="$1"
+    local ca
+    local bundle
+    local public_roots=""
+    local candidate
+
+    ca="$(k8s_gateway_tls_ca_file_for_cluster "${cluster_name}")"
+    bundle="$(k8s_gateway_tls_trust_bundle_file_for_cluster "${cluster_name}")"
+    for candidate in "${NHX_HARNESS_PUBLIC_CA_BUNDLE:-}" /etc/ssl/certs/ca-certificates.crt \
+        /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/cert.pem; do
+        if [[ -n "${candidate}" && -s "${candidate}" ]]; then
+            public_roots="${candidate}"
+            break
+        fi
+    done
+    if [[ -z "${public_roots}" ]]; then
+        fail "no public CA bundle found for job pods; set NHX_HARNESS_PUBLIC_CA_BUNDLE to a PEM bundle"
+    fi
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ cat %q %q > %q\n" "${public_roots}" "${ca}" "${bundle}"
+        return
+    fi
+    {
+        cat "${public_roots}"
+        printf "\n"
+        cat "${ca}"
+    } >"${bundle}"
+}
+
 ensure_k8s_gateway_tls_certificate() {
     local cluster_name="$1"
     local output_dir
@@ -951,6 +990,8 @@ k8s_ensure_namespace() {
         | kubectl --kubeconfig "${kubeconfig}" --context "${context}" apply -f -
 }
 
+# Server-side apply: client-side apply copies the whole secret into the last-applied annotation,
+# which is capped at 256 KiB, and the job CA bundle alone is larger.
 k8s_reconcile_secret() {
     local context="$1"
     local kubeconfig="$2"
@@ -961,12 +1002,12 @@ k8s_reconcile_secret() {
         printf "+ kubectl --kubeconfig %q --context %q -n %q create secret generic %q " \
             "${kubeconfig}" "${context}" "${HELM_NAMESPACE}" "${secret_name}"
         quote_args "$@"
-        printf -- "--dry-run=client -o yaml | kubectl --kubeconfig %q --context %q apply -f -\n" "${kubeconfig}" "${context}"
+        printf -- "--dry-run=client -o yaml | kubectl --kubeconfig %q --context %q apply --server-side --force-conflicts -f -\n" "${kubeconfig}" "${context}"
         return
     fi
     kubectl --kubeconfig "${kubeconfig}" --context "${context}" -n "${HELM_NAMESPACE}" \
         create secret generic "${secret_name}" "$@" --dry-run=client -o yaml \
-        | kubectl --kubeconfig "${kubeconfig}" --context "${context}" apply -f -
+        | kubectl --kubeconfig "${kubeconfig}" --context "${context}" apply --server-side --force-conflicts -f -
 }
 
 k8s_prepare_secrets() {
@@ -976,6 +1017,7 @@ k8s_prepare_secrets() {
     local tls_dir
 
     ensure_k8s_gateway_tls_certificate "${cluster_name}"
+    write_k8s_gateway_tls_trust_bundle "${cluster_name}"
     tls_dir="$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
     k8s_ensure_namespace "${context}" "${kubeconfig}"
     k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-workload-token-signing-key \
@@ -983,7 +1025,8 @@ k8s_prepare_secrets() {
     k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-helix-envoy-tls \
         "--from-file=tls.crt=${tls_dir}/tls.crt" \
         "--from-file=tls.key=${tls_dir}/tls.key" \
-        "--from-file=ca.crt=${tls_dir}/ca.crt"
+        "--from-file=ca.crt=${tls_dir}/ca.crt" \
+        "--from-file=ca-bundle.crt=${tls_dir}/ca-bundle.crt"
     k8s_reconcile_secret "${context}" "${kubeconfig}" zitadel-masterkey \
         "--from-file=masterkey=$(zitadel_masterkey_file)"
     k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-zitadel-prepared \

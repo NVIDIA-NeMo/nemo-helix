@@ -877,7 +877,12 @@ def _reconcile_secret(
             kubeconfig,
         )
     )
-    _apply_manifest(context, rendered.stdout, kubeconfig)
+    # Server-side: client-side apply copies the secret into an annotation capped at 256 KiB, and
+    # the job CA bundle alone is larger.
+    _run_with_input(
+        _kubectl_command(context, ["apply", "--server-side", "--force-conflicts", "-f", "-"], kubeconfig),
+        rendered.stdout,
+    )
 
 
 def _prepare_precreated_secrets(context: str, kubeconfig: Path | None = None) -> None:
@@ -900,6 +905,8 @@ def _prepare_precreated_secrets(context: str, kubeconfig: Path | None = None) ->
             f"--from-file=tls.crt={tls_dir / 'tls.crt'}",
             f"--from-file=tls.key={tls_dir / 'tls.key'}",
             f"--from-file=ca.crt={tls_dir / 'ca.crt'}",
+            # Job pods' SSL_CERT_FILE: public roots plus the gateway CA, written by run.sh.
+            f"--from-file=ca-bundle.crt={tls_dir / 'ca-bundle.crt'}",
         ],
         kubeconfig,
     )

@@ -46,8 +46,8 @@ services:
       NEMO_JOBS_DEFAULT_DOCKER_NETWORK: ${AUTHENTIK_WORKLOAD_NETWORK_NAME:-authentik_workload}
       NEMO_DEPLOYMENTS_DOCKER_NETWORK: ${AUTHENTIK_WORKLOAD_NETWORK_NAME:-authentik_workload}
       NEMO_DEPLOYMENTS_DOCKER_ENDPOINT_MODE: network
-      SSL_CERT_FILE: /etc/nhx/gateway-tls/tls.crt
-      REQUESTS_CA_BUNDLE: /etc/nhx/gateway-tls/tls.crt
+      SSL_CERT_FILE: /etc/nhx/gateway-tls/ca-bundle.crt
+      REQUESTS_CA_BUNDLE: /etc/nhx/gateway-tls/ca-bundle.crt
       AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD: ${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:?run contrib/auth/authentik/run.sh prepare-local}
     depends_on:
       gateway-tls-init:
@@ -91,7 +91,9 @@ services:
           - nemo-gateway
 
   gateway-tls-init:
-    image: docker.io/library/busybox:1.37.0@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028
+    # The platform image, for its CA bundle: SSL_CERT_FILE replaces a client's trust store, so the
+    # bundle it points at needs the public roots as well as the gateway certificate.
+    image: ${IMAGE_REGISTRY:-my-registry}/nhx-api:${BAKE_TAG:-local}
     user: "0:0"
     entrypoint:
       - sh
@@ -102,6 +104,8 @@ services:
         chown 101:101 /target/tls/tls.crt /target/tls/tls.key
         chmod 644 /target/tls/tls.crt
         chmod 600 /target/tls/tls.key
+        cat /etc/ssl/certs/ca-certificates.crt /source/tls/tls.crt > /target/tls/ca-bundle.crt
+        chmod 644 /target/tls/ca-bundle.crt
     volumes:
       - ${AUTHENTIK_GATEWAY_TLS_DIR:-../.generated/gateway-tls}:/source/tls:ro
       - gateway-tls:/target/tls
