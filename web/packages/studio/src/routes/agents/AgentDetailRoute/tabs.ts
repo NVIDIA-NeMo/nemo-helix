@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { DetailPageTab } from '@studio/components/Layouts/DetailPageLayout';
 import {
   AGENT_OPTIMIZATIONS_ENABLED,
   AGENT_OVERVIEW_ENABLED,
@@ -9,17 +10,28 @@ import {
 
 export const TAB_SEARCH_PARAM = 'tab';
 
-export const DETAIL_TABS = [
-  'overview',
-  'chat',
-  'evaluations',
-  'insights',
-  'optimizations',
-  'deployments',
-  'logs',
-] as const;
+export type AgentDetailTab =
+  | 'overview'
+  | 'chat'
+  | 'evaluations'
+  | 'insights'
+  | 'optimizations'
+  | 'deployments'
+  | 'logs';
 
-export type AgentDetailTab = (typeof DETAIL_TABS)[number];
+/** The tabs this build shows, in order. Flagged-off tabs are left out, so their URLs fall back to
+ *  DEFAULT_TAB. */
+export const AGENT_DETAIL_TABS: DetailPageTab<AgentDetailTab>[] = [
+  ...(AGENT_OVERVIEW_ENABLED ? [{ value: 'overview' as const, label: 'Overview' }] : []),
+  { value: 'chat', label: 'Chat' },
+  { value: 'evaluations', label: 'Evaluations' },
+  ...(OPTIMIZER_ENABLED ? [{ value: 'insights' as const, label: 'Insights' }] : []),
+  ...(AGENT_OPTIMIZATIONS_ENABLED
+    ? [{ value: 'optimizations' as const, label: 'Optimizations' }]
+    : []),
+  { value: 'deployments', label: 'Deployment' },
+  { value: 'logs', label: 'Logs' },
+];
 
 export const EVAL_TABS: ReadonlySet<AgentDetailTab> = new Set([
   'overview',
@@ -54,8 +66,4 @@ export const isOptimizationView = (value: string | null): value is OptimizationV
   Object.values(OptimizationView).some((view) => view === value);
 
 export const isAgentDetailTab = (value: string | null): value is AgentDetailTab =>
-  !!value &&
-  DETAIL_TABS.includes(value as AgentDetailTab) &&
-  (value !== 'overview' || AGENT_OVERVIEW_ENABLED) &&
-  (value !== 'optimizations' || AGENT_OPTIMIZATIONS_ENABLED) &&
-  (value !== 'insights' || OPTIMIZER_ENABLED);
+  AGENT_DETAIL_TABS.some((tab) => tab.value === value);

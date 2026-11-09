@@ -12,7 +12,7 @@ import { Badge, Button, TabsContent } from '@nvidia/foundations-react-core';
 import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
-import { DetailPageLayout, type DetailPageTab } from '@studio/components/Layouts/DetailPageLayout';
+import { DetailPageLayout } from '@studio/components/Layouts/DetailPageLayout';
 import {
   AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
   AGENT_OPTIMIZATION_FORM_ENABLED,
@@ -41,6 +41,7 @@ import { OptimizationsTab } from '@studio/routes/agents/AgentDetailRoute/optimiz
 import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
 import {
   ACTION_SEARCH_PARAM,
+  AGENT_DETAIL_TABS,
   type AgentDetailTab,
   DEFAULT_TAB,
   EVAL_TABS,
@@ -255,18 +256,6 @@ export const AgentDetailRoute: FC = () => {
 
   const displayName = agent?.name ?? agentName ?? 'Agent details';
 
-  const tabs: DetailPageTab<AgentDetailTab>[] = [
-    ...(AGENT_OVERVIEW_ENABLED ? [{ value: 'overview' as const, label: 'Overview' }] : []),
-    { value: 'chat', label: 'Chat' },
-    { value: 'evaluations', label: 'Evaluations' },
-    ...(OPTIMIZER_ENABLED ? [{ value: 'insights' as const, label: 'Insights' }] : []),
-    ...(AGENT_OPTIMIZATIONS_ENABLED
-      ? [{ value: 'optimizations' as const, label: 'Optimizations' }]
-      : []),
-    { value: 'deployments', label: 'Deployment' },
-    { value: 'logs', label: 'Logs' },
-  ];
-
   const copyAgentId = async () => {
     if (!agent?.id) return;
     try {
@@ -318,7 +307,7 @@ export const AgentDetailRoute: FC = () => {
             ) : null}
           </>
         }
-        tabs={tabs}
+        tabs={AGENT_DETAIL_TABS}
         selectedTab={selectedTab}
         onTabChange={setSelectedTab}
         tabsListRef={tabsRef}

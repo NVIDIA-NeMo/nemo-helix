@@ -65,7 +65,7 @@ describe('DetailPageLayout', () => {
     expect(screen.getByRole('tab', { name: 'Logs' })).toBeDisabled();
   });
 
-  it('renders actions beside the tab bar', () => {
+  it('renders the actions slot', () => {
     renderLayout({ slotActions: <Button>Run Evaluation</Button> });
 
     expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeInTheDocument();
