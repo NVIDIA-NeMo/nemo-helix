@@ -30,7 +30,9 @@ class TasksetRunProgress(BaseModel):
         default=None,
         description=(
             "Trial counts summed across the run's tasks. The reward is the mean of each task's mean reward, so "
-            "every task counts equally regardless of how many trials it ran."
+            "every task counts equally regardless of how many trials it ran. None when any task has no counts, "
+            "as in a run that was already going when trial counts were added: a total over only some of its "
+            "tasks would read as the whole run's."
         ),
     )
 
@@ -40,9 +42,14 @@ def build_progress(members: Iterable[TasksetRunMemberEntity]) -> TasksetRunProgr
 
     A queued member is ``image_ready`` with no ``task_job``; one with ``task_job`` set is a create intent
     and already holds a slot. A registered member with no ``job_status`` yet isn't in ``task_jobs``.
-    Trials sum the counts the controller copied onto each member from its task Job.
+    Trials sum the counts the controller copied onto each member from its task Job, but only when every member
+    has them. A new run's members start with their planned trials counted, so a member without counts belongs to
+    a run created before counts existed; its Job reported none and never will, so a total over the other members
+    would pass for the run's and is withheld instead.
     """
     members = list(members)
+    counts = [member.trial_counts for member in members]
+    counted = [count for count in counts if count is not None]
     return TasksetRunProgress(
         tasks=len(members),
         members=dict(Counter(member.phase for member in members)),
@@ -54,5 +61,5 @@ def build_progress(members: Iterable[TasksetRunMemberEntity]) -> TasksetRunProgr
                 if member.phase is MemberPhase.REGISTERED and member.job_status is not None
             )
         ),
-        trial_counts=sum_trial_counts(member.trial_counts for member in members if member.trial_counts is not None),
+        trial_counts=sum_trial_counts(counted) if len(counted) == len(counts) else None,
     )
