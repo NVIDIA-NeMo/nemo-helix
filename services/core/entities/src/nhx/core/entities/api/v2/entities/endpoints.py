@@ -25,7 +25,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE, EntityWriteValidationErrorResponse
-from nhx.common.api.common import DeleteResponse, Page, PaginationData
+from nhx.common.api.common import DeleteResponse, ErrorResponse, Page, PaginationData
 from nhx.common.auth import ALL_WORKSPACES
 from nhx.common.auth.client import AuthClient
 from nhx.common.entities.client import EntityValidationError
@@ -468,7 +468,10 @@ async def list_entities(
     response_model=Entity,
     tags=[API_TAG],
     summary="Get entity by name",
-    responses={403: {"description": "Not allowed to read entities in the requested workspace."}},
+    responses={
+        403: {"description": "Not allowed to read entities in the requested workspace."},
+        404: {"model": ErrorResponse, "description": "Entity or workspace not found"},
+    },
     description=textwrap.dedent("""
         Get a specific entity by its workspace, type, and name.
 
@@ -516,6 +519,7 @@ async def get_entity_by_name(
     summary="Update entity by name",
     responses={
         403: {"description": "Not allowed to update entities in the requested workspace."},
+        404: {"model": ErrorResponse, "description": "Entity or workspace not found"},
         **_ENTITY_WRITE_ERROR_RESPONSES,
     },
     description=textwrap.dedent("""
@@ -640,7 +644,10 @@ async def update_entity_by_name(
     response_model=DeleteResponse,
     tags=[API_TAG],
     summary="Delete entity by name",
-    responses={403: {"description": "Not allowed to delete entities in the requested workspace."}},
+    responses={
+        403: {"description": "Not allowed to delete entities in the requested workspace."},
+        404: {"model": ErrorResponse, "description": "Entity or workspace not found"},
+    },
     description=textwrap.dedent("""
         Delete an entity by its name.
 
@@ -698,6 +705,7 @@ async def delete_entity_by_name(
     response_model=Entity,
     tags=[API_TAG],
     summary="Get entity by ID (debug/internal)",
+    responses={404: {"model": ErrorResponse, "description": "Entity not found"}},
     description=textwrap.dedent("""
         Get a specific entity by its unique identifier.
         This endpoint is primarily for debugging and internal use.

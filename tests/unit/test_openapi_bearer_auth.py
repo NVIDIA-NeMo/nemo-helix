@@ -74,6 +74,9 @@ def test_native_security_is_scoped_and_does_not_duplicate_authorization_paramete
     assert "security" not in spec
     scheme = spec["components"]["securitySchemes"][BEARER_SCHEME_NAME]
     assert (scheme["type"], scheme["scheme"]) == ("http", "bearer")
+    assert scheme["description"] == BEARER_SECURITY_SCHEME["description"]
+    assert "Authorization: Bearer <token>" in scheme["description"]
+    assert "bearer-auth token field" in scheme["description"]
     token = sample_request(
         spec, "/apis/auth/token", "post", {**spec["paths"]["/apis/auth/token"]["post"], "x-codeSamples": []}
     )

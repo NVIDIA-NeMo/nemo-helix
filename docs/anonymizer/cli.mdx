@@ -36,9 +36,13 @@ The command does not accept `data.source`. Input-source validation happens durin
 
 ## `nemo anonymizer preview`
 
+First build a `PreviewRequest` and write it to `/tmp/anonymizer-preview.json` as shown in
+[Preview a Config](/documentation/anonymize-data/tutorials/preview-a-config#step-2-run-with-the-python-sdk).
+That tutorial includes the input fileset and model configuration prerequisites; the CLI does not create the spec file.
+
 ```bash
 nemo anonymizer preview \
-  --spec-file /tmp/anonymizer-preview.yaml
+  --spec-file /tmp/anonymizer-preview.json
 ```
 
 | Flag             | Description                                                                            |

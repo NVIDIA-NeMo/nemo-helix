@@ -116,11 +116,23 @@ preview.display_record(0)  # render record 0 with entity highlights in a noteboo
 
 `AnonymizerResource.preview` calls the plugin service: use a fileset or `http(s)` source, and include `model_configs`.
 
-The CLI accepts the same request as a YAML or JSON spec file and streams NDJSON frames:
+The CLI accepts the same request as a YAML or JSON spec file and streams NDJSON frames.
+To use the request from Step 1 with the CLI instead of calling `anonymizer.preview`, first
+serialize it to a local JSON file (no preview call is needed to write the spec):
+
+```python
+from pathlib import Path
+
+Path("/tmp/anonymizer-preview.json").write_text(
+    request.model_dump_json(indent=2), encoding="utf-8"
+)
+```
+
+Then run:
 
 ```bash
 nemo anonymizer preview \
-  --spec-file /tmp/anonymizer-preview.yaml
+  --spec-file /tmp/anonymizer-preview.json
 ```
 
 <Accordion title="Async client">

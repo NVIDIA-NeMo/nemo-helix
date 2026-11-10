@@ -923,7 +923,7 @@ def list_jobs(
             name=filter_name,
             project=filter_project,
             source=filter_source,
-            status=filter_status,
+            status=(filter_status[0] if len(filter_status) == 1 else {"$in": filter_status}) if filter_status else None,
             workspace=filter_workspace,
         )
     )

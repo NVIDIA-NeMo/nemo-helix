@@ -201,6 +201,7 @@ async def get_secret(
 
 @router.patch(
     "/v2/workspaces/{workspace}/secrets/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Secret not found"}},
     status_code=status.HTTP_200_OK,
     response_model=schemas.HelixSecretResponse,
 )
@@ -250,7 +251,11 @@ async def update_secret(
         return schemas.HelixSecretResponse.from_entity(updated_secret)
 
 
-@router.delete("/v2/workspaces/{workspace}/secrets/{name}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/v2/workspaces/{workspace}/secrets/{name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: {"model": ErrorResponse, "description": "Secret not found"}},
+)
 async def delete_secret(
     name: str,
     workspace: str,
