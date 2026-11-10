@@ -17,7 +17,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 from nemo_agents_plugin.agent_config import AgentConfig, AgentConfigLoadError
-from nemo_agents_plugin.fabric import server
+from nemo_agents_plugin.fabric import environment, server
 from nemo_agents_plugin.fabric.runtime import (
     FabricRuntimeExecutionError,
     FabricRuntimeResult,
@@ -238,6 +238,116 @@ def test_startup_loads_and_validates_agent_config(
         assert isinstance(app.state.session_manager, FabricSessionManager)
 
     assert mock_validate_agent_config == [(app.state.agent_config, tmp_path)]
+
+
+@pytest.mark.parametrize("configured_workspace", ["workspace", "."])
+def test_startup_captures_workspace_inputs_and_reuses_them_after_restart(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    configured_workspace: str,
+) -> None:
+    base_dir = tmp_path / "agent"
+    workspace = base_dir / configured_workspace
+    (workspace / "data").mkdir(parents=True)
+    source = workspace / "data" / "input.bin"
+    source.write_bytes(b"\x00original input\xff")
+    source.chmod(0o755)
+    (workspace / "relative-link").symlink_to("data/input.bin")
+    (workspace / "absolute-link").symlink_to(source.resolve())
+    external = tmp_path / "outside.txt"
+    external.write_text("outside workspace")
+    (workspace / "external-link").symlink_to(external)
+    excluded = (
+        ".venv",
+        "node_modules",
+        "__pycache__",
+        "large_tool_results",
+        "conversation_history",
+        ".fabric",
+        "traces",
+    )
+    for name in excluded:
+        (workspace / name).mkdir()
+        (workspace / name / "existing.txt").write_text("not an input")
+    config = _example_config()
+    config["harnesses"]["hermes"]["kind"] = "deepagents"
+    config["environment"] = {
+        "workspace": configured_workspace,
+        "artifacts": str(Path(configured_workspace) / "traces"),
+    }
+    config_path = _write_agent_config(base_dir, config)
+
+    app = create_fabric_serving_app(config_path)
+    with TestClient(app):
+        baseline = app.state.workspace_baseline
+        assert baseline.is_relative_to(workspace.resolve())
+        assert (baseline / "data/input.bin").read_bytes() == b"\x00original input\xff"
+        assert (baseline / "data/input.bin").stat().st_mode & 0o111
+        for name in ("relative-link", "absolute-link"):
+            assert (baseline / name).resolve() == baseline / "data/input.bin"
+        for name in (*excluded, "external-link", environment.DEEPAGENTS_WORKSPACE_DIR):
+            assert not (baseline / name).exists()
+        assert (workspace / ".venv/existing.txt").exists()
+        source.write_text("changed during a conversation")
+        (workspace / "late.txt").write_text("later conversation output")
+
+    restarted = create_fabric_serving_app(config_path)
+    with TestClient(restarted):
+        assert restarted.state.workspace_baseline == baseline
+        assert (baseline / "data/input.bin").read_bytes() == b"\x00original input\xff"
+        assert not (baseline / "late.txt").exists()
+
+
+@pytest.mark.parametrize(
+    ("kind", "settings", "provider"),
+    [
+        ("hermes", {}, "local"),
+        ("deepagents", {"deepagents": {"backend": {"type": "local_shell"}}}, "local"),
+        ("deepagents", {}, "remote"),
+    ],
+)
+def test_startup_leaves_other_backends_without_a_workspace_baseline(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    kind: str,
+    settings: dict[str, Any],
+    provider: str,
+) -> None:
+    config = _example_config()
+    config["harnesses"]["hermes"].update(kind=kind, settings=settings)
+    config["environment"] = {"provider": provider}
+    app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
+
+    with TestClient(app):
+        assert app.state.workspace_baseline is None
+        assert not (tmp_path / "workspace").exists()
+
+
+def test_failed_baseline_copy_is_not_reused_on_retry(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _example_config()
+    config["harnesses"]["hermes"]["kind"] = "deepagents"
+    config_path = _write_agent_config(tmp_path, config)
+
+    def fail_copy(source: Path, target: Path, **kwargs: Any) -> None:
+        target.mkdir()
+        (target / "partial.txt").write_text("incomplete")
+        raise OSError("copy failed")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(environment.shutil, "copytree", fail_copy)
+        with pytest.raises(OSError, match="copy failed"), TestClient(create_fabric_serving_app(config_path)):
+            pass
+
+    storage = tmp_path / "workspace" / environment.DEEPAGENTS_WORKSPACE_DIR
+    assert list(storage.iterdir()) == []
+    app = create_fabric_serving_app(config_path)
+    with TestClient(app):
+        assert app.state.workspace_baseline.is_dir()
+        assert not (app.state.workspace_baseline / "partial.txt").exists()
 
 
 @pytest.mark.parametrize("socket_fd", [None, 123])

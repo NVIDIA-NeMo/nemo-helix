@@ -21,7 +21,11 @@ from typing import Annotated, Any
 from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
-from nemo_agents_plugin.fabric.environment import release_runtime_base_dir, resolve_runtime_base_dir
+from nemo_agents_plugin.fabric.environment import (
+    prepare_deepagents_workspace_baseline,
+    release_runtime_base_dir,
+    resolve_runtime_base_dir,
+)
 from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
     FabricRuntimeExecutionError,
@@ -338,6 +342,9 @@ def create_fabric_serving_app(
         # the process that made it even when the runtime never comes up.
         try:
             validation_result = await _validate_agent_config(agent_config, base_dir=base_dir)
+            app.state.workspace_baseline = await asyncio.to_thread(
+                prepare_deepagents_workspace_baseline, agent_config, base_dir
+            )
             app.state.agent_config = agent_config
             app.state.base_dir = base_dir
             app.state.validation_result = validation_result

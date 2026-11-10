@@ -12,12 +12,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nemo_agents_plugin.agent_config import AgentConfig
+from nemo_agents_plugin.fabric.adapters import uses_default_deepagents_backend
 
 logger = logging.getLogger(__name__)
 
 #: Prefix for the directory an agent tree is copied to when its mounted location
 #: cannot be written to.
 RUNTIME_BASE_DIR_PREFIX = "nemo-agent-runtime"
+DEEPAGENTS_WORKSPACE_DIR = ".nemo-deepagents"
+_WORKSPACE_DEPENDENCY_DIRS = {".venv", "node_modules", "__pycache__"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,3 +83,70 @@ def ensure_local_workspace_dir(agent_config: AgentConfig, base_dir: Path) -> Non
         raise ValueError("Local workspace path must remain within the agent base directory.")
 
     workspace.mkdir(parents=True, exist_ok=True)
+
+
+def prepare_deepagents_workspace_baseline(agent_config: AgentConfig, base_dir: Path) -> Path | None:
+    """Save the initial workspace inputs before serving conversations.
+
+    Initial capture assumes a fresh deployment workspace. Keep this baseline
+    across process restarts; recapturing the live workspace could include session
+    output. Replacing the deployment workspace also replaces its baseline.
+    """
+    harness = agent_config.harnesses.get(agent_config.default_harness or "")
+    if harness is None or not uses_default_deepagents_backend(harness):
+        return None
+    if agent_config.environment.provider != "local" or not agent_config.environment.workspace:
+        return None
+
+    ensure_local_workspace_dir(agent_config, base_dir)
+    workspace = (base_dir / agent_config.environment.workspace).resolve()
+    storage = workspace / DEEPAGENTS_WORKSPACE_DIR
+    baseline = storage / "inputs"
+    if storage.is_symlink() or baseline.is_symlink():
+        raise ValueError("DeepAgents workspace baseline directories must not be symlinks.")
+    if baseline.is_dir():
+        return baseline
+    storage.mkdir(exist_ok=True)
+
+    excluded = {storage, *(workspace / name for name in ("large_tool_results", "conversation_history", ".fabric"))}
+    for configured_path in (
+        agent_config.environment.artifacts,
+        agent_config.runtime.artifacts,
+        agent_config.telemetry.output_dir,
+    ):
+        if configured_path:
+            output = (base_dir / configured_path).resolve()
+            if output != workspace and output.is_relative_to(workspace):
+                excluded.add(output)
+
+    # Publish only a complete copy; a failed startup must not leave a reusable partial baseline.
+    with tempfile.TemporaryDirectory(prefix=".inputs-", dir=storage) as temporary:
+        staged = Path(temporary) / "inputs"
+        _copy_workspace_inputs(workspace, staged, excluded)
+        staged.rename(baseline)
+    return baseline
+
+
+def _copy_workspace_inputs(source: Path, target: Path, excluded: set[Path]) -> None:
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        ignored: set[str] = set()
+        for name in names:
+            path = Path(directory) / name
+            resolved = path.resolve()
+            if (
+                not resolved.is_relative_to(source)
+                or _WORKSPACE_DEPENDENCY_DIRS.intersection(resolved.relative_to(source).parts)
+                or any(resolved.is_relative_to(root) for root in excluded)
+                or (path.is_dir() and (path / "pyvenv.cfg").is_file())
+            ):
+                ignored.add(name)
+        return ignored
+
+    shutil.copytree(source, target, symlinks=True, ignore=ignore)
+    # Internal links must resolve inside each copied workspace, including originally absolute links.
+    for link in target.rglob("*"):
+        if link.is_symlink():
+            original = source / link.relative_to(target)
+            destination = target / original.resolve().relative_to(source)
+            link.unlink()
+            link.symlink_to(os.path.relpath(destination, link.parent))
