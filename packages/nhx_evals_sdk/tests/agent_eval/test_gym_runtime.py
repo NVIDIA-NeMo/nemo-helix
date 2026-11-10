@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 from collections import Counter, deque
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -63,10 +64,23 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     trials_from_rollouts,
 )
 from nhx_evals_sdk.agent_eval.runtimes.gym.runtime import FIRST_ERROR_CONTEXT_LINES, FIRST_ERROR_LINE_MAX_CHARS
-from nhx_evals_sdk.agent_eval.trials import UNKNOWN_ERROR_TYPE, AgentEvalTrialStatus, TrialError, TrialMeasurements
+from nhx_evals_sdk.agent_eval.trials import (
+    UNKNOWN_ERROR_TYPE,
+    AgentEvalTrial,
+    AgentEvalTrialStatus,
+    TrialError,
+    TrialMeasurements,
+)
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nhx_evals_sdk.values import SecretRef
+from nhx_evals_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_FORMAT_OTLP, EVIDENCE_TRACE
+from nhx_evals_sdk.values.otlp import final_output_text
 from pydantic import ValidationError
+
+from packages.nhx_evals_sdk.tests.agent_eval._otlp_testkit import write_answer_trace
+
+_GYM_RESULTS_LOG = "nhx_evals_sdk.agent_eval.runtimes.gym.results"
+_PROJECTED_ANSWER = "The projected answer."
 
 FIXTURES = Path(__file__).parent / "fixtures"
 EXAMPLE = FIXTURES / "gym_mcqa_example.jsonl"
@@ -625,6 +639,214 @@ async def test_a_rollout_carries_an_otlp_trace_the_sdk_can_read(tmp_path: Path) 
         if attribute.key == "openinference.span.kind"
     ]
     assert kinds == ["AGENT", "LLM", "TOOL"]
+
+
+def _fabric_result(*artifacts: dict[str, Any]) -> dict[str, Any]:
+    """A Fabric ``RunResult.to_mapping()`` JSON declaring ``artifacts`` (name/kind/path entries)."""
+    return {"status": "succeeded", "artifacts": {"artifacts": list(artifacts)}}
+
+
+def _trial_declaring_fabric_artifacts(tmp_path: Path, artifacts: Sequence[dict[str, Any]]) -> AgentEvalTrial:
+    """One completed rollout whose ``fabric_result`` declares ``artifacts``."""
+    tasks = discover_gym_tasks(EXAMPLE)
+    _ordered, index_map = _index_map(tasks, tmp_path)
+    bundle = tmp_path / "rollouts.jsonl"
+    bundle.write_text(
+        json.dumps(
+            {
+                NG_TASK_INDEX: 0,
+                NG_ROLLOUT_INDEX: 0,
+                "reward": 1.0,
+                "response": {
+                    "usage": {"input_tokens": 4, "output_tokens": 1},
+                    "output": [{"type": "message", "content": [{"type": "output_text", "text": _PROJECTED_ANSWER}]}],
+                },
+                "fabric_result": _fabric_result(*artifacts),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    capture_dir = model_call_capture_dir(tmp_path)
+    capture_dir.mkdir(parents=True)
+    (capture_dir / "0-0.capture.jsonl").write_text(json.dumps({"model_call_id": "c0"}) + "\n", encoding="utf-8")
+    (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=capture_dir)
+    return trial
+
+
+async def _trace_answer(trial: AgentEvalTrial) -> str | None:
+    assert trial.evidence is not None
+    handle = await trial.evidence.trace(EVIDENCE_TRACE, format=EVIDENCE_FORMAT_OTLP)
+    return final_output_text(await handle.resource_spans())
+
+
+def _declared_warnings(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [
+        record
+        for record in caplog.records
+        if record.name == _GYM_RESULTS_LOG and record.message.startswith("Declared otlp")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_declared_otlp_artifact_supersedes_the_model_call_projection(tmp_path: Path) -> None:
+    trace = write_answer_trace(tmp_path, "The declared answer.")
+
+    trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": str(trace)}])
+
+    assert await _trace_answer(trial) == "The declared answer."
+    assert trial.evidence is not None
+    assert EVIDENCE_FORMAT_ATIF not in {descriptor.format for descriptor in trial.evidence.descriptors.values()}
+
+
+@pytest.mark.asyncio
+async def test_declared_otlp_artifact_registers_one_declared_atif_alongside(tmp_path: Path) -> None:
+    trace = write_answer_trace(tmp_path, "The declared answer.")
+    atif = tmp_path / "relay" / "trajectory-session.atif.json"
+    atif.parent.mkdir()
+    atif.write_text('{"trajectory": []}\n', encoding="utf-8")
+
+    trial = _trial_declaring_fabric_artifacts(
+        tmp_path,
+        [
+            {"name": "trace", "kind": "otlp", "path": str(trace)},
+            {"name": "trajectory", "kind": "atif", "path": str(atif)},
+        ],
+    )
+
+    assert await _trace_answer(trial) == "The declared answer."
+    assert trial.evidence is not None
+    assert f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}" in trial.evidence.descriptors
+
+
+@pytest.mark.asyncio
+async def test_two_declared_atif_artifacts_register_no_atif(tmp_path: Path) -> None:
+    trace = write_answer_trace(tmp_path, "The declared answer.")
+    atif_a = tmp_path / "relay" / "trajectory-a.atif.json"
+    atif_b = tmp_path / "relay" / "trajectory-b.atif.json"
+    atif_a.parent.mkdir()
+    atif_a.write_text('{"trajectory": []}\n', encoding="utf-8")
+    atif_b.write_text('{"trajectory": []}\n', encoding="utf-8")
+
+    trial = _trial_declaring_fabric_artifacts(
+        tmp_path,
+        [
+            {"name": "trace", "kind": "otlp", "path": str(trace)},
+            {"name": "trajectory-a", "kind": "atif", "path": str(atif_a)},
+            {"name": "trajectory-b", "kind": "atif", "path": str(atif_b)},
+        ],
+    )
+
+    assert await _trace_answer(trial) == "The declared answer."
+    assert trial.evidence is not None
+    assert f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}" not in trial.evidence.descriptors
+
+
+@pytest.mark.parametrize(
+    "artifacts",
+    [
+        pytest.param([], id="no-fabric-artifacts"),
+        pytest.param([{"name": "trajectory", "kind": "atif", "path": "relay/trajectory.atif.json"}], id="atif-alone"),
+        pytest.param(
+            [
+                {"name": "trace-a", "kind": "otlp", "path": "traces/relay-a.jsonl"},
+                {"name": "trace-b", "kind": "otlp", "path": "traces/relay-b.jsonl"},
+            ],
+            id="two-otlp-files",
+        ),
+        pytest.param([{"name": "trace", "kind": "otlp", "path": "traces/missing.jsonl"}], id="otlp-path-missing"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_trials_without_a_single_declared_trace_keep_the_projection(
+    tmp_path: Path, artifacts: list[dict[str, Any]], caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "traces").mkdir()
+    for name in ("relay-a.jsonl", "relay-b.jsonl"):
+        (tmp_path / "traces" / name).write_text('{"resourceSpans": []}\n', encoding="utf-8")
+    (tmp_path / "relay").mkdir()
+    declared = [{**artifact, "path": str(tmp_path / artifact["path"])} for artifact in artifacts]
+    otlp_count = sum(artifact["kind"] == "otlp" for artifact in artifacts)
+
+    with caplog.at_level(logging.WARNING, logger=_GYM_RESULTS_LOG):
+        trial = _trial_declaring_fabric_artifacts(tmp_path, declared)
+
+    assert await _trace_answer(trial) == _PROJECTED_ANSWER
+    warnings = _declared_warnings(caplog)
+    if otlp_count == 0:
+        assert warnings == []
+    elif otlp_count == 2:
+        assert getattr(warnings[-1], "declared_count") == 2
+        assert getattr(warnings[-1], "contained_count") == 2
+    else:
+        assert str(getattr(warnings[-1], "path")).endswith("missing.jsonl")
+
+
+@pytest.mark.asyncio
+async def test_non_mapping_fabric_result_keeps_the_projection(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    tasks = discover_gym_tasks(EXAMPLE)
+    _ordered, index_map = _index_map(tasks, tmp_path)
+    bundle = tmp_path / "rollouts.jsonl"
+    record = {
+        NG_TASK_INDEX: 0,
+        NG_ROLLOUT_INDEX: 0,
+        "reward": 1.0,
+        "response": {
+            "usage": {"input_tokens": 4, "output_tokens": 1},
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": _PROJECTED_ANSWER}]}],
+        },
+        "fabric_result": "not-a-mapping",
+    }
+    bundle.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    captures = model_call_capture_dir(tmp_path)
+    captures.mkdir(parents=True)
+    (captures / "0-0.capture.jsonl").write_text(json.dumps({"model_call_id": "c0"}) + "\n", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger=_GYM_RESULTS_LOG):
+        (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=captures)
+
+    assert await _trace_answer(trial) == _PROJECTED_ANSWER
+    assert _declared_warnings(caplog) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("escape", ["absolute", "symlink"])
+async def test_declared_trace_outside_the_run_directory_keeps_the_projection(
+    tmp_path: Path, escape: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Both escapes are readable, non-empty files, so only the containment check can reject them.
+    outside = tmp_path.parent / "outside-relay.jsonl"
+    outside.write_text('{"resourceSpans": []}\n', encoding="utf-8")
+    try:
+        if escape == "absolute":
+            declared = str(outside)
+        else:
+            escape_link = tmp_path / "escape.jsonl"
+            escape_link.symlink_to(outside)
+            declared = str(escape_link)
+
+        with caplog.at_level(logging.WARNING, logger=_GYM_RESULTS_LOG):
+            trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": declared}])
+    finally:
+        outside.unlink(missing_ok=True)
+
+    assert await _trace_answer(trial) == _PROJECTED_ANSWER
+    warning = _declared_warnings(caplog)[-1]
+    assert getattr(warning, "declared_count") == 1
+    assert getattr(warning, "contained_count") == 0
+
+
+@pytest.mark.asyncio
+async def test_empty_declared_trace_keeps_the_projection(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    # An empty file means Relay never flushed.
+    trace = tmp_path / "traces" / "relay.jsonl"
+    trace.parent.mkdir()
+    trace.write_text("", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING, logger=_GYM_RESULTS_LOG):
+        trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": str(trace)}])
+
+    assert await _trace_answer(trial) == _PROJECTED_ANSWER
+    assert getattr(_declared_warnings(caplog)[-1], "path") == str(trace)
 
 
 def test_success_records_without_rollout_index_get_distinct_ids(tmp_path: Path) -> None:

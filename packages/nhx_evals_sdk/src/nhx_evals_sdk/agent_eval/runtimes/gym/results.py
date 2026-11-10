@@ -21,10 +21,17 @@ from google.protobuf.json_format import MessageToDict
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import DEFAULT_REWARD_KEY, model_call_capture_dir
 from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
     ENV_LOG_NAME,
+    FABRIC_RESULT_KEY,
     NG_ATTEMPT_INDEX,
     NG_ROLLOUT_INDEX,
     NG_TASK_INDEX,
     read_jsonl,
+)
+from nhx_evals_sdk.agent_eval.runtimes.trace_evidence import (
+    ATIF_ARTIFACT_KIND,
+    OTLP_ARTIFACT_KIND,
+    declared_artifacts,
+    register_trace_evidence,
 )
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import (
@@ -281,6 +288,63 @@ def require_full_coverage(tasks: Sequence[AgentEvalTask], *, covered_task_ids: s
     )
 
 
+def _within_run_dir(candidate: str, run_dir: Path) -> bool:
+    """Whether ``candidate`` resolves inside ``run_dir``.
+
+    Relative paths are rejected: Fabric declares absolute host paths, and a relative one would
+    name a different file depending on where the evaluator was launched.
+    """
+    if not Path(candidate).is_absolute():
+        return False
+    try:
+        resolved = Path(candidate).resolve()
+    except (OSError, ValueError):  # ValueError: e.g. an embedded null byte in an odd record.
+        return False
+    root = run_dir.resolve()
+    return resolved == root or root in resolved.parents
+
+
+def _declared_fabric_trace(
+    fabric_result: object, *, run_dir: Path, trial: Mapping[str, object]
+) -> tuple[Path | None, Path | None]:
+    """``(otlp, atif)`` when the rollout declared exactly one non-empty trace inside ``run_dir``.
+
+    A declared OTLP that is not that one file is rejected with a warning, so the caller keeps
+    the model-call projection instead of dropping the trace silently. No declaration is not a
+    rejection. ``trial`` identifies the rollout in those warnings.
+    """
+    if not isinstance(fabric_result, Mapping):
+        return None, None
+    artifacts = declared_artifacts(fabric_result)
+    declared = [artifact for artifact in artifacts if artifact.kind == OTLP_ARTIFACT_KIND]
+    if not declared:
+        return None, None
+    contained = [artifact for artifact in declared if _within_run_dir(artifact.path, run_dir)]
+    if len(contained) != 1:
+        logger.warning(
+            "Declared otlp trace is not a single file inside the run directory; keeping the model-call projection.",
+            extra={**trial, "declared_count": len(declared), "contained_count": len(contained)},
+        )
+        return None, None
+    trace = Path(contained[0].path)
+    try:
+        readable = trace.is_file() and trace.stat().st_size > 0
+    except OSError:
+        readable = False
+    if not readable:
+        logger.warning(
+            "Declared otlp trace is missing or empty; keeping the model-call projection.",
+            extra={**trial, "path": str(trace)},
+        )
+        return None, None
+    atif = [
+        artifact
+        for artifact in artifacts
+        if artifact.kind == ATIF_ARTIFACT_KIND and _within_run_dir(artifact.path, run_dir)
+    ]
+    return trace, Path(atif[0].path) if len(atif) == 1 else None
+
+
 def _rollout_evidence(
     record: Mapping[str, Any],
     *,
@@ -291,30 +355,35 @@ def _rollout_evidence(
 ) -> CandidateEvidence:
     """The rollouts file every trial shares, plus this rollout's own trace.
 
-    The trace is derived from the record rather than captured, so it is carried inline rather than
-    written beside the rollouts file. It is registered under the format-qualified key as well as the
-    plain one, so a metric asking for ``format="otlp"`` and one asking for whatever is primary reach
-    the same handle.
+    A declared trace file wins over the projection built from the rollout record. The trace is
+    registered under the format-qualified key as well as the plain one, so a metric asking for
+    ``format="otlp"`` and one asking for whatever is primary reach the same handle.
     """
     descriptors: dict[str, EvidenceDescriptor] = {
         "rollouts": EvidenceDescriptor(kind="filesystem", format="file", ref=str(rollouts_path))
     }
     capture_path = _capture_path(record, capture_dir)
+    if capture_path is not None:
+        # The capture stays even when a declared trace wins: a metric can still want the per-call source.
+        descriptors[NG_TRAJECTORY_EVIDENCE] = EvidenceDescriptor(
+            kind="filesystem", format="file", ref=str(capture_path)
+        )
     if capture_dir is not None and capture_path is None:
-        # Capture is switched on by the runner, so an absent one is Gym not doing what it was
-        # asked. The trial still scores; its trace just loses the timing capture exists to provide.
+        # Capture is requested by the runner, so a missing file is a misconfigured run whichever trace wins.
         logger.warning(
             "No model-call capture for trial %s under %s; its trace will carry no per-call timing.",
             trial_id,
             capture_dir,
         )
+    otlp, atif = _declared_fabric_trace(
+        record.get(FABRIC_RESULT_KEY),
+        run_dir=rollouts_path.parent,
+        trial={"task_index": record.get(NG_TASK_INDEX), "rollout_index": record.get(NG_ROLLOUT_INDEX)},
+    )
+    if otlp is not None:
+        register_trace_evidence(descriptors, atif=atif, otlp=otlp)
+        return CandidateEvidence(descriptors=descriptors)
     model_calls = _read_model_calls(capture_path, trial_id=trial_id)
-    if capture_path is not None:
-        # Kept as its own evidence, by reference: the OTLP view below is a projection of it, and a
-        # projection is not a reason to lose what it was projected from.
-        descriptors[NG_TRAJECTORY_EVIDENCE] = EvidenceDescriptor(
-            kind="filesystem", format="file", ref=str(capture_path)
-        )
     resource_spans = _rollout_resource_spans(record, task_id=task_id, trial_id=trial_id, model_calls=model_calls)
     if resource_spans is not None:
         # Rendered to JSON here and only here, because an ``EvidenceDescriptor`` holds JSON.

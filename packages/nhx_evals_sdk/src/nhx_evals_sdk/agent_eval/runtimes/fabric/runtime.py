@@ -66,12 +66,7 @@ from nhx_evals_sdk.agent_eval.runtimes.fabric.env import (
 )
 from nhx_evals_sdk.agent_eval.runtimes.fabric.image import ensure_fabric_image
 from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_receiver import OTLPReceiver
-from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_writer import (
-    fold_exports,
-    otlp_trace_path,
-    register_trace_evidence,
-    traces_dir,
-)
+from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_writer import fold_exports, otlp_trace_path, traces_dir
 from nhx_evals_sdk.agent_eval.runtimes.fabric.skills import (
     SKILL_MODE_CODEX_SKILLS_DIR,
     AgentSkill,
@@ -86,6 +81,7 @@ from nhx_evals_sdk.agent_eval.runtimes.fabric.skills import (
 )
 from nhx_evals_sdk.agent_eval.runtimes.sandbox.base import SandboxProvider
 from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_values
+from nhx_evals_sdk.agent_eval.runtimes.trace_evidence import ATIF_ARTIFACT_KIND, register_trace_evidence
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import (
     AgentEvalTrial,
@@ -753,7 +749,7 @@ def _atif_path(run: _common.TaskRun) -> Path | None:
     """
     if run.result is not None:
         for artifact in run.result.artifacts:
-            if artifact.kind == _common.ATIF_ARTIFACT_KIND:
+            if artifact.kind == ATIF_ARTIFACT_KIND:
                 return Path(artifact.path)
     if not run.relay_dir.is_dir():
         return None
@@ -947,7 +943,7 @@ def _atif_path(run: _common.TaskRun) -> Path | None:
     """
     if run.result is not None:
         for artifact in run.result.artifacts:
-            if artifact.kind == _common.ATIF_ARTIFACT_KIND:
+            if artifact.kind == ATIF_ARTIFACT_KIND:
                 return Path(artifact.path)
     if not run.relay_dir.is_dir():
         return None
