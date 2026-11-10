@@ -9,8 +9,9 @@ import { Button, Flex } from '@nvidia/foundations-react-core';
 import { DeployModelCta } from '@studio/components/ModelChat/DeployModelCta';
 import { LIVE_STATUSES } from '@studio/hooks/useBaseModelDeploymentReadiness';
 import type { DeploymentIndicatorState } from '@studio/hooks/useModelDeploymentStatuses';
-import { getModelTabLink, ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
+import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { DeleteDeploymentButton } from '@studio/routes/ModelDetailRoute/DeploymentTab/DeleteDeploymentButton';
+import { useModelTabRoute } from '@studio/routes/ModelDetailRoute/useModelTabRoute';
 import type { FC } from 'react';
 import { Link } from 'react-router';
 
@@ -22,6 +23,7 @@ export interface DeploymentActionsProps {
 }
 
 export const DeploymentActions: FC<DeploymentActionsProps> = ({ model, adapter, deployment }) => {
+  const getTabRoute = useModelTabRoute();
   const servedRef = deployment.kind === 'served' ? deployment.deploymentRef : undefined;
   const servedParts = servedRef ? getPartsFromReference(servedRef) : undefined;
   const { data: servedDeployment } = useModelsGetLatestDeployment(
@@ -37,7 +39,7 @@ export const DeploymentActions: FC<DeploymentActionsProps> = ({ model, adapter, 
       return (
         <Flex gap="density-sm">
           <Button kind="secondary" asChild>
-            <Link to={getModelTabLink(ModelDetailTab.Chat)}>Chat</Link>
+            <Link to={getTabRoute(ModelDetailTab.Chat)}>Chat</Link>
           </Button>
           {servedDeployment && (
             <DeleteDeploymentButton model={model} deployment={servedDeployment} />
