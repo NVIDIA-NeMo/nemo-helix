@@ -94,16 +94,34 @@ const mockTasks: Task[] = [
   },
 ];
 
-/** Name filter as the SDK serializes it with `qs` brackets: exact, `$in`, or `%text%` `$like`. */
-const nameMatcher = (request: Request) => {
+/** A text filter on `field` as the SDK serializes it with `qs` brackets: exact, `$in`, or
+ *  `%text%` `$like`. */
+const textMatcher = (params: URLSearchParams, field: string) => {
+  const exact = params.get(`filter[${field}]`);
+  const values = params.getAll(`filter[${field}][$in]`);
+  const like = params.get(`filter[${field}][$like]`)?.replaceAll('%', '').toLowerCase();
+  return (value = '') =>
+    (!exact || value === exact) &&
+    (!values.length || values.includes(value)) &&
+    (!like || value.toLowerCase().includes(like));
+};
+
+const nameMatcher = (request: Request) => textMatcher(new URL(request.url).searchParams, 'name');
+
+/** The taskset list's filters: name, description, a tag, and an `updated_at` range. */
+const tasksetMatcher = (request: Request) => {
   const params = new URL(request.url).searchParams;
-  const exact = params.get('filter[name]');
-  const names = params.getAll('filter[name][$in]');
-  const like = params.get('filter[name][$like]')?.replaceAll('%', '').toLowerCase();
-  return (name: string) =>
-    (!exact || name === exact) &&
-    (!names.length || names.includes(name)) &&
-    (!like || name.toLowerCase().includes(like));
+  const name = textMatcher(params, 'name');
+  const description = textMatcher(params, 'description');
+  const tag = params.get('filter[tags]');
+  const from = params.get('filter[updated_at][$gte]');
+  const to = params.get('filter[updated_at][$lte]');
+  return (t: Taskset) =>
+    name(t.name) &&
+    description(t.description) &&
+    (!tag || tag in (t.tags ?? {})) &&
+    (!from || Date.parse(t.updated_at) >= Date.parse(from)) &&
+    (!to || Date.parse(t.updated_at) <= Date.parse(to));
 };
 
 const notFound = (what: string) =>
@@ -152,10 +170,10 @@ export const evaluatorHandlers = [
 
   // Tasksets — read-only, as the Studio library is.
   http.get(`${EVALS_URL}/tasksets`, ({ request, params }) => {
-    const matches = nameMatcher(request);
+    const matches = tasksetMatcher(request);
     return paginate(
       request,
-      mockTasksets.filter((t) => t.workspace === params.workspace && matches(t.name))
+      mockTasksets.filter((t) => t.workspace === params.workspace && matches(t))
     );
   }),
   http.get(TASKSET_URL, ({ params }) => {

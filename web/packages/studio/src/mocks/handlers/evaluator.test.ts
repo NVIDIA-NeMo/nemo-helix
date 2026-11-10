@@ -20,6 +20,15 @@ describe('mock taskset handlers', () => {
     ]);
   });
 
+  it.each([
+    ['description', 'filter[description][$like]=%25sorting%25', ['sort-suite']],
+    ['tag', 'filter[tags]=stable', ['sort-suite']],
+    ['updated range', 'filter[updated_at][$gte]=2026-10-10T00:00:00Z', ['sort-suite']],
+    ['updated upper bound', 'filter[updated_at][$lte]=2026-10-10T00:00:00Z', ['phishing-triage']],
+  ])('filters tasksets by %s', async (_, query, expected) => {
+    expect(await names(`default/tasksets?${query}`)).toEqual(expected);
+  });
+
   it('filters tasks by a name list', async () => {
     expect(
       await names('default/tasks?filter[name][$in]=sort-ints&filter[name][$in]=missing')
