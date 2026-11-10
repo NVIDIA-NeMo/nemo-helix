@@ -5,15 +5,10 @@
 
 from datetime import datetime, timezone
 
+from compass.analysis import normalize_intake_trace
+from compass.traces import Trace, TraceSnapshot
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.intake.types import TraceFilterParam
-from trace_ingest.loaders.intake import (
-    _EvaluatorResult,
-    _IntakeSpan,
-    _IntakeTrace,
-    _normalize_trace,
-)
-from trace_ingest.models import Trace, TraceSnapshot
 
 
 async def load_trace_snapshot(
@@ -27,7 +22,7 @@ async def load_trace_snapshot(
 ) -> TraceSnapshot:
     """Select complete traces, retaining SDK authentication and token refresh.
 
-    Compass trace_ingest normalizer owns the conversion to canonical
+    Compass normalizer owns the conversion to canonical
     traces. Platform owns HTTP access because its clients refresh credentials
     and support evaluation IDs in addition to the package's name-based query.
     Time bounds select traces; child spans are loaded in full.
@@ -58,11 +53,11 @@ async def load_trace_snapshot(
             query_params={"filter": {"session_id": trace.session_id}, "page_size": 100},
         )
         traces.append(
-            _normalize_trace(
-                _IntakeTrace.model_validate(trace.model_dump(mode="json")),
-                [_IntakeSpan.model_validate(span.model_dump(mode="json")) async for span in spans.items()],
+            normalize_intake_trace(
+                trace.model_dump(mode="json"),
+                [span.model_dump(mode="json") async for span in spans.items()],
                 [
-                    _EvaluatorResult.model_validate(result.model_dump(mode="json"))
+                    result.model_dump(mode="json")
                     async for result in results.items()
                     # A FAILED result carries no value, which the snapshot model has no shape for.
                     if result.status != "FAILED"

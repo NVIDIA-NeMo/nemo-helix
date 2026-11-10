@@ -35,8 +35,7 @@ The plugin is installed by default through the root workspace's `enabled-plugins
 uv tool install --python 3.13 "nemo-helix[all]"
 ```
 
-The `nemo-compass-plugin` extra includes `nemo-compass==0.2.0`, which bundles Compass's
-analysis code and `trace_ingest` loaders. Compass execution requires Python
+The `nemo-compass-plugin` extra includes Compass's shared analysis API and trace loaders. Compass execution requires Python
 3.12 or 3.13; Compass does not yet support Python 3.14.
 
 ## CLI
@@ -61,6 +60,36 @@ completes successfully. A run and its backing job share one name.
 
 Provide `--agent` and pass the workspace and Ethos explicitly when needed.
 `--base-url` defaults to `NHX_BASE_URL`, then `http://localhost:8080`.
+
+### Analysis options and results
+
+Pass `--analysis-options options.json` to `analysis-runs create` or `analysis enable`
+to override Compass's analysis settings. The API and SDK accept the same object
+as `analysis_options`. For example:
+
+```json
+{"compass_signals": {"tool_issues": {"minimum_independent_cases": 5}, "user_sentiment": false}}
+```
+
+Helix stores only these overrides. The Compass version executing the job validates
+them and resolves omitted defaults, so new signals and defaults arrive with the
+package upgrade. Invalid options fail the job with Compass's validation error.
+For scheduled analysis, PATCH `analysis_options` with `{}` to reset to package
+defaults; omitting it or passing null leaves the saved overrides unchanged.
+
+The `compass-analysis` Job result contains the full serialized Compass analysis,
+including effective options, package version, stage outcomes, validation rejections,
+and signal diagnostics. `analysis-report` remains the human-readable report.
+Insight entities are a separate projection: existing user-edited titles,
+descriptions, ratings, and lifecycle status remain unchanged; only evidence and
+its date are updated. New package result fields remain available in the artifact
+even before Helix adds corresponding entity or Studio fields.
+
+The plugin calls `compass.analysis.analyze` and public Intake normalization.
+Compass owns stage ordering, signal registration, validation, compilation, link
+resolution, and confidence review. Helix owns authenticated clients, input loading,
+Fabric execution, and persistence. Integrations must keep borrowed model clients
+open through the run and close them afterward.
 
 ### Telemetry requirement
 

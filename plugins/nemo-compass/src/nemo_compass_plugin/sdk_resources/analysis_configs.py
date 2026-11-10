@@ -5,7 +5,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Protocol, TypeAlias, TypedDict
+from typing import Any, Protocol, TypeAlias, TypedDict
 
 from nemo_compass_plugin.client import AsyncCompassClient, CompassClient
 from nemo_compass_plugin.entities import (
@@ -68,14 +68,22 @@ def _list_params(
 def _build_update_body(
     *,
     enabled: bool | None,
+    analysis_options: dict[str, Any] | None = None,
 ) -> UpdateAnalysisConfigRequest:
-    if enabled is None:
-        return UpdateAnalysisConfigRequest()
-    return UpdateAnalysisConfigRequest(enabled=enabled)
+    body = UpdateAnalysisConfigRequest()
+    if enabled is not None:
+        body.enabled = enabled
+    if analysis_options is not None:
+        body.analysis_options = analysis_options
+    return body
 
 
-def _build_enable_body(*, default_model: str, fast_model: str) -> EnableAnalysisConfigRequest:
-    return EnableAnalysisConfigRequest(default_model=default_model, fast_model=fast_model)
+def _build_enable_body(
+    *, default_model: str, fast_model: str, analysis_options: dict[str, Any] | None = None
+) -> EnableAnalysisConfigRequest:
+    return EnableAnalysisConfigRequest(
+        default_model=default_model, fast_model=fast_model, analysis_options=analysis_options or {}
+    )
 
 
 def _build_status_update_body(
@@ -125,12 +133,22 @@ class _AnalysisConfigResource:
     def _client(self) -> CompassClient:
         return self._parent._client
 
-    def enable(self, *, workspace: str, agent: str, default_model: str, fast_model: str) -> AnalysisConfig:
+    def enable(
+        self,
+        *,
+        workspace: str,
+        agent: str,
+        default_model: str,
+        fast_model: str,
+        analysis_options: dict[str, Any] | None = None,
+    ) -> AnalysisConfig:
         with httpx_status_errors():
             response = self._client.enable_analysis_config(
                 workspace=workspace,
                 agent=agent,
-                body=_build_enable_body(default_model=default_model, fast_model=fast_model),
+                body=_build_enable_body(
+                    default_model=default_model, fast_model=fast_model, analysis_options=analysis_options
+                ),
             )
             return entity_from_response(AnalysisConfig, response.http_response.json())
 
@@ -147,6 +165,7 @@ class _AnalysisConfigResource:
         page_size: int = 20,
         sort: str = "-created_at",
         enabled: bool | None = None,
+        analysis_options: dict[str, Any] | None = None,
     ) -> AnalysisConfigPage:
         with httpx_status_errors():
             response = self._client.list_analysis_configs(
@@ -167,12 +186,13 @@ class _AnalysisConfigResource:
         workspace: str,
         agent: str,
         enabled: bool | None = None,
+        analysis_options: dict[str, Any] | None = None,
     ) -> AnalysisConfig:
         with httpx_status_errors():
             response = self._client.update_analysis_config(
                 workspace=workspace,
                 agent=agent,
-                body=_build_update_body(enabled=enabled),
+                body=_build_update_body(enabled=enabled, analysis_options=analysis_options),
             )
             return entity_from_response(AnalysisConfig, response.http_response.json())
 
@@ -187,12 +207,22 @@ class _AsyncAnalysisConfigResource:
     def _client(self) -> AsyncCompassClient:
         return self._parent._client
 
-    async def enable(self, *, workspace: str, agent: str, default_model: str, fast_model: str) -> AnalysisConfig:
+    async def enable(
+        self,
+        *,
+        workspace: str,
+        agent: str,
+        default_model: str,
+        fast_model: str,
+        analysis_options: dict[str, Any] | None = None,
+    ) -> AnalysisConfig:
         with httpx_status_errors():
             response = await self._client.enable_analysis_config(
                 workspace=workspace,
                 agent=agent,
-                body=_build_enable_body(default_model=default_model, fast_model=fast_model),
+                body=_build_enable_body(
+                    default_model=default_model, fast_model=fast_model, analysis_options=analysis_options
+                ),
             )
             return entity_from_response(AnalysisConfig, response.http_response.json())
 
@@ -209,6 +239,7 @@ class _AsyncAnalysisConfigResource:
         page_size: int = 20,
         sort: str = "-created_at",
         enabled: bool | None = None,
+        analysis_options: dict[str, Any] | None = None,
     ) -> AnalysisConfigPage:
         with httpx_status_errors():
             response = await self._client.list_analysis_configs(
@@ -229,12 +260,13 @@ class _AsyncAnalysisConfigResource:
         workspace: str,
         agent: str,
         enabled: bool | None = None,
+        analysis_options: dict[str, Any] | None = None,
     ) -> AnalysisConfig:
         with httpx_status_errors():
             response = await self._client.update_analysis_config(
                 workspace=workspace,
                 agent=agent,
-                body=_build_update_body(enabled=enabled),
+                body=_build_update_body(enabled=enabled, analysis_options=analysis_options),
             )
             return entity_from_response(AnalysisConfig, response.http_response.json())
 

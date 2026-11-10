@@ -39,6 +39,7 @@ def build_compass_agent_config(
     ethos: str | None = None,
     base_url: str | None = None,
     enable_observability: bool | None = None,
+    analysis_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build Compass's ``nemo-agents-spec-v1`` config for one run.
 
@@ -53,11 +54,14 @@ def build_compass_agent_config(
         base_url: Optional Platform base URL. Unset lets the job's own
             environment supply it.
         enable_observability: Whether Compass may export its own OTLP trace.
+        analysis_options: User overrides passed to the installed Compass package.
 
     Returns:
         A config dict suitable for ``AgentInline.config``.
     """
     settings: dict[str, Any] = {"agent": agent}
+    if analysis_options is not None:
+        settings["analysis_options"] = analysis_options
     if ethos is not None:
         settings["ethos"] = ethos
     if base_url is not None:

@@ -17,7 +17,8 @@ from nemo_compass_plugin.analysis.observability import CompassEvaluationContext
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.nooa_model_client import ConfiguredModelClients
 from nooa.context_blocks import ResultStatus
-from nooa.events import LLMComplete, PythonOutput
+from nooa.events import PythonOutput
+from nooa.unifiedllm import LLMResponse
 
 
 class FakeClient:
@@ -180,12 +181,12 @@ async def test_client_closed_when_model_resolution_raises(monkeypatch: pytest.Mo
 
 def test_verbose_echo_maps_nooa_reasoning_tools_and_execution(capsys: pytest.CaptureFixture[str]) -> None:
     run_module._echo_event(
-        LLMComplete(
-            reasoning_content="inspect the failing sessions",
+        LLMResponse(
+            reasoning="inspect the failing sessions",
             tool_calls=[
                 {
-                    "tool_call_id": "call-1",
-                    "function_name": "execute_python",
+                    "id": "call-1",
+                    "name": "execute_python",
                     "arguments": '{"code":"await self.fetch_spans()"}',
                 }
             ],

@@ -129,6 +129,9 @@ class CompassRuntime:
         # Every settings and context read can raise, so resolve them before
         # opening the client: nothing is worth a live SDK handle that no one closes.
         ethos = _string_setting(self._settings, "ethos")
+        analysis_options = self._settings.get("analysis_options", {})
+        if not isinstance(analysis_options, dict):
+            raise CompassAdapterConfigError("harness.settings.analysis_options must be an object")
         since = _datetime_context(request.context, SINCE_CONTEXT_KEY)
         evaluation_id = _string_context(request.context, EVALUATION_ID_CONTEXT_KEY)
         enable_observability = bool(self._settings.get("enable_observability", True))
@@ -148,6 +151,7 @@ class CompassRuntime:
                 enable_observability=enable_observability,
                 relay_scope_name=relay_scope_name,
                 model_refs=model_refs,
+                analysis_options=analysis_options,
             )
         return result
 

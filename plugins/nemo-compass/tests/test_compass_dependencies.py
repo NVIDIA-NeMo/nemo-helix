@@ -9,7 +9,7 @@ import sys
 import pytest
 
 
-@pytest.mark.parametrize("missing_dependency", ["compass", "trace_ingest", "unexpected_dependency"])
+@pytest.mark.parametrize("missing_dependency", ["compass", "unexpected_dependency"])
 def test_missing_compass_dependencies(missing_dependency: str) -> None:
     # A fresh process exercises adapter imports without cached compass dependencies.
     script = """

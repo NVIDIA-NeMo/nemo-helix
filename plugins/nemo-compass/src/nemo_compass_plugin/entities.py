@@ -5,7 +5,7 @@
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from nemo_compass_plugin.evidence import EvidenceCompatibility, TraceEvidence
 from nemo_helix_plugin.entity import NemoEntity
@@ -117,6 +117,11 @@ class AnalysisRun(NemoEntity, entity_type="insights_analysis_run"):
         description="Workspace-qualified Model Entity the run used for context summarization.",
     )
 
+    analysis_options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Compass analysis option overrides, validated by the Compass version executing the run. Omitted defaults are resolved at execution.",
+    )
+
 
 class AnalysisConfig(NemoEntity, entity_type="insights_analysis_config"):
     """Per-agent opt-in state for framework-managed periodic analysis.
@@ -140,6 +145,11 @@ class AnalysisConfig(NemoEntity, entity_type="insights_analysis_config"):
     fast_model: str = Field(
         default="",
         description="Workspace-qualified Model Entity used for latency-sensitive analysis work.",
+    )
+
+    analysis_options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Compass analysis option overrides, validated by the Compass version executing the run. Omitted defaults are resolved at execution.",
     )
 
 

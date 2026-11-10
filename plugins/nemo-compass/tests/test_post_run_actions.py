@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nemo_compass_plugin.post_run_actions import REPORT_RESULT_NAME, CompassAnalysisAction
+from nemo_compass_plugin.post_run_actions import ANALYSIS_RESULT_NAME, REPORT_RESULT_NAME, CompassAnalysisAction
 from nemo_helix_plugin.agents.post_run_actions import (
     FabricRuntimeResult,
     PostRunActionContext,
@@ -73,6 +73,7 @@ def test_compass_action_persists_compass_result_and_saves_report(
                         "summary": "summary",
                         "new_insights": [],
                         "updated_insights": [],
+                        "analysis_result": {"compass_version": "test", "effective_options": {}, "future_field": 7},
                     },
                 },
             ),
@@ -84,6 +85,10 @@ def test_compass_action_persists_compass_result_and_saves_report(
     assert client.closed
     report_path = Path(ctx.storage.ephemeral / "results" / REPORT_RESULT_NAME)
     assert report_path.read_text() == "Persisted analysis report"
+    import json
+
+    artifact = json.loads((ctx.storage.ephemeral / "results" / ANALYSIS_RESULT_NAME).read_text())
+    assert artifact == {"compass_version": "test", "effective_options": {}, "future_field": 7}
 
 
 def test_compass_action_names_the_missing_compass_result_key(ctx: JobContext) -> None:

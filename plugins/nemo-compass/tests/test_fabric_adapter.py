@@ -124,6 +124,7 @@ async def test_fabric_adapter_returns_unpersisted_compass_result(monkeypatch) ->
                 {
                     "agent": "research-agent",
                     "ethos": "# Ethos",
+                    "analysis_options": {"compass_signals": {"tool_issues": False}},
                     "base_url": "http://platform",
                 }
             )
@@ -148,11 +149,13 @@ async def test_fabric_adapter_returns_unpersisted_compass_result(monkeypatch) ->
             "summary": "No high-impact failures found.",
             "new_insights": [],
             "updated_insights": [],
+            "analysis_result": None,
             "notes": [],
         },
     }
     assert seen["agent"] == "research-agent"
     assert seen["ethos"] == "# Ethos"
+    assert seen["analysis_options"] == {"compass_signals": {"tool_issues": False}}
     assert seen["workspace"] == "workspace"
     assert seen["base_url"] == "http://platform"
     assert seen["client"] is clients[0]

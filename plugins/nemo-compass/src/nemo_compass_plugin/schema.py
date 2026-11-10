@@ -88,12 +88,17 @@ class EnableAnalysisConfigRequest(BaseModel):
 
     default_model: str = Field(min_length=1)
     fast_model: str = Field(min_length=1)
+    analysis_options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Compass analysis option overrides, validated by the Compass version executing the run. Omitted defaults are resolved at execution.",
+    )
 
 
 class UpdateAnalysisConfigRequest(BaseModel):
     """Body for ``PATCH /analysis-configs/{agent}``."""
 
     enabled: bool | None = None
+    analysis_options: dict[str, Any] | None = None
 
 
 NonBlankString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -131,6 +136,10 @@ class CreateAnalysisRunRequest(BaseModel):
     evaluation_id: NonBlankString | None = Field(
         default=None,
         description="Optional run scope AND-pinned onto every span read.",
+    )
+    analysis_options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Compass analysis option overrides, validated by the Compass version executing the run. Omitted defaults are resolved at execution.",
     )
     timeout_seconds: float | None = Field(default=None, gt=0, description="Optional execute job timeout.")
 

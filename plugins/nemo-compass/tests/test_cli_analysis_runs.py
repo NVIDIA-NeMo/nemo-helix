@@ -439,3 +439,23 @@ def test_model_warning_does_not_block_submission(app, api, flag, model, warns):
         assert "NVIDIA Nemotron 3.5 Super VL" in result.stderr
     assert api.requests[0].body[flag.removeprefix("--").replace("-", "_")] == model
     assert json.loads(result.stdout)["run"]["name"] == RUN_NAME
+
+
+def test_options_file_reaches_request_without_expanding_defaults(app, api, tmp_path):
+    api.on("POST", RUNS, run_response_json())
+    path = tmp_path / "options.json"
+    overrides = {"compass_signals": {"tool_issues": False}}
+    path.write_text(json.dumps(overrides))
+    result = _create(app, "--analysis-options", str(path))
+    assert result.exit_code == 0, result.output
+    assert api.requests[0].body["analysis_options"] == overrides
+
+
+@pytest.mark.parametrize("text", ["[1, 2]", "null", "{broken"])
+def test_options_file_requires_json_object(app, api, tmp_path, text):
+    path = tmp_path / "options.json"
+    path.write_text(text)
+    result = _create(app, "--analysis-options", str(path))
+    assert result.exit_code != 0
+    assert "--analysis-options" in result.output
+    assert api.requests == []
