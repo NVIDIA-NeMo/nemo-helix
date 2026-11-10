@@ -159,19 +159,27 @@ def _build_images(evaluator: Evaluator, ref: str, *, wait: bool, status: bool, p
     if status:
         builds = read_builds(evaluator, refs)
         code = _print_status(builds)
+
         if (hint := _submit_ready_hint(ref, builds, flag)) is not None:
             typer.echo(hint)
+
         return code
+
     if not wait:
         typer.echo(builds_summary(request_builds(evaluator, refs)))
         typer.echo("Check with --status, follow with --wait, or submit once all are ready.")
         return 0
+
     builds = wait_for_builds(evaluator, refs, poll_seconds=poll_seconds, echo=typer.echo)
+
     if failed_builds(builds) is not None:
         typer.echo("Rerun this command to retry the failed builds.")
+
         if (hint := _submit_ready_hint(ref, builds, flag)) is not None:
             typer.echo(hint)
+
         return 1
+
     typer.echo(f"Submit with: nemo evals runs submit --taskset {shlex.quote(ref)}{flag}")
     return 0
 
@@ -185,12 +193,17 @@ def _submit_ready_hint(ref: str, builds: dict[str, ImageBuild] | dict[str, Image
     """
     states = {task: _build_state(build) for task, build in builds.items()}
     failed = [task for task, state in states.items() if state == "failed"]
+
     if not failed or any(state not in ("ready", "failed") for state in states.values()):
         return None
-    if (option := tasks_without(list(builds), failed)) is None:
+
+    option = tasks_without(list(builds), failed)
+    if option is None:
         return None
+
     count, value = option
     tasks = f"{count} ready task{'s' if count != 1 else ''}"
+
     return f"Or submit the {tasks} with: nemo evals runs submit --taskset {shlex.quote(ref)} --tasks {value}{flag}"
 
 
