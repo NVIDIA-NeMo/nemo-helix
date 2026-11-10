@@ -87,6 +87,7 @@ RUN --mount=type=cache,target=/root/.cache/uv <<"EOF" bash -eu
 umask 022
 export UV_CACHE_DIR=/root/.cache/uv
 for python in \
+    /opt/ray_venvs/nemo_rl.models.policy.workers.automodel_policy_worker.AutomodelPolicyWorker/bin/python \
     /opt/ray_venvs/nemo_rl.models.policy.workers.megatron_policy_worker.MegatronPolicyWorker/bin/python \
     /opt/ray_venvs/nemo_rl.models.generation.vllm.vllm_worker.VllmGenerationWorker/bin/python \
     /opt/ray_venvs/nemo_rl.models.generation.vllm.vllm_worker_async.VllmAsyncGenerationWorker/bin/python \
