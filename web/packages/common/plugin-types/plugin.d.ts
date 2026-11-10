@@ -3,9 +3,11 @@
 import * as React$1 from "react";
 import react__default, { AriaAttributes, CSSProperties, ChangeEvent, ComponentProps, ComponentPropsWithRef, ComponentPropsWithoutRef, ComponentType, ElementType, FC, ForwardRefExoticComponent, JSX as JSX$1, JSXElementConstructor, MouseEventHandler, PropsWithChildren, ReactElement, ReactNode, RefAttributes, RefObject, SVGProps } from "react";
 import { ThreadMessageLike, ThreadPrimitive, ToolCallMessagePartComponent } from "@assistant-ui/react";
-import { HelixJobLog, HelixJobStatus, InferenceParams, ModelEntity, ModelEntityFilter, ModelEntitySortField, ModelEntitysPage, ModelsListModelsParams, PromptData } from "@nemo/sdk/generated/platform/schema";
+import { HelixJobLog, HelixJobStatus, InferenceParams, ModelEntity, ModelEntityFilter, ModelEntitysPage, ModelsListModelsParams, PromptData } from "@nemo/sdk/generated/platform/schema";
 import { Agent } from "@nemo/sdk/generated/agents/schema";
 import { VariantProps } from "class-variance-authority";
+import { ModelEntitySortField } from "@nemo/sdk/generated/platform/schema/ModelEntitySortField";
+import { HelixJobStatus as HelixJobStatus$1 } from "@nemo/sdk/generated/platform/schema/HelixJobStatus";
 //#endregion
 //#region src/components/AccessibleTitle/index.d.ts
 interface AccessibleTitleProps {
@@ -11400,9 +11402,9 @@ export declare const DEFAULT_PAGE = 1;
 export declare const DEFAULT_PAGE_SIZE = 50;
 //#endregion
 //#region src/constants/query.d.ts
-export declare const CJobCancellableStatuses: HelixJobStatus[];
-export declare const CJobLaunchableStatuses: HelixJobStatus[];
-export declare const CJobTerminalStatuses: HelixJobStatus[];
-export declare const HelixJobTerminalStatuses: HelixJobStatus[];
+export declare const CJobCancellableStatuses: HelixJobStatus$1[];
+export declare const CJobLaunchableStatuses: HelixJobStatus$1[];
+export declare const CJobTerminalStatuses: HelixJobStatus$1[];
+export declare const HelixJobTerminalStatuses: HelixJobStatus$1[];
 //#endregion
 export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type ListModels, type LogStatus, type ModelSearchFilter, type ModelSearchProps, type ModelSelectProps, type ModelSelection, type ModelType, type ModelWorkspaceGroup, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseModelSearchCoreOptions as UseModelSearchOptions, type UseModelSearchResult, type UseStudioDataViewStateOptions, type WithFilterOperators, WorkspaceModelSelectCore as WorkspaceModelSelect, type WorkspaceModelSelectCoreProps as WorkspaceModelSelectProps, useModelSearchCore as useModelSearch };
