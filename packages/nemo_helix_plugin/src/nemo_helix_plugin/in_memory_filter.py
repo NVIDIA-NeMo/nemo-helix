@@ -50,14 +50,12 @@ class InMemoryFilterRepository(FilterRepository):
     def _value(self, field: str) -> Any:
         """Resolve ``field`` on the bound entity (``_MISSING`` if absent).
 
-        Mirrors ``SQLAlchemyFilterRepository._get_column``: a plain attribute/key,
-        or a dotted walk through a nested JSON mapping.
+        Resolve a plain attribute/key or walk a dotted path rooted at a JSON
+        mapping. This accepts both entity-store ``data`` and typed Job ``spec``
+        shapes; callers supply paths appropriate to the bound object.
         """
         if _has_attr(self.entity, field):
             return _get_attr(self.entity, field, _MISSING)
-        if field.startswith("data."):
-            data = _get_attr(self.entity, "data", _MISSING)
-            return _walk_json_path(data, field.split(".")[1:])
         if "." in field:
             root, *path = field.split(".")
             value = _get_attr(self.entity, root, _MISSING)
