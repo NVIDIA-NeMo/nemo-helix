@@ -19,8 +19,10 @@ from harbor.agents.installed.base import NonZeroAgentExitCodeError
 from harbor.agents.nop import NopAgent
 from harbor.environments.base import ExecResult
 from harbor.environments.capabilities import EnvironmentCapabilities
-from harbor.models.task.config import NetworkMode, NetworkPolicy
+from harbor.environments.docker.docker import DockerEnvironment
+from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.config import AgentConfig
+from harbor.models.trial.paths import TrialPaths
 from nemo_evals.harbor import agent_setup_egress
 from nemo_evals.harbor.agent_setup_egress import (
     GUARDED_METHODS,
@@ -30,6 +32,10 @@ from nemo_evals.harbor.agent_setup_egress import (
     AgentSetupEgress,
 )
 from nemo_evals.harbor.setup_cleanup import KILL_CONNECTION_HOLDERS_SCRIPT, LIST_PROCESSES_SCRIPT, SYSTEM_PATH
+from nhx_evals_sdk.agent_eval.runtimes.harbor.host_alias import (
+    CONTAINER_HOST_ALIAS_OVERLAY,
+    SIDECAR_HOST_ALIAS_OVERLAY,
+)
 
 SETUP_HOSTS = ["registry.npmjs.org", "pypi.org"]
 SNAPSHOT = ("1:100", "7:250")
@@ -713,3 +719,36 @@ def test_an_acp_shorthand_keeps_its_registry_spec(tmp_path):
     from harbor.agents.installed.acp import AcpAgent
 
     assert isinstance(_agent(tmp_path, inner="acp:claude-code"), AcpAgent)
+
+
+@pytest.mark.parametrize(
+    "alias", [CONTAINER_HOST_ALIAS_OVERLAY, SIDECAR_HOST_ALIAS_OVERLAY], ids=["container", "sidecar"]
+)
+@pytest.mark.parametrize("task_compose", [False, True], ids=["no-task-compose", "task-compose"])
+@pytest.mark.parametrize("other_overlay", [False, True], ids=["alias-only", "other-overlay"])
+def test_only_the_sdk_host_alias_overlays_dont_count_as_compose(
+    tmp_path: Path, alias: Path, task_compose: bool, other_overlay: bool
+) -> None:
+    """The runtime's alias overlay alone leaves the setup window free to open; any other Compose file keeps the guard."""
+    environment_dir = tmp_path / "environment"
+    environment_dir.mkdir()
+    (environment_dir / "Dockerfile").write_text("FROM python:3.13-slim\n")
+    if task_compose:
+        (environment_dir / "docker-compose.yaml").write_text("services: {worker: {image: alpine}}\n")
+    overlays = [alias]
+    if other_overlay:
+        # Same name and content, but not the SDK's file: anything else could define services.
+        copy = tmp_path / alias.name
+        copy.write_text(alias.read_text())
+        overlays.append(copy)
+    environment = DockerEnvironment(
+        environment_dir=environment_dir,
+        environment_name="alias-guard",
+        session_id="alias-guard",
+        trial_paths=TrialPaths(trial_dir=tmp_path / "trial"),
+        task_env_config=EnvironmentConfig(),  # public, so no Docker daemon or kernel probe is needed
+        extra_docker_compose=overlays,
+    )
+
+    assert environment._uses_compose  # what Harbor reports, and what kept the window shut
+    assert agent_setup_egress._uses_compose(environment) is (task_compose or other_overlay)

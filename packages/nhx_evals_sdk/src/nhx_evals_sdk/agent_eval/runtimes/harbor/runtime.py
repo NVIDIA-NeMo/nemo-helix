@@ -71,6 +71,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.env import (
     validate_harbor_env,
     warn_unscrubbed_secret_keys,
 )
+from nhx_evals_sdk.agent_eval.runtimes.harbor.host_alias import CONTAINER_HOST_ALIAS_OVERLAY, SIDECAR_HOST_ALIAS_OVERLAY
 from nhx_evals_sdk.agent_eval.runtimes.harbor.scoring import harbor_scoring_metrics
 from nhx_evals_sdk.agent_eval.runtimes.harbor.setup_slots import SetupSlots, default_slot_dir, max_concurrent_setups
 from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import (
@@ -1181,8 +1182,8 @@ def _build_native_job(
             # sidecar's network, where Docker refuses the alias but shares the sidecar's hosts file, so there
             # the alias goes on the sidecar and the task's allowlist still decides reachability. Overlays are
             # job-wide, so a selection with both kinds runs as two Harbor jobs.
-            container_alias = [Path(__file__).with_name("host-gateway.yaml")]
-            sidecar_alias = [Path(__file__).with_name("host-gateway-sidecar.yaml")]
+            container_alias = [CONTAINER_HOST_ALIAS_OVERLAY]
+            sidecar_alias = [SIDECAR_HOST_ALIAS_OVERLAY]
             public, restricted, unknown = await _partition_by_egress_control(dataset_path, task_names, agent)
             if unknown:
                 logger.warning(

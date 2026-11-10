@@ -33,9 +33,11 @@ from harbor.agents.factory import AgentFactory
 from harbor.agents.installed.acp_registry import is_acp_registry_shorthand, registry_spec_from_agent_name
 from harbor.agents.installed.base import BaseInstalledAgent, NonZeroAgentExitCodeError
 from harbor.environments.base import BaseEnvironment, ExecResult
+from harbor.environments.docker.docker import DockerEnvironment
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from harbor.models.trial.config import AgentConfig
 from nemo_evals.harbor.setup_cleanup import KILL_CONNECTION_HOLDERS_SCRIPT, LIST_PROCESSES_SCRIPT, SHELL, SYSTEM_PATH
+from nhx_evals_sdk.agent_eval.runtimes.harbor.host_alias import HOST_ALIAS_OVERLAYS
 
 SETUP_EGRESS_AGENT = "nemo_evals.harbor.agent_setup_egress:AgentSetupEgress"
 INNER_AGENT_KWARG = "agent_setup_egress_inner"
@@ -188,8 +190,28 @@ def _uses_compose(environment: BaseEnvironment) -> bool:
 
     The cleanup only sees the main service's processes, so a compose environment keeps the task's policy.
     Every Harbor provider that supports compose reports per instance whether it uses it.
+
+    Harbor's Docker environment counts any extra Compose file as compose, including the host alias overlays
+    the SDK runtime adds to every local Docker job. Those only set ``extra_hosts`` on services Harbor runs
+    anyway and start nothing outside the main container, so an environment with no other Compose file is not
+    treated as compose. Counting them kept every restricted local Docker task on its baseline policy during
+    setup, so an agent that installs anything could not reach the setup hosts.
     """
-    return environment.capabilities.docker_compose and environment._uses_compose
+    if not (environment.capabilities.docker_compose and environment._uses_compose):
+        return False
+    return not _only_sdk_host_aliases(environment)
+
+
+def _only_sdk_host_aliases(environment: BaseEnvironment) -> bool:
+    """Whether the only Compose files on a Docker environment are the SDK's own host alias overlays.
+
+    Matched by resolved path, not by name or content: a task's own ``docker-compose.yaml`` or any other
+    overlay can define services, so either keeps the environment counted as compose.
+    """
+    if not isinstance(environment, DockerEnvironment) or environment._environment_docker_compose_path.exists():
+        return False
+    overlays = environment.extra_docker_compose_paths
+    return bool(overlays) and all(path.resolve() in HOST_ALIAS_OVERLAYS for path in overlays)
 
 
 @cache
