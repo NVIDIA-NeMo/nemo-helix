@@ -66,6 +66,9 @@ export const useJobNotifications = (workspace: string | undefined): void => {
       query: {
         enabled: Boolean(workspace),
         staleTime: 0,
+        // The whole point is to notice a job finishing while the user is on another tab, and
+        // TanStack Query pauses interval refetching in a background tab unless told not to.
+        refetchIntervalInBackground: true,
         refetchInterval: (query) =>
           query.state.status === 'error' ? false : JOB_POLLING_INTERVAL_LONG,
       },
@@ -92,6 +95,9 @@ export const useJobNotifications = (workspace: string | undefined): void => {
         const notification = new Notification(content.title, {
           body: content.body,
           tag: content.tag,
+          // Ask the OS to play its notification sound. Browsers have no custom-sound option;
+          // whether a sound is actually heard still follows the OS's notification settings.
+          silent: false,
         });
         notification.onclick = () => {
           window.focus();

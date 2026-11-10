@@ -80,7 +80,7 @@ describe('useJobNotifications', () => {
     await waitFor(() => expect(notificationCtor).toHaveBeenCalledTimes(1));
     expect(notificationCtor).toHaveBeenCalledWith(
       'Job completed',
-      expect.objectContaining({ tag: 'my-job' })
+      expect.objectContaining({ tag: 'my-job', silent: false })
     );
   });
 
@@ -116,6 +116,17 @@ describe('useJobNotifications', () => {
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
 
     expect(notificationCtor).not.toHaveBeenCalled();
+  });
+
+  it('keeps polling while the tab is in the background', async () => {
+    // TanStack Query pauses interval refetching in a background tab by default, which would
+    // silence the watcher exactly when the user has switched away.
+    serveStatus('active');
+    const queryClient = setup();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+
+    const [query] = queryClient.getQueryCache().getAll();
+    expect(query.observers[0].options.refetchIntervalInBackground).toBe(true);
   });
 
   it('asks for permission once a running job is seen and permission is undecided', async () => {
