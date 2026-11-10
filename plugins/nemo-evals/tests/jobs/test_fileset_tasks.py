@@ -10,14 +10,14 @@ ordinary inline/stored-task path covered elsewhere.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 
 import pytest
+from fastapi import FastAPI, HTTPException
 from nemo_evals.api.fields import MetadataItem, TaskInputs
 from nemo_evals.api.schemas import EvaluatorTaskDefinition, TaskInput
 from nemo_evals.api.service.task_service import stored_evaluator_task_digest
@@ -26,8 +26,10 @@ from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec
 from nemo_evals.jobs.fileset_tasks import gym_reward_metric
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.service import EvaluatorPluginService
+from nemo_helix_plugin.dependencies import get_submission_authorizer
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nhx.core.entities.service import EntitiesService
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.service import JobsService
@@ -262,33 +264,74 @@ def test_a_failing_submission_check_writes_nothing(ctx: ClientContext, monkeypat
     assert _writes(ctx, "tasks") == _writes(ctx, "tasksets") == 0
 
 
-def test_the_caller_authorizer_checks_every_read_and_write_before_any_write(ctx: ClientContext) -> None:
+def _authorize_as(ctx: ClientContext, authorize: Callable[[str, str], Awaitable[None]]) -> None:
+    """Make the job route check the submission with ``authorize``, as the platform does with the caller's scopes."""
+    app = ctx.test_client.app
+    assert isinstance(app, FastAPI)
+    app.dependency_overrides[get_submission_authorizer] = lambda: authorize
+
+
+def _jobs(ctx: ClientContext) -> int:
+    listed = ctx.test_client.get("/apis/evals/v2/workspaces/default/agent-evaluate/jobs").raise_for_status()
+    return len(listed.json()["data"])
+
+
+def test_the_route_checks_the_file_read_with_the_callers_scopes(ctx: ClientContext) -> None:
+    """A token whose principal may read the file but whose scopes may not gets no copy of it in a job."""
+    _upload(ctx, _row("q"))
+
+    async def authorize(method: str, path: str) -> None:
+        if path.startswith("/apis/files/"):
+            raise HTTPException(status_code=403, detail="token lacks files:read")
+
+    _authorize_as(ctx, authorize)
+    response = ctx.test_client.post(
+        "/apis/evals/v2/workspaces/default/agent-evaluate/jobs", json={"spec": _spec(_tasks(snapshot=None))}
+    )
+
+    assert response.status_code == 403, response.text
+    assert "files:read" in response.text
+    assert _jobs(ctx) == 0
+
+
+def test_the_route_checks_every_snapshot_read_and_write_before_any_write(ctx: ClientContext) -> None:
     _upload(ctx, _row("q"))
     checked: list[tuple[str, str]] = []
 
     async def authorize(method: str, path: str) -> None:
         checked.append((method, path))
         if "/tasksets/" in path:
-            raise PermissionError("no taskset writes")
+            raise PermissionError("no taskset access")
 
-    with pytest.raises(PermissionError, match="no taskset writes"):
-        asyncio.run(
-            AgentEvalJob.to_spec(
-                AgentEvalInputSpec.model_validate(_spec(_tasks())),
-                workspace="default",
-                entity_client=ctx.entity_client,
-                async_sdk=ctx.async_client,
-                is_local=False,
-                authorize=authorize,
-            )
-        )
+    _authorize_as(ctx, authorize)
+    response = ctx.test_client.post(
+        "/apis/evals/v2/workspaces/default/agent-evaluate/jobs", json={"spec": _spec(_tasks())}
+    )
 
+    assert response.status_code == 403, response.text
     methods = {(method, path.split("/")[-2] if "/evals/" in path else path) for method, path in checked}
     assert ("GET", "/apis/files/v2/workspaces/default/filesets/golden/-/gym/golden.jsonl") in methods
     assert ("PUT", "tasks") in methods
     # Reading the previous revision is checked too, before the taskset write.
     assert checked[-1] == ("GET", "/apis/evals/v2/workspaces/default/tasksets/golden-suite")
     assert _writes(ctx, "tasks") == _writes(ctx, "tasksets") == 0
+    assert _jobs(ctx) == 0
+
+
+def test_a_compile_refusal_leaves_the_snapshot_unchanged(ctx: ClientContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    _upload(ctx, _row("q1"), _row("q2"))
+    _submit(ctx, _tasks())
+    _upload(ctx, _row("q1"), _row("q2 edited"))
+
+    async def refuse(*_: object, **__: object) -> None:
+        raise HelixJobCompilationError("sandboxing is disabled")
+
+    monkeypatch.setattr(AgentEvalJob, "_compile", refuse)
+    assert "sandboxing is disabled" in _refused(ctx, _tasks())
+
+    assert _writes(ctx, "tasks") == 2
+    assert _taskset_revisions(ctx) == 1
+    assert _jobs(ctx) == 1
 
 
 def test_the_computed_digest_is_the_one_the_service_publishes(ctx: ClientContext) -> None:

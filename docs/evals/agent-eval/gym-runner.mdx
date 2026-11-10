@@ -450,7 +450,8 @@ submission waits.
 ### Snapshots
 
 With `snapshot`, the submission also publishes the file's tasks and a revision of the named taskset,
-then runs exactly those tasks. Submit whenever the file changes:
+then runs exactly those tasks. Publishing is the submission's last step, so a refused submission
+leaves the taskset as it was. Submit whenever the file changes:
 
 | The file | Tasks | Taskset |
 | --- | --- | --- |

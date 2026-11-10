@@ -6,13 +6,13 @@
 :func:`load_task_inputs` reads the file as the submitter, within a byte cap, and converts its rows
 with ``discover_gym_tasks`` into ordinary inline task inputs, which then pass every check any inline
 task passes. When the source names a snapshot taskset, :func:`publish_snapshot` runs after those
-checks: it writes each changed task, then a taskset revision pinning every member to the digest its
+checks and, on the job route, after compilation too: it writes each changed task, then a taskset revision pinning every member to the digest its
 write returned, and pins the evaluation's tasks to those same revisions. Nothing is looked up
 afterwards by name or "newest", so a concurrent submission cannot swap another file's rows in.
 
 Writes go through the submitter's request-scoped client, so the platform authorizes each as the
-submitter; ``authorize``, when the caller supplies one, additionally checks them with the submitter's
-token scopes.
+submitter. ``authorize``, which the job route supplies, additionally checks the file read and the
+writes with the submitter's token scopes.
 """
 
 from __future__ import annotations

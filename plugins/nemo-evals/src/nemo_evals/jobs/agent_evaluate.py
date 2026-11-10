@@ -136,6 +136,7 @@ from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
     CPUExecutionProviderSpec,
+    DeferWrite,
     HelixJobSpec,
     SubprocessExecutionProviderSpec,
 )
@@ -239,6 +240,17 @@ def _staged_agent_files(target: FabricRunnerTarget | HarborRunnerTarget, ctx: Jo
     return staged
 
 
+async def _discard_resolved_agent_files(target: object, async_sdk: AsyncHelixClient | None) -> None:
+    """Delete the registered agent's files snapshot resolution took, for a submission that creates no job."""
+    snapshot = (
+        registered_agent_files_receipt(target)
+        if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
+        else None
+    )
+    if snapshot is not None and async_sdk is not None:
+        await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
+
+
 class _AgentEvalJobBase(NemoJob):
     """Run agent evaluation (``AgentEvaluator``) over tasks against a Model/Agent endpoint or runner."""
 
@@ -266,10 +278,13 @@ class _AgentEvalJobBase(NemoJob):
         async_sdk: AsyncHelixClient | None,
         is_local: bool,
         authorize: SourceReadAuthorizer | None = None,
+        defer: DeferWrite | None = None,
     ) -> BaseModel:
         """Resolve each task's metric references into inline metrics for the canonical spec.
 
         ``authorize``, when set, checks each stored task, metric and model as the caller before it is read.
+        ``defer``, when set, receives a FileSet source's snapshot publication, which the job route runs only
+        once compilation has also passed; without it the snapshot is published here, after every check.
         """
         del is_local
         submit_spec = (
@@ -316,30 +331,37 @@ class _AgentEvalJobBase(NemoJob):
                 tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"})
             )
             add_gateway_key_placeholder(build_task_environment(_secret_refs(spec)), spec.target)
-            if fileset_source is not None and fileset_source.snapshot is not None:
-                # Last, after every check: publishing is the submission's only write.
-                pinned = await publish_snapshot(
-                    fileset_source,
-                    file_inputs,
-                    spec.tasks,
-                    source_sha256=source_sha256,
-                    workspace=workspace,
-                    async_client=require_platform_client(async_sdk, "publishing a FileSet task snapshot"),
-                    authorize=authorize,
-                )
-                spec = spec.model_copy(update={"tasks": pinned})
-            return spec
+            if fileset_source is None or fileset_source.snapshot is None:
+                return spec
+            source = fileset_source
+
+            async def publish(canonical: BaseModel) -> BaseModel:
+                # Publishing is the submission's only write, so it runs after every check.
+                assert isinstance(canonical, AgentEvalSpec)
+                try:
+                    pinned = await publish_snapshot(
+                        source,
+                        file_inputs,
+                        canonical.tasks,
+                        source_sha256=source_sha256,
+                        workspace=workspace,
+                        async_client=require_platform_client(async_sdk, "publishing a FileSet task snapshot"),
+                        authorize=authorize,
+                    )
+                except Exception:
+                    await _discard_resolved_agent_files(canonical.target, async_sdk)
+                    raise
+                return canonical.model_copy(update={"tasks": pinned})
+
+            if defer is not None:
+                defer(publish)
+                return spec
         except Exception:
             # Resolution may have snapshotted the agent's files; a submission that fails after that owns no job
             # to clean the snapshot up, so it goes here.
-            snapshot = (
-                registered_agent_files_receipt(target)
-                if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
-                else None
-            )
-            if snapshot is not None and async_sdk is not None:
-                await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
+            await _discard_resolved_agent_files(target, async_sdk)
             raise
+        return await publish(spec)
 
     @classmethod
     async def compile(
@@ -365,14 +387,7 @@ class _AgentEvalJobBase(NemoJob):
         try:
             return await cls._compile(canonical_spec, async_sdk=async_sdk, profile=profile)
         except Exception:
-            target = canonical_spec.target
-            snapshot = (
-                registered_agent_files_receipt(target)
-                if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
-                else None
-            )
-            if snapshot is not None and async_sdk is not None:
-                await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
+            await _discard_resolved_agent_files(canonical_spec.target, async_sdk)
             raise
 
     @classmethod
