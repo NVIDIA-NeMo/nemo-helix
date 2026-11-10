@@ -16,6 +16,7 @@ import pytest
 import yaml
 from _doubles import make_job_context, make_sdk
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
+from nemo_agent_hardener_plugin.filesets import UploadedFileset
 from nemo_agent_hardener_plugin.jobs import _common, artifacts, benign_suite, execution
 from nemo_agent_hardener_plugin.jobs import manifest as manifest_mod
 from nemo_agent_hardener_plugin.jobs import run as run_module
@@ -1294,12 +1295,17 @@ def test_legacy_manifest_re_resolves_then_freezes_itself(tmp_path: Path, monkeyp
         )
     )
     seen = _capture_resolve(monkeypatch)
-    monkeypatch.setattr(manifest_mod, "upload_project_dir", lambda _s, _d, *, workspace: "default/new-fs")
+    monkeypatch.setattr(
+        manifest_mod,
+        "upload_project_dir",
+        lambda _s, _d, *, workspace: UploadedFileset("default/new-fs", "scaffold-id"),
+    )
 
     manifest_mod._materialize_manifest(sdk, "clockbot-hardening", make_job_context(tmp_path))
 
     assert seen != {}, "the legacy path still resolves"
     assert updated["data"]["agent_fileset"] == "default/new-fs"
+    assert updated["data"]["agent_fileset_id"] == "scaffold-id"
     assert updated["data"]["manifest_yaml"]
 
 

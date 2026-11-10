@@ -19,6 +19,7 @@ from pathlib import Path
 
 from filesets import AsyncFilesetFileSystem
 from nemo_agents_plugin.entities import ethos_fileset_name
+from nemo_evals._fileset_receipt import FilesetReceipt
 from nemo_evals.filesets import FilesetRef, _download_fileset_ref
 from nemo_evals.jobs.utils import run_with_isolated_async_client
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -35,7 +36,9 @@ def snapshot_fileset_name() -> str:
     return f"{SNAPSHOT_FILESET_PREFIX}{uuid.uuid4().hex[:12]}"
 
 
-async def snapshot_registered_agent_files(files: AsyncFilesClient, *, workspace: str, agent_name: str) -> FilesetRef:
+async def snapshot_registered_agent_files(
+    files: AsyncFilesClient, *, workspace: str, agent_name: str
+) -> FilesetReceipt:
     """Copy the agent's Ethos FileSet into a fresh job-owned FileSet and return that FileSet's ref.
 
     The caller has already checked the Ethos FileSet exists. A failure after the snapshot FileSet was
@@ -44,9 +47,12 @@ async def snapshot_registered_agent_files(files: AsyncFilesClient, *, workspace:
     source = f"{workspace}/{ethos_fileset_name(agent_name)}"
     snapshot = snapshot_fileset_name()
     description = f"Ethos files of agent {workspace}/{agent_name} as evaluated; snapshot of {source}."
-    await files.create_fileset(
-        workspace=workspace, body=CreateFilesetRequest(name=snapshot, description=description[:255])
-    )
+    allocated = (
+        await files.create_fileset(
+            workspace=workspace, body=CreateFilesetRequest(name=snapshot, description=description[:255])
+        )
+    ).data()
+    receipt = FilesetReceipt(ref=f"{workspace}/{snapshot}", fileset_id=allocated.id)
     try:
         with tempfile.TemporaryDirectory(prefix=".agent-files-snapshot-") as directory:
             downloaded = await _download_fileset_ref(
@@ -60,29 +66,29 @@ async def snapshot_registered_agent_files(files: AsyncFilesClient, *, workspace:
                     content=path.read_bytes(),
                 )
     except Exception:
-        await discard_registered_agent_files(files, FilesetRef(root=f"{workspace}/{snapshot}"))
+        await discard_registered_agent_files(files, receipt)
         raise
-    return FilesetRef(root=f"{workspace}/{snapshot}")
+    return receipt
 
 
-async def discard_registered_agent_files(files: AsyncFilesClient, ref: FilesetRef) -> None:
+async def discard_registered_agent_files(files: AsyncFilesClient, ref: FilesetReceipt) -> None:
     """Delete a snapshot FileSet, logging rather than raising: the snapshot is never the job's output."""
-    workspace, _, name = ref.root.partition("/")
+    workspace, _, name = ref.ref.partition("/")
     try:
-        await files.delete_fileset(workspace=workspace, name=name)
+        await files.delete_fileset_by_id(workspace=workspace, fileset_id=ref.fileset_id)
     except Exception:
-        logger.warning("Failed to delete agent files snapshot %s; it can be removed by hand", ref.root, exc_info=True)
+        logger.warning("Failed to delete agent files snapshot %s; it can be removed by hand", ref.ref, exc_info=True)
 
 
-def discard_registered_agent_files_sync(client: NemoClient | AsyncNemoClient, ref: FilesetRef) -> None:
+def discard_registered_agent_files_sync(client: NemoClient | AsyncNemoClient, ref: FilesetReceipt) -> None:
     """The evaluation step's view of :func:`discard_registered_agent_files`, for either client color."""
     if isinstance(client, AsyncNemoClient):
         run_with_isolated_async_client(
             client, lambda async_client: discard_registered_agent_files(AsyncFilesClient.from_client(async_client), ref)
         )
         return
-    workspace, _, name = ref.root.partition("/")
+    workspace, _, name = ref.ref.partition("/")
     try:
-        FilesClient.from_client(client).delete_fileset(workspace=workspace, name=name)
+        FilesClient.from_client(client).delete_fileset_by_id(workspace=workspace, fileset_id=ref.fileset_id)
     except Exception:
-        logger.warning("Failed to delete agent files snapshot %s; it can be removed by hand", ref.root, exc_info=True)
+        logger.warning("Failed to delete agent files snapshot %s; it can be removed by hand", ref.ref, exc_info=True)

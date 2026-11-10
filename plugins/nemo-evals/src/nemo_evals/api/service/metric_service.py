@@ -30,7 +30,7 @@ from nemo_evals.api.schemas import (
     MetricRef,
 )
 from nemo_evals.entities import MetricBundleEntity
-from nemo_evals.metric_storage import delete_bundle_by_ref, store_bundle
+from nemo_evals.metric_storage import delete_bundle_by_id, store_bundle
 from nemo_evals.shared.metric_bundles.bundles import MetricBundle as RuntimeMetricBundle
 from nemo_evals.shared.metric_bundles.cloudpickle import CLOUDPICKLE_KIND, require_cloudpickle_metrics_allowed
 from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
@@ -160,24 +160,25 @@ class MetricService:
         # Convert the wire DTO into the runtime bundle (JSON round-trip keeps the
         # base64 payload handling consistent), then store/index it.
         runtime_bundle = RuntimeMetricBundle.model_validate_json(metric.model_dump_json())
-        bundle_ref = await store_bundle(self.files_client, workspace, name, runtime_bundle)
+        stored = await store_bundle(self.files_client, workspace, name, runtime_bundle)
         entity = _entity_from_bundle(
             name=name,
             workspace=workspace,
             bundle=runtime_bundle,
-            bundle_ref=bundle_ref,
+            bundle_ref=stored.ref,
             project=project,
         )
 
+        entity.bundle_fileset_id = stored.fileset_id
         try:
             created = await self.entity_client.create(entity)
         except NemoEntityConflictError as e:
             # We own this uniquely-named fileset and the entity was not created;
             # deleting it cannot affect the existing metric's data.
-            await self._discard_bundle(bundle_ref)
+            await self._discard_bundle_by_id(workspace=workspace, fileset_id=stored.fileset_id)
             raise ValueError(f"Metric with name '{name}' already exists in workspace '{workspace}'") from e
         except Exception:
-            await self._discard_bundle(bundle_ref)
+            await self._discard_bundle_by_id(workspace=workspace, fileset_id=stored.fileset_id)
             raise
 
         logger.info(
@@ -212,18 +213,19 @@ class MetricService:
         except NemoEntityNotFoundError:
             pass
 
-        bundle_ref = await store_bundle(self.files_client, workspace, name, runtime_bundle)
+        stored = await store_bundle(self.files_client, workspace, name, runtime_bundle)
         entity = _entity_from_bundle(
-            name=name, workspace=workspace, bundle=runtime_bundle, bundle_ref=bundle_ref, project=None, derived=True
+            name=name, workspace=workspace, bundle=runtime_bundle, bundle_ref=stored.ref, project=None, derived=True
         )
+        entity.bundle_fileset_id = stored.fileset_id
         try:
             await self.entity_client.create(entity)
         except NemoEntityConflictError:
             # Raced another writer to the same content-addressed name; theirs is byte-identical, so
             # drop the fileset we just uploaded and reuse the existing entry.
-            await self._discard_bundle(bundle_ref)
+            await self._discard_bundle_by_id(workspace=workspace, fileset_id=stored.fileset_id)
         except Exception:
-            await self._discard_bundle(bundle_ref)
+            await self._discard_bundle_by_id(workspace=workspace, fileset_id=stored.fileset_id)
             raise
         return ref
 
@@ -281,34 +283,24 @@ class MetricService:
             return False
 
         try:
-            await self.entity_client.delete(
-                MetricBundleEntity,
-                entity.name,
-                workspace=workspace,
-                expected_db_version=entity.db_version,
-            )
+            await self.entity_client.delete_by_id(MetricBundleEntity, entity.id, expected_db_version=entity.db_version)
         except NemoEntityNotFoundError:
             # Lost a delete race: another request already removed it.
             return False
-        await self._discard_bundle(entity.bundle_ref)
+        if entity.bundle_fileset_id is not None:
+            await self._discard_bundle_by_id(workspace=entity.workspace, fileset_id=entity.bundle_fileset_id)
         logger.info(
             "Metric deleted", extra={"workspace": sanitize_for_log(workspace), "metric_name": sanitize_for_log(name)}
         )
         return True
 
-    async def _discard_bundle(self, bundle_ref: str) -> None:
-        """Delete an unreferenced bundle fileset.
-
-        Safe by construction: every reference names a fileset created for a
-        single metric version, so deleting it can only remove bytes nothing
-        else points at. A failure here leaks that one fileset (logged) but never
-        affects a live metric.
-        """
+    async def _discard_bundle_by_id(self, *, workspace: str, fileset_id: str) -> None:
+        """Clean up a captured metric allocation without replacing the original operation's outcome."""
         try:
-            await delete_bundle_by_ref(self.files_client, bundle_ref)
+            await delete_bundle_by_id(self.files_client, workspace=workspace, fileset_id=fileset_id)
         except Exception:
             logger.warning(
                 "Failed to delete unreferenced metric bundle fileset; storage may be leaked",
-                extra={"bundle_ref": sanitize_for_log(bundle_ref)},
+                extra={"workspace": sanitize_for_log(workspace), "fileset_id": sanitize_for_log(fileset_id)},
                 exc_info=True,
             )

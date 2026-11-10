@@ -492,11 +492,8 @@ class ModelDeploymentService:
             # If already DELETED, hard delete from database
             if entity.status == ModelDeploymentStatus.DELETED:
                 logger.info(f"Deployment already DELETED, removing from database: {workspace}/{name} version {version}")
-                await self.entity_client.delete(
-                    ModelDeploymentEntity,
-                    entity.name,
-                    workspace=workspace,
-                    expected_db_version=entity.db_version,
+                await self.entity_client.delete_by_id(
+                    ModelDeploymentEntity, entity.id, expected_db_version=entity.db_version
                 )
                 return None
 
@@ -530,11 +527,8 @@ class ModelDeploymentService:
             if all_deleted:
                 logger.info(f"All versions already DELETED, removing from database: {workspace}/{name}")
                 for entity in result.data:
-                    await self.entity_client.delete(
-                        ModelDeploymentEntity,
-                        entity.name,
-                        workspace=workspace,
-                        expected_db_version=entity.db_version,
+                    await self.entity_client.delete_by_id(
+                        ModelDeploymentEntity, entity.id, expected_db_version=entity.db_version
                     )
                 return None
 

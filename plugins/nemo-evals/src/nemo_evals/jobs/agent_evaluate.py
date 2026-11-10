@@ -60,6 +60,7 @@ from nemo_evals.jobs.agent_spec import (
     Target,
     registered_agent_config,
     registered_agent_files,
+    registered_agent_files_receipt,
     validate_task_collection,
 )
 from nemo_evals.jobs.attempt_tasks import load_attempt_tasks
@@ -299,7 +300,7 @@ class _AgentEvalJobBase(NemoJob):
             # Resolution may have snapshotted the agent's files; a submission that fails after that owns no job
             # to clean the snapshot up, so it goes here.
             snapshot = (
-                registered_agent_files(target)
+                registered_agent_files_receipt(target)
                 if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
                 else None
             )
@@ -333,7 +334,7 @@ class _AgentEvalJobBase(NemoJob):
         except Exception:
             target = canonical_spec.target
             snapshot = (
-                registered_agent_files(target)
+                registered_agent_files_receipt(target)
                 if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
                 else None
             )
@@ -752,7 +753,7 @@ class _AgentEvalJobBase(NemoJob):
         # The run is complete and its bundle durable; the files snapshot taken at submit has served its
         # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.
         snapshot = (
-            registered_agent_files(spec.target)
+            registered_agent_files_receipt(spec.target)
             if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
             else None
         )

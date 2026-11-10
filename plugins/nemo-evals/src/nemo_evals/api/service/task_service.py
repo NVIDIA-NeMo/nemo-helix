@@ -262,9 +262,7 @@ class TaskService:
             try:
                 # Only the head as we created it: a publisher whose create lost to ours may have
                 # published onto it since, and deleting by name alone would remove their task.
-                await self.entity_client.delete(
-                    TaskEntity, name=name, workspace=workspace, expected_db_version=created_db_version
-                )
+                await self.entity_client.delete_by_id(TaskEntity, created.id, expected_db_version=created_db_version)
             except Exception:
                 # Report the rollback failure, but re-raise the *original* error: replacing it
                 # would hide why the publish failed and leave the caller debugging the cleanup.
@@ -440,7 +438,10 @@ class TaskService:
     async def delete_task(self, workspace: str, name: str) -> bool:
         """Delete a stored task; ``False`` if absent."""
         try:
-            await self.entity_client.delete(TaskEntity, name=name, workspace=workspace)
+            _delete_target = await self.entity_client.get(TaskEntity, name=name, workspace=workspace)
+            await self.entity_client.delete_by_id(
+                TaskEntity, _delete_target.id, expected_db_version=_delete_target.db_version
+            )
         except NemoEntityNotFoundError:
             return False
         logger.info(

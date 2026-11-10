@@ -741,6 +741,19 @@ authz:
         scopes:
         - files:write
         - platform:write
+    /apis/files/v2/workspaces/{workspace}/filesets/by-id/{fileset_id}:
+      delete:
+        permissions:
+        - filesets.delete
+        scopes:
+        - files:write
+        - platform:write
+      get:
+        permissions:
+        - filesets.read
+        scopes:
+        - files:read
+        - platform:read
     /apis/files/v2/workspaces/{workspace}/filesets/{name}/-/{path}:
       delete:
         permissions:
