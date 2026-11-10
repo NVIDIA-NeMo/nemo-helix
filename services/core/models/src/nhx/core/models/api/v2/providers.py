@@ -314,6 +314,7 @@ async def get_provider(
 
 @router.delete(
     "/v2/workspaces/{workspace}/providers/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Model provider not found"}},
     summary="Delete ModelProvider",
     response_description="Delete a model provider",
     status_code=status.HTTP_204_NO_CONTENT,
