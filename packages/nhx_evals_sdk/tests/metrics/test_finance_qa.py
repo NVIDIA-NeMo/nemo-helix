@@ -9,6 +9,7 @@ import pytest
 from metrics import finance_qa_cookbook as cookbook
 from metrics.helpers import compute_scores, output_names
 from nhx_evals_sdk.execution.evaluator import Evaluator
+from nhx_evals_sdk.metrics import finance_qa
 from nhx_evals_sdk.metrics.finance_qa import FinanceQAMetric
 from nhx_evals_sdk.metrics.types import MetricsUnion
 from pydantic import TypeAdapter
@@ -178,8 +179,6 @@ class TestOptionalScores:
             ("CodeFinQA", "revenue = 120\ncost = 80\nanswer = revenue - cost", True),
             ("CodeTAT-QA", "answer = (120 - 80", False),
             ("CodeTAT-QA", "answer = 1\x00", False),
-            ("CodeTAT-QA", "x = " + "-" * 8000 + "1", False),  # The parser's stack overflows: MemoryError.
-            ("CodeTAT-QA", "+".join(["1"] * 10000), False),  # Too deep for the AST: RecursionError.
             ("TAT-DQA/arithmetic", "answer = 120 - 80", None),
         ],
     )
@@ -188,6 +187,19 @@ class TestOptionalScores:
         response = _response("40", reasoning_content=reasoning)
         scores = await _scores(_metric(), {"answer": "40", "task": task}, {"response": response})
         assert scores.get("program_syntax_valid") is expected
+
+    @pytest.mark.parametrize("error", [MemoryError("Parser stack overflowed"), RecursionError("too deep")])
+    @pytest.mark.asyncio
+    async def test_a_trace_beyond_the_parser_limits_is_invalid(self, monkeypatch, error):
+        """Deep nesting makes ast.parse raise MemoryError or RecursionError; the depth that does varies by Python."""
+
+        def parse(source: str) -> None:
+            raise error
+
+        monkeypatch.setattr(finance_qa.ast, "parse", parse)
+        response = _response("40", reasoning_content="answer = " + "(" * 50 + "40" + ")" * 50)
+        scores = await _scores(_metric(), {"answer": "40", "task": "CodeFinQA"}, {"response": response})
+        assert (scores["program_syntax_valid"], scores["task_correct"]) == (False, True)
 
     @pytest.mark.parametrize(
         ("max_new_tokens", "completion_tokens", "expected"),
