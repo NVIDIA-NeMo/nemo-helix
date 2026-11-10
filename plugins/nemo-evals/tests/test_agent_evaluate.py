@@ -3348,7 +3348,7 @@ def test_summary_failure_preserves_the_run_outcome_publication_and_cleanup(
     )
     snapshot = FilesetRef(root="dev/agent-snapshot")
     (ctx.storage.persistent / agent_evaluate.ENVIRONMENT_STORAGE_DIR).mkdir()
-    mocker.patch("nemo_evals.jobs.agent_evaluate.registered_agent_files", return_value=snapshot)
+    mocker.patch("nemo_evals.jobs.agent_evaluate.registered_agent_files_receipt", return_value=snapshot)
     discard = mocker.patch("nemo_evals.jobs.agent_evaluate.discard_registered_agent_files_sync")
     original = ctx.results.save
 
