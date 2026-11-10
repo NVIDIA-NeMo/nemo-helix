@@ -17,6 +17,20 @@ def test_pr_e2e_runs_on_label_and_new_commits() -> None:
     assert "pull_request_target" not in workflow["on"]
 
 
+def test_plugin_build_uses_the_web_package_manager_pin() -> None:
+    workflow = yaml.load(WORKFLOW.read_text(), Loader=yaml.BaseLoader)
+    job = workflow["jobs"]["web-studio-e2e"]
+    step = next(step for step in job["steps"] if step.get("name") == "Build Agent Hardener plugin UI")
+    # The standalone plugin has no packageManager field. Starting Corepack there
+    # selects latest pnpm, which may not work with our pinned Node/Corepack.
+    assert job["defaults"]["run"]["working-directory"] == "web"
+    assert "working-directory" not in step
+    assert step["run"].splitlines() == [
+        "pnpm --dir ../plugins/nemo-agent-hardener/web install --frozen-lockfile",
+        "pnpm --dir ../plugins/nemo-agent-hardener/web build",
+    ]
+
+
 def test_pr_e2e_preserves_eligibility_guards() -> None:
     workflow = yaml.load(WORKFLOW.read_text(), Loader=yaml.BaseLoader)
     eligibility = " ".join(workflow["jobs"]["eligibility"]["if"].split())

@@ -851,8 +851,10 @@ jobs:
           VITE_AUTH_CLIENT_ID: studio-e2e
         run: pnpm --filter nemo-studio-ui build:fastapi
       - name: Build Agent Hardener plugin UI
-        working-directory: plugins/nemo-agent-hardener/web
-        run: pnpm install --frozen-lockfile && pnpm build
+        # Invoke from web/ so Corepack uses its packageManager pin, not latest pnpm.
+        run: |
+          pnpm --dir ../plugins/nemo-agent-hardener/web install --frozen-lockfile
+          pnpm --dir ../plugins/nemo-agent-hardener/web build
       - name: Install Playwright browsers
         run: pnpm --filter nemo-studio-ui exec playwright install --with-deps chromium
       - name: Run E2E tests against local Studio
