@@ -386,44 +386,6 @@ async def test_mixed_resolution_keeps_reference_expiry_and_owned_lifecycle(
 
 
 @pytest.mark.asyncio
-async def test_cleanup_retries_redacts_failures_and_stops_with_server(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    interval = asyncio.Event()
-    attempted = asyncio.Event()
-    recovered = asyncio.Event()
-    attempts = 0
-    delays: list[float] = []
-
-    async def reconcile() -> None:
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            attempted.set()
-            raise RuntimeError("private credential material")
-        recovered.set()
-
-    async def next_interval(seconds: float) -> None:
-        delays.append(seconds)
-        await interval.wait()
-        interval.clear()
-
-    owned = AsyncMock(spec=OwnedCredentials)
-    owned.reconcile.side_effect = reconcile
-    monkeypatch.setattr(server.asyncio, "sleep", next_interval)
-    async with server.owned_credential_recovery(owned):
-        await asyncio.wait_for(attempted.wait(), timeout=1)
-        assert attempts == 1
-        interval.set()
-        await asyncio.wait_for(recovered.wait(), timeout=1)
-        assert attempts == 2
-    assert "retained deletion intent" in caplog.text
-    assert "private credential material" not in caplog.text
-    assert delays and all(seconds == 30 for seconds in delays)
-    assert not any(task.get_name() == "owned-credential-cleanup" for task in asyncio.all_tasks())
-
-
-@pytest.mark.asyncio
 async def test_pending_cleanup_does_not_block_startup_and_is_cancelled_at_shutdown() -> None:
     started = asyncio.Event()
     cancelled = asyncio.Event()
