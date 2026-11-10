@@ -104,9 +104,16 @@ async def _read_file(
     return qualified, bytes(body)
 
 
-def _task_inputs(qualified: str, body: bytes) -> list[AgentEvalTaskInput]:
+def _task_inputs(source: FilesetTaskSource, qualified: str, body: bytes) -> list[AgentEvalTaskInput]:
     """Convert the file's rows to inline task inputs, each scored by the shared Gym reward bundle."""
-    tasks = discover_gym_tasks(io.BytesIO(body), name=qualified, metrics=[], max_rows=MAX_ROWS)
+    tasks = discover_gym_tasks(
+        io.BytesIO(body),
+        name=qualified,
+        metrics=[],
+        max_rows=MAX_ROWS,
+        id_field=source.id_field,
+        id_prefix=source.id_prefix,
+    )
     reward = gym_reward_metric()
     return [
         AgentEvalTaskInput(
@@ -134,7 +141,7 @@ async def load_task_inputs(
         ValueError: The file is missing, too large, has too many rows, or has a bad row.
     """
     qualified, body = await _read_file(source, workspace=workspace, async_client=async_client, authorize=authorize)
-    inputs = await asyncio.to_thread(_task_inputs, qualified, body)
+    inputs = await asyncio.to_thread(_task_inputs, source, qualified, body)
     return hashlib.sha256(body).hexdigest(), inputs
 
 

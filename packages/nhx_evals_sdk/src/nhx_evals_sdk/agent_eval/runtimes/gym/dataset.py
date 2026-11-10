@@ -3,7 +3,7 @@
 
 """Gym rows to Evaluator tasks, and back to a dataset Gym will collect against.
 
-Task identity is the content hash of a row, and attribution is an index this module *assigns*
+Task identity is the content hash of a row (or of its key, with ``id_field``), and attribution is an index this module *assigns*
 rather than infers — see :func:`materialize_dataset`. Both halves live together because they are
 two directions of one translation: what breaks one silently breaks the other.
 """
@@ -13,6 +13,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -48,7 +50,40 @@ _HASH_ID_HEX_DIGITS = 59
 
 def _hash_task_id(row: Mapping[str, Any]) -> str:
     """A row's content-derived task id: ``gym-`` and a prefix of :func:`_canonical_row_hash`."""
-    return f"gym-{_canonical_row_hash(row)[:_HASH_ID_HEX_DIGITS]}"
+    return f"{RESERVED_ID_PREFIX}-{_canonical_row_hash(row)[:_HASH_ID_HEX_DIGITS]}"
+
+
+#: Longest platform entity name, which a keyed task id fills: ``<prefix>-`` plus as many hex digits of
+#: the key's hash as fit.
+_MAX_TASK_ID_LENGTH = 63
+#: A key prefix: a lowercase letter, then up to 7 lowercase letters or digits. No dashes, so the id can
+#: never contain ``--`` or end in ``-``, both of which the platform's entity names refuse.
+ID_PREFIX_PATTERN = r"^[a-z][a-z0-9]{0,7}$"
+#: Prefix of the ids rows get without a key. Keyed ids may not use it, so a task's name shows which kind it is.
+RESERVED_ID_PREFIX = "gym"
+
+
+def check_id_prefix(id_prefix: str) -> None:
+    """Raise ``ValueError`` unless ``id_prefix`` is a valid keyed-id prefix.
+
+    It must match :data:`ID_PREFIX_PATTERN` and must not be :data:`RESERVED_ID_PREFIX`.
+    """
+    if not re.fullmatch(ID_PREFIX_PATTERN, id_prefix):
+        raise ValueError(
+            f"id_prefix {id_prefix!r} must be 1-8 characters: a lowercase letter, then lowercase letters or digits"
+        )
+    if id_prefix == RESERVED_ID_PREFIX:
+        raise ValueError(f"id_prefix {id_prefix!r} is reserved for the ids of rows without a key; choose another")
+
+
+def _keyed_task_id(value: Any, id_prefix: str) -> str:
+    """A keyed row's task id: ``<id_prefix>-`` and the hash of the key's JSON encoding, filling 63 characters.
+
+    Only the key is hashed, so editing any other field of the row keeps its id. The key is hashed in
+    its JSON form, so ``1`` and ``"1"`` are different keys.
+    """
+    digest = hashlib.sha256(json.dumps(value).encode("utf-8")).hexdigest()
+    return f"{id_prefix}-{digest[: _MAX_TASK_ID_LENGTH - len(id_prefix) - 1]}"
 
 
 def _content_text(content: Any) -> str:
@@ -118,6 +153,8 @@ def discover_gym_tasks(
     metrics: Sequence[Any] | None = None,
     name: str | None = None,
     max_rows: int | None = None,
+    id_field: str | None = None,
+    id_prefix: str | None = None,
 ) -> list[AgentEvalTask]:
     """Build one :class:`AgentEvalTask` per distinct row in a Gym dataset (jsonl).
 
@@ -126,7 +163,14 @@ def discover_gym_tasks(
     at the first row past the limit.
 
     **Task ids.** A task's id is ``gym-`` and 59 hex digits of its row's content hash, a valid
-    platform entity name, so the same row has the same id locally, inline and stored.
+    platform entity name, so the same row has the same id locally, inline and stored. An edited row
+    is therefore a new task.
+
+    With ``id_field`` and ``id_prefix`` (always together), a task's id instead comes from the row's
+    value of ``id_field``: ``<id_prefix>-`` and the hash of that value, 63 characters in all. Only
+    the key is hashed, so an edited row keeps its id. Every row must carry a non-empty string or
+    number in ``id_field``, and two rows with the same key are an error naming both lines.
+    ``id_prefix`` keeps two files' keys apart in one workspace: see :data:`ID_PREFIX_PATTERN`.
 
     Every task's ``intent`` is the fixed label ``"Gym row"``: it never names the file, so the same
     row yields the same task content from any file. Each task's ``instruction`` is rendered
@@ -159,10 +203,15 @@ def discover_gym_tasks(
     (``rollout_collection._preprocess_rows_from_config``), so a row without it is rejected here
     rather than crashing Gym mid-collection.
     """
+    if (id_field is None) != (id_prefix is None):
+        raise ValueError("id_field and id_prefix go together: set both, or neither")
+    if id_prefix is not None:
+        check_id_prefix(id_prefix)
     path = Path(dataset) if isinstance(dataset, (str, Path)) else None
     label = name or (str(path) if path is not None else "<stream>")
     tasks: list[AgentEvalTask] = []
     seen: set[str] = set()
+    key_lines: dict[str, int] = {}
     rows = duplicates = promptless = 0
     for line_no, row in iter_jsonl_objects(path if path is not None else dataset, name=label):
         rows += 1
@@ -174,7 +223,28 @@ def discover_gym_tasks(
                 f"{label}:{line_no}: row has no 'responses_create_params' mapping; Gym requires that key "
                 "on every dataset row"
             )
-        task_id = _hash_task_id(row)
+        if id_field is not None and id_prefix is not None:
+            key = row.get(id_field)
+            # A non-finite number is refused too: JSON's 1e400 and 2e400 both parse as infinity, so they
+            # would name one task.
+            if (
+                isinstance(key, bool)
+                or not isinstance(key, (str, int, float))
+                or key == ""
+                or (isinstance(key, float) and not math.isfinite(key))
+            ):
+                raise ValueError(
+                    f"{label}:{line_no}: row has no usable {id_field!r} value (need a non-empty string or finite "
+                    f"number, got {key!r})"
+                )
+            task_id = _keyed_task_id(key, id_prefix)
+            if task_id in key_lines:
+                raise ValueError(
+                    f"{label}:{line_no}: {id_field} {key!r} repeats line {key_lines[task_id]}; each row needs its own key"
+                )
+            key_lines[task_id] = line_no
+        else:
+            task_id = _hash_task_id(row)
         if task_id in seen:
             duplicates += 1
             continue

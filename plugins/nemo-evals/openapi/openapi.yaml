@@ -5761,7 +5761,8 @@ components:
           description: 'The dataset file, as `workspace/fileset#path/to/file.jsonl`.
             One file only: a whole FileSet or a glob is refused. It is read once,
             as the submitter, at submission. Each distinct row becomes one task, `gym-<row
-            content hash>`, scored by the Gym reward. Requires a `gym` target.'
+            content hash>` unless `id_field` names it, scored by the Gym reward. Requires
+            a `gym` target.'
         snapshot:
           allOf:
           - $ref: '#/components/schemas/TasksetRef'
@@ -5770,6 +5771,23 @@ components:
             Each submission publishes a revision only when the file changed, and the
             evaluation runs exactly the published tasks. Omit to run the file's tasks
             inline, storing nothing but the job.
+        id_field:
+          title: Id Field
+          description: Row key that names each task, so an edited row keeps its task
+            (and, with `snapshot`, gets a new revision of it) instead of becoming
+            a new task. Every row must carry a non-empty string or finite number there,
+            unique within the file. Requires `id_prefix`.
+          type: string
+          minLength: 1
+        id_prefix:
+          title: Id Prefix
+          description: 'Prefix of keyed task ids, `<id_prefix>-<hash of the row''s
+            id_field value>`: a lowercase letter, then up to 7 lowercase letters or
+            digits, and not `gym`, which ids without a key use. Choose one per dataset,
+            so two files with the same keys don''t share tasks in a workspace. Requires
+            `id_field`.'
+          type: string
+          pattern: ^[a-z][a-z0-9]{0,7}$
       additionalProperties: false
       type: object
       required:

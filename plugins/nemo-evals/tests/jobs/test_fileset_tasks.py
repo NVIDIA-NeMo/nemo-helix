@@ -239,6 +239,66 @@ def test_reordering_or_reverting_the_file_publishes_a_revision_but_no_task(ctx: 
     assert _taskset_revisions(ctx) == 3
 
 
+# --- Keyed rows (id_field + id_prefix) ----------------------------------------------------------
+
+KEYED_NAME = re.compile(r"gold-[0-9a-f]{58}")
+
+
+def _keyed(uid: object, question: str) -> str:
+    return json.dumps({"uid": uid, "responses_create_params": {"input": question}, "expected_answer": "A"})
+
+
+def _keyed_tasks(*, snapshot: str | None = TASKSET) -> dict[str, Any]:
+    return {**_tasks(snapshot=snapshot), "id_field": "uid", "id_prefix": "gold"}
+
+
+def test_keyed_rows_are_named_by_prefix_and_key(ctx: ClientContext) -> None:
+    _upload(ctx, _keyed("t1", "q1"), _keyed(2, "q2"))
+
+    spec = _submit(ctx, _keyed_tasks(snapshot=None))
+
+    assert len(spec.tasks) == 2
+    assert all(KEYED_NAME.fullmatch(task.id) for task in spec.tasks)
+
+
+def test_an_edited_keyed_row_is_a_new_revision_of_its_task(ctx: ClientContext) -> None:
+    """[t1, t2, t3] then [t1, t2-edited, t4]: one taskset with two revisions over four tasks, t2 with two."""
+    tasks = Evaluator.from_client(ctx.client).tasks
+    _upload(ctx, _keyed("t1", "q1"), _keyed("t2", "q2"), _keyed("t3", "q3"))
+    first = _submit(ctx, _keyed_tasks())
+    _upload(ctx, _keyed("t1", "q1"), _keyed("t2", "q2 edited"), _keyed("t4", "q4"))
+    second = _submit(ctx, _keyed_tasks())
+
+    t1, t2, t3 = (task.id for task in first.tasks)
+    assert [task.id for task in second.tasks][:2] == [t1, t2]
+    assert _taskset_revisions(ctx) == 2
+    assert _writes(ctx, "tasks") == 5  # three, then the edit and the new row
+    assert len(tasks.list(workspace="default", page_size=100).data) == 4
+    assert len(tasks.list_revisions(t2, workspace="default").data) == 2
+    assert len(tasks.list_revisions(t1, workspace="default").data) == 1
+    assert tasks.retrieve(t3, workspace="default").name == t3  # the removed row's task is kept
+    # The second job ran the edited revision of t2, not the first.
+    assert second.tasks[1].spec.provenance != first.tasks[1].spec.provenance
+
+
+@pytest.mark.parametrize(
+    ("lines", "message"),
+    [
+        ([_keyed("t1", "q1"), "", _keyed("t1", "q2")], r"golden\.jsonl:3: uid 't1' repeats line 1"),
+        ([_keyed("t1", "q1"), _keyed(None, "q2")], r"golden\.jsonl:2: row has no usable 'uid' value"),
+        ([json.dumps({"responses_create_params": {"input": "q"}})], r"golden\.jsonl:1: row has no usable 'uid'"),
+        ([_keyed(True, "q1")], r"golden\.jsonl:1: row has no usable 'uid'"),
+        ([_keyed("", "q1")], r"golden\.jsonl:1: row has no usable 'uid'"),
+        (['{"uid": 1e400, "responses_create_params": {"input": "q"}}'], r"golden\.jsonl:1: row has no usable 'uid'"),
+        (['{"uid": NaN, "responses_create_params": {"input": "q"}}'], r"golden\.jsonl:1: row has no usable 'uid'"),
+    ],
+)
+def test_a_bad_key_is_refused_naming_its_line(ctx: ClientContext, lines: list[str], message: str) -> None:
+    _upload(ctx, *lines)
+    assert re.search(message, _refused(ctx, _keyed_tasks()))
+    assert _writes(ctx, "tasks") == _writes(ctx, "tasksets") == 0
+
+
 def test_a_resubmit_verifies_members_in_batches(ctx: ClientContext, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("nemo_evals.revisions._PIN_BATCH", 5)
     _upload(ctx, *(_row(f"q{i}") for i in range(30)))
@@ -359,6 +419,13 @@ def test_the_computed_digest_is_the_one_the_service_publishes(ctx: ClientContext
         ({"fileset": "default/golden"}, "name one dataset file"),
         ({"fileset": "default/golden#gym/*.jsonl"}, "globs are not supported"),
         ({"fileset": FILE, "snapshot": f"{TASKSET}#latest"}, "write destination"),
+        ({"fileset": FILE, "id_field": "uid"}, "`id_field` and `id_prefix` go together"),
+        ({"fileset": FILE, "id_prefix": "gold"}, "`id_field` and `id_prefix` go together"),
+        ({"fileset": FILE, "id_field": "uid", "id_prefix": "Gold"}, "id_prefix"),
+        ({"fileset": FILE, "id_field": "uid", "id_prefix": "golden123"}, "id_prefix"),
+        ({"fileset": FILE, "id_field": "uid", "id_prefix": "g-x"}, "id_prefix"),
+        ({"fileset": FILE, "id_field": "uid", "id_prefix": "1gold"}, "id_prefix"),
+        ({"fileset": FILE, "id_field": "uid", "id_prefix": "gym"}, "reserved"),
     ],
 )
 def test_invalid_sources_are_refused(tasks: dict[str, Any], message: str) -> None:
