@@ -45,7 +45,13 @@ from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_evals.source_authorization import SourceReadAuthorizer
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
-from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError, NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.client.errors import (
+    ConflictError,
+    NemoTransportError,
+    NotFoundError,
+    PermissionDeniedError,
+    UnprocessableEntityError,
+)
 from nemo_helix_plugin.evals.client import AsyncEvaluatorClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nhx_evals_sdk.agent_eval.runtimes.gym import GymRewardMetric, discover_gym_tasks
@@ -183,9 +189,12 @@ async def publish_snapshot(
             lambda: [stored_evaluator_task_digest(body, workspace=ts_workspace) for body in bodies]
         )
 
-        async def put_task(index: int) -> str:
+        reused: list[int] = []
+
+        async def put_task(index: int, *, write: bool = False) -> str:
             task_id = inputs[index].id
-            if pinned_before.get((ts_workspace, task_id)) == expected[index]:
+            if not write and pinned_before.get((ts_workspace, task_id)) == expected[index]:
+                reused.append(index)
                 return expected[index]
             stored = await tasks_resource.replace(task_id, task=bodies[index], workspace=ts_workspace)
             if stored.content_hash is None:
@@ -193,20 +202,40 @@ async def publish_snapshot(
             return stored.content_hash
 
         digests = await map_with_limited_concurrency(put_task, list(range(len(inputs))), concurrency=_WRITE_CONCURRENCY)
-        # The service dedupes: a taskset identical to its current revision publishes nothing new.
-        await tasksets_resource.replace(
-            ts_name,
-            taskset=TasksetInput(
-                description=previous.description if previous is not None else None,
-                tasks=[TaskRef(f"{ts_workspace}/{t.id}#{d}") for t, d in zip(inputs, digests, strict=True)],
-                metadata=[
-                    MetadataItem(key="source_fileset", value=source.fileset.root),
-                    MetadataItem(key="source_sha256", value=source_sha256),
-                ],
-                tags=[f"src-{source_sha256}"],
-            ),
-            workspace=ts_workspace,
-        )
+
+        async def publish() -> None:
+            # The service dedupes: a taskset identical to its current revision publishes nothing new.
+            await tasksets_resource.replace(
+                ts_name,
+                taskset=TasksetInput(
+                    description=previous.description if previous is not None else None,
+                    tasks=[TaskRef(f"{ts_workspace}/{t.id}#{d}") for t, d in zip(inputs, digests, strict=True)],
+                    metadata=[
+                        MetadataItem(key="source_fileset", value=source.fileset.root),
+                        MetadataItem(key="source_sha256", value=source_sha256),
+                    ],
+                    tags=[f"src-{source_sha256}"],
+                ),
+                workspace=ts_workspace,
+            )
+
+        try:
+            await publish()
+        except UnprocessableEntityError:
+            if not reused:
+                raise
+            # A reused pin can name a task deleted since the previous revision, which the service refuses.
+            # Write every reused row (the service dedupes those still stored, so they gain no revision)
+            # and publish once more. Only this rare case pays for the writes the skip saves.
+            logger.info(
+                "taskset %s/%s pins a deleted task; rewriting %d reused rows", ts_workspace, ts_name, len(reused)
+            )
+            rewritten = await map_with_limited_concurrency(
+                lambda index: put_task(index, write=True), reused, concurrency=_WRITE_CONCURRENCY
+            )
+            for index, digest in zip(reused, rewritten, strict=True):
+                digests[index] = digest
+            await publish()
     except PermissionDeniedError as exc:
         raise PermissionError(
             f"publishing taskset {ts_workspace}/{ts_name} needs read and write access to its tasks and tasksets"

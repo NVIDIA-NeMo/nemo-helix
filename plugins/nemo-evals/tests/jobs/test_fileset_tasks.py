@@ -211,6 +211,20 @@ def test_an_edited_row_writes_one_task_and_keeps_the_old_one(ctx: ClientContext)
     assert Evaluator.from_client(ctx.client).tasks.retrieve(dropped, workspace="default").name == dropped
 
 
+def test_a_member_deleted_since_the_last_snapshot_is_written_again(ctx: ClientContext) -> None:
+    _upload(ctx, _row("q1"), _row("q2"))
+    first = _submit(ctx, _tasks())
+    deleted = first.tasks[0].id
+    Evaluator.from_client(ctx.client).tasks.delete(deleted, workspace="default")
+
+    second = _submit(ctx, _tasks())
+
+    assert Evaluator.from_client(ctx.client).tasks.retrieve(deleted, workspace="default").name == deleted
+    assert [t.spec.provenance for t in second.tasks] == [t.spec.provenance for t in first.tasks]
+    assert _taskset_revisions(ctx) == 1
+    assert _submit(ctx, _tasks()).tasks == second.tasks
+
+
 def test_reordering_or_reverting_the_file_publishes_a_revision_but_no_task(ctx: ClientContext) -> None:
     _upload(ctx, _row("a"), _row("b"))
     _submit(ctx, _tasks())
