@@ -24,3 +24,11 @@ export interface FilesRefParts {
   fileset: string;
   path?: string;
 }
+
+/** Client-side task table filters, keyed by column id; `name` is the search text. */
+export interface TaskFilters {
+  name?: string;
+  /** Multi-select state: the selected runner kinds. */
+  runner?: Record<string, true>;
+  metadata?: string;
+}

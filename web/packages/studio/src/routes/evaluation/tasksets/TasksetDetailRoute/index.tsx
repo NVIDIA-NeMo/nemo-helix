@@ -7,6 +7,7 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { KeyValueGrid } from '@nemo/common/src/components/KeyValueGrid';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
+import { FILTERS_SEARCH_PARAM } from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
 import { useEvalsGetTaskset } from '@nemo/sdk/generated/evals/evals-plugin-tasksets-routes';
 import {
   Anchor,
@@ -37,10 +38,19 @@ import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams'
 import type { FC } from 'react';
 import { Link } from 'react-router';
 
+/** Both tabs' tables keep their state in the same URL params; clear it when switching tabs. */
+const TABLE_STATE_RESET = {
+  page: undefined,
+  page_size: undefined,
+  sort: undefined,
+  s: undefined,
+  [FILTERS_SEARCH_PARAM]: undefined,
+};
+
 export const TasksetDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { tasksetName } = useRequiredPathParams([ROUTE_PARAMS.tasksetName]);
-  const { getQueryParam, setQueryParam } = useQueryParams();
+  const { getQueryParam, setQueryParam, setQueryParams } = useQueryParams();
 
   useBreadcrumbs({
     items: [
@@ -66,7 +76,7 @@ export const TasksetDetailRoute: FC = () => {
 
   return (
     <AccessibleTitle title={`Taskset ${tasksetName}`}>
-      <Stack className="min-h-full" gap="density-xl" padding="density-2xl">
+      <Stack className="h-full" gap="density-xl" padding="density-2xl">
         <PageHeader
           className="p-0"
           slotHeading={
@@ -99,18 +109,24 @@ export const TasksetDetailRoute: FC = () => {
             },
           ]}
         />
-        <TabsRoot defaultValue="tasks" className="flex flex-col">
+        <TabsRoot
+          value={getQueryParam(QUERY_PARAMETERS.tab) || 'tasks'}
+          onValueChange={(tab) =>
+            setQueryParams({ ...TABLE_STATE_RESET, [QUERY_PARAMETERS.tab]: tab })
+          }
+          className="flex min-h-0 flex-1 flex-col"
+        >
           <TabsList>
             <TabsTrigger value="tasks">Tasks</TabsTrigger>
             <TabsTrigger value="revisions">Revisions</TabsTrigger>
           </TabsList>
-          <TabsContent value="tasks" className="p-0">
+          <TabsContent value="tasks" className="flex min-h-0 flex-1 flex-col p-0 pt-density-lg">
             <TaskTable
               taskset={taskset}
               onTaskClick={(row) => setQueryParam(QUERY_PARAMETERS.task, row.ref)}
             />
           </TabsContent>
-          <TabsContent value="revisions" className="p-0">
+          <TabsContent value="revisions" className="flex min-h-0 flex-1 flex-col p-0 pt-density-lg">
             <RevisionHistory taskset={taskset} />
           </TabsContent>
         </TabsRoot>

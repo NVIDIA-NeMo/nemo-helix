@@ -9,22 +9,31 @@ import type { TasksetTaskRow } from '@studio/routes/evaluation/tasksets/types';
 import { useQueries } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
+/** Names per list call: keeps each `$in` filter well under URL length limits. */
+const BATCH_SIZE = 100;
+
 /**
- * Attaches task records to `rows`, one list call per workspace. Pass only the rows on screen:
- * a taskset can hold thousands of refs, and one `$in` filter over all of them overflows the URL.
- * A pinned ref resolves to the task's current record, not the pinned revision.
+ * Attaches task records to `rows`, in batched list calls per workspace so a taskset with
+ * thousands of refs never overflows the URL. A pinned ref resolves to the task's current
+ * record, not the pinned revision.
  */
 export function useResolvedTasks(rows: TasksetTaskRow[]) {
-  const namesByWorkspace = useMemo(() => {
+  const batches = useMemo(() => {
     const grouped = new Map<string, string[]>();
     rows.forEach(({ workspace, name }) =>
       grouped.set(workspace, [...(grouped.get(workspace) ?? []), name])
     );
-    return [...grouped];
+    return [...grouped].flatMap(([workspace, names]) => {
+      const unique = [...new Set(names)];
+      return Array.from({ length: Math.ceil(unique.length / BATCH_SIZE) }, (_, i) => ({
+        workspace,
+        names: unique.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE),
+      }));
+    });
   }, [rows]);
 
   const results = useQueries({
-    queries: namesByWorkspace.map(([workspace, names]) =>
+    queries: batches.map(({ workspace, names }) =>
       getEvalsListTasksQueryOptions(workspace, {
         page_size: names.length,
         filter: withOperators<TaskFilter>({ name: { $in: names } }),

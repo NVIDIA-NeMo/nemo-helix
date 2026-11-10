@@ -4,7 +4,12 @@
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import type { Task, TasksetTags } from '@nemo/sdk/generated/evals/schema';
 import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
-import type { FilesRefParts, TaskRefParts } from '@studio/routes/evaluation/tasksets/types';
+import type {
+  FilesRefParts,
+  TaskFilters,
+  TaskRefParts,
+  TasksetTaskRow,
+} from '@studio/routes/evaluation/tasksets/types';
 import { getFilesetDetailRoute, getFilesetDetailsRoute } from '@studio/routes/utils';
 
 export const RUNNER_LABELS = {
@@ -61,4 +66,22 @@ export const configSection = (config: unknown, key: string): Record<string, unkn
 export const requestStatus = (error: unknown, isFetching: boolean) => {
   if (error) return 'error';
   return isFetching ? 'loading' : undefined;
+};
+
+const includesText = (text: string, query: string) =>
+  text.toLowerCase().includes(query.toLowerCase());
+
+/** Whether a member row passes the task table's search and column filters. A row whose task
+ *  didn't resolve has no runner or metadata, so it only survives the name search. */
+export const matchesTaskFilters = (
+  { name, task }: TasksetTaskRow,
+  { name: query, runner, metadata }: TaskFilters
+): boolean => {
+  if (query && !includesText(name, query)) return false;
+  if (runner && Object.keys(runner).length && !(task && runner[task.spec.kind])) return false;
+  if (metadata) {
+    const pairs = (task?.metadata ?? []).map(({ key, value }) => `${key}: ${formatValue(value)}`);
+    if (!pairs.some((pair) => includesText(pair, metadata))) return false;
+  }
+  return true;
 };

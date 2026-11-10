@@ -3,6 +3,7 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
+import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
@@ -21,8 +22,16 @@ import { useNavigate } from 'react-router';
 
 export const TasksetsDataView: FC<{ workspace: string }> = ({ workspace }) => {
   const navigate = useNavigate();
-  const dataViewState = useStudioDataViewState({ defaultSort: [{ id: 'updated_at', desc: true }] });
-  const { searchText } = dataViewState.apiFilter;
+  const dataViewState = useStudioDataViewState<TasksetFilter>({
+    defaultSort: [{ id: 'updated_at', desc: true }],
+  });
+  const { searchText, filter: columns } = dataViewState.apiFilter;
+  const filter = withOperators<TasksetFilter>({
+    ...(searchText && { name: { $like: `%${searchText}%` } }),
+    ...(columns?.description && { description: { $like: `%${columns.description}%` } }),
+    ...(columns?.tags && { tags: columns.tags }),
+    ...(columns?.updated_at && { updated_at: columns.updated_at }),
+  });
 
   const { data, isFetching, error } = useEvalsListTasksets(
     workspace,
@@ -30,9 +39,7 @@ export const TasksetsDataView: FC<{ workspace: string }> = ({ workspace }) => {
       page: dataViewState.pagination.state.pageIndex + 1,
       page_size: dataViewState.pagination.state.pageSize,
       sort: getSortParam(dataViewState.sorting.state) as TasksetSort,
-      filter: searchText
-        ? withOperators<TasksetFilter>({ name: { $like: `%${searchText}%` } })
-        : undefined,
+      filter: Object.keys(filter).length ? filter : undefined,
     },
     { query: { placeholderData: keepPreviousData } }
   );
@@ -44,6 +51,7 @@ export const TasksetsDataView: FC<{ workspace: string }> = ({ workspace }) => {
     accessor('description', {
       header: 'Description',
       enableSorting: false,
+      meta: { filter: { type: 'text', placeholder: 'Description contains' } },
       cell: ({ row }) => (
         <Text className="truncate" title={row.original.description}>
           {row.original.description || EMPTY_FIELD_VALUE}
@@ -67,6 +75,7 @@ export const TasksetsDataView: FC<{ workspace: string }> = ({ workspace }) => {
       header: 'Tags',
       size: 180,
       enableSorting: false,
+      meta: { filter: { type: 'text', label: 'Tag', placeholder: 'e.g. stable' } },
       cell: ({ row }) => (
         <Flex gap="density-xs" wrap="wrap">
           {tagNames(row.original.tags).map((tag) => (
@@ -80,6 +89,7 @@ export const TasksetsDataView: FC<{ workspace: string }> = ({ workspace }) => {
     accessor('updated_at', {
       header: 'Updated',
       size: 140,
+      meta: { filter: dateTimeFilter('Updated At') },
       cell: ({ row }) => <RelativeTime datetime={row.original.updated_at} />,
     }),
   ];
