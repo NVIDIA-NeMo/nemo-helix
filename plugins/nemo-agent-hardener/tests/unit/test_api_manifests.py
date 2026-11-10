@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 import yaml
 from fastapi import FastAPI
@@ -22,7 +23,10 @@ from nemo_agent_hardener_plugin.api.v2 import manifests as manifests_module
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.filesets import UploadedFileset
 from nemo_agent_hardener_plugin.jobs import manifest as job_manifest
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import AuthenticationError, InternalServerError, PermissionDeniedError
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, NemoPaginationInfo, get_entity_client
+from nemo_helix_plugin.files.client import FilesClient
 
 NOW = datetime.now(timezone.utc)
 PREFIX = "/apis/agent-hardener/v2/workspaces/{workspace}"
@@ -54,7 +58,7 @@ def mock_entity_client() -> AsyncMock:
 
 @pytest.fixture
 def client(mock_entity_client: AsyncMock, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setattr(manifests_module, "get_nemo_client", lambda **_: MagicMock())
+    monkeypatch.setattr(manifests_module, "get_nemo_client", lambda **_: NemoClient(base_url="http://testserver"))
     monkeypatch.setattr(manifests_module, "resolve_agent_to_manifest", lambda *_a, **kw: _resolved(kw.get("egress")))
     # Resolution now writes a scaffold that gets frozen as a fileset; the real upload needs a real dir.
     monkeypatch.setattr(
@@ -63,9 +67,15 @@ def client(mock_entity_client: AsyncMock, monkeypatch: pytest.MonkeyPatch) -> Te
         lambda _sdk, _dir, *, workspace: UploadedFileset("default/agent-fs-1", "scaffold-id"),
     )
     monkeypatch.setattr(manifests_module, "delete_fileset_by_id", lambda _client, *, workspace, fileset_id: None)
+    monkeypatch.setattr(
+        FilesClient, "get_fileset", lambda *_a, **_kw: MagicMock(data=lambda: MagicMock(id="legacy-allocation-id"))
+    )
     app = FastAPI()
     app.include_router(manifests_module.router, prefix=PREFIX)
     app.dependency_overrides[get_entity_client] = lambda: mock_entity_client
+    app.dependency_overrides[manifests_module.get_service_files_client] = lambda: FilesClient.from_client(
+        NemoClient(base_url="http://testserver")
+    )
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -747,7 +757,7 @@ def test_stored_user_backends_drops_the_gateway_entry() -> None:
 
 @pytest.mark.parametrize("action", ["refresh", "delete"])
 @pytest.mark.parametrize("recorded_id", [None, "owned-allocation-id"])
-def test_scaffold_cleanup_depends_on_recorded_id_not_read_reference(
+def test_agent_fileset_cleanup_uses_recorded_or_migrated_id(
     client: TestClient,
     mock_entity_client: AsyncMock,
     monkeypatch: pytest.MonkeyPatch,
@@ -776,10 +786,77 @@ def test_scaffold_cleanup_depends_on_recorded_id_not_read_reference(
         response = client.delete(url)
         assert response.status_code == 204, response.text
 
-    if recorded_id is None:
-        cleanup.assert_not_called()
-    else:
-        cleanup.assert_called_once()
-        call = cleanup.call_args
-        assert call is not None
-        assert call.kwargs == {"workspace": "default", "fileset_id": recorded_id}
+    cleanup.assert_called_once()
+    call = cleanup.call_args
+    assert call is not None
+    assert call.kwargs == {"workspace": "default", "fileset_id": recorded_id or "legacy-allocation-id"}
+
+
+@pytest.mark.parametrize("recorded_id", [None, "original-id"])
+def test_patch_migrates_schema_and_pins_agent_fileset_once(
+    client: TestClient, mock_entity_client: AsyncMock, monkeypatch: pytest.MonkeyPatch, recorded_id: str | None
+) -> None:
+    manifest = AgentHardenerManifest(
+        name="m1", workspace="default", agent_fileset="default/scaffold", agent_fileset_id=recorded_id
+    )
+    manifest._id = "manifest-id"
+    manifest._db_version = 7
+    mock_entity_client.get.return_value = manifest
+    mock_entity_client.update.side_effect = lambda updated: updated
+    resolve = MagicMock(return_value=MagicMock(data=lambda: MagicMock(id="captured-id")))
+    monkeypatch.setattr(FilesClient, "get_fileset", resolve)
+
+    response = client.patch("/apis/agent-hardener/v2/workspaces/default/manifests/m1", json={"rounds": 3})
+
+    assert response.status_code == 200, response.text
+    saved = mock_entity_client.update.await_args.args[0]
+    assert saved.id == "manifest-id" and saved.db_version == 7
+    assert saved.agent_fileset_id == (recorded_id or "captured-id")
+    assert saved.rounds == 3
+    assert manifest.agent_fileset_id == recorded_id
+    assert resolve.call_count == (1 if recorded_id is None else 0)
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_status"),
+    [
+        (AuthenticationError(httpx.Response(401)), 401),
+        (PermissionDeniedError(httpx.Response(403)), 403),
+        (InternalServerError(httpx.Response(503)), 500),
+        (httpx.ConnectError("Files service unavailable"), 500),
+    ],
+)
+def test_delete_lookup_failure_preserves_manifest_for_retry(
+    client: TestClient,
+    mock_entity_client: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+    expected_status: int,
+) -> None:
+    """Preserve a name-only manifest on lookup failure and allow a later retry."""
+    manifest = AgentHardenerManifest(name="m1", workspace="default", agent_fileset="default/agent-files")
+    manifest._id = "manifest-id"
+    manifest._db_version = 7
+    mock_entity_client.get.return_value = manifest
+    lookup = MagicMock(side_effect=failure)
+    cleanup = MagicMock()
+    monkeypatch.setattr(FilesClient, "get_fileset", lookup)
+    monkeypatch.setattr(manifests_module, "delete_fileset_by_id", cleanup)
+    url = "/apis/agent-hardener/v2/workspaces/default/manifests/m1"
+
+    response = client.delete(url)
+
+    assert response.status_code == expected_status
+    mock_entity_client.delete_by_id.assert_not_awaited()
+    cleanup.assert_not_called()
+    assert manifest.id == "manifest-id" and manifest.db_version == 7
+    assert manifest.agent_fileset_id is None
+
+    lookup.side_effect = None
+    lookup.return_value = MagicMock(data=lambda: MagicMock(id="captured-id"))
+    assert client.delete(url).status_code == 204
+    mock_entity_client.delete_by_id.assert_awaited_once_with(
+        AgentHardenerManifest, "manifest-id", expected_db_version=7
+    )
+    cleanup.assert_called_once()
+    assert cleanup.call_args.kwargs == {"workspace": "default", "fileset_id": "captured-id"}

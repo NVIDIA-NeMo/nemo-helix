@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import importlib.metadata
-import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -1005,30 +1004,18 @@ async def test_registered_agent_rejects_unsupported_provider_bindings(mocker: Mo
 
 
 @pytest.mark.parametrize(
-    ("files", "fileset_id", "warns"),
-    [
-        (None, None, False),
-        (FilesetRef(root="dev/snapshot"), None, True),
-        (FilesetRef(root="dev/snapshot"), "snapshot-id", False),
-    ],
+    ("files", "fileset_id"),
+    [(None, None), (FilesetRef(root="dev/snapshot"), None), (FilesetRef(root="dev/snapshot"), "snapshot-id")],
 )
-def test_snapshot_cleanup_warns_only_for_a_name_without_an_id(
-    files: FilesetRef | None, fileset_id: str | None, warns: bool, caplog: pytest.LogCaptureFixture
+def test_receipt_accessor_is_silent_until_the_caller_upgrades_legacy_data(
+    files: FilesetRef | None, fileset_id: str | None, caplog: pytest.LogCaptureFixture
 ) -> None:
     target = FabricRunnerTarget(source=RegisteredAgentSource(agent=_AGENT, files=files, fileset_id=fileset_id))
-
     receipt = registered_agent_files_receipt(target)
-
-    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
-    assert bool(warnings) is warns
-    if warns:
-        assert len(warnings) == 1
-        assert "dev/snapshot" in warnings[0].getMessage()
-        assert "skipping automatic cleanup" in warnings[0].getMessage()
+    assert not caplog.records
     if files is not None and fileset_id is not None:
         assert receipt is not None
-        assert receipt.fileset_id == fileset_id
-        assert receipt.ref == files.root
+        assert receipt.fileset_id == fileset_id and receipt.ref == files.root
     else:
         assert receipt is None
 

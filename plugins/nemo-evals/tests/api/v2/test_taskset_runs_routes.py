@@ -13,14 +13,18 @@ from nemo_evals.api.dependencies import get_service_run_store, get_taskset_run_s
 from nemo_evals.api.v2.taskset_runs import router
 from nemo_evals.service import EvaluatorPluginService
 from nemo_evals.taskset_runs.entities import MemberPhase, ResultState, TasksetRunMemberEntity, TasksetRunPhase
+from nemo_evals.taskset_runs.store import TasksetRunStore
 from nemo_evals.taskset_runs.trials import TrialCounts, TrialPhase
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.client.errors import AuthenticationError, InternalServerError, PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nhx.core.entities.service import EntitiesService
 from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 from nhx.testing import ClientContext, create_test_client
+from nhx.testing.files import InMemoryFilesService
 
 PATH = "/apis/evals/v2/workspaces/default/agent-evaluate/runs"
 
@@ -584,3 +588,74 @@ async def test_read_routes_preserve_storage_permission_denials(read_client, serv
     response = await read_client.get(PATH + suffix)
     assert response.status_code == 403
     assert response.json() == {"detail": "Forbidden"}
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_status"),
+    [
+        (AuthenticationError(httpx.Response(401)), 401),
+        (PermissionDeniedError(httpx.Response(403)), 403),
+        (InternalServerError(httpx.Response(503)), 500),
+        (httpx.ConnectError("Files service unavailable"), 500),
+    ],
+)
+async def test_cancel_lookup_failure_preserves_run_for_retry(
+    read_client: httpx.AsyncClient,
+    seed_run,
+    cancel_clock,
+    run_store: TasksetRunStore,
+    files_client: AsyncFilesClient,
+    files_service: InMemoryFilesService,
+    failure: Exception,
+    expected_status: int,
+) -> None:
+    """Failed migration preserves the run; a successful retry records cancellation and the fileset ID."""
+    allocation = (
+        await files_client.create_fileset(workspace="default", body=CreateFilesetRequest(name="legacy-plan"))
+    ).data()
+    original = await seed_run(plan_ref="default/legacy-plan#plan.json")
+    files_service.calls.clear()
+    files_service.failures["get"] = failure
+
+    response = await read_client.post(f"{PATH}/run-selected/cancel")
+
+    assert response.status_code == expected_status
+    current = await run_store.find("default", "run-selected")
+    assert current is not None
+    assert current.model_dump() == original.model_dump()
+    assert current.db_version == original.db_version
+    assert current.cancel_requested_at is None and current.plan_fileset_id is None
+    assert files_service.calls == [("get", "default", "legacy-plan")]
+    assert files_service.allocations[("default", "legacy-plan")] == allocation.id
+
+    files_service.failures.clear()
+    response = await read_client.post(f"{PATH}/run-selected/cancel")
+
+    assert response.status_code == 200
+    current = await run_store.find("default", "run-selected")
+    assert current is not None
+    assert current.cancel_requested_at == CANCEL_AT
+    assert current.plan_fileset_id == allocation.id
+    assert current.plan_digest == original.plan_digest
+    assert current.db_version == original.db_version + 1
+    assert not any(operation == "delete" for operation, _, _ in files_service.calls)
+
+
+async def test_cancel_with_recorded_plan_id_does_not_require_files_lookup(
+    read_client: httpx.AsyncClient,
+    seed_run,
+    cancel_clock,
+    run_store: TasksetRunStore,
+    files_service: InMemoryFilesService,
+) -> None:
+    """A captured plan ID lets cancellation proceed while Files is unavailable."""
+    await seed_run(plan_fileset_id="recorded-plan-id")
+    files_service.failures["get"] = 503
+
+    response = await read_client.post(f"{PATH}/run-selected/cancel")
+
+    assert response.status_code == 200
+    current = await run_store.find("default", "run-selected")
+    assert current is not None and current.plan_fileset_id == "recorded-plan-id"
+    assert current.cancel_requested_at == CANCEL_AT
+    assert files_service.calls == []

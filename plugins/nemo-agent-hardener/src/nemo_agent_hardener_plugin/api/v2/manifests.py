@@ -33,6 +33,7 @@ from nemo_agent_hardener_plugin.agent_resolver import (
     parse_secret_specs,
     resolve_agent_to_manifest,
 )
+from nemo_agent_hardener_plugin.api.dependencies import get_service_files_client
 from nemo_agent_hardener_plugin.api.v2._filters import make_filter_dep
 from nemo_agent_hardener_plugin.api.v2.schemas import (
     InspectAgentRequest,
@@ -60,8 +61,10 @@ from nemo_agent_hardener_plugin.jobs.manifest import _apply_agent_port
 from nemo_agent_hardener_plugin.model_config import ModelConfigDefaults, WarGameModels, model_config_defaults
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
 from nemo_agent_hardener_plugin.project_resolver import HERMES_RUNTIME_ENV, build_project_manifest_dict, inspect_project
+from nemo_agent_hardener_plugin.schema_migrations import migrate_schema_manifest
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client.errors import AuthenticationError, PermissionDeniedError
 from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -69,6 +72,7 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityNotFoundError,
     get_entity_client,
 )
+from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from starlette.concurrency import run_in_threadpool
@@ -515,6 +519,7 @@ async def update_manifest(
     name: str,
     body: ManifestUpdate,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    files_client: FilesClient = Depends(get_service_files_client),
 ) -> AgentHardenerManifest:
     """Edit a manifest's cached benign suite, victim port, egress, or war-game settings.
 
@@ -522,6 +527,11 @@ async def update_manifest(
     `POST /manifests/{name}/refresh` to re-resolve the one it already targets.
     """
     existing = (await _get_manifest_or_404(entity_client, workspace, name)).model_copy(deep=True)
+    existing = await run_in_threadpool(
+        migrate_schema_manifest,
+        existing,
+        files_client=files_client,
+    )
     if body.benign_suite is not None:
         existing.benign_suite = body.benign_suite
     if body.defenders is not None:
@@ -556,6 +566,7 @@ async def refresh_manifest(
     workspace: str,
     name: str,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    files_client: FilesClient = Depends(get_service_files_client),
 ) -> AgentHardenerManifest:
     """Re-resolve an agent-source manifest against the agent as it is *now*.
 
@@ -573,6 +584,11 @@ async def refresh_manifest(
             detail=f"manifest '{name}' names no agent to refresh from; recreate it against a registered agent.",
         )
 
+    existing = await run_in_threadpool(
+        migrate_schema_manifest,
+        existing,
+        files_client=files_client,
+    )
     # Names that only came from the old deployment are re-derived, so a secret it dropped is not still required.
     kept_secrets = [
         n for n in existing.secrets if n in existing.declared_secrets or n not in existing.deployed_secret_refs
@@ -586,7 +602,6 @@ async def refresh_manifest(
         backends=_stored_user_backends(existing.manifest_yaml),
         env=existing.env,
     )
-    stale = existing.agent_fileset
     stale_id = existing.agent_fileset_id
 
     existing.agent_fileset = fileset.ref
@@ -606,8 +621,6 @@ async def refresh_manifest(
             workspace=existing.workspace,
             fileset_id=stale_id,
         )
-    elif stale_id is None and stale:
-        logger.warning("Retaining previous scaffold for manifest '%s': no recorded Fileset ID", sanitize_for_log(name))
     return updated
 
 
@@ -618,9 +631,18 @@ async def delete_manifest(
     workspace: str,
     name: str,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    files_client: FilesClient = Depends(get_service_files_client),
 ) -> None:
     """Delete a saved manifest by name, along with the victim bundle the service created for it."""
     existing = await _get_manifest_or_404(entity_client, workspace, name)
+    try:
+        existing = await run_in_threadpool(
+            migrate_schema_manifest,
+            existing,
+            files_client=files_client,
+        )
+    except (AuthenticationError, PermissionDeniedError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail="Fileset lookup access denied") from exc
     try:
         await entity_client.delete_by_id(AgentHardenerManifest, existing.id, expected_db_version=existing.db_version)
     except Exception as exc:
@@ -638,5 +660,3 @@ async def delete_manifest(
             workspace=existing.workspace,
             fileset_id=existing.agent_fileset_id,
         )
-    elif existing.agent_fileset:
-        logger.warning("Retaining scaffold for manifest '%s': no recorded Fileset ID", sanitize_for_log(name))

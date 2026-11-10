@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 
 from filesets import parse_fileset_ref
+from nemo_evals.schema_migrations import migrate_schema_fileset_receipt
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -176,9 +177,9 @@ async def delete_fileset_ref(files_client: AsyncFilesClient, ref: str, *, filese
     """
     try:
         workspace, name, _ = parse_fileset_ref(ref, workspace_fallback=None)
-        if fileset_id is None:
-            logger.warning("Retaining legacy plan fileset without an allocation ID: %s", ref)
+        receipt = await migrate_schema_fileset_receipt(ref, fileset_id=fileset_id, files_client=files_client)
+        if receipt is None:
             return
-        await files_client.delete_fileset_by_id(workspace=workspace, fileset_id=fileset_id)
+        await files_client.delete_fileset_by_id(workspace=workspace, fileset_id=receipt.fileset_id)
     except Exception:
         logger.warning("Failed to clean up fileset %s; storage may be leaked", ref, exc_info=True)

@@ -3346,10 +3346,8 @@ def test_summary_failure_preserves_the_run_outcome_publication_and_cleanup(
         "nemo_evals.jobs.agent_evaluate.publish_agent_eval_result",
         return_value=PublicationOutcome(status=HelixJobStatus.COMPLETED, evaluation_id="eval-a"),
     )
-    snapshot = FilesetRef(root="dev/agent-snapshot")
     (ctx.storage.persistent / agent_evaluate.ENVIRONMENT_STORAGE_DIR).mkdir()
-    mocker.patch("nemo_evals.jobs.agent_evaluate.registered_agent_files_receipt", return_value=snapshot)
-    discard = mocker.patch("nemo_evals.jobs.agent_evaluate.discard_registered_agent_files_sync")
+    discard = mocker.patch("nemo_evals.jobs.agent_evaluate.discard_snapshot_sync")
     original = ctx.results.save
 
     def save(name, path, **kwargs):
@@ -3380,7 +3378,7 @@ def test_summary_failure_preserves_the_run_outcome_publication_and_cleanup(
     run.assert_called_once()
     persist.assert_called_once()
     publish.assert_called_once()
-    discard.assert_called_once_with(client, snapshot)
+    discard.assert_called_once_with(spec.target, client)
 
 
 @pytest.mark.parametrize("failed_step", ["publish", "client"])

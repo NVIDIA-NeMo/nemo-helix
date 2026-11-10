@@ -31,7 +31,6 @@ from nemo_evals.jobs.gateway_agents import GatewayAgentEnv, gateway_agent_env, v
 from nemo_evals.jobs.publication_spec import PublicationSpec
 from nemo_evals.metric_refs import MetricRefOrInline
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline
-from nemo_helix_plugin.log_utils import sanitize_for_log
 from nhx_evals_sdk.agent_eval.runtimes.fabric.env import validate_fabric_env
 from nhx_evals_sdk.agent_eval.runtimes.gym.dataset import ID_PREFIX_PATTERN, check_id_prefix
 from nhx_evals_sdk.agent_eval.runtimes.harbor.env import validate_harbor_env
@@ -773,17 +772,11 @@ def registered_agent_files(target: FabricRunnerTarget | HarborRunnerTarget | Gym
 def registered_agent_files_receipt(
     target: Target | None,
 ) -> FilesetReceipt | None:
-    """Return the captured snapshot allocation for cleanup; legacy names cannot identify it safely."""
+    """Return a recorded snapshot allocation after the caller has upgraded any legacy reference."""
     source = registered_agent_source(target)
     if source is None or source.files is None:
         return None
     if source.fileset_id is None:
-        # Legacy records kept only a reusable name. Retain the snapshot because looking up
-        # that name now could select a replacement owned by another run.
-        logger.warning(
-            "Agent files snapshot '%s' has no recorded fileset ID; skipping automatic cleanup",
-            sanitize_for_log(source.files.root),
-        )
         return None
     return FilesetReceipt(ref=source.files.root, fileset_id=source.fileset_id)
 
