@@ -681,6 +681,9 @@ def test_policy_allows_workload_operations_without_broad_platform_access():
     assert ("POST", "/apis/inference-gateway/v2/workspaces/team/openai/-/v1/chat/completions") in allowed
     assert all("/secrets/" not in path and "/entities/" not in path and "/auth/" not in path for _, path in allowed)
     assert ("POST", "/apis/jobs/v2/workspaces/team/jobs") not in allowed
+    # Result saves must not depend on reading the job record: the restricted policy
+    # deliberately leaves GET /jobs/{job} out.
+    assert ("GET", "/apis/jobs/v2/workspaces/team/jobs/job-1") not in allowed
     assert restricted.landlock.compatibility == "hard_requirement"
 
     # Compare the handwritten policy with requests built by the actual client contract.

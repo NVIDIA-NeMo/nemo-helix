@@ -69,6 +69,8 @@ def result_manager_factory(
     workspace: str | None = None,
     files_client: FilesClient,
     jobs_client: JobsClient | None = None,
+    fileset: str | None = None,
+    artifact_base_path: str | None = None,
 ) -> _ResultManager:
     from nemo_helix_plugin.jobs.result_manager import result_manager_factory as create_result_manager
 
@@ -78,6 +80,8 @@ def result_manager_factory(
         workspace=workspace,
         files_client=files_client,
         jobs_client=jobs_client,
+        fileset=fileset,
+        artifact_base_path=artifact_base_path,
     )
 
 
@@ -196,6 +200,13 @@ class HelixJobResults(JobResults):
         client: Typed root client used for both file uploads and the jobs-results
             registration.
         attempt_id: Concrete platform attempt that produces these results.
+        fileset: Fileset holding the job's artifacts. Pass it when the caller already
+            knows the job's storage context (sandboxes export it as ``NEMO_JOB_FILESET``);
+            when omitted the manager reads it from the job record, which needs access
+            to ``GET /jobs/{job}``.
+        artifact_base_path: Folder inside ``fileset`` the job's artifacts nest under;
+            ``None`` means the job owns the whole fileset. Only meaningful alongside
+            ``fileset``.
     """
 
     def __init__(
@@ -205,6 +216,8 @@ class HelixJobResults(JobResults):
         workspace: str,
         client: NemoClient,
         attempt_id: str,
+        fileset: str | None = None,
+        artifact_base_path: str | None = None,
     ) -> None:
         self._manager: _ResultManager
         self._configure_manager(
@@ -212,6 +225,8 @@ class HelixJobResults(JobResults):
             workspace=workspace,
             client=client,
             attempt_id=attempt_id,
+            fileset=fileset,
+            artifact_base_path=artifact_base_path,
         )
 
     def _configure_manager(
@@ -221,6 +236,8 @@ class HelixJobResults(JobResults):
         workspace: str,
         client: NemoClient,
         attempt_id: str,
+        fileset: str | None,
+        artifact_base_path: str | None,
     ) -> None:
         self._manager = result_manager_factory(
             job_name=job_name,
@@ -228,6 +245,8 @@ class HelixJobResults(JobResults):
             attempt_id=attempt_id,
             files_client=FilesClient.from_client(client),
             jobs_client=JobsClient.from_client(client),
+            fileset=fileset,
+            artifact_base_path=artifact_base_path,
         )
         self._job_name = job_name
         self._workspace = workspace

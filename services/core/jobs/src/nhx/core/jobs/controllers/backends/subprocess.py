@@ -27,6 +27,7 @@ from nhx.common.config import get_platform_config
 from nhx.common.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -561,6 +562,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                 NEMO_JOB_TASK_ENVVAR: task_id,
                 NEMO_JOB_WORKSPACE_ENVVAR: step.workspace,
                 NEMO_JOB_FILESET_ENVVAR: step.fileset,
+                **({NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR: step.artifact_base_path} if step.artifact_base_path else {}),
                 **({NEMO_JOB_UID_ENVVAR: step.job_id} if step.job_id else {}),
                 EPHEMERAL_TASK_STORAGE_PATH_ENVVAR: str(ephemeral_dir),
                 CONFIG_TASK_STORAGE_PATH_ENVVAR: str(config_dir),

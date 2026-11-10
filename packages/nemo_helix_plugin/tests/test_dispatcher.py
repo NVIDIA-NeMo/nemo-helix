@@ -499,3 +499,60 @@ class TestBuildCtxFromEnv:
 
         with pytest.raises(RuntimeError, match="NEMO_JOB_ATTEMPT_ID"):
             build_ctx_from_env(_sync_client())
+
+
+class TestBuildCtxJobStorageContext:
+    """``ctx.results`` carries the job's fileset and artifact base path.
+
+    The result sink must not read the job record itself: restricted sandboxes may
+    post results but may not ``GET /jobs/{job}``.
+    """
+
+    @staticmethod
+    def _capture_results(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        captured: dict[str, object] = {}
+
+        def _fake(**kwargs: object) -> MagicMock:
+            captured.update(kwargs)
+            return MagicMock(name="HelixJobResults")
+
+        monkeypatch.setattr(dispatcher_module, "HelixJobResults", _fake)
+        return captured
+
+    @staticmethod
+    def _setup_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setenv("NEMO_JOB_WORKSPACE", "ws")
+        monkeypatch.setenv("NEMO_JOB_ID", "job-a")
+        monkeypatch.setenv("NEMO_JOB_ATTEMPT_ID", "attempt-a")
+        monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
+
+    def test_fileset_and_base_path_come_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured = self._capture_results(monkeypatch)
+        self._setup_env(monkeypatch, tmp_path)
+        monkeypatch.setenv("NEMO_JOB_FILESET", "job-fileset")
+        monkeypatch.setenv("NEMO_JOB_ARTIFACT_BASE_PATH", "jobs/job-a")
+
+        build_ctx_from_env(_sync_client())
+
+        assert captured["fileset"] == "job-fileset"
+        assert captured["artifact_base_path"] == "jobs/job-a"
+
+    def test_absent_base_path_is_none(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A job that owns its whole fileset gets no base path rather than an empty one."""
+        captured = self._capture_results(monkeypatch)
+        self._setup_env(monkeypatch, tmp_path)
+        monkeypatch.setenv("NEMO_JOB_FILESET", "job-fileset")
+        monkeypatch.setenv("NEMO_JOB_ARTIFACT_BASE_PATH", "")
+
+        build_ctx_from_env(_sync_client())
+
+        assert captured["artifact_base_path"] is None
+
+    def test_absent_fileset_falls_back_to_the_job_record(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured = self._capture_results(monkeypatch)
+        self._setup_env(monkeypatch, tmp_path)
+        monkeypatch.delenv("NEMO_JOB_FILESET", raising=False)
+
+        build_ctx_from_env(_sync_client())
+
+        assert captured["fileset"] is None

@@ -465,7 +465,7 @@ def test_result_manager_fetches_metadata_from_typed_task_client() -> None:
         jobs_client=JobsClient.from_client(client),
     )
 
-    assert manager._fetch_job_metadata() == ("att-123", "test-fileset", "shared-fs")
+    assert manager._job_context() == ("att-123", "test-fileset", "jobs/test-job")
 
 
 def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(tmp_path: Path) -> None:
@@ -495,3 +495,77 @@ def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(
     jobs_client.create_job_result.assert_called_once()
     call = jobs_client.create_job_result.call_args
     assert call.kwargs["body"].attempt_id == "attempt-a"
+
+
+class TestRestrictedPolicyResultSave:
+    """A provider-bound sandbox saves results without reading the job record.
+
+    OpenShell sandboxes with gateway provider bindings get the restricted platform
+    policy: they may post results, but ``GET /jobs/{job}`` is denied. ``ctx.results.save``
+    must therefore work from the ``NEMO_JOB_*`` env alone.
+    """
+
+    @staticmethod
+    def _denying_transport(denied: list[httpx.Request]):
+        job_record_path = "/apis/jobs/v2/workspaces/ws/jobs/job-a"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET" and request.url.path == job_record_path:
+                denied.append(request)
+                return httpx.Response(403, json={"detail": "not permitted by policy"}, request=request)
+            if request.url.path.startswith("/apis/jobs/v2/workspaces/ws/jobs/job-a/results/"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "name": "summary",
+                        "job": "job-a",
+                        "workspace": "ws",
+                        "attempt_id": "attempt-a",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "updated_at": "2026-01-01T00:00:00Z",
+                        "artifact_url": "fileset://ws/job-fileset#jobs/job-a/results/attempt-a/summary",
+                        "artifact_storage_type": "fileset",
+                    },
+                    request=request,
+                )
+            return httpx.Response(200, json={}, request=request)
+
+        return httpx.MockTransport(handler)
+
+    def test_save_never_reads_the_job_record(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from nemo_helix_plugin.tasks import dispatcher as dispatcher_module
+
+        artifact = tmp_path / "summary.json"
+        artifact.write_text("{}")
+        monkeypatch.setenv("NEMO_JOB_WORKSPACE", "ws")
+        monkeypatch.setenv("NEMO_JOB_ID", "job-a")
+        monkeypatch.setenv("NEMO_JOB_ATTEMPT_ID", "attempt-a")
+        monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
+        monkeypatch.setenv("NEMO_JOB_FILESET", "job-fileset")
+        monkeypatch.setenv("NEMO_JOB_ARTIFACT_BASE_PATH", "jobs/job-a")
+
+        denied: list[httpx.Request] = []
+        client = NemoClient(
+            base_url="http://platform.test",
+            workspace="ws",
+            http_client=httpx.Client(transport=self._denying_transport(denied)),
+            owns_http_client=True,
+        )
+        try:
+            ctx = dispatcher_module.build_ctx_from_env(client)
+            with (
+                patch(
+                    "nemo_helix_plugin.jobs.result_manager.FilesetFileManager.validate_storage",
+                ),
+                patch(
+                    "nemo_helix_plugin.jobs.result_manager.FilesetFileManager.upload",
+                    return_value="fileset://ws/job-fileset#jobs/job-a/results/attempt-a/summary",
+                ) as upload,
+            ):
+                ref = ctx.results.save("summary", artifact)
+        finally:
+            client.close()
+
+        assert not denied, "the result save must not fetch the job record"
+        assert ref.artifact_url.startswith("fileset://ws/job-fileset#")
+        assert upload.call_args.kwargs["remote_path"] == "jobs/job-a/results/attempt-a/summary"

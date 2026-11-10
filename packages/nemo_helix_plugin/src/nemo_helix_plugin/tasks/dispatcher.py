@@ -53,7 +53,9 @@ from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
+    NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
@@ -192,12 +194,15 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
     exists inside task containers.
 
     ``HelixJobResults.job_name`` is the *submitted* platform job name, not
-    the job class name — :class:`~nemo_helix_plugin.jobs.result_manager.ResultManager`
-    uses it to look up the job via the typed Jobs client so each
-    ``ctx.results.save()`` registers against the correct job record. The
-    backends inject this as ``NEMO_JOB_ID = step.job``; the NemoJob class
-    identifier (e.g. ``"evaluate"``) would point at a non-existent job and
-    break result registration.
+    the job class name. The result sink is also handed the job's fileset and
+    artifact base path so it never needs to read the job record itself: a
+    sandbox on the restricted platform policy is allowed to post results but
+    not to ``GET /jobs/{job}``. The backends inject these as
+    ``NEMO_JOB_FILESET`` and ``NEMO_JOB_ARTIFACT_BASE_PATH``; ``NEMO_JOB_ID =
+    step.job`` names the job, and the NemoJob class identifier (e.g.
+    ``"evaluate"``) would point at a non-existent job and break result
+    registration. When the fileset is absent the sink falls back to reading
+    the job record, so non-sandbox callers keep working.
     """
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "").strip()
     if not workspace:
@@ -212,6 +217,9 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
     attempt_id = os.environ.get(NEMO_JOB_ATTEMPT_ID_ENVVAR, "").strip()
     if not attempt_id:
         raise RuntimeError(f"{NEMO_JOB_ATTEMPT_ID_ENVVAR} not set; running outside the platform?")
+    fileset = os.environ.get(NEMO_JOB_FILESET_ENVVAR, "").strip() or None
+    # A job that owns its whole fileset has no base path, so an empty value is the root.
+    artifact_base_path = os.environ.get(NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR, "").strip() or None
     return JobContext(
         workspace=workspace,
         storage=StoragePaths(
@@ -223,6 +231,8 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
             workspace=workspace,
             client=client,
             attempt_id=attempt_id,
+            fileset=fileset,
+            artifact_base_path=artifact_base_path,
         ),
         usage=HelixJobUsageReporter(
             job_name=job_id,

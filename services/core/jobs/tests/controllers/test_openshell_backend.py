@@ -1149,3 +1149,36 @@ async def test_provider_revocation_uses_async_transport_and_timeout(
         ),
         timeout=7,
     )
+
+
+class TestResultStorageContext:
+    """The sandbox is handed the job's fileset and artifact base path.
+
+    Provider-bound sandboxes may only POST results, not GET the job record, so the
+    result sink has to receive this context through the environment.
+    """
+
+    def test_step_context_reaches_the_sandbox_env(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending.model_copy(deep=True)
+        step.artifact_base_path = "jobs/test-job"
+
+        backend.schedule(step.step_spec.executor, step)
+
+        env = dict(_create_request(backend).spec.environment)
+        assert env["NEMO_JOB_FILESET"] == "test-logs-fileset"
+        assert env["NEMO_JOB_ARTIFACT_BASE_PATH"] == "jobs/test-job"
+
+    def test_job_without_output_location_omits_the_base_path(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending.model_copy(deep=True)
+        step.artifact_base_path = None
+
+        backend.schedule(step.step_spec.executor, step)
+
+        env = dict(_create_request(backend).spec.environment)
+        assert "NEMO_JOB_ARTIFACT_BASE_PATH" not in env

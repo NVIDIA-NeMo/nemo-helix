@@ -199,3 +199,80 @@ async def test_create_result_wraps_transport_errors_async(tmp_path, mock_async_f
         pytest.raises(CreateJobResultError, match="Error creating job result"),
     ):
         await mgr.create_result("my-result", test_file)
+
+
+@pytest.mark.parametrize(
+    "artifact_base_path,expected_remote_path",
+    [
+        ("jobs/test-job", "jobs/test-job/results/att-1/summary"),
+        (None, "results/att-1/summary"),
+    ],
+)
+def test_create_result_uses_supplied_context_without_reading_the_job(
+    tmp_path, mock_sync_file_manager, artifact_base_path, expected_remote_path
+):
+    """Step-supplied fileset/base path must not trigger ``get_job``.
+
+    A sandbox on the restricted platform policy may post results but may not read
+    the job record, so the sync manager must work from the context it is handed.
+    """
+    test_file = tmp_path / "artifact.bin"
+    test_file.write_bytes(b"x")
+
+    mock_jobs = MagicMock(spec=JobsClient)
+    mock_jobs.create_job_result.return_value = _resp(MagicMock())
+
+    sdk = _sync_client()
+    mgr = rm.ResultManager(
+        job_name="test-job",
+        workspace="test-ws",
+        attempt_id="att-1",
+        files_client=FilesClient.from_client(sdk),
+        jobs_client=mock_jobs,
+        fileset="job-fileset",
+        artifact_base_path=artifact_base_path,
+    )
+
+    with patch.object(mgr, "_create_file_manager", return_value=mock_sync_file_manager):
+        mgr.create_result("summary", test_file)
+
+    mock_jobs.get_job.assert_not_called()
+    assert mock_sync_file_manager.upload.call_args.kwargs["remote_path"] == expected_remote_path
+    assert mock_jobs.create_job_result.call_args.kwargs["body"].attempt_id == "att-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "artifact_base_path,expected_remote_path",
+    [
+        ("jobs/test-job", "jobs/test-job/results/att-1/summary"),
+        (None, "results/att-1/summary"),
+    ],
+)
+async def test_create_result_uses_supplied_context_without_reading_the_job_async(
+    tmp_path, mock_async_file_manager, artifact_base_path, expected_remote_path
+):
+    """Async twin of the restricted-policy regression test."""
+    test_file = tmp_path / "artifact.bin"
+    test_file.write_bytes(b"x")
+
+    mock_jobs = MagicMock(spec=AsyncJobsClient)
+    mock_jobs.create_job_result = AsyncMock(return_value=_resp(MagicMock()))
+
+    sdk = _async_client()
+    mgr = rm.AsyncResultManager(
+        job_name="test-job",
+        workspace="test-ws",
+        attempt_id="att-1",
+        files_client=AsyncFilesClient.from_client(sdk),
+        jobs_client=mock_jobs,
+        fileset="job-fileset",
+        artifact_base_path=artifact_base_path,
+    )
+
+    with patch.object(mgr, "_create_file_manager", return_value=mock_async_file_manager):
+        await mgr.create_result("summary", test_file)
+
+    mock_jobs.get_job.assert_not_called()
+    assert mock_async_file_manager.upload.call_args.kwargs["remote_path"] == expected_remote_path
+    assert mock_jobs.create_job_result.call_args.kwargs["body"].attempt_id == "att-1"
