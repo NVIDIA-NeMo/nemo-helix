@@ -47,7 +47,7 @@ the other migration requirements above still apply.
 
 The embedded PostgreSQL is for evaluation and development, not production.
 New installations generate a random password when `postgresql.auth.password`
-is empty. Upgrades reuse the existing chart-managed Secret, including legacy
+is unset. Upgrades reuse the existing chart-managed Secret, including legacy
 passwords; upgrading does **not** rotate an existing `nemo` password. Helm must
 be able to look up that Secret. Offline upgrade renders must supply the current
 password or an `existingSecret` reference; a missing Secret fails rather than
