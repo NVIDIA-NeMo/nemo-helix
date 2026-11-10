@@ -5,7 +5,7 @@ import { KVPair } from '@nemo/common/src/components/KVPair';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import { Stack, Text } from '@nvidia/foundations-react-core';
-import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
+import { DetailPanel } from '@studio/components/DetailPanel';
 import type { FC } from 'react';
 
 interface AgentSummaryPanelProps {

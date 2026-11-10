@@ -4,12 +4,12 @@
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Stack } from '@nvidia/foundations-react-core';
 import type { AgentSpecSource } from '@studio/api/agents/useAgentSpecFileset';
+import { DetailPanel } from '@studio/components/DetailPanel';
 import { AGENT_CONTAINER_DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import type { PendingImageBuild } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { DeploymentRow } from '@studio/routes/agents/AgentDetailRoute/components/DeploymentRow';
 import { PendingImageBuildRow } from '@studio/routes/agents/AgentDetailRoute/components/PendingImageBuildRow';
 import { NoHealthyDeploymentsBanner } from '@studio/routes/agents/AgentDetailRoute/NoHealthyDeploymentsBanner';
-import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { PackageAgentControl } from '@studio/routes/agents/AgentDetailRoute/PackageAgentControl';
 import type { FC } from 'react';
 
