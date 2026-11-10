@@ -882,6 +882,9 @@ const fieldValueError = (field: ColumnField, value: string): string | null => {
   ) {
     return `${field.label} must be a comma-separated list of numbers.`;
   }
+  if (field.key === 'locale' && field.options && !field.options.some((o) => o.value === value)) {
+    return `${field.label}: "${value}" is not a supported locale.`;
+  }
   return null;
 };
 

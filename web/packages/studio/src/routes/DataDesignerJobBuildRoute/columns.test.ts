@@ -292,6 +292,16 @@ describe('sampler columns', () => {
     expect(edges).toContainEqual({ source: 'c', target: 'd' });
   });
 
+  it('flags unsupported person-sampler locales', () => {
+    const bad = column('a', 'p', 'sampler', { locale: 'es_ES' }, 'person');
+    const ok = column('b', 'q', 'sampler', { locale: 'en_US' }, 'person');
+
+    expect(validateColumns([bad])).toContainEqual(
+      expect.stringContaining('not a supported locale')
+    );
+    expect(validateColumns([ok])).toEqual([]);
+  });
+
   it('flags malformed numeric and JSON sampler params', () => {
     const badNumber = column('a', 'x', 'sampler', { p: 'not-a-number' }, 'bernoulli');
     const badJson = column(
