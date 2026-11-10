@@ -15,7 +15,7 @@ test_get_required_scopes_for_defined_endpoint if {
     scopes := get_required_scopes("/apis/models/v2/workspaces/-/models", "GET") with data.authz.endpoints as {
         "/apis/models/v2/workspaces/{workspace}/models": {
             "get": {
-                "permissions": ["models.list"],
+                "direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]},
                 "scopes": ["models:read", "platform:read"]
             }
         }
@@ -45,7 +45,7 @@ test_has_required_scopes_empty_array_with_required if {
     not has_required_scopes("/apis/models/v2/workspaces/-/models", "GET", []) with data.authz.endpoints as {
         "/apis/models/v2/workspaces/{workspace}/models": {
             "get": {
-                "permissions": ["models.list"],
+                "direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]},
                 "scopes": ["models:read", "platform:read"]
             }
         }
@@ -56,7 +56,7 @@ test_has_required_scopes_empty_array_with_required if {
 test_has_required_scopes_no_scopes_required if {
     has_required_scopes("/apis/entities/v2/workspaces", "POST", ["models:read"]) with data.authz.endpoints as {
         "/apis/entities/v2/workspaces": {
-            "post": {"permissions": [], "scopes": []}
+            "post": {"direct": {"actor_perms": []}, "delegated": {"actor_perms": [], "subject_perms": []}, "scopes": []}
         }
     }
 }
@@ -66,7 +66,7 @@ test_has_required_scopes_has_one_scope if {
     has_required_scopes("/apis/models/v2/workspaces/-/models", "GET", ["models:read"]) with data.authz.endpoints as {
         "/apis/models/v2/workspaces/{workspace}/models": {
             "get": {
-                "permissions": ["models.list"],
+                "direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]},
                 "scopes": ["models:read", "platform:read"]
             }
         }
@@ -78,7 +78,7 @@ test_has_required_scopes_has_second_scope if {
     has_required_scopes("/apis/models/v2/workspaces/-/models", "GET", ["platform:read"]) with data.authz.endpoints as {
         "/apis/models/v2/workspaces/{workspace}/models": {
             "get": {
-                "permissions": ["models.list"],
+                "direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]},
                 "scopes": ["models:read", "platform:read"]
             }
         }
@@ -90,7 +90,7 @@ test_has_required_scopes_has_all_scopes if {
     has_required_scopes("/apis/models/v2/workspaces/-/models", "GET", ["models:read", "platform:read"]) with data.authz.endpoints as {
         "/apis/models/v2/workspaces/{workspace}/models": {
             "get": {
-                "permissions": ["models.list"],
+                "direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]},
                 "scopes": ["models:read", "platform:read"]
             }
         }
@@ -102,7 +102,7 @@ test_has_required_scopes_has_extra_scopes if {
     has_required_scopes("/apis/models/v2/workspaces/-/models", "GET", ["models:read", "platform:read", "audit:read"]) with data.authz.endpoints as {
         "/apis/models/v2/workspaces/{workspace}/models": {
             "get": {
-                "permissions": ["models.list"],
+                "direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]},
                 "scopes": ["models:read", "platform:read"]
             }
         }
@@ -114,7 +114,7 @@ test_has_required_scopes_missing_scopes if {
     not has_required_scopes("/apis/models/v2/workspaces/-/models", "GET", ["audit:read"]) with data.authz.endpoints as {
         "/apis/models/v2/workspaces/{workspace}/models": {
             "get": {
-                "permissions": ["models.list"],
+                "direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]},
                 "scopes": ["models:read", "platform:read"]
             }
         }
@@ -124,7 +124,7 @@ test_has_required_scopes_missing_scopes if {
 # Test authorization with scopes
 
 test_allow_with_valid_scopes if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1",
@@ -139,7 +139,7 @@ test_allow_with_valid_scopes if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -150,7 +150,7 @@ test_allow_with_valid_scopes if {
 }
 
 test_allow_fails_with_invalid_scopes if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1",
@@ -165,7 +165,7 @@ test_allow_fails_with_invalid_scopes if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -177,7 +177,7 @@ test_allow_fails_with_invalid_scopes if {
 
 test_allow_with_no_scopes_provided if {
     # Test that when no scopes are provided, authorization works based on permissions alone
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1"
@@ -191,7 +191,7 @@ test_allow_with_no_scopes_provided if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -202,7 +202,7 @@ test_allow_with_no_scopes_provided if {
 
 test_allow_with_empty_scopes if {
     # Empty scopes array now skips scope checking (same as no scopes provided)
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1",
@@ -217,7 +217,7 @@ test_allow_with_empty_scopes if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -230,7 +230,7 @@ test_allow_with_empty_scopes if {
 
 test_list_allow_with_valid_scopes if {
     # Valid scopes AND workspaces.list in the system workspace together allow listing.
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces",
@@ -241,7 +241,7 @@ test_list_allow_with_valid_scopes if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces": {
             "get": {
-                "permissions": ["workspaces.list"],
+                "direct": {"actor_perms": ["workspaces.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.list"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -252,7 +252,7 @@ test_list_allow_with_valid_scopes if {
 }
 
 test_list_allow_fails_with_invalid_scopes if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces",
@@ -261,7 +261,7 @@ test_list_allow_fails_with_invalid_scopes if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces": {
             "get": {
-                "permissions": ["workspaces.list"],
+                "direct": {"actor_perms": ["workspaces.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.list"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -273,7 +273,7 @@ test_list_allow_fails_with_invalid_scopes if {
 # Test wildcard principal with scopes
 
 test_public_workspace_with_valid_scopes if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/public-ns",
@@ -290,7 +290,7 @@ test_public_workspace_with_valid_scopes if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -309,7 +309,7 @@ test_public_workspace_with_valid_scopes if {
 }
 
 test_public_workspace_fails_with_invalid_scopes if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/public-ns",
@@ -326,7 +326,7 @@ test_public_workspace_fails_with_invalid_scopes if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -346,7 +346,7 @@ test_public_workspace_fails_with_invalid_scopes if {
 # Test platform admin with scopes (platform admin should have access regardless of scopes)
 
 test_platform_admin_bypasses_scope_check if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "admin",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1",
@@ -361,7 +361,7 @@ test_platform_admin_bypasses_scope_check if {
 
 # Test that OIDC scopes without ":" are ignored (treated as no platform scopes)
 test_oidc_scopes_ignored if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1",
@@ -376,7 +376,7 @@ test_oidc_scopes_ignored if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -387,7 +387,7 @@ test_oidc_scopes_ignored if {
 
 # Test that provider namespace scopes are ignored (treated as non-platform scopes)
 test_provider_urn_scopes_ignored if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1",
@@ -402,7 +402,7 @@ test_provider_urn_scopes_ignored if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -412,7 +412,7 @@ test_provider_urn_scopes_ignored if {
 }
 
 test_unconfigured_one_colon_provider_scopes_ignored if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1",
@@ -427,7 +427,7 @@ test_unconfigured_one_colon_provider_scopes_ignored if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -437,7 +437,7 @@ test_unconfigured_one_colon_provider_scopes_ignored if {
 }
 
 test_multi_colon_provider_scopes_ignored if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1",
@@ -460,7 +460,7 @@ test_multi_colon_provider_scopes_ignored if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -471,7 +471,7 @@ test_multi_colon_provider_scopes_ignored if {
 
 # Test that mixing OIDC scopes with platform scopes works
 test_mixed_oidc_and_platform_scopes if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1",
@@ -486,7 +486,7 @@ test_mixed_oidc_and_platform_scopes if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["entities:read", "platform:read", "models:read"]
             }
         }
@@ -498,7 +498,7 @@ test_mixed_oidc_and_platform_scopes if {
 
 # Test that platform scopes are still enforced when mixed with OIDC scopes
 test_mixed_scopes_platform_scope_enforced if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1",
@@ -513,7 +513,7 @@ test_mixed_scopes_platform_scope_enforced if {
     with data.authz.endpoints as {
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["entities:read", "platform:read"]
             }
         }
@@ -528,7 +528,7 @@ test_mixed_scopes_platform_scope_enforced if {
 # `auth`/`platform` scopes from these endpoints fails this suite too, not just a mocked one.
 
 test_scoped_access_key_cannot_create_access_keys if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "POST",
         "path": "/apis/auth/v2/access-keys",
@@ -540,7 +540,7 @@ test_scoped_access_key_cannot_create_access_keys if {
 }
 
 test_scoped_access_key_cannot_list_access_keys if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "GET",
         "path": "/apis/auth/v2/access-keys",
@@ -552,7 +552,7 @@ test_scoped_access_key_cannot_list_access_keys if {
 }
 
 test_scoped_access_key_cannot_revoke_access_keys if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "DELETE",
         "path": "/apis/auth/v2/access-keys/ak_00000000000000000000000000000000",
@@ -564,7 +564,7 @@ test_scoped_access_key_cannot_revoke_access_keys if {
 }
 
 test_scoped_access_key_cannot_rotate_access_keys if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "POST",
         "path": "/apis/auth/v2/access-keys/ak_00000000000000000000000000000000/rotate",
@@ -576,7 +576,7 @@ test_scoped_access_key_cannot_rotate_access_keys if {
 }
 
 test_access_key_scoped_to_auth_can_create_access_keys if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "POST",
         "path": "/apis/auth/v2/access-keys",
@@ -588,7 +588,7 @@ test_access_key_scoped_to_auth_can_create_access_keys if {
 }
 
 test_access_key_scoped_to_platform_can_create_access_keys if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "POST",
         "path": "/apis/auth/v2/access-keys",
@@ -601,7 +601,7 @@ test_access_key_scoped_to_platform_can_create_access_keys if {
 
 test_unscoped_access_key_can_create_access_keys if {
     # No `scope` claim at all skips scope checking; authorized on permissions/ownership alone.
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user1",
         "method": "POST",
         "path": "/apis/auth/v2/access-keys"
@@ -615,7 +615,7 @@ test_unscoped_access_key_can_create_access_keys if {
 # `scope_check_passed` from the bypass rule fails this suite too, not just a mocked one.
 
 test_platform_admin_scoped_access_key_denied_outside_its_scope if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "admin1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1",
@@ -628,7 +628,7 @@ test_platform_admin_scoped_access_key_denied_outside_its_scope if {
 }
 
 test_platform_admin_scoped_access_key_allowed_within_its_scope if {
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "admin1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1",
@@ -642,7 +642,7 @@ test_platform_admin_scoped_access_key_allowed_within_its_scope if {
 
 test_platform_admin_without_platform_scope_claims_keeps_full_bypass if {
     # No `scope` claim at all: the platform admin bypass still applies unrestricted.
-    result := allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "admin1",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces/ns1"
@@ -673,7 +673,7 @@ test_configured_scope_family_without_data if {
 test_configured_scope_family_ignores_endpoint_scan if {
     # Families come only from the precomputed lookup, never from scanning endpoints.
     not configured_scope_family("platform") with data.authz.scope_families as {}
-        with data.authz.endpoints as {"/x": {"get": {"permissions": [], "scopes": ["platform:read"]}}}
+        with data.authz.endpoints as {"/x": {"get": {"direct": {"actor_perms": []}, "delegated": {"actor_perms": [], "subject_perms": []}, "scopes": ["platform:read"]}}}
 }
 
 test_is_platform_scope_cases if {
