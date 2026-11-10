@@ -21,6 +21,7 @@ A plugin contributes one or more surfaces. Each entry-point group maps a name to
 | HTTP service | `nemo.services` | FastAPI routers under `/apis/<name>/` |
 | CLI | `nemo.cli` | `nemo <name> ...` commands |
 | Job | `nemo.jobs` | Platform jobs, each with generated submit and `explain` commands |
+| Job backend | `nemo.job_backends` | Typed execution profiles and controller implementations |
 | Controller | `nemo.controllers` | Background reconciliation loops |
 | Inference middleware | `nemo.inference_middleware` | Middleware that [virtual models](#virtual-model-plugins) can run |
 | Python SDK | `nemo.sdk` | Resources on the Python SDK client |
@@ -69,6 +70,95 @@ nemo agents optimize list-strategies          # optimization strategies
 ```
 
 Middleware plugins log `Loaded inference middleware plugin '<name>'` at startup.
+
+## Job Backend Plugins
+
+A job backend runs steps on a compute system. Register a schema-only contribution
+under `nemo.job_backends`, separate from the controller implementation:
+
+```toml
+[project.entry-points."nemo.job_backends"]
+example = "nemo_example.profile:contribution"
+```
+
+```python
+from typing import Literal
+
+from nemo_helix_plugin.jobs.backends import JobBackendContribution
+from nemo_helix_plugin.jobs.execution_profiles import JobExecutionProfileConfig
+from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
+from pydantic import Field
+
+
+class ExampleConfig(JobExecutionProfileConfig):
+    queue: str = "default"
+
+
+class ExampleProfile(BaseExecutionProfile):
+    backend: Literal["example"] = "example"
+    provider: Literal["cpu", "gpu"] = "cpu"
+    config: ExampleConfig = Field(default_factory=ExampleConfig)
+
+
+contribution = JobBackendContribution(
+    backend="example",
+    profile_model=ExampleProfile,
+    implementations={
+        "cpu": "nemo_example.backend:ExampleBackend",
+        "gpu": "nemo_example.backend:ExampleBackend",
+    },
+)
+```
+
+The entry-point key identifies the plugin for allowlists and manifests; `backend`
+identifies its execution profiles and must be unique. The profile must subclass
+`BaseExecutionProfile`, declare a single matching `Literal` for `backend`, and
+define `config`. Built-in names (`docker`, `kubernetes_job`, `volcano_job`,
+`subprocess`, `e2e`, `openshell`) are reserved.
+
+The contribution module must import only schema dependencies available to
+`nemo-helix-plugin` consumers. Both the Jobs API and Python client load it. Keep
+controller and compute SDK imports in the implementation module, which loads only
+when a configured profile selects it. Implementation references use
+`module:ClassName`; each class must be a concrete subclass of
+`nhx.core.jobs.controllers.backends.base.JobBackend` in the platform environment.
+It receives `(nemo_client, profile.config, profile.profile)` and implements
+`schedule`, `sync`, `cleanup_steps`, and `shutdown`. The inherited constructor calls
+`init`. Use the existing `JobUpdate` and step specifications for lifecycle updates.
+Backend authors must implement the step executor contract they intend to support;
+registration alone does not add a new executor syntax or compiler.
+
+Install the plugin in both the Jobs API and controller environments, then configure
+the platform's `jobs.executors`:
+
+```yaml
+jobs:
+  executors:
+    - provider: gpu
+      profile: batch
+      backend: example
+      config:
+        queue: training
+```
+
+The `(provider, profile)` pair must be unique. Backend configuration is validated
+by the contributed profile model, and its selected provider must have an
+implementation reference. Override `supports_persistent_storage` on the profile
+only if the backend supports the platform's persistent job storage contract.
+
+Discovery uses `NEMO_PLUGIN_JOB_BACKENDS_ALLOWLIST`, falling back to
+`NEMO_PLUGIN_ALLOWLIST`. Values are comma-separated entry-point keys; `*` enables
+all and an empty value disables discovery. Built-in backends remain available.
+Discovery is cached for the process lifetime; restart after installation or
+allowlist changes.
+
+Import failures during contribution discovery log a warning and skip the entry.
+Malformed loaded contributions, reserved or duplicate backend names, unknown or
+disabled configured backends, unsupported providers, and invalid selected
+implementation classes fail configuration or controller startup. A Python client
+without the plugin can still read an execution profile using
+`GenericExecutionProfile`, preserving its backend, provider, profile, and config.
+The Jobs API requires an installed, allowlisted contribution to admit that profile.
 
 ## Virtual Model Plugins
 

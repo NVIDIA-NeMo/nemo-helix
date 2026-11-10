@@ -209,7 +209,7 @@ def _make_endpoint(
             "@post decorator so the existing entity can be retrieved on 409."
         )
 
-    hints = get_type_hints(fn)
+    hints = get_type_hints(fn, include_extras=True)
     ret = hints.get("return")
     response_type = ret if ret is not None and ret is not type(None) else None
 

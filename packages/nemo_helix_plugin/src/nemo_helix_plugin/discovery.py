@@ -22,6 +22,7 @@ Entry-point groups and their wrappers
 ``nemo.skills``                → :func:`discover_skills`                — ``() -> Path`` callable
 ``nemo.docs``                  → :func:`discover_docs`                  — ``() -> Path | dict`` callable
 ``nemo.executors``             → :func:`discover_executors`             — ``Executor`` class
+``nemo.job_backends``          → :func:`~nemo_helix_plugin.jobs.backends.discover_job_backends` — schema-only :class:`~nemo_helix_plugin.jobs.backends.JobBackendContribution` instance
 ``nemo.sandbox_profiles``      → :func:`discover_sandbox_profiles`      — :class:`~nemo_helix_plugin.sandbox.SandboxImageProfile` instance
 ``nemo.inference_middleware``  → :func:`discover_inference_middleware`  — :class:`~nemo_helix_plugin.inference_middleware.NemoInferenceMiddleware` subclass  (typed, IGW instantiates)
 ``nemo.customization.contributors`` → :func:`discover_customization_contributors` — :class:`~nemo_helix_plugin.customization_contributor.CustomizationContributor` instance  (typed, customization router instantiates)
@@ -93,6 +94,7 @@ _ALL_SURFACE_GROUPS = (
     "nemo.skills",
     "nemo.docs",
     "nemo.executors",
+    "nemo.job_backends",
     "nemo.inference_middleware",
     "nemo.customization.contributors",
     "nemo.seed",
@@ -116,6 +118,7 @@ _SURFACE_ALLOWLIST_ENV_VARS: dict[str, str] = {
     "nemo.skills": "NEMO_PLUGIN_SKILLS_ALLOWLIST",
     "nemo.docs": "NEMO_PLUGIN_DOCS_ALLOWLIST",
     "nemo.executors": "NEMO_PLUGIN_EXECUTORS_ALLOWLIST",
+    "nemo.job_backends": "NEMO_PLUGIN_JOB_BACKENDS_ALLOWLIST",
     "nemo.inference_middleware": "NEMO_PLUGIN_INFERENCE_MIDDLEWARE_ALLOWLIST",
     "nemo.customization.contributors": "NEMO_PLUGIN_CUSTOMIZATION_CONTRIBUTORS_ALLOWLIST",
     "nemo.seed": "NEMO_PLUGIN_SEED_ALLOWLIST",

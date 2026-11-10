@@ -11,9 +11,11 @@ decorator turns the signature into a :class:`PreparedRequest` builder.
 from __future__ import annotations
 
 from abc import abstractmethod
+from typing import Annotated, Any
 
 from nemo_helix_plugin.client.endpoint import delete, get, patch, post, put
 from nemo_helix_plugin.client.types import BinaryContent, CursorPagination, Paginated
+from nemo_helix_plugin.jobs.backends import GenericExecutionProfile, discover_job_backends
 from nemo_helix_plugin.jobs.execution_profiles import (
     DockerJobExecutionProfile,
     E2EJobExecutionProfile,
@@ -28,6 +30,7 @@ from nemo_helix_plugin.jobs.schemas import (
     HelixJobResultResponse,
     HelixJobStatusResponse,
 )
+from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
     HelixJobAttemptResponse,
@@ -49,10 +52,11 @@ from nemo_helix_plugin.jobs.types import (
     ListStepsQueryParams,
     UpdateHelixJobRequest,
 )
+from pydantic import SerializeAsAny, TypeAdapter, ValidatorFunctionWrapHandler, WrapValidator
 
 # The execution-profiles endpoint returns a union over all configured backend
 # profile types.
-ExecutionProfile = (
+_BuiltinExecutionProfile = (
     DockerJobExecutionProfile
     | KubernetesJobExecutionProfile
     | VolcanoJobExecutionProfile
@@ -60,6 +64,46 @@ ExecutionProfile = (
     | OpenShellJobExecutionProfile
     | E2EJobExecutionProfile
 )
+
+_BUILTIN_PROFILE_MODELS = {
+    model.model_fields["backend"].default: model
+    for model in (
+        DockerJobExecutionProfile,
+        KubernetesJobExecutionProfile,
+        VolcanoJobExecutionProfile,
+        SubprocessJobExecutionProfile,
+        OpenShellJobExecutionProfile,
+        E2EJobExecutionProfile,
+    )
+}
+_builtin_profile_adapter = TypeAdapter(_BuiltinExecutionProfile)
+
+
+def _parse_execution_profile_response(value: Any, _handler: ValidatorFunctionWrapHandler) -> BaseExecutionProfile:
+    if isinstance(value, BaseExecutionProfile):
+        value = value.model_dump()
+    if not isinstance(value, dict):
+        raise ValueError("Execution profile must be an object")
+    if "backend" not in value:
+        # Preserve the original built-in union's default selection behavior.
+        return _builtin_profile_adapter.validate_python(value)
+    backend = value["backend"]
+    if not isinstance(backend, str):
+        raise ValueError("Execution profile backend must be a string")
+    model = _BUILTIN_PROFILE_MODELS.get(backend)
+    if model is None:
+        contribution = discover_job_backends().get(backend)
+        model = contribution.profile_model if contribution else GenericExecutionProfile
+    return model.model_validate(value)
+
+
+# Explicit dispatch prevents invalid known configs from falling back to the
+# generic model. WrapValidator accepts contributed subclasses while retaining
+# stable built-in schemas; duck serialization preserves their config fields.
+ExecutionProfile = Annotated[
+    SerializeAsAny[_BuiltinExecutionProfile | GenericExecutionProfile],
+    WrapValidator(_parse_execution_profile_response),
+]
 
 # ---------------------------------------------------------------------------
 # Execution profiles
