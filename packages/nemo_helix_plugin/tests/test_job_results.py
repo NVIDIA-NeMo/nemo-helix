@@ -313,7 +313,7 @@ def test_result_manager_factory_explicit_workspace_overrides_client_workspace() 
         attempt_id="attempt-1",
         workspace="explicit-ws",
         files_client=files_client,
-        fileset="job-fileset",
+        fileset_name="job-fileset",
         jobs_client=JobsClient.from_client(files_client),
     )
 
@@ -329,7 +329,7 @@ def test_result_manager_factory_ignores_job_env_and_uses_client_workspace(monkey
         job_name="j",
         attempt_id="attempt-1",
         files_client=files_client,
-        fileset="job-fileset",
+        fileset_name="job-fileset",
         jobs_client=JobsClient.from_client(files_client),
     )
 
@@ -347,7 +347,7 @@ async def test_async_result_manager_factory_ignores_job_env_and_uses_client_work
         job_name="j",
         attempt_id="attempt-1",
         files_client=files_client,
-        fileset="job-fileset",
+        fileset_name="job-fileset",
         jobs_client=AsyncJobsClient.from_client(files_client),
     )
 
@@ -361,7 +361,7 @@ class TestHelixJobResults:
         with patch("nemo_helix_plugin.job_results.result_manager_factory") as factory:
             factory.return_value = MagicMock()
             sink = HelixJobResults(
-                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset="job-fileset"
+                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset_name="job-fileset"
             )
         assert isinstance(sink, JobResults)
 
@@ -371,7 +371,9 @@ class TestHelixJobResults:
 
         with patch("nemo_helix_plugin.job_results.result_manager_factory") as factory:
             factory.return_value = MagicMock()
-            HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset="job-fileset")
+            HelixJobResults(
+                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset_name="job-fileset"
+            )
 
         files_client = factory.call_args.kwargs["files_client"]
         jobs_client = factory.call_args.kwargs["jobs_client"]
@@ -390,7 +392,9 @@ class TestHelixJobResults:
             url="fileset://ws/fs#results/A1/metrics",
         )
         with patch("nemo_helix_plugin.job_results.result_manager_factory", return_value=manager) as factory:
-            sink = HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="A1", fileset="job-fileset")
+            sink = HelixJobResults(
+                job_name="j", workspace="ws", client=client, attempt_id="A1", fileset_name="job-fileset"
+            )
             ref = sink.save("metrics", local, ignore_patterns=["cache.db"])
 
         factory.assert_called_once()
@@ -417,7 +421,7 @@ class TestHelixJobResults:
         manager.create_result.return_value = _platform_record()
         with patch("nemo_helix_plugin.job_results.result_manager_factory", return_value=manager):
             sink = HelixJobResults(
-                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset="job-fileset"
+                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset_name="job-fileset"
             )
             sink.save("artifacts", payload_dir, ignore_patterns=["cache.db", "cache/"])
         call = manager.create_result.call_args
@@ -430,7 +434,7 @@ class TestHelixJobResults:
         manager.create_result.side_effect = RuntimeError("boom")
         with patch("nemo_helix_plugin.job_results.result_manager_factory", return_value=manager):
             sink = HelixJobResults(
-                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset="job-fileset"
+                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset_name="job-fileset"
             )
             with pytest.raises(RuntimeError, match="boom"):
                 sink.save("metrics", Path("/tmp/whatever"))
@@ -450,7 +454,7 @@ def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(
         job_name="job-a",
         workspace="ws",
         attempt_id="attempt-a",
-        fileset="results",
+        fileset_name="results",
         files_client=MagicMock(),
         jobs_client=jobs_client,
     )

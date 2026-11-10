@@ -44,7 +44,7 @@ def test_result_remote_path_nests_under_base():
         job_name="my-job",
         workspace="ws",
         attempt_id="att-1",
-        fileset="test-fileset",
+        fileset_name="test-fileset",
         files_client=FilesClient.from_client(sdk),
         jobs_client=JobsClient.from_client(sdk),
     )
@@ -68,7 +68,7 @@ def test_create_result_nests_under_the_job_base_path(tmp_path, mock_sync_file_ma
             job_name="test-job",
             workspace="test-ws",
             attempt_id="att-1",
-            fileset="test-fileset",
+            fileset_name="test-fileset",
             artifact_base_path=artifact_base_path,
             files_client=FilesClient.from_client(sdk),
             jobs_client=mock_jobs,
@@ -97,7 +97,7 @@ def test_create_result_returns_existing_on_conflict_sync(tmp_path, mock_sync_fil
         job_name="test-job",
         workspace="test-ws",
         attempt_id="att-123",
-        fileset="test-fileset",
+        fileset_name="test-fileset",
         files_client=FilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )
@@ -122,7 +122,7 @@ def test_create_result_wraps_transport_errors_sync(tmp_path, mock_sync_file_mana
         job_name="test-job",
         workspace="test-ws",
         attempt_id="att-123",
-        fileset="test-fileset",
+        fileset_name="test-fileset",
         files_client=FilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )
@@ -152,7 +152,7 @@ async def test_create_result_returns_existing_on_conflict_async(tmp_path, mock_a
         job_name="test-job",
         workspace="test-ws",
         attempt_id="att-123",
-        fileset="test-fileset",
+        fileset_name="test-fileset",
         files_client=AsyncFilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )
@@ -178,7 +178,7 @@ async def test_create_result_wraps_transport_errors_async(tmp_path, mock_async_f
         job_name="test-job",
         workspace="test-ws",
         attempt_id="att-123",
-        fileset="test-fileset",
+        fileset_name="test-fileset",
         files_client=AsyncFilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )

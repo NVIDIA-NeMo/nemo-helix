@@ -76,7 +76,7 @@ class ResultManager(BaseResultManager):
     files_client: FilesClient
     jobs_client: JobsClient
     attempt_id: str
-    fileset: str
+    fileset_name: str
     artifact_base_path: str | None = None
 
     def _create_file_manager(self, fileset_name: str) -> FilesetFileManager:
@@ -94,7 +94,7 @@ class ResultManager(BaseResultManager):
         ignore_patterns: list[str] | str | None = None,
     ) -> HelixJobResultResponse:
         attempt_id = self.attempt_id
-        file_manager = self._create_file_manager(self.fileset)
+        file_manager = self._create_file_manager(self.fileset_name)
         file_manager.validate_storage()
         artifact_local_path = self._validate_local_path(artifact_local_path)
         remote_path = self._result_remote_path(attempt_id, result_name, base=self.artifact_base_path)
@@ -142,7 +142,7 @@ class AsyncResultManager(BaseResultManager):
     files_client: AsyncFilesClient
     jobs_client: AsyncJobsClient
     attempt_id: str
-    fileset: str
+    fileset_name: str
     artifact_base_path: str | None = None
 
     def _create_file_manager(self, fileset_name: str) -> AsyncFilesetFileManager:
@@ -160,7 +160,7 @@ class AsyncResultManager(BaseResultManager):
         ignore_patterns: list[str] | str | None = None,
     ) -> HelixJobResultResponse:
         attempt_id = self.attempt_id
-        file_manager = self._create_file_manager(self.fileset)
+        file_manager = self._create_file_manager(self.fileset_name)
         await file_manager.validate_storage()
         artifact_local_path = self._validate_local_path(artifact_local_path)
         remote_path = self._result_remote_path(attempt_id, result_name, base=self.artifact_base_path)
@@ -212,7 +212,7 @@ def result_manager_factory(
     attempt_id: str,
     workspace: str | None = None,
     files_client: FilesClient,
-    fileset: str,
+    fileset_name: str,
     jobs_client: JobsClient | None = None,
     artifact_base_path: str | None = None,
 ) -> ResultManager:
@@ -223,10 +223,10 @@ def result_manager_factory(
         attempt_id: Concrete attempt ID that produces uploaded results.
         workspace: Job workspace. If not provided, falls back to the client workspace resolution.
         files_client: Files service client.
-        fileset: Fileset holding the job's artifacts.
+        fileset_name: Fileset holding the job's artifacts.
         jobs_client: Jobs service client. If not provided, one is created from
             files_client's shared transport.
-        artifact_base_path: Folder inside ``fileset`` the job's artifacts nest under;
+        artifact_base_path: Folder inside ``fileset_name`` the job's artifacts nest under;
             ``None`` means the job owns the whole fileset.
     """
     resolved_workspace = files_client.resolve_workspace(workspace)
@@ -236,7 +236,7 @@ def result_manager_factory(
         attempt_id=attempt_id,
         files_client=files_client,
         jobs_client=jobs_client or JobsClient.from_client(files_client),
-        fileset=fileset,
+        fileset_name=fileset_name,
         artifact_base_path=artifact_base_path,
     )
 
@@ -247,7 +247,7 @@ def async_result_manager_factory(
     attempt_id: str,
     workspace: str | None = None,
     files_client: AsyncFilesClient,
-    fileset: str,
+    fileset_name: str,
     jobs_client: AsyncJobsClient | None = None,
     artifact_base_path: str | None = None,
 ) -> AsyncResultManager:
@@ -258,10 +258,10 @@ def async_result_manager_factory(
         attempt_id: Concrete attempt ID that produces uploaded results.
         workspace: Job workspace. If not provided, falls back to the client workspace resolution.
         files_client: Files service client.
-        fileset: Fileset holding the job's artifacts.
+        fileset_name: Fileset holding the job's artifacts.
         jobs_client: Jobs service client. If not provided, one is created from
             files_client's shared transport.
-        artifact_base_path: Folder inside ``fileset`` the job's artifacts nest under;
+        artifact_base_path: Folder inside ``fileset_name`` the job's artifacts nest under;
             ``None`` means the job owns the whole fileset.
     """
     resolved_workspace = files_client.resolve_workspace(workspace)
@@ -271,7 +271,7 @@ def async_result_manager_factory(
         attempt_id=attempt_id,
         files_client=files_client,
         jobs_client=jobs_client or AsyncJobsClient.from_client(files_client),
-        fileset=fileset,
+        fileset_name=fileset_name,
         artifact_base_path=artifact_base_path,
     )
 

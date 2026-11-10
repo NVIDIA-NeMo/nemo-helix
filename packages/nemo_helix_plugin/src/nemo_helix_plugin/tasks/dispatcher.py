@@ -199,8 +199,8 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
     ``NEMO_JOB_FILESET`` and ``NEMO_JOB_ARTIFACT_BASE_PATH``; ``NEMO_JOB_ID =
     step.job`` names the job, and the NemoJob class identifier (e.g.
     ``"evaluate"``) would point at a non-existent job and break result
-    registration. When the fileset is absent the sink falls back to reading
-    the job record, so non-sandbox callers keep working.
+    registration. A missing ``NEMO_JOB_FILESET`` raises instead of falling back
+    to the job record, which the restricted platform policy denies.
     """
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "").strip()
     if not workspace:
@@ -215,7 +215,7 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
     attempt_id = os.environ.get(NEMO_JOB_ATTEMPT_ID_ENVVAR, "").strip()
     if not attempt_id:
         raise RuntimeError(f"{NEMO_JOB_ATTEMPT_ID_ENVVAR} not set; running outside the platform?")
-    fileset, artifact_base_path = job_storage_context_from_env()
+    fileset_name, artifact_base_path = job_storage_context_from_env()
     return JobContext(
         workspace=workspace,
         storage=StoragePaths(
@@ -227,7 +227,7 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
             workspace=workspace,
             client=client,
             attempt_id=attempt_id,
-            fileset=fileset,
+            fileset_name=fileset_name,
             artifact_base_path=artifact_base_path,
         ),
         usage=HelixJobUsageReporter(

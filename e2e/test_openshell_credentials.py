@@ -368,7 +368,7 @@ def test_original_placeholder_survives_rotation_then_secret_deletion_revokes_acc
         providers = set(sandboxes[0].spec.providers)
         assert providers, "The actual controller must attach a provider"
         if backend == "job":
-            assert original.result_status == 200, (
+            assert original.result_status == 201, (
                 f"The sandbox could not save a job result: {original.result_status} {original.result_error}"
             )
             saved = (

@@ -258,13 +258,13 @@ def _get_ctx(sdk: NemoClient) -> JobContext:
         ephemeral=Path(_get_required_env(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR)),
         persistent=Path(_get_required_env(PERSISTENT_JOB_STORAGE_PATH_ENVVAR)),
     )
-    fileset, artifact_base_path = job_storage_context_from_env()
+    fileset_name, artifact_base_path = job_storage_context_from_env()
     results = HelixJobResults(
         workspace=workspace,
         job_name=job_name,
         client=client,
         attempt_id=attempt_id,
-        fileset=fileset,
+        fileset_name=fileset_name,
         artifact_base_path=artifact_base_path,
     )
     return JobContext(
