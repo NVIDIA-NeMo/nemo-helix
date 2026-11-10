@@ -10,7 +10,7 @@
  * its affiliates is strictly prohibited.
  */
 
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import type { ButtonProps } from '@nvidia/foundations-react-core';
 import { CreateButton } from '@studio/components/common/CreateButton';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';

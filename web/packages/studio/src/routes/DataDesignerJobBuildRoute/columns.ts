@@ -1,17 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  type DataDesignerConfig,
-  DatetimeSamplerParamsUnit,
-  type FilesetFileSeedSource,
-  PersonSamplerParamsSex,
-  type SamplerColumnConfig,
-  SamplerType,
-  type SamplingStrategy,
-  type SeedConfig,
-  TimeDeltaSamplerParamsUnit,
+import type {
+  DataDesignerConfig,
+  FilesetFileSeedSource,
+  SamplerColumnConfig,
+  SamplingStrategy,
+  SeedConfig,
 } from '@nemo/sdk/generated/data-designer/schema';
+import { DatetimeSamplerParamsUnit } from '@nemo/sdk/generated/data-designer/schema/DatetimeSamplerParamsUnit';
+import { PersonSamplerParamsSex } from '@nemo/sdk/generated/data-designer/schema/PersonSamplerParamsSex';
+import { SamplerType } from '@nemo/sdk/generated/data-designer/schema/SamplerType';
+import { TimeDeltaSamplerParamsUnit } from '@nemo/sdk/generated/data-designer/schema/TimeDeltaSamplerParamsUnit';
 import { COLUMN_TYPE_GROUPS } from '@studio/components/AddColumnPalette/constants';
 import type {
   AddColumnSelection,

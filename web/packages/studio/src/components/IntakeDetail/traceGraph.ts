@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { SpanStatus } from '@nemo/sdk/generated/platform/schema';
+import { SpanStatus } from '@nemo/sdk/generated/platform/schema/SpanStatus';
 import type {
   DagEdge,
   DagNode,

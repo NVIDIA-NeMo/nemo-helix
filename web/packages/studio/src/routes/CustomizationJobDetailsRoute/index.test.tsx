@@ -3,7 +3,8 @@
 
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
-import { type HelixJobResponse, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import {

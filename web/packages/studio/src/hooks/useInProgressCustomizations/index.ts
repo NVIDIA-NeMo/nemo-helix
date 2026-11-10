@@ -5,13 +5,13 @@ import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { getQueryKeyInfiniteModels } from '@nemo/common/src/api/models/useModels';
 import { useJobsListJobs } from '@nemo/sdk/generated/platform/jobs';
 import { getModelsListModelsQueryKey } from '@nemo/sdk/generated/platform/models';
-import {
-  FinetuningType,
-  HelixJobStatus,
-  type HelixJobListSortField,
-  type HelixJobResponse,
-  type HelixJobsListFilter,
+import type {
+  HelixJobListSortField,
+  HelixJobResponse,
+  HelixJobsListFilter,
 } from '@nemo/sdk/generated/platform/schema';
+import { FinetuningType } from '@nemo/sdk/generated/platform/schema/FinetuningType';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { JOB_SOURCE } from '@studio/components/dataViews/JobsDataView/constants';
 import { asRecord } from '@studio/util/guards';
 import { useQueryClient } from '@tanstack/react-query';

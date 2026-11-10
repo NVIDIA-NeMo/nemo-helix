@@ -3,11 +3,8 @@
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
-import {
-  type HelixJobResponse,
-  type HelixJobResponsesPage,
-  HelixJobStatus,
-} from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobResponse, HelixJobResponsesPage } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { JobsDataView } from '@studio/components/dataViews/JobsDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
-import { FilesetPurpose, type FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { FilesetCreateModal } from '@studio/components/FilesetCreateModal';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { mockUseNavigate, mockUseParams } from '@studio/tests/util/mockUseParams';

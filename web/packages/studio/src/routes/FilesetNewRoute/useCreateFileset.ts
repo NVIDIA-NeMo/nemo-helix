@@ -14,11 +14,8 @@ import {
   getFilesRetrieveFilesetQueryKey,
   useFilesCreateFileset,
 } from '@nemo/sdk/generated/platform/files';
-import {
-  type FilesetOutput,
-  FilesetPurpose,
-  type CreateFilesetRequest,
-} from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput, CreateFilesetRequest } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { filesetNameTakenMessage } from '@studio/components/filesets/filesetNames';
 import { invalidateFilesetNameCheck } from '@studio/components/filesets/hooks/useFilesetNameStatus';
 import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';

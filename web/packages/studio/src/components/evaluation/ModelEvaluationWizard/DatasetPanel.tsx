@@ -8,7 +8,7 @@ import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSel
 import { PreviewBox } from '@nemo/common/src/components/PreviewBox';
 import { resolveKeyPath } from '@nemo/common/src/utils/file';
 import { CheckCircle, HelpCircle } from '@nemo/icons/icons';
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { Banner, Block, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   CANONICAL_FIELD_LABELS,

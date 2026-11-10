@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StatusBadge, type StatusConfigEntry } from '@nemo/common/src/components/StatusBadge';
-import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 import { Skeleton } from '@nvidia/foundations-react-core';
 import type { DeploymentIndicatorState } from '@studio/hooks/useModelDeploymentStatuses';
 import type { FC } from 'react';
