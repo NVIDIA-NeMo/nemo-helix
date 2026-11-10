@@ -254,7 +254,7 @@ def test_startup_loads_and_validates_agent_config(
     assert mock_validate_agent_config == [(app.state.agent_config, tmp_path)]
 
 
-@pytest.mark.parametrize("configured_workspace", ["workspace", "."])
+@pytest.mark.parametrize("configured_workspace", ["workspace", ".", ""])
 def test_startup_captures_workspace_inputs_and_reuses_them_after_restart(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
@@ -379,7 +379,7 @@ def test_startup_stages_skills_and_maps_runtime_paths(
         assert app.state.agent_config.skills.paths == [skill_path]
 
 
-@pytest.mark.parametrize("configured_workspace", ["workspace", "."])
+@pytest.mark.parametrize("configured_workspace", ["workspace", ".", ""])
 def test_startup_refreshes_skills_without_recapturing_workspace(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],

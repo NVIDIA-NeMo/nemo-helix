@@ -448,7 +448,7 @@ async def test_different_platform_sessions_get_separate_runtimes(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("configured_workspace", ["workspace", "."])
+@pytest.mark.parametrize("configured_workspace", ["workspace", ".", ""])
 async def test_deepagents_sessions_isolate_files_and_reuse_their_workspace(
     tmp_path: Path, configured_workspace: str
 ) -> None:

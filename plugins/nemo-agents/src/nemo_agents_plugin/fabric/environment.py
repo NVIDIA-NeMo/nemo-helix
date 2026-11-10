@@ -108,7 +108,7 @@ def prepare_deepagents_workspace_baseline(agent_config: AgentConfig, base_dir: P
     harness = agent_config.harnesses.get(agent_config.default_harness or "")
     if harness is None or not uses_default_deepagents_backend(harness):
         return None
-    if agent_config.environment.provider != "local" or not agent_config.environment.workspace:
+    if agent_config.environment.provider != "local":
         return None
 
     ensure_local_workspace_dir(agent_config, base_dir)
