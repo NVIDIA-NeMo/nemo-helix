@@ -5,13 +5,9 @@ import type { EntitiesListEntitiesParams, RailsConfig } from '@nemo/sdk/generate
 import {
   createGuardrailCheck,
   type CreateGuardrailCheckInput,
-  deleteGuardrailCheck,
-  getGuardrailCheck,
-  getGuardrailCheckQueryKey,
   getGuardrailChecksQueryKey,
   guardrailChecksForConfigFilter,
   listGuardrailChecks,
-  runGuardrailCheck,
   runGuardrailChecks,
   updateGuardrailCheck,
   type UpdateGuardrailCheckPatch,
@@ -33,7 +29,7 @@ type QueryOpts<TData> = Omit<UseQueryOptions<TData, Error>, 'queryKey' | 'queryF
 // ---------------------------------------------------------------------------
 
 /** React Query options for a (optionally filtered/paginated) list of guardrail checks. */
-export const getGuardrailChecksQueryOptions = (
+const getGuardrailChecksQueryOptions = (
   workspace: string,
   params?: EntitiesListEntitiesParams,
   options?: QueryOpts<GuardrailChecksPage>
@@ -45,7 +41,7 @@ export const getGuardrailChecksQueryOptions = (
   });
 
 /** Query hook for the guardrail checks in a workspace. */
-export const useGuardrailChecks = (
+const useGuardrailChecks = (
   workspace: string,
   params?: EntitiesListEntitiesParams,
   options?: QueryOpts<GuardrailChecksPage>
@@ -63,30 +59,6 @@ export const useGuardrailChecksForConfig = (
     { ...params, filter: guardrailChecksForConfigFilter(configId) },
     options
   );
-
-/** React Query options for a single guardrail check, scoped by its parent config. */
-export const getGuardrailCheckQueryOptions = (
-  workspace: string,
-  name: string,
-  parent: string,
-  options?: QueryOpts<GuardrailCheckEntity>
-) =>
-  queryOptions<GuardrailCheckEntity, Error>({
-    queryKey: getGuardrailCheckQueryKey(workspace, name, parent),
-    queryFn: ({ signal }) => getGuardrailCheck(workspace, name, parent, signal),
-    ...options,
-  });
-
-/**
- * Fetch a single guardrail check by name. Checks are hard children of a config,
- * so `parent` (the parent config's entity id) is required to resolve the lookup.
- */
-export const useGuardrailCheck = (
-  workspace: string,
-  name: string,
-  parent: string,
-  options?: QueryOpts<GuardrailCheckEntity>
-) => useQuery(getGuardrailCheckQueryOptions(workspace, name, parent, options));
 
 // ---------------------------------------------------------------------------
 // Mutations
@@ -130,48 +102,6 @@ export const useUpdateGuardrailCheck = (options?: UseUpdateGuardrailCheckOptions
     onSuccess: (...args) => {
       const [entity] = args;
       invalidateGuardrailChecksCaches(entity.workspace, entity.name);
-      options?.onSuccess?.(...args);
-    },
-  });
-
-export type UseDeleteGuardrailCheckOptions = Omit<
-  UseMutationOptions<void, Error, { workspace: string; name: string; parent: string }>,
-  'mutationFn'
->;
-
-/**
- * Mutation hook to delete a guardrail check; refreshes check caches on success.
- * `parent` (the owning config's entity id) is required to address the child by name.
- */
-export const useDeleteGuardrailCheck = (options?: UseDeleteGuardrailCheckOptions) =>
-  useMutation({
-    ...options,
-    mutationFn: ({ workspace, name, parent }) => deleteGuardrailCheck(workspace, name, parent),
-    onSuccess: (...args) => {
-      const [, variables] = args;
-      invalidateGuardrailChecksCaches(variables.workspace, variables.name);
-      options?.onSuccess?.(...args);
-    },
-  });
-
-export type UseRunGuardrailCheckOptions = Omit<
-  UseMutationOptions<
-    Awaited<ReturnType<typeof runGuardrailCheck>>,
-    Error,
-    { workspace: string; check: GuardrailCheckEntity; draftConfig?: RailsConfig }
-  >,
-  'mutationFn'
->;
-
-/** Mutation hook to run a single guardrail check and persist the run. */
-export const useRunGuardrailCheck = (options?: UseRunGuardrailCheckOptions) =>
-  useMutation({
-    ...options,
-    mutationFn: ({ workspace, check, draftConfig }) =>
-      runGuardrailCheck(workspace, check, draftConfig),
-    onSuccess: (...args) => {
-      const [, variables] = args;
-      invalidateGuardrailChecksCaches(variables.workspace, variables.check.name);
       options?.onSuccess?.(...args);
     },
   });

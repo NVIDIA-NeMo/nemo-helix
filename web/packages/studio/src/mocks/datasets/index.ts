@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CommitOutput } from '@huggingface/hub';
 import type { FilesetOutput, FilesetOutputsPage } from '@nemo/sdk/generated/platform/schema';
 
 const mockFileset = (id: string, name: string, workspace: string): FilesetOutput => ({
@@ -37,52 +36,6 @@ export const datasets: FilesetOutputsPage = {
 };
 
 export const dataset = datasets.data[0] as FilesetOutput;
-
-export const createDatasetRepoResponse = {
-  repoUrl: 'datasets/default/dataset-657702',
-};
-
-export const uploadFileResponse: CommitOutput = {
-  commit: {
-    oid: '2a1b1cdf9c45a21b1daf606f1800a3edf20cc003d5af402fd6d712c5a9df6c17',
-    url: 'hf://',
-  },
-  hookOutput: '',
-};
-
-export const preuploadFilesResponse = {
-  files: [
-    {
-      path: 'training_file.jsonl',
-      uploadMode: 'lfs',
-      shouldIgnore: false,
-    },
-    {
-      path: 'validation_file.jsonl',
-      uploadMode: 'lfs',
-      shouldIgnore: false,
-    },
-  ],
-};
-
-export const uploadFilesBatchResponse = {
-  objects: [
-    {
-      oid: 'cfa2fd49abe343ad5d02f88f36592084b8c6e39db116977ce57f8baae9f3316b',
-      size: 3817191,
-    },
-    {
-      oid: '2a1b1cdf9c45a21b1daf606f1800a3edf20cc003d5af402fd6d712c5a9df6c18',
-      size: 499572,
-    },
-  ],
-};
-
-export const commitResponse = {
-  success: true,
-  commitOid: '6fcc0f7e943059d59413d7b5bd5aa4855ef5928c',
-  commitUrl: '',
-};
 
 export const mockLfsObjectResponse = JSON.stringify({ key: 'value' });
 

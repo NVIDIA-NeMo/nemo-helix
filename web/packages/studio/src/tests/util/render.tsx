@@ -60,10 +60,7 @@ const allQueries = {
   ...customQueries,
 };
 
-export const customRender = (
-  element: React.ReactElement,
-  testProviderOptions?: TestProvidersOptions
-) => {
+const customRender = (element: React.ReactElement, testProviderOptions?: TestProvidersOptions) => {
   return render(
     <TestProviders options={testProviderOptions}>
       <Suspense fallback={<Loading />}>
