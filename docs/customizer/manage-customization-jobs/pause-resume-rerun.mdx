@@ -13,7 +13,7 @@ Before you can pause, resume, or rerun a customization job, make sure that you h
 Customization jobs run on the platform's Jobs service, so you pause, resume, and rerun them through that service with the job's name and workspace, the same way for every backend. Submitting a job returns its name. To find it later, list the workspace's customization jobs in the status you want to act on, for example the jobs that ended in `error`:
 
 ```bash
-nemo jobs list --workspace default --filter.source customization --filter.status error
+nemo customization list-jobs --workspace default --filter.status error
 ```
 
 ---

@@ -9,6 +9,24 @@ description: ""
 
 This section describes how to configure jobs in NeMo Helix. The Jobs service is responsible for scheduling batch jobs, collecting telemetry and managing job results.
 
+## Listing Jobs by Type
+
+Every plugin that submits jobs has a `list-jobs` command that lists only that plugin's jobs, newest first. Use `--type` to list some of its job types; the command's help names them.
+
+```bash
+nemo data-designer list-jobs
+nemo evals list-jobs --type agent-evaluate --filter.status completed
+```
+
+`nemo jobs list --type` does the same from the core jobs command. Pass a plugin to list all its job types, or `<plugin>.<job>` for one job type. Repeat `--type` to list several:
+
+```bash
+nemo jobs list --type evals
+nemo jobs list --type evals.evaluate --type garak
+```
+
+When several job types are listed, the results are merged into one list. `--page-size` caps the merged list and `--all-pages` fetches every job; `--page` works only when exactly one job type is listed. Each job in the output has a `type` field naming its job type.
+
 ## Viewing Job Attempts
 
 Each job run creates an attempt. The job response includes `attempt_id` for the current attempt. List the attempt history or retrieve the current attempt without first looking up its ID:

@@ -3,18 +3,50 @@
 
 """Agent labels and listing an agent's execute runs, through the real services and entity store."""
 
-from typing import Any
+import json
+from dataclasses import dataclass
+from typing import Any, TypeVar
 
 import pytest
+from nemo_agents_plugin.cli import AgentsCLI
 from nemo_agents_plugin.sdk import AgentsResource
 from nemo_agents_plugin.service import AgentsService
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.service import JobsService
 from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 from nhx.testing import ClientContext, create_test_client
+from typer.testing import CliRunner
 
 pytestmark = pytest.mark.integration
+
+ClientT = TypeVar("ClientT", bound=NemoClient)
+
+
+@dataclass
+class _CLIState:
+    """The slice of the ``nemo`` CLI state ``list-jobs`` uses, over the in-process platform."""
+
+    client: NemoClient
+
+    def typed_client(self, client_cls: type[ClientT], timeout: float = 60.0) -> ClientT:
+        return client_cls.from_client(self.client)
+
+    def get_workspace(self) -> str | None:
+        return "default"
+
+    def get_base_url(self, default: str | None = None) -> str | None:
+        return default
+
+    def get_output_format(self, override: str | None = None, *, apply_non_tty_default: bool = True) -> str:
+        return override or "json"
+
+    def get_no_truncate(self, override: bool | None = None) -> bool:
+        return True
+
+    def get_timestamp_format(self, override: str | None = None) -> str:
+        return "iso8601"
 
 
 class _TestAgentsService(NemoServiceAdapter):
@@ -96,7 +128,25 @@ def test_list_execute_runs_by_agent() -> None:
             "run-inline",
         }
 
-        # The documented CLI route: core jobs, scoped to execute jobs by source.
+        # A bare name means the agent in the listing workspace.
+        assert _names(execute_jobs.list(agents=["calc"])) == {"run-calc", "run-calc-qualified"}
+        assert _names(execute_jobs.list("research", agents=["calc"])) == set()
+
+        # The documented CLI command lists through the execute job route.
+        result = CliRunner().invoke(
+            AgentsCLI().get_cli(), ["list-jobs", "--agent", "calc", "-a", "research/calc"], obj=_CLIState(ctx.client)
+        )
+        assert result.exit_code == 0, result.output
+        listed = json.loads(result.stdout)["data"]
+        assert {job["name"] for job in listed} == {"run-calc", "run-calc-qualified", "run-research-calc"}
+        assert {job["type"] for job in listed} == {"agents.execute"}
+
+        # Without --agent it lists every agents job type; only execute jobs exist here.
+        result = CliRunner().invoke(AgentsCLI().get_cli(), ["list-jobs", "--all-pages"], obj=_CLIState(ctx.client))
+        assert result.exit_code == 0, result.output
+        assert {job["name"] for job in json.loads(result.stdout)["data"]} == _names(execute_jobs.list())
+
+        # The core jobs route still works, scoped to execute jobs by source.
         core_jobs = JobsClient.from_client(ctx.client).list_jobs(
             query_params={
                 "filter": {"spec.agent_ref": {"$in": ["default/calc"]}, "source": "nemo-agents-plugin-execute"}
