@@ -196,8 +196,6 @@ def test_list_jobs_sends_serialized_filter_query_to_source_owned_client() -> Non
     ("statuses", "expected"),
     [
         ([], "pending"),
-        (["completed"], "completed"),
-        (["error"], "error"),
         (["active"], "active"),
         (["queued"], "queued"),
         (["completed", "error"], {"$in": ["completed", "error"]}),

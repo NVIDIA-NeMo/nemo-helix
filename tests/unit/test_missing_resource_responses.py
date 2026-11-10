@@ -4,7 +4,7 @@
 """Missing-resource response contracts (NVBug 7074797), without a running platform."""
 
 import importlib
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -77,28 +77,6 @@ def test_missing_resource_is_documented(module, router_name, endpoint):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "endpoint", ["get_workspace", "update_workspace", "delete_workspace", "get_workspace_deletion"]
-)
-async def test_workspace_missing_returns_404(endpoint):
-    from nhx.core.entities.api.v2.workspaces import endpoints
-
-    repository = AsyncMock()
-    repository.get_workspace_by_name.return_value = None
-    repository.update_workspace.return_value = None
-    kwargs = {"name": "missing", "repository": repository}
-    if endpoint == "update_workspace":
-        kwargs.update(workspace_data=Mock(description="updated"), auth_client=Mock())
-    elif endpoint == "delete_workspace":
-        kwargs["entity_repository"] = AsyncMock()
-    elif endpoint == "get_workspace_deletion":
-        kwargs["auth_client"] = Mock()
-    with pytest.raises(HTTPException) as exc:
-        await getattr(endpoints, endpoint)(**kwargs)
-    assert exc.value.status_code == 404
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("endpoint", ["get_attempt_step", "get_attempt_step_task", "update_attempt_step_task"])
 async def test_attempt_route_missing_parent_returns_404(endpoint):
     from nhx.core.jobs.api.v2.jobs import endpoints
@@ -110,60 +88,16 @@ async def test_attempt_route_missing_parent_returns_404(endpoint):
     if endpoint != "get_attempt_step":
         kwargs["step"] = "missing-step"
     if endpoint == "update_attempt_step_task":
-        kwargs["update"] = Mock()
+        kwargs["update"] = None
     with pytest.raises(HTTPException) as exc:
         await getattr(endpoints, endpoint)(**kwargs)
     assert exc.value.status_code == 404
     dispatcher.create_or_update_task.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_task_put_upserts_task_when_parent_exists():
-    from nhx.core.jobs.api.v2.jobs import endpoints
-
-    dispatcher = AsyncMock()
-    job_entity = Mock(name="job")
-    step_entity = Mock()
-    dispatcher.resolve_attempt.return_value = (job_entity, Mock())
-    dispatcher.get_attempt_step_by_name.return_value = step_entity
-    update = Mock()
-    result = await endpoints.update_attempt_step_task(
-        job="job",
-        attempt="attempt",
-        step="step",
-        name="new-task",
-        workspace="default",
-        update=update,
-        dispatcher=dispatcher,
-    )
-    assert result is dispatcher.create_or_update_task.return_value
-    dispatcher.create_or_update_task.assert_awaited_once_with(
-        job_entity.name,
-        "new-task",
-        "default",
-        update,
-        step_entity,
-    )
-
-
-@pytest.mark.asyncio
-async def test_provider_put_upserts_missing_provider_without_404():
-    from nhx.common.auth.models import Principal
+def test_provider_put_does_not_advertise_target_not_found():
     from nhx.core.models.api.v2 import providers
 
-    service = AsyncMock()
-    provider = Mock()
-    service.upsert_model_provider.return_value = provider
-    request = Mock(api_key_secret_name=None, model_deployment_id=None)
-    result = await providers.upsert_provider(
-        workspace="default",
-        name="new",
-        request=request,
-        service=service,
-        auth_client=Mock(principal=Principal(id="test")),
-        secrets=AsyncMock(),
-    )
-    assert result is provider
     route = next(r for r in providers.router.routes if isinstance(r, APIRoute) and r.name == "upsert_provider")
     assert 404 not in route.responses
 

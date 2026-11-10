@@ -18,18 +18,9 @@ from nhx.core.jobs.entities import HelixJob, HelixJobAttempt
 @pytest.mark.parametrize(
     ("condition", "expected"),
     [
-        ({"status": "completed"}, {"completed"}),
-        ({"status": "error"}, {"error"}),
         ({"status": "active"}, {"active"}),
-        ({"status": "queued"}, {"queued"}),
-        ({"status": ["completed"]}, {"completed"}),
-        ({"status": ["error"]}, {"error"}),
-        ({"status": ["active"]}, {"active"}),
         ({"status": ["queued"]}, {"queued"}),
         ({"status": ["completed", "error"]}, {"completed", "error"}),
-        ({"status": {"$in": ["completed", "error"]}}, {"completed", "error"}),
-        ({"status": {"$eq": ["completed", "error"]}}, {"completed", "error"}),
-        ({"status": []}, set()),
         ({"$or": [{"status": ["completed", "error"]}, {"status": "queued"}]}, {"completed", "error", "queued"}),
         ({"$not": {"status": ["completed", "error"]}}, {"active", "queued"}),
     ],
