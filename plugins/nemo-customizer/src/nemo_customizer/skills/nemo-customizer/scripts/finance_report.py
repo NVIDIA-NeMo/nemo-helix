@@ -17,9 +17,14 @@ The report has the shape of ``metrics()`` in the cookbook's ``evaluation.py`` (N
 ``usage-cookbook/Nemotron-3.5-Super-VL/lora-finance``): the overall summary, then
 ``by_capability`` and ``by_task``. Each summary gives the means of ``exact``, ``relaxed``,
 ``task_correct``, ``answer_f1`` and ``trace_closed``, and ``python_syntax_rate`` over the rows that
-have ``program_syntax_valid``. ``coverage`` is the rows scored over all rows in the files. A row whose
-inference or scoring failed is not scored, as in the cookbook. ``hit_max_new_tokens`` is a count;
-a row without that score, because the job set no ``max_new_tokens``, counts as not hitting it.
+have ``program_syntax_valid``. ``coverage`` is the rows scored over all rows in the files.
+
+- A row whose metric or request failed is not scored, as in the cookbook: the metric has an entry in
+  ``metric_errors``, or the sample carries ``inference_error`` (a failed request in a multi-metric job).
+- ``hit_max_new_tokens`` is a count. It is null when no row has that score, because the jobs set no
+  ``max_new_tokens``; a row without it among rows that have it counts as not hitting the limit.
+- ``numeric_relative_tolerance`` is ``--tolerance``, since the row scores don't record it.
+- A file in which no row carries the metric is an error: it most likely names the wrong metric or job.
 """
 
 from __future__ import annotations
@@ -33,43 +38,56 @@ from pathlib import Path
 from typing import Any
 
 METRIC = "finance-qa"
-SCORES = ("exact", "relaxed", "task_correct", "answer_f1", "trace_closed")
+FLAGS = ("exact", "relaxed", "task_correct", "trace_closed")
 
 
-def _flag(value: Any) -> bool | None:
-    """A boolean score from a row-scores file, or None when it is missing or NaN."""
-    if value is None or value == "NaN" or (isinstance(value, float) and math.isnan(value)):
-        return None
-    return bool(value)
+def _missing(value: Any) -> bool:
+    """Whether a score from a row-scores file is absent or NaN (written as the string "NaN")."""
+    return value is None or value == "NaN" or (isinstance(value, float) and math.isnan(value))
 
 
 def read_rows(path: Path, capability: str, metric: str = METRIC) -> tuple[list[dict[str, Any]], int]:
     """Return the scored rows of one row-scores file, and the number of rows in it."""
     rows: list[dict[str, Any]] = []
     total = 0
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        if not line.strip():
-            continue
-        total += 1
-        record = json.loads(line)
-        if (record.get("metric_errors") or {}).get(metric):
-            continue
-        outputs = {output["name"]: output["value"] for output in (record.get("metrics") or {}).get(metric) or []}
-        if not outputs:
-            continue
-        if not isinstance(outputs.get("task"), str):
-            raise ValueError(f"{path}:{number}: the {metric} scores have no task label")
-        row: dict[str, Any] = {"task": outputs["task"], "capability": capability}
-        for name in SCORES:
-            if name == "answer_f1":
-                row[name] = float(outputs[name])
-            elif (flag := _flag(outputs.get(name))) is None:
-                raise ValueError(f"{path}:{number}: the {metric} scores have no {name}")
-            else:
-                row[name] = flag
-        row["program_syntax_valid"] = _flag(outputs.get("program_syntax_valid"))
-        row["hit_max_new_tokens"] = bool(_flag(outputs.get("hit_max_new_tokens")))
-        rows.append(row)
+    with_metric = 0
+    # Iterating the file splits on newlines only. str.splitlines() would also split on U+2028 and U+0085,
+    # which row-scores JSON can hold unescaped inside strings.
+    with path.open(encoding="utf-8") as handle:
+        for number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            total += 1
+            where = f"{path}:{number}"
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(f"{where}: not a JSON record: {error}") from error
+            metrics = record.get("metrics") or {}
+            failed = metric in (record.get("metric_errors") or {})
+            if failed or metric in metrics:
+                with_metric += 1
+            if failed or "inference_error" in (record.get("sample") or {}):
+                continue
+            outputs = {output["name"]: output["value"] for output in metrics.get(metric) or []}
+            if not outputs:
+                continue
+            if not isinstance(outputs.get("task"), str):
+                raise ValueError(f"{where}: the {metric} scores have no task label")
+            row: dict[str, Any] = {"task": outputs["task"], "capability": capability}
+            for name in FLAGS:
+                if _missing(value := outputs.get(name)):
+                    raise ValueError(f"{where}: the {metric} scores have no {name}")
+                row[name] = bool(value)
+            f1 = outputs.get("answer_f1")
+            if _missing(f1) or isinstance(f1, bool) or not isinstance(f1, int | float):
+                raise ValueError(f"{where}: the {metric} scores have no numeric answer_f1")
+            row["answer_f1"] = float(f1)
+            for name in ("program_syntax_valid", "hit_max_new_tokens"):
+                row[name] = None if _missing(value := outputs.get(name)) else bool(value)
+            rows.append(row)
+    if total and not with_metric:
+        raise ValueError(f"{path}: no row has {metric} scores; check --metric and that this is the job's row scores")
     return rows, total
 
 
@@ -99,6 +117,7 @@ def report(rows: list[dict[str, Any]], expected: int, tolerance: float) -> dict[
     for row in rows:
         by_task[row["task"]].append(row)
         by_capability[row["capability"]].append(row)
+    hits = [row["hit_max_new_tokens"] for row in rows if row["hit_max_new_tokens"] is not None]
     result = summarize(rows)
     result.update(
         {
@@ -106,7 +125,7 @@ def report(rows: list[dict[str, Any]], expected: int, tolerance: float) -> dict[
             "evaluated_samples": len(rows),
             "coverage": len(rows) / expected if expected else 0.0,
             "numeric_relative_tolerance": tolerance,
-            "hit_max_new_tokens": sum(row["hit_max_new_tokens"] for row in rows),
+            "hit_max_new_tokens": sum(hits) if hits else None,
             "by_capability": {name: summarize(items) for name, items in sorted(by_capability.items())},
             "by_task": {name: summarize(items) for name, items in sorted(by_task.items())},
         }
@@ -118,7 +137,7 @@ def _source(value: str) -> tuple[str, Path]:
     capability, separator, path = value.partition("=")
     if not separator or not capability or not path:
         raise argparse.ArgumentTypeError(f"expected CAPABILITY=PATH, got {value!r}")
-    return capability, Path(path)
+    return capability, Path(path).expanduser()
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -135,7 +154,7 @@ def main(argv: list[str] | None = None) -> None:
         "--tolerance",
         type=float,
         default=0.05,
-        help="The metric's relative tolerance, recorded in the report (default 0.05)",
+        help="The tolerance the jobs' finance-qa metric used, recorded in the report (default 0.05, the metric's default)",
     )
     parser.add_argument("--output", type=Path, help="Write the report here instead of to stdout")
     args = parser.parse_args(argv)

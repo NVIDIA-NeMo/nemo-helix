@@ -22,6 +22,7 @@ SCRIPT = (
     / "scripts"
     / "finance_report.py"
 )
+SCORES = ("exact", "relaxed", "task_correct", "answer_f1", "trace_closed")
 CAPABILITY_TASKS = {
     "visual_ocr": ("TAT-DQA/span", "TAT-DQA/multi-span"),
     "reasoning": ("TAT-DQA/arithmetic", "TAT-DQA/count"),
@@ -107,7 +108,7 @@ def _cookbook_row(rng: random.Random, capability: str) -> dict[str, Any]:
 
 def _row_score(row: dict[str, Any], row_index: int) -> dict[str, Any]:
     """The same row as a line of a job's row-scores JSONL from the finance-qa metric."""
-    outputs = [{"name": name, "value": row[name]} for name in finance_report.SCORES]
+    outputs = [{"name": name, "value": row[name]} for name in SCORES]
     if row["program_syntax_valid"] is not None:
         outputs.append({"name": "program_syntax_valid", "value": row["program_syntax_valid"]})
     outputs.append({"name": "hit_max_new_tokens", "value": row["hit_max_new_tokens"]})
@@ -123,7 +124,7 @@ def _row_score(row: dict[str, Any], row_index: int) -> dict[str, Any]:
 
 def _failed_row(row_index: int) -> dict[str, Any]:
     """A row whose inference failed with ignore_request_failure: NaN outputs and a metric error."""
-    outputs = [{"name": name, "value": "NaN"} for name in (*finance_report.SCORES, "hit_max_new_tokens")]
+    outputs = [{"name": name, "value": "NaN"} for name in (*SCORES, "hit_max_new_tokens")]
     return {
         "row_index": row_index,
         "item": {"messages": []},
@@ -135,7 +136,8 @@ def _failed_row(row_index: int) -> dict[str, Any]:
 
 
 def _write(path: Path, records: list[dict[str, Any]]) -> Path:
-    path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+    """Write records as the platform does: non-ASCII, including U+2028 and U+0085, left unescaped."""
+    path.write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records), encoding="utf-8")
     return path
 
 
@@ -165,18 +167,85 @@ def test_matches_the_cookbook_report(tmp_path: Path) -> None:
     assert report["by_capability"]["code_generation"]["python_syntax_rate"] is not None
 
 
-def test_rows_without_hit_max_new_tokens_count_as_not_hitting(tmp_path: Path) -> None:
-    record = _row_score(_cookbook_row(random.Random(0), "reasoning"), 0)
-    record["metrics"]["finance-qa"] = [o for o in record["metrics"]["finance-qa"] if o["name"] != "hit_max_new_tokens"]
-    rows, total = finance_report.read_rows(_write(tmp_path / "rows.jsonl", [record]), "reasoning")
-    assert total == 1
-    assert rows[0]["hit_max_new_tokens"] is False
+def _without(record: dict[str, Any], name: str) -> dict[str, Any]:
+    record["metrics"]["finance-qa"] = [o for o in record["metrics"]["finance-qa"] if o["name"] != name]
+    return record
 
 
-def test_rows_of_other_metrics_are_not_scored(tmp_path: Path) -> None:
+def test_hit_max_new_tokens_is_null_when_no_row_measured_it(tmp_path: Path) -> None:
+    records = [
+        _without(_row_score(_cookbook_row(random.Random(i), "reasoning"), i), "hit_max_new_tokens") for i in range(3)
+    ]
+    rows, _ = finance_report.read_rows(_write(tmp_path / "rows.jsonl", records), "reasoning")
+    assert finance_report.report(rows, 3, 0.05)["hit_max_new_tokens"] is None
+
+
+def test_a_row_without_hit_max_new_tokens_among_measured_rows_counts_as_not_hitting(tmp_path: Path) -> None:
+    measured = _row_score({**_cookbook_row(random.Random(0), "reasoning"), "hit_max_new_tokens": True}, 0)
+    unmeasured = _without(_row_score(_cookbook_row(random.Random(1), "reasoning"), 1), "hit_max_new_tokens")
+    rows, _ = finance_report.read_rows(_write(tmp_path / "rows.jsonl", [measured, unmeasured]), "reasoning")
+    assert finance_report.report(rows, 2, 0.05)["hit_max_new_tokens"] == 1
+
+
+def test_a_failed_row_with_an_empty_error_message_is_not_scored(tmp_path: Path) -> None:
+    """``str(TimeoutError())`` is empty, so a failed row is found by its metric key, not by its message."""
+    failed = _failed_row(1)
+    failed["metric_errors"] = {"finance-qa": ""}
+    scored = _row_score(_cookbook_row(random.Random(0), "reasoning"), 0)
+    rows, total = finance_report.read_rows(_write(tmp_path / "rows.jsonl", [scored, failed]), "reasoning")
+    assert (len(rows), total) == (1, 2)
+
+
+def test_a_row_whose_request_failed_is_not_scored(tmp_path: Path) -> None:
+    """In a multi-metric job, a failed request leaves ``inference_error`` on the sample."""
+    failed = _row_score(_cookbook_row(random.Random(1), "reasoning"), 1)
+    failed["sample"] = {"output_text": None, "response": {}, "inference_error": "timed out"}
+    scored = _row_score(_cookbook_row(random.Random(0), "reasoning"), 0)
+    rows, total = finance_report.read_rows(_write(tmp_path / "rows.jsonl", [scored, failed]), "reasoning")
+    assert (len(rows), total) == (1, 2)
+
+
+def test_line_separators_inside_strings_do_not_split_records(tmp_path: Path) -> None:
+    record = _row_score(_cookbook_row(random.Random(0), "visual_ocr"), 0)
+    record["item"] = {"messages": [{"role": "user", "content": "Revenue\u2028grew\x85by 5%"}]}
+    rows, total = finance_report.read_rows(_write(tmp_path / "rows.jsonl", [record]), "visual_ocr")
+    assert (len(rows), total) == (1, 1)
+
+
+def test_a_file_without_the_metric_is_an_error(tmp_path: Path) -> None:
+    """A wrong --metric or the wrong job's file would otherwise give an all-zero report."""
     record = {"row_index": 0, "item": {}, "sample": {}, "metrics": {"string-check": []}, "requests": []}
-    rows, total = finance_report.read_rows(_write(tmp_path / "rows.jsonl", [record, {}]), "reasoning")
-    assert (rows, total) == ([], 2)
+    with pytest.raises(ValueError, match="no row has finance-qa scores"):
+        finance_report.read_rows(_write(tmp_path / "rows.jsonl", [record, {}]), "reasoning")
+
+
+def test_a_row_without_the_metric_among_scored_rows_is_not_scored(tmp_path: Path) -> None:
+    scored = _row_score(_cookbook_row(random.Random(0), "reasoning"), 0)
+    other = {"row_index": 1, "item": {}, "sample": {}, "metrics": {"string-check": []}, "requests": []}
+    rows, total = finance_report.read_rows(_write(tmp_path / "rows.jsonl", [scored, other]), "reasoning")
+    assert (len(rows), total) == (1, 2)
+
+
+@pytest.mark.parametrize("value", [None, "NaN", True])
+def test_a_row_without_a_numeric_answer_f1_is_an_error(tmp_path: Path, value: Any) -> None:
+    record = _without(_row_score(_cookbook_row(random.Random(0), "reasoning"), 0), "answer_f1")
+    if value is not None:
+        record["metrics"]["finance-qa"].append({"name": "answer_f1", "value": value})
+    with pytest.raises(ValueError, match="rows.jsonl:1: the finance-qa scores have no numeric answer_f1"):
+        finance_report.read_rows(_write(tmp_path / "rows.jsonl", [record]), "reasoning")
+
+
+def test_a_line_that_is_not_json_names_the_file_and_line(tmp_path: Path) -> None:
+    path = tmp_path / "rows.jsonl"
+    path.write_text(json.dumps(_row_score(_cookbook_row(random.Random(0), "reasoning"), 0)) + "\n{oops\n")
+    with pytest.raises(ValueError, match="rows.jsonl:2: not a JSON record"):
+        finance_report.read_rows(path, "reasoning")
+
+
+def test_source_paths_expand_the_home_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _write(tmp_path / "rows.jsonl", [_row_score(_cookbook_row(random.Random(0), "reasoning"), 0)])
+    assert finance_report._source("reasoning=~/rows.jsonl") == ("reasoning", tmp_path / "rows.jsonl")
 
 
 def test_a_row_without_a_task_label_is_an_error(tmp_path: Path) -> None:
