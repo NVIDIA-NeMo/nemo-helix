@@ -7,6 +7,7 @@ import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experim
 import { getFilesListFilesetFilesQueryKey } from '@nemo/sdk/generated/platform/files';
 import type { EvaluationResponse, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
+import { DATASET_SNAPSHOT_KEY } from '@studio/components/evaluation/AgentEvaluationWizard/datasetSnapshot';
 import {
   EVAL_CONFIG_FILESET_KEY,
   evaluationConfigError,
@@ -123,6 +124,44 @@ const mockLists = () => {
     }),
     http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
       HttpResponse.json({ data: [] })
+    )
+  );
+};
+
+const SNAPSHOT_REF = `${DEFAULT_WORKSPACE}/source-data#rows.jsonl`;
+
+/** Makes "baseline" a run that recorded its dataset, and answers the dataset listing with
+ *  ``files``. */
+const mockSnapshotSource = (files: HttpResponse<string> | { path: string; size: number }[]) => {
+  const evaluations = EVALUATIONS.map((item) =>
+    item.name === 'baseline'
+      ? {
+          ...item,
+          metadata: {
+            ...item.metadata,
+            [DATASET_SNAPSHOT_KEY]: JSON.stringify({
+              ref: SNAPSHOT_REF,
+              files: [{ path: 'rows.jsonl', size: 10 }],
+            }),
+          },
+        }
+      : item
+  );
+  server.use(
+    http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), ({ request }) => {
+      const name = new URL(request.url).searchParams.get('filter[name]');
+      return HttpResponse.json(
+        name
+          ? { ...emptyPage, data: evaluations.filter((item) => item.name === name) }
+          : { data: evaluations }
+      );
+    }),
+    http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
+      Array.isArray(files)
+        ? HttpResponse.json({
+            data: files.map((file) => ({ ...file, file_ref: file.path, file_url: file.path })),
+          })
+        : files
     )
   );
 };
@@ -344,6 +383,40 @@ describe('AgentEvaluationWizard', () => {
     expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
 
     finishCheck(null);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
+  });
+
+  it('blocks a re-run whose dataset no longer exists, saying so under the picker', async () => {
+    mockLists();
+    mockSnapshotSource(new HttpResponse(null, { status: 404 }));
+    const user = userEvent.setup();
+    renderWizard({ sourceEvaluation: 'baseline' });
+
+    const name = await screen.findByLabelText('New Evaluation Name');
+    await user.clear(name);
+    await user.type(name, 'baseline-rerun');
+    expect(
+      await screen.findByText(
+        `The dataset this evaluation read, ${SNAPSHOT_REF}, no longer exists. Pick another evaluation.`
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
+  });
+
+  it('warns about a re-run whose dataset changed, and still lets it run', async () => {
+    mockLists();
+    mockSnapshotSource([{ path: 'rows.jsonl', size: 12 }]);
+    const user = userEvent.setup();
+    renderWizard({ sourceEvaluation: 'baseline' });
+
+    const name = await screen.findByLabelText('New Evaluation Name');
+    await user.clear(name);
+    await user.type(name, 'baseline-rerun');
+    expect(
+      await screen.findByText(/The dataset has changed since baseline ran/)
+    ).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
     );

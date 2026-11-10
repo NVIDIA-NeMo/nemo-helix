@@ -15,6 +15,7 @@ import {
   getFilesListFilesetsQueryKey,
 } from '@nemo/sdk/generated/platform/files';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
+import { DATASET_SNAPSHOT_KEY } from '@studio/components/evaluation/AgentEvaluationWizard/datasetSnapshot';
 import { createRunEvaluation } from '@studio/components/evaluation/experimentEvalConfig';
 import type { DownloadFileAsArrayBufferArgs } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { ROUTES } from '@studio/constants/routes';
@@ -292,7 +293,15 @@ describe('AgentEvaluationWizard dataset', () => {
     expect(uploadedPaths()).toEqual(['eval-config.yaml']);
     expect(createRunEvaluation).toHaveBeenCalledWith(
       DEFAULT_WORKSPACE,
-      expect.objectContaining({ datasetName: 'generated' })
+      expect.objectContaining({
+        datasetName: 'generated',
+        metadata: {
+          [DATASET_SNAPSHOT_KEY]: JSON.stringify({
+            ref: DATASET_REF,
+            files: [{ path: 'output/part-0.parquet', size: 10 }],
+          }),
+        },
+      })
     );
   });
 
