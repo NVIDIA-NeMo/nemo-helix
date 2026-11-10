@@ -35,6 +35,8 @@ def test_enable_request_requires_and_persists_model_pair() -> None:
         json={
             "default_model": "default/gpt-5",
             "fast_model": "default/gpt-5-mini",
+            "source_fileset": "default/source",
+            "embedding_model": "default/qwen",
         },
     )
 
@@ -42,6 +44,8 @@ def test_enable_request_requires_and_persists_model_pair() -> None:
     created = entity_client.create.await_args.args[0]
     assert created.default_model == "default/gpt-5"
     assert created.fast_model == "default/gpt-5-mini"
+    assert created.source_fileset == "default/source"
+    assert created.embedding_model == "default/qwen"
     assert response.json()["default_model"] == "default/gpt-5"
     assert response.json()["fast_model"] == "default/gpt-5-mini"
 
@@ -55,6 +59,8 @@ def test_reenable_refreshes_persisted_model_pair() -> None:
         enabled=False,
         default_model="default/old-model",
         fast_model="default/old-model",
+        source_fileset="default/old-source",
+        embedding_model="default/old-embedding",
     )
     entity_client.get.return_value = existing
     entity_client.update.side_effect = lambda config: config
@@ -72,6 +78,8 @@ def test_reenable_refreshes_persisted_model_pair() -> None:
     assert updated.enabled is True
     assert updated.default_model == "default/gpt-5"
     assert updated.fast_model == "default/gpt-5-mini"
+    assert updated.source_fileset is None
+    assert updated.embedding_model is None
 
 
 def test_enable_sdk_body_contains_both_model_refs() -> None:
@@ -82,6 +90,8 @@ def test_enable_sdk_body_contains_both_model_refs() -> None:
         "default_model": "default/gpt-5",
         "fast_model": "default/gpt-5-mini",
         "analysis_options": {},
+        "source_fileset": None,
+        "embedding_model": None,
     }
 
 

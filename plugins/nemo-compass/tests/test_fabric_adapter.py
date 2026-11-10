@@ -540,3 +540,26 @@ def test_fabric_plan_accepts_package_owned_options(tmp_path):
     )
     plan = Fabric().plan(translate_agent_config(config), base_dir=tmp_path)
     assert plan.adapter.adapter_id == "nvidia.helix.compass.analyst"
+
+
+async def test_fabric_adapter_passes_staged_source_and_embedding_ref(monkeypatch, tmp_path) -> None:
+    seen: dict[str, Any] = {}
+
+    async def run(**kwargs):
+        seen.update(kwargs)
+        return CompassResult(summary="Complete"), object()
+
+    monkeypatch.setattr(fabric_adapter, "run_compass_change_set", run)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
+    config = _agent_config({"agent": "research-agent", "code_base": "source"})
+    config.models["embedding"] = contract.AgentModelConfig(provider="platform", model="default/qwen")
+    context = _runtime_context()
+    context.environment.workspace = tmp_path
+    source = tmp_path / "source"
+    source.mkdir()
+    runtime = fabric_adapter.CompassRuntime()
+    await runtime.start({"config": config})
+    result = await runtime.invoke(_request({"nemo_helix": {"job_workspace": "default"}}), context)
+    assert result.status is contract.AgentRunStatus.SUCCEEDED
+    assert seen["code_base"] == source
+    assert seen["embedding_model"] == "default/qwen"

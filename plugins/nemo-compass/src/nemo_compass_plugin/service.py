@@ -353,6 +353,8 @@ async def _get_or_create_analysis_config(
     default_model: str = "",
     fast_model: str = "",
     analysis_options: dict[str, Any] | None = None,
+    source_fileset: str | None = None,
+    embedding_model: str | None = None,
 ) -> tuple[AnalysisConfig, bool]:
     """Fetch an analysis config, creating a default one if it is absent.
 
@@ -376,6 +378,8 @@ async def _get_or_create_analysis_config(
         default_model=default_model,
         fast_model=fast_model,
         analysis_options=analysis_options or {},
+        source_fileset=source_fileset,
+        embedding_model=embedding_model,
     )
     try:
         return await entity_client.create(config), True
@@ -431,6 +435,8 @@ def _build_analysis_configs_router() -> APIRouter:
             default_model=body.default_model,
             fast_model=body.fast_model,
             analysis_options=body.analysis_options,
+            source_fileset=body.source_fileset,
+            embedding_model=body.embedding_model,
         )
         if created:
             return config
@@ -439,6 +445,8 @@ def _build_analysis_configs_router() -> APIRouter:
         config.default_model = body.default_model
         config.fast_model = body.fast_model
         config.analysis_options = body.analysis_options
+        config.source_fileset = body.source_fileset
+        config.embedding_model = body.embedding_model
         try:
             return await entity_client.update(config)
         except Exception as exc:

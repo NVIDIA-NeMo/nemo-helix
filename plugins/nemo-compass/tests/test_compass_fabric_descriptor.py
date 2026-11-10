@@ -198,3 +198,13 @@ def test_fabric_plans_the_built_config(tmp_path: Path) -> None:
     plan = fabric.Fabric().plan(translate_agent_config(_compass_config()), base_dir=tmp_path)
 
     assert plan is not None
+
+
+def test_fabric_plans_source_and_embedding_configuration(tmp_path: Path) -> None:
+    _require_installed_descriptor()
+    config = _compass_config(source_fileset="default/source", embedding_model="default/qwen")
+    translated = translate_agent_config(config)
+    assert translated.harness is not None
+    assert translated.harness.settings["code_base"] == "."
+    assert translated.models["embedding"].model == "default/qwen"
+    assert fabric.Fabric().plan(translated, base_dir=tmp_path) is not None

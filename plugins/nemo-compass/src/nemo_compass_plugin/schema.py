@@ -88,6 +88,16 @@ class EnableAnalysisConfigRequest(BaseModel):
 
     default_model: str = Field(min_length=1)
     fast_model: str = Field(min_length=1)
+    source_fileset: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Fileset reference containing agent source, staged as the execute job workdir.",
+    )
+    embedding_model: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Platform model reference serving Qwen3-Embedding-8B with 4096 dimensions.",
+    )
     analysis_options: dict[str, Any] = Field(
         default_factory=dict,
         description="Compass analysis option overrides, validated by the Compass version executing the run. Omitted defaults are resolved at execution.",
@@ -136,6 +146,16 @@ class CreateAnalysisRunRequest(BaseModel):
     evaluation_id: NonBlankString | None = Field(
         default=None,
         description="Optional run scope AND-pinned onto every span read.",
+    )
+    source_fileset: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Fileset reference containing agent source, staged as the execute job workdir.",
+    )
+    embedding_model: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Platform model reference serving Qwen3-Embedding-8B with 4096 dimensions.",
     )
     analysis_options: dict[str, Any] = Field(
         default_factory=dict,

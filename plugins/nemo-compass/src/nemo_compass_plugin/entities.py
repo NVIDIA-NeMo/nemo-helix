@@ -117,6 +117,16 @@ class AnalysisRun(NemoEntity, entity_type="insights_analysis_run"):
         description="Workspace-qualified Model Entity the run used for context summarization.",
     )
 
+    source_fileset: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Fileset reference containing agent source, staged as the execute job workdir.",
+    )
+    embedding_model: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Platform model reference serving Qwen3-Embedding-8B with 4096 dimensions.",
+    )
     analysis_options: dict[str, Any] = Field(
         default_factory=dict,
         description="Compass analysis option overrides, validated by the Compass version executing the run. Omitted defaults are resolved at execution.",
@@ -147,6 +157,16 @@ class AnalysisConfig(NemoEntity, entity_type="insights_analysis_config"):
         description="Workspace-qualified Model Entity used for latency-sensitive analysis work.",
     )
 
+    source_fileset: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Fileset reference containing agent source, staged as the execute job workdir.",
+    )
+    embedding_model: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Platform model reference serving Qwen3-Embedding-8B with 4096 dimensions.",
+    )
     analysis_options: dict[str, Any] = Field(
         default_factory=dict,
         description="Compass analysis option overrides, validated by the Compass version executing the run. Omitted defaults are resolved at execution.",

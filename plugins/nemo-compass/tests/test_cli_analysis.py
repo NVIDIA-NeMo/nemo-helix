@@ -119,3 +119,21 @@ def test_status_without_an_agent_lists_every_config(app: typer.Typer, api: FakeC
     assert api.requests[0].params == {"page": "1", "page_size": "100", "sort": "-created_at"}
     assert "demo-agent" in result.stdout
     assert CONFIGURED_DEFAULT in result.stdout
+
+
+@pytest.mark.usefixtures("configured_models")
+def test_enable_saves_optional_input_references(app: typer.Typer, api: FakeCompassAPI) -> None:
+    api.on("POST", f"{CONFIG}/enable", config_json())
+    result = _invoke(
+        app,
+        "enable",
+        "--agent",
+        "demo-agent",
+        "--source-fileset",
+        "default/source",
+        "--embedding-model",
+        "default/qwen",
+    )
+    assert result.exit_code == 0, result.output
+    assert api.requests[0].body["source_fileset"] == "default/source"
+    assert api.requests[0].body["embedding_model"] == "default/qwen"

@@ -138,6 +138,8 @@ async def submit_analysis_run(
         default_model=request.default_model,
         fast_model=request.fast_model,
         analysis_options=request.analysis_options,
+        source_fileset=request.source_fileset,
+        embedding_model=request.embedding_model,
     )
     try:
         saved = await entity_client.create(run)
@@ -282,10 +284,19 @@ async def _resolve_model_refs(
         field="fast_model",
         workspace=workspace,
     )
-    return request.model_copy(update={"default_model": default_model, "fast_model": fast_model})
+    embedding_model = None
+    if request.embedding_model is not None:
+        embedding_model = await _resolve_model_ref(
+            client, request.embedding_model, field="embedding_model", workspace=workspace, embeddings=True
+        )
+    return request.model_copy(
+        update={"default_model": default_model, "fast_model": fast_model, "embedding_model": embedding_model}
+    )
 
 
-async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str, workspace: str) -> str:
+async def _resolve_model_ref(
+    client: ModelLookupClient, ref: str, *, field: str, workspace: str, embeddings: bool = False
+) -> str:
     """Return ``<workspace>/<name>`` for an existing Model Entity Compass can call, or raise 422."""
     match ref.split("/"):
         case [name]:
@@ -317,7 +328,9 @@ async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str,
     # Compass job would otherwise start and fail when it builds its model
     # clients, after the run is recorded and a pod has been scheduled.
     try:
-        supported_backend_format(model_entity)
+        backend_format = supported_backend_format(model_entity)
+        if embeddings and backend_format != "OPENAI_CHAT":
+            raise ValueError("Embedding models must expose an OpenAI-compatible embeddings endpoint")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"{field}: {exc}") from exc
     return f"{model_workspace}/{name}"
@@ -342,6 +355,8 @@ def build_execute_agent_job_config(
             },
         }
     )
+    if request.source_fileset is not None:
+        payload["workdir"] = {"base_workdir": request.source_fileset}
     if request.timeout_seconds is not None:
         payload["timeout_seconds"] = request.timeout_seconds
 
@@ -368,6 +383,8 @@ def _inline_compass(request: CreateAnalysisRunRequest, *, base_url: str | None =
                 fast_model=request.fast_model,
                 ethos=request.ethos,
                 analysis_options=request.analysis_options,
+                source_fileset=request.source_fileset,
+                embedding_model=request.embedding_model,
                 # Compass's self-observability builds its own OTLP exporter from
                 # the operator's local CLI config, which does not exist in a task
                 # pod, so on a cluster it exports unauthenticated at best. Telemetry

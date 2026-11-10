@@ -79,11 +79,23 @@ def _build_update_body(
 
 
 def _build_enable_body(
-    *, default_model: str, fast_model: str, analysis_options: dict[str, Any] | None = None
+    *,
+    default_model: str,
+    fast_model: str,
+    analysis_options: dict[str, Any] | None = None,
+    source_fileset: str | None = None,
+    embedding_model: str | None = None,
 ) -> EnableAnalysisConfigRequest:
-    return EnableAnalysisConfigRequest(
-        default_model=default_model, fast_model=fast_model, analysis_options=analysis_options or {}
+    body = EnableAnalysisConfigRequest(
+        default_model=default_model,
+        fast_model=fast_model,
+        analysis_options=analysis_options or {},
     )
+    if source_fileset is not None:
+        body.source_fileset = source_fileset
+    if embedding_model is not None:
+        body.embedding_model = embedding_model
+    return body
 
 
 def _build_status_update_body(
@@ -140,6 +152,8 @@ class _AnalysisConfigResource:
         agent: str,
         default_model: str,
         fast_model: str,
+        source_fileset: str | None = None,
+        embedding_model: str | None = None,
         analysis_options: dict[str, Any] | None = None,
     ) -> AnalysisConfig:
         with httpx_status_errors():
@@ -147,7 +161,11 @@ class _AnalysisConfigResource:
                 workspace=workspace,
                 agent=agent,
                 body=_build_enable_body(
-                    default_model=default_model, fast_model=fast_model, analysis_options=analysis_options
+                    default_model=default_model,
+                    fast_model=fast_model,
+                    analysis_options=analysis_options,
+                    source_fileset=source_fileset,
+                    embedding_model=embedding_model,
                 ),
             )
             return entity_from_response(AnalysisConfig, response.http_response.json())
@@ -213,6 +231,8 @@ class _AsyncAnalysisConfigResource:
         agent: str,
         default_model: str,
         fast_model: str,
+        source_fileset: str | None = None,
+        embedding_model: str | None = None,
         analysis_options: dict[str, Any] | None = None,
     ) -> AnalysisConfig:
         with httpx_status_errors():
@@ -220,7 +240,11 @@ class _AsyncAnalysisConfigResource:
                 workspace=workspace,
                 agent=agent,
                 body=_build_enable_body(
-                    default_model=default_model, fast_model=fast_model, analysis_options=analysis_options
+                    default_model=default_model,
+                    fast_model=fast_model,
+                    analysis_options=analysis_options,
+                    source_fileset=source_fileset,
+                    embedding_model=embedding_model,
                 ),
             )
             return entity_from_response(AnalysisConfig, response.http_response.json())

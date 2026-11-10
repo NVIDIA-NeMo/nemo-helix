@@ -7,6 +7,8 @@ NeMo Helix plugin for analyzing agent telemetry and persisting actionable insigh
 
 Analysis uses [NeMo Compass](https://github.com/NVIDIA-NeMo/nemo-compass).
 NeMo Helix supplies authenticated trace and model access and stores the resulting insights.
+See [analysis inputs and upgrades](ANALYSIS.md) for source-code and embedding
+configuration and the CLI/Helix validation procedure.
 
 ## Prerequisites
 
