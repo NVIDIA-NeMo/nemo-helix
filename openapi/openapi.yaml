@@ -1828,7 +1828,7 @@ paths:
         '403':
           description: Not allowed to update entities in the requested workspace.
         '404':
-          description: Entity or workspace not found
+          description: Entity not found or workspace being deleted
           content:
             application/json:
               schema:

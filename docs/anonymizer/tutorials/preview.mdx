@@ -128,12 +128,15 @@ Path("/tmp/anonymizer-preview.json").write_text(
 )
 ```
 
-Then run:
+To display and save all emitted frames as NDJSON, run:
 
 ```bash
 nemo anonymizer preview \
-  --spec-file /tmp/anonymizer-preview.json
+  --spec-file /tmp/anonymizer-preview.json | tee anonymizer-preview.ndjson
 ```
+
+The saved file contains all frame kinds, not just the anonymized records. This CLI
+path does not create the Python `preview` variable used in Step 3.
 
 <Accordion title="Async client">
 
@@ -158,7 +161,10 @@ In a standalone Python script, use `asyncio.run(run_preview())` instead (with `i
 
 </Accordion>
 
-## Step 3: Persist Preview Records
+## Step 3: Persist Preview Records (Python SDK)
+
+This step applies only if you called the sync or async Python SDK above. For the
+CLI path, use the NDJSON file saved by `tee` instead.
 
 `AnonymizerPreviewResult.dataset` and `trace_dataset` are pandas DataFrames, so save them with standard pandas methods:
 

@@ -519,7 +519,7 @@ async def get_entity_by_name(
     summary="Update entity by name",
     responses={
         403: {"description": "Not allowed to update entities in the requested workspace."},
-        404: {"model": ErrorResponse, "description": "Entity or workspace not found"},
+        404: {"model": ErrorResponse, "description": "Entity not found or workspace being deleted"},
         **_ENTITY_WRITE_ERROR_RESPONSES,
     },
     description=textwrap.dedent("""
