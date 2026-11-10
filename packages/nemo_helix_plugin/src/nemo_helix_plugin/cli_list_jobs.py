@@ -28,7 +28,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
 import click
 import typer
@@ -106,7 +106,7 @@ class JobCollection:
     path: str
 
     @classmethod
-    def for_job(cls, key: str, job_cls: type[NemoJob]) -> "JobCollection":
+    def for_job(cls, key: str, job_cls: type[NemoJob]) -> Self:
         """The collection *job_cls* is mounted at, given its ``nemo.jobs`` entry-point *key*.
 
         Only the key's plugin prefix is used; the job's own ``name`` names the type, so the
