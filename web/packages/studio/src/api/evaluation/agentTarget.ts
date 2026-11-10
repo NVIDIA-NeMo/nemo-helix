@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isPlainObject } from '@studio/util/functions';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 
 /** Resolve only targets that identify a registered agent, never a runner's display name.
  * Registered source AgentRefs serialize as strings, not objects with a `name` field. */

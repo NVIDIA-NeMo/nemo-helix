@@ -53,12 +53,15 @@ def restore_process_state(monkeypatch: pytest.MonkeyPatch):
 
 
 class _Driver:
+    """A fake OpenSandbox driver that records the metadata it is asked to match."""
+
     def __init__(self, *, connection: Mapping[str, str] | None = None, **kwargs: object) -> None:
         self.connection = dict(connection or {})
         self.metadata: dict[str, str] = {}
         self.error: BaseException | None = None
 
     async def destroy_sandboxes_matching(self, metadata: Mapping[str, str]) -> tuple[str, ...]:
+        """Hang long past any caller timeout."""
         self.metadata = dict(metadata)
         if self.error is not None:
             raise self.error
@@ -102,6 +105,30 @@ def test_reap_logs_a_control_plane_failure_and_returns(
 
     with caplog.at_level("ERROR"):
         assert reap_job_sandboxes("rl-1", host_provider="opensandbox") == ()
+
+    assert "failed to reap sandboxes for job rl-1" in caplog.text
+
+
+def test_reap_gives_up_after_the_callers_timeout(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A caller inside a termination grace period bounds the sweep so its own teardown still runs."""
+
+    class _Hung(_Driver):
+        """A driver whose sweep never finishes."""
+
+        async def destroy_sandboxes_matching(self, metadata: Mapping[str, str]) -> tuple[str, ...]:
+            """Hang long past any caller timeout."""
+            await asyncio.sleep(60)
+            return ()
+
+    monkeypatch.setattr(
+        "sandboxed_gym.backends._opensandbox_driver.OpenSandboxDriver",
+        lambda *, connection=None, **kwargs: _Hung(connection=connection),
+    )
+
+    with caplog.at_level("ERROR"):
+        assert reap_job_sandboxes("rl-1", host_provider="opensandbox", timeout_s=0.05) == ()
 
     assert "failed to reap sandboxes for job rl-1" in caplog.text
 

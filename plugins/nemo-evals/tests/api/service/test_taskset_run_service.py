@@ -533,6 +533,7 @@ async def test_get_counts_progress_from_every_member_page_without_jobs(
         "members": {"image_ready": 2, "registered": 3, "succeeded": 1, "failed": 1},
         "queued": 1,
         "task_jobs": {"active": 2, "pending": 1},
+        "trial_counts": None,
     }
 
 
@@ -630,11 +631,13 @@ async def test_list_tasks_preserves_stored_task_details_and_page_metadata(
         {
             "task": "task-10",
             "task_index": 10,
+            "task_name": None,
             "phase": "failed",
             "job": "recorded-job-10",
             "job_status": "error",
             "error": "saved diagnostic",
             "publication": None,
+            "trial_counts": None,
         }
     ]
     assert result.pagination.model_dump() == {

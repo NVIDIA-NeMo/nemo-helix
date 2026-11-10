@@ -22,6 +22,7 @@ from nemo_evals.taskset_runs.entities import (
 )
 from nemo_evals.taskset_runs.progress import TasksetRunProgress
 from nemo_evals.taskset_runs.specs import TASK_BUNDLE_FILES
+from nemo_evals.taskset_runs.trials import TrialCounts
 from nemo_helix_plugin.jobs.ignore_patterns import matches_ignore_patterns
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -315,8 +316,8 @@ class TasksetRunStatus(BaseModel):
     progress: TasksetRunProgress | None = Field(
         default=None,
         description=(
-            "Counted from the run's members on each GET of this run; None before the controller creates them, "
-            "and in run lists and submit responses."
+            "Counted from the run's members on each GET of this run, and in run lists that ask for it; None before "
+            "the controller creates them, and in other run lists and submit responses."
         ),
     )
 
@@ -335,6 +336,10 @@ class TasksetRunTask(BaseModel):
 
     task: str = Field(description="Member name within the run, for example task-7.")
     task_index: int = Field(ge=0, description="Zero-based index of the task in the run's resolved task list.")
+    task_name: str | None = Field(
+        default=None,
+        description="The task's id in the run's taskset (a Harbor task's native id); omitted for runs from before it.",
+    )
     phase: MemberPhase = Field(description="Stored image preparation and execution progress of this task.")
     job: str | None = Field(
         default=None,
@@ -352,6 +357,13 @@ class TasksetRunTask(BaseModel):
             "reported nothing."
         ),
     )
+    trial_counts: TrialCounts | None = Field(
+        default=None,
+        description=(
+            "The task Job's trials counted by phase, as the controller last read them; every planned trial counts "
+            "as pending until the Job reports."
+        ),
+    )
 
 
 def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
@@ -367,11 +379,13 @@ def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
     return TasksetRunTask(
         task=member.name,
         task_index=member.task_index,
+        task_name=member.task_name,
         phase=member.phase,
         job=member.task_job,
         job_status=member.job_status,
         error=member.error,
         publication=member.publication,
+        trial_counts=member.trial_counts,
     )
 
 

@@ -7,21 +7,11 @@ import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
 import { toInferenceModelName } from '@nemo/common/src/utils/models';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
-import {
-  Badge,
-  Button,
-  Flex,
-  PageHeader,
-  Stack,
-  TabsContent,
-  TabsList,
-  TabsRoot,
-  TabsTrigger,
-  Text,
-} from '@nvidia/foundations-react-core';
+import { Badge, Button, Stack, TabsContent } from '@nvidia/foundations-react-core';
 import { CustomizationOverview } from '@studio/components/CustomizationOverview';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
 import { EvaluationResultsDataView } from '@studio/components/dataViews/EvaluationResultsDataView';
+import { DetailPageLayout, type DetailPageTab } from '@studio/components/Layouts/DetailPageLayout';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
@@ -75,7 +65,7 @@ export const ModelDetailRoute: FC = () => {
 
   // The job tabs stay visible but disabled while the lookup runs, and go away if there is no job.
   const hasJobTabs = job.isLoading || Boolean(job.jobName);
-  const tabs: { value: ModelDetailTab; label: string; disabled?: boolean }[] = [
+  const tabs: DetailPageTab<ModelDetailTab>[] = [
     { value: ModelDetailTab.Details, label: 'Details' },
     { value: ModelDetailTab.Chat, label: 'Chat' },
     { value: ModelDetailTab.Evaluations, label: 'Evaluations' },
@@ -153,115 +143,101 @@ export const ModelDetailRoute: FC = () => {
 
   return (
     <AccessibleTitle title={`Model details for ${name}`}>
-      <Stack className="h-full min-h-0" gap="density-2xl" padding="density-2xl">
-        <PageHeader
-          className="shrink-0 p-0"
-          slotHeading={
-            <Flex align="baseline" gap="3" wrap="wrap">
-              <Text kind="title/md">{name}</Text>
-              <DeploymentStatusBadge state={lineage.deployment} isAdapter={Boolean(adapter)} />
-              {tags.map((tag) => (
-                <Badge key={tag} kind="outline" color="gray">
-                  {tag}
-                </Badge>
-              ))}
-            </Flex>
-          }
-          slotDescription={(adapter ?? model).description}
-          slotActions={
-            selectedTab === ModelDetailTab.Deployment ? (
-              <DeploymentActions
-                model={model}
-                adapter={adapter}
-                deployment={lineage.baseDeployment}
-              />
-            ) : (
-              headerAction && (
-                <Button color="brand" asChild>
-                  <Link to={headerAction.to}>{headerAction.label}</Link>
-                </Button>
-              )
-            )
-          }
-        />
-
-        <TabsRoot
-          className="flex min-h-0 flex-1 flex-col"
-          value={selectedTab}
-          onValueChange={(value) => setQueryParam(QUERY_PARAMETERS.tab, value)}
-        >
-          <TabsList className="shrink-0">
-            {tabs.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value} disabled={tab.disabled}>
-                {tab.label}
-              </TabsTrigger>
+      <DetailPageLayout
+        title={name}
+        slotBadges={
+          <>
+            <DeploymentStatusBadge state={lineage.deployment} isAdapter={Boolean(adapter)} />
+            {tags.map((tag) => (
+              <Badge key={tag} kind="solid" color="gray">
+                {tag}
+              </Badge>
             ))}
-          </TabsList>
-
-          <TabsContent
-            value={ModelDetailTab.Details}
-            className="min-h-0 flex-1 overflow-y-auto p-0 pt-6"
-          >
-            <DetailsTab model={model} adapter={adapter} lineage={lineage} jobRecord={jobDetails} />
-          </TabsContent>
-
-          <TabsContent value={ModelDetailTab.Chat} className="flex min-h-0 flex-1 p-0 pt-6">
-            <ChatTab
-              // The baseline panel is seeded once, so start over on another model or adapter.
-              key={`${model.workspace}/${model.name}:${adapter?.name ?? ''}`}
+          </>
+        }
+        slotDescription={(adapter ?? model).description}
+        tabs={tabs}
+        selectedTab={selectedTab}
+        onTabChange={(tab) => setQueryParam(QUERY_PARAMETERS.tab, tab)}
+        slotActions={
+          selectedTab === ModelDetailTab.Deployment ? (
+            <DeploymentActions
               model={model}
               adapter={adapter}
+              deployment={lineage.baseDeployment}
             />
-          </TabsContent>
+          ) : (
+            headerAction && (
+              <Button color="brand" asChild>
+                <Link to={headerAction.to}>{headerAction.label}</Link>
+              </Button>
+            )
+          )
+        }
+      >
+        <TabsContent
+          value={ModelDetailTab.Details}
+          className="min-h-0 flex-1 overflow-y-auto p-0 pt-6"
+        >
+          <DetailsTab model={model} adapter={adapter} lineage={lineage} jobRecord={jobDetails} />
+        </TabsContent>
 
-          <TabsContent
-            value={ModelDetailTab.Evaluations}
-            className="min-h-0 flex-1 overflow-y-auto p-0 pt-6"
-          >
-            <EvaluationResultsDataView
-              targetModelName={evaluatedName}
-              onCreate={() => navigate(runEvaluationRoute)}
-            />
-          </TabsContent>
+        <TabsContent value={ModelDetailTab.Chat} className="flex min-h-0 flex-1 p-0 pt-6">
+          <ChatTab
+            // The baseline panel is seeded once, so start over on another model or adapter.
+            key={`${model.workspace}/${model.name}:${adapter?.name ?? ''}`}
+            model={model}
+            adapter={adapter}
+          />
+        </TabsContent>
 
-          <TabsContent
-            value={ModelDetailTab.Files}
-            className="flex min-h-0 flex-1 flex-col items-stretch overflow-y-auto p-0 pt-6"
-          >
-            <FilesTab fileset={fileset} />
-          </TabsContent>
+        <TabsContent
+          value={ModelDetailTab.Evaluations}
+          className="min-h-0 flex-1 overflow-y-auto p-0 pt-6"
+        >
+          <EvaluationResultsDataView
+            targetModelName={evaluatedName}
+            onCreate={() => navigate(runEvaluationRoute)}
+          />
+        </TabsContent>
 
-          <TabsContent
-            value={ModelDetailTab.Deployment}
-            className="flex min-h-0 flex-1 flex-col items-stretch overflow-y-auto p-0 pt-6"
-          >
-            <DeploymentTab model={model} adapter={adapter} deployment={lineage.baseDeployment} />
-          </TabsContent>
+        <TabsContent
+          value={ModelDetailTab.Files}
+          className="flex min-h-0 flex-1 flex-col items-stretch overflow-y-auto p-0 pt-6"
+        >
+          <FilesTab fileset={fileset} />
+        </TabsContent>
 
-          {job.jobName && (
-            <>
-              <TabsContent
-                value={ModelDetailTab.Training}
-                className="min-h-0 flex-1 overflow-y-auto p-0 pt-6 pr-density-md"
-              >
-                <Stack className="w-full">
-                  <CustomizationOverview
-                    customizationJobName={job.jobName}
-                    workspace={job.workspace}
-                  />
-                </Stack>
-              </TabsContent>
-              <TabsContent value={ModelDetailTab.Logs} className="flex min-h-0 flex-1 p-0 pt-6">
-                <LogsTab
+        <TabsContent
+          value={ModelDetailTab.Deployment}
+          className="flex min-h-0 flex-1 flex-col items-stretch overflow-y-auto p-0 pt-6"
+        >
+          <DeploymentTab model={model} adapter={adapter} deployment={lineage.baseDeployment} />
+        </TabsContent>
+
+        {job.jobName && (
+          <>
+            <TabsContent
+              value={ModelDetailTab.Training}
+              className="min-h-0 flex-1 overflow-y-auto p-0 pt-6 pr-density-md"
+            >
+              <Stack className="w-full">
+                <CustomizationOverview
                   customizationJobName={job.jobName}
                   workspace={job.workspace}
-                  jobStatus={jobDetails?.status}
                 />
-              </TabsContent>
-            </>
-          )}
-        </TabsRoot>
-      </Stack>
+              </Stack>
+            </TabsContent>
+            <TabsContent value={ModelDetailTab.Logs} className="flex min-h-0 flex-1 p-0 pt-6">
+              <LogsTab
+                customizationJobName={job.jobName}
+                workspace={job.workspace}
+                jobStatus={jobDetails?.status}
+              />
+            </TabsContent>
+          </>
+        )}
+      </DetailPageLayout>
     </AccessibleTitle>
   );
 };
