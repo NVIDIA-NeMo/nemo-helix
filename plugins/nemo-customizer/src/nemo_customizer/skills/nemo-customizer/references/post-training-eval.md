@@ -140,6 +140,36 @@ Score the official validation split in the `cord-v2` fileset, not a separate tes
 
 Published numbers on the first 20 validation rows (Automodel Super VL guide): the base model scores 0/20 exact with mean similarity 0.048; the LoRA (rank 64, step 199, merged) scores 8/20 and 0.954. The base model answers in prose, so near-zero scores for it are expected. Expect small differences from upstream, which decoded merged weights with Hugging Face `generate`.
 
+### Finance (TAT-DQA and BizBench)
+
+The finance cookbook trains one adapter per capability and scores each capability's `test.jsonl` against its adapter. Score it the same way: one job per capability, with the `finance-qa` metric, which scores each row as the cookbook's `evaluation.py` does. The cookbook publishes no numbers and never scores the base model, so run the same three jobs against the base model for the comparison.
+
+| Capability | Rows | Tasks | Prompt template | `max_tokens` |
+|---|---|---|---|---|
+| `visual_ocr` | `FilesetRef("<ws>/finance-ocr#test.jsonl")` | `TAT-DQA/span`, `TAT-DQA/multi-span` | **Image rows** above, with `finance-ocr` as the fileset | 512 |
+| `reasoning` | `FilesetRef("<ws>/finance-reasoning#test.jsonl")` | `TAT-DQA/arithmetic`, `TAT-DQA/count` | `{"messages": "{{ item.messages[:-1] }}"}` | 256 |
+| `code_generation` | `FilesetRef("<ws>/finance-code#test.jsonl")` | `CodeFinQA`, `CodeTAT-QA` | `{"messages": "{{ item.messages[:-1] }}"}` | 512 |
+
+| Input | Value |
+|---|---|
+| Target | The capability's adapter, `<ws>/<base-entity>&adapters/<ws>/<adapter>`, then the base model, `<ws>/<base-entity>`, as an inline `Model` (**Model IDs** above) |
+| Metric | `FinanceQAMetric(reference="{{ item.messages[-1].content }}", task=<task template>, max_new_tokens=<the job's max_tokens>)`, reported as `finance-qa` |
+| Task template | Every prompt starts with `Task: <task>`, which picks the scoring. OCR rows: `{{ item.messages[0].content[1].text.splitlines()[0].removeprefix('Task: ') }}`. Reasoning and code rows: `{{ item.messages[0].content.splitlines()[0].removeprefix('Task: ') }}` |
+| Inference | `temperature` 0, `max_tokens` from the table, thinking **on**: `extra_body={"chat_template_kwargs": {"enable_thinking": true}}`. Leave `reasoning` unset in the run config: the metric reads the answer after `</think>` from the response itself |
+
+- The metric reports `exact`, `relaxed`, `task_correct`, `answer_f1`, `trace_closed`, `program_syntax_valid` (code rows only) and `hit_max_new_tokens`. The thinking trace counts toward `max_tokens`, so a long trace can be cut off before its answer. Such a row scores as wrong and counts in `hit_max_new_tokens`, as in the cookbook.
+- The cookbook reports the three capabilities together, with a breakdown per capability and per task. Download each job's row scores and combine the three with `scripts/finance_report.py`, once for the adapters and once for the base model:
+
+```bash
+nemo jobs results download row-scores --job <ocr-job> --output-file ocr.jsonl
+nemo jobs results download row-scores --job <reasoning-job> --output-file reasoning.jsonl
+nemo jobs results download row-scores --job <code-job> --output-file code.jsonl
+python3 scripts/finance_report.py visual_ocr=ocr.jsonl reasoning=reasoning.jsonl \
+  code_generation=code.jsonl --output adapters.json
+```
+
+Report `task_accuracy` and `answer_f1` overall and per capability, base versus adapters, and the `coverage` of each report. With `ignore_request_failure`, rows whose inference failed lower `coverage`, not the accuracy.
+
 ## Reading the result
 
 | Observation | Likely meaning |
