@@ -20,6 +20,7 @@ from nhx.core.auth.app.embedded_pdp.data import apply_embedded_policy_document
 from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm
 from nhx.core.auth.config import AuthServiceConfig
 from nhx.core.auth.oidc_broker import routes as oidc_broker
+from nhx.core.entities.app.repository import dispose_async_engine
 
 logger = logging.getLogger(__name__)
 
@@ -164,4 +165,6 @@ class AuthService(Service[AuthServiceConfig]):
                         await self._refresh_task
             self._refresh_task = None
             logger.info("Policy data refresh loop stopped")
+        # Account resolution may lazily create an entities engine on this loop.
+        await dispose_async_engine()
         await super().on_shutdown()
