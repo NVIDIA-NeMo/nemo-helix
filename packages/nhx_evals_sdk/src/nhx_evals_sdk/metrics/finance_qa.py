@@ -8,9 +8,9 @@ The scoring functions port ``evaluation.py`` from the Nemotron finance LoRA cook
 so scores computed here match the cookbook's per-row scores.
 """
 
-import ast
 import re
 import unicodedata
+from ast import parse
 from collections import Counter
 from collections.abc import Mapping
 from typing import Any
@@ -141,7 +141,7 @@ def program_syntax_valid(reasoning: str) -> bool:
     A trace too deeply nested for the parser counts as invalid rather than failing the row.
     """
     try:
-        ast.parse(reasoning)
+        parse(reasoning)
     except (SyntaxError, MemoryError, RecursionError):
         return False
     return True

@@ -196,7 +196,7 @@ class TestOptionalScores:
         def parse(source: str) -> None:
             raise error
 
-        monkeypatch.setattr(finance_qa.ast, "parse", parse)
+        monkeypatch.setattr(finance_qa, "parse", parse)
         response = _response("40", reasoning_content="answer = " + "(" * 50 + "40" + ")" * 50)
         scores = await _scores(_metric(), {"answer": "40", "task": "CodeFinQA"}, {"response": response})
         assert (scores["program_syntax_valid"], scores["task_correct"]) == (False, True)
