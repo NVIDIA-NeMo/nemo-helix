@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Collapsible, Text } from '@nvidia/foundations-react-core';
+import { Collapsible, Flex, Text } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
 import type { ReactNode, Ref } from 'react';
 
@@ -39,7 +39,11 @@ export const WorkStep = ({
     showChevron
     slotTrigger={
       <>
-        {icon ? <span className="flex shrink-0 items-center">{icon}</span> : null}
+        {icon ? (
+          <Flex asChild align="center" className="shrink-0">
+            <span>{icon}</span>
+          </Flex>
+        ) : null}
         <Text asChild kind="body/regular/md" className="min-w-0 truncate">
           <span data-testid={titleTestId}>{title}</span>
         </Text>

@@ -22,9 +22,12 @@ export const useMessageError = (): string | undefined =>
   });
 
 export const useFailedReplyExplanation = (): string | undefined =>
-  useAuiState((state) =>
-    isFailedReply(state.message.status) ? getFailedReplyExplanation(state.message.parts) : undefined
-  );
+  useAuiState((state) => {
+    if (!isFailedReply(state.message.status)) {
+      return undefined;
+    }
+    return getFailedReplyExplanation(state.message.parts);
+  });
 
 export const useIsFailedReplyExplanationPart = (): boolean =>
   useAuiState(
