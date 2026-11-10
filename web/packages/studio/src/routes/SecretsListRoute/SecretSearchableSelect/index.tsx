@@ -45,6 +45,7 @@ export type SecretSearchableSelectProps<T extends FieldValues> = {
   formFieldProps: SecretSearchableSelectFormFieldProps;
   /** Use `''` for no visible trigger text (see `ControlledSearchableSelect` `triggerPlaceholder`). */
   triggerPlaceholder?: string;
+  disabled?: boolean;
 };
 
 export function SecretSearchableSelect<T extends FieldValues>({
@@ -55,6 +56,7 @@ export function SecretSearchableSelect<T extends FieldValues>({
   onRequestNewSecret,
   formFieldProps,
   triggerPlaceholder = 'Select a secret (optional)',
+  disabled,
 }: SecretSearchableSelectProps<T>) {
   const {
     data: secretsPages,
@@ -93,6 +95,7 @@ export function SecretSearchableSelect<T extends FieldValues>({
   return (
     <ControlledSearchableSelect
       useControllerProps={useControllerProps as unknown as UseControllerProps<FieldValues>}
+      disabled={disabled}
       options={secretOptions}
       onLoadMore={handleLoadMoreSecrets}
       hasMore={hasNextPage ?? false}
