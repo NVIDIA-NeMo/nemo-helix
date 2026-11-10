@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 
 import pytest
-from nemo_agents_plugin.agent_config import AgentConfig
+from nemo_agents_plugin.agent_config import AgentConfig, HarnessConfig
 from nemo_agents_plugin.fabric import adapters
 from nemo_agents_plugin.fabric.adapters import (
     HARNESS_ADAPTER_IDS,
@@ -18,6 +18,7 @@ from nemo_agents_plugin.fabric.adapters import (
     accepted_adapter_ids,
     installed_adapter_ids,
     resolve_adapter_id,
+    uses_default_deepagents_backend,
     validate_harness_kinds,
 )
 
@@ -79,6 +80,31 @@ def test_missing_root_has_no_installed_adapters(tmp_path: Path) -> None:
 def test_stock_short_names_resolve_without_manifests(tmp_path: Path, kind: str, adapter_id: str) -> None:
     assert resolve_adapter_id(kind, tmp_path) == adapter_id
     assert resolve_adapter_id(adapter_id, tmp_path) == adapter_id
+
+
+@pytest.mark.usefixtures("installed_adapter_manifests")
+@pytest.mark.parametrize(
+    ("kind", "settings", "expected"),
+    [
+        ("deepagents", {}, True),
+        ("nvidia.fabric.langchain.deepagents", {}, True),
+        ("deepagents", {"deepagents": None}, True),
+        ("deepagents", {"deepagents": {"backend": None, "interrupt_on": {}}}, True),
+        ("deepagents", {"deepagents": {"backend": {"type": "local_shell"}}}, False),
+        (
+            "nvidia.fabric.langchain.deepagents",
+            {"deepagents": {"backend": {"type": "local_shell"}}},
+            False,
+        ),
+        ("deepagents", {"deepagents": []}, False),
+        ("codex", {}, False),
+        ("nvidia.helix.compass.analyst", {}, False),
+    ],
+)
+def test_default_deepagents_backend_scope(kind: str, settings: dict[str, object], expected: bool) -> None:
+    harness = HarnessConfig(kind=kind, settings=settings)
+
+    assert uses_default_deepagents_backend(harness) is expected
 
 
 def test_adapter_ids_need_not_start_with_nvidia_fabric(tmp_path: Path) -> None:
