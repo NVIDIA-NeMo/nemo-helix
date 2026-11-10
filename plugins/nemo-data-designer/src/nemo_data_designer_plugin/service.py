@@ -16,16 +16,9 @@ from pydantic import ValidationError
 from starlette import status
 from starlette.responses import JSONResponse
 
-#: Jobs ``source`` for each data-designer job collection, passed as ``add_job_routes(..., service_name=)``.
-#: Each list route filters on ``source == service_name`` and renders every match with its own spec
-#: schema, so the four collections must not share a source: a single job of another type would make
-#: each list endpoint 500. Changing one of these values drops that type's existing jobs from its list
-#: route (they stay reachable by name and through the core Jobs API).
-#:
-#: Create keeps the source every data-designer job was stored under before the collections were
-#: split (the old module-derived default), so existing create jobs stay listed. It is pinned here so
-#: renaming the package cannot change it. Retrieval jobs created before the split still carry it, and
-#: each one breaks the create list until it is cancelled and deleted through the core Jobs API.
+# Jobs ``source`` identifiers. Each list route filters job entities using the source AND renders every match against a schema;
+# therefore each job type must have a distinct source: we can't list-and-validate a heterogeneous job collection. The standard
+# DD create job keeps the original, default, module-derived source value so that existing jobs stay listed.
 CREATE_JOB_SOURCE = "nemo-data-designer-plugin"
 RETRIEVAL_GENERATE_JOB_SOURCE = "data-designer.retrieval-generate"
 RETRIEVAL_PREPARE_JOB_SOURCE = "data-designer.retrieval-prepare"
