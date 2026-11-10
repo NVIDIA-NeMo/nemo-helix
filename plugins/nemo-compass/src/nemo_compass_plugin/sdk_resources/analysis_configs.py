@@ -165,7 +165,6 @@ class _AnalysisConfigResource:
         page_size: int = 20,
         sort: str = "-created_at",
         enabled: bool | None = None,
-        analysis_options: dict[str, Any] | None = None,
     ) -> AnalysisConfigPage:
         with httpx_status_errors():
             response = self._client.list_analysis_configs(
@@ -239,7 +238,6 @@ class _AsyncAnalysisConfigResource:
         page_size: int = 20,
         sort: str = "-created_at",
         enabled: bool | None = None,
-        analysis_options: dict[str, Any] | None = None,
     ) -> AnalysisConfigPage:
         with httpx_status_errors():
             response = await self._client.list_analysis_configs(

@@ -39,7 +39,7 @@ def test_enable_sends_the_locally_configured_models(app: typer.Typer, api: FakeC
 
     assert result.exit_code == 0, result.output
     (request,) = api.requests
-    assert request.body == {"default_model": CONFIGURED_DEFAULT, "fast_model": CONFIGURED_FAST}
+    assert request.body == {"default_model": CONFIGURED_DEFAULT, "fast_model": CONFIGURED_FAST, "analysis_options": {}}
     assert json.loads(result.stdout)["id"] == "config-id-1"
 
 
@@ -74,7 +74,11 @@ def test_enable_uses_explicit_model_refs_without_reading_config(
     )
 
     assert result.exit_code == 0, result.output
-    assert api.requests[0].body == {"default_model": "default/big", "fast_model": "default/small"}
+    assert api.requests[0].body == {
+        "default_model": "default/big",
+        "fast_model": "default/small",
+        "analysis_options": {},
+    }
 
 
 @pytest.mark.usefixtures("configured_models")

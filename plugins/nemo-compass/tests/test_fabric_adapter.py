@@ -522,3 +522,21 @@ async def test_without_relay_the_agent_runs_unscoped() -> None:
         await runtime.invoke(_request({"nemo_helix": {"job_workspace": "w"}}), _runtime_context(None))
 
     assert seen["relay_scope_name"] is None
+
+
+def test_fabric_plan_accepts_package_owned_options(tmp_path):
+    from nemo_agents_plugin.agent_config import AgentConfig
+    from nemo_agents_plugin.fabric.translator import translate_agent_config
+    from nemo_compass_plugin.analysis.agent_config import build_compass_agent_config
+    from nemo_fabric import Fabric
+
+    config = AgentConfig.model_validate(
+        build_compass_agent_config(
+            agent="target",
+            default_model="default/model",
+            fast_model="default/model",
+            analysis_options={"compass_signals": {"tool_issues": False}},
+        )
+    )
+    plan = Fabric().plan(translate_agent_config(config), base_dir=tmp_path)
+    assert plan.adapter.adapter_id == "nvidia.helix.compass.analyst"

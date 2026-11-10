@@ -718,6 +718,12 @@ components:
           description: Workspace-qualified Model Entity used for latency-sensitive
             analysis work.
           default: ''
+        analysis_options:
+          additionalProperties: true
+          type: object
+          title: Analysis Options
+          description: Compass analysis option overrides, validated by the Compass
+            version executing the run. Omitted defaults are resolved at execution.
         id:
           type: string
           title: Id
@@ -831,6 +837,12 @@ components:
           title: Fast Model
           description: Workspace-qualified Model Entity the run used for context summarization.
           default: ''
+        analysis_options:
+          additionalProperties: true
+          type: object
+          title: Analysis Options
+          description: Compass analysis option overrides, validated by the Compass
+            version executing the run. Omitted defaults are resolved at execution.
         id:
           type: string
           title: Id
@@ -1053,6 +1065,12 @@ components:
           description: Optional run scope AND-pinned onto every span read.
           type: string
           minLength: 1
+        analysis_options:
+          additionalProperties: true
+          type: object
+          title: Analysis Options
+          description: Compass analysis option overrides, validated by the Compass
+            version executing the run. Omitted defaults are resolved at execution.
         timeout_seconds:
           title: Timeout Seconds
           description: Optional execute job timeout.
@@ -1139,6 +1157,12 @@ components:
           type: string
           minLength: 1
           title: Fast Model
+        analysis_options:
+          additionalProperties: true
+          type: object
+          title: Analysis Options
+          description: Compass analysis option overrides, validated by the Compass
+            version executing the run. Omitted defaults are resolved at execution.
       type: object
       required:
       - default_model
@@ -1598,6 +1622,10 @@ components:
         enabled:
           title: Enabled
           type: boolean
+        analysis_options:
+          title: Analysis Options
+          additionalProperties: true
+          type: object
       type: object
       title: UpdateAnalysisConfigRequest
       description: Body for ``PATCH /analysis-configs/{agent}``.
