@@ -5,7 +5,6 @@ import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
-import { LegacyFilesetRedirect } from '@studio/routes/FilesetDetailRoute/LegacyFilesetRedirect';
 import { getWorkspaceFilesetsRoute } from '@studio/routes/utils';
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
@@ -38,14 +37,6 @@ export const filesetRoutes: RouteObject[] = [
     path: ROUTES.workspace.filesetDetail,
     element: <FilesetDetailRoute />,
     errorElement: <RouteErrorPanel title="Fileset" />,
-  },
-  {
-    path: ROUTES.workspace.filesetDetails,
-    element: <LegacyFilesetRedirect />,
-  },
-  {
-    path: ROUTES.workspace.filesetFile,
-    element: <LegacyFilesetRedirect />,
   },
 ];
 
