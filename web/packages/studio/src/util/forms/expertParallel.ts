@@ -22,13 +22,11 @@ export const validExpertParallelSizes = (
 };
 
 // Only Nemotron-H is confirmed to need expert parallelism. Automodel rejects it for MoE models on
-// its Hugging Face path, such as Mixtral, so it is only filled in for Nemotron-H.
-const isNemotronH = (spec: ModelEntity['spec']) =>
-  spec?.checkpoint_model_name === 'NemotronHForCausalLM';
-
-// Nemotron-H also covers the dense v2 models, which have no experts.
+// its Hugging Face path, such as Mixtral, so it is only filled in for Nemotron-H. The check on
+// expert count excludes the dense Nemotron-H v2 models.
 const isNemotronHMoe = (spec: ModelEntity['spec']) =>
-  isNemotronH(spec) && (spec?.moe_config?.num_experts ?? 0) > 1;
+  spec?.checkpoint_model_name === 'NemotronHForCausalLM' &&
+  (spec?.moe_config?.num_experts ?? 0) > 1;
 
 export const expertParallelWarning = (
   spec: ModelEntity['spec'],
@@ -36,7 +34,7 @@ export const expertParallelWarning = (
 ): string | undefined => {
   const numExperts = spec?.moe_config?.num_experts;
   if (!numExperts || numExperts <= 1 || totalGpus(p) <= 1) return undefined;
-  const needs = isNemotronH(spec) ? 'This model needs' : 'Mixture-of-Experts models usually need';
+  const needs = 'Mixture-of-Experts models usually need';
   if ((p.tensor_parallel_size ?? 1) > 1) return `${needs} Tensor Parallel Size set to 1.`;
   const sizes = validExpertParallelSizes(numExperts, p);
   if (sizes.length === 0) {

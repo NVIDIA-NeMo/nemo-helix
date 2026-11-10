@@ -50,7 +50,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
     Slider: { onValueCommit: refillExpertParallelSize },
     TextInput: { onBlur: refillExpertParallelSize },
   };
-  const expertParallelSize = (
+  const expertParallelSizeField = (
     <ControlledSliderWithTextInput
       useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}
       formFieldProps={{
@@ -90,7 +90,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
         attributes={onGpuLayoutChange}
         disabled={disabled}
       />
-      {isMoe && expertParallelSize}
+      {isMoe && expertParallelSizeField}
       {warning && (
         <Banner kind="inline" status="warning">
           {warning}
@@ -149,7 +149,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                 attributes={onGpuLayoutChange}
                 disabled={disabled}
               />
-              {!isMoe && expertParallelSize}
+              {!isMoe && expertParallelSizeField}
               <ControlledSwitch
                 useControllerProps={{ name: 'automodel.parallelism.sequence_parallel', control }}
                 formFieldProps={{

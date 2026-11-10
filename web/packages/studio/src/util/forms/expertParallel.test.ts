@@ -45,16 +45,15 @@ describe('expertParallelWarning', () => {
     ).toBeUndefined();
   });
 
-  it.each([undefined, 1, 3])(
-    'states the valid sizes for Nemotron-H when the size is %s',
-    (size) => {
-      expect(
-        expertParallelWarning(nemotronH, { num_gpus_per_node: 4, expert_parallel_size: size })
-      ).toBe('This model needs an expert parallel size of 2 or 4 to train on 4 GPUs.');
-    }
-  );
+  it.each([undefined, 1, 3])('states the valid sizes when the size is %s', (size) => {
+    expect(
+      expertParallelWarning(nemotronH, { num_gpus_per_node: 4, expert_parallel_size: size })
+    ).toBe(
+      'Mixture-of-Experts models usually need an expert parallel size of 2 or 4 to train on 4 GPUs.'
+    );
+  });
 
-  it('recommends the valid sizes for other MoE architectures', () => {
+  it('warns other MoE architectures the same way', () => {
     expect(expertParallelWarning(spec('MixtralForCausalLM', 8), { num_gpus_per_node: 4 })).toBe(
       'Mixture-of-Experts models usually need an expert parallel size of 2 or 4 to train on 4 GPUs.'
     );
@@ -67,7 +66,7 @@ describe('expertParallelWarning', () => {
         tensor_parallel_size: 2,
         expert_parallel_size: 2,
       })
-    ).toBe('This model needs Tensor Parallel Size set to 1.');
+    ).toBe('Mixture-of-Experts models usually need Tensor Parallel Size set to 1.');
   });
 
   it('explains when no size fits', () => {
