@@ -280,6 +280,10 @@ RUN git config --global http.version HTTP/1.1 && \
     git -C /src/magi-attention/magi_attention/csrc/cutlass sparse-checkout set include tools/util/include && \
     git -C /src/magi-attention/magi_attention/csrc/cutlass fetch --depth 1 origin "$cutlass_sha" && \
     git -C /src/magi-attention/magi_attention/csrc/cutlass checkout --detach FETCH_HEAD
+# The pinned commit compiles its extensions and runtime JIT kernels as C++17, which the NGC 26.09
+# PyTorch headers reject. Apply upstream's C++20 fix (see the patch header) until the pin includes it.
+RUN --mount=type=bind,source=docker/base/patches,target=/tmp/patches,readonly \
+    git -C /src/magi-attention apply --verbose /tmp/patches/magi-attention-cxx20.patch
 RUN mkdir -p /wheels && \
     pip install --no-cache-dir versioningit && \
     cd /src/magi-attention && \

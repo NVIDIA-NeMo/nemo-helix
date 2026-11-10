@@ -89,17 +89,6 @@ RUN --mount=from=causal-conv1d-wheel-src,target=/tmp/causal-conv1d-wheel-src,rea
     /tmp/magi-attention-wheel-src/wheels/cu13.4/magi_attention-*cp312*.whl
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    git clone https://github.com/fanshiqing/grouped_gemm.git /tmp/grouped_gemm && \
-    cd /tmp/grouped_gemm && \
-    git checkout v1.1.4 && \
-    git submodule update --init --recursive && \
-    mkdir -p /source-distributions/nhx-automodel-base/git && \
-    tar --exclude-vcs --create --gzip \
-    --file /source-distributions/nhx-automodel-base/git/grouped_gemm-v1.1.4.tar.gz . && \
-    uv pip install --no-build-isolation --no-deps . && \
-    rm -rf /tmp/grouped_gemm
-
-RUN --mount=type=cache,target=/root/.cache/uv \
     git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && \
     cd bitsandbytes && \
     git checkout 0.49.2 && \
