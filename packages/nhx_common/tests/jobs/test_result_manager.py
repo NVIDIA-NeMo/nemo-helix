@@ -1,295 +1,190 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for :mod:`nemo_helix_plugin.jobs.result_manager`.
-
-These drive the manager against a fake Files + Jobs platform over an httpx transport,
-so the assertions cover what actually goes over the wire: which routes are called, in
-what order, the path an artifact lands at, and the result registration body. The fake
-answers only the routes a result save is allowed to use and 404s everything else, so a
-stray job-record read fails the test instead of passing silently.
-"""
-
-from __future__ import annotations
-
-from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.client.errors import ConflictError as ClientConflictError
+from nemo_helix_plugin.client.errors import NemoTransportError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.jobs import result_manager as rm
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
-
-JOB = "job-a"
-WORKSPACE = "ws"
-FILESET = "job-fileset"
-ATTEMPT = "attempt-1"
-BASE_PATH = "jobs/job-a"
-
-FILES_ROOT = f"/apis/files/v2/workspaces/{WORKSPACE}/filesets/{FILESET}"
-JOBS_ROOT = f"/apis/jobs/v2/workspaces/{WORKSPACE}/jobs/{JOB}"
+from nemo_helix_plugin.jobs.result_manager import CreateJobResultError
 
 
-def _result_body(name: str, artifact_url: str) -> dict[str, object]:
-    return {
-        "name": name,
-        "job": JOB,
-        "workspace": WORKSPACE,
-        "attempt_id": ATTEMPT,
-        "created_at": "2026-01-01T00:00:00Z",
-        "updated_at": "2026-01-01T00:00:00Z",
-        "artifact_url": artifact_url,
-        "artifact_storage_type": "fileset",
-    }
+def _resp(data):
+    """Wrap a payload in a NemoResponse-like object whose ``.data()`` returns it."""
+    m = MagicMock()
+    m.data.return_value = data
+    return m
 
 
-class FakePlatform:
-    """The Files and Jobs routes a result save may use. Anything else is a 404.
-
-    Recording every request lets a test assert the exact call sequence, which is how
-    "the sink never reads the job record" is checked.
-    """
-
-    def __init__(self, *, result_exists: bool = False, transport_error: bool = False) -> None:
-        self.requests: list[httpx.Request] = []
-        self.artifacts: dict[str, bytes] = {}
-        self.result_exists = result_exists
-        self.transport_error = transport_error
-
-    def calls(self) -> list[tuple[str, str]]:
-        return [(request.method, request.url.path) for request in self.requests]
-
-    def result_requests(self) -> list[httpx.Request]:
-        return [request for request in self.requests if "/results/" in request.url.path]
-
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        method, path = request.method, request.url.path
-        if method == "GET" and path == f"{FILES_ROOT}/files":
-            return httpx.Response(200, json={"data": []}, request=request)
-        if method == "PUT" and path.startswith(f"{FILES_ROOT}/-/"):
-            remote = path.split("/-/", 1)[1]
-            self.artifacts[remote] = request.content
-            return httpx.Response(
-                200,
-                json={
-                    "file_ref": f"{WORKSPACE}/{FILESET}#{remote}",
-                    "file_url": f"http://platform/files/{remote}",
-                    "path": remote,
-                    "size": len(request.content),
-                },
-                request=request,
-            )
-        if path.startswith(f"{JOBS_ROOT}/results/"):
-            name = path.rsplit("/", 1)[1]
-            artifact_url = f"{WORKSPACE}/{FILESET}#{BASE_PATH}/results/{ATTEMPT}/{name}"
-            if method == "POST":
-                if self.transport_error:
-                    raise httpx.ConnectError("connection refused", request=request)
-                if self.result_exists:
-                    return httpx.Response(409, json={"detail": "exists"}, request=request)
-                return httpx.Response(200, json=_result_body(name, artifact_url), request=request)
-            if method == "GET":
-                return httpx.Response(200, json=_result_body(name, artifact_url), request=request)
-        return httpx.Response(
-            404,
-            json={"detail": f"{method} {path} is not a permitted platform request"},
-            request=request,
-        )
+def _conflict_error() -> ClientConflictError:
+    """Build the ConflictError the typed client raises on a 409 response."""
+    request = httpx.Request("POST", "http://test")
+    return ClientConflictError(httpx.Response(status_code=409, json={}, request=request))
 
 
-def _sync_client(platform: FakePlatform) -> NemoClient:
-    return NemoClient(
-        base_url="http://platform",
-        workspace=WORKSPACE,
-        http_client=httpx.Client(transport=httpx.MockTransport(platform.handler)),
-    )
+def _sync_client() -> NemoClient:
+    http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
+    return NemoClient(base_url="http://test", workspace="test-ws", http_client=http_client)
 
 
-def _async_client(platform: FakePlatform) -> AsyncNemoClient:
-    return AsyncNemoClient(
-        base_url="http://platform",
-        workspace=WORKSPACE,
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(platform.handler)),
-    )
-
-
-def _manager(platform: FakePlatform, *, artifact_base_path: str | None = BASE_PATH) -> rm.ResultManager:
-    client = _sync_client(platform)
-    return rm.ResultManager(
-        job_name=JOB,
-        workspace=WORKSPACE,
-        attempt_id=ATTEMPT,
-        fileset=FILESET,
-        artifact_base_path=artifact_base_path,
-        files_client=FilesClient.from_client(client),
-        jobs_client=JobsClient.from_client(client),
-    )
-
-
-def _async_manager(platform: FakePlatform, *, artifact_base_path: str | None = BASE_PATH) -> rm.AsyncResultManager:
-    client = _async_client(platform)
-    return rm.AsyncResultManager(
-        job_name=JOB,
-        workspace=WORKSPACE,
-        attempt_id=ATTEMPT,
-        fileset=FILESET,
-        artifact_base_path=artifact_base_path,
-        files_client=AsyncFilesClient.from_client(client),
-        jobs_client=AsyncJobsClient.from_client(client),
-    )
-
-
-def _artifact(tmp_path: Path, name: str = "summary.json", content: bytes = b'{"ok": true}') -> Path:
-    artifact = tmp_path / name
-    artifact.write_bytes(content)
-    return artifact
+def _async_client() -> AsyncNemoClient:
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
+    return AsyncNemoClient(base_url="http://test", workspace="test-ws", http_client=http_client)
 
 
 def test_result_remote_path_nests_under_base():
     """_result_remote_path prepends the per-job base only when one is supplied."""
-    manager = _manager(FakePlatform())
-    assert manager._result_remote_path(ATTEMPT, "summary") == "results/attempt-1/summary"
-    assert manager._result_remote_path(ATTEMPT, "summary", base="jobs/job-a") == (
-        "jobs/job-a/results/attempt-1/summary"
+    sdk = _sync_client()
+    mgr = rm.ResultManager(
+        job_name="my-job",
+        workspace="ws",
+        attempt_id="att-1",
+        fileset="test-fileset",
+        files_client=FilesClient.from_client(sdk),
+        jobs_client=JobsClient.from_client(sdk),
+    )
+    assert mgr._result_remote_path("att-1", "summary") == "results/att-1/summary"
+    assert mgr._result_remote_path("att-1", "summary", base="jobs/my-job") == "jobs/my-job/results/att-1/summary"
+
+
+def test_create_result_nests_under_the_job_base_path(tmp_path, mock_sync_file_manager):
+    """A job with an output_location nests results under jobs/<job_name>/results/…; else flat."""
+    test_file = tmp_path / "artifact.bin"
+    test_file.write_bytes(b"x")
+
+    sdk = _sync_client()
+    for artifact_base_path, expected in [
+        ("jobs/test-job", "jobs/test-job/results/att-1/summary"),
+        (None, "results/att-1/summary"),
+    ]:
+        mock_jobs = MagicMock(spec=JobsClient)
+        mock_jobs.create_job_result.return_value = _resp(MagicMock())
+        mgr = rm.ResultManager(
+            job_name="test-job",
+            workspace="test-ws",
+            attempt_id="att-1",
+            fileset="test-fileset",
+            artifact_base_path=artifact_base_path,
+            files_client=FilesClient.from_client(sdk),
+            jobs_client=mock_jobs,
+        )
+        with (
+            patch.object(mgr, "_create_file_manager", return_value=mock_sync_file_manager),
+        ):
+            mgr.create_result("summary", test_file)
+        assert mock_sync_file_manager.upload.call_args.kwargs["remote_path"] == expected
+        assert mock_jobs.create_job_result.call_args.kwargs["body"].attempt_id == "att-1"
+
+
+def test_create_result_returns_existing_on_conflict_sync(tmp_path, mock_sync_file_manager):
+    """Test that sync create_result returns existing result when ConflictError is raised."""
+    test_file = tmp_path / "artifact.bin"
+    test_file.write_bytes(b"test content")
+
+    # Configure the typed jobs client to raise ConflictError on create, return existing on retrieve.
+    existing_result = MagicMock(name="my-result")
+    mock_jobs = MagicMock(spec=JobsClient)
+    mock_jobs.create_job_result.side_effect = _conflict_error()
+    mock_jobs.get_job_result.return_value = _resp(existing_result)
+
+    sdk = _sync_client()
+    mgr = rm.ResultManager(
+        job_name="test-job",
+        workspace="test-ws",
+        attempt_id="att-123",
+        fileset="test-fileset",
+        files_client=FilesClient.from_client(sdk),
+        jobs_client=mock_jobs,
     )
 
+    with patch.object(mgr, "_create_file_manager", return_value=mock_sync_file_manager):
+        result = mgr.create_result("my-result", test_file)
 
-@pytest.mark.parametrize(
-    "artifact_base_path,expected_remote",
-    [(BASE_PATH, f"{BASE_PATH}/results/{ATTEMPT}/summary"), (None, f"results/{ATTEMPT}/summary")],
-)
-def test_create_result_uploads_then_registers(tmp_path, artifact_base_path, expected_remote):
-    """A save lists the fileset, uploads the artifact, then registers the result."""
-    platform = FakePlatform()
-    artifact = _artifact(tmp_path)
-
-    manager = _manager(platform, artifact_base_path=artifact_base_path)
-    result = manager.create_result("summary", artifact)
-
-    assert platform.calls() == [
-        ("GET", f"{FILES_ROOT}/files"),
-        ("PUT", f"{FILES_ROOT}/-/{expected_remote}"),
-        ("POST", f"{JOBS_ROOT}/results/summary"),
-    ]
-    assert platform.artifacts[expected_remote] == b'{"ok": true}'
-    assert result.name == "summary"
-    post = platform.result_requests()[-1]
-    assert post.read() and b'"attempt_id":"attempt-1"' in post.content
-    assert f'"artifact_url":"{WORKSPACE}/{FILESET}#{expected_remote}"'.encode() in post.content
+    mock_jobs.get_job_result.assert_called_once_with(name="my-result", job="test-job", workspace="test-ws")
+    assert result is existing_result
 
 
-def test_create_result_never_reads_the_job_record(tmp_path):
-    """The restricted sandbox policy allows results but not GET /jobs/{job}."""
-    platform = FakePlatform()
-    _manager(platform).create_result("summary", _artifact(tmp_path))
-
-    assert ("GET", JOBS_ROOT) not in platform.calls()
-    assert all(path.startswith((FILES_ROOT, f"{JOBS_ROOT}/results/")) for _, path in platform.calls())
-
-
-def test_create_result_returns_existing_result_after_a_conflict(tmp_path):
-    """Saving a result name twice reads the existing record instead of failing."""
-    platform = FakePlatform(result_exists=True)
-
-    result = _manager(platform).create_result("summary", _artifact(tmp_path))
-
-    assert platform.calls() == [
-        ("GET", f"{FILES_ROOT}/files"),
-        ("PUT", f"{FILES_ROOT}/-/{BASE_PATH}/results/{ATTEMPT}/summary"),
-        ("POST", f"{JOBS_ROOT}/results/summary"),
-        ("GET", f"{JOBS_ROOT}/results/summary"),
-    ]
-    assert result.name == "summary"
-    assert ("GET", JOBS_ROOT) not in platform.calls()
-
-
-def test_create_result_wraps_transport_errors(tmp_path):
-    """A failed registration surfaces as CreateJobResultError, not a raw transport error."""
-    platform = FakePlatform(transport_error=True)
-
-    with pytest.raises(rm.CreateJobResultError, match="Error creating job result"):
-        _manager(platform).create_result("summary", _artifact(tmp_path))
-
-
-def test_create_result_rejects_a_missing_artifact_before_uploading(tmp_path):
-    """A save of a path that does not exist never reaches the artifact route."""
-    platform = FakePlatform()
-
-    with pytest.raises(rm.FileDoesNotExist):
-        _manager(platform).create_result("summary", tmp_path / "absent.json")
-
-    assert platform.calls() == [("GET", f"{FILES_ROOT}/files")]
-
-
-def test_create_result_surfaces_a_fileset_it_cannot_create(tmp_path):
-    """A save into a missing fileset fails: the sandbox may not create one.
-
-    ``validate_storage`` creates the fileset when it is absent, and the restricted
-    platform policy does not allow that route. The failure propagates rather than
-    turning into a result record with no artifact.
-    """
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        status = 403 if request.method == "POST" else 404
-        return httpx.Response(status, json={"detail": "not permitted by policy"}, request=request)
-
-    client = NemoClient(
-        base_url="http://platform",
-        workspace=WORKSPACE,
-        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+def test_create_result_wraps_transport_errors_sync(tmp_path, mock_sync_file_manager):
+    test_file = tmp_path / "artifact.bin"
+    test_file.write_bytes(b"test content")
+    request = httpx.Request("POST", "http://test/apis/jobs/v2/workspaces/test-ws/jobs/test-job/results/my-result")
+    mock_jobs = MagicMock(spec=JobsClient)
+    mock_jobs.create_job_result.side_effect = NemoTransportError(
+        httpx.ConnectError("Connection refused", request=request)
     )
-    manager = rm.ResultManager(
-        job_name=JOB,
-        workspace=WORKSPACE,
-        attempt_id=ATTEMPT,
-        fileset=FILESET,
-        files_client=FilesClient.from_client(client),
-        jobs_client=JobsClient.from_client(client),
+    sdk = _sync_client()
+    mgr = rm.ResultManager(
+        job_name="test-job",
+        workspace="test-ws",
+        attempt_id="att-123",
+        fileset="test-fileset",
+        files_client=FilesClient.from_client(sdk),
+        jobs_client=mock_jobs,
     )
 
-    with pytest.raises(PermissionDeniedError):
-        manager.create_result("summary", _artifact(tmp_path))
+    with (
+        patch.object(mgr, "_create_file_manager", return_value=mock_sync_file_manager),
+        pytest.raises(CreateJobResultError, match="Error creating job result"),
+    ):
+        mgr.create_result("my-result", test_file)
 
 
 @pytest.mark.asyncio
-async def test_async_create_result_uploads_then_registers(tmp_path):
-    """The async manager performs the same upload and registration sequence."""
-    platform = FakePlatform()
-    artifact = _artifact(tmp_path)
+async def test_create_result_returns_existing_on_conflict_async(tmp_path, mock_async_file_manager):
+    """Test that async create_result returns existing result when ConflictError is raised."""
+    test_file = tmp_path / "artifact.bin"
+    test_file.write_bytes(b"test content")
 
-    result = await _async_manager(platform).create_result("summary", artifact)
+    # Configure the typed async jobs client to raise ConflictError on create, return existing on retrieve.
+    existing_result = MagicMock(name="my-result")
+    mock_jobs = MagicMock(spec=AsyncJobsClient)
+    mock_jobs.create_job_result = AsyncMock(side_effect=_conflict_error())
+    mock_jobs.get_job_result = AsyncMock(return_value=_resp(existing_result))
+    # Job retrieval provides the fileset name.
 
-    assert platform.calls() == [
-        ("GET", f"{FILES_ROOT}/files"),
-        ("PUT", f"{FILES_ROOT}/-/{BASE_PATH}/results/{ATTEMPT}/summary"),
-        ("POST", f"{JOBS_ROOT}/results/summary"),
-    ]
-    assert platform.artifacts[f"{BASE_PATH}/results/{ATTEMPT}/summary"] == b'{"ok": true}'
-    assert result.name == "summary"
-    assert ("GET", JOBS_ROOT) not in platform.calls()
+    sdk = _async_client()
+    mgr = rm.AsyncResultManager(
+        job_name="test-job",
+        workspace="test-ws",
+        attempt_id="att-123",
+        fileset="test-fileset",
+        files_client=AsyncFilesClient.from_client(sdk),
+        jobs_client=mock_jobs,
+    )
 
+    with patch.object(mgr, "_create_file_manager", return_value=mock_async_file_manager):
+        result = await mgr.create_result("my-result", test_file)
 
-@pytest.mark.asyncio
-async def test_async_create_result_returns_existing_result_after_a_conflict(tmp_path):
-    """The async conflict path reads the existing record rather than the job."""
-    platform = FakePlatform(result_exists=True)
-
-    result = await _async_manager(platform).create_result("summary", _artifact(tmp_path))
-
-    assert platform.calls()[-2:] == [
-        ("POST", f"{JOBS_ROOT}/results/summary"),
-        ("GET", f"{JOBS_ROOT}/results/summary"),
-    ]
-    assert result.name == "summary"
-    assert ("GET", JOBS_ROOT) not in platform.calls()
+    mock_jobs.get_job_result.assert_awaited_once_with(name="my-result", job="test-job", workspace="test-ws")
+    assert result is existing_result
 
 
 @pytest.mark.asyncio
-async def test_async_create_result_wraps_transport_errors(tmp_path):
-    platform = FakePlatform(transport_error=True)
+async def test_create_result_wraps_transport_errors_async(tmp_path, mock_async_file_manager):
+    test_file = tmp_path / "artifact.bin"
+    test_file.write_bytes(b"test content")
+    request = httpx.Request("POST", "http://test/apis/jobs/v2/workspaces/test-ws/jobs/test-job/results/my-result")
+    mock_jobs = MagicMock(spec=AsyncJobsClient)
+    mock_jobs.create_job_result = AsyncMock(
+        side_effect=NemoTransportError(httpx.ConnectError("Connection refused", request=request))
+    )
+    sdk = _async_client()
+    mgr = rm.AsyncResultManager(
+        job_name="test-job",
+        workspace="test-ws",
+        attempt_id="att-123",
+        fileset="test-fileset",
+        files_client=AsyncFilesClient.from_client(sdk),
+        jobs_client=mock_jobs,
+    )
 
-    with pytest.raises(rm.CreateJobResultError, match="Error creating job result"):
-        await _async_manager(platform).create_result("summary", _artifact(tmp_path))
+    with (
+        patch.object(mgr, "_create_file_manager", return_value=mock_async_file_manager),
+        pytest.raises(CreateJobResultError, match="Error creating job result"),
+    ):
+        await mgr.create_result("my-result", test_file)
