@@ -7,12 +7,11 @@
  * IMPORTANT: This file is used by Playwright e2e tests which run in Node.js (not Vite),
  * so any imports must be Node-compatible (no import.meta.env or heavy dependencies).
  */
-import { ChatCompletionRole } from 'openai/resources/index.mjs';
-
 import {
   DEFAULT_LLM_JUDGE_DEFAULTS,
   EVALUATION_DEFAULT_OUTPUT_TEMPLATE_STRING,
-} from '../constants/metrics';
+} from '@nemo/common/src/constants/metrics';
+import type { ChatCompletionRole } from 'openai/resources/index.mjs';
 
 interface InferenceRequestTemplate {
   messages: Array<{ role: ChatCompletionRole; content: string }>;

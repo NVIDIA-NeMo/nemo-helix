@@ -109,14 +109,14 @@ class _FakeHost:
 
 
 def bind_http_transport(monkeypatch: pytest.MonkeyPatch, transport: httpx.MockTransport) -> None:
-    """Point ``httpx.AsyncClient`` at ``transport``. Typed kwargs so ty can check the call."""
+    """Point the runner's ``AsyncClient`` at ``transport``. Typed kwargs so ty can check the call."""
     original = httpx.AsyncClient
 
     def bound(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
         kwargs["transport"] = transport
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(httpx, "AsyncClient", bound)
+    monkeypatch.setattr(sandboxed, "AsyncClient", bound)
 
 
 def runner_against(host: _FakeHost, monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> SandboxedGymAgentTaskRunner:
@@ -178,14 +178,15 @@ async def test_without_a_collector_the_whole_run_is_one_post_of_examples(tasks, 
 async def test_an_injected_collector_replaces_the_post(tasks, tmp_path, monkeypatch) -> None:
     """A caller holding a session collects through it instead, e.g. chunked with retries."""
     host = _FakeHost(rewards={0: 1.0, 1: 0.0}, model_calls=[_model_call("c0", 1788534870.5)])
-    bind_http_transport(monkeypatch, host.transport())
+    transport = host.transport()
+    bind_http_transport(monkeypatch, transport)
     batches: list[list[dict[str, Any]]] = []
 
     async def collect(examples: list[dict[str, Any]]) -> list[Any]:
         batches.append(examples)
         records: list[Any] = []
         for start in range(0, len(examples), 3):
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(transport=transport) as client:
                 response = await client.post(ROLLOUT_URL, json={"examples": examples[start : start + 3]})
             records.extend(response.json()["results"])
         return [*records, "not a record"]

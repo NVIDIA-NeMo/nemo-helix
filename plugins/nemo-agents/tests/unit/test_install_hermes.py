@@ -19,7 +19,7 @@ def test_install_checks_upstream_override_policy(
     interpreter = tmp_path / "venv" / "bin" / "python"
     checker = Mock(return_value=unexpected)
     monkeypatch.setattr(
-        install_hermes.runpy,
+        install_hermes,
         "run_path",
         lambda _: {"override_requirements": lambda _: ["Pillow==13.0.0"], "unexpected_incompatibilities": checker},
     )
@@ -35,7 +35,7 @@ def test_install_checks_upstream_override_policy(
             return subprocess.CompletedProcess(command, 0)
         return subprocess.CompletedProcess(command, 1, stdout="report", stderr="")
 
-    monkeypatch.setattr(install_hermes.subprocess, "run", run)
+    monkeypatch.setattr(install_hermes, "run", run)
     if unexpected == []:
         install_hermes.install_hermes(tmp_path, interpreter)
     else:

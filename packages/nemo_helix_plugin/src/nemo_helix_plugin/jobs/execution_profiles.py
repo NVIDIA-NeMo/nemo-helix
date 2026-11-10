@@ -137,6 +137,11 @@ class DockerVolumeMount(BaseModel):
     allow_create_volume: bool = Field(
         default=False, description="Whether to allow the creation of the volume if it does not exist (default: false)."
     )
+    read_only: bool = Field(
+        default=False,
+        description="Mount the volume read-only in the job container, so job code cannot change what it holds "
+        "(default: false).",
+    )
 
 
 class DockerJobStorageConfig(BaseModel):
@@ -623,6 +628,16 @@ class OpenShellJobExecutionProfileConfig(JobExecutionProfileConfig):
             "Entrypoint for job steps that do not declare one. The OpenShell supervisor ignores "
             "the image ENTRYPOINT, so the sandbox command must name the binary explicitly. "
             "When unset, defaults to `nemo-helix`, resolved on the PATH from the image ENV."
+        ),
+    )
+    num_gpus: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "GPUs requested for a gpu step of this profile that does not declare its own "
+            "resources.num_gpus; a gpu step with neither asks for one. cpu steps never request "
+            "a GPU, as on the docker and k8s backends. A GPU sandbox keeps the k8s default "
+            "/dev/shm, since OpenShell has no shm sizing; a step's shm_size is ignored."
         ),
     )
     egress_proxy: str | None = Field(

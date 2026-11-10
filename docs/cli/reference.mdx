@@ -1009,6 +1009,9 @@ Use `--agent` for a known coding agent and `--path` for any other agent.
 Use `--skill` to select specific skills, `--user` for user scope, or
 `--project-dir` to explicitly select a known agent's project directory.
 
+A full install (no `--skill`) also removes skills a previous install wrote
+that this build no longer ships.
+
 **Examples:**
 
 ```shell
@@ -1598,7 +1601,7 @@ backends, this also deletes the underlying files.
 **Usage:**
 
 ```shell
-nemo files filesets delete [OPTIONS] NAME
+nemo files filesets delete [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -1607,6 +1610,7 @@ nemo files filesets delete [OPTIONS] NAME
 
 **Options:**
 
+* `--id`: Delete the exact fileset allocation by ID.
 * `--workspace`
 
 **Help:**
@@ -1631,7 +1635,7 @@ nemo files filesets list [OPTIONS]
 * `--workspace`
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
-* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: -created_at, created_at, -updated_at, updated_at, -name, name]
+* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: -created_at, created_at, -updated_at, updated_at, -name, name, -storage_type, storage_type]
 * `--all-pages`: Fetch all pages
 
 **Filter Options:**
@@ -3494,7 +3498,7 @@ nemo inference prompts list [OPTIONS]
 * `--workspace`
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
-* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: -created_at, created_at, -updated_at, updated_at, -name, name]
+* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: created_at, -created_at, updated_at, -updated_at, name, -name]
 * `--all-pages`: Fetch all pages
 
 **Filter Options:**
@@ -5146,7 +5150,7 @@ nemo models create [OPTIONS] [NAME]
 
 * `--workspace`
 * `--api-endpoint`: Data about an inference endpoint. (JSON string)
-* `--backend-format <CHOICE>`: Inference backend API wire formats understood by IGW and middleware plugins. [possible values: OPENAI_CHAT, ANTHROPIC_MESSAGES]
+* `--backend-format <CHOICE>`: Inference backend API wire formats understood by IGW and middleware plugins. [possible values: OPENAI_CHAT, ANTHROPIC_MESSAGES, SYSTEMONE]
 * `--base-model`: Link to another model which is used as a base for the current model
 * `--custom-fields`: Custom fields for additional metadata (JSON string)
 * `--description`: Optional description of the model
@@ -5216,7 +5220,7 @@ nemo models list [OPTIONS]
 * `--workspace`
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
-* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: -created_at, created_at, -updated_at, updated_at, -name, name]
+* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: created_at, -created_at, updated_at, -updated_at, name, -name]
 * `--verbose`: Whether to include full spec details
 * `--all-pages`: Fetch all pages
 
@@ -5313,7 +5317,7 @@ nemo models update [OPTIONS] NAME
 * `--workspace`
 * `--verbose`: Whether to include full spec details
 * `--api-endpoint`: Data about an inference endpoint. (JSON string)
-* `--backend-format <CHOICE>`: Inference backend API wire formats understood by IGW and middleware plugins. [possible values: OPENAI_CHAT, ANTHROPIC_MESSAGES]
+* `--backend-format <CHOICE>`: Inference backend API wire formats understood by IGW and middleware plugins. [possible values: OPENAI_CHAT, ANTHROPIC_MESSAGES, SYSTEMONE]
 * `--base-model`: Link to another model which is used as a base for the current model
 * `--custom-fields`: Custom fields for additional metadata (JSON string)
 * `--description`: Optional description of the model
@@ -5916,7 +5920,7 @@ nemo workspaces list [OPTIONS]
 - Object (JSON): `{"name":{"$like":"value"}}` with operators `$eq`, `$like`, `$lt`, `$lte`, `$gt`, `$gte`, `$in`, `$nin`, `$and`, `$or`, `$not`
 * `--page <INTEGER>`: Page number
 * `--page-size <INTEGER>`: Items per page
-* `--sort <CHOICE>`: Sort field [possible values: -created_at, created_at, -updated_at, updated_at, -name, name]
+* `--sort <CHOICE>`: Sort field [possible values: created_at, -created_at, updated_at, -updated_at, name, -name]
 * `--all-pages`: Fetch all pages
 
 **Help:**
@@ -6372,6 +6376,7 @@ nemo agents optimize run-strategy [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RunStrategySubmitSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -7334,6 +7339,7 @@ nemo agents evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the EvaluateAgentSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -7398,6 +7404,7 @@ nemo agents execute [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the ExecuteAgentJobConfig Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -7467,6 +7474,7 @@ nemo agents package-agent [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the PackageAgentInput Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -8101,6 +8109,7 @@ nemo data-designer retrieval-generate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RetrievalGenerateJobConfig Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -8186,6 +8195,7 @@ nemo data-designer retrieval-prepare [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RetrievalPrepareJobConfig Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -8298,6 +8308,7 @@ nemo data-designer retrieval-run [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RetrievalRunJobConfig Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -8967,6 +8978,7 @@ nemo garak audit [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AuditInputSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -9131,6 +9143,7 @@ nemo anonymizer run [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AnonymizerRequest Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -9403,8 +9416,8 @@ nemo evals runs submit [OPTIONS]
 * `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: `<url>@<ref>` reads `tasks/` at that ref. For another directory, use a GitHub tree URL: `https://github.com/<org>/<repo>/tree/<ref>/<dir>`.
 * `--taskset`: Stored taskset, workspace/name#digest (from `nemo evals tasksets create`): uploads no tasks and requests no image builds; submit refuses a task whose image isn't built.
 * `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless `--taskset`, `--harbor-dir`, `--harbor-hub` or `--harbor-git` supplies the tasks.
-* `--dataset`: Intake dataset, NAME[@VERSION], for the run's Evaluation (with `--taskset` and `--experiment`); `tasksets create` prints it. `--harbor-hub` and `--harbor-git` set it themselves.
-* `--tasks`: Indexes or names, comma-separated; default all.
+* `--intake-dataset`: Intake label, NAME[@VERSION], shown as the dataset of the run's Evaluation; doesn't select tasks. With `--taskset` and `--experiment` only; `tasksets create` prints it. `--harbor-hub` and `--harbor-git` set it themselves.
+* `--tasks`: Zero-based indexes, inclusive ranges, or names, comma-separated (e.g. 0-4,7,anko-example); default all.
 * `--agent`: Harbor built-in agent (without `--spec-file`). [default: oracle]
 * `--sandbox-profile`: Operator sandbox profile; default: the operator's (without `--spec-file`).
 * `--dispatcher-profile`: Jobs profile for task Jobs.
@@ -9456,7 +9469,7 @@ nemo evals tasksets create [OPTIONS]
 * `--harbor-dir <PATH>`: Local Harbor dataset directory.
 * `--harbor-hub`: Harbor Hub dataset, org/name@ref.
 * `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: `<url>@<ref>` reads `tasks/` at that ref. For another directory, use a GitHub tree URL: `https://github.com/<org>/<repo>/tree/<ref>/<dir>`.
-* `--tasks`: Indexes or names, comma-separated; default all.
+* `--tasks`: Zero-based indexes, inclusive ranges, or names, comma-separated (e.g. 0-4,7,anko-example); default all.
 * `--list-tasks`: Print the selectable tasks and exit.
 * `--workspace`: Workspace for the tasks and the taskset; default: the configured workspace.
 * `--json`: Print the taskset as JSON.
@@ -9523,11 +9536,12 @@ nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AgentEvalInputSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `target`, `trials`, `labels`, `tasks`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `target`, `trials`, `labels`, `result_ignore_patterns`, `tasks`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**
@@ -9586,6 +9600,7 @@ nemo evals evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the EvaluateInputSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -9643,6 +9658,7 @@ nemo evals retrieve-eval [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RetrieveEvalInputSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -10232,6 +10248,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -10304,6 +10321,7 @@ nemo customization rl.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RlJobInput Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -10412,6 +10430,7 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the UnslothJobInput Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -10801,6 +10820,7 @@ nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the SafeSynthesizerJobConfig Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).

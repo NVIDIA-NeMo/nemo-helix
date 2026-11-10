@@ -45,13 +45,14 @@ import json
 import logging
 import math
 import os
-import shutil
 import tempfile
 import tomllib
 from asyncio import wait_for
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from os import symlink
 from pathlib import Path
+from shutil import rmtree
 from time import sleep
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -727,7 +728,7 @@ def _remove_injected_bundle(workspace_dir: Path, location: str) -> None:
     # Guard against a location escaping the workspace (defensive; provenance is evaluator-authored).
     if workspace_root not in injected.parents or not injected.exists():
         return
-    shutil.rmtree(injected, ignore_errors=True)
+    rmtree(injected, ignore_errors=True)
     # Prune now-empty reserved parents (``.agents/skills``, ``.agents``) but never the workspace itself.
     parent = injected.parent
     while parent != workspace_root and parent.is_dir():
@@ -874,7 +875,7 @@ def _make_codex_home() -> tuple[Path, dict[str, str]]:
     try:
         for name in _CODEX_LOGIN_FILES:
             if (base / name).is_file():
-                (home / name).symlink_to(base / name)
+                symlink(base / name, home / name)
     except BaseException:
         _remove_codex_home(home)
         raise
@@ -887,7 +888,7 @@ _CODEX_HOME_REMOVAL_DELAYS_S = (0.0, 0.5, 1.0, 2.0)
 def _remove_codex_home(home: Path) -> None:
     for delay in _CODEX_HOME_REMOVAL_DELAYS_S:
         sleep(delay)
-        shutil.rmtree(home, ignore_errors=True)
+        rmtree(home, ignore_errors=True)
         if not home.exists():
             return
     logger.warning("Could not fully remove the Codex home %s; Codex was still writing to it.", home)
@@ -921,7 +922,7 @@ def _remove_injected_bundle(workspace_dir: Path, location: str) -> None:
     # Guard against a location escaping the workspace (defensive; provenance is evaluator-authored).
     if workspace_root not in injected.parents or not injected.exists():
         return
-    shutil.rmtree(injected, ignore_errors=True)
+    rmtree(injected, ignore_errors=True)
     # Prune now-empty reserved parents (``.agents/skills``, ``.agents``) but never the workspace itself.
     parent = injected.parent
     while parent != workspace_root and parent.is_dir():

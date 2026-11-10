@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 
 export const parentModel1: ModelEntity = {
   id: 'model-parent-1',

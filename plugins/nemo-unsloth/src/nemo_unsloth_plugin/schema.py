@@ -29,7 +29,9 @@ from nemo_helix_plugin.deployment import (
     reject_lora_without_lora_enabled,
 )
 from nemo_helix_plugin.integrations import IntegrationsSpec
+from nhx.customization_common.schema import learning_rate_defaults_schema_extra
 from nhx.unsloth.schemas import (
+    UNSLOTH_LEARNING_RATE_DEFAULTS,
     BatchSpec,
     DatasetSpec,
     HardwareSpec,
@@ -43,7 +45,7 @@ from nhx.unsloth.schemas import (
     UnslothSchema,
     resolve_learning_rate,
 )
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 __all__ = [
     "BatchSpec",
@@ -73,6 +75,8 @@ class OutputRequest(UnslothSchema):
 
 class UnslothJobInput(UnslothSchema):
     """POST body / CLI JSON for ``nemo customization unsloth --job-json``."""
+
+    model_config = ConfigDict(json_schema_extra=learning_rate_defaults_schema_extra(UNSLOTH_LEARNING_RATE_DEFAULTS))
 
     name: str | None = None
     model: ModelLoadSpec

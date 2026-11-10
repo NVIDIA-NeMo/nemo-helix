@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "target": {
+      "kind": "harbor",
+      "source": {
+        "name": "openhands",
+        "model": {
+          "ref": "default/nvidia-nemotron-3-5-super-vl-120b-a12b"
+        }
+      },
+      "agent_kwargs": {
+        "version": "1.6.0",
+        "temperature": "1",
+        "top_p": "0.95",
+        "disable_vision": true
+      },
+      "env_secrets": {
+        "LLM_API_KEY": "evals-inference-key"
+      },
+      "n_attempts": 1,
+      "max_retries": 1
+    }
+  },
+  "execution": {}
+}

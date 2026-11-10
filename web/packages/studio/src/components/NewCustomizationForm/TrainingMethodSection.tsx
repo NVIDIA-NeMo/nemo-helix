@@ -111,8 +111,8 @@ export const TrainingMethodSection = () => {
                 parallelism: current.parallelism,
                 batch_size: current.batch_size,
                 max_seq_length: current.max_seq_length,
-                // learning_rate is NOT carried over: the two methods now default two
-                // orders of magnitude apart, so each switch takes its own default.
+                // learning_rate is NOT carried over: the two methods default far apart,
+                // so each switch leaves it unset for the backend to pick.
               },
               { shouldValidate: true }
             );

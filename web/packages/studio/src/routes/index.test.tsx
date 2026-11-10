@@ -104,8 +104,8 @@ describe('Routes', () => {
       vi.resetModules();
       stubAllFeatureFlagsOff();
       [{ routes }, { getWorkspaceDetailsDefaultRoute }] = await Promise.all([
-        import('./index'),
-        import('./utils'),
+        import('@studio/routes/index'),
+        import('@studio/routes/utils'),
       ]);
     }, 30_000);
 
@@ -138,6 +138,7 @@ describe('Routes', () => {
         ROUTES.workspace.filesetFile,
         ROUTES.workspace.jobs,
         ROUTES.workspace.jobDetail,
+        ROUTES.workspace.modelCompare,
         `${ROUTES.workspace.plugin}/*`,
         ROUTES.workspace.safeSynthesizer,
         ROUTES.workspace.safeSynthesizerNew,
@@ -165,8 +166,8 @@ describe('Routes', () => {
 
     it('should exclude customization routes if customizer is disabled', async () => {
       vi.stubEnv('VITE_FF_CUSTOMIZER_ENABLED', 'false');
-      const { routes } = await import('./index');
-      const { getWorkspaceDetailsDefaultRoute } = await import('./utils');
+      const { routes } = await import('@studio/routes/index');
+      const { getWorkspaceDetailsDefaultRoute } = await import('@studio/routes/utils');
       customizationRoutes.forEach((route) => {
         expect(findIfRouteExists(routes, route)).toBe(false);
       });
@@ -182,8 +183,8 @@ describe('Routes', () => {
       vi.stubEnv('VITE_FF_CUSTOMIZER_ENABLED', 'true');
       vi.stubEnv('VITE_FF_EVALS_ENABLED', 'false');
       vi.stubEnv('VITE_FF_INTAKE_ENABLED', 'true');
-      const { routes } = await import('./index');
-      const { getWorkspaceDetailsDefaultRoute } = await import('./utils');
+      const { routes } = await import('@studio/routes/index');
+      const { getWorkspaceDetailsDefaultRoute } = await import('@studio/routes/utils');
       evalRoutes.forEach((route) => {
         expect(findIfRouteExists(routes, route)).toBe(false);
       });
@@ -198,8 +199,8 @@ describe('Routes', () => {
     it('should exclude intake routes if intake is disabled', async () => {
       vi.stubEnv('VITE_FF_CUSTOMIZER_ENABLED', 'true');
       vi.stubEnv('VITE_FF_INTAKE_ENABLED', 'false');
-      const { routes } = await import('./index');
-      const { getWorkspaceDetailsDefaultRoute } = await import('./utils');
+      const { routes } = await import('@studio/routes/index');
+      const { getWorkspaceDetailsDefaultRoute } = await import('@studio/routes/utils');
       intakeRoutes.forEach((route) => {
         expect(findIfRouteExists(routes, route)).toBe(false);
       });
@@ -214,34 +215,34 @@ describe('Routes', () => {
     it('should include the dashboard route if assistant studio is enabled', async () => {
       vi.stubEnv('VITE_FF_ASSISTANT_STUDIO_ENABLED', 'true');
       vi.stubEnv('VITE_FF_DASHBOARD_SANDBOX_ENABLED', 'false');
-      const { routes } = await import('./index');
+      const { routes } = await import('@studio/routes/index');
       expect(findIfRouteExists(routes, ROUTES.workspace.dashboard)).toBe(true);
     });
 
     it('should exclude the dashboard route if neither dashboard variant is enabled', async () => {
       vi.stubEnv('VITE_FF_ASSISTANT_STUDIO_ENABLED', 'false');
       vi.stubEnv('VITE_FF_DASHBOARD_SANDBOX_ENABLED', 'false');
-      const { routes } = await import('./index');
+      const { routes } = await import('@studio/routes/index');
       expect(findIfRouteExists(routes, ROUTES.workspace.dashboard)).toBe(false);
     });
 
     it('should include virtual model routes if only agent optimizations are enabled', async () => {
       vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'false');
       vi.stubEnv('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', 'true');
-      const { routes } = await import('./index');
+      const { routes } = await import('@studio/routes/index');
       expect(findIfRouteExists(routes, ROUTES.workspace.virtualModelDetail)).toBe(true);
     });
 
     it('should exclude virtual model routes if guardrails and agent optimizations are disabled', async () => {
       vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'false');
       vi.stubEnv('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', 'false');
-      const { routes } = await import('./index');
+      const { routes } = await import('@studio/routes/index');
       expect(findIfRouteExists(routes, ROUTES.workspace.virtualModelDetail)).toBe(false);
     });
 
     it('includes Optimizer routes when Optimizer is enabled for preview', async () => {
       vi.stubEnv('VITE_FF_OPTIMIZER_ENABLED', 'preview');
-      const { routes } = await import('./index');
+      const { routes } = await import('@studio/routes/index');
 
       const missingRoutes = optimizerRoutes.filter((route) => !findIfRouteExists(routes, route));
 

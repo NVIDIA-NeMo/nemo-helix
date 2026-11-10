@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import type {
   AssistantChatArtifacts,
   AssistantChatFileArtifact,
@@ -150,9 +151,6 @@ export const cleanAssistantArtifactText = (value: string): string => {
   const unwrapped = inlineCodeMatch[2]?.trim();
   return unwrapped || trimmed;
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const getString = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;
@@ -447,12 +445,12 @@ const recordToolArtifacts = (
   pushUnique(artifacts.tools, toolName);
 
   const action = FILE_CHANGE_TOOL_ACTIONS.get(toolName);
-  if (action && isRecord(input)) {
+  if (action && isPlainObject(input)) {
     const path = getString(input.file_path) ?? getString(input.path);
     if (path) upsertFile(artifacts, { action, path });
   }
 
-  if ((toolName === 'studio_link' || toolName.endsWith('__studio_link')) && isRecord(input)) {
+  if ((toolName === 'studio_link' || toolName.endsWith('__studio_link')) && isPlainObject(input)) {
     const destination = getString(input.destination);
     const label = getString(input.label) ?? destination;
     const href = buildStudioLinkHrefFromInput(input, artifacts.workspace);
@@ -460,7 +458,10 @@ const recordToolArtifacts = (
     if (destination === 'job') recordJobArtifact(artifacts, input);
   }
 
-  if ((toolName === 'job_progress' || toolName.endsWith('__job_progress')) && isRecord(input)) {
+  if (
+    (toolName === 'job_progress' || toolName.endsWith('__job_progress')) &&
+    isPlainObject(input)
+  ) {
     recordJobArtifact(artifacts, input);
   }
 };
@@ -469,10 +470,10 @@ export const updateAssistantChatArtifactsFromEvent = (
   current: AssistantChatArtifacts,
   event: unknown
 ): AssistantChatArtifacts => {
-  if (!isRecord(event)) return current;
+  if (!isPlainObject(event)) return current;
 
   const next = cloneArtifacts(current);
-  const message = isRecord(event.message) ? event.message : undefined;
+  const message = isPlainObject(event.message) ? event.message : undefined;
   const model = getString(message?.model);
   if (model) setAssistantModel(next, model);
 
@@ -480,7 +481,7 @@ export const updateAssistantChatArtifactsFromEvent = (
   if (!Array.isArray(content)) return next;
 
   for (const part of content) {
-    if (!isRecord(part)) continue;
+    if (!isPlainObject(part)) continue;
 
     if (part.type === 'text') {
       const text = getString(part.text);

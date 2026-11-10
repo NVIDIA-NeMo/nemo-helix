@@ -9,16 +9,16 @@
  * without an express license agreement from NVIDIA CORPORATION or
  * its affiliates is strictly prohibited.
  */
-import {
+import type {
   EvaluateJob,
   EvaluateJobsPage,
   HelixJobStatus as JobStatus,
   EvalsListEvaluateJobsParams,
 } from '@nemo/sdk/generated/evals/schema';
-import { EvaluationApiError } from '@studio/api/evaluation/EvaluationApiError';
+import type { EvaluationApiError } from '@studio/api/evaluation/EvaluationApiError';
 import { fetchEvaluationsWithMetrics } from '@studio/api/evaluation/index';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { UseQueryOptions, queryOptions, useQuery } from '@tanstack/react-query';
+import { type UseQueryOptions, queryOptions, useQuery } from '@tanstack/react-query';
 
 /** Task result shape appended by fetchEvaluationsWithMetrics. */
 export type TaskResultOutput = Record<string, unknown>;

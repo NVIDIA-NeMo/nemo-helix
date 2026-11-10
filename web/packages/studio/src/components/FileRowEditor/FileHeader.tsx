@@ -5,7 +5,7 @@ import { Download, IconDocument, FolderOpen, Add, Floppy } from '@nemo/icons/ico
 import { Button, Flex, Spinner, Stack, Tag, Text } from '@nvidia/foundations-react-core';
 import { FILE_FORMAT_TAG_COLOR } from '@studio/components/FileRowEditor/constants';
 import type { DataFileFormat } from '@studio/components/FileRowEditor/parse';
-import { type ChangeEvent, type FC, type ReactNode, type RefObject } from 'react';
+import type { ChangeEvent, FC, ReactNode, RefObject } from 'react';
 
 export interface FileHeaderProps {
   fileName: string;

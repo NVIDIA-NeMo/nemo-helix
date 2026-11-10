@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
-import { ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
+import type { ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
 import { CustomModelsDataView } from '@studio/components/dataViews/CustomModelsDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
@@ -14,8 +14,9 @@ import {
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { getCustomizationJobListRoute } from '@studio/routes/utils';
+import { menuFor } from '@studio/tests/util/menuFor';
 import { renderRoute } from '@studio/tests/util/render';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -118,11 +119,16 @@ describe('CustomModelsDataView', () => {
     const adapterActionButton = actionButtons[actionButtons.length - 1];
     await user.click(adapterActionButton);
 
+    const menu = menuFor(adapterActionButton);
+    const items = within(menu).getAllByTestId('quick-actions-menu-item');
+    expect(items.at(-1)).toHaveTextContent('Delete Adapter');
+    expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
+
     // Click "Delete Adapter" in the menu
-    await user.click(await screen.findByRole('menuitem', { name: 'Delete Adapter' }));
+    await user.click(within(menu).getByRole('menuitem', { name: 'Delete Adapter' }));
 
     // Confirm deletion in the modal
-    expect(await screen.findByText('Delete Adapter')).toBeInTheDocument();
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Delete Adapter');
     await user.click(screen.getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => {
@@ -168,9 +174,12 @@ describe('CustomModelsDataView', () => {
 
       const { user, buttons } = await openActionsFor(adapterName);
       // Sub-rows render last; the adapter's menu is the final one.
-      await user.click(buttons[buttons.length - 1]);
+      const trigger = buttons[buttons.length - 1];
+      await user.click(trigger);
 
-      expect(await screen.findByRole('menuitem', { name: 'Job details' })).toBeInTheDocument();
+      expect(
+        within(menuFor(trigger)).getByRole('menuitem', { name: 'Job details' })
+      ).toBeInTheDocument();
     });
 
     it('omits Job details when no customization job produced the row', async () => {
@@ -184,10 +193,11 @@ describe('CustomModelsDataView', () => {
 
       const { user, buttons } = await openActionsFor(entityStoreBaseModel1.name);
       await user.click(buttons[0]);
+      const menu = menuFor(buttons[0]);
 
       // A model can be registered outside a customization run; there is no job to link to.
-      await screen.findByRole('menuitem', { name: 'Model details' });
-      expect(screen.queryByRole('menuitem', { name: 'Job details' })).not.toBeInTheDocument();
+      expect(within(menu).getByRole('menuitem', { name: 'Model details' })).toBeInTheDocument();
+      expect(within(menu).queryByRole('menuitem', { name: 'Job details' })).not.toBeInTheDocument();
     });
   });
 });

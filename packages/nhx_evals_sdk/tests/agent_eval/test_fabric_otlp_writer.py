@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from nhx_evals_sdk.agent_eval.runtimes.fabric import otlp_writer
 from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_receiver import (
     EXPORT_SUFFIX,
     PROTOBUF_MEDIA_TYPE,
@@ -299,14 +300,14 @@ def test_an_unconsumable_export_does_not_cost_the_committed_trace(
     to a cleanup error would be strictly worse than leaving the input behind.
     """
     post(receiver.endpoint, export("kept"))
-    original = Path.unlink
+    original = otlp_writer._consume
 
-    def refuse(self: Path, missing_ok: bool = False) -> None:
-        if self.suffix == ".pb":
+    def refuse(export: Path) -> None:
+        if export.suffix == ".pb":
             raise PermissionError("Operation not permitted")
-        original(self, missing_ok=missing_ok)
+        original(export)
 
-    monkeypatch.setattr(Path, "unlink", refuse)
+    monkeypatch.setattr(otlp_writer, "_consume", refuse)
 
     with caplog.at_level("WARNING"):
         assert fold_exports(traces_dir(tmp_path)) == 1

@@ -10,11 +10,11 @@ import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { useDatasetDirectoryDelete } from '@studio/api/datasets/useDatasetDirectoryDelete';
-import { FileSystemDirectory } from '@studio/components/FilesTable/utils';
+import type { FileSystemDirectory } from '@studio/components/FilesTable/utils';
 import { useSelectedDatasetId } from '@studio/hooks/useSelectedDatasetId';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { resolveDatasetFilePath } from '@studio/util/files';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 
 interface Props {
   datasetId?: string;
@@ -78,16 +78,14 @@ export const DirectoryQuickActions: FC<Props> = ({
           },
         ]
       : []),
-    {
-      label: 'Delete',
-      onSelect: () => setOpenModal('delete'),
-      danger: true,
-    },
   ];
 
   return (
     <>
-      <QuickActionsMenuRoot actions={actions} />
+      <QuickActionsMenuRoot
+        actions={actions}
+        deleteAction={{ onSelect: () => setOpenModal('delete') }}
+      />
       <DeleteConfirmationModal
         open={openModal === 'delete'}
         onDelete={handleDeleteDirectory}

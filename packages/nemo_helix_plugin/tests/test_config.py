@@ -319,13 +319,13 @@ def test_validate_docker_available_returns_false_on_connection_failures() -> Non
         OSError("no such file"),
     ):
         reset_capability_cache()
-        with patch("docker.from_env", side_effect=exc):
+        with patch("nemo_helix_plugin.capabilities._docker_from_env", side_effect=exc):
             assert validate_docker_available() is False
 
         reset_capability_cache()
         client = MagicMock()
         client.ping.side_effect = exc
-        with patch("docker.from_env", return_value=client):
+        with patch("nemo_helix_plugin.capabilities._docker_from_env", return_value=client):
             assert validate_docker_available() is False
         client.close.assert_called()
     reset_capability_cache()

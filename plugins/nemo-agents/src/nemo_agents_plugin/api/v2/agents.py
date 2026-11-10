@@ -28,8 +28,10 @@ from nemo_agents_plugin.schema import (
 )
 from nemo_helix_plugin.agents.types import ReferenceConfig
 from nemo_helix_plugin.agents.validation import resolve_agent_fileset
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -90,6 +92,8 @@ async def register_agent(
         ) from exc
     except NemoEntityValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to register agent '%s'", body.name)
         raise HTTPException(status_code=500, detail="Failed to register agent.") from exc
@@ -112,8 +116,7 @@ async def register_agent(
 )
 async def list_agents(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     parsed_filter: ParsedFilter = Depends(_agent_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -126,11 +129,13 @@ async def list_agents(
         result = await entity_client.list(
             Agent,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_operation=parsed_filter.operation,
         )
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list agents in workspace '%s'", workspace)
         raise HTTPException(status_code=500, detail="Failed to list agents.") from exc
@@ -163,6 +168,8 @@ async def get_agent(
             status_code=404,
             detail=f"Agent '{name}' not found in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to get agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to get agent.") from exc
@@ -186,9 +193,16 @@ async def delete_agent(
     still reference this agent.  Delete or wait for those deployments to finish
     before deleting the agent.
     """
+    try:
+        _delete_target = await entity_client.get(Agent, name=name, workspace=workspace)
+    except NemoEntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"Agent '{name}' not found in workspace '{workspace}'.") from exc
+
     # Check for live deployments that would be orphaned by this deletion.
     try:
         result = await entity_client.list(AgentDeployment, workspace=workspace)
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list deployments before deleting agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to check deployments.") from exc
@@ -205,7 +219,7 @@ async def delete_agent(
         )
 
     try:
-        await entity_client.delete(Agent, name=name, workspace=workspace)
+        await entity_client.delete_by_id(Agent, _delete_target.id, expected_db_version=_delete_target.db_version)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -219,6 +233,8 @@ async def delete_agent(
                 "Refresh the agent and try again."
             ),
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to delete agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to delete agent.") from exc

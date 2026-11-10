@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { withOperators } from '@nemo/common/src/api/filterOperators';
+import { parseJsonl } from '@nemo/common/src/utils/parseRecords';
 import {
   evalsCreateAgentEvaluateJob,
   evalsGetAgentEvaluateJob,
@@ -22,6 +23,7 @@ import type {
   ResultFilter,
 } from '@nemo/sdk/generated/evals/schema';
 import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
+import { agentNameForTarget } from '@studio/api/evaluation/agentTarget';
 
 const PAGE_SIZE = 50;
 
@@ -34,19 +36,10 @@ export type AgentEvalAggregateScore =
 /** Re-export so callers continue to import AgentEvalResult from this module. */
 export type { AgentEvalResult };
 
-/** The agent name a job evaluated, read from its target (spec.target.agent.name).
- *  Strips only this job's own ``workspace/`` prefix so the result compares equal to a
- *  bare agent name; any other ``/`` in the name is left intact. */
+/** The local registered agent a job evaluated. Foreign refs cannot form a local breadcrumb. */
 export const agentNameForJob = (job: AgentEvaluateJob): string | null => {
-  const target = job.spec?.target as
-    | { kind?: string; agent?: { name?: string } }
-    | null
-    | undefined;
-  if (!target || target.kind !== 'agent') return null;
-  const name = target.agent?.name;
-  if (typeof name !== 'string' || name.length === 0) return null;
-  const prefix = job.workspace ? `${job.workspace}/` : '';
-  return prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name;
+  const name = agentNameForTarget(job.spec?.target, job.workspace);
+  return name?.includes('/') ? null : name;
 };
 
 export const evalConfigName = (job: AgentEvaluateJob): string | null => {
@@ -197,11 +190,7 @@ const downloadJsonl = async <T>(
   const blob = await filesDownloadFile(workspace, fileset, remotePath, signal);
   if (!blob) return [];
   const text = await blob.text();
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as T);
+  return parseJsonl<T>(text);
 };
 
 /** Loads the per-task bundle (tasks/trials/scores) for a completed job. Returns

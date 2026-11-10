@@ -21,6 +21,9 @@ from nemo_helix_plugin.entities.base import (
     BASE_FIELDS as BASE_FIELDS,
 )
 from nemo_helix_plugin.entities.base import (
+    CLIENT_ERRORS as CLIENT_ERRORS,
+)
+from nemo_helix_plugin.entities.base import (
     DEFAULT_WORKSPACE as DEFAULT_WORKSPACE,
 )
 from nemo_helix_plugin.entities.base import (

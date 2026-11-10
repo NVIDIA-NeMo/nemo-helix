@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import quote
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_example_plugin.entities import ExampleItem
@@ -241,22 +243,20 @@ def test_update_item_404() -> None:
 def test_delete_item_204() -> None:
     mock = AsyncMock()
     mock.get.return_value = _make_item("widget")
-    mock.delete.return_value = None
+    mock.delete_by_id.return_value = None
 
     client = TestClient(_make_app(mock))
     resp = client.delete("/v2/workspaces/default/items/widget")
 
     assert resp.status_code == 204
-    mock.delete.assert_awaited_once_with(
-        ExampleItem,
-        name="widget",
-        workspace="default",
+    mock.delete_by_id.assert_awaited_once_with(
+        ExampleItem, mock.get.return_value.id, expected_db_version=mock.get.return_value.db_version
     )
 
 
 def test_delete_item_404() -> None:
     mock = AsyncMock()
-    mock.delete.side_effect = NemoEntityNotFoundError("not found")
+    mock.delete_by_id.side_effect = NemoEntityNotFoundError("not found")
 
     client = TestClient(_make_app(mock))
     resp = client.delete("/v2/workspaces/default/items/missing")
@@ -266,7 +266,7 @@ def test_delete_item_404() -> None:
 
 def test_delete_item_409_when_changed() -> None:
     mock = AsyncMock()
-    mock.delete.side_effect = NemoEntityConflictError("changed")
+    mock.delete_by_id.side_effect = NemoEntityConflictError("changed")
 
     client = TestClient(_make_app(mock))
     resp = client.delete("/v2/workspaces/default/items/widget")
@@ -276,22 +276,20 @@ def test_delete_item_409_when_changed() -> None:
 
 def test_delete_middleware_config_204() -> None:
     mock = AsyncMock()
-    mock.delete.return_value = None
+    mock.delete_by_id.return_value = None
 
     client = TestClient(_make_app(mock))
     resp = client.delete("/v2/workspaces/default/middleware-configs/cfg-1")
 
     assert resp.status_code == 204
-    mock.delete.assert_awaited_once_with(
-        ExampleMiddlewareConfig,
-        name="cfg-1",
-        workspace="default",
+    mock.delete_by_id.assert_awaited_once_with(
+        ExampleMiddlewareConfig, mock.get.return_value.id, expected_db_version=mock.get.return_value.db_version
     )
 
 
 def test_delete_middleware_config_409_when_changed() -> None:
     mock = AsyncMock()
-    mock.delete.side_effect = NemoEntityConflictError("changed")
+    mock.delete_by_id.side_effect = NemoEntityConflictError("changed")
 
     client = TestClient(_make_app(mock))
     resp = client.delete("/v2/workspaces/default/middleware-configs/cfg-1")
@@ -321,3 +319,28 @@ def test_response_includes_id_and_created_at() -> None:
     assert body["id"] == "id-w1"
     assert body["created_at"] is not None
     assert "updated_at" in body  # present even if None
+
+
+@pytest.mark.parametrize(
+    ("resource", "entity_type"),
+    [("items", ExampleItem), ("middleware-configs", ExampleMiddlewareConfig)],
+)
+def test_id_delete_error_logs_strip_line_breaks_without_changing_the_lookup(
+    resource: str,
+    entity_type: type[ExampleItem] | type[ExampleMiddlewareConfig],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    entity_id = "selected-id\r\nforged-entry"
+    mock = AsyncMock()
+    mock.get_by_id.side_effect = RuntimeError("Entity Store unavailable")
+    client = TestClient(_make_app(mock))
+
+    response = client.delete(f"/v2/workspaces/default/{resource}/by-id/{quote(entity_id, safe='')}")
+
+    assert response.status_code == 500
+    mock.get_by_id.assert_awaited_once_with(entity_type, entity_id)
+    records = [record for record in caplog.records if record.name.startswith("nemo_example_plugin.")]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    assert "selected-idforged-entry" in message
+    assert "\r" not in message and "\n" not in message

@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import httpx
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
+from nemo_builder_plugin.schema import BuildMount, FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.image_builds.builder import (
     HttpImageBuilder,
     adopt_or_build,
@@ -83,6 +84,7 @@ class _Builder:
         source: FileSetSource | ImageSource,
         dockerfile: str | None,
         platform: str | None,
+        mounts: Sequence[BuildMount] = (),
     ) -> SubmitBuildResponse:
         self.submitted.append(revision)
         if revision in self.conflicting:
@@ -349,6 +351,7 @@ class _RacingBuilder:
         source: FileSetSource | ImageSource,
         dockerfile: str | None,
         platform: str | None,
+        mounts: Sequence[BuildMount] = (),
     ) -> SubmitBuildResponse:
         image_name, request = f"{name}-{revision}", source.model_dump_json()
         if image_name in self.rows:

@@ -321,8 +321,11 @@ def test_authentik_compose_uses_https_gateway_for_workloads():
     assert gateway["depends_on"]["authentik-blueprint-init"]["condition"] == "service_completed_successfully"
     assert "gateway-tls:/etc/envoy/tls:ro" in gateway["volumes"]
     assert blueprint_init["networks"] == ["nemo-internal"]
-    assert gateway_tls_init["image"] == (
-        "docker.io/library/busybox:1.37.0@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028"
+    # The platform image, for the CA bundle that busybox does not ship.
+    assert gateway_tls_init["image"] == "${IMAGE_REGISTRY:-my-registry}/nhx-api:${BAKE_TAG:-local}"
+    assert (
+        "cat /etc/ssl/certs/ca-certificates.crt /source/tls/tls.crt > /target/tls/ca-bundle.crt"
+        in gateway_tls_init["entrypoint"][2]
     )
     assert gateway_tls_init["user"] == "0:0"
     assert gateway_tls_init["entrypoint"][:2] == ["sh", "-euc"]
@@ -330,8 +333,8 @@ def test_authentik_compose_uses_https_gateway_for_workloads():
     assert "chmod 600 /target/tls/tls.key" in gateway_tls_init["entrypoint"][2]
     assert compose["volumes"]["gateway-tls"]["name"] == "${AUTHENTIK_GATEWAY_TLS_VOLUME:-authentik_gateway_tls}"
     assert "gateway-tls:/etc/nhx/gateway-tls:ro" in nemo["volumes"]
-    assert nemo["environment"]["SSL_CERT_FILE"] == "/etc/nhx/gateway-tls/tls.crt"
-    assert nemo["environment"]["REQUESTS_CA_BUNDLE"] == "/etc/nhx/gateway-tls/tls.crt"
+    assert nemo["environment"]["SSL_CERT_FILE"] == "/etc/nhx/gateway-tls/ca-bundle.crt"
+    assert nemo["environment"]["REQUESTS_CA_BUNDLE"] == "/etc/nhx/gateway-tls/ca-bundle.crt"
 
 
 def test_authentik_compose_mounts_gateway_ca_into_docker_workloads():
@@ -346,13 +349,15 @@ def test_authentik_compose_mounts_gateway_ca_into_docker_workloads():
     docker_config = workload_executor["config"]
 
     assert docker_config["env"] == {
-        "SSL_CERT_FILE": "/etc/nhx/gateway-tls/tls.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nhx/gateway-tls/tls.crt",
+        "NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/gateway-tls/tls.crt",
+        "SSL_CERT_FILE": "/etc/nhx/gateway-tls/ca-bundle.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/gateway-tls/ca-bundle.crt",
     }
     assert docker_config["storage"]["additional_volume_mounts"] == [
         {
             "volume_name": gateway_tls_volume_name,
             "mount_path": "/etc/nhx/gateway-tls",
+            "read_only": True,
         }
     ]
 
@@ -364,3 +369,31 @@ def test_authentik_runtimes_declare_platform_access_key_capability():
 
     assert "platform_access_keys" in runtimes["authentik-compose"]["capabilities"]
     assert "platform_access_keys" in runtimes["authentik-kubernetes"]["capabilities"]
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "contrib/auth/authentik/gateway/envoy.yaml",
+        "contrib/auth/authentik/helm/templates/_envoy-config.tpl",
+        "contrib/auth/zitadel/helm/templates/_envoy-config.tpl",
+    ],
+)
+def test_contrib_gateways_normalize_paths_before_the_ext_authz_fence(template: str) -> None:
+    # Without normalization, /apis/auth/ext%2Dauthz misses the literal 404 prefix and reaches the API.
+    # The .tpl files are Helm templates that do not parse as YAML, so match the settings as sibling keys of
+    # the connection manager's stat_prefix (a commented-out or misplaced key does not count).
+    lines = (Path(__file__).parent.parent.parent.parent / template).read_text(encoding="utf-8").splitlines()
+
+    stat_prefix_index = next(i for i, line in enumerate(lines) if line.strip() == "stat_prefix: ingress_http")
+    indent = len(lines[stat_prefix_index]) - len(lines[stat_prefix_index].lstrip())
+    siblings = {line.strip() for line in lines if len(line) - len(line.lstrip()) == indent}
+    assert {
+        "normalize_path: true",
+        "merge_slashes: true",
+        "path_with_escaped_slashes_action: UNESCAPE_AND_REDIRECT",
+    } <= siblings
+
+    fence_index = next(i for i, line in enumerate(lines) if line.strip() == 'prefix: "/apis/auth/ext-authz"')
+    api_index = next(i for i, line in enumerate(lines) if line.strip() == 'prefix: "/apis/"')
+    assert fence_index < api_index

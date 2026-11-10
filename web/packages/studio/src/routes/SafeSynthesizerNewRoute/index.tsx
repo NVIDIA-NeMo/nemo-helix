@@ -18,7 +18,7 @@ import {
   getSafeSynthesizerFormDefaults,
 } from '@studio/routes/SafeSynthesizerNewRoute/schema';
 import { getGenerateJobRoute, getSafeSynthesizerRoute } from '@studio/routes/utils';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 

@@ -330,7 +330,14 @@ Number Check performs numerical comparisons and operations on extracted values. 
 - Checking value ranges or thresholds
 - Comparing predicted vs expected numbers
 
-**Metric Output:** 1 if the condition is true, 0 otherwise. If either value cannot be parsed as a number, the row score is `NaN`.
+**Metric Output:** 1 if the condition is true, 0 otherwise. If either value cannot be parsed as a number, the row score is `NaN`. The metric reads the last number in each value, and a last number with a comma between digits (`1,000`) or in scientific notation (`6.02e23`) counts as unparseable.
+
+**Large Numbers:**
+
+- Integers are compared exactly up to Python's [integer string conversion limit](https://docs.python.org/3/library/stdtypes.html#int-max-str-digits), 4,300 digits by default. Leading zeros don't count toward the limit for this metric.
+- Integers with more digits, and decimals beyond the floating-point range (about 1.8e308), are compared as positive or negative infinity. Two different values that become the same infinity compare as equal (for example, `equals` scores 1), but their `absolute difference` is `NaN`, so that operation scores 0.
+- Each operand outside the floating-point range adds a diagnostic to the row that names the operand (`left` or `right`).
+- Disabling the limit, for example with `PYTHONINTMAXSTRDIGITS=0` in the process that runs the evaluation, removes the integer cutoff.
 
 ### Supported Operations
 
@@ -519,6 +526,98 @@ result = job.get_result()
 </Tab>
 
 </Tabs>
+## Sequence Similarity Metric
+
+Sequence Similarity scores how closely the candidate matches the reference, character by character. The score is Python's `difflib.SequenceMatcher(None, candidate, reference).ratio()`: twice the number of matching characters, divided by the total length of both strings.
+
+**Use Sequence Similarity when:**
+- Giving partial credit for long structured outputs, such as tagged or JSON extractions, where exact match is too strict
+- Reproducing scores that a recipe or paper reports as a `difflib` ratio
+
+**Metric Output:** A score between 0 and 1, where 1 means the strings are identical.
+
+The metric doesn't normalize text, so case and whitespace count. Use Jinja filters in the templates, such as `trim`, to normalize before comparison. The argument order is fixed (candidate first) because it can change the score: once the reference is 200 characters or longer, `SequenceMatcher` ignores characters that make up more than 1% of it.
+
+<Tabs>
+
+<Tab title="Local Evaluation">
+
+```python
+from nhx_evals_sdk import Evaluator as LocalEvaluator
+
+from nhx_evals_sdk import SequenceSimilarityMetric
+
+metric = SequenceSimilarityMetric(
+    reference="{{item.label}}",
+    candidate="{{item.prediction | trim}}",
+)
+
+result = LocalEvaluator().run_sync(
+    metrics=[metric],
+    dataset=[
+        {
+            "label": "<s_nm>ICED TEA</s_nm><s_cnt>2</s_cnt><s_price>18,000</s_price>",
+            "prediction": "<s_nm>ICED TEA</s_nm><s_cnt>2</s_cnt><s_price>18,000</s_price>\n",
+        },
+        {
+            "label": "<s_nm>FRIED RICE</s_nm><s_cnt>1</s_cnt><s_price>12,000</s_price>",
+            "prediction": "<s_nm>FRIED RICE</s_nm><s_price>12,000</s_price>",
+        },
+    ],
+)
+
+for score in result.aggregate_scores.scores:
+    print(f"{score.name}: mean={score.mean}")
+```
+
+</Tab>
+<Tab title="Remote Job">
+
+```python
+from nhx_evals_sdk import SequenceSimilarityMetric
+
+metric = SequenceSimilarityMetric(
+    reference="{{item.label}}",
+    candidate="{{item.prediction | trim}}",
+)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "label": "<s_nm>ICED TEA</s_nm><s_cnt>2</s_cnt><s_price>18,000</s_price>",
+            "prediction": "<s_nm>ICED TEA</s_nm><s_cnt>2</s_cnt><s_price>18,000</s_price>\n",
+        },
+        {
+            "label": "<s_nm>FRIED RICE</s_nm><s_cnt>1</s_cnt><s_price>12,000</s_price>",
+            "prediction": "<s_nm>FRIED RICE</s_nm><s_price>12,000</s_price>",
+        },
+    ],
+)
+job.wait_until_done()
+result = job.get_result()
+```
+
+</Tab>
+<Tab title="Example Result">
+
+```json
+{
+  "scores": [
+    {
+      "name": "sequence-similarity",
+      "count": 2,
+      "mean": 0.929,
+      "min": 0.857,
+      "max": 1.0
+    }
+  ]
+}
+```
+
+</Tab>
+
+</Tabs>
 ## String Check Metric
 
 String Check performs various string operations and comparisons. Supports equality, containment, and prefix/suffix checks.
@@ -618,7 +717,7 @@ The examples on this page use inline dataset rows with `dataset=[...]`. Template
 
 - `reference`, `references`, `left_template`, and `right_template` read from `item` fields in the dataset.
 - `candidate` reads from an `item` field for offline rows when configured.
-- If `candidate` is omitted for BLEU, Exact Match, F1, or ROUGE, the metric uses `sample.output_text`, which is populated during online evaluations.
+- If `candidate` is omitted for BLEU, Exact Match, F1, ROUGE, or Sequence Similarity, the metric uses `sample.output_text`, which is populated during online evaluations.
 
 Keep field names consistent between the dataset rows and the templates you configure. For example, `{{item.expected}}` requires each row to include an `expected` field.
 

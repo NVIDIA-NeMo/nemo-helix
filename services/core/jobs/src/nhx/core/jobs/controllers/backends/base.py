@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import datetime
 import logging
-import time
 from abc import ABC, abstractmethod
 from bisect import bisect_right
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
+from time import monotonic
 from typing import Generic, Literal, Optional, TypeVar
 from urllib.parse import SplitResult, quote, urlsplit
 
@@ -459,10 +459,10 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
         )
         start = bisect_right(names, self._cancelled_workload_cursor)
         batch = names[start : start + CANCELLED_WORKLOAD_BATCH_SIZE] or names[:CANCELLED_WORKLOAD_BATCH_SIZE]
-        deadline = time.monotonic() + CANCELLED_WORKLOAD_BUDGET_SECONDS
+        deadline = monotonic() + CANCELLED_WORKLOAD_BUDGET_SECONDS
         progress = on_progress or (lambda: None)
         for index, name in enumerate(batch):
-            if index and time.monotonic() >= deadline:
+            if index and monotonic() >= deadline:
                 break
             self._cancelled_workload_cursor = name
             labels = workloads[name]

@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from nhx.testing import docker as nhx_testing_docker
 from nhx.testing.docker import (
     MODELS_CONTROLLER_MANAGED_LABEL,
     cleanup_model_deployment_containers,
@@ -65,7 +66,7 @@ def test_cleanup_model_deployment_containers_filters_by_owner_labels():
 def test_remove_intake_clickhouse_removes_the_platform_data_dir_container(monkeypatch):
     """Removal targets Intake's ClickHouse subdir without NHX_DATA_DIR, which skips the slow ownership restore."""
     run = MagicMock(return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""))
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(nhx_testing_docker, "run", run)
     monkeypatch.setenv("NHX_DATA_DIR", "/tmp/platform/data")
     monkeypatch.setenv("NHX_BASE_URL", "http://localhost:8090")
     data_dir = Path("/tmp/platform/data")
@@ -103,7 +104,7 @@ def test_remove_intake_clickhouse_failures_warn_without_raising(monkeypatch, cap
             raise outcome
         return outcome
 
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(nhx_testing_docker, "run", run)
 
     remove_intake_clickhouse(Path("/tmp/platform/data"))
 

@@ -60,8 +60,10 @@ from nemo_evals.jobs.agent_spec import (
     Target,
     registered_agent_config,
     registered_agent_files,
+    registered_agent_files_receipt,
     validate_task_collection,
 )
+from nemo_evals.jobs.attempt_tasks import load_attempt_tasks
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evals.jobs.gateway_models import (
     TrialRoute,
@@ -144,7 +146,7 @@ from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult
 from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
-from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborJobScope, HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTarget
 from nhx_evals_sdk.values import AgentBase, Model, ModelRef, RunConfigOnline, RunConfigOnlineModel
@@ -284,7 +286,7 @@ class _AgentEvalJobBase(NemoJob):
         target = await resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
         try:
             await check_gateway_model(target, async_sdk=async_sdk, authorize=authorize)
-            await require_closed_book_route(target, (), async_sdk=async_sdk, authorize=authorize)
+            await require_closed_book_route(target, async_sdk=async_sdk, authorize=authorize)
             validate_execution_support(resolved_tasks, target=target, adapters=ctx.adapters)
             if isinstance(target, GymRunnerTarget):
                 target = await prepare_gym_submission(resolved_tasks, target, ctx)
@@ -298,7 +300,7 @@ class _AgentEvalJobBase(NemoJob):
             # Resolution may have snapshotted the agent's files; a submission that fails after that owns no job
             # to clean the snapshot up, so it goes here.
             snapshot = (
-                registered_agent_files(target)
+                registered_agent_files_receipt(target)
                 if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
                 else None
             )
@@ -332,7 +334,7 @@ class _AgentEvalJobBase(NemoJob):
         except Exception:
             target = canonical_spec.target
             snapshot = (
-                registered_agent_files(target)
+                registered_agent_files_receipt(target)
                 if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
                 else None
             )
@@ -512,6 +514,7 @@ class _AgentEvalJobBase(NemoJob):
         configure_harbor: Callable[[HarborRuntimeConfig], HarborRuntimeConfig] | None = None,
         fabric_gateway_origin: str | None = None,
         trial_issuer: TrialCredentialIssuer | None = None,
+        trial_progress: Callable[[HarborRuntimeConfig], HarborJobScope | None] | None = None,
     ) -> tuple[AgentEvalTarget | None, str | dict[str, Any] | None, RunConfigOnline | RunConfigOnlineModel | None]:
         """Resolve a target spec to ``(runtime target, prompt_template, params)`` for the SDK run config.
 
@@ -519,7 +522,7 @@ class _AgentEvalJobBase(NemoJob):
         shapes its own request, so it contributes neither a prompt template nor inference params.
         ``configure_harbor`` adjusts a Harbor runner's config last (a Kubernetes task Job selects its
         sandbox environment there). ``trial_issuer`` issues each trial of a Harbor agent that calls a gateway
-        model its own gateway key.
+        model its own gateway key. ``trial_progress`` gives the scope that reports a Harbor job's trials as they run.
         """
         if isinstance(target, ModelTarget):
             return target.model, target.prompt_template, target.params or RunConfigOnlineModel()
@@ -581,15 +584,18 @@ class _AgentEvalJobBase(NemoJob):
                 )
                 harbor_config = trust_the_gateway_ca(harbor_config, origin)
             gateway = _trial_gateway(target)
-            job_scope = (
+            # Each scope wraps every Harbor job: one issues trial keys, the other reports trial progress.
+            job_scopes = (
                 gateway_job_scope(harbor_config, trial_issuer, gateway[1])
                 if trial_issuer is not None and gateway is not None
-                else None
+                else None,
+                trial_progress(harbor_config) if trial_progress is not None else None,
             )
+
             harbor_runtime = HarborAgentTaskRunner(
                 config=harbor_config,
                 secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
-                job_scope=job_scope,
+                job_scopes=[scope for scope in job_scopes if scope is not None],
             )
             return harbor_runtime, None, None
         return None, None, None
@@ -655,6 +661,7 @@ class _AgentEvalJobBase(NemoJob):
                 configure_harbor=lambda harbor_config: self._configure_harbor_runtime(harbor_config, ctx),
                 fabric_gateway_origin=fabric_gateway_origin,
                 trial_issuer=trial_issuer,
+                trial_progress=lambda harbor_config: self._trial_progress_scope(harbor_config, ctx, async_client),
             )
             bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
             if bundle_dir.exists():
@@ -691,7 +698,7 @@ class _AgentEvalJobBase(NemoJob):
                 result.metadata.target.config["url"] = endpoint.url
 
         files = self._write_result_files(result, ctx.storage.persistent)
-        artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)
+        artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir, ignore_patterns=spec.result_ignore_patterns)
         ctx.results.save(SUMMARY_RESULT_NAME, files.summary)
 
         outcome = agent_eval_outcome(result)
@@ -746,7 +753,7 @@ class _AgentEvalJobBase(NemoJob):
         # The run is complete and its bundle durable; the files snapshot taken at submit has served its
         # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.
         snapshot = (
-            registered_agent_files(spec.target)
+            registered_agent_files_receipt(spec.target)
             if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
             else None
         )
@@ -766,6 +773,12 @@ class _AgentEvalJobBase(NemoJob):
         """Hook: adjust a Harbor runner's config before it runs. Returns it unchanged by default."""
         return config
 
+    def _trial_progress_scope(
+        self, config: HarborRuntimeConfig, ctx: JobContext, async_client: AsyncNemoClient | None
+    ) -> HarborJobScope | None:
+        """Hook: a scope that reports the Harbor job's trials as they run. None by default: nothing reads them."""
+        return None
+
 
 def _trial_credential_issuer(
     spec: AgentEvalSpec,
@@ -776,7 +789,7 @@ def _trial_credential_issuer(
 ) -> TrialCredentialIssuer | None:
     """The issuer of each trial's trial token, for a Harbor agent that calls a gateway model."""
     gateway = _trial_gateway(spec.target)
-    closed = closed_book_run(spec.target, ())
+    closed = closed_book_run(spec.target)
     if async_client is None or gateway is None:
         if closed:
             raise ValueError(
@@ -888,7 +901,7 @@ class AgentEvalJob(_AgentEvalJobBase):
         client: NemoClient,
     ) -> dict:
         """Run the agent evaluation locally and persist its result bundle as artifacts."""
-        return self._run_sync(config, ctx=ctx, client=client)
+        return self._run_sync(load_attempt_tasks(config, ctx=ctx, client=client), ctx=ctx, client=client)
 
 
 class AsyncAgentEvalJob(_AgentEvalJobBase):
@@ -902,4 +915,5 @@ class AsyncAgentEvalJob(_AgentEvalJobBase):
         async_client: AsyncNemoClient,
     ) -> dict:
         """Run the agent evaluation in a task container and persist async side effects."""
+        config = load_attempt_tasks(config, ctx=ctx)
         return self._run_with_client(config, ctx=ctx, platform_client=async_client, async_client=async_client)

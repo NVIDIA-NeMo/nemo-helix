@@ -46,6 +46,17 @@ const baseRules = {
     { blankLine: 'any', prev: 'import', next: 'import' },
   ],
   '@typescript-eslint/no-unused-vars': 'off',
+  // Inline `type` keeps mixed type/value imports on one line, which no-duplicate-imports requires
+  '@typescript-eslint/consistent-type-imports': [
+    'error',
+    {
+      prefer: 'type-imports',
+      fixStyle: 'inline-type-imports',
+      // Allow `typeof import('...')`, used by vi.mock/importOriginal in tests
+      disallowTypeAnnotations: false,
+    },
+  ],
+  '@typescript-eslint/no-import-type-side-effects': 'error',
   'import/extensions': [
     'error',
     'never',
@@ -99,6 +110,19 @@ const baseRules = {
   ],
 };
 
+// Path aliases only (`@studio/*`, `@nemo/common/src/*`); relative imports, including siblings, are banned
+const relativeImportPattern = {
+  regex: '^\\.{1,2}(?:/|$)',
+  message: 'Use the @studio/* or @nemo/common/src/* alias instead of a relative import.',
+};
+
+const vitestImportPath = {
+  name: 'vitest',
+  message:
+    "Do not import runtime values from 'vitest'. Test APIs are exposed as globals via `globals: true` in the shared vitest config (vi, describe, it, expect, beforeEach, afterEach). Type-only imports (e.g. `import type { Mock } from 'vitest'`) are allowed.",
+  allowTypeImports: true,
+};
+
 const ignores = [
   `${pathPrefix}packages/studio/dist`,
   `${pathPrefix}packages/studio/public/vendor`,
@@ -144,6 +168,7 @@ export default [
     rules: {
       ...baseRules,
       'import/no-default-export': 'error',
+      'no-restricted-imports': ['error', { patterns: [relativeImportPattern] }],
     },
     languageOptions: baseLanguageOptions,
   },
@@ -161,18 +186,7 @@ export default [
       ...baseRules,
       'import/no-default-export': 'error',
       'no-console': 'error',
-      'no-restricted-imports': [
-        'warn',
-        {
-          patterns: [
-            {
-              group: ['../*', '../**'],
-              message:
-                'Use the absolute @studio/* alias instead of parent-directory relative paths.',
-            },
-          ],
-        },
-      ],
+      'no-restricted-imports': ['error', { patterns: [relativeImportPattern] }],
     },
     languageOptions: baseLanguageOptions,
   },
@@ -195,18 +209,16 @@ export default [
       ...testingLibrary.configs['flat/react'].rules,
       'vitest/consistent-test-it': ['error', { fn: 'it' }],
       'testing-library/no-debugging-utils': 'error',
+      'no-restricted-imports': ['error', { paths: [vitestImportPath] }],
+    },
+  },
+  // Re-merge the alias rule into common/studio tests, since the block above replaces no-restricted-imports
+  {
+    files: [`${pathPrefix}packages/{common,studio}/src/**/*.{test,spec}.{ts,tsx}`],
+    rules: {
       'no-restricted-imports': [
         'error',
-        {
-          paths: [
-            {
-              name: 'vitest',
-              message:
-                "Do not import runtime values from 'vitest'. Test APIs are exposed as globals via `globals: true` in the shared vitest config (vi, describe, it, expect, beforeEach, afterEach). Type-only imports (e.g. `import type { Mock } from 'vitest'`) are allowed.",
-              allowTypeImports: true,
-            },
-          ],
-        },
+        { paths: [vitestImportPath], patterns: [relativeImportPattern] },
       ],
     },
   },

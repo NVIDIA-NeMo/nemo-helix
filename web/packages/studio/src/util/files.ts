@@ -3,7 +3,7 @@
 
 import { ContentType } from '@nemo/common/src/components/CodeEditor/constants';
 import { logger } from '@nemo/common/src/utils/logger';
-import { FileSystemDirectory, FileSystemNode } from '@studio/components/FilesTable/utils';
+import type { FileSystemDirectory, FileSystemNode } from '@studio/components/FilesTable/utils';
 import { parseCSVTable } from '@studio/components/SafeSynthesizerFilesetPreview/util';
 import { getTextWithCount, parseCSV } from '@studio/util/strings';
 
@@ -36,14 +36,6 @@ export const getTextSizeInBytes = (text: string): number => {
  */
 export const getFileNameFromPath = (path: string) => {
   return path.match(/[^/\\]+$/)?.[0] ?? path;
-};
-
-/**
- * Returns the given fileName prepended with the given folder, if provided.
- */
-export const getFullFilePath = (filepath: string, folder?: string) => {
-  const fileName = getFileNameFromPath(filepath);
-  return folder ? `${folder}/${fileName}` : fileName;
 };
 
 /**

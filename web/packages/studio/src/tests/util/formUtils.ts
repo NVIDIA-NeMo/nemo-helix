@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { screen } from '@testing-library/react';
-import { UserEvent } from '@testing-library/user-event';
+import type { UserEvent } from '@testing-library/user-event';
 
 export const selectAutocompleteOption = async (props: {
   user: UserEvent;

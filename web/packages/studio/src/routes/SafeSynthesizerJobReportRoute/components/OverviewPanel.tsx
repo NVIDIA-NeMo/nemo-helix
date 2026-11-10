@@ -11,7 +11,7 @@ import { Button, Panel } from '@nvidia/foundations-react-core';
 import { SafeSynthesizerFilesetPreview } from '@studio/components/SafeSynthesizerFilesetPreview';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { isJobSuccessful } from '@studio/util/safeSynthesizer';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface OverviewPanelProps {
   jobId: string;

@@ -20,7 +20,7 @@ import {
   PRETRAINED_MODEL_OPTIONS,
 } from '@studio/routes/SafeSynthesizerNewRoute/constants';
 import {
-  SafeSynthesizerFormData,
+  type SafeSynthesizerFormData,
   getSafeSynthesizerFormDefaults,
 } from '@studio/routes/SafeSynthesizerNewRoute/schema';
 import { useFormContext } from 'react-hook-form';

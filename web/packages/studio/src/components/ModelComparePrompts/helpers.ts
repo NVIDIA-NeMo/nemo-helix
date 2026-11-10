@@ -4,6 +4,7 @@
 import { FileFormat, InputFileSchemaType } from '@nemo/common/src/types';
 import { extractUserFriendlyKeysFromRow, resolveKeyPath } from '@nemo/common/src/utils/file';
 import { detectFileStructure, validateFileFormat } from '@nemo/common/src/utils/fileValidation';
+import { parseJsonl } from '@nemo/common/src/utils/parseRecords';
 import { type FileSampleMethod, sampleIndices } from '@nemo/common/src/utils/sampleTextLines';
 import type { PromptRow } from '@studio/components/ModelComparePrompts/types';
 import type { DatasetInputFileResult } from '@studio/types/dataset';
@@ -53,11 +54,7 @@ export async function parseUploadedFile(
   let parsedRows: Record<string, unknown>[];
   try {
     if (validation.format === FileFormat.JSONL) {
-      parsedRows = text
-        .trim()
-        .split('\n')
-        .filter((line) => line.length > 0)
-        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      parsedRows = parseJsonl<Record<string, unknown>>(text);
     } else {
       const parsed: unknown = JSON.parse(text);
       parsedRows = Array.isArray(parsed)

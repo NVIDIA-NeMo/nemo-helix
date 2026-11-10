@@ -13,6 +13,7 @@ import {
   type HelixJobsListFilter,
 } from '@nemo/sdk/generated/platform/schema';
 import { JOB_SOURCE } from '@studio/components/dataViews/JobsDataView/constants';
+import { asRecord } from '@studio/util/guards';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
 
@@ -55,9 +56,6 @@ export interface InProgressCustomization {
   finetuningType?: FinetuningType;
   createdAt?: string;
 }
-
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
 
 const asString = (value: unknown): string | undefined =>
   typeof value === 'string' && value.length > 0 ? value : undefined;

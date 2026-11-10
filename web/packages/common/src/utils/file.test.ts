@@ -9,7 +9,7 @@ import {
   extractUserFriendlyKeysFromRow,
   isAcceptedFileType,
   resolveKeyPath,
-} from './file';
+} from '@nemo/common/src/utils/file';
 
 describe('triggerDownload', () => {
   // Mock DOM methods and properties

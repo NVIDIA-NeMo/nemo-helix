@@ -26,6 +26,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.inference_middleware import (
     InferenceMiddlewareError,
@@ -306,8 +307,7 @@ async def create_virtual_model(
 async def list_virtual_models(
     workspace: str,
     entity_client: EntityClientDep,
-    page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
-    page_size: int = Query(default=20, ge=1, le=200, description="Number of results per page."),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=200)),
     sort: str = Query(
         default="-created_at",
         description="Sort field.  Prefix with ``-`` for descending order.",
@@ -338,8 +338,8 @@ async def list_virtual_models(
         result = await entity_client.list(
             VirtualModel,
             workspace=filter_workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_operation=parsed_filter.operation,
         )
@@ -489,11 +489,11 @@ async def delete_virtual_model(
     this VirtualModel.  IGW's model cache is refreshed on its next polling cycle.
     """
     try:
-        await entity_client.delete(
+        _delete_target = await entity_client.get(VirtualModel, name=name, workspace=workspace)
+        await entity_client.delete_by_id(
             VirtualModel,
-            name=name,
-            workspace=workspace,
-            expected_db_version=expected_db_version,
+            _delete_target.id,
+            expected_db_version=_delete_target.db_version if expected_db_version is None else expected_db_version,
         )
     except EntityNotFoundError as exc:
         raise HTTPException(

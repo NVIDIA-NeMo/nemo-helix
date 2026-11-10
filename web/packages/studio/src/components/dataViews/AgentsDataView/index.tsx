@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
-import { Root as DataViewRoot } from '@nemo/common/src/components/DataView/internal';
+import type { Root as DataViewRoot } from '@nemo/common/src/components/DataView/internal';
 import {
   ROW_ACTIONS_COLUMN_SIZE,
   ROW_SELECTION_COLUMN_SIZE,
@@ -11,10 +11,12 @@ import {
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { type AgentConfig, getAgentModelNames } from '@nemo/common/src/utils/agents';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import { Trash } from '@nemo/icons/icons';
 import {
@@ -30,53 +32,15 @@ import {
 } from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import { Button, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
-import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
-import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
-import { MODEL_COMPARE_ENABLED } from '@studio/constants/environment';
+import { Button, Text } from '@nvidia/foundations-react-core';
+import { hasAgentConfig, NO_CONFIG_DEPLOY_MESSAGE } from '@studio/api/agents/hasAgentConfig';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getModelCompareRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { ComponentProps, FC, useEffect, useMemo, useState } from 'react';
+import { type ComponentProps, type FC, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 export type { Agent, AgentDeployment };
-
-/** A model entry in a `nemo-agents-spec-v1` config, under `models` or on a harness. */
-export interface AgentSpecModel {
-  provider?: string;
-  model?: string;
-  api_key_env?: string;
-  temperature?: number;
-  settings?: Record<string, unknown>;
-}
-
-export interface AgentConfig {
-  functions?: Record<string, { _type: string }>;
-  llms?: Record<
-    string,
-    {
-      _type: string;
-      model_name?: string;
-      api_key?: string;
-      temperature?: number;
-      base_url?: string;
-    }
-  >;
-  /** `nemo-agents-spec-v1` named models, e.g. `{ default: { model: 'nvidia-…' } }`. */
-  models?: Record<string, AgentSpecModel>;
-  harnesses?: Record<string, { kind?: string; model?: AgentSpecModel }>;
-  workflow?: {
-    _type: string;
-    tool_names?: string[];
-    llm_name?: string;
-    verbose?: boolean;
-    parse_agent_response_max_retries?: number;
-  };
-}
-
-export type AgentItem = Agent & { id: string };
-export type AgentEntity = AgentDeployment & { id: string };
 
 const TERMINAL_DEPLOYMENT_STATUSES = new Set(['running', 'failed', 'stopped', 'error']);
 
@@ -114,7 +78,7 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
   onCreateDeployment,
   onCloneAgent,
   onAgentsLoaded,
-  canTestModels = MODEL_COMPARE_ENABLED,
+  canTestModels = true,
 }) => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
@@ -164,7 +128,9 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
   const agentsData = agentsResponse?.data;
 
   useEffect(() => {
-    if (agentsData) onAgentsLoaded?.(agentsData);
+    if (agentsData) {
+      onAgentsLoaded?.(agentsData);
+    }
   }, [agentsData, onAgentsLoaded]);
 
   const totalCount = agentsResponse?.pagination?.total_results ?? agentsData?.length ?? 0;
@@ -211,9 +177,13 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
     for (let page = 1; page <= MAX_PAGES; page += 1) {
       const resp = await agentsListDeployments(workspace, { page, page_size: PAGE_SIZE });
       for (const d of resp.data ?? []) {
-        if (d.agent === agentName && d.name) names.push(d.name);
+        if (d.agent === agentName && d.name) {
+          names.push(d.name);
+        }
       }
-      if (page >= (resp.pagination?.total_pages ?? 1)) break;
+      if (page >= (resp.pagination?.total_pages ?? 1)) {
+        break;
+      }
     }
     return names;
   };
@@ -224,7 +194,9 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
       deploymentNames.map((name) =>
         deleteDeploymentMutation.mutateAsync({ workspace, name }).catch((err) => {
           // A deployment already gone (404) is fine; anything else aborts this agent.
-          if ((err as { response?: { status?: number } })?.response?.status === 404) return;
+          if ((err as { response?: { status?: number } })?.response?.status === 404) {
+            return;
+          }
           throw err;
         })
       )
@@ -233,13 +205,17 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
   };
 
   const handleDelete = async (): Promise<boolean> => {
-    if (!deleteState) return false;
+    if (!deleteState) {
+      return false;
+    }
     const agents = deleteState.kind === 'agent' ? [deleteState.item] : deleteState.items;
     const results = await Promise.allSettled(agents.map((a) => deleteAgentWithDeployments(a.name)));
     const failed = results.filter((r) => r.status === 'rejected').length;
 
     refreshAfterDelete();
-    if (failed < agents.length) dataViewState.rowSelection.set({});
+    if (failed < agents.length) {
+      dataViewState.rowSelection.set({});
+    }
 
     if (failed > 0) {
       toast.error(
@@ -296,36 +272,33 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
     rowActionsColumn({
       size: ROW_ACTIONS_COLUMN_SIZE,
       enableResizing: false,
-      rowActions: (row: AgentTableRow): DropdownEntry[] => [
-        {
-          children: 'Deploy',
-          disabled: !hasAgentConfig(row.config),
-          onSelect: () => onCreateDeployment?.(row.name),
-        },
-        ...(canTestModels
-          ? [
-              {
-                children: 'Test models',
-                onSelect: () => {
-                  const target = getModelCompareRoute(workspace);
-                  const model = row.models[0];
-                  const urn = model ? `${row.workspace}/${model}` : null;
-                  navigate(urn ? `${target}?model=${encodeURIComponent(urn)}` : target);
-                },
-              },
-            ]
-          : []),
-        {
-          children: 'Clone',
-          onSelect: () => onCloneAgent?.(row),
-        },
-        { kind: 'divider' as const },
-        {
-          children: 'Delete',
-          danger: true,
-          onSelect: () => setDeleteState({ kind: 'agent', item: row }),
-        },
-      ],
+      cell: ({ row: { original: row } }) => (
+        <QuickActionsMenuRoot
+          actions={[
+            {
+              label: 'Deploy',
+              disabled: !hasAgentConfig(row.config),
+              disabledReason: NO_CONFIG_DEPLOY_MESSAGE,
+              onSelect: () => onCreateDeployment?.(row.name),
+            },
+            ...(canTestModels
+              ? [
+                  {
+                    label: 'Test models',
+                    onSelect: () => {
+                      const target = getModelCompareRoute(workspace);
+                      const model = row.models[0];
+                      const urn = model ? `${row.workspace}/${model}` : null;
+                      navigate(urn ? `${target}?model=${encodeURIComponent(urn)}` : target);
+                    },
+                  },
+                ]
+              : []),
+            { label: 'Clone', onSelect: () => onCloneAgent?.(row) },
+          ]}
+          deleteAction={{ onSelect: () => setDeleteState({ kind: 'agent', item: row }) }}
+        />
+      ),
     }),
   ];
 

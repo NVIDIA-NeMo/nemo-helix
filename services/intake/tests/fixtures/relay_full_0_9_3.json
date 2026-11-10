@@ -1,0 +1,412 @@
+[
+  {
+    "resourceSpans": [
+      {
+        "resource": {
+          "attributes": [
+            {
+              "key": "telemetry.sdk.version",
+              "value": {
+                "stringValue": "0.32.1"
+              }
+            },
+            {
+              "key": "telemetry.sdk.language",
+              "value": {
+                "stringValue": "rust"
+              }
+            },
+            {
+              "key": "telemetry.sdk.name",
+              "value": {
+                "stringValue": "opentelemetry"
+              }
+            },
+            {
+              "key": "service.name",
+              "value": {
+                "stringValue": "unknown_service"
+              }
+            }
+          ]
+        },
+        "scopeSpans": [
+          {
+            "scope": {
+              "name": "opentelemetry"
+            },
+            "spans": [
+              {
+                "traceId": "AaGoXfzZd0CFYTuWDp8YVg==",
+                "spanId": "jLQ/kKwV9hQ=",
+                "parentSpanId": "vAn8S+nbx9w=",
+                "name": "recorded-model",
+                "kind": "SPAN_KIND_CLIENT",
+                "startTimeUnixNano": "1793826094307358517",
+                "endTimeUnixNano": "1793826094312756772",
+                "attributes": [
+                  {
+                    "key": "nemo_relay.uuid",
+                    "value": {
+                      "stringValue": "01a1a85d-fce2-7ec0-8cb4-3f90ac15f614"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.parent_uuid",
+                    "value": {
+                      "stringValue": "01a1a85d-fcde-7891-bc09-fc4be9dbc7dc"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.scope_type",
+                    "value": {
+                      "stringValue": "llm"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.handle_attributes",
+                    "value": {
+                      "stringValue": "[]"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.start.data.content",
+                    "value": {
+                      "stringValue": "{\"messages\":[{\"data\":{\"additional_kwargs\":{},\"content\":\"hello\",\"id\":null,\"name\":null,\"response_metadata\":{},\"type\":\"human\"},\"type\":\"human\"}],\"model\":\"recorded-model\"}"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.start.data.headers",
+                    "value": {
+                      "stringValue": "{\"x-dynamo-parent-session-id\":\"outer-agent\",\"x-dynamo-session-id\":\"nested-agent\"}"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.start.input.content",
+                    "value": {
+                      "stringValue": "{\"messages\":[{\"data\":{\"additional_kwargs\":{},\"content\":\"hello\",\"id\":null,\"name\":null,\"response_metadata\":{},\"type\":\"human\"},\"type\":\"human\"}],\"model\":\"recorded-model\"}"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.start.input.headers",
+                    "value": {
+                      "stringValue": "{\"x-dynamo-parent-session-id\":\"outer-agent\",\"x-dynamo-session-id\":\"nested-agent\"}"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.data.__nemo_relay_integrations_langchain_model_response",
+                    "value": {
+                      "stringValue": "{\"messages\":[{\"data\":{\"additional_kwargs\":{},\"content\":\"hello back\",\"id\":\"msg-1\",\"invalid_tool_calls\":[],\"name\":null,\"response_metadata\":{\"model_name\":\"recorded-model\",\"model_provider\":\"recorded-provider\"},\"tool_calls\":[],\"type\":\"ai\",\"usage_metadata\":{\"input_tokens\":11,\"output_tokens\":3,\"total_tokens\":14}},\"type\":\"ai\"}]}"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.metadata.otel.status_code",
+                    "value": {
+                      "stringValue": "OK"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.output.__nemo_relay_integrations_langchain_model_response",
+                    "value": {
+                      "stringValue": "{\"messages\":[{\"data\":{\"additional_kwargs\":{},\"content\":\"hello back\",\"id\":\"msg-1\",\"invalid_tool_calls\":[],\"name\":null,\"response_metadata\":{\"model_name\":\"recorded-model\",\"model_provider\":\"recorded-provider\"},\"tool_calls\":[],\"type\":\"ai\",\"usage_metadata\":{\"input_tokens\":11,\"output_tokens\":3,\"total_tokens\":14}},\"type\":\"ai\"}]}"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.model_name",
+                    "value": {
+                      "stringValue": "recorded-model"
+                    }
+                  }
+                ],
+                "status": {
+                  "code": "STATUS_CODE_OK"
+                },
+                "flags": 257
+              },
+              {
+                "traceId": "AaGoXfzZd0CFYTuWDp8YVg==",
+                "spanId": "pZSO2Ok3V/8=",
+                "parentSpanId": "vAn8S+nbx9w=",
+                "name": "lookup",
+                "kind": "SPAN_KIND_CLIENT",
+                "startTimeUnixNano": "1793826094317341229",
+                "endTimeUnixNano": "1793826094317693038",
+                "attributes": [
+                  {
+                    "key": "nemo_relay.uuid",
+                    "value": {
+                      "stringValue": "01a1a85d-fced-7713-a594-8ed8e93757ff"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.parent_uuid",
+                    "value": {
+                      "stringValue": "01a1a85d-fcde-7891-bc09-fc4be9dbc7dc"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.scope_type",
+                    "value": {
+                      "stringValue": "tool"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.handle_attributes",
+                    "value": {
+                      "stringValue": "[]"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.start.data.query",
+                    "value": {
+                      "stringValue": "hello"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.start.input.query",
+                    "value": {
+                      "stringValue": "hello"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.data.answer",
+                    "value": {
+                      "stringValue": "world"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.metadata.otel.status_code",
+                    "value": {
+                      "stringValue": "OK"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.output.answer",
+                    "value": {
+                      "stringValue": "world"
+                    }
+                  }
+                ],
+                "status": {
+                  "code": "STATUS_CODE_OK"
+                },
+                "flags": 257
+              },
+              {
+                "traceId": "AaGoXfzZd0CFYTuWDp8YVg==",
+                "spanId": "pZSO4kATSCI=",
+                "parentSpanId": "vAn8S+nbx9w=",
+                "name": "broken",
+                "kind": "SPAN_KIND_CLIENT",
+                "startTimeUnixNano": "1793826094317872113",
+                "endTimeUnixNano": "1793826094318068470",
+                "attributes": [
+                  {
+                    "key": "nemo_relay.uuid",
+                    "value": {
+                      "stringValue": "01a1a85d-fced-7713-a594-8ee240134822"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.parent_uuid",
+                    "value": {
+                      "stringValue": "01a1a85d-fcde-7891-bc09-fc4be9dbc7dc"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.scope_type",
+                    "value": {
+                      "stringValue": "tool"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.handle_attributes",
+                    "value": {
+                      "stringValue": "[]"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.metadata.error.type",
+                    "value": {
+                      "stringValue": "internal_error"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.metadata.exception.type",
+                    "value": {
+                      "stringValue": "ValueError"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.metadata.otel.status_code",
+                    "value": {
+                      "stringValue": "ERROR"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.metadata.otel.status_description",
+                    "value": {
+                      "stringValue": "internal error: ValueError: recorded failure"
+                    }
+                  },
+                  {
+                    "key": "error.type",
+                    "value": {
+                      "stringValue": "internal_error"
+                    }
+                  }
+                ],
+                "events": [
+                  {
+                    "timeUnixNano": "1793826094318068470",
+                    "name": "exception",
+                    "attributes": [
+                      {
+                        "key": "exception.type",
+                        "value": {
+                          "stringValue": "ValueError"
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "status": {
+                  "message": "internal error: ValueError: recorded failure",
+                  "code": "STATUS_CODE_ERROR"
+                },
+                "flags": 257
+              },
+              {
+                "traceId": "AaGoXfzZd0CFYTuWDp8YVg==",
+                "spanId": "vAn8S+nbx9w=",
+                "parentSpanId": "hWE7lg6fGFY=",
+                "name": "nested-agent",
+                "kind": "SPAN_KIND_INTERNAL",
+                "startTimeUnixNano": "1793826094302127332",
+                "endTimeUnixNano": "1793826094318301267",
+                "attributes": [
+                  {
+                    "key": "nemo_relay.uuid",
+                    "value": {
+                      "stringValue": "01a1a85d-fcde-7891-bc09-fc4be9dbc7dc"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.parent_uuid",
+                    "value": {
+                      "stringValue": "01a1a85d-fcd9-7740-8561-3b960e9f1856"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.scope_type",
+                    "value": {
+                      "stringValue": "agent"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.handle_attributes",
+                    "value": {
+                      "stringValue": "[]"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.start.data.text",
+                    "value": {
+                      "stringValue": "hello"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.start.input.text",
+                    "value": {
+                      "stringValue": "hello"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.data.answer",
+                    "value": {
+                      "stringValue": "hello back"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.output.answer",
+                    "value": {
+                      "stringValue": "hello back"
+                    }
+                  }
+                ],
+                "status": {},
+                "flags": 257
+              },
+              {
+                "traceId": "AaGoXfzZd0CFYTuWDp8YVg==",
+                "spanId": "hWE7lg6fGFY=",
+                "name": "outer-agent",
+                "kind": "SPAN_KIND_INTERNAL",
+                "startTimeUnixNano": "1793826094297873638",
+                "endTimeUnixNano": "1793826094318318613",
+                "attributes": [
+                  {
+                    "key": "nemo_relay.uuid",
+                    "value": {
+                      "stringValue": "01a1a85d-fcd9-7740-8561-3b960e9f1856"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.parent_uuid",
+                    "value": {
+                      "stringValue": "01a1a85d-fcd6-7861-ba86-6d84a20afa97"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.scope_type",
+                    "value": {
+                      "stringValue": "agent"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.handle_attributes",
+                    "value": {
+                      "stringValue": "[]"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.start.data.instruction",
+                    "value": {
+                      "stringValue": "hello"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.start.input.instruction",
+                    "value": {
+                      "stringValue": "hello"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.session.instance_id",
+                    "value": {
+                      "stringValue": "01a1a85d-fcd9-7740-8561-3b960e9f1856"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.data",
+                    "value": {
+                      "stringValue": "hello back"
+                    }
+                  },
+                  {
+                    "key": "nemo_relay.end.output",
+                    "value": {
+                      "stringValue": "hello back"
+                    }
+                  }
+                ],
+                "status": {},
+                "flags": 257
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

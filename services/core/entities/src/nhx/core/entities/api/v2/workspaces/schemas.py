@@ -6,6 +6,7 @@
 from datetime import datetime
 from typing import List, Optional
 
+from nhx.common.auth.principal_identifier import MAX_PRINCIPAL_ID_LENGTH
 from nhx.common.entities.constants import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,6 +39,7 @@ class WorkspaceMemberInput(BaseModel):
 
     principal: str = Field(
         ...,
+        max_length=MAX_PRINCIPAL_ID_LENGTH,
         description="The principal identifier (email, user ID, or group ID)",
         examples=["user@example.com", "user-123"],
     )

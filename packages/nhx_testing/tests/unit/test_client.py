@@ -558,7 +558,7 @@ class _ScriptedPostClient:
 def test_post_after_auth_warmup_retries_the_first_forbidden(monkeypatch: pytest.MonkeyPatch) -> None:
     from nhx.testing.client import _post_after_auth_warmup
 
-    monkeypatch.setattr("nhx.testing.client.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("nhx.testing.client.sleep", lambda _seconds: None)
     client = _ScriptedPostClient([403, 201])
 
     _post_after_auth_warmup(
@@ -574,7 +574,7 @@ def test_post_after_auth_warmup_retries_the_first_forbidden(monkeypatch: pytest.
 def test_post_after_auth_warmup_raises_when_the_denial_is_not_warmup(monkeypatch: pytest.MonkeyPatch) -> None:
     from nhx.testing.client import _post_after_auth_warmup
 
-    monkeypatch.setattr("nhx.testing.client.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("nhx.testing.client.sleep", lambda _seconds: None)
     client = _ScriptedPostClient([422])
 
     with pytest.raises(RuntimeError, match="422"):

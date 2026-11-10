@@ -87,7 +87,8 @@ def test_run_config_pii_only_uses_processed_training_df(tmp_path, monkeypatch):
     pd.testing.assert_frame_equal(result.synthetic_data, processed)
 
 
-def test_run_config_pii_only_disables_dataset_size_floor(tmp_path, monkeypatch):
+@pytest.mark.parametrize("disabled_checks", [None, ["token_budget", "dataset.size"]])
+def test_run_config_pii_only_disables_dataset_size_floor(tmp_path, monkeypatch, disabled_checks):
     task_main = import_task_main_without_heavy_runtime(monkeypatch)
 
     small_df = pd.DataFrame({"name": ["Alice", "Bob"], "age": [1, 2]})
@@ -95,7 +96,8 @@ def test_run_config_pii_only_disables_dataset_size_floor(tmp_path, monkeypatch):
 
     class FakeSafeSynthesizer:
         def __init__(self, config, save_path):
-            self.config = config
+            # Exercise the real sparse-config rebuild used by AutoConfigResolver.
+            self.config = config.with_config_patch({})
             self._total_start = None
             self._training_df = None
             self._workdir = None
@@ -104,6 +106,8 @@ def test_run_config_pii_only_disables_dataset_size_floor(tmp_path, monkeypatch):
             return self
 
         def process_data(self):
+            assert self.config.data.holdout == 0
+            assert self.config.data.max_holdout == 0
             observed_disabled_checks.extend(self.config.preflight.disabled_checks)
             self._training_df = small_df
 
@@ -122,17 +126,23 @@ def test_run_config_pii_only_disables_dataset_size_floor(tmp_path, monkeypatch):
         }
     )
 
+    assert "data" not in job_config.config.model_fields_set
+    assert "preflight" not in job_config.config.model_fields_set
+    if disabled_checks is not None:
+        job_config.config = job_config.config.with_config_patch({"preflight": {"disabled_checks": disabled_checks}})
+    original_config = job_config.config.model_dump()
+
     task_main.run_config(job_config, small_df, tmp_path)
 
-    assert observed_disabled_checks == ["dataset.size"]
-    assert job_config.config.preflight.disabled_checks == []
+    assert observed_disabled_checks == (disabled_checks if disabled_checks is not None else ["dataset.size"])
+    assert job_config.config.model_dump() == original_config
     assert len(small_df) < 200
 
 
 def test_run_from_env_reports_missing_config_path(monkeypatch):
     task_main = import_task_main_without_heavy_runtime(monkeypatch)
     monkeypatch.setattr(task_main, "initialize_observability", lambda: None)
-    monkeypatch.setattr(task_main, "get_platform_config", lambda: SimpleNamespace(get_service_url=lambda _name: None))
+    monkeypatch.setattr(task_main, "init_models_sync", lambda: {})
     monkeypatch.setattr(task_main, "_setup_classify_endpoint", lambda: None)
     monkeypatch.setattr(task_main, "download_from_fileset", lambda fileset_url: pd.DataFrame({"value": [1]}))
     monkeypatch.setenv("DATA_SOURCE", "default/data#input.csv")

@@ -13,6 +13,7 @@
 import logging
 import os
 import signal
+import time
 from pathlib import Path
 from typing import Any, Optional, cast
 
@@ -21,6 +22,7 @@ from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.training.errors.classifier import classify_output
+from nhx.customization_common.training.lora import merge_lora_adapter
 from nhx.customization_common.training.nccl import get_nccl_ib_env
 from nhx.customization_common.training.progress import JobsServiceProgressReporter
 from nhx.rl.app.jobs.training.schemas import (
@@ -39,23 +41,30 @@ from nhx.rl.tasks.training.backends.nemo_rl.checkpoints import (
     convert_dcp_to_huggingface,
     copy_hf_full_weights,
     copy_lora_adapter,
-    find_dcp_weights_root,
-    find_hf_full_weight_root,
-    find_lora_adapter_root,
-    is_peft_publication,
+    select_publication,
 )
+from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import compile_dpo_config
+from nhx.rl.tasks.training.backends.nemo_rl.grpo_config import compile_grpo_config, sandbox_host_provider_options
+from nhx.rl.tasks.training.backends.nemo_rl.ray_bootstrap import create_bootstrap_from_env
 from nhx.rl.tasks.training.chat_templates import apply_chat_template_to_checkpoint
 from nhx.rl.tasks.training.integrations import find_logger_mlflow_run_id
 from nhx.rl.tasks.training.protocol import LibraryConfig, TrainingBackend, TrainingPaused
-
-from .dpo_config import compile_dpo_config
-from .grpo_config import compile_grpo_config
-from .ray_bootstrap import create_bootstrap_from_env
 
 logger = logging.getLogger(__name__)
 
 # Path to driver scripts (relative to this module)
 _DRIVER_DIR = Path(__file__).parent
+
+# Upper bound on one sandbox sweep. A cancelled step pod gets a 30s termination grace period, and
+# the driver wait that follows can use all of it, so the sweep has to leave room.
+SANDBOX_REAP_TIMEOUT_S = 10.0
+
+# One budget for everything a signal triggers: both sandbox sweeps and the driver termination. It
+# stays under the default 30s grace so the process exits before the runtime sends SIGKILL.
+SHUTDOWN_GRACE_S = 25.0
+
+# ``terminate_driver`` can wait this long after it kills a driver that ignored the signal.
+_DRIVER_KILL_WAIT_S = 5.0
 
 
 class NemoRLBackend(TrainingBackend):
@@ -180,9 +189,23 @@ class NemoRLBackend(TrainingBackend):
         # Set up signal handler for cleanup — terminate the driver subprocess
         # explicitly so it doesn't become orphaned, then let SystemExit propagate
         # to trigger Ray cluster cleanup in the bootstrap's finally block.
+        shutdown_deadline: float | None = None
+
         def cleanup(signum, frame):
+            """Reap sandboxes, stop the driver, then exit; later signals take the default action."""
+            nonlocal shutdown_deadline
             logger.warning(f"Signal {signum} received, terminating driver and cleaning up")
-            bootstrap.terminate_driver(signum)
+            # Put the default actions back before any blocking work, so a second signal ends the
+            # process instead of re-entering this handler in the middle of the first teardown.
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            shutdown_deadline = time.monotonic() + SHUTDOWN_GRACE_S
+            # Reap before waiting on the driver, which can take the whole termination grace
+            # period. The sandbox belongs to a Ray actor that is killed without running its
+            # own teardown, and this process is the one the container runtime signals.
+            self._reap_job_sandboxes(customizer_config, deadline=shutdown_deadline)
+            driver_wait = max(1, int(shutdown_deadline - time.monotonic() - _DRIVER_KILL_WAIT_S))
+            bootstrap.terminate_driver(signum, timeout=driver_wait)
             raise SystemExit(signum)
 
         # Snapshot env vars and signal handlers so we can restore them after the
@@ -198,6 +221,9 @@ class NemoRLBackend(TrainingBackend):
 
             exit_code = bootstrap.run_with_driver(str(driver_path), driver_args)
         finally:
+            # Whatever ended the driver (a cancel, a crash, an ordinary exit), no sandbox this
+            # job created outlives it. A no-op when the Gym actor already tore its own down.
+            self._reap_job_sandboxes(customizer_config, deadline=shutdown_deadline)
             signal.signal(signal.SIGINT, previous_sigint)
             signal.signal(signal.SIGTERM, previous_sigterm)
             for key, original in saved_env.items():
@@ -216,6 +242,38 @@ class NemoRLBackend(TrainingBackend):
 
         # Return empty metrics (actual metrics are logged during training)
         return TrainingMetrics(total_steps=0, total_epochs=0)
+
+    def _reap_job_sandboxes(self, config: TrainingStepConfig, deadline: float | None = None) -> None:
+        """Destroy every OpenSandbox resource labelled with this job's id. Never raises.
+
+        ``deadline`` is a ``time.monotonic()`` instant. When set, the sweep gets only the time left
+        before it, and is skipped once that has run out.
+
+        Only GRPO jobs that run the Gym in a sandbox have anything to reap. Failures are logged
+        rather than raised: this runs from a signal handler and a ``finally``, and an error here
+        must not replace the training outcome or skip the rest of the teardown.
+        """
+        gym = getattr(config, "gym", None)
+        if gym is None or not getattr(gym, "sandboxed", False):
+            return
+        timeout_s = SANDBOX_REAP_TIMEOUT_S
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(f"Shutdown budget spent; not reaping sandboxes for job {self._job_ctx.job_id}")
+                return
+            timeout_s = min(timeout_s, remaining)
+        try:
+            from sandboxed_gym.job_reaper import reap_job_sandboxes
+
+            reap_job_sandboxes(
+                self._job_ctx.job_id,
+                host_provider="opensandbox",
+                host_provider_options=sandbox_host_provider_options(gym),
+                timeout_s=timeout_s,
+            )
+        except Exception:
+            logger.exception(f"Could not reap sandboxes for job {self._job_ctx.job_id}")
 
     def _get_driver_path(self, config: TrainingStepConfig) -> Path:
         """Get the appropriate driver script path based on training type.
@@ -291,40 +349,50 @@ class NemoRLBackend(TrainingBackend):
     ) -> CheckpointInfo:
         """Process NeMo RL checkpoint to standard output format.
 
-        LoRA copies the adapter tree. Full-weight HuggingFace safetensors are copied.
-        DCP is converted when ``.metadata`` is present.
+        ``lora`` copies the HF PEFT adapter. ``lora_merged`` folds that adapter into
+        the base model and writes a HuggingFace model. Full-weight safetensors are
+        copied. DCP is converted when ``.metadata`` is present.
         """
         logger.info("Processing created checkpoint")
-        requested_lora = customizer_config.training.finetuning_type == FinetuningType.LORA
-        adapter_root = find_lora_adapter_root(checkpoint_path) if requested_lora else None
-
-        if is_peft_publication(requested_lora=requested_lora, adapter_root=adapter_root):
-            if adapter_root is None:
-                searched = ", ".join(str(path) for path in LORA_ADAPTER_SEARCH_PATHS)
-                raise FileNotFoundError(
-                    "LoRA adapter publication was selected but adapter_config.json was not found "
-                    f"under {checkpoint_path} (searched {searched})."
-                )
-            logger.info("Copying LoRA adapter from %s to %s", adapter_root, output_path)
-            copy_lora_adapter(checkpoint_path, adapter_root, output_path)
+        kind, root = select_publication(checkpoint_path, customizer_config.training.finetuning_type)
+        if kind == "peft":
+            assert root is not None
+            logger.info("Copying LoRA adapter from %s to %s", root, output_path)
+            copy_lora_adapter(checkpoint_path, root, output_path)
             return CheckpointInfo(
                 path=str(output_path),
                 format=CheckpointFormat.HF_PEFT,
                 precision=customizer_config.model.precision,
             )
-        if requested_lora:
+        if customizer_config.training.finetuning_type == FinetuningType.LORA and kind != "merge":
             logger.warning(
                 "No adapter_config.json under %s (searched %s); falling back to full-weight publication",
                 checkpoint_path,
                 ", ".join(str(path) for path in LORA_ADAPTER_SEARCH_PATHS),
             )
 
-        hf_root = find_hf_full_weight_root(checkpoint_path)
-        if hf_root is not None:
-            logger.info("Copying HuggingFace full-weight checkpoint from %s to %s", hf_root, output_path)
-            copy_hf_full_weights(checkpoint_path, hf_root, output_path)
+        hf_checkpoint_path: Path | None = None
+        if kind == "merge":
+            if root is None:
+                searched = ", ".join(str(path) for path in LORA_ADAPTER_SEARCH_PATHS)
+                raise FileNotFoundError(
+                    "lora_merged publication requires adapter_config.json "
+                    f"under {checkpoint_path} (searched {searched})."
+                )
+            merge_lora_adapter(
+                root,
+                customizer_config.model.path,
+                output_path,
+                trust_remote_code=customizer_config.model.trust_remote_code,
+                has_vision_tower=customizer_config.model.has_vision_tower,
+            )
             hf_checkpoint_path = output_path
-        elif find_dcp_weights_root(checkpoint_path) is not None:
+        elif kind == "hf":
+            assert root is not None
+            logger.info("Copying HuggingFace full-weight checkpoint from %s to %s", root, output_path)
+            copy_hf_full_weights(checkpoint_path, root, output_path)
+            hf_checkpoint_path = output_path
+        elif kind == "dcp":
             hf_checkpoint_path = convert_dcp_to_huggingface(checkpoint_path, output_path)
         else:
             raise FileNotFoundError(

@@ -10,20 +10,19 @@ import {
 import { AssistantChatMessageContent } from '@nemo/common/src/components/AssistantChat/AssistantChatMessageContent';
 import { AssistantMessageContentTransition } from '@nemo/common/src/components/AssistantChat/AssistantMessageContentTransition';
 import {
-  ACTION_BUTTON_CLASS,
   CopyAction,
+  MESSAGE_ACTION_ICON_SIZE,
   MESSAGE_ACTIONS_CLASS,
+  MessageActionButton,
 } from '@nemo/common/src/components/AssistantChat/messageActions';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
 import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMessageError';
-import { Refresh } from '@nemo/icons/icons';
-import { Skeleton, Tooltip } from '@nvidia/foundations-react-core';
+import { Retry } from '@nemo/icons/icons';
+import { Flex, Skeleton, Stack, Tooltip } from '@nvidia/foundations-react-core';
 
-const ASSISTANT_MESSAGE_SURFACE_CLASS =
-  'w-full max-w-full rounded-lg border border-base border-l-4 bg-surface-base px-density-lg py-density-md shadow ring-1 ring-black/5 dark:ring-white/10';
-// A failed reply gets a red bar so it doesn't read as a success next to its error banner.
-const ASSISTANT_MESSAGE_BAR_CLASS = 'border-l-[var(--border-color-brand)]';
-const ASSISTANT_ERROR_BAR_CLASS = 'border-l-feedback-danger';
+// A failed reply keeps a red-barred surface so it doesn't read as a success next to its error banner.
+const ASSISTANT_ERROR_SURFACE_CLASS =
+  'w-full max-w-full rounded-lg border border-base border-l-4 border-l-feedback-danger bg-surface-base px-density-lg py-density-md shadow ring-1 ring-black/5 dark:ring-white/10';
 
 export const AssistantMessage = ({
   animateCompletion = false,
@@ -42,18 +41,20 @@ export const AssistantMessage = ({
   const completed = useAuiState((state) => state.message.status?.type === 'complete');
   const failed = useMessageError() !== undefined;
   const messageContent = (
-    <AssistantChatMessageContent
-      contentSurfaceClassName={`${ASSISTANT_MESSAGE_SURFACE_CLASS} ${failed ? ASSISTANT_ERROR_BAR_CLASS : ASSISTANT_MESSAGE_BAR_CLASS}`}
-      messageContentProps={messageContentProps}
-      toolCallPartComponent={toolCallPartComponent}
-    />
+    <Stack align="start" className="w-full min-w-0" gap="density-xs">
+      <AssistantChatMessageContent
+        contentSurfaceClassName={failed ? ASSISTANT_ERROR_SURFACE_CLASS : undefined}
+        messageContentProps={messageContentProps}
+        toolCallPartComponent={toolCallPartComponent}
+      />
+    </Stack>
   );
 
   return (
     <MessagePrimitive.Root
       data-testid="assistant-chat-message"
       data-testspeaker="assistant"
-      className="group/message flex w-full flex-col items-start gap-density-xs whitespace-normal"
+      className="group/message flex w-full flex-col items-start gap-density-xl whitespace-normal"
     >
       {hasRenderableContent && animateCompletion ? (
         <AssistantMessageContentTransition completed={completed} enabled={animateCompletion}>
@@ -75,22 +76,18 @@ export const AssistantMessage = ({
         </MessagePrimitive.If>
       ) : null}
       {!hideAssistantMessageActions ? (
-        <div
-          className="flex h-7 items-center pl-density-xs"
-          data-testid="assistant-chat-message-actions"
-        >
+        <Flex align="center" data-testid="assistant-chat-message-actions">
           <ActionBarPrimitive.Root hideWhenRunning className={MESSAGE_ACTIONS_CLASS}>
+            <CopyAction />
             <Tooltip slotContent="Regenerate response">
-              <ActionBarPrimitive.Reload
-                aria-label="Regenerate response"
-                className={ACTION_BUTTON_CLASS}
-              >
-                <Refresh size="16" />
+              <ActionBarPrimitive.Reload asChild>
+                <MessageActionButton aria-label="Regenerate response">
+                  <Retry size={MESSAGE_ACTION_ICON_SIZE} />
+                </MessageActionButton>
               </ActionBarPrimitive.Reload>
             </Tooltip>
-            <CopyAction />
           </ActionBarPrimitive.Root>
-        </div>
+        </Flex>
       ) : null}
     </MessagePrimitive.Root>
   );

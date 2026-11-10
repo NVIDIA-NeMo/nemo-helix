@@ -44,6 +44,7 @@ def _deletion_error_text(error: BaseException) -> str:
 
 _DELETION_LEASE_TIMEOUT_SECONDS = 60.0
 _DELETION_LEASE_RENEW_INTERVAL_SECONDS = 20.0
+_lease_renewal_sleep = async_sleep
 
 
 class WorkspaceJobCleanupError(RuntimeError):
@@ -303,7 +304,7 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         deadline = loop.time() + _DELETION_LEASE_TIMEOUT_SECONDS - _DELETION_LEASE_RENEW_INTERVAL_SECONDS
         try:
             while True:
-                await asyncio.sleep(_DELETION_LEASE_RENEW_INTERVAL_SECONDS)
+                await _lease_renewal_sleep(_DELETION_LEASE_RENEW_INTERVAL_SECONDS)
                 renewed = await asyncio.wait_for(
                     self._workspace_repository.renew_workspace_deletion_lease(
                         name=lease.workspace_name,
@@ -503,10 +504,10 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         try:
             files = AsyncFilesClient.from_client(self._client)
             filesets_response = await files.list_filesets(workspace=workspace.name)
-            filesets = [fileset.name async for fileset in filesets_response.items()]
+            filesets = [fileset.id async for fileset in filesets_response.items()]
             errors = await self._delete_resources(
                 filesets,
-                lambda name: files.delete_fileset(name=name, workspace=workspace.name),
+                lambda fileset_id: files.delete_fileset_by_id(fileset_id=fileset_id, workspace=workspace.name),
                 kind="fileset",
             )
             self._raise_if_resource_deletes_failed(workspace.name, errors, "fileset(s)")

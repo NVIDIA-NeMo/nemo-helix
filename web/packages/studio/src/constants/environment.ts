@@ -21,8 +21,6 @@ import { featureFlags } from '@studio/constants/featureFlags';
  */
 const getEnvVar = (envVarKey: string) => import.meta.env[envVarKey] as string;
 
-// Special keyword env vars
-export const IS_PROD = import.meta.env.PROD;
 export const BASE_URL = import.meta.env.BASE_URL as string;
 
 // Platform base URL — single endpoint for all microservices
@@ -34,7 +32,6 @@ export const AGENT_CONTAINER_DEPLOYMENTS_ENABLED =
   featureFlags.agentContainerDeploymentsEnabled !== false;
 export const AGENT_OPTIMIZATIONS_ENABLED = featureFlags.agentOptimizationsEnabled !== false;
 export const AGENT_OPTIMIZATION_FORM_ENABLED = featureFlags.agentOptimizationFormEnabled !== false;
-export const AGENT_OVERVIEW_ENABLED = featureFlags.agentOverviewEnabled !== false;
 export const ANONYMIZER_ENABLED = featureFlags.anonymizerEnabled !== false;
 export const ASSISTANT_STUDIO_ENABLED = featureFlags.assistantStudioEnabled !== false;
 export const CUSTOMIZER_ENABLED = featureFlags.customizerEnabled !== false;
@@ -50,7 +47,6 @@ export const FILESET_DETAILS_ENABLED = featureFlags.filesetDetailsEnabled !== fa
 export const INFERENCE_PROVIDER_ENABLED = featureFlags.inferenceProviderEnabled !== false;
 export const INTAKE_ENABLED = featureFlags.intakeEnabled !== false;
 export const MEMBERS_ENABLED = featureFlags.membersEnabled !== false;
-export const MODEL_COMPARE_ENABLED = featureFlags.modelCompareEnabled !== false;
 export const MODEL_DETAILS_ENABLED = featureFlags.modelDetailsEnabled !== false;
 export const MODEL_EVALUATION_FORM_ENABLED = featureFlags.modelEvaluationFormEnabled !== false;
 export const MONITOR_ENABLED = featureFlags.monitorEnabled !== false;

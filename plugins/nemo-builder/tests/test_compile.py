@@ -9,13 +9,14 @@ from nemo_builder_plugin.compile import WORK_MOUNT
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.execution import ExecutionBackend
 from nemo_builder_plugin.plan import BuildPlan
-from nemo_builder_plugin.schema import BuildOutput, BuildSet, BuildSpec, FileSetSource
+from nemo_builder_plugin.schema import BuildMount, BuildOutput, BuildSet, BuildSpec, FileSetSource
 from nemo_builder_plugin.steps import (
     REGISTRY_PASSWORD_ENV,
     REGISTRY_USERNAME_ENV,
     SIGNING_KEY_ENV,
     ContextSource,
     PushStepConfig,
+    SandboxMount,
     SuperviseStepConfig,
 )
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
@@ -218,6 +219,18 @@ class TestGrouping:
             ContextSource(fileset="default/fs-a", context_path="environment"),
             ContextSource(fileset="default/fs-a", context_path="tests"),
         ]
+
+    def test_a_mount_is_fetched_and_mounted_only_into_its_specs_sandbox(self) -> None:
+        mounted = _spec("mounted").model_copy(
+            update={"mounts": [BuildMount(source=FileSetSource(fileset="tools"), target="/opt/tool")]}
+        )
+        spec = _compile(_set(_spec("plain"), mounted), config=_config())
+        groups = SuperviseStepConfig.model_validate(spec.steps[1].config).groups
+        assert [g.mounts for g in groups] == [
+            [],
+            [SandboxMount(source=ContextSource(fileset="default/tools"), target="/opt/tool")],
+        ]
+        assert [s["fileset"] for s in spec.steps[0].config["sources"]] == ["default/fs-a", "default/tools"]
 
     def test_fetch_downloads_a_shared_source_once(self) -> None:
         spec = _compile(_set(_spec("main"), _spec("verifier")), config=_config())

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { logger } from '@nemo/common/src/utils/logger';
+import { readParquetObjects } from '@nemo/common/src/utils/parseRecords';
 import { customFetch } from '@nemo/sdk/generated/fetchers/platform';
 import {
   filesListFilesetFiles,
@@ -10,7 +11,6 @@ import {
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import { queryOptions } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
-import { parquetReadObjects } from 'hyparquet';
 
 /**
  * Upper bounds on what a template may actually pull.
@@ -103,8 +103,7 @@ export const readParquetRows = async (
   rowEnd: number
 ): Promise<Record<string, unknown>[]> => {
   try {
-    const file = await blob.arrayBuffer();
-    return await parquetReadObjects({ file, rowEnd });
+    return await readParquetObjects(blob, { rowEnd });
   } catch (error) {
     logger.error('Failed to decode Parquet dataset file', error);
     throw new Error(

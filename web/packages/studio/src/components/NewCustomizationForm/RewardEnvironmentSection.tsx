@@ -27,7 +27,7 @@ import {
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getHumanReadableFileSize } from '@studio/util/files';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
-import { FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
 
 const GymEnvironmentInfo: FC<{

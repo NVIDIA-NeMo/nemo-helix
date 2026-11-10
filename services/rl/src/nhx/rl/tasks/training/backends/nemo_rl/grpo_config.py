@@ -5,13 +5,18 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import yaml
+from nhx.customization_common.schemas.checkpoint import (
+    VLM_LORA_EXCLUDE_MODULES,
+    CheckpointTraits,
+    lora_uses_default_targets,
+    traits_from_step_model,
+)
 from nhx.customization_common.service.constants import (
     DEFAULT_ENVIRONMENT_PATH,
     SANDBOX_DATASET_PATH,
@@ -52,9 +57,9 @@ from nhx.rl.tasks.training.datasets.validation import DatasetValidator
 logger = logging.getLogger(__name__)
 
 
-def _build_lora_cfg(customizer_config: TrainingStepConfig) -> dict[str, Any]:
+def _build_lora_cfg(customizer_config: TrainingStepConfig, is_vlm: bool = False) -> dict[str, Any]:
     """Map TrainingStepConfig LoRA settings onto NeMo-RL DTensor lora_cfg."""
-    enabled = customizer_config.training.finetuning_type == FinetuningType.LORA
+    enabled = customizer_config.training.finetuning_type in (FinetuningType.LORA, FinetuningType.LORA_MERGED)
     lora = customizer_config.training.lora
     tp = customizer_config.parallelism.tensor_parallel_size
     # Triton is the faster LoRA path but only works at TP 1 (its kernel has no DTensor
@@ -64,6 +69,9 @@ def _build_lora_cfg(customizer_config: TrainingStepConfig) -> dict[str, Any]:
     use_triton = (tp == 1) if requested_triton is None else requested_triton
     target_modules = list(lora.target_modules) if lora and lora.target_modules else []
     exclude_modules = list(lora.exclude_modules) if lora and lora.exclude_modules else []
+    if is_vlm and enabled and lora_uses_default_targets(target_modules, exclude_modules):
+        target_modules = []
+        exclude_modules = list(VLM_LORA_EXCLUDE_MODULES)
     return {
         "enabled": enabled,
         "target_modules": target_modules,
@@ -84,6 +92,7 @@ def _build_automodel_cfg(
     customizer_config: TrainingStepConfig,
     grpo_hp: GRPOConfig,
     lora_cfg: dict[str, Any],
+    traits: CheckpointTraits | None = None,
 ) -> dict[str, Any]:
     """Map parallelism and backend settings onto NeMo-RL's policy.automodel_cfg.
 
@@ -125,6 +134,18 @@ def _build_automodel_cfg(
             **automodel_cfg.get("moe_parallelizer", {}),
             **grpo_hp.moe_parallelizer,
         }
+    if traits is not None and traits.has_vision_tower:
+        kwargs = dict(automodel_kwargs or {})
+        if "freeze_config" not in kwargs:
+            freeze_config = {
+                "freeze_embeddings": True,
+                "freeze_vision_tower": True,
+                "freeze_language_model": False,
+            }
+            if traits.has_audio_tower:
+                freeze_config["freeze_audio_tower"] = True
+            kwargs["freeze_config"] = freeze_config
+        automodel_kwargs = kwargs
     if automodel_kwargs:
         automodel_cfg["automodel_kwargs"] = dict(automodel_kwargs)
     if lora_cfg["enabled"]:
@@ -135,6 +156,7 @@ def _build_automodel_cfg(
 def _build_batching_config(
     customizer_config: TrainingStepConfig,
     grpo_hp: GRPOConfig,
+    is_vlm: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return the ``(dynamic_batching, sequence_packing)`` blocks for ``policy``.
 
@@ -163,6 +185,11 @@ def _build_batching_config(
     if strategy == BatchingStrategy.SEQUENCE_PACKING:
         # AutomodelPolicyWorker rejects packing under context parallelism. It also rejects it
         # for VLM and reward models, neither of which this backend compiles.
+        if is_vlm:
+            raise ValueError(
+                "batching_strategy='sequence_packing' is not supported for a vision-language model. "
+                "Use 'dynamic' or 'static'."
+            )
         if customizer_config.parallelism.context_parallel_size > 1:
             raise ValueError(
                 "batching_strategy='sequence_packing' is not supported with "
@@ -194,22 +221,6 @@ def _count_jsonl_rows(path: Path) -> int:
             if line.strip():
                 count += 1
     return count
-
-
-def _warn_if_v4_compatible_on_v5_checkpoint(model_path: str, v4_compatible: bool) -> None:
-    if not v4_compatible:
-        return
-    try:
-        version = json.loads((Path(model_path) / "config.json").read_text(encoding="utf-8")).get("transformers_version")
-        major = int(str(version).split(".")[0])
-    except (OSError, ValueError, AttributeError):
-        return
-    if major >= 5:
-        logger.warning(
-            "v4_compatible is enabled but the base checkpoint is transformers v%s; "
-            "set training.v4_compatible=false to keep the v5 config.json.",
-            major,
-        )
 
 
 # Formats whose wheels/ can be a complete closure. This is capability, not policy:
@@ -244,8 +255,8 @@ def _read_manifest_config_paths(environment_path: str | None) -> list[str]:
 def _resolve_gym_paths(
     customizer_config: TrainingStepConfig,
     workspace_dir: Path,
-) -> tuple[Path, Path, int, int]:
-    """Return train/val paths and sample counts for Gym JSONL.
+) -> tuple[Path, Path, int, int, int]:
+    """Return train/val paths, sample counts, and the widest prompt's image-part count.
 
     The returned paths feed ``cfg["data"]``, which NeMo-RL opens in the *training
     master* (``setup_response_data`` -> ``NemoGymDataset``). They must therefore stay
@@ -268,7 +279,13 @@ def _resolve_gym_paths(
         validator.validate_dataset(str(pvc_train))
         if pvc_val.is_file():
             validator.validate_dataset(str(pvc_val))
-        return pvc_train, pvc_val, _count_jsonl_rows(pvc_train), _count_jsonl_rows(pvc_val)
+        return (
+            pvc_train,
+            pvc_val,
+            _count_jsonl_rows(pvc_train),
+            _count_jsonl_rows(pvc_val),
+            validator.max_images_per_prompt,
+        )
 
     prepared = prepare_dataset(
         dataset_path=Path(customizer_config.dataset.path),
@@ -283,11 +300,16 @@ def _resolve_gym_paths(
         prepared.validation_file,
         prepared.train_samples,
         prepared.validation_samples,
+        validator.max_images_per_prompt,
     )
 
 
-def _sandbox_host_provider_options(gym: TrainingStepConfig.GymConfig) -> dict[str, Any]:
-    """``create.resource`` must match ``sandbox.resources``."""
+def sandbox_host_provider_options(gym: TrainingStepConfig.GymConfig) -> dict[str, Any]:
+    """OpenSandbox host-provider options for a GRPO job.
+
+    ``create.resource`` must match ``sandbox.resources``. The training task passes the same
+    options to the sandbox reaper, so it reaches the server the Gym actor created sandboxes on.
+    """
     connection: dict[str, Any] = {}
     if gym.sandbox_server_protocol:
         connection["protocol"] = gym.sandbox_server_protocol
@@ -305,6 +327,7 @@ def _build_nemo_gym_env_config(
     customizer_config: TrainingStepConfig,
     job_ctx: NHXJobContext,
 ) -> dict[str, Any]:
+    """Build the NeMo-Gym environment section of the GRPO config."""
     gym = customizer_config.gym
     if gym is None:
         raise ValueError("GRPO jobs require gym configuration on TrainingStepConfig")
@@ -392,7 +415,7 @@ def _build_nemo_gym_env_config(
             # Only emitted when the operator declared it, so an unset value leaves
             # NeMo-RL's own default in place rather than this compiler asserting one.
             # create.resource must match resources.
-            host_provider_options=_sandbox_host_provider_options(gym),
+            host_provider_options=sandbox_host_provider_options(gym),
             # Same rule: unset leaves the OpenSandbox server's default in place.
             resources=gym.sandbox_resources or None,
             environment_pvc_claim=mounts.environment_pvc_claim,
@@ -443,7 +466,8 @@ def compile_grpo_config(
     workspace_dir = Path(customizer_config.workspace_path)
     grpo_hp = customizer_config.training.grpo or GRPOConfig()
 
-    train_path, val_path, train_samples, val_samples = _resolve_gym_paths(customizer_config, workspace_dir)
+    train_path, val_path, train_samples, val_samples, max_images = _resolve_gym_paths(customizer_config, workspace_dir)
+    traits = traits_from_step_model(customizer_config.model)
 
     batch_size = customizer_config.batch.global_batch_size
     micro_batch_size = customizer_config.batch.micro_batch_size
@@ -568,8 +592,10 @@ def compile_grpo_config(
     model_path = customizer_config.model.path
     precision = _adapt_precision(customizer_config.model.precision)
     parallelism = customizer_config.parallelism
-    lora_cfg = _build_lora_cfg(customizer_config)
-    dynamic_batching_cfg, sequence_packing_cfg = _build_batching_config(customizer_config, grpo_hp)
+    lora_cfg = _build_lora_cfg(customizer_config, is_vlm=traits.has_vision_tower)
+    dynamic_batching_cfg, sequence_packing_cfg = _build_batching_config(
+        customizer_config, grpo_hp, is_vlm=traits.has_vision_tower
+    )
     chat_template = resolve_chat_template(
         model_path=model_path,
         model_name=customizer_config.model.name,
@@ -579,6 +605,7 @@ def compile_grpo_config(
 
     cfg["policy"] = {
         "model_name": model_path,
+        **({"is_vlm": True} if traits.has_vision_tower else {}),
         "tokenizer": _build_tokenizer_config(model_path, chat_template),
         "train_global_batch_size": batch_size,
         "train_micro_batch_size": micro_batch_size,
@@ -594,7 +621,7 @@ def compile_grpo_config(
         "offload_policy_before_refit": False,
         "offload_optimizer_for_refit": True,
         "max_grad_norm": grpo_hp.max_grad_norm,
-        "automodel_cfg": _build_automodel_cfg(customizer_config, grpo_hp, lora_cfg),
+        "automodel_cfg": _build_automodel_cfg(customizer_config, grpo_hp, lora_cfg, traits),
         "megatron_cfg": _megatron_cfg_disabled(precision, grpo_hp.max_grad_norm),
         "optimizer": _build_optimizer_config(customizer_config),
         "scheduler": _build_scheduler_config(customizer_config, max_steps),
@@ -642,8 +669,20 @@ def compile_grpo_config(
     }
     # Sibling of vllm_cfg, not nested in it: NeMo-RL forwards this dict straight to
     # the vLLM engine constructor, so it reaches options vllm_cfg does not name.
+    # A vision checkpoint starts from the image defaults. Caller keys override
+    # individual entries and cannot drop the image limit by replacing the dict.
+    vllm_kwargs: dict[str, Any] = {}
+    if traits.has_vision_tower:
+        vllm_kwargs = {
+            "skip_mm_profiling": True,
+            "limit_mm_per_prompt": {"image": max(max_images, 1)},
+            "mm_processor_cache_gb": 0,
+        }
     if grpo_hp.vllm_kwargs:
-        cfg["policy"]["generation"]["vllm_kwargs"] = dict(grpo_hp.vllm_kwargs)
+        vllm_kwargs.update(grpo_hp.vllm_kwargs)
+    if vllm_kwargs:
+        cfg["policy"]["generation"]["vllm_kwargs"] = vllm_kwargs
+
     if lora_cfg["enabled"]:
         cfg["policy"]["generation"]["lora_refit_mode"] = "merged"
 
@@ -653,15 +692,15 @@ def compile_grpo_config(
     cfg["policy"]["automodel_cfg"]["checkpoint"] = {
         "model_save_format": "safetensors",
         "save_consolidated": "every",
-        "v4_compatible": customizer_config.model.v4_compatible,
     }
-    _warn_if_v4_compatible_on_v5_checkpoint(model_path, customizer_config.model.v4_compatible)
 
     # NeMo-RL forwards these to the training model as HF config kwargs and to vLLM as
     # `hf_overrides`, so one setting covers both. The passthrough is copied rather than
     # aliased so a caller's dict is not mutated, and router_aux_loss_coef is layered on top
     # -- the job schema already rejects the case where both would write the same key.
     hf_config_overrides: dict[str, Any] = deepcopy(grpo_hp.hf_config_overrides or {})
+    if traits.declares_nextn_predict_layers and "num_nextn_predict_layers" not in hf_config_overrides:
+        hf_config_overrides["num_nextn_predict_layers"] = 0
     if grpo_hp.router_aux_loss_coef is not None:
         hf_config_overrides["router_aux_loss_coef"] = float(grpo_hp.router_aux_loss_coef)
     if hf_config_overrides:

@@ -3,11 +3,21 @@
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from typing import Any, Dict, List, Optional, Type, Union
 
-from nemoguardrails import LLMRails
 from nemoguardrails import RailsConfig as InternalSdkRailsConfig
+from nemoguardrails.rails.llm.config import _get_flow_name
+from nemoguardrails.rails.llm.options import (
+    ActivatedRail,
+    GenerationLog,
+    GenerationResponse,
+    RailsResult,
+    RailStatus,
+    RailType,
+)
 from nhx.guardrails.app.constants import NIM_CHAT, NIM_LLM
+from nhx.guardrails.app.services.rails.engine import RailsEngine, uses_iorails
 from nhx.guardrails.app.utils.context_utils import (
     get_request_default_headers_from_context,
     set_request_default_headers_into_context,
@@ -184,7 +194,7 @@ def get_main_model_from_rails_config(rails_config: RailsConfig) -> Model | None:
 
 
 def _run_generate_in_new_loop(
-    llm_rails: LLMRails,
+    llm_rails: RailsEngine,
     messages: Optional[List[dict]] = None,
     prompt: Optional[str] = None,
     options: Optional[Any] = None,
@@ -235,7 +245,7 @@ def _run_generate_in_new_loop(
 
 
 async def run_generate_async(
-    llm_rails: LLMRails,
+    llm_rails: RailsEngine,
     messages: Optional[List[dict]] = None,
     prompt: Optional[str] = None,
     options: Optional[Any] = None,
@@ -246,7 +256,14 @@ async def run_generate_async(
     asyncio.to_thread copies the current contextvars context before entering
     the thread, so context variables set prior to this call remain accessible
     inside the guardrails pipeline.
+
+    IORails engines run on the server loop instead: their HTTP clients and queue workers are bound to
+    the loop that first used them, and the registry shares one engine across requests, so the
+    per-request loop below would strand them and hang the next request.
     """
+    if uses_iorails(llm_rails):
+        return await llm_rails.generate_async(messages=messages, prompt=prompt, options=options, state=state)
+
     return await asyncio.to_thread(
         _run_generate_in_new_loop,
         llm_rails,
@@ -255,3 +272,130 @@ async def run_generate_async(
         options=options,
         state=state,
     )
+
+
+def _text_of_content_parts(parts: List[Any]) -> str:
+    """Join the text parts of OpenAI-style message content with newlines, dropping non-text parts."""
+    texts = []
+    for part in parts:
+        if isinstance(part, str):
+            texts.append(part)
+        elif isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+            texts.append(part["text"])
+    return "\n".join(texts)
+
+
+def _text_only_messages(messages: List[dict]) -> List[dict]:
+    """Copy of ``messages`` with list-valued ``content`` flattened to its text.
+
+    IORails reads a message only when ``content`` is a string, so content parts would look empty and the
+    rail would be skipped, passing the request unchecked. Parts a text rail cannot inspect (images,
+    audio, files) are dropped; a message made only of those is therefore not checked.
+    """
+    return [
+        {**message, "content": _text_of_content_parts(message["content"])}
+        if isinstance(message.get("content"), list)
+        else message
+        for message in messages
+    ]
+
+
+def _last_text_by_role(messages: List[dict], role: str) -> str:
+    """Text of the last message with ``role``, or "" when there is none or it is not plain text."""
+    for message in reversed(messages):
+        if message.get("role") == role:
+            content = message.get("content")
+            return content if isinstance(content, str) else ""
+    return ""
+
+
+def _rails_result_to_generation_response(
+    result: RailsResult,
+    flows_by_type: Dict[RailType, List[str]],
+) -> GenerationResponse:
+    """Shape an IORails verdict like the LLMRails generation result the checks response is built from.
+
+    The checks response reads ``log.activated_rails`` to report each rail's status, with ``stop``
+    meaning blocked. IORails reports only the verdict and which rail blocked, so every rail that ran is
+    reported as passed, up to the one that blocked. The blocking rail is reported even when it is not
+    one of the config's flows (a rail that failed to run), so a block is never reported as success.
+    """
+    activated_rails: List[ActivatedRail] = []
+    blocked = result.status is RailStatus.BLOCKED
+    for rail_type, flows in flows_by_type.items():
+        for flow in flows:
+            # IORails names the blocking rail without the ``$model=...`` / ``(...)`` suffix its flow
+            # carries, using this same helper.
+            is_blocking_rail = blocked and _get_flow_name(flow) == result.rail
+            activated_rails.append(ActivatedRail(type=rail_type.value, name=flow, stop=is_blocking_rail))
+            if is_blocking_rail:
+                return GenerationResponse(
+                    response=[{"role": "assistant", "content": result.content}],
+                    log=GenerationLog(activated_rails=activated_rails),
+                )
+
+    if blocked:
+        rail_type = next(iter(flows_by_type), RailType.OUTPUT)
+        activated_rails.append(ActivatedRail(type=rail_type.value, name=result.rail or rail_type.value, stop=True))
+
+    return GenerationResponse(
+        response=[{"role": "assistant", "content": result.content}],
+        log=GenerationLog(activated_rails=activated_rails),
+    )
+
+
+async def run_check_async(
+    rails_engine: RailsEngine,
+    messages: List[dict],
+    rail_types: List[str],
+    state: Optional[Any] = None,
+) -> GenerationResponse:
+    """Run the config's rails over ``messages`` as supplied, without generating a response.
+
+    A check audits text the caller already has, so the main model must not run: IORails'
+    ``generate_async`` always calls it and then judges its reply, which would report a verdict on text
+    nobody supplied. IORails' ``check_async`` judges the supplied messages. Runs on the server loop for
+    the same reason as :func:`run_generate_async`.
+
+    Only IORails needs this. LLMRails treats a trailing assistant message as the text to check and
+    skips generation, so its checks stay on :func:`run_generate_async`.
+    """
+    if not uses_iorails(rails_engine):
+        raise ValueError("run_check_async only serves IORails engines; use run_generate_async for LLMRails")
+    if state is not None:
+        raise ValueError("state is not supported by IORails; it is a stateless input/output rails engine")
+
+    messages = _text_only_messages(messages)
+    rails_config = rails_engine.config
+    flows_by_type: Dict[RailType, List[str]] = {}
+    for rail_type in (RailType.INPUT, RailType.OUTPUT):
+        if rail_type.value not in rail_types:
+            continue
+        flows = list(getattr(rails_config.rails, rail_type.value).flows or [])
+        # A rail that has nothing to read does not run, so it is not reported as having passed.
+        checked_role = "user" if rail_type is RailType.INPUT else "assistant"
+        if flows and _last_text_by_role(messages, checked_role):
+            flows_by_type[rail_type] = flows
+
+    result = await rails_engine.check_async(messages, rail_types=list(flows_by_type))
+    return _rails_result_to_generation_response(result, flows_by_type)
+
+
+def stream_rails_async(
+    llm_rails: RailsEngine,
+    prompt: Optional[str] = None,
+    messages: Optional[List[dict]] = None,
+    options: Optional[Any] = None,
+    state: Optional[Any] = None,
+) -> AsyncIterator[Union[str, dict]]:
+    """Stream a guarded response from either rails engine.
+
+    IORails is stateless and only honors ``options``, so ``state`` would be silently dropped. Reject
+    it instead, as the non-streaming IORails path does.
+    """
+    if uses_iorails(llm_rails):
+        if state is not None:
+            raise ValueError("state is not supported by IORails; it is a stateless input/output rails engine")
+        return llm_rails.stream_async(prompt=prompt, messages=messages, options=options)
+
+    return llm_rails.stream_async(prompt=prompt, messages=messages, options=options, state=state)

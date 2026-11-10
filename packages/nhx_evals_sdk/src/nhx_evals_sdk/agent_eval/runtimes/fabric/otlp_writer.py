@@ -109,6 +109,11 @@ def fold_exports(directory: Path) -> int:
     return folded
 
 
+def _consume(export: Path) -> None:
+    """Remove one export; a seam so tests can make removal fail without patching ``Path``."""
+    export.unlink(missing_ok=True)
+
+
 def _drop(exports: list[Path]) -> None:
     """Consume the exports a fold has read, best-effort.
 
@@ -123,7 +128,7 @@ def _drop(exports: list[Path]) -> None:
     """
     for export in exports:
         try:
-            export.unlink(missing_ok=True)
+            _consume(export)
         except OSError as error:
             logger.warning(
                 "Could not consume the OTLP export at %s (%s); folding this directory again would duplicate its spans.",

@@ -2,19 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { WithFilterOperators } from '@nemo/common/src/api/filterOperators';
+import { DEFAULT_NAMESPACE } from '@nemo/common/src/constants';
+import { DEFAULT_PAGE_SIZE, QUERY_PREFIX_ENTITY_STORE } from '@nemo/common/src/constants/api';
+import { isBaseModel } from '@nemo/common/src/utils/models';
 import { modelsListModels } from '@nemo/sdk/generated/platform/models';
 import {
-  ModelEntity,
-  ModelEntityFilter,
+  type ModelEntity,
+  type ModelEntityFilter,
   ModelEntitySortField,
-  ModelEntitysPage,
+  type ModelEntitysPage,
 } from '@nemo/sdk/generated/platform/schema';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
-
-import { DEFAULT_NAMESPACE } from '../../constants';
-import { DEFAULT_PAGE_SIZE, QUERY_PREFIX_ENTITY_STORE } from '../../constants/api';
-import { isBaseModel } from '../../utils/models';
 
 const SORT_COMPARATORS: Record<ModelEntitySortField, (a: ModelEntity, b: ModelEntity) => number> = {
   [ModelEntitySortField.name]: (a, b) => (a.name ?? '').localeCompare(b.name ?? ''),

@@ -77,11 +77,11 @@ def kubernetes_client_mock():
     custom_v1_mock = MagicMock()
     with (
         patch(
-            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.client.CoreV1Api",
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.CoreV1Api",
             return_value=core_v1_mock,
         ),
         patch(
-            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.client.CustomObjectsApi",
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.CustomObjectsApi",
             return_value=custom_v1_mock,
         ),
     ):
@@ -152,7 +152,7 @@ def volcano_job(
 ) -> Generator[VolcanoJobBackend, None, None]:
     """Create a namespaced custom object (Volcano Job) instance with mocked clients."""
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -555,7 +555,7 @@ def test_volcano_job_profile_environment_applied(
         **{**volcano_execution_profile_config.model_dump(), "env": {"HOME": "/tmp"}}
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -928,7 +928,7 @@ def test_networking_annotations_disabled_via_config(
     )
 
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,

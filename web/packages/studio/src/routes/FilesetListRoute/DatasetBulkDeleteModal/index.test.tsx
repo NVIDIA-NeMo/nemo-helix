@@ -41,32 +41,6 @@ describe('DatasetBulkDeleteModal', () => {
       expect(triggerButton).toBeInTheDocument();
     });
 
-    it('displays correct dataset count in singular form', () => {
-      render(
-        <DatasetBulkDeleteModal
-          selectedDatasets={[bulkDeleteTestDatasets[0]]}
-          onConfirmSuccess={mockOnConfirmSuccess}
-          onSettled={mockOnSettled}
-        />
-      );
-
-      const triggerButton = screen.getByTestId('bulk-delete-modal-trigger-button');
-      expect(triggerButton).toBeInTheDocument();
-    });
-
-    it('displays correct dataset count in plural form', () => {
-      render(
-        <DatasetBulkDeleteModal
-          selectedDatasets={bulkDeleteTestDatasets}
-          onConfirmSuccess={mockOnConfirmSuccess}
-          onSettled={mockOnSettled}
-        />
-      );
-
-      const triggerButton = screen.getByTestId('bulk-delete-modal-trigger-button');
-      expect(triggerButton).toBeInTheDocument();
-    });
-
     it('renders with empty dataset array', () => {
       render(
         <DatasetBulkDeleteModal

@@ -60,9 +60,9 @@ nemo-fabric-adapters-remote-agent==0.6.0
 nemo-fabric==0.6.0
 nemo-relay==0.11.0
 nemo-safe-synthesizer==0.1.15
-nemo-sandboxed-gym==0.1.0
+nemo-sandboxed-gym==0.2.0
 nemo-switchyard==0.3.0
-nemoguardrails==0.23.0
+nemoguardrails==0.24.1
 ngcsdk==4.37.0
 nooa==0.0.10
 numpy==2.5.4

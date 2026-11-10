@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { jsonParseLinter } from '@codemirror/lang-json';
-import { Diagnostic, linter } from '@codemirror/lint';
-import { EditorView } from '@codemirror/view';
-import { findNodeRanges, NodeRange } from '@nemo/common/src/components/CodeEditor/util/editor';
+import { type Diagnostic, linter } from '@codemirror/lint';
+import type { EditorView } from '@codemirror/view';
+import { findNodeRanges, type NodeRange } from '@nemo/common/src/components/CodeEditor/util/editor';
 
 // JSONL linter
 export const jsonlLinter = linter((view: EditorView) => {

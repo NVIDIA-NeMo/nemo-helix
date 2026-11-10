@@ -5,8 +5,11 @@ import asyncio
 
 import pytest
 from nhx.common.config import Configuration
+from nhx.common.config.base import DatabaseConfig
 from nhx.core.auth.config import AuthServiceConfig
 from nhx.core.auth.service import AuthService
+from nhx.core.entities.app.repository import get_async_engine, initialize_async_engine
+from nhx.core.entities.config import EntitiesConfig
 
 
 @pytest.fixture(autouse=True)
@@ -114,3 +117,14 @@ async def test_on_shutdown_cancels_a_policy_refresh_that_does_not_finish(monkeyp
     await service.on_shutdown()
 
     assert outcomes == ["cancelled"]
+
+
+@pytest.mark.asyncio
+async def test_on_shutdown_disposes_the_entities_engine_account_resolution_created(tmp_path):
+    Configuration.set_override(AuthServiceConfig(enabled=False))
+    await initialize_async_engine(EntitiesConfig(database_config=DatabaseConfig(url=f"sqlite:///{tmp_path}/e.db")))
+
+    await AuthService().on_shutdown()
+
+    with pytest.raises(RuntimeError, match="not initialized"):
+        await get_async_engine()

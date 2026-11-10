@@ -130,7 +130,7 @@ constraints = [
     { name = "sqlfluff", specifier = ">=4.2.2" },
     { name = "sqlparse", specifier = ">=0.6.0,<0.7" },
     { name = "starlette", specifier = ">=1.3.1" },
-    { name = "urllib3", specifier = ">=2.7.0" },
+    { name = "urllib3", specifier = ">=2.8.0" },
     { name = "uv", specifier = ">=0.13.4" },
     { name = "wandb", specifier = ">=0.30.0" },
 ]
@@ -145,7 +145,7 @@ overrides = [
     { name = "cryptography", specifier = ">=50.0.0,<51" },
     { name = "datasets", specifier = ">=5.1.0,<6" },
     { name = "diskcache", marker = "sys_platform == 'never'" },
-    { name = "fastmcp", specifier = ">=3.2.0" },
+    { name = "fastmcp", specifier = ">=3.4.4" },
     { name = "fschat", marker = "sys_platform == 'never'" },
     { name = "gitpython", specifier = ">=3.1.62" },
     { name = "grpcio", specifier = ">=1.71.0" },
@@ -163,7 +163,7 @@ overrides = [
     { name = "setuptools", specifier = ">=78.1.1" },
     { name = "simpleeval", specifier = ">=1.0.5" },
     { name = "ujson", specifier = ">=5.12.0" },
-    { name = "urllib3", specifier = ">=2.7.0" },
+    { name = "urllib3", specifier = ">=2.8.0" },
     { name = "wandb", specifier = ">=0.30.0" },
     { name = "wheel", specifier = ">=0.46.2" },
     { name = "xgrammar", specifier = ">=0.1.32" },
@@ -492,11 +492,11 @@ wheels = [
 
 [[package]]
 name = "argcomplete"
-version = "3.7.1"
+version = "3.7.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d1/40/8a867253c9b8afa296ac22e426a157eebbe41dcac66f7f50bbbef931afed/argcomplete-3.7.1.tar.gz", hash = "sha256:6926a3a70ae70dce1f3dfb5cf1fc984278cd163e78ec18ad2ed7fa4fabd8f281", size = 74457, upload-time = "2026-08-04T15:03:59.399Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/87/6f/5a73f04007ca950701765949209f068da628bd11f9c2da287278ce91e0ee/argcomplete-3.7.2.tar.gz", hash = "sha256:aad8b69a0b9969edb62db0d1752354c0d50717b10e0cbb00e2a958381b9fc6b9", size = 74473, upload-time = "2026-08-06T04:53:21.662Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/56/1935d0692656f0bfc0c2336d4ce599dcf166abe4ec786ce1abdaefa19589/argcomplete-3.7.1-py3-none-any.whl", hash = "sha256:0bed095030f295599b1018a622a53ea22f4f253e134b87be396b51e59ee00954", size = 43301, upload-time = "2026-08-04T15:03:58.02Z" },
+    { url = "https://files.pythonhosted.org/packages/46/bd/551ee6af426af84ca33e02622be722925c196608e9127d731ef17c47f06e/argcomplete-3.7.2-py3-none-any.whl", hash = "sha256:6029205678bdd9c1c728a155f5f9ecf5812393f969eef58807641a2bc2aa5b19", size = 43294, upload-time = "2026-08-06T04:53:20.246Z" },
 ]
 
 [[package]]
@@ -5064,7 +5064,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.3.5" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
-    { name = "nemoguardrails", extras = ["tracing"], specifier = "==0.23.0" },
+    { name = "nemoguardrails", extras = ["tracing"], specifier = "==0.24.1" },
     { name = "pyyaml", marker = "extra == 'bench'", specifier = ">=6.0" },
 ]
 provides-extras = ["bench"]
@@ -5161,6 +5161,7 @@ all = [
     { name = "nhx-evals-sdk", extra = ["harbor"] },
     { name = "nhx-guardrails" },
     { name = "nhx-rl" },
+    { name = "nhx-sandbox" },
     { name = "nhx-unsloth" },
     { name = "nooa" },
     { name = "numpy" },
@@ -5678,6 +5679,7 @@ nemo-evals-plugin = [
     { name = "nemo-builder-plugin" },
     { name = "nemo-helix-plugin" },
     { name = "nhx-evals-sdk", extra = ["harbor"] },
+    { name = "nhx-sandbox" },
     { name = "opentelemetry-proto" },
     { name = "pydantic" },
     { name = "typer" },
@@ -5838,6 +5840,9 @@ nhx-evals-sdk = [
     { name = "rouge-score" },
     { name = "sacrebleu" },
 ]
+nhx-sandbox = [
+    { name = "pydantic" },
+]
 platform-seed-service = [
     { name = "nemo-garak-plugin" },
     { name = "nhx-auth" },
@@ -5894,6 +5899,7 @@ plugins = [
     { name = "nhx-customization-common" },
     { name = "nhx-evals-sdk", extra = ["harbor"] },
     { name = "nhx-rl" },
+    { name = "nhx-sandbox" },
     { name = "nhx-unsloth" },
     { name = "nooa" },
     { name = "numpy" },
@@ -6008,6 +6014,7 @@ services = [
     { name = "nhx-evals-sdk", extra = ["harbor"] },
     { name = "nhx-guardrails" },
     { name = "nhx-rl" },
+    { name = "nhx-sandbox" },
     { name = "nhx-unsloth" },
     { name = "nooa" },
     { name = "numpy" },
@@ -6594,11 +6601,11 @@ requires-dist = [
     { name = "nemo-switchyard", marker = "extra == 'nemo-switchyard'", specifier = "==0.3.0" },
     { name = "nemo-switchyard", marker = "extra == 'plugins'", specifier = "==0.3.0" },
     { name = "nemo-switchyard", marker = "extra == 'services'", specifier = "==0.3.0" },
-    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'all'", specifier = "==0.23.0" },
-    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'guardrails-service'", specifier = "==0.23.0" },
-    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'nemo-guardrails-plugin'", specifier = "==0.23.0" },
-    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'plugins'", specifier = "==0.23.0" },
-    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'services'", specifier = "==0.23.0" },
+    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'all'", specifier = "==0.24.1" },
+    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'guardrails-service'", specifier = "==0.24.1" },
+    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'nemo-guardrails-plugin'", specifier = "==0.24.1" },
+    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'plugins'", specifier = "==0.24.1" },
+    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'services'", specifier = "==0.24.1" },
     { name = "ngcsdk", marker = "extra == 'all'", specifier = ">=4.9.10" },
     { name = "ngcsdk", marker = "extra == 'core-service'", specifier = ">=4.9.10" },
     { name = "ngcsdk", marker = "extra == 'files-service'", specifier = ">=4.9.10" },
@@ -6660,6 +6667,10 @@ requires-dist = [
     { name = "nhx-rl", marker = "extra == 'nemo-rl-plugin'", editable = "services/rl" },
     { name = "nhx-rl", marker = "extra == 'plugins'", editable = "services/rl" },
     { name = "nhx-rl", marker = "extra == 'services'", editable = "services/rl" },
+    { name = "nhx-sandbox", marker = "extra == 'all'", editable = "packages/nhx_sandbox" },
+    { name = "nhx-sandbox", marker = "extra == 'nemo-evals-plugin'", editable = "packages/nhx_sandbox" },
+    { name = "nhx-sandbox", marker = "extra == 'plugins'", editable = "packages/nhx_sandbox" },
+    { name = "nhx-sandbox", marker = "extra == 'services'", editable = "packages/nhx_sandbox" },
     { name = "nhx-unsloth", marker = "extra == 'all'", editable = "services/unsloth" },
     { name = "nhx-unsloth", marker = "extra == 'nemo-unsloth-plugin'", editable = "services/unsloth" },
     { name = "nhx-unsloth", marker = "extra == 'plugins'", editable = "services/unsloth" },
@@ -6844,6 +6855,7 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'nhx-common'", specifier = ">=2.10.3" },
     { name = "pydantic", marker = "extra == 'nhx-customization-common'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nhx-evals-sdk'", specifier = ">=2.10.6" },
+    { name = "pydantic", marker = "extra == 'nhx-sandbox'", specifier = ">=2.10.0" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.12.0" },
@@ -7062,7 +7074,7 @@ requires-dist = [
     { name = "yara-python", marker = "extra == 'guardrails-service'", specifier = "==4.5.4" },
     { name = "yara-python", marker = "extra == 'services'", specifier = "==4.5.4" },
 ]
-provides-extras = ["all", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "garak-service", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-agents-plugin-mini-swe-agent", "nemo-agents-plugin-nooa", "nemo-anonymizer-plugin", "nemo-automodel-plugin", "nemo-builder-plugin", "nemo-compass-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evals-plugin", "nemo-garak-plugin", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "nhx-evals-sdk", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
+provides-extras = ["all", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "garak-service", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-agents-plugin-mini-swe-agent", "nemo-agents-plugin-nooa", "nemo-anonymizer-plugin", "nemo-automodel-plugin", "nemo-builder-plugin", "nemo-compass-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evals-plugin", "nemo-garak-plugin", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "nhx-evals-sdk", "nhx-sandbox", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
 
 [[package]]
 name = "nemo-helix-ext"
@@ -7689,20 +7701,20 @@ dev = [
 
 [[package]]
 name = "nemoguardrails"
-version = "0.23.0"
+version = "0.24.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "aiohttp-retry" },
     { name = "dataclasses-json" },
-    { name = "fastembed", marker = "python_full_version < '3.14'" },
+    { name = "fastembed" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "lark" },
     { name = "nest-asyncio" },
+    { name = "numpy" },
     { name = "onnxruntime" },
-    { name = "pandas" },
     { name = "prompt-toolkit" },
     { name = "protobuf" },
     { name = "pydantic" },
@@ -7712,7 +7724,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/73/ec/02ea37d5bea9178b192540fb9dfcfc1d7a080fb20a6465612b888e896306/nemoguardrails-0.23.0-py3-none-any.whl", hash = "sha256:91106c9718748fd760e873dd872915c6ed15d15c80300d538c8a1f4024eff92a", size = 891405, upload-time = "2026-07-01T16:24:54.322Z" },
+    { url = "https://files.pythonhosted.org/packages/59/5c/e44694350e4867436bc897365b8e0d6383b9e990fa18b56fb4bf9fe35939/nemoguardrails-0.24.1-py3-none-any.whl", hash = "sha256:4fcfc9d9456cdcbcc939fbd4ba884e9fc89b7f200bd9d8ed77836298bf31680f", size = 1060573, upload-time = "2026-09-16T17:17:10.794Z" },
 ]
 
 [package.optional-dependencies]
@@ -8553,7 +8565,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastmcp", specifier = ">=3.2.0" },
+    { name = "fastmcp", specifier = ">=3.4.4" },
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "nhx-entities", editable = "services/core/entities" },
 ]
@@ -8876,7 +8888,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.2" },
     { name = "langchain-nvidia-ai-endpoints", specifier = ">=1.4.3,<2.0.0" },
     { name = "langchain-openai", specifier = ">=1.3.5,<2.0.0" },
-    { name = "nemoguardrails", extras = ["tracing"], specifier = "==0.23.0" },
+    { name = "nemoguardrails", extras = ["tracing"], specifier = "==0.24.1" },
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "openai", specifier = ">=1.61.0" },
     { name = "opentelemetry-distro", specifier = ">=0.64b0" },
@@ -13540,11 +13552,11 @@ wheels = [
 
 [[package]]
 name = "urllib3"
-version = "2.7.0"
+version = "2.8.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/53/0c/06f8b233b8fd13b9e5ee11424ef85419ba0d8ba0b3138bf360be2ff56953/urllib3-2.7.0.tar.gz", hash = "sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c", size = 433602, upload-time = "2026-05-07T16:13:18.596Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e3/05/b17359e1cefb4f909b5e40b1b90a496d987258916dbbf88e842c729f510e/urllib3-2.8.0.tar.gz", hash = "sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63", size = 458972, upload-time = "2026-09-15T19:29:36.253Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl", hash = "sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897", size = 131087, upload-time = "2026-05-07T16:13:17.151Z" },
+    { url = "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl", hash = "sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3", size = 135717, upload-time = "2026-09-15T19:29:34.577Z" },
 ]
 
 [[package]]

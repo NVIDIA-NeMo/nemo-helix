@@ -3,7 +3,7 @@
 
 import { InfoCircle } from '@nemo/icons/icons';
 import { Flex, Text } from '@nvidia/foundations-react-core';
-import { FC, ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 
 interface ListItemProps {
   value: string;

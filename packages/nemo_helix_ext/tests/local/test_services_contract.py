@@ -228,7 +228,7 @@ def test_contract_embedded_and_daemon_child_both_delegate_models_to_platform_bui
         patch("nemo_helix_ext.local.services.process.write_descriptor"),
         patch("nemo_helix_ext.local.services.process.remove_descriptor"),
         patch("nemo_helix_ext.local.services.serve_embedded_app"),
-        patch("nemo_helix_ext.local.services.os.close"),
+        patch("nemo_helix_ext.local.services.close"),
     ):
         services.run_services(service_config(services.ServiceMode.DAEMON), _mode="daemon")
 

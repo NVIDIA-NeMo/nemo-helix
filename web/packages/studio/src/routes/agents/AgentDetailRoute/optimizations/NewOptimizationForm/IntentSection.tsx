@@ -9,7 +9,7 @@ import {
   intentById,
   OPTIMIZATION_INTENTS,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { useFormContext } from 'react-hook-form';
 
 /**

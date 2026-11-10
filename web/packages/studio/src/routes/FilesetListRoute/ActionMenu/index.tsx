@@ -3,22 +3,16 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { logger } from '@nemo/common/src/utils/logger';
-import { MoreVert } from '@nemo/icons/icons';
 import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
-import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
-import {
-  Button,
-  DropdownContent,
-  DropdownItem,
-  DropdownRoot,
-  DropdownTrigger,
-} from '@nvidia/foundations-react-core';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
-import { FC, useState } from 'react';
+import { CopyFilesetModal } from '@studio/components/filesets/CopyFilesetModal';
+import { type FC, useState } from 'react';
 
 interface ActionMenuProps {
   dataset: FilesetOutput;
@@ -33,7 +27,7 @@ export const ActionMenu: FC<ActionMenuProps> = ({
   onDatasetUpdated,
   onDatasetDeleted,
 }) => {
-  const [modalOpen, setModalOpen] = useState<'edit' | 'delete' | undefined>(undefined);
+  const [modalOpen, setModalOpen] = useState<'edit' | 'copy' | 'delete' | undefined>(undefined);
   const { mutateAsync: deleteDataset } = useFilesDeleteFileset({
     mutation: {
       onSuccess: (_data, variables) => {
@@ -72,20 +66,15 @@ export const ActionMenu: FC<ActionMenuProps> = ({
 
   return (
     <>
-      <DropdownRoot>
-        <DropdownTrigger asChild showChevron={false} data-testid="quick-actions-menu-trigger">
-          <Button kind="tertiary" aria-label="Open dataset actions menu">
-            <MoreVert />
-          </Button>
-        </DropdownTrigger>
-        <DropdownContent align="end" className="w-[180px]">
-          <DropdownItem onClick={() => onNavigateToDetails(dataset)}>View</DropdownItem>
-          <DropdownItem onClick={() => setModalOpen('edit')}>Edit</DropdownItem>
-          <DropdownItem onClick={() => setModalOpen('delete')} danger>
-            Delete
-          </DropdownItem>
-        </DropdownContent>
-      </DropdownRoot>
+      <QuickActionsMenuRoot
+        ariaLabel="Open dataset actions menu"
+        actions={[
+          { label: 'View', onSelect: () => onNavigateToDetails(dataset) },
+          { label: 'Edit', onSelect: () => setModalOpen('edit') },
+          { label: 'Copy to New Fileset', onSelect: () => setModalOpen('copy') },
+        ]}
+        deleteAction={{ onSelect: () => setModalOpen('delete') }}
+      />
 
       {/* Edit Modal */}
       {modalOpen === 'edit' && (
@@ -95,6 +84,14 @@ export const ActionMenu: FC<ActionMenuProps> = ({
           onClose={handleModalClose}
           onDatasetUpdated={handleDatasetUpdated}
           open={modalOpen === 'edit'}
+        />
+      )}
+
+      {modalOpen === 'copy' && (
+        <CopyFilesetModal
+          source={dataset}
+          onClose={handleModalClose}
+          onCopied={onNavigateToDetails}
         />
       )}
 

@@ -53,6 +53,7 @@ from nhx.guardrails.app.utils.context_utils import (
     set_x_model_response_headers_into_context,
 )
 from nhx.guardrails.app.utils.platform_request_headers import headers_for_model_endpoint
+from openai import AsyncOpenAI, OpenAI
 from pydantic import SecretStr
 from pydantic_core import PydanticUndefined
 
@@ -133,11 +134,6 @@ class ChatNIM(FlexibleChatModelBase, BaseRequest):
         This function is called at request time for a completion request for the `main` model, before invoking the model.
         It determines the API key and base URL, and instantiates the OpenAI client to use for inference.
         """
-        try:
-            import openai
-        except ImportError:
-            raise ImportError("Could not import openai python package. Please install it with `pip install openai`.")
-
         # check if api_key was passed directly
         if values.get("api_key") is not None:
             raise ValueError(
@@ -185,8 +181,8 @@ class ChatNIM(FlexibleChatModelBase, BaseRequest):
         if not client_params["api_key"]:
             client_params["api_key"] = "EMPTY"
 
-        values["client"] = openai.OpenAI(**client_params)
-        values["async_client"] = openai.AsyncOpenAI(**client_params)
+        values["client"] = OpenAI(**client_params)
+        values["async_client"] = AsyncOpenAI(**client_params)
 
         return values
 

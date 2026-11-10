@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { INFERENCE_MAX_DEPTH, inferJsonSchema } from './inference';
+import { INFERENCE_MAX_DEPTH, inferJsonSchema } from '@nemo/common/src/utils/jsonSchema/inference';
 
 const SCHEMA = 'https://json-schema.org/draft/2020-12/schema';
 

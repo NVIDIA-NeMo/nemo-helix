@@ -10,8 +10,12 @@
  * its affiliates is strictly prohibited.
  */
 
-import { booleanFlag, FlagDescriptor, previewFlag } from '@studio/constants/featureFlags/utils';
-import { z } from 'zod';
+import {
+  booleanFlag,
+  type FlagDescriptor,
+  previewFlag,
+} from '@studio/constants/featureFlags/utils';
+import type { z } from 'zod';
 
 // ============================================================================
 // FEATURE FLAGS CONFIGURATION
@@ -67,7 +71,6 @@ export const flagDefinitions = {
   ),
   agentOptimizationsEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', true),
   agentOptimizationFormEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATION_FORM_ENABLED', true),
-  agentOverviewEnabled: booleanFlag('VITE_FF_AGENT_OVERVIEW_ENABLED', true),
   anonymizerEnabled: booleanFlag('VITE_FF_ANONYMIZER_ENABLED', true),
   assistantStudioEnabled: previewFlag('VITE_FF_ASSISTANT_STUDIO_ENABLED', false),
   customizerEnabled: previewFlag('VITE_FF_CUSTOMIZER_ENABLED', true),
@@ -81,12 +84,10 @@ export const flagDefinitions = {
   inferenceProviderEnabled: previewFlag('VITE_FF_INFERENCE_PROVIDER_ENABLED', true),
   intakeEnabled: previewFlag('VITE_FF_INTAKE_ENABLED', true),
   membersEnabled: previewFlag('VITE_FF_MEMBERS_ENABLED', true),
-  modelCompareEnabled: previewFlag('VITE_FF_MODEL_COMPARE_ENABLED'),
   modelDetailsEnabled: previewFlag('VITE_FF_MODEL_DETAILS_ENABLED'),
   modelEvaluationFormEnabled: previewFlag('VITE_FF_MODEL_EVALUATION_FORM_ENABLED', true),
   monitorEnabled: previewFlag('VITE_FF_MONITOR_ENABLED'),
   optimizerEnabled: previewFlag('VITE_FF_OPTIMIZER_ENABLED', true),
-  traceGraphEnabled: booleanFlag('VITE_FF_TRACE_GRAPH_ENABLED', true),
 } as const;
 
 // --- Types ---

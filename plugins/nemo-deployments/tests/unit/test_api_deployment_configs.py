@@ -42,6 +42,8 @@ def test_create_deployment_config_201(client: TestClient, mock_entity_client: As
     )
     assert resp.status_code == 201
     assert resp.json()["name"] == "cfg1"
+    # The runtime default of 64Mi is too small for multi-process workloads.
+    assert mock_entity_client.create.await_args.args[0].shm_size == "8Gi"
 
 
 def test_create_deployment_config_accepts_camel_case_restart_policy(
@@ -57,6 +59,7 @@ def test_create_deployment_config_accepts_camel_case_restart_policy(
             "containers": [{"name": "main", "image": "nginx"}],
             "restartPolicy": "Never",
             "backoffLimit": 3,
+            "shmSize": "32Gi",
         },
     )
 
@@ -64,6 +67,7 @@ def test_create_deployment_config_accepts_camel_case_restart_policy(
     created_config = mock_entity_client.create.await_args.args[0]
     assert created_config.restart_policy == "Never"
     assert created_config.backoff_limit == 3
+    assert created_config.shm_size == "32Gi"
 
 
 def test_create_deployment_config_accepts_snake_case_top_level_fields(
@@ -83,6 +87,7 @@ def test_create_deployment_config_accepts_snake_case_top_level_fields(
             "restart_policy": "Never",
             "backoff_limit": 3,
             "drift_recovery": {"max_attempts": 2},
+            "shm_size": "16Gi",
             "backend_config": {"k8s": {"namespace": "dep-ns", "serviceAccount": "dep-sa"}},
             "workload_identity": {
                 "enabled": True,
@@ -101,6 +106,7 @@ def test_create_deployment_config_accepts_snake_case_top_level_fields(
     assert created_config.restart_policy == "Never"
     assert created_config.backoff_limit == 3
     assert created_config.drift_recovery.max_attempts == 2
+    assert created_config.shm_size == "16Gi"
     assert created_config.backend_config.k8s is not None
     assert created_config.backend_config.k8s.namespace == "dep-ns"
     assert created_config.backend_config.k8s.service_account == "dep-sa"
@@ -108,17 +114,33 @@ def test_create_deployment_config_accepts_snake_case_top_level_fields(
     assert created_config.workload_identity.token_expiration_seconds == 900
 
 
-def test_create_deployment_config_rejects_zero_backoff_limit(
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"backoff_limit": 0},
+        {"shmSize": "32GB"},
+        {"shm_size": "lots"},
+        {"shmSize": " 32Gi "},
+        {"shmSize": "0"},
+        {"shmSize": "0.5"},
+    ],
+    ids=[
+        "zero-backoff-limit",
+        "shm-size-unit",
+        "shm-size-text",
+        "shm-size-spaces",
+        "shm-size-zero",
+        "shm-size-sub-byte",
+    ],
+)
+def test_create_deployment_config_rejects_invalid_fields(
     client: TestClient,
     mock_entity_client: AsyncMock,
+    invalid: dict,
 ) -> None:
     resp = client.post(
         "/apis/deployments/v2/workspaces/default/deployment-configs",
-        json={
-            "name": "cfg1",
-            "containers": [{"name": "main", "image": "nginx"}],
-            "backoff_limit": 0,
-        },
+        json={"name": "cfg1", "containers": [{"name": "main", "image": "nginx"}], **invalid},
     )
 
     assert resp.status_code == 422
@@ -148,10 +170,10 @@ def test_delete_deployment_config_204(client: TestClient, mock_entity_client: As
     mock_entity_client.list.return_value = list_response([])
     resp = client.delete("/apis/deployments/v2/workspaces/default/deployment-configs/cfg1")
     assert resp.status_code == 204
-    mock_entity_client.delete.assert_awaited_once_with(
+    mock_entity_client.delete_by_id.assert_awaited_once_with(
         configs_module.DeploymentConfig,
-        name="cfg1",
-        workspace="default",
+        mock_entity_client.get.return_value.id,
+        expected_db_version=mock_entity_client.get.return_value.db_version,
     )
 
 
@@ -160,12 +182,12 @@ def test_delete_deployment_config_409_when_referenced(client: TestClient, mock_e
     resp = client.delete("/apis/deployments/v2/workspaces/default/deployment-configs/cfg1")
     assert resp.status_code == 409
     assert "referenced" in resp.json()["detail"].lower()
-    mock_entity_client.delete.assert_not_awaited()
+    mock_entity_client.delete_by_id.assert_not_awaited()
 
 
 def test_delete_deployment_config_409_when_changed(client: TestClient, mock_entity_client: AsyncMock) -> None:
     mock_entity_client.list.return_value = list_response([])
-    mock_entity_client.delete.side_effect = NemoEntityConflictError("changed")
+    mock_entity_client.delete_by_id.side_effect = NemoEntityConflictError("changed")
     resp = client.delete("/apis/deployments/v2/workspaces/default/deployment-configs/cfg1")
     assert resp.status_code == 409
 

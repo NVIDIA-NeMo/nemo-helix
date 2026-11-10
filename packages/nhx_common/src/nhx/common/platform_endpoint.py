@@ -16,6 +16,7 @@ from types import MappingProxyType
 from typing import Literal, TypedDict
 
 import httpx
+from httpx import AsyncClient, AsyncHTTPTransport, Client, HTTPTransport
 from httpx._types import TimeoutTypes
 from nemo_helix_plugin.client.tls import client_verify_from_env
 from nemo_helix_plugin.config import platform_service_name_from_url_env_var
@@ -98,11 +99,11 @@ def _sync_http_transport(
 ) -> httpx.HTTPTransport:
     if uds is None:
         if limits is None:
-            return httpx.HTTPTransport(verify=verify)
-        return httpx.HTTPTransport(verify=verify, limits=limits)
+            return HTTPTransport(verify=verify)
+        return HTTPTransport(verify=verify, limits=limits)
     if limits is None:
-        return httpx.HTTPTransport(uds=uds, verify=verify)
-    return httpx.HTTPTransport(uds=uds, verify=verify, limits=limits)
+        return HTTPTransport(uds=uds, verify=verify)
+    return HTTPTransport(uds=uds, verify=verify, limits=limits)
 
 
 def _async_http_transport(
@@ -113,11 +114,11 @@ def _async_http_transport(
 ) -> httpx.AsyncHTTPTransport:
     if uds is None:
         if limits is None:
-            return httpx.AsyncHTTPTransport(verify=verify)
-        return httpx.AsyncHTTPTransport(verify=verify, limits=limits)
+            return AsyncHTTPTransport(verify=verify)
+        return AsyncHTTPTransport(verify=verify, limits=limits)
     if limits is None:
-        return httpx.AsyncHTTPTransport(uds=uds, verify=verify)
-    return httpx.AsyncHTTPTransport(uds=uds, verify=verify, limits=limits)
+        return AsyncHTTPTransport(uds=uds, verify=verify)
+    return AsyncHTTPTransport(uds=uds, verify=verify, limits=limits)
 
 
 def _sync_default_sdk_client(
@@ -233,15 +234,15 @@ class HelixEndpoint:
                 raise ValueError("UDS endpoint is missing a socket path")
             transport = _sync_http_transport(uds=str(self.socket_path), verify=client_verify)
             if timeout is None:
-                return httpx.Client(transport=transport, follow_redirects=True)
-            return httpx.Client(transport=transport, follow_redirects=True, timeout=timeout)
+                return Client(transport=transport, follow_redirects=True)
+            return Client(transport=transport, follow_redirects=True, timeout=timeout)
         if timeout is None:
             if client_verify is True:
-                return httpx.Client(follow_redirects=True)
-            return httpx.Client(follow_redirects=True, verify=client_verify)
+                return Client(follow_redirects=True)
+            return Client(follow_redirects=True, verify=client_verify)
         if client_verify is True:
-            return httpx.Client(follow_redirects=True, timeout=timeout)
-        return httpx.Client(follow_redirects=True, timeout=timeout, verify=client_verify)
+            return Client(follow_redirects=True, timeout=timeout)
+        return Client(follow_redirects=True, timeout=timeout, verify=client_verify)
 
     def async_http_client(self, *, timeout: TimeoutTypes | None = None) -> httpx.AsyncClient:
         client_verify = client_verify_from_env()
@@ -250,15 +251,15 @@ class HelixEndpoint:
                 raise ValueError("UDS endpoint is missing a socket path")
             transport = _async_http_transport(uds=str(self.socket_path), verify=client_verify)
             if timeout is None:
-                return httpx.AsyncClient(transport=transport, follow_redirects=True)
-            return httpx.AsyncClient(transport=transport, follow_redirects=True, timeout=timeout)
+                return AsyncClient(transport=transport, follow_redirects=True)
+            return AsyncClient(transport=transport, follow_redirects=True, timeout=timeout)
         if timeout is None:
             if client_verify is True:
-                return httpx.AsyncClient(follow_redirects=True)
-            return httpx.AsyncClient(follow_redirects=True, verify=client_verify)
+                return AsyncClient(follow_redirects=True)
+            return AsyncClient(follow_redirects=True, verify=client_verify)
         if client_verify is True:
-            return httpx.AsyncClient(follow_redirects=True, timeout=timeout)
-        return httpx.AsyncClient(follow_redirects=True, timeout=timeout, verify=client_verify)
+            return AsyncClient(follow_redirects=True, timeout=timeout)
+        return AsyncClient(follow_redirects=True, timeout=timeout, verify=client_verify)
 
     def sync_sdk_http_client(
         self,

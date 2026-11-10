@@ -5,7 +5,7 @@ import {
   encodeColumnFiltersParam,
   FILTERS_SEARCH_PARAM,
 } from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
-import { getPartsFromNamedEntityRef, NamedEntityRef } from '@nemo/common/src/namedEntity';
+import { getPartsFromNamedEntityRef, type NamedEntityRef } from '@nemo/common/src/namedEntity';
 import { AGENT_NAME_FILTER_ID } from '@studio/components/IntakeLists/traceFilterIds';
 import {
   ANONYMIZER_ENABLED,
@@ -20,7 +20,6 @@ import {
   INFERENCE_PROVIDER_ENABLED,
   INTAKE_ENABLED,
   MEMBERS_ENABLED,
-  MODEL_COMPARE_ENABLED,
   MODEL_DETAILS_ENABLED,
   MODEL_EVALUATION_FORM_ENABLED,
   OPTIMIZER_ENABLED,
@@ -28,11 +27,12 @@ import {
 } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { ACTION_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs';
+import type { NewAgentTab } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
-import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
+import type { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import type { GuardrailChecksSubTab } from '@studio/routes/guardrails/GuardrailChecksTab/constants';
 import type { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
-import { createSearchParams, generatePath, RouteObject } from 'react-router';
+import { createSearchParams, generatePath, type RouteObject } from 'react-router';
 
 const gateRoutes = (enabled: boolean, routes: RouteObject | RouteObject[]) => {
   if (!enabled) return [];
@@ -83,9 +83,6 @@ export const gateMembersRoutes = (routes: RouteObject | RouteObject[]) =>
 
 export const gateAssistantStudioRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(ASSISTANT_STUDIO_ENABLED, routes);
-
-export const gateModelCompareRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(MODEL_COMPARE_ENABLED, routes);
 
 export const gateOptimizerRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(OPTIMIZER_ENABLED, routes);
@@ -650,8 +647,14 @@ export const getModelChatRoute = (model: NamedEntityRef) => {
   return generatePath(ROUTES.models.modelChat, { modelNamespace, modelName });
 };
 
-export const getAgentsListRoute = (workspace: string) => {
-  return generatePath(ROUTES.workspace.agentsList, { workspace });
+export const REGISTER_AGENT_SEARCH_PARAM = 'register';
+
+export const getAgentsListRoute = (workspace: string, options?: { register?: NewAgentTab }) => {
+  const base = generatePath(ROUTES.workspace.agentsList, { workspace });
+  if (options?.register) {
+    return `${base}?${new URLSearchParams({ [REGISTER_AGENT_SEARCH_PARAM]: options.register })}`;
+  }
+  return base;
 };
 
 export const getAssistantChatRoute = (workspace: string) => {

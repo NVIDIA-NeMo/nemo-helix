@@ -303,26 +303,23 @@ class ModelProviderService:
         """Delete a provider and the models only it serves, unless it is a deployment's provider."""
         logger.debug("Deleting model provider", extra={"workspace": request.workspace, "provider_name": request.name})
 
+        try:
+            provider = await self.entity_client.get(
+                ModelProviderEntity,
+                workspace=request.workspace,
+                name=request.name,
+            )
+        except EntityNotFoundError:
+            logger.warning(
+                "Model provider not found for deletion",
+                extra={"workspace": request.workspace, "provider_name": request.name},
+            )
+            return False
+
         for attempt in range(1, _DELETE_PROVIDER_ATTEMPTS + 1):
             try:
-                provider = await self.entity_client.get(
-                    ModelProviderEntity,
-                    workspace=request.workspace,
-                    name=request.name,
-                )
-            except EntityNotFoundError:
-                logger.warning(
-                    "Model provider not found for deletion",
-                    extra={"workspace": request.workspace, "provider_name": request.name},
-                )
-                return False
-
-            try:
-                await self.entity_client.delete(
-                    ModelProviderEntity,
-                    provider.name,
-                    workspace=request.workspace,
-                    expected_db_version=provider.db_version,
+                await self.entity_client.delete_by_id(
+                    ModelProviderEntity, provider.id, expected_db_version=provider.db_version
                 )
                 break
             except EntityConflictError:
@@ -332,6 +329,10 @@ class ModelProviderService:
                     "Model provider changed while deleting, retrying",
                     extra={"workspace": request.workspace, "provider_name": request.name, "attempt": attempt},
                 )
+                try:
+                    provider = await self.entity_client.get_by_id(ModelProviderEntity, provider.id)
+                except EntityNotFoundError:
+                    return False
 
         provider_id = f"{request.workspace}/{request.name}"
         await self._cleanup_model_entities(provider, provider_id)
@@ -371,12 +372,7 @@ class ModelProviderService:
                             extra={"provider_id": provider_id, "model_entity_id": served_model.model_entity_id},
                         )
                 else:
-                    await self.entity_client.delete(
-                        Model,
-                        model.name,
-                        workspace=model_workspace,
-                        expected_db_version=model.db_version,
-                    )
+                    await self.entity_client.delete_by_id(Model, model.id, expected_db_version=model.db_version)
                     logger.info(
                         "Deleted model entity with no remaining providers",
                         extra={"provider_id": provider_id, "model_entity_id": served_model.model_entity_id},

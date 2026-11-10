@@ -102,5 +102,5 @@ def native_linux_host(monkeypatch):
         if key.startswith("NHX_") and (key.endswith("_URL") or key == "NHX_LOOPBACK_ADDRESS"):
             monkeypatch.delenv(key)
     # Only OS/context facts are supplied. Never stub endpoint resolution or HTTP.
-    monkeypatch.setattr("nemo_helix_plugin.config.platform.system", lambda: "Linux")
+    monkeypatch.setattr("nemo_helix_plugin.config.platform_system", lambda: "Linux")
     monkeypatch.setattr("nemo_helix_plugin.config._is_running_in_docker", lambda: False)

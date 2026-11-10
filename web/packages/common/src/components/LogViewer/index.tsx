@@ -25,7 +25,7 @@ import {
   Tag,
   Text,
 } from '@nvidia/foundations-react-core';
-import { FC, useEffect, useRef, useState } from 'react';
+import { type FC, useEffect, useRef, useState } from 'react';
 
 import '@nemo/common/src/components/LogViewer/styles.css';
 

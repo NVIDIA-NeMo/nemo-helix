@@ -14,7 +14,7 @@ try:
     from fastapi.testclient import TestClient
     from nemo_scaled_evals_plugin.service import ScaledEvalsService
     from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
-    from scaled_evals.api.db import get_db
+    from scaled_evals.api.db import get_db, get_request_db
     from scaled_evals.api.runnability import caller_secret_readable
     from scaled_evals.api.tenancy import caller_is_admin
 except ImportError as exc:
@@ -33,6 +33,7 @@ def test_raw_key_in_credential_reference_is_not_echoed() -> None:
     # Body validation happens after dependency solving, so without this the
     # unreachable-Postgres 503 masks the 422 under test.
     app.dependency_overrides[get_db] = lambda: None
+    app.dependency_overrides[get_request_db] = lambda: None
     app.dependency_overrides[caller_is_admin] = lambda: True
     app.dependency_overrides[caller_secret_readable] = lambda: lambda _ref: True
     client = TestClient(app)

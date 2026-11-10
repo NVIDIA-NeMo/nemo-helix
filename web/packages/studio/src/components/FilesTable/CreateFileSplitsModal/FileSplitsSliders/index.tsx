@@ -4,7 +4,7 @@
 import { SliderWithTextInput } from '@nemo/common/src/components/SliderWithTextInput';
 import { LockOpen, LockClosed } from '@nemo/icons/icons';
 import { Stack, Button, Flex, Label } from '@nvidia/foundations-react-core';
-import { FC, useCallback, useState } from 'react';
+import { type FC, useCallback, useState } from 'react';
 import { Controller, useFormContext, useWatch } from 'react-hook-form';
 
 type SplitFormFields = {

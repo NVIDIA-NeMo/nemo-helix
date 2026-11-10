@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { generateDefaultName } from '@nemo/common/src/utils/generateDefaultName';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import {
   type AutomodelJobInput,
   type AutomodelJobsJobRequest,
@@ -33,6 +34,8 @@ import {
   RL_DPO_DEFAULT_SPEC,
   RL_GRPO_DEFAULT_SPEC,
   UNSLOTH_DEFAULT_SPEC,
+  learningRateDefault,
+  withoutDefaultLearningRate,
 } from '@studio/util/forms/specDefaults';
 import { z } from 'zod';
 
@@ -253,6 +256,28 @@ export const customizationFormSchema = z
       spec = rlSpecSchema;
       value = data.rl;
       const grpo = data.grpo as Partial<GrpoFormFields> | undefined;
+      // Mirrors the backend's _min_learning_rate_does_not_exceed_peak against the rate it
+      // would resolve, since an unset peak hides the conflict until submit.
+      const rlTraining = (data.rl as RlJobInput | undefined)?.training;
+      const minLearningRate = rlTraining?.min_learning_rate;
+      const peakLearningRate =
+        rlTraining?.learning_rate ??
+        learningRateDefault(
+          grpo?.trainingType === 'grpo'
+            ? { backend: 'rl', method: 'grpo', finetuningType: grpo.finetuning_type }
+            : { backend: 'rl', method: 'dpo' }
+        );
+      if (
+        minLearningRate != null &&
+        peakLearningRate != null &&
+        minLearningRate > peakLearningRate
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Min learning rate cannot exceed the peak learning rate (${peakLearningRate})`,
+          path: ['rl', 'training', 'min_learning_rate'],
+        });
+      }
       if (grpo?.trainingType === 'grpo') {
         if (!grpo.environmentFileset) {
           ctx.addIssue({
@@ -261,11 +286,10 @@ export const customizationFormSchema = z
             path: ['grpo', 'environmentFileset'],
           });
         }
-        const training = (data.rl as RlJobInput | undefined)?.training;
         // Mirrors the backend's _generation_length_fits_context validator: max_seq_length
         // is the whole prompt + generation budget, so a larger generation cap is
         // unsatisfiable and the job is rejected at submit.
-        const maxSeqLength = training?.max_seq_length;
+        const maxSeqLength = rlTraining?.max_seq_length;
         if (
           grpo.max_new_tokens != null &&
           maxSeqLength != null &&
@@ -279,7 +303,7 @@ export const customizationFormSchema = z
         }
         // Mirrors the backend's validate_for_training: a remainder otherwise surfaces
         // only as an assert at the first optimizer step, once the job holds GPUs.
-        const batchSize = training?.batch_size;
+        const batchSize = rlTraining?.batch_size;
         const generations = grpo.num_generations_per_prompt;
         // Omitting num_prompts_per_step does not skip the rule: the backend derives it,
         // and the floor division is the case its own comment flags as the failure.
@@ -600,15 +624,12 @@ export interface ReplayableJob {
   backend?: CustomizationBackend;
 }
 
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 /** `value` restricted to the keys `known` also has, so nothing is added, only dropped. */
 const keepKnownKeys = (value: unknown, known: unknown): unknown => {
   if (Array.isArray(value) && Array.isArray(known)) {
     return value.map((item, i) => keepKnownKeys(item, known[i]));
   }
-  if (!isPlainRecord(value) || !isPlainRecord(known)) return value;
+  if (!isPlainObject(value) || !isPlainObject(known)) return value;
   return Object.fromEntries(
     Object.entries(value)
       .filter(([key]) => key in known)
@@ -650,7 +671,7 @@ const keepSchemaKeys = (value: unknown, schema: z.ZodTypeAny): unknown => {
       ? value.map((item) => keepSchemaKeys(item, inner.element))
       : value;
   }
-  if (!isPlainRecord(value)) return value;
+  if (!isPlainObject(value)) return value;
   const object = inner instanceof z.ZodUnion ? matchingUnionOption(inner, value) : inner;
   if (!(object instanceof z.ZodObject)) return value;
   const shape = object.shape as z.ZodRawShape;
@@ -679,7 +700,10 @@ export const jobToFormFields = (job: ReplayableJob): CustomizationFormFields => 
   const backend = job.backend ?? getCustomizationBackend(job.spec);
 
   if (backend === CustomizationBackend.automodel) {
-    const spec = toSubmittableSpec<AutomodelJobInput>(automodelBodySpec, job.spec);
+    const spec = withoutDefaultLearningRate(
+      backend,
+      toSubmittableSpec<AutomodelJobInput>(automodelBodySpec, job.spec)
+    );
     // A job submitted outside Studio can ask to merge either way round. Both merge, and
     // the form only shows `finetuning_type`, so a job carrying `lora.merge` has to come
     // back as lora_merged or it would replay as an unmerged adapter.
@@ -696,7 +720,10 @@ export const jobToFormFields = (job: ReplayableJob): CustomizationFormFields => 
     };
   }
   if (backend === CustomizationBackend.rl) {
-    const spec = toSubmittableSpec<RlJobInput>(rlBodySpec, job.spec);
+    const spec = withoutDefaultLearningRate(
+      backend,
+      toSubmittableSpec<RlJobInput>(rlBodySpec, job.spec)
+    );
     // GRPO-only hyperparameters live in the `grpo` namespace, not on spec.training,
     // so replaying the spec alone would present a cloned GRPO job as a default DPO one.
     const grpo = spec.training.type === 'grpo' ? spec.training : undefined;
@@ -764,7 +791,10 @@ export const jobToFormFields = (job: ReplayableJob): CustomizationFormFields => 
     outputName: generateDefaultName(),
     description: job.description ?? '',
     backend: 'unsloth',
-    unsloth: toSubmittableSpec<UnslothJobInput>(unslothBodySpec, job.spec),
+    unsloth: withoutDefaultLearningRate(
+      CustomizationBackend.unsloth,
+      toSubmittableSpec<UnslothJobInput>(unslothBodySpec, job.spec)
+    ),
   };
 };
 
