@@ -21,6 +21,7 @@ from .access_key_lifecycle import (
     AccessKeyLifecycleAuthenticator,
     AccessKeyLifecycleUnavailableError,
 )
+from .access_key_workspace_filter import workspace_filter_error
 from .bearer import MalformedBearerTokenError, parse_bearer_authorization_header
 from .client import AuthClient, AuthorizationResult
 from .dependencies import auth_client_context
@@ -499,6 +500,11 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             if isinstance(result, AuthorizationResult):
                 auth_client.principal = result.apply_to_principal(auth_client.principal)
                 self._update_auth_context(auth_client.principal)
+                auth_client.access_key_workspaces = result.access_key_workspaces
+                if result.access_key_workspaces is not None and (
+                    filter_error := workspace_filter_error(request.url.path, request.query_params)
+                ):
+                    return JSONResponse(status_code=400, content={"detail": filter_error})
             return None
 
         principal_id = auth_client.principal.id

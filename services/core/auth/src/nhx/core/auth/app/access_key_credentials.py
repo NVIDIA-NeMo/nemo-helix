@@ -16,11 +16,12 @@ from nhx.core.entities.app.repository import (
     AccountCredentialRecord,
     AccountCredentialStatus,
     AccountCredentialStore,
-    AccountCredentialType,
     AccountIdentityStore,
 )
-
-ACCESS_KEY_CREDENTIAL_TYPE: AccountCredentialType = "access_key"
+from nhx.core.entities.app.repository.access_key_workspace import (
+    ACCESS_KEY_CREDENTIAL_TYPE,
+    SERVICE_ACCOUNT_IDENTITY_ISSUER,
+)
 
 
 class AccessKeyCredentialAdapter:
@@ -41,7 +42,7 @@ class AccessKeyCredentialAdapter:
         if record.is_service_account():
             subject_principal = record.subject_principal or ""
             identity = await self.identity_store.resolve_or_materialize(
-                issuer="nemo:service-account",
+                issuer=SERVICE_ACCOUNT_IDENTITY_ISSUER,
                 subject=subject_principal.removeprefix(SERVICE_ACCOUNT_PRINCIPAL_PREFIX),
                 subject_claim="service_account_id",
                 account_type="service",

@@ -74,6 +74,8 @@ class _Principal:
     on_behalf_of_email: str | None = None
     on_behalf_of_account_id: str | None = None
     on_behalf_of_authz_aliases: Sequence[str] = ()
+    access_key_jti: str | None = None
+    on_behalf_of_access_key_jti: str | None = None
     effective: _Principal | None = field(default=None, repr=False)
 
     @property
@@ -143,6 +145,11 @@ class TestBuildHeaders:
         assert headers["X-NHX-Principal-On-Behalf-Of"] == "boss@ex.com"
         assert headers["X-NHX-Principal-On-Behalf-Of-Email"] == "boss@ex.com"
         assert headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "admin"
+
+    def test_principal_on_behalf_of_forwards_its_access_key_id(self):
+        jti = "ak_" + "b" * 32
+        headers = _build_headers(as_service="svc", on_behalf_of=_Principal(id="service-account:ci", access_key_jti=jti))
+        assert headers["X-NHX-Subject-Access-Key-Jti"] == jti
 
     def test_service_principal_ignores_env_principal(self, monkeypatch):
         # The as_service branch does not read NHX_PRINCIPAL (matches legacy behavior).

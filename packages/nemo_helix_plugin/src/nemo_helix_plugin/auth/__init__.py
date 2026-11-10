@@ -232,6 +232,22 @@ def current_auth_context() -> AuthContext | None:
     return AuthContext.from_principal(auth_client.principal)
 
 
+def current_request_principal() -> RuntimePrincipal | None:
+    """Return the current request's principal, to delegate within the request.
+
+    Unlike ``current_auth_context``, it keeps the Scoped Access Key ID, so a call made on the caller's
+    behalf keeps the key's workspace limit. Store ``current_auth_context()`` instead, never this.
+    """
+    try:
+        from nhx.common.auth.dependencies import auth_client_context
+    except ImportError:
+        return None
+    auth_client = auth_client_context.get()
+    if auth_client is None or auth_client.principal is None or not auth_client.principal.id:
+        return None
+    return auth_client.principal
+
+
 def platform_auth_enabled() -> bool:
     """Return whether platform authentication is enabled.
 
@@ -317,6 +333,7 @@ __all__ = [
     "RuntimeAuthClient",
     "current_auth_client",
     "current_auth_context",
+    "current_request_principal",
     "inference_gateway_credential",
     "is_service_principal_id",
     "platform_auth_enabled",

@@ -9,21 +9,30 @@ import future.keywords.in
 import data.common
 
 # Explicit lists select authority; legacy permissions means subject under OBO,
-# otherwise actor. No admin shortcut can combine the two identity sets.
+# otherwise actor. No admin shortcut can combine the two identity sets. A workspace-limited Scoped Access Key
+# is also held to its workspaces.
 has_permissions := {"allowed_workspaces": permitted_query_workspaces} if {
 	"workspaces" in object.keys(input)
-} else := {"allowed": true} if permission_query_allowed(input.workspace)
+} else := {"allowed": true} if {
+	access_key_limit_allows(input.workspace)
+	permission_query_allowed(input.workspace)
+}
 
 else := {"allowed": false}
 
 # Reuse scalar permission checks without per-workspace requests or input copies.
 permitted_query_workspaces := [workspace |
 	workspace := input.workspaces[_]
+	access_key_limit_allows(workspace)
 	permission_query_allowed(workspace)
 ] if {
 	is_array(input.workspaces)
 	every workspace in input.workspaces { is_string(workspace) }
 } else := []
+
+access_key_limit_allows(_) if not access_key_limited
+
+access_key_limit_allows(workspace) if access_key_workspace_allowed(workspace)
 
 explicit_permission_query if "actor_permissions" in object.keys(input)
 explicit_permission_query if "subject_permissions" in object.keys(input)

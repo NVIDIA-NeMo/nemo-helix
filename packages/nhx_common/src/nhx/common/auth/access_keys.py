@@ -20,7 +20,6 @@ from nemo_helix_plugin.auth.access_keys.issuer import (
     AccessKeyOperationNotImplementedError,
 )
 from nemo_helix_plugin.auth.access_keys.types import (
-    ACCESS_KEY_JTI_PATTERN,
     AccessKeyCreateRequest,
     AccessKeyCreateResponse,
     AccessKeyEntityType,
@@ -33,7 +32,7 @@ from nemo_helix_plugin.auth.access_keys.types import (
 from nhx.common.config import AuthConfig, get_platform_config
 
 from .jwks import DEFAULT_JWKS_CACHE_LIFESPAN, AsyncJWKSClient, signing_jwk_from_jwks
-from .models import Principal
+from .models import ACCESS_KEY_JTI_RE, Principal
 from .principal_identifier import (
     SERVICE_ACCOUNT_PRINCIPAL_PREFIX,
     InvalidPrincipalIdentifier,
@@ -51,7 +50,10 @@ ACCESS_KEY_TOKEN_MAX_BYTES = 7 * 1024
 ACCESS_KEY_JWKS_PATH = "/apis/auth/jwks"
 ACCESS_KEY_METADATA_VERSION = 2
 LEGACY_ACCESS_KEY_METADATA_VERSION = 1
-_ACCESS_KEY_JTI_RE = re.compile(ACCESS_KEY_JTI_PATTERN)
+# Optional `nhx_access_key` field: immutable IDs of the only workspaces the key may be used in.
+ACCESS_KEY_WORKSPACE_IDS_FIELD = "workspace_ids"
+# Workspace IDs are generate_entity_id("workspace"): "workspace-" plus a base58-encoded UUID.
+_WORKSPACE_ID_RE = re.compile(r"^workspace-[1-9A-HJ-NP-Za-km-z]{1,32}$")
 _NEWLY_CREATED_STATUS: AccessKeyStatus = "ACTIVE"
 
 logger = logging.getLogger(__name__)
@@ -113,6 +115,36 @@ def _groups_claim_for_gateway_header(groups: list[str]) -> str | None:
     return groups_claim or None
 
 
+def access_key_workspace_ids(metadata: dict[str, Any]) -> list[str] | None:
+    """Return the key's workspace limit, or None when it has none.
+
+    Raises AccessKeyValidationError when the field is present on a key that isn't a service account's, or isn't a
+    nonempty list of unique workspace IDs.
+    """
+    if ACCESS_KEY_WORKSPACE_IDS_FIELD not in metadata:
+        return None
+    # Only service-account keys can be limited: the auth service denies a service account whose key ID was lost on
+    # the way, but can't tell a user's limited key from their unlimited ones.
+    if metadata.get("entity_type") != "SERVICE_ACCOUNT":
+        raise AccessKeyValidationError("workspace_ids is only allowed on service-account keys")
+    workspace_ids = metadata[ACCESS_KEY_WORKSPACE_IDS_FIELD]
+    if not isinstance(workspace_ids, list) or not workspace_ids:
+        raise AccessKeyValidationError("workspace_ids must be a nonempty list")
+    if not all(
+        isinstance(workspace_id, str) and _WORKSPACE_ID_RE.match(workspace_id) for workspace_id in workspace_ids
+    ):
+        raise AccessKeyValidationError("workspace_ids must contain only workspace IDs")
+    if len(set(workspace_ids)) != len(workspace_ids):
+        raise AccessKeyValidationError("workspace_ids must not repeat a workspace ID")
+    return list(workspace_ids)
+
+
+def access_key_has_workspace_limit(claims: TokenClaims) -> bool:
+    """Whether validated access-key claims carry a workspace limit."""
+    metadata = claims.raw_claims.get(ACCESS_KEY_METADATA_CLAIM)
+    return isinstance(metadata, dict) and ACCESS_KEY_WORKSPACE_IDS_FIELD in metadata
+
+
 def is_access_key_token_candidate(token: str) -> bool:
     """Return True when an untrusted token claims to be a Scoped Access Key."""
     try:
@@ -131,7 +163,7 @@ def is_access_key_token_candidate(token: str) -> bool:
     if unverified.get(ACCESS_KEY_TOKEN_TYPE_CLAIM) != ACCESS_KEY_TOKEN_TYPE:
         return False
     jti = unverified.get("jti", "")
-    return isinstance(jti, str) and bool(_ACCESS_KEY_JTI_RE.match(jti))
+    return isinstance(jti, str) and bool(ACCESS_KEY_JTI_RE.match(jti))
 
 
 def _access_key_signing_key(config: AuthConfig) -> RSASigningKey:
@@ -550,6 +582,8 @@ async def validate_access_key_token(
             return None
         if entity_type not in {"USER", "SERVICE_ACCOUNT"}:
             return None
+        # A malformed limit rejects the token rather than being ignored, which would make the key unlimited.
+        access_key_workspace_ids(metadata)
 
         groups = groups_from_claim(claims.get("groups", []))
         scope_claim = claims.get("scope") or claims.get("scp")

@@ -98,6 +98,20 @@ async def test_delegated_service_workload_access_token_preserves_obo_principal(t
 
 
 @pytest.mark.asyncio
+async def test_delegated_service_workload_access_token_keeps_subject_access_key_id(tmp_path: Path) -> None:
+    config = _token_exchange_config(tmp_path)
+    jti = "ak_" + "b" * 32
+    creator = Principal(id="service-account:ci", access_key_jti=jti)
+
+    token = await issue_service_workload_access_token_async(config, service_name="jobs", on_behalf_of=creator)
+    resolved = await resolve_workload_access_token(config, token)
+
+    assert resolved is not None
+    assert resolved.principal.on_behalf_of == "service-account:ci"
+    assert resolved.principal.on_behalf_of_access_key_jti == jti
+
+
+@pytest.mark.asyncio
 async def test_workload_subject_token_resolves_with_configured_subject_issuer(tmp_path: Path) -> None:
     private_key = _new_private_key()
     now = datetime.now(tz=UTC)

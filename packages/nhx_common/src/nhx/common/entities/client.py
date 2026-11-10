@@ -33,6 +33,7 @@ def _service_principal_headers(service_name: str, *, internal: bool) -> dict[str
         "X-NHX-Principal-Id": f"service:{service_name}",
         "X-NHX-Actor-Account-Id": "",
         "X-NHX-Actor-Aliases": f"service:{service_name}",
+        "X-NHX-Access-Key-Jti": "",
         # ``with_options`` merges defaults. Explicitly clear any delegation
         # inherited from a request-scoped client so this is true elevation.
         "X-NHX-Principal-On-Behalf-Of": "",
@@ -40,6 +41,7 @@ def _service_principal_headers(service_name: str, *, internal: bool) -> dict[str
         "X-NHX-Principal-On-Behalf-Of-Groups": "",
         "X-NHX-Subject-Account-Id": "",
         "X-NHX-Subject-Aliases": "",
+        "X-NHX-Subject-Access-Key-Jti": "",
     }
     if internal:
         headers.update(MARK_INTERNAL_REQUEST_HEADERS)

@@ -233,6 +233,8 @@ static_resources:
                           headers:remove("x-nhx-principal-on-behalf-of")
                           headers:remove("x-nhx-subject-account-id")
                           headers:remove("x-nhx-subject-aliases")
+                          headers:remove("x-nhx-access-key-jti")
+                          headers:remove("x-nhx-subject-access-key-jti")
                           headers:remove("x-nhx-principal-on-behalf-of-email")
                           headers:remove("x-nhx-principal-on-behalf-of-groups")
                           headers:remove("x-nhx-authorized")
@@ -285,6 +287,7 @@ static_resources:
                               - exact: x-nhx-principal-on-behalf-of
                               - exact: x-nhx-subject-account-id
                               - exact: x-nhx-subject-aliases
+                              - exact: x-nhx-access-key-jti
                               - exact: x-nhx-principal-on-behalf-of-email
                               - exact: x-nhx-principal-on-behalf-of-groups
                               - exact: x-nhx-scopes

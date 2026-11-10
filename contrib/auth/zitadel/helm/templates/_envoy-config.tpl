@@ -289,9 +289,14 @@ static_resources:
                               - exact: x-nhx-principal-id
                               - exact: x-nhx-principal-email
                               - exact: x-nhx-principal-groups
+                              - exact: x-nhx-actor-account-id
+                              - exact: x-nhx-actor-aliases
                               - exact: x-nhx-principal-on-behalf-of
+                              - exact: x-nhx-subject-account-id
+                              - exact: x-nhx-subject-aliases
                               - exact: x-nhx-principal-on-behalf-of-email
                               - exact: x-nhx-principal-on-behalf-of-groups
+                              - exact: x-nhx-access-key-jti
                               - exact: x-nhx-scopes
                   - name: envoy.filters.http.router
                     typed_config:

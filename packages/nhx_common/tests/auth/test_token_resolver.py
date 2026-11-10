@@ -139,6 +139,7 @@ async def test_resolver_uses_access_key_validator_when_access_keys_are_enabled()
         "X-NHX-Principal-Email": "alice@example.com",
         "X-NHX-Principal-Groups": "team-ml",
         "X-NHX-Actor-Aliases": "alice@example.com",
+        "X-NHX-Access-Key-Jti": "ak_example",
         "X-NHX-Scopes": "models:read",
     }
     validate_access_key.assert_awaited_once_with(config, "scoped-access-key")
@@ -243,3 +244,67 @@ async def test_resolver_rejects_an_invalid_access_key_without_trying_other_issue
     assert resolved is None
     extra_resolver.assert_not_called()
     jwt_validator.validate_token.assert_not_called()
+
+
+SUBJECT_KEY_JTI = "ak_" + "b" * 32
+
+
+def test_access_key_principal_carries_its_key_id() -> None:
+    resolved = ResolvedBearerToken(
+        claims=TokenClaims(
+            subject="service-account:ci", email=None, groups=[], scopes=[], raw_claims={"jti": SUBJECT_KEY_JTI}
+        ),
+        token_kind="access_key",
+    )
+
+    assert resolved.principal.access_key_jti == SUBJECT_KEY_JTI
+
+
+def test_oidc_principal_ignores_jti_claim() -> None:
+    resolved = ResolvedBearerToken(
+        claims=TokenClaims(subject="user:alice", email=None, groups=[], scopes=[], raw_claims={"jti": "oidc-token-id"}),
+        token_kind="oidc_access_token",
+    )
+
+    assert resolved.principal.access_key_jti is None
+
+
+def test_workload_access_token_carries_subject_key_id() -> None:
+    claims = _claims_with_actor()
+    claims.raw_claims["nhx_access_key_jti"] = SUBJECT_KEY_JTI
+    resolved = ResolvedBearerToken(claims=claims, token_kind="workload_access_token")
+
+    assert resolved.principal.access_key_jti is None
+    assert resolved.principal.on_behalf_of_access_key_jti == SUBJECT_KEY_JTI
+    assert resolved.principal_headers()["X-NHX-Subject-Access-Key-Jti"] == SUBJECT_KEY_JTI
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "metadata", "resolves"),
+    [
+        ("opa", {"version": 2, "workspace_ids": ["workspace-7hxkp9Q2LoF8z8M9JZxZsH"]}, False),
+        ("opa", {"version": 2}, True),
+        ("embedded", {"version": 2, "workspace_ids": ["workspace-7hxkp9Q2LoF8z8M9JZxZsH"]}, True),
+    ],
+    ids=["opa-limited-rejected", "opa-unlimited-ok", "embedded-limited-ok"],
+)
+async def test_external_opa_rejects_workspace_limited_keys(provider, metadata, resolves) -> None:
+    config = AuthConfig(
+        enabled=True,
+        access_keys=AccessKeyConfig(enabled=True),
+        oidc=OIDCConfig(enabled=False),
+        policy_decision_point_provider=provider,
+    )
+    claims = TokenClaims(
+        subject="service-account:ci",
+        email=None,
+        groups=[],
+        scopes=[],
+        raw_claims={"jti": SUBJECT_KEY_JTI, "nhx_access_key": metadata},
+    )
+
+    with patch("nhx.common.auth.access_keys.validate_access_key_token", new=AsyncMock(return_value=claims)):
+        resolved = await resolve_bearer_token(config, "scoped-access-key")
+
+    assert (resolved is not None) is resolves

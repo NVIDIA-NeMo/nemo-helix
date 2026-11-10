@@ -32,6 +32,12 @@ import data.common
 #   "has_role": true
 # }
 has_role := result if {
+	# A workspace-limited Scoped Access Key outside its workspaces.
+	access_key_limited
+	not access_key_workspace_allowed(input.workspace)
+
+	result := {"has_role": false}
+} else := result if {
 	workspace := input.workspace
 	required_role := input.role
 

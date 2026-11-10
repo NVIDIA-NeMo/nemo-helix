@@ -202,6 +202,7 @@ async def get_accessible_workspaces(
     Returns:
         Set of workspace names, or None if all workspaces are accessible
         (auth disabled, or service principal with no on-behalf-of, or platform admin).
+        A workspace-limited Scoped Access Key caps the result, platform admin included.
         For any delegated caller, access is computed for the **on-behalf-of** user
         (id, email, groups), not the actor. This matches the embedded PDP and avoids
         treating delegated calls as unscoped service access.
@@ -218,8 +219,21 @@ async def get_accessible_workspaces(
     if principal.is_privileged() and not principal.is_delegated:
         return None
 
-    effective_principal = principal.effective_principal
+    accessible = await _accessible_workspaces_from_bindings(entity_repository, principal, refresh=refresh)
+    # A workspace-limited Scoped Access Key caps whatever its role bindings grant.
+    if auth_client.access_key_workspaces is not None:
+        limit = set(auth_client.access_key_workspaces)
+        return limit if accessible is None else accessible & limit
+    return accessible
 
+
+async def _accessible_workspaces_from_bindings(
+    entity_repository: EntityRepositoryInterface,
+    principal: Principal,
+    *,
+    refresh: bool,
+) -> Optional[Set[str]]:
+    effective_principal = principal.effective_principal
     principal_id = effective_principal.id
 
     # Fetch role bindings for each identifier (id, email, groups) — same union as PDP/OPA

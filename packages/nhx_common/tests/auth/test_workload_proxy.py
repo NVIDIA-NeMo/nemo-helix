@@ -252,11 +252,16 @@ def test_forward_strips_inbound_on_behalf_of_to_prevent_spoofing() -> None:
             "x-nhx-principal-on-behalf-of-groups": "platform-admins",
             "x-nhx-subject-account-id": "account-attacker",
             "x-nhx-subject-aliases": "attacker-alias",
+            # A forged key ID could point the PDP at another key's workspace limit.
+            "x-nhx-access-key-jti": "ak_" + "e" * 32,
+            "x-nhx-subject-access-key-jti": "ak_" + "e" * 32,
         },
     )
 
     sent = route.calls.last.request
     sent_keys = {k.lower() for k in sent.headers}
+    assert "x-nhx-access-key-jti" not in sent_keys
+    assert "x-nhx-subject-access-key-jti" not in sent_keys
     assert sent.headers["x-nhx-principal-id"] == "service:agents"
     assert sent.headers["x-nhx-actor-aliases"] == "service:agents"
     assert sent.headers["x-nhx-principal-on-behalf-of"] == "user:alice"

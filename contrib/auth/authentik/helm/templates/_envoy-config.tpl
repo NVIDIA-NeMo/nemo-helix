@@ -289,6 +289,7 @@ static_resources:
                               - exact: x-nhx-principal-on-behalf-of
                               - exact: x-nhx-subject-account-id
                               - exact: x-nhx-subject-aliases
+                              - exact: x-nhx-access-key-jti
                               - exact: x-nhx-principal-on-behalf-of-email
                               - exact: x-nhx-principal-on-behalf-of-groups
                               - exact: x-nhx-scopes
