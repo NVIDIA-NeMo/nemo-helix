@@ -12,11 +12,22 @@ from nemo_agents_plugin.cli import AgentsCLI
 from nemo_agents_plugin.sdk import AgentsResource
 from nemo_agents_plugin.service import AgentsService
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceQueryParams, CreateWorkspaceRequest
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.service import JobsService
 from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
-from nhx.testing import ClientContext, create_test_client
+from nhx.testing import (
+    TEST_ADMIN_EMAIL,
+    ClientContext,
+    as_user,
+    create_test_client,
+    grant_workspace_role,
+    short_unique_name,
+    unique_email,
+)
 from typer.testing import CliRunner
 
 pytestmark = pytest.mark.integration
@@ -153,3 +164,53 @@ def test_list_execute_runs_by_agent() -> None:
             }
         )
         assert {job.name for job in core_jobs.page().items} == {"run-calc", "run-calc-qualified"}
+
+
+def test_listing_execute_runs_across_workspaces_returns_only_readable_workspaces() -> None:
+    """Workspace ``-`` lists every workspace the caller can read, and no others, through the typed route.
+
+    The agents route forwards ``-`` to core Jobs as the caller, and the entity store narrows it to
+    the caller's readable workspaces. Every user can read ``default``, so both workspaces here are
+    new ones: the reader is granted Viewer on one, and the other belongs to someone else.
+    """
+    with create_test_client(
+        _TestAgentsService, FilesService, JobsService, auth_enabled=True, client_type=ClientContext
+    ) as ctx:
+        readable, hidden = short_unique_name("agents-readable"), short_unique_name("agents-hidden")
+        admin = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        for workspace in (readable, hidden):
+            WorkspacesClient.from_client(admin).create_workspace(
+                query_params=CreateWorkspaceQueryParams(wait_role_propagation=True),
+                body=CreateWorkspaceRequest(name=workspace),
+            ).data()
+            admin_agents = AgentsResource(admin)
+            admin_agents.register(name="calc", config=_agent_config("calc"), workspace=workspace)
+            admin_agents.jobs.execute.create(
+                name=f"run-{workspace}", spec={"agent": f"{workspace}/calc", "input": "hello"}, workspace=workspace
+            )
+
+        reader_email = unique_email("agents-reader")
+        grant_workspace_role(admin, workspace=readable, principal=reader_email, roles=["Viewer"])
+        reader = as_user(ctx.client, reader_email)
+        reader_jobs = AgentsResource(reader).jobs.execute
+        both_agents = [f"{readable}/calc", f"{hidden}/calc"]
+
+        # The admin sees both runs, so the reader's narrower view below is the filter, not missing data.
+        assert _names(AgentsResource(admin).jobs.execute.list("-", agents=both_agents)) == {
+            f"run-{readable}",
+            f"run-{hidden}",
+        }
+
+        assert _names(reader_jobs.list("-", agents=both_agents)) == {f"run-{readable}"}
+        assert _names(reader_jobs.list("-")) == {f"run-{readable}"}
+        with pytest.raises(PermissionDeniedError):
+            reader_jobs.list(hidden)
+
+        # The documented CLI command, as the reader.
+        result = CliRunner().invoke(
+            AgentsCLI().get_cli(),
+            ["list-jobs", "--workspace", "-", "--agent", both_agents[0], "--agent", both_agents[1]],
+            obj=_CLIState(reader),
+        )
+        assert result.exit_code == 0, result.output
+        assert {job["name"] for job in json.loads(result.stdout)["data"]} == {f"run-{readable}"}
