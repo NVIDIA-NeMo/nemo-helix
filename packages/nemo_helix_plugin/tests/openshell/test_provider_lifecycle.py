@@ -684,6 +684,9 @@ def test_policy_allows_workload_operations_without_broad_platform_access():
     # Result saves must not depend on reading the job record: the restricted policy
     # deliberately leaves GET /jobs/{job} out.
     assert ("GET", "/apis/jobs/v2/workspaces/team/jobs/job-1") not in allowed
+    # Saving the same result name twice reads the existing record instead of failing.
+    assert ("POST", "/apis/jobs/v2/workspaces/team/jobs/job-1/results/*") in allowed
+    assert ("GET", "/apis/jobs/v2/workspaces/team/jobs/job-1/results/*") in allowed
     assert restricted.landlock.compatibility == "hard_requirement"
 
     # Compare the handwritten policy with requests built by the actual client contract.
