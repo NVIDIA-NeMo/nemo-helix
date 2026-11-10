@@ -52,6 +52,8 @@ or `postgresql.auth.existingSecret` (and `existingSecretPasswordKey`). Offline
 `helm template` generates a new password unless `--is-upgrade` is set to reject
 missing credentials. Applying that Secret does not change the database role
 password; coordinate rotation with the Secret update and API/controller restarts.
+Update any explicit Helm `postgresql.auth.password` value too (or clear it to reuse
+the Secret), otherwise a later upgrade can restore the old password in the Secret.
 
 Enable `networkPolicies.enabled` with an enforcing CNI to restrict PostgreSQL
 ingress to same-release API/controller pods. Use
@@ -619,7 +621,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | postgresql.auth | object | [See values.yaml](values.yaml#L424) | PostgreSQL authentication configuration. |
 | postgresql.auth.existingSecret | string | `""` | Name of an existing secret containing the PostgreSQL password. If set, the chart does not create a secret. |
 | postgresql.auth.existingSecretPasswordKey | string | `"password"` | Key in the existing secret containing the PostgreSQL password. |
-| postgresql.auth.password | string | `nil` | PostgreSQL password. If unset, generate a random password on install and reuse the existing Secret on upgrade. This does not rotate passwords in an initialized database; coordinate role password changes and workload restarts separately. |
+| postgresql.auth.password | string | `""` | PostgreSQL password. If unset, generate a random password on install and reuse the existing Secret on upgrade. This does not rotate passwords in an initialized database; coordinate role password changes and workload restarts separately. |
 | postgresql.enabled | bool | `true` | Whether to deploy the embedded PostgreSQL. If enabled, the chart deploys a single-replica PostgreSQL instance using the official Postgres image. It is NOT recommended to use the built-in PostgreSQL for production deployments. It is enabled in the chart by default for ease of getting started with the platform. If you are using an existing PostgreSQL installation, set this to false and use the "externalDatabase" configuration section. |
 | postgresql.nodeSelector | object | `{}` | Node selector for the PostgreSQL pod. |
 | postgresql.persistence | object | [See values.yaml](values.yaml#L439) | PostgreSQL persistence configuration. |

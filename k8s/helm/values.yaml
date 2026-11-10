@@ -424,7 +424,7 @@ postgresql:
   auth:
     username: nemo
     # -- PostgreSQL password. If unset, generate a random password on install and reuse the existing Secret on upgrade. This does not rotate passwords in an initialized database; coordinate role password changes and workload restarts separately.
-    password: null
+    password: ""
     database: nemohelix
     # -- Name of an existing secret containing the PostgreSQL password. If set, the chart does not create a secret.
     existingSecret: ""

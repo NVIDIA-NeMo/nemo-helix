@@ -52,6 +52,8 @@ or `postgresql.auth.existingSecret` (and `existingSecretPasswordKey`). Offline
 `helm template` generates a new password unless `--is-upgrade` is set to reject
 missing credentials. Applying that Secret does not change the database role
 password; coordinate rotation with the Secret update and API/controller restarts.
+Update any explicit Helm `postgresql.auth.password` value too (or clear it to reuse
+the Secret), otherwise a later upgrade can restore the old password in the Secret.
 
 Enable `networkPolicies.enabled` with an enforcing CNI to restrict PostgreSQL
 ingress to same-release API/controller pods. Use
