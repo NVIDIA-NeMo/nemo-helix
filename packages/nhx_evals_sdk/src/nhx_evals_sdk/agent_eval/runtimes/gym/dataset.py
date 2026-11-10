@@ -49,7 +49,7 @@ _HASH_ID_HEX_DIGITS = 59
 
 def _hash_task_id(row: Mapping[str, Any]) -> str:
     """A row's content-derived task id: ``gym-`` and a prefix of :func:`_canonical_row_hash`."""
-    return f"gym-{_canonical_row_hash(row)[:_HASH_ID_HEX_DIGITS]}"
+    return f"{RESERVED_ID_PREFIX}-{_canonical_row_hash(row)[:_HASH_ID_HEX_DIGITS]}"
 
 
 #: Longest platform entity name, which a keyed task id fills: ``<prefix>-`` plus as many hex digits of
@@ -58,14 +58,21 @@ _MAX_TASK_ID_LENGTH = 63
 #: A key prefix: a lowercase letter, then up to 7 lowercase letters or digits. No dashes, so the id can
 #: never contain ``--`` or end in ``-``, both of which the platform's entity names refuse.
 ID_PREFIX_PATTERN = r"^[a-z][a-z0-9]{0,7}$"
+#: Prefix of the ids rows get without a key. Keyed ids may not use it, so a task's name shows which kind it is.
+RESERVED_ID_PREFIX = "gym"
 
 
 def check_id_prefix(id_prefix: str) -> None:
-    """Raise ``ValueError`` unless ``id_prefix`` is a valid keyed-id prefix (:data:`ID_PREFIX_PATTERN`)."""
+    """Raise ``ValueError`` unless ``id_prefix`` is a valid keyed-id prefix.
+
+    It must match :data:`ID_PREFIX_PATTERN` and must not be :data:`RESERVED_ID_PREFIX`.
+    """
     if not re.fullmatch(ID_PREFIX_PATTERN, id_prefix):
         raise ValueError(
             f"id_prefix {id_prefix!r} must be 1-8 characters: a lowercase letter, then lowercase letters or digits"
         )
+    if id_prefix == RESERVED_ID_PREFIX:
+        raise ValueError(f"id_prefix {id_prefix!r} is reserved for the ids of rows without a key; choose another")
 
 
 def _keyed_task_id(value: Any, id_prefix: str) -> str:

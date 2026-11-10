@@ -5783,8 +5783,9 @@ components:
           title: Id Prefix
           description: 'Prefix of keyed task ids, `<id_prefix>-<hash of the row''s
             id_field value>`: a lowercase letter, then up to 7 lowercase letters or
-            digits. Choose one per dataset, so two files with the same keys don''t
-            share tasks in a workspace. Requires `id_field`.'
+            digits, and not `gym`, which ids without a key use. Choose one per dataset,
+            so two files with the same keys don''t share tasks in a workspace. Requires
+            `id_field`.'
           type: string
           pattern: ^[a-z][a-z0-9]{0,7}$
       additionalProperties: false

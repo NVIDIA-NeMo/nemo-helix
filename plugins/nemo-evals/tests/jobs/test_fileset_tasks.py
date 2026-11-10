@@ -423,6 +423,7 @@ def test_the_computed_digest_is_the_one_the_service_publishes(ctx: ClientContext
         ({"fileset": FILE, "id_field": "uid", "id_prefix": "golden123"}, "id_prefix"),
         ({"fileset": FILE, "id_field": "uid", "id_prefix": "g-x"}, "id_prefix"),
         ({"fileset": FILE, "id_field": "uid", "id_prefix": "1gold"}, "id_prefix"),
+        ({"fileset": FILE, "id_field": "uid", "id_prefix": "gym"}, "reserved"),
     ],
 )
 def test_invalid_sources_are_refused(tasks: dict[str, Any], message: str) -> None:

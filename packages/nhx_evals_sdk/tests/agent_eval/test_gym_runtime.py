@@ -385,6 +385,7 @@ def test_a_keyed_id_depends_only_on_the_key() -> None:
         ({"id_field": "uid", "id_prefix": "golden123"}, "1-8 characters"),
         ({"id_field": "uid", "id_prefix": "g-x"}, "1-8 characters"),
         ({"id_field": "uid", "id_prefix": "Gold"}, "1-8 characters"),
+        ({"id_field": "uid", "id_prefix": "gym"}, "reserved"),
     ],
 )
 def test_keyed_ids_need_both_fields_and_a_valid_prefix(kwargs: dict, message: str) -> None:

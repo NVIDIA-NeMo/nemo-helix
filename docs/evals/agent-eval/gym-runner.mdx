@@ -486,7 +486,8 @@ choose an `id_prefix`, and a task is named by its key instead:
 - Each task's id is `<id_prefix>-` and a hash of the row's `id_field` value, 63 characters in all. Only
   the key is hashed, so editing any other field keeps the task's id. With `snapshot`, the edit is a
   new revision of that task, and older taskset revisions still pin the old one.
-- `id_prefix` is 1-8 characters: a lowercase letter, then lowercase letters or digits. Use one prefix
+- `id_prefix` is 1-8 characters: a lowercase letter, then lowercase letters or digits. It can't be
+  `gym`, which ids without a key use. Use one prefix
   per dataset, so two files that both use keys like `1`, `2`, `3` keep separate tasks in a workspace.
 - Every row needs a non-empty string or number in `id_field`. A missing key or a key two rows share
   fails the submit with HTTP 422 naming the line. The key is hashed in its JSON form, so `1` and
