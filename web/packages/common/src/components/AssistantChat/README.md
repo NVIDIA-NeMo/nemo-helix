@@ -61,9 +61,9 @@ When a request fails for a non-cancel reason the assistant message is marked `in
 
 - the partial answer, if any, as normal markdown in a body with a **red** left bar (a successful reply has the brand-colored bar);
 - an inline error banner holding only the explanation;
-- a "Show details" row under the banner that expands to the **raw** error, with the status code and provider detail, in a code snippet that can be copied.
+- a "Show details" row under the banner that expands to the **raw** error, with the status code and provider detail, in a code snippet that can be copied. If the browser blocks clipboard access (for example a page served over plain `http` outside `localhost`) the copy tooltip says so. A failed reply with no raw error has no details row.
 
-The banner has no actions of its own: the reply's hover action row stays available, and its "Regenerate response" action reruns the request.
+The banner has no actions of its own. Where the surface shows the reply's hover action row, its "Regenerate response" action reruns the request; the NeMo Assistant hides that row (`hideAssistantMessageActions`), so its failed replies have no Regenerate action.
 
 The explanation is the title and hint returned by the `describeError` prop, or the generic line "There was an error generating a response." when the prop is omitted or returns `undefined`. Only the agent chat passes one (`describeChatError`, wired in `ChatPlaygroundContent`), because its wording is specific to agents; every other surface shows the generic line, with the raw error behind "Show details". A runtime that keeps the partial answer (the NeMo Assistant does) appends the explanation from `getFailedReply` as its own text part rather than merging it into the answer; the NeMo Assistant describes its own interrupted-connection error with `describeAssistantRunError`.
 

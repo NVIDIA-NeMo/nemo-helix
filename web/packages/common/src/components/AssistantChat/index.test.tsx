@@ -876,6 +876,46 @@ describe('AssistantChat', () => {
     expect(screen.queryByTestId('assistant-chat-error-details')).not.toBeInTheDocument();
   });
 
+  it.each([
+    { outcome: 'copied', writeText: () => Promise.resolve(), tooltip: 'Copy' },
+    {
+      outcome: 'blocked',
+      writeText: () => Promise.reject(new Error('denied')),
+      tooltip: 'Could not copy: clipboard access was blocked',
+    },
+  ])(
+    'copies the raw error from the details row when the clipboard is $outcome',
+    async ({ writeText, tooltip }) => {
+      const user = userEvent.setup({ delay: null });
+      const writeTextMock = vi.fn(writeText);
+      vi.spyOn(navigator, 'clipboard', 'get').mockReturnValue({
+        writeText: writeTextMock,
+      } as unknown as Clipboard);
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      renderAssistantChat(
+        <StaticAssistantChatThread
+          messages={[
+            { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+            {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'There was an error generating a response.' }],
+              status: { type: 'incomplete', reason: 'error', error: '502 Bad Gateway' },
+            },
+          ]}
+        />
+      );
+
+      const details = await screen.findByTestId('assistant-chat-error-details');
+      await user.click(within(details).getByText('Show details'));
+      const copyButton = within(details).getByRole('button', { name: 'Copy' });
+      await user.click(copyButton);
+      await user.hover(copyButton);
+
+      expect(writeTextMock).toHaveBeenCalledWith('502 Bad Gateway');
+      expect(await screen.findAllByText(tooltip)).not.toHaveLength(0);
+    }
+  );
+
   it(
     'offers Regenerate response on a failed reply instead of an action in the banner',
     async () => {
