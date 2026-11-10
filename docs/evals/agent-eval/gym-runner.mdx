@@ -457,7 +457,7 @@ leaves the taskset as it was. Submit whenever the file changes:
 | --- | --- | --- |
 | is unchanged | Nothing written | No new revision |
 | has rows reordered | Nothing written | One new revision, because the file's bytes changed |
-| has an edited row | The edited row is a new task | One new revision |
+| has an edited row | The edited row is a new task, or with `id_field` a new revision of its task | One new revision |
 | has a row removed | The task is kept, so older revisions still resolve | One new revision without it |
 
 Each taskset revision records the file it came from in its metadata (`source_fileset`,
@@ -472,6 +472,26 @@ stores the Gym reward metric's bundle.
 The first snapshot of a file writes one task per row, so for thousands of rows it can take minutes;
 give that submission a long client timeout. Later submissions write only the rows that changed, and a
 submission of an unchanged file writes no task.
+
+### Keep tasks across edits
+
+By default a task's id is a hash of its row's content, so an edited row is a new task: nothing in a
+row says it is an earlier row changed. If your rows carry a stable key, name it with `id_field` and
+choose an `id_prefix`, and a task is named by its key instead:
+
+```json
+"tasks": {"fileset": "default/golden#gym/golden.jsonl", "snapshot": "default/golden-suite", "id_field": "uid", "id_prefix": "gold"}
+```
+
+- Each task's id is `<id_prefix>-` and a hash of the row's `id_field` value, 63 characters in all. Only
+  the key is hashed, so editing any other field keeps the task's id. With `snapshot`, the edit is a
+  new revision of that task, and older taskset revisions still pin the old one.
+- `id_prefix` is 1-8 characters: a lowercase letter, then lowercase letters or digits. Use one prefix
+  per dataset, so two files that both use keys like `1`, `2`, `3` keep separate tasks in a workspace.
+- Every row needs a non-empty string or number in `id_field`. A missing key or a key two rows share
+  fails the submit with HTTP 422 naming the line. The key is hashed in its JSON form, so `1` and
+  `"1"` are different keys.
+- `discover_gym_tasks(path, id_field="uid", id_prefix="gold")` gives the same ids locally.
 
 ## Run a registered agent
 

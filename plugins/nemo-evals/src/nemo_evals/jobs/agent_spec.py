@@ -33,6 +33,7 @@ from nemo_evals.metric_refs import MetricRefOrInline
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nhx_evals_sdk.agent_eval.runtimes.fabric.env import validate_fabric_env
+from nhx_evals_sdk.agent_eval.runtimes.gym.dataset import ID_PREFIX_PATTERN
 from nhx_evals_sdk.agent_eval.runtimes.harbor.env import validate_harbor_env
 from nhx_evals_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nhx_evals_sdk.agent_eval.tasks import SemanticView
@@ -833,7 +834,8 @@ class FilesetTaskSource(BaseModel):
     fileset: FilesetRef = Field(
         description="The dataset file, as `workspace/fileset#path/to/file.jsonl`. One file only: a whole "
         "FileSet or a glob is refused. It is read once, as the submitter, at submission. Each distinct "
-        "row becomes one task, `gym-<row content hash>`, scored by the Gym reward. Requires a `gym` target.",
+        "row becomes one task, `gym-<row content hash>` unless `id_field` names it, scored by the Gym reward. "
+        "Requires a `gym` target.",
     )
     snapshot: TasksetRef | None = Field(
         default=None,
@@ -842,6 +844,26 @@ class FilesetTaskSource(BaseModel):
         "the file changed, and the evaluation runs exactly the published tasks. Omit to run the file's "
         "tasks inline, storing nothing but the job.",
     )
+    id_field: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Row key that names each task, so an edited row keeps its task (and, with `snapshot`, gets a "
+        "new revision of it) instead of becoming a new task. Every row must carry a non-empty string or "
+        "number there, unique within the file. Requires `id_prefix`.",
+    )
+    id_prefix: str | None = Field(
+        default=None,
+        pattern=ID_PREFIX_PATTERN,
+        description="Prefix of keyed task ids, `<id_prefix>-<hash of the row's id_field value>`: a lowercase "
+        "letter, then up to 7 lowercase letters or digits. Choose one per dataset, so two files with the "
+        "same keys don't share tasks in a workspace. Requires `id_field`.",
+    )
+
+    @model_validator(mode="after")
+    def _key_fields_together(self) -> FilesetTaskSource:
+        if (self.id_field is None) != (self.id_prefix is None):
+            raise ValueError("`id_field` and `id_prefix` go together: set both, or neither")
+        return self
 
     @field_validator("fileset")
     @classmethod

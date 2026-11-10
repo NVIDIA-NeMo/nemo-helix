@@ -347,6 +347,51 @@ def test_discover_gym_tasks_stops_at_the_row_limit() -> None:
         discover_gym_tasks(Lines(), name="x", max_rows=2)
 
 
+#: The platform's entity-name rule, which every task id must satisfy to be stored.
+ENTITY_NAME = re.compile(r"^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$")
+
+
+def _keyed_ids(*rows: dict, prefix: str = "gold") -> list[str]:
+    lines = b"".join(json.dumps(row).encode() + b"\n" for row in rows)
+    return [t.id for t in discover_gym_tasks(io.BytesIO(lines), name="x", id_field="uid", id_prefix=prefix)]
+
+
+@pytest.mark.parametrize("prefix", ["g", "gold", "golden12"])
+def test_keyed_ids_fill_a_valid_entity_name(prefix: str) -> None:
+    [task_id] = _keyed_ids({"uid": "t1", "responses_create_params": {"input": "q"}}, prefix=prefix)
+    assert task_id.startswith(f"{prefix}-")
+    assert len(task_id) == 63
+    assert ENTITY_NAME.fullmatch(task_id)
+
+
+def test_a_keyed_id_depends_only_on_the_key() -> None:
+    before, other = _keyed_ids(
+        {"uid": "t1", "responses_create_params": {"input": "q"}, "expected_answer": "A"},
+        {"uid": "t2", "responses_create_params": {"input": "q"}, "expected_answer": "A"},
+    )
+    [after] = _keyed_ids({"uid": "t1", "responses_create_params": {"input": "edited"}, "expected_answer": "B"})
+    assert before == after != other
+    # The key is hashed as JSON, so a number and its string are different keys.
+    assert _keyed_ids({"uid": 1, "responses_create_params": {}}) != _keyed_ids(
+        {"uid": "1", "responses_create_params": {}}
+    )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"id_field": "uid"}, "go together"),
+        ({"id_prefix": "gold"}, "go together"),
+        ({"id_field": "uid", "id_prefix": "golden123"}, "1-8 characters"),
+        ({"id_field": "uid", "id_prefix": "g-x"}, "1-8 characters"),
+        ({"id_field": "uid", "id_prefix": "Gold"}, "1-8 characters"),
+    ],
+)
+def test_keyed_ids_need_both_fields_and_a_valid_prefix(kwargs: dict, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        discover_gym_tasks(io.BytesIO(b'{"uid": "t1", "responses_create_params": {}}\n'), name="x", **kwargs)
+
+
 @pytest.mark.parametrize(
     ("raw", "message"),
     [
