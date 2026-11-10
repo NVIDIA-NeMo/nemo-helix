@@ -12,6 +12,7 @@ tests lock that behaviour in (including against the real captured output)."""
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import re
@@ -319,45 +320,31 @@ def test_discover_gym_tasks_content_does_not_depend_on_the_file_name(tmp_path: P
     assert {task.intent for task in first} == {"Gym row"}
 
 
-def test_discover_gym_tasks_takes_ids_from_id_field(tmp_path: Path) -> None:
-    dataset = _write_rows(tmp_path / "ids.jsonl", _row("q1", uuid="a-1"), _row("q2", uuid=17))
-    tasks = discover_gym_tasks(dataset, id_field="uuid")
-    assert [task.id for task in tasks] == ["a-1", "17"]
-    # The id field stays part of the row, so the verifier still sees it.
-    assert tasks[0].metadata["gym_row_extras"]["uuid"] == "a-1"
+def test_discover_gym_tasks_reads_a_stream_like_the_file(tmp_path: Path) -> None:
+    dataset = _write_rows(tmp_path / "golden.jsonl", _row("q1"), "", _row("q2"))
+    from_file = discover_gym_tasks(dataset)
+    from_stream = discover_gym_tasks(io.BytesIO(dataset.read_bytes()), name="ws/fs#golden.jsonl")
+    assert [(t.id, t.inputs) for t in from_stream] == [(t.id, t.inputs) for t in from_file]
+    # Only a path is stamped: a stream has no local location worth recording.
+    assert "gym_dataset_path" not in from_stream[0].metadata
+    with pytest.raises(ValueError, match=r"ws/fs#golden\.jsonl:2: malformed JSON"):
+        discover_gym_tasks(io.BytesIO(b'{"responses_create_params": {}}\n{bad\n'), name="ws/fs#golden.jsonl")
 
 
-def test_discover_gym_tasks_prefixes_ids(tmp_path: Path) -> None:
-    dataset = _write_rows(tmp_path / "ids.jsonl", _row("q1", uuid=1), _row("q2", uuid=2))
-    tasks = discover_gym_tasks(dataset, id_field="uuid", task_id_prefix="nokia-mcqa")
-    assert [task.id for task in tasks] == ["nokia-mcqa-1", "nokia-mcqa-2"]
+def test_discover_gym_tasks_stops_at_the_row_limit() -> None:
+    rows = (_row(f"q{i}") for i in range(3))
 
+    class Lines:
+        """Fails the test if discovery reads past the row that breaks the limit."""
 
-def test_discover_gym_tasks_keeps_an_id_across_content_edits(tmp_path: Path) -> None:
-    before = discover_gym_tasks(_write_rows(tmp_path / "v1.jsonl", _row("old", uuid="r1")), id_field="uuid")
-    after = discover_gym_tasks(_write_rows(tmp_path / "v2.jsonl", _row("new", uuid="r1")), id_field="uuid")
-    assert before[0].id == after[0].id == "r1"
-    assert before[0].inputs != after[0].inputs
+        def __iter__(self):
+            for index, row in enumerate(rows):
+                assert index < 3
+                yield f"{row}\n".encode()
+            raise AssertionError("read past the limit")
 
-
-@pytest.mark.parametrize(
-    ("lines", "kwargs", "message"),
-    [
-        ([_row("q1")], {"id_field": "uuid"}, r"ids\.jsonl:1: row has no 'uuid' field"),
-        ([_row("q1", uuid=1.5)], {"id_field": "uuid"}, r"ids\.jsonl:1: 'uuid' must be a string or integer, got float"),
-        ([_row("q1", uuid=True)], {"id_field": "uuid"}, r"'uuid' must be a string or integer, got bool"),
-        ([_row("q1", uuid=" ")], {"id_field": "uuid"}, r"ids\.jsonl:1: 'uuid' is empty"),
-        (
-            [_row("q1", uuid="A"), "", _row("q2", uuid="a")],
-            {"id_field": "uuid"},
-            r"ids\.jsonl:3: duplicate 'uuid' value; line 1 already has task id 'a'",
-        ),
-        ([_row("q1")], {"task_id_prefix": "p"}, r"task_id_prefix requires id_field"),
-    ],
-)
-def test_discover_gym_tasks_rejects_bad_ids(tmp_path: Path, lines: list[str], kwargs: dict, message: str) -> None:
-    with pytest.raises(ValueError, match=message):
-        discover_gym_tasks(_write_rows(tmp_path / "ids.jsonl", *lines), **kwargs)
+    with pytest.raises(ValueError, match=r"x:3: more than the 2-row limit"):
+        discover_gym_tasks(Lines(), name="x", max_rows=2)
 
 
 @pytest.mark.parametrize(

@@ -468,18 +468,3 @@ async def test_id_membership_distinguishes_same_name_across_workspaces(entity_st
     service = TasksetService(entity_store, tasks, authorize_task_read=AsyncMock())
     suite, _ = await service.create_taskset("suite", TasksetInput(task_ids=[heads[1].id]), workspace="default")
     assert suite.tasks[0].root.startswith("second/member#")
-
-
-async def test_every_write_and_read_reports_the_digest_of_its_revision(service: TasksetService) -> None:
-    created, _ = await service.create_taskset("ts-1", _taskset_input(), workspace="default")
-    unchanged, published = await service.replace_taskset("ts-1", _taskset_input(), workspace="default")
-    edited_input = _taskset_input().model_copy(update={"description": "Edited."})
-    edited, _ = await service.replace_taskset("ts-1", edited_input, workspace="default")
-    head = await service.get_taskset("default", "ts-1")
-    revisions = await service.list_revisions("default", "ts-1")
-
-    assert revisions is not None and head is not None
-    by_ordinal = {revision.revision: revision.content_hash for revision in revisions.data}
-    assert not published
-    assert created.content_hash == unchanged.content_hash == by_ordinal[1]
-    assert edited.content_hash == head.content_hash == by_ordinal[2]

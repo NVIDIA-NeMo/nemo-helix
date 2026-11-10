@@ -294,24 +294,23 @@ _PIN_BATCH = 200
 _PIN_PAGE_SIZE = 1000
 
 
-async def find_task_revisions_by_digest(
+async def verify_task_pins(
     entity_client: EntityClientProtocol[TaskEntity],
     workspace: str,
     pins: Sequence[tuple[str, str]],
-) -> dict[tuple[str, str], tuple[TaskEntity, TaskRevisionEntity]]:
-    """Resolve many ``(task name, digest)`` pins in one workspace with batched queries.
+) -> None:
+    """Check that each ``(task name, digest)`` pin in one workspace names a published, intact revision.
 
     The batched form of ``get(TaskEntity)`` + :func:`get_revision` per pin: one query for each batch
-    of heads and one (paged) for their revisions, instead of two round trips per pin, so pinning a
-    taskset of thousands of members costs a handful of queries. Same guarantees: each revision is
-    the newest with that digest under that head, and its content is re-verified against the digest.
+    of heads and one (paged, stopping once every pin is found) for their revisions, instead of two
+    round trips per pin, so pinning a taskset of thousands of members costs a handful of queries.
+    Each found revision's content is re-verified against its digest.
 
     Raises:
         NemoEntityNotFoundError: A named task does not exist.
         RevisionNotFoundError: A task has no revision with its pinned digest.
     """
     revision_client = cast(EntityClientProtocol[TaskRevisionEntity], entity_client)
-    found: dict[tuple[str, str], tuple[TaskEntity, TaskRevisionEntity]] = {}
     unique = list(dict.fromkeys(pins))
     for start in range(0, len(unique), _PIN_BATCH):
         batch = unique[start : start + _PIN_BATCH]
@@ -326,9 +325,9 @@ async def find_task_revisions_by_digest(
         for name in names:
             if name not in heads:
                 raise NemoEntityNotFoundError(f"Task '{workspace}/{name}' not found")
-        newest: dict[tuple[str, str], TaskRevisionEntity] = {}
+        missing = {(heads[name].id, digest): name for name, digest in batch}
         page = 1
-        while True:
+        while missing:
             revisions = await revision_client.list(
                 TaskRevisionEntity,
                 workspace=workspace,
@@ -345,24 +344,19 @@ async def find_task_revisions_by_digest(
                         ),
                     ],
                 ),
-                sort="-created_at",
                 page=page,
                 page_size=_PIN_PAGE_SIZE,
             )
             for revision in revisions.data:
-                # Newest first, so the first row seen for a (parent, digest) is the one find_by_digest picks.
-                newest.setdefault((revision.parent or "", revision.content_hash), revision)
+                name = missing.pop((revision.parent or "", revision.content_hash), None)
+                if name is not None:
+                    _verify_content(heads[name], revision)
             if page >= revisions.pagination.total_pages:
                 break
             page += 1
-        for name, digest in batch:
-            head = heads[name]
-            revision = newest.get((head.id, digest))
-            if revision is None:
-                raise RevisionNotFoundError(f"'{workspace}/{name}' has no revision with digest {digest!r}")
-            _verify_content(head, revision)
-            found[(name, digest)] = (head, revision)
-    return found
+        if missing:
+            (_, digest), name = next(iter(missing.items()))
+            raise RevisionNotFoundError(f"'{workspace}/{name}' has no revision with digest {digest!r}")
 
 
 def _verify_content(head: TaskEntity | TasksetEntity, revision: TaskRevisionEntity | TasksetRevisionEntity) -> None:

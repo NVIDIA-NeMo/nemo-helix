@@ -33,11 +33,11 @@ from nemo_evals.harbor.materialization import verify_definition
 from nemo_evals.metric_refs import parse_metric_ref
 from nemo_evals.revisions import (
     apply_tag,
-    find_task_revisions_by_digest,
     get_revision,
     head_digest,
     list_revisions,
     publish_revision,
+    verify_task_pins,
 )
 from nemo_helix_plugin.entities import (
     EntityClientProtocol,
@@ -411,7 +411,7 @@ class TaskService:
         Raises ``NemoEntityNotFoundError`` for a missing task and :class:`RevisionNotFoundError` for a
         missing revision, as :meth:`resolve_revision` would for each pin.
         """
-        await find_task_revisions_by_digest(self.entity_client, workspace, pins)
+        await verify_task_pins(self.entity_client, workspace, pins)
 
     async def list_revisions(
         self, workspace: str, name: str, *, page: int = 1, page_size: int = 100

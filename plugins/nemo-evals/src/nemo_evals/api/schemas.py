@@ -504,14 +504,6 @@ class Taskset(BaseModel):
         description="Ordinal of the published revision this content corresponds to. Every stored "
         "taskset has at least one revision, so this is never 0."
     )
-    content_hash: str | None = Field(
-        default=None,
-        pattern=DIGEST_PATTERN,
-        description="Digest of the revision this content corresponds to; pin it as "
-        "'workspace/name#<content_hash>'. A create or replace returns the digest it published, or of "
-        "the existing revision it matched when the content was unchanged. Always set by this server; "
-        "optional only so clients still read responses from servers that predate it.",
-    )
     tags: dict[str, int] = Field(
         default_factory=dict,
         description="Tag → revision-ordinal pointers. Reading the record's current content returns "

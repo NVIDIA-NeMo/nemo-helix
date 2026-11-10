@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -112,50 +112,33 @@ def _default_gym_metric() -> Metric:
     return GymRewardMetric()
 
 
-def _row_task_id(row: Mapping[str, Any], *, id_field: str, task_id_prefix: str | None, where: str) -> str:
-    """The task id a row names through ``id_field``, optionally prefixed.
-
-    Only strings and integers are ids: a float, bool or nested value has no single obvious text
-    form, so it is refused rather than stringified into something the author never wrote.
-    """
-    if id_field not in row:
-        raise ValueError(f"{where}: row has no {id_field!r} field to take its task id from")
-    raw = row[id_field]
-    if isinstance(raw, bool) or not isinstance(raw, (str, int)):
-        raise ValueError(f"{where}: {id_field!r} must be a string or integer, got {type(raw).__name__}")
-    value = str(raw)
-    if not value.strip():
-        raise ValueError(f"{where}: {id_field!r} is empty")
-    return f"{task_id_prefix}-{value}" if task_id_prefix is not None else value
-
-
 def discover_gym_tasks(
-    dataset: str | Path,
+    dataset: str | Path | Iterable[bytes],
     *,
     metrics: Sequence[Any] | None = None,
-    id_field: str | None = None,
-    task_id_prefix: str | None = None,
+    name: str | None = None,
+    max_rows: int | None = None,
 ) -> list[AgentEvalTask]:
     """Build one :class:`AgentEvalTask` per distinct row in a Gym dataset (jsonl).
 
-    **Task ids.** By default a task's id is ``gym-`` and 59 hex digits of its row's content hash, a
-    valid platform entity name, so the same row has the same id locally, inline and stored. With ``id_field``, it is
-    that field's value instead (a string or integer), so a row keeps its id when its content is
-    edited; ``task_id_prefix`` then makes it ``f"{task_id_prefix}-{value}"``, for ids that must be
-    unique beyond one dataset. In id mode a duplicate id (ignoring case) is an error rather than a
-    collapsed duplicate, because two rows claiming one id are different rows.
+    ``dataset`` is a path, or an iterable of byte lines (``io.BytesIO``) that ``name`` labels in
+    errors and logs. ``max_rows``, when set, refuses a dataset with more non-blank rows, stopping
+    at the first row past the limit.
+
+    **Task ids.** A task's id is ``gym-`` and 59 hex digits of its row's content hash, a valid
+    platform entity name, so the same row has the same id locally, inline and stored.
 
     Every task's ``intent`` is the fixed label ``"Gym row"``: it never names the file, so the same
     row yields the same task content from any file. Each task's ``instruction`` is rendered
     from ``responses_create_params.input`` *when the row carries one*; the raw params
     are stashed under ``inputs['gym_row']`` for provenance; and it is scored by a
-    :class:`GymRewardMetric`. The dataset path is stamped on
+    :class:`GymRewardMetric`. A path dataset is stamped on
     ``metadata['gym_dataset_path']``, and every *other* row key (the verifier's
     ground-truth fields, ``agent_ref``, and so on) on ``metadata['gym_row_extras']``.
     Together with ``inputs['gym_row']`` those reconstruct the complete source row,
     which :class:`GymAgentTaskRunner` re-materializes into the dataset it hands to Gym.
 
-    **One distinct row is one task.** In hash mode, duplicate rows collapse (identity is row content,
+    **One distinct row is one task.** Duplicate rows collapse (identity is row content,
     so they are by definition the same task) and are reported as a warning: repeated
     attempts are a run-level concern — ``GymRuntimeConfig.num_repeats`` — not something
     a dataset expresses by repeating a row, so duplicates almost always mean bad data.
@@ -176,37 +159,26 @@ def discover_gym_tasks(
     (``rollout_collection._preprocess_rows_from_config``), so a row without it is rejected here
     rather than crashing Gym mid-collection.
     """
-    if task_id_prefix is not None and id_field is None:
-        raise ValueError("task_id_prefix requires id_field: a prefix applies to a row's id, and hash ids take none")
-    dataset = Path(dataset)
+    path = Path(dataset) if isinstance(dataset, (str, Path)) else None
+    label = name or (str(path) if path is not None else "<stream>")
     tasks: list[AgentEvalTask] = []
     seen: set[str] = set()
-    #: Id mode only: casefolded task id -> the line that claimed it, for duplicate errors.
-    id_lines: dict[str, int] = {}
-    duplicates = 0
-    promptless = 0
-    for line_no, row in iter_jsonl_objects(dataset):
+    rows = duplicates = promptless = 0
+    for line_no, row in iter_jsonl_objects(path if path is not None else dataset, name=label):
+        rows += 1
+        if max_rows is not None and rows > max_rows:
+            raise ValueError(f"{label}:{line_no}: more than the {max_rows}-row limit")
         params = row.get("responses_create_params")
         if not isinstance(params, Mapping):
             raise ValueError(
-                f"{dataset}:{line_no}: row has no 'responses_create_params' mapping; Gym requires that key "
+                f"{label}:{line_no}: row has no 'responses_create_params' mapping; Gym requires that key "
                 "on every dataset row"
             )
-        if id_field is None:
-            task_id = _hash_task_id(row)
-            if task_id in seen:
-                duplicates += 1
-                continue
-            seen.add(task_id)
-        else:
-            task_id = _row_task_id(row, id_field=id_field, task_id_prefix=task_id_prefix, where=f"{dataset}:{line_no}")
-            # Casefolded, because an evaluation rejects task ids that differ only in case.
-            first = id_lines.setdefault(task_id.casefold(), line_no)
-            if first != line_no:
-                raise ValueError(
-                    f"{dataset}:{line_no}: duplicate {id_field!r} value; line {first} already has task id "
-                    f"{task_id!r}. Ids must be unique per row (ignoring case)."
-                )
+        task_id = _hash_task_id(row)
+        if task_id in seen:
+            duplicates += 1
+            continue
+        seen.add(task_id)
         instruction = _render_instruction(params)
         if not instruction:
             promptless += 1
@@ -223,7 +195,7 @@ def discover_gym_tasks(
                 },
                 metrics=list(metrics) if metrics is not None else [_default_gym_metric()],
                 metadata={
-                    "gym_dataset_path": str(dataset),
+                    **({"gym_dataset_path": str(path)} if path is not None else {}),
                     # Everything except responses_create_params, which already lives in inputs['gym_row'].
                     "gym_row_extras": {
                         key: value
@@ -239,7 +211,7 @@ def discover_gym_tasks(
             "repeating a row cannot request repeated attempts — set GymRuntimeConfig.num_repeats for that. "
             "Duplicate rows usually indicate a data problem.",
             duplicates,
-            dataset,
+            label,
             len(tasks),
         )
     if promptless:
@@ -250,10 +222,10 @@ def discover_gym_tasks(
             "not read the instruction. A runner that hands the task straight to an agent will reject these tasks.",
             promptless,
             len(tasks),
-            dataset,
+            label,
         )
     if not tasks:
-        raise ValueError(f"no rows found in Gym dataset {dataset}")
+        raise ValueError(f"no rows found in Gym dataset {label}")
     return tasks
 
 

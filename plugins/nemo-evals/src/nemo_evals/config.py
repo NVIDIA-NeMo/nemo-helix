@@ -414,20 +414,6 @@ class EvaluatorConfig(NemoConfig):
         "`jobs.executor_defaults.<backend>.env` as well. This setting is the access control: submitters "
         "choose their job's executor profile, so opting in only some profiles restricts nothing.",
     )
-    fileset_task_source_max_bytes: int = Field(
-        default=64 * 1024 * 1024,
-        gt=0,
-        description="Largest dataset file an agent-evaluate submission may name as its task source "
-        "(`tasks.source.fileset`). The file is read and converted inside the Evals API process during "
-        "the submit request, so this bounds that request's memory. A larger file is refused with 422.",
-    )
-    fileset_task_source_max_rows: int = Field(
-        default=50_000,
-        gt=0,
-        description="Most rows an agent-evaluate FileSet task source may hold. Each row becomes a task "
-        "the submission validates, freezes into the job spec and, when snapshotting, publishes, so this "
-        "bounds the submit request's work and the job record's size. More rows are refused with 422.",
-    )
 
 
 def get_config() -> EvaluatorConfig:
