@@ -348,6 +348,10 @@ def derive_egress(agent_config: dict[str, Any]) -> list[str]:
 
     for model_cfg in _declared_models(agent_config):
         base_url = model_cfg.get("base_url")
+        # Match Fabric's legacy endpoint promotion without mutating the inspected config.
+        if base_url is None:
+            settings = model_cfg.get("settings")
+            base_url = settings.get("base_url") if isinstance(settings, dict) else None
         if isinstance(base_url, str) and "://" in base_url:
             found.extend(_egress_host_entries(base_url))
 
