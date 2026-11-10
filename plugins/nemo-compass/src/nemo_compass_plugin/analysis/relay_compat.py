@@ -82,17 +82,25 @@ def install_nemo_relay_compat(event_manager: EventManager) -> Callable[[], None]
 
 @asynccontextmanager
 async def relay_scope(event_manager: EventManager, scope_name: str) -> AsyncGenerator[ScopeHandle, None]:
-    """Keep NOOA's scope ownership and cleanup while using the local installer."""
+    """Give concurrent Compass agents independent stacks and preserve parent links."""
+    current = nemo_relay_middleware._current_relay_scope.get()
+    parent, owner = current if current is not None else (nemo_relay.scope.get_handle(), None)
+    task = asyncio.current_task()
+    stack_var = nemo_relay_middleware._SCOPE_STACK_VAR
+    stack_token = None
+    if owner is not task and stack_var is not None:
+        # Relay stacks are mutable and otherwise shared by child asyncio tasks.
+        # Match NOOA's agent-call middleware before opening our agent scope.
+        stack_token = stack_var.set(nemo_relay.create_scope_stack())
     uninstall = install_nemo_relay_compat(event_manager)
     try:
-        with nemo_relay.scope.scope(scope_name, nemo_relay.ScopeType.Agent) as handle:
-            # Match NOOA 0.0.10's scope helper so nested agent calls retain their
-            # parent and same-task scope-local guardrails; concurrent calls still
-            # use NOOA's task isolation. Remove with the compatibility installer.
-            token = nemo_relay_middleware._current_relay_scope.set((handle, asyncio.current_task()))
+        with nemo_relay.scope.scope(scope_name, nemo_relay.ScopeType.Agent, handle=parent) as handle:
+            token = nemo_relay_middleware._current_relay_scope.set((handle, task))
             try:
                 yield handle
             finally:
                 nemo_relay_middleware._current_relay_scope.reset(token)
     finally:
         uninstall()
+        if stack_token is not None and stack_var is not None:
+            stack_var.reset(stack_token)
