@@ -7,12 +7,14 @@ import {
   getEvalsGetTaskQueryOptions,
   getEvalsGetTaskRevisionQueryOptions,
 } from '@nemo/sdk/generated/evals/evals-plugin-tasks-routes';
-import { SidePanel, Stack, Text } from '@nvidia/foundations-react-core';
+import { Anchor, SidePanel, Stack, Text } from '@nvidia/foundations-react-core';
+import { TaskDefinition } from '@studio/routes/evaluation/tasks/TaskDefinition';
+import { TaskMetricsPanel } from '@studio/routes/evaluation/tasks/TaskDefinition/TaskMetricsPanel';
 import { parseTaskRef, RUNNER_LABELS } from '@studio/routes/evaluation/tasksets/helpers';
-import { HarborDetails } from '@studio/routes/evaluation/tasksets/TaskDetailDrawer/HarborDetails';
-import { InlineDetails } from '@studio/routes/evaluation/tasksets/TaskDetailDrawer/InlineDetails';
+import { getTaskDetailRoute } from '@studio/routes/utils';
 import { useQuery } from '@tanstack/react-query';
 import type { FC } from 'react';
+import { Link } from 'react-router';
 
 interface TaskDetailDrawerProps {
   /** The member ref to show; the drawer is closed when unset. */
@@ -58,11 +60,13 @@ export const TaskDetailDrawer: FC<TaskDetailDrawerProps> = ({ taskRef, workspace
             { key: 'ref', label: 'Task Ref', value: taskRef, wrapValue: true },
           ]}
         />
-        {task.spec.kind === 'harbor' ? (
-          <HarborDetails spec={task.spec} />
-        ) : (
-          <InlineDetails spec={task.spec} />
-        )}
+        <Anchor asChild>
+          <Link to={getTaskDetailRoute(task.workspace, task.name)}>
+            View task revisions and usage
+          </Link>
+        </Anchor>
+        <TaskDefinition task={task} />
+        <TaskMetricsPanel task={task} />
       </Stack>
     );
   };
