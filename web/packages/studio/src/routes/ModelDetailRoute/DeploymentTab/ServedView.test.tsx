@@ -97,6 +97,23 @@ describe('ServedView', () => {
     expect(screen.queryByRole('button', { name: /undeploy/i })).not.toBeInTheDocument();
   });
 
+  it('leaves out the gateway panel for an autoprovisioned passthrough virtual model', () => {
+    vi.mocked(useGetVirtualModel).mockReturnValue(
+      query({ name: 'my-model', workspace: 'ws', autoprovisioned: true })
+    );
+    render(
+      <ServedView
+        model={model}
+        adapter={null}
+        deploymentRef="ws/my-deployment"
+        providerRef="ws/my-provider"
+      />
+    );
+
+    expect(screen.queryByRole('link', { name: /virtual model/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('Guardrails')).not.toBeInTheDocument();
+  });
+
   it('marks which adapters the deployment has loaded, leading with the current one', () => {
     render(
       <ServedView
