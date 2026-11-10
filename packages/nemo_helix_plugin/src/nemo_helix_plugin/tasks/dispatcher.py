@@ -48,14 +48,12 @@ from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
-from nemo_helix_plugin.job_results import HelixJobResults
+from nemo_helix_plugin.job_results import HelixJobResults, job_storage_context_from_env
 from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
-    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
-    NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
@@ -217,9 +215,7 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
     attempt_id = os.environ.get(NEMO_JOB_ATTEMPT_ID_ENVVAR, "").strip()
     if not attempt_id:
         raise RuntimeError(f"{NEMO_JOB_ATTEMPT_ID_ENVVAR} not set; running outside the platform?")
-    fileset = os.environ.get(NEMO_JOB_FILESET_ENVVAR, "").strip() or None
-    # A job that owns its whole fileset has no base path, so an empty value is the root.
-    artifact_base_path = os.environ.get(NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR, "").strip() or None
+    fileset, artifact_base_path = job_storage_context_from_env()
     return JobContext(
         workspace=workspace,
         storage=StoragePaths(

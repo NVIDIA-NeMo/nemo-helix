@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from nhx.common.entities import DEFAULT_WORKSPACE
 from nhx.common.jobs.file_manager import FilesetFileManager
-from nhx.common.jobs.schemas import FileStorageType
 
 NHX_URL = "http://localhost:8080"
 
@@ -54,26 +53,3 @@ def fileset_manager(mock_fileset_fs) -> FilesetFileManager:
         fileset_name="job-results-jobid-123",
         filesystem=mock_fileset_fs,
     )
-
-
-@pytest.fixture
-def mock_sync_file_manager():
-    """Mock sync file manager for ResultManager tests."""
-    mock_fm = MagicMock()
-    mock_fm.validate_storage.return_value = None
-    mock_fm.upload.return_value = "test-ws/test-fileset#results/att-123/my-result"
-    mock_fm.storage_type.return_value = FileStorageType.FILESET
-    return mock_fm
-
-
-@pytest.fixture
-def mock_async_file_manager():
-    """Mock async file manager for AsyncResultManager tests.
-
-    Note: storage_type() is a sync method, so we use MagicMock for it.
-    """
-    mock_fm = MagicMock()
-    mock_fm.validate_storage = AsyncMock(return_value=None)
-    mock_fm.upload = AsyncMock(return_value="test-ws/test-fileset#results/att-123/my-result")
-    mock_fm.storage_type.return_value = FileStorageType.FILESET
-    return mock_fm

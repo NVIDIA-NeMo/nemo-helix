@@ -440,6 +440,7 @@ async def task_context(
                     workspace="default",
                     client=client_context.client,
                     attempt_id=job.attempt_id,
+                    fileset=job.fileset,
                 ),
                 job_id=job.id,
                 attempt_id=job.attempt_id,

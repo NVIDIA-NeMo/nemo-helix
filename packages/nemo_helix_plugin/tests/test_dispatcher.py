@@ -49,6 +49,7 @@ def _setup_env(
     monkeypatch.setenv("NEMO_JOB_STEP_CONFIG_FILE_PATH", str(config_path))
     monkeypatch.setenv("NEMO_JOB_WORKSPACE", workspace)
     monkeypatch.setenv("NEMO_JOB_ATTEMPT_ID", "attempt-a")
+    monkeypatch.setenv("NEMO_JOB_FILESET", "job-fileset")
     monkeypatch.setenv("NEMO_JOB_PERSISTENT_JOB_STORAGE_PATH", str(tmp_path / "p"))
     monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
     if job_id is None:
@@ -308,6 +309,7 @@ class TestBuildCtxFromEnv:
     @pytest.fixture(autouse=True)
     def _attempt_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("NEMO_JOB_ATTEMPT_ID", "attempt-a")
+        monkeypatch.setenv("NEMO_JOB_FILESET", "job-fileset")
 
     @staticmethod
     def _patch_results(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
@@ -502,57 +504,90 @@ class TestBuildCtxFromEnv:
 
 
 class TestBuildCtxJobStorageContext:
-    """``ctx.results`` carries the job's fileset and artifact base path.
+    """``ctx.results`` publishes into the job's fileset without reading the job record.
 
-    The result sink must not read the job record itself: restricted sandboxes may
-    post results but may not ``GET /jobs/{job}``.
+    Provider-bound sandboxes may post results but not ``GET /jobs/{job}``, so the sink
+    has to work from the ``NEMO_JOB_*`` env the backend injects.
     """
 
     @staticmethod
-    def _capture_results(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
-        captured: dict[str, object] = {}
+    def _recording_client(requests: list[httpx.Request]) -> NemoClient:
+        """Answer the files and results routes, and 404 everything else."""
 
-        def _fake(**kwargs: object) -> MagicMock:
-            captured.update(kwargs)
-            return MagicMock(name="HelixJobResults")
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            path = request.url.path
+            if request.method == "GET" and path.endswith("/filesets/job-fileset/files"):
+                return httpx.Response(200, json={"data": []}, request=request)
+            if request.method == "PUT" and "/filesets/job-fileset/-/" in path:
+                return httpx.Response(
+                    200,
+                    json={"file_ref": "f", "file_url": "u", "path": "p", "size": 2},
+                    request=request,
+                )
+            if request.method == "POST" and path.endswith("/jobs/job-a/results/summary"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "name": "summary",
+                        "job": "job-a",
+                        "workspace": "ws",
+                        "attempt_id": "attempt-a",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "updated_at": "2026-01-01T00:00:00Z",
+                        "artifact_url": "ws/job-fileset#jobs/job-a/results/attempt-a/summary",
+                        "artifact_storage_type": "fileset",
+                    },
+                    request=request,
+                )
+            return httpx.Response(404, json={"detail": f"{request.method} {path} is not permitted"}, request=request)
 
-        monkeypatch.setattr(dispatcher_module, "HelixJobResults", _fake)
-        return captured
+        return NemoClient(
+            base_url="http://platform.test",
+            workspace="ws",
+            http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+            owns_http_client=True,
+        )
 
     @staticmethod
-    def _setup_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def _setup_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **extra: str) -> None:
         monkeypatch.setenv("NEMO_JOB_WORKSPACE", "ws")
         monkeypatch.setenv("NEMO_JOB_ID", "job-a")
         monkeypatch.setenv("NEMO_JOB_ATTEMPT_ID", "attempt-a")
         monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
-
-    def test_fileset_and_base_path_come_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        captured = self._capture_results(monkeypatch)
-        self._setup_env(monkeypatch, tmp_path)
         monkeypatch.setenv("NEMO_JOB_FILESET", "job-fileset")
-        monkeypatch.setenv("NEMO_JOB_ARTIFACT_BASE_PATH", "jobs/job-a")
+        for name, value in extra.items():
+            monkeypatch.setenv(name, value)
 
-        build_ctx_from_env(_sync_client())
+    def _saved_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **extra: str) -> list[str]:
+        artifact = tmp_path / "summary.json"
+        artifact.write_text("{}")
+        self._setup_env(monkeypatch, tmp_path, **extra)
+        requests: list[httpx.Request] = []
+        client = self._recording_client(requests)
+        ctx = build_ctx_from_env(client)
+        ctx.results.save("summary", artifact)
+        uploads = [r.url.path for r in requests if r.method == "PUT"]
+        assert all(not (r.method == "GET" and r.url.path == "/apis/jobs/v2/workspaces/ws/jobs/job-a") for r in requests)
+        return uploads
 
-        assert captured["fileset"] == "job-fileset"
-        assert captured["artifact_base_path"] == "jobs/job-a"
+    def test_results_nest_under_the_job_artifact_base_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        uploads = self._saved_path(tmp_path, monkeypatch, NEMO_JOB_ARTIFACT_BASE_PATH="jobs/job-a")
 
-    def test_absent_base_path_is_none(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert uploads == ["/apis/files/v2/workspaces/ws/filesets/job-fileset/-/jobs/job-a/results/attempt-a/summary"]
+
+    def test_absent_base_path_is_the_fileset_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A job that owns its whole fileset gets no base path rather than an empty one."""
-        captured = self._capture_results(monkeypatch)
+        uploads = self._saved_path(tmp_path, monkeypatch, NEMO_JOB_ARTIFACT_BASE_PATH="")
+
+        assert uploads == ["/apis/files/v2/workspaces/ws/filesets/job-fileset/-/results/attempt-a/summary"]
+
+    def test_missing_fileset_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The sink cannot fall back to reading the job, so a missing fileset is fatal."""
         self._setup_env(monkeypatch, tmp_path)
-        monkeypatch.setenv("NEMO_JOB_FILESET", "job-fileset")
-        monkeypatch.setenv("NEMO_JOB_ARTIFACT_BASE_PATH", "")
+        monkeypatch.delenv("NEMO_JOB_FILESET")
 
-        build_ctx_from_env(_sync_client())
-
-        assert captured["artifact_base_path"] is None
-
-    def test_absent_fileset_falls_back_to_the_job_record(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        captured = self._capture_results(monkeypatch)
-        self._setup_env(monkeypatch, tmp_path)
-        monkeypatch.delenv("NEMO_JOB_FILESET", raising=False)
-
-        build_ctx_from_env(_sync_client())
-
-        assert captured["fileset"] is None
+        with pytest.raises(RuntimeError, match="NEMO_JOB_FILESET"):
+            build_ctx_from_env(self._recording_client([]))

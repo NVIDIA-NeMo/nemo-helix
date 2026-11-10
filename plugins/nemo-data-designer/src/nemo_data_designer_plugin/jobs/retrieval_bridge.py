@@ -11,7 +11,7 @@ from typing import Any
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
-from nemo_helix_plugin.job_results import HelixJobResults
+from nemo_helix_plugin.job_results import HelixJobResults, job_storage_context_from_env
 from nemo_helix_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
@@ -42,7 +42,15 @@ def _get_ctx(client: NemoClient) -> JobContext:
         ephemeral=Path(os.environ[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR]),
         persistent=Path(persistent_env) if persistent_env else None,
     )
-    results = HelixJobResults(workspace=workspace, job_name=job_name, client=client, attempt_id=attempt_id)
+    fileset, artifact_base_path = job_storage_context_from_env()
+    results = HelixJobResults(
+        workspace=workspace,
+        job_name=job_name,
+        client=client,
+        attempt_id=attempt_id,
+        fileset=fileset,
+        artifact_base_path=artifact_base_path,
+    )
     return JobContext(
         workspace=workspace,
         job_id=job_name,
