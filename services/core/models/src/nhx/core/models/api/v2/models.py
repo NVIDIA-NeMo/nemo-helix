@@ -350,7 +350,10 @@ async def start_update_model_spec_job(model_entity: ModelEntity):
 
 @router.patch(
     "/v2/workspaces/{workspace}/models/{name}",
-    responses=_ENTITY_WRITE_ERROR_RESPONSES,
+    responses={
+        **_ENTITY_WRITE_ERROR_RESPONSES,
+        404: {"model": ErrorResponse, "description": "Model not found"},
+    },
     summary="Update Model",
     response_description="Update model metadata",
     status_code=status.HTTP_200_OK,
@@ -448,6 +451,7 @@ async def update_model(
 
 @router.delete(
     "/v2/workspaces/{workspace}/models/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Model not found"}},
     summary="Delete Model",
     response_description="Delete model entity",
     status_code=status.HTTP_204_NO_CONTENT,

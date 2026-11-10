@@ -397,13 +397,14 @@ describe('AssistantChat', () => {
 
     expect(screen.getByText('Existing prompt')).toBeInTheDocument();
     expect(screen.getByText('Existing response')).toBeInTheDocument();
+    const actions = within(within(assistantMessage).getByTestId('assistant-chat-message-actions'));
     expect(
-      within(assistantMessage).getByRole('button', { name: /Copy message/i })
-    ).toBeInTheDocument();
-    expect(
-      within(assistantMessage).getByRole('button', { name: /Regenerate response/i })
-    ).toBeInTheDocument();
+      actions.getAllByRole('button').map((button) => button.getAttribute('aria-label'))
+    ).toEqual(['Copy message', 'Regenerate response']);
     expect(screen.getByRole('button', { name: /Edit message/i })).toBeInTheDocument();
+    expect(
+      within(assistantMessage).queryByTestId('assistant-chat-message-surface')
+    ).not.toBeInTheDocument();
   });
 
   it('can hide assistant copy and regenerate message actions', () => {
@@ -492,19 +493,15 @@ describe('AssistantChat', () => {
     );
 
     const assistantMessage = screen.getByTestId('assistant-chat-message');
-    const messageSurfaces = within(assistantMessage).getAllByTestId(
-      'assistant-chat-message-surface'
-    );
+    const textBlocks = within(assistantMessage).getAllByTestId('chat-message-content-text');
     const toolCall = within(assistantMessage).getByTestId('assistant-chat-tool-pill');
 
-    expect(messageSurfaces).toHaveLength(2);
-    expect(messageSurfaces[0]).toHaveTextContent('I will inspect the repository.');
-    expect(messageSurfaces[1]).toHaveTextContent('I found the relevant file.');
+    expect(textBlocks).toHaveLength(2);
+    expect(textBlocks[0]).toHaveTextContent('I will inspect the repository.');
+    expect(textBlocks[1]).toHaveTextContent('I found the relevant file.');
     expect(toolCall).toHaveTextContent('Read');
-    for (const messageSurface of messageSurfaces) {
-      expect(
-        within(messageSurface).queryByTestId('assistant-chat-tool-pill')
-      ).not.toBeInTheDocument();
+    for (const textBlock of textBlocks) {
+      expect(within(textBlock).queryByTestId('assistant-chat-tool-pill')).not.toBeInTheDocument();
     }
   });
 

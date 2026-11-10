@@ -50,10 +50,10 @@ class _MockAsyncPaginatedResponse:
 
 
 def _make_mock_files_client(filesets: list | None = None) -> AsyncMock:
-    """Build a mock AsyncFilesClient with list_filesets/delete_fileset."""
+    """Build a mock AsyncFilesClient with list_filesets/delete_fileset_by_id."""
     mock_files = AsyncMock()
     mock_files.list_filesets = AsyncMock(return_value=_MockAsyncPaginatedResponse(filesets or []))
-    mock_files.delete_fileset = AsyncMock()
+    mock_files.delete_fileset_by_id = AsyncMock()
     return mock_files
 
 
@@ -144,6 +144,7 @@ def _make_job(name: str, status: str = "completed") -> MagicMock:
 def _named(name: str) -> MagicMock:
     item = MagicMock()
     item.name = name
+    item.id = f"allocation-{name}"
     return item
 
 
@@ -292,7 +293,7 @@ class TestWorkspaceCleanupAsyncStep:
         models_client.delete_adapter = AsyncMock(side_effect=lambda **_: call_order.append("adapter"))
         models_client.delete_model = AsyncMock(side_effect=lambda **_: call_order.append("model"))
         mock_files = _make_mock_files_client([fileset])
-        mock_files.delete_fileset = AsyncMock(side_effect=lambda **_: call_order.append("fileset"))
+        mock_files.delete_fileset_by_id = AsyncMock(side_effect=lambda **_: call_order.append("fileset"))
         controller = _make_controller(workspace_repo=repo)
 
         with _patch_clients(_make_jobs_client([]), mock_files, models_client):
@@ -737,20 +738,22 @@ class TestWorkspaceCleanupAsyncStep:
             attempted = models_client.delete_model
         else:
             files_client.list_filesets = AsyncMock(return_value=_MockAsyncPaginatedResponse([first, second]))
-            files_client.delete_fileset = AsyncMock(side_effect=[Exception("fail"), None])
-            attempted = files_client.delete_fileset
+            files_client.delete_fileset_by_id = AsyncMock(side_effect=[Exception("fail"), None])
+            attempted = files_client.delete_fileset_by_id
 
         controller = _make_controller(workspace_repo=repo)
         with _patch_clients(_make_jobs_client([]), files_client, models_client):
             await controller._async_step()
 
-        assert [call.kwargs["name"] for call in attempted.await_args_list] == ["first", "second"]
+        assert [call.kwargs["fileset_id" if kind == "fileset" else "name"] for call in attempted.await_args_list] == (
+            [first.id, second.id] if kind == "fileset" else ["first", "second"]
+        )
         if kind == "adapter":
             models_client.delete_model.assert_awaited_once_with(name="model", workspace="test-workspace")
         if kind == "model":
             models_client.delete_adapter.assert_awaited_once_with(name="adapter", workspace="test-workspace")
         if kind != "fileset":
-            files_client.delete_fileset.assert_not_called()
+            files_client.delete_fileset_by_id.assert_not_called()
         repo.delete_workspace_if_claimed.assert_not_called()
         failure = repo.fail_workspace_deletion_if_claimed.await_args.kwargs
         assert failure["name"] == workspace.name
@@ -781,7 +784,7 @@ class TestWorkspaceCleanupAsyncStep:
             models_client.delete_model = AsyncMock(side_effect=_not_found())
         else:
             files_client.list_filesets = AsyncMock(return_value=_MockAsyncPaginatedResponse([item]))
-            files_client.delete_fileset = AsyncMock(side_effect=_not_found())
+            files_client.delete_fileset_by_id = AsyncMock(side_effect=_not_found())
 
         controller = _make_controller(workspace_repo=repo)
         with _patch_clients(_make_jobs_client([]), files_client, models_client):
@@ -1092,8 +1095,8 @@ class TestWorkspaceCleanupFilesets:
         with patch.object(AsyncFilesClient, "from_client", return_value=mock_files):
             await controller._cleanup_filesets(workspace)
 
-        mock_files.delete_fileset.assert_awaited_once_with(
-            name="test-fileset",
+        mock_files.delete_fileset_by_id.assert_awaited_once_with(
+            fileset_id=fileset.id,
             workspace="test-workspace",
         )
 
@@ -1102,18 +1105,19 @@ class TestWorkspaceCleanupFilesets:
         workspace = _make_workspace()
         fs1 = MagicMock()
         fs1.name = "fs1"
+        fs1.id = "allocation-fs1"
         fs2 = MagicMock()
         fs2.name = "fs2"
 
         mock_files = _make_mock_files_client([fs1, fs2])
-        mock_files.delete_fileset = AsyncMock(side_effect=[Exception("fail"), None])
+        mock_files.delete_fileset_by_id = AsyncMock(side_effect=[Exception("fail"), None])
         controller = _make_controller()
 
         with patch.object(AsyncFilesClient, "from_client", return_value=mock_files):
-            with pytest.raises(WorkspaceResourceCleanupError, match="fs1: fail"):
+            with pytest.raises(WorkspaceResourceCleanupError, match="allocation-fs1: fail"):
                 await controller._cleanup_filesets(workspace)
 
-        assert mock_files.delete_fileset.await_count == 2
+        assert mock_files.delete_fileset_by_id.await_count == 2
 
     @pytest.mark.asyncio
     async def test_fileset_conflict_is_stored_on_the_failed_workspace(self):
@@ -1125,8 +1129,9 @@ class TestWorkspaceCleanupFilesets:
         repo.fail_workspace_deletion_if_claimed.return_value = True
         fileset = MagicMock()
         fileset.name = "shared-weights"
+        fileset.id = "allocation-shared-weights"
         files_client = _make_mock_files_client([fileset])
-        files_client.delete_fileset = AsyncMock(
+        files_client.delete_fileset_by_id = AsyncMock(
             side_effect=Exception(
                 "HTTP 409: Cannot delete fileset 'team-a/shared-weights' because 1 model entity reference(s) still use it"
             )
@@ -1139,7 +1144,7 @@ class TestWorkspaceCleanupFilesets:
         failure = repo.fail_workspace_deletion_if_claimed.await_args.kwargs
         assert failure["name"] == workspace.name
         assert failure["expected_updated_at"] == claimed.updated_at
-        assert "shared-weights:" in failure["deletion_error"]
+        assert "allocation-shared-weights:" in failure["deletion_error"]
         assert "HTTP 409:" in failure["deletion_error"]
         assert "1 model entity reference" in failure["deletion_error"]
         repo.delete_workspace_if_claimed.assert_not_called()

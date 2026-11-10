@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
-import {
-  type AnnotationInput,
-  type HTTPValidationError,
-  type ModelEntitySortField,
-  type HelixJobLogPage,
-  type HelixJobResponsesPage,
-  type Project,
-  TraceMetricBucketParam,
+import type {
+  AnnotationInput,
+  HTTPValidationError,
+  ModelEntitySortField,
+  HelixJobLogPage,
+  HelixJobResponsesPage,
+  Project,
 } from '@nemo/sdk/generated/platform/schema';
+import { TraceMetricBucketParam } from '@nemo/sdk/generated/platform/schema/TraceMetricBucketParam';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { agentDeploymentCapabilitiesHandlers } from '@studio/mocks/handlers/agentDeploymentCapabilities';
 import { agentOptimizeJobsHandlers } from '@studio/mocks/handlers/agentOptimizeJobs';

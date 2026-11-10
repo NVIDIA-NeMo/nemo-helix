@@ -22,15 +22,18 @@ from typing import Annotated, Any, Literal, Self, TypeAlias
 import nemo_evals.shared.metric_bundles.cloudpickle  # noqa: F401
 import nemo_evals.shared.metric_bundles.inline  # noqa: F401
 from filesets import FilesetPathError, parse_fileset_ref
+from nemo_evals._fileset_receipt import FilesetReceipt
 from nemo_evals.api.schemas import AgentRef, TaskInputs, TaskMetadataList, TaskRef, TasksetRef
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
-from nemo_evals.filesets import FilesetRef
+from nemo_evals.filesets import FilesetRef, is_fileset_glob_pattern
 from nemo_evals.jobs.gateway_agents import GatewayAgentEnv, gateway_agent_env, validate_gateway_env
 from nemo_evals.jobs.publication_spec import PublicationSpec
 from nemo_evals.metric_refs import MetricRefOrInline
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline
+from nemo_helix_plugin.log_utils import sanitize_for_log
 from nhx_evals_sdk.agent_eval.runtimes.fabric.env import validate_fabric_env
+from nhx_evals_sdk.agent_eval.runtimes.gym.dataset import ID_PREFIX_PATTERN, check_id_prefix
 from nhx_evals_sdk.agent_eval.runtimes.harbor.env import validate_harbor_env
 from nhx_evals_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nhx_evals_sdk.agent_eval.tasks import SemanticView
@@ -129,6 +132,7 @@ class RegisteredAgentSource(BaseModel):
         "taken when the agent was resolved so a re-registration while the job is queued cannot change the "
         "files it runs with. Present only when the resolved config refers to files by relative path.",
     )
+    fileset_id: str | None = Field(default=None, description="ID of the snapshot allocation; absent on legacy jobs.")
 
 
 #: What a Fabric run is made from. The two shapes share no field, so a document is one or the other.
@@ -766,6 +770,24 @@ def registered_agent_files(target: FabricRunnerTarget | HarborRunnerTarget | Gym
     return source.files if source is not None else None
 
 
+def registered_agent_files_receipt(
+    target: Target | None,
+) -> FilesetReceipt | None:
+    """Return the captured snapshot allocation for cleanup; legacy names cannot identify it safely."""
+    source = registered_agent_source(target)
+    if source is None or source.files is None:
+        return None
+    if source.fileset_id is None:
+        # Legacy records kept only a reusable name. Retain the snapshot because looking up
+        # that name now could select a replacement owned by another run.
+        logger.warning(
+            "Agent files snapshot '%s' has no recorded fileset ID; skipping automatic cleanup",
+            sanitize_for_log(source.files.root),
+        )
+        return None
+    return FilesetReceipt(ref=source.files.root, fileset_id=source.fileset_id)
+
+
 def target_agent_identity(target: Target | Model | AgentBase | ModelRef | None) -> tuple[str | None, str | None]:
     """``(agent_name, model_name)`` derivable from a target, for publishing to Intake.
 
@@ -802,6 +824,68 @@ def target_agent_identity(target: Target | Model | AgentBase | ModelRef | None) 
     if isinstance(target, Model):
         return None, target.name
     return None, None
+
+
+class FilesetTaskSource(BaseModel):
+    """A Gym jsonl dataset file in a FileSet, converted into tasks at submission, optionally published first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fileset: FilesetRef = Field(
+        description="The dataset file, as `workspace/fileset#path/to/file.jsonl`. One file only: a whole "
+        "FileSet or a glob is refused. It is read once, as the submitter, at submission. Each distinct "
+        "row becomes one task, `gym-<row content hash>` unless `id_field` names it, scored by the Gym reward. "
+        "Requires a `gym` target.",
+    )
+    snapshot: TasksetRef | None = Field(
+        default=None,
+        description="Taskset to publish the file's tasks as, `workspace/name` or `name`; it is created if "
+        "absent, and tasks are written to its workspace. Each submission publishes a revision only when "
+        "the file changed, and the evaluation runs exactly the published tasks. Omit to run the file's "
+        "tasks inline, storing nothing but the job.",
+    )
+    id_field: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Row key that names each task, so an edited row keeps its task (and, with `snapshot`, gets a "
+        "new revision of it) instead of becoming a new task. Every row must carry a non-empty string or finite "
+        "number there, unique within the file. Requires `id_prefix`.",
+    )
+    id_prefix: str | None = Field(
+        default=None,
+        pattern=ID_PREFIX_PATTERN,
+        description="Prefix of keyed task ids, `<id_prefix>-<hash of the row's id_field value>`: a lowercase "
+        "letter, then up to 7 lowercase letters or digits, and not `gym`, which ids without a key use. Choose one per dataset, so two files with the "
+        "same keys don't share tasks in a workspace. Requires `id_field`.",
+    )
+
+    @model_validator(mode="after")
+    def _key_fields_together(self) -> FilesetTaskSource:
+        if (self.id_field is None) != (self.id_prefix is None):
+            raise ValueError("`id_field` and `id_prefix` go together: set both, or neither")
+        if self.id_prefix is not None:
+            check_id_prefix(self.id_prefix)
+        return self
+
+    @field_validator("fileset")
+    @classmethod
+    def _require_one_file(cls, value: FilesetRef) -> FilesetRef:
+        try:
+            _, _, file_path = parse_fileset_ref(value.root, workspace_fallback="_validation")
+        except FilesetPathError as exc:
+            raise ValueError(f"invalid FileSet reference: {value.root!r}") from exc
+        if not file_path:
+            raise ValueError("name one dataset file in the FileSet: `workspace/fileset#path/to/file.jsonl`")
+        if is_fileset_glob_pattern(file_path):
+            raise ValueError("a FileSet task source names one file; globs are not supported")
+        return value
+
+    @field_validator("snapshot")
+    @classmethod
+    def _reject_revision_selector(cls, value: TasksetRef | None) -> TasksetRef | None:
+        if value is not None and "#" in value.root:
+            raise ValueError("a snapshot taskset is a write destination; drop its `#tag` or `#digest`")
+        return value
 
 
 class AgentEvalTaskInput(BaseModel):
@@ -982,17 +1066,28 @@ class _AgentEvalSpecCommon(BaseModel):
 class AgentEvalInputSpec(_AgentEvalSpecCommon):
     """Submitter-facing agent-evaluation input.
 
-    ``tasks`` accepts inline tasks, stored task references, or a stored taskset reference.
-    Stored definitions and scoring expand at submission; Harbor archives are prepared on the worker.
+    ``tasks`` accepts inline tasks, stored task references, a stored taskset reference, or a dataset
+    file in a FileSet. Stored definitions, files and scoring expand at submission; Harbor archives are
+    prepared on the worker.
     """
 
     tasks: (
         TasksetRef
+        | FilesetTaskSource
         | Annotated[list[AgentEvalTaskInput], Field(min_length=1)]
         | Annotated[list[TaskRef], Field(min_length=1)]
     ) = Field(
-        description="Tasks to evaluate: a nonempty list containing only inline tasks or only task references, or a stored taskset reference.",
+        description="Tasks to evaluate: a nonempty list containing only inline tasks or only task references, "
+        "a stored taskset reference, or a FileSet task source (`{fileset, snapshot}`) whose dataset file is "
+        "converted to tasks at submission.",
     )
+
+    @model_validator(mode="after")
+    def _fileset_source_needs_a_matching_target(self) -> Self:
+        if isinstance(self.tasks, FilesetTaskSource) and not isinstance(self.target, GymRunnerTarget):
+            source = "precomputed `trials`" if self.target is None else f"a `{self.target.kind}` target"
+            raise ValueError(f"a FileSet task source needs a `gym` target, not {source}")
+        return self
 
     @model_validator(mode="after")
     def _reject_empty_inline_tasks(self) -> Self:
@@ -1008,7 +1103,7 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
         if isinstance(target, (FabricRunnerTarget, GymRunnerTarget)) and target.resolved_config is not None:
             raise ValueError("`resolved_config` is set by registered-agent resolution, not the submitter")
         source = registered_agent_source(target)
-        if source is not None and source.files is not None:
+        if source is not None and (source.files is not None or source.fileset_id is not None):
             raise ValueError("`source.files` is set by registered-agent resolution, not the submitter")
         if isinstance(target, HarborRunnerTarget) and source is not None and "fabric_config" in target.agent_kwargs:
             raise ValueError(

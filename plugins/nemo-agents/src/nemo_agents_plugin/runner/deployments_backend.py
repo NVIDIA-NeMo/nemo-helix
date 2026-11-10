@@ -75,7 +75,7 @@ from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
-from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import FilesetRef
@@ -902,7 +902,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
             logger.error("Refusing to deploy agent %r: %s", name, exc)
             return DeploymentInfo(name=name, status="failed", error=str(exc))
         deployment_config.gateway_providers = providers or {}
-        await entities.create(deployment_config)
+        created_config = await entities.create(deployment_config)
         try:
             deployment = Deployment(
                 name=name,
@@ -916,11 +916,8 @@ class DeploymentsRunnerBackend(RunnerBackend):
         except Exception:
             # Avoid orphaning the config if Deployment create fails.
             try:
-                await entities.delete(
-                    DeploymentConfig,
-                    name=name,
-                    workspace=workspace,
-                    expected_db_version=deployment_config.db_version,
+                await entities.delete_by_id(
+                    DeploymentConfig, created_config.id, expected_db_version=created_config.db_version
                 )
             except Exception:
                 logger.exception(
@@ -970,6 +967,11 @@ class DeploymentsRunnerBackend(RunnerBackend):
         except NemoEntityNotFoundError:
             pass
 
+        try:
+            deployment_config = await entities.get(DeploymentConfig, name=name, workspace=workspace)
+        except NemoEntityNotFoundError:
+            deployment_config = None
+
         if deployment_present:
             gone = await self._wait_for_deployment_gone(workspace, name)
             if not gone:
@@ -982,16 +984,19 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 )
                 return False
 
-        try:
-            deployment_config = await entities.get(DeploymentConfig, name=name, workspace=workspace)
-            await entities.delete(
-                DeploymentConfig,
-                name=name,
-                workspace=workspace,
-                expected_db_version=deployment_config.db_version,
-            )
-        except NemoEntityNotFoundError:
-            pass
+        if deployment_config is not None:
+            try:
+                deployment_config = await entities.get_by_id(DeploymentConfig, deployment_config.id)
+                await entities.delete_by_id(
+                    DeploymentConfig, deployment_config.id, expected_db_version=deployment_config.db_version
+                )
+            except NemoEntityNotFoundError:
+                pass
+            except NemoEntityConflictError:
+                logger.warning(
+                    "Deployment config '%s/%s' changed during deletion; will retry next reconcile", workspace, name
+                )
+                return False
         return True
 
     async def _wait_for_deployment_gone(self, workspace: str, dep_name: str) -> bool:

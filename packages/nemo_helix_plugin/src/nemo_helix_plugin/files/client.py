@@ -24,6 +24,8 @@ class _FilesMethods:
     create_fileset = method(endpoints.create_fileset)
     list_filesets = method(endpoints.list_filesets)
     get_fileset = method(endpoints.get_fileset)
+    get_fileset_by_id = method(endpoints.get_fileset_by_id)
+    delete_fileset_by_id = method(endpoints.delete_fileset_by_id)
     update_fileset = method(endpoints.update_fileset)
     delete_fileset = method(endpoints.delete_fileset)
     refresh_fileset = method(endpoints.refresh_fileset)

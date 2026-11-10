@@ -70,7 +70,7 @@ Use the metric-specific pages for configuration details and examples:
 
 | Metric family | Common classes |
 |---------------|----------------|
-| Similarity | `ExactMatchMetric`, `F1Metric`, `BLEUMetric`, `ROUGEMetric`, `StringCheckMetric`, `NumberCheckMetric` |
+| Similarity | `ExactMatchMetric`, `F1Metric`, `BLEUMetric`, `ROUGEMetric`, `SequenceSimilarityMetric`, `StringCheckMetric`, `NumberCheckMetric` |
 | LLM-as-a-Judge | `LLMJudgeMetric` |
 | RAG and agentic | `FaithfulnessMetric`, `ResponseRelevancyMetric`, `TopicAdherenceMetric`, `ToolCallingMetric`, and related RAGAS-backed classes |
 | Custom endpoints | Remote metric classes from `nhx_evals_sdk.metrics.remote` |
@@ -111,4 +111,4 @@ result = job.get_result()
 
 - Metric Results - Work with `EvaluationResult`, aggregate scores, and row scores
 - Manage Metric Jobs - Submit, monitor, reconnect to, and download job results
-- [Similarity Metrics](/documentation/evaluate-models/metrics/similarity-metrics) - Configure exact match, F1, BLEU, ROUGE, and string/number checks
+- [Similarity Metrics](/documentation/evaluate-models/metrics/similarity-metrics) - Configure exact match, F1, BLEU, ROUGE, sequence similarity, and string/number checks
