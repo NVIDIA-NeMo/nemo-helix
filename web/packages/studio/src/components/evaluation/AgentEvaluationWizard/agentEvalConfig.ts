@@ -15,12 +15,16 @@ export const itemRef = (column: string): string => `item[${JSON.stringify(column
 const fieldBlocks = (columns: string[]) =>
   columns.map((column) => `${column}:\n{{ ${itemRef(column)} }}`);
 
-/** The agent's prompt until the user edits it: every column, under its name. */
+/** The agent's prompt until the user edits it: the checked columns, each under its name. */
 export const defaultAgentPrompt = (columns: string[]): string => fieldBlocks(columns).join('\n\n');
 
-/** The judge's prompt until the user edits it: every column, then the agent's response. */
+/** The judge's prompt until the user edits it: the agent's response, then the checked columns
+ *  under the Ground Truth heading the default scores grade against. */
 export const defaultJudgePrompt = (columns: string[]): string =>
-  [...fieldBlocks(columns), 'Response to evaluate:\n{{ sample.output_text }}'].join('\n\n');
+  [
+    '## Response to evaluate\n{{ sample.output_text }}',
+    ...(columns.length > 0 ? [`## Ground Truth\n${fieldBlocks(columns).join('\n\n')}`] : []),
+  ].join('\n\n');
 
 /** A judge given its prompt reads no bindings, and the judge is the only metric built here. */
 const NO_BINDINGS: DatasetBindings = {

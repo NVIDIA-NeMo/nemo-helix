@@ -10,7 +10,7 @@ import { FormField } from '@nvidia/foundations-react-core';
 import { useSetFieldErrorOnApiError } from '@studio/hooks/evaluation/useSetFieldErrorOnApiError';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { parseEvaluationModelValue } from '@studio/util/evaluations';
-import { ReactNode, useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { type FieldValues, type Path, useController, useFormContext } from 'react-hook-form';
 
 /** Judging needs a model that can actually serve a chat completion. */

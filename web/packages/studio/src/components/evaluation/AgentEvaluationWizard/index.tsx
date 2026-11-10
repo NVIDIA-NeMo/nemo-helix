@@ -214,6 +214,10 @@ const submitEvaluationBaseSchema = z.object({
   configKind: z.enum(CONFIG_KINDS),
   /** The prompt sent to the agent; ``null`` while it is still the generated one. */
   promptTemplate: z.string().nullable(),
+  /** Columns the generated agent prompt sends, in the order they were checked. */
+  promptColumns: z.array(z.string()),
+  /** Columns the generated judge prompt sends ahead of the agent's response. */
+  judgeColumns: z.array(z.string()),
   dataset: z.string().nullable(),
   /** The guided form's LLM judge. */
   body: z.object({
@@ -263,6 +267,17 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
         });
       }
       if (data.configKind === CONFIG_KIND_FORM) {
+        if (
+          data.promptTemplate === null
+            ? data.promptColumns.length === 0
+            : !data.promptTemplate.trim()
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Select at least one field, or write a prompt.',
+            path: ['promptTemplate'],
+          });
+        }
         if (isUnusablePrompt(data.promptTemplate)) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -323,6 +338,8 @@ const makeDefaultValues = (
   evaluationName: sourceEvaluation ?? '',
   configKind: CONFIG_KIND_FORM,
   promptTemplate: null,
+  promptColumns: [],
+  judgeColumns: [],
   dataset: null,
   body: { judgeModel: '', judgePrompt: null, scores: EVALUATION_FORM_DEFAULTS.body.scores },
   configFileset: '',
@@ -580,9 +597,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   const configKind = useWatch({ control, name: 'configKind' });
   const isFormConfig = configKind === CONFIG_KIND_FORM;
-  const [dataset, promptTemplate, judgePrompt] = useWatch({
+  const [dataset, promptTemplate, judgePrompt, promptColumns, judgeColumns] = useWatch({
     control,
-    name: ['dataset', 'promptTemplate', 'body.judgePrompt'],
+    name: ['dataset', 'promptTemplate', 'body.judgePrompt', 'promptColumns', 'judgeColumns'],
   });
   const datasetLocation = dataset ? parseFilesetLocation(dataset) : null;
   // Reading the sibling shards is opted into per file: another pick may share a folder with
@@ -666,12 +683,16 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     !isFormConfig && pickedSpec && preview.row
       ? configFitIssues(pickedSpec, columns)
       : NO_FIT_ISSUES;
-  const generatedAgentPrompt = defaultAgentPrompt(columns);
-  const generatedJudgePrompt = defaultJudgePrompt(columns);
+  const generatedAgentPrompt = defaultAgentPrompt(
+    promptColumns.filter((column) => columns.includes(column))
+  );
+  const generatedJudgePrompt = defaultJudgePrompt(
+    judgeColumns.filter((column) => columns.includes(column))
+  );
+  const agentPrompt = promptTemplate ?? generatedAgentPrompt;
   const checksPrompts = isFormConfig && !!preview.row;
-  const promptIssues = checksPrompts
-    ? promptFitIssues(promptTemplate ?? generatedAgentPrompt, columns)
-    : NO_FIT_ISSUES;
+  const promptIssues =
+    checksPrompts && agentPrompt.trim() ? promptFitIssues(agentPrompt, columns) : NO_FIT_ISSUES;
   const judgePromptIssues = checksPrompts
     ? promptFitIssues(judgePrompt ?? generatedJudgePrompt, columns, true)
     : NO_FIT_ISSUES;
@@ -1213,6 +1234,10 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                 slotLabel={<Text kind="label/bold/xl">Dataset File</Text>}
                 acceptedFileTypes={DATASET_FILE_TYPES}
                 showMapping={false}
+                onFileSelected={() => {
+                  setValue('promptColumns', []);
+                  setValue('judgeColumns', []);
+                }}
               >
                 {shards ? (
                   <Checkbox
@@ -1291,9 +1316,10 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                 <>
                   <PromptTemplateSection
                     name="promptTemplate"
+                    columnsName="promptColumns"
                     title="Agent Prompt"
                     titleKind="label/bold/lg"
-                    description="Sent to the agent for every row. It starts with every field: remove the ones the agent shouldn't see, such as expected answers."
+                    description="Sent to the agent for every row. Select the fields it should see, and leave out expected answers."
                     generated={generatedAgentPrompt}
                     columns={columns}
                     issues={promptIssues}
@@ -1307,9 +1333,10 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                     />
                     <PromptTemplateSection
                       name="body.judgePrompt"
+                      columnsName="judgeColumns"
                       title="Judge Prompt"
                       titleKind="label/bold/md"
-                      description="Sent to the judge with the agent's response for every row. It starts with every field, so the judge can check the response against the expected values."
+                      description="Sent to the judge with the agent's response for every row. Select the fields to check the response against, such as expected answers."
                       generated={generatedJudgePrompt}
                       columns={columns}
                       issues={judgePromptIssues}

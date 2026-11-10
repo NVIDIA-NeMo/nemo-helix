@@ -135,13 +135,19 @@ describe('templateFields', () => {
 });
 
 describe('default prompts', () => {
-  it('render every column under its name, and the judge also reads the response', () => {
+  it('render every column under its name', () => {
     expect(defaultAgentPrompt(['user_message', 'emails'])).toBe(
       'user_message:\n{{ item["user_message"] }}\n\nemails:\n{{ item["emails"] }}'
     );
-    expect(defaultJudgePrompt(['expected'])).toBe(
-      'expected:\n{{ item["expected"] }}\n\nResponse to evaluate:\n{{ sample.output_text }}'
+  });
+
+  it('give the judge the response first, then the checked columns as its Ground Truth', () => {
+    expect(defaultJudgePrompt(['expected_answer', 'expected_tool'])).toBe(
+      '## Response to evaluate\n{{ sample.output_text }}\n\n## Ground Truth\n' +
+        'expected_answer:\n{{ item["expected_answer"] }}\n\n' +
+        'expected_tool:\n{{ item["expected_tool"] }}'
     );
+    expect(defaultJudgePrompt([])).toBe('## Response to evaluate\n{{ sample.output_text }}');
   });
 
   it('index every column by key, escaping quotes and backslashes', () => {

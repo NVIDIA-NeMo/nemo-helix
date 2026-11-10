@@ -391,14 +391,35 @@ describe('AgentEvaluationWizard dataset', () => {
 
 const ROW_PROMPT = 'prompt:\n{{ item["prompt"] }}\n\nexpected:\n{{ item["expected"] }}';
 
+const promptFields = (title: string) =>
+  within(screen.getByRole('group', { name: `${title} fields` }));
+
+const findPromptFields = (title: string) => screen.findByRole('group', { name: `${title} fields` });
+
+const checkFields = async (user: User, title: string, columns: string[]) => {
+  await findPromptFields(title);
+  for (const column of columns) {
+    await user.click(promptFields(title).getByRole('checkbox', { name: column }));
+  }
+};
+
+/** Opens the prompt editor and returns its text, then closes it again. */
+const readPrompt = async (user: User, title: string) => {
+  await user.click(screen.getByRole('button', { name: `Edit ${title}` }));
+  const value = (screen.getByLabelText(title) as HTMLTextAreaElement).value;
+  await user.click(screen.getByRole('button', { name: `Hide ${title}` }));
+  return value;
+};
+
 describe('AgentEvaluationWizard guided eval config', () => {
-  it('sends every field as a text prompt and scores the response with one LLM judge', async () => {
+  it('sends the checked fields as a text prompt and scores the response with one LLM judge', async () => {
     const user = userEvent.setup();
     renderWizard();
 
     await openConfigurationStep(user);
     await pickDataset(user);
-    expect(await screen.findByLabelText('Agent Prompt')).toHaveValue(ROW_PROMPT);
+    await checkFields(user, 'Agent Prompt', ['prompt', 'expected']);
+    await checkFields(user, 'Judge Prompt', ['prompt', 'expected']);
     await user.type(screen.getByLabelText('Judge Model'), 'default/judge');
     await leaveConfiguration(user);
     await nameAndRun(user);
@@ -417,7 +438,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
                 messages: [
                   {
                     role: 'user',
-                    content: `${ROW_PROMPT}\n\nResponse to evaluate:\n{{ sample.output_text }}`,
+                    content: `## Response to evaluate\n{{ sample.output_text }}\n\n## Ground Truth\n${ROW_PROMPT}`,
                   },
                 ],
               },
@@ -431,13 +452,151 @@ describe('AgentEvaluationWizard guided eval config', () => {
     expect(uploadedPaths()).toEqual(['eval-config.json']);
   });
 
+  it('submits the prompts generated from the checked fields without opening either editor', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openConfigurationStep(user);
+    await pickDataset(user);
+    await checkFields(user, 'Agent Prompt', ['expected', 'prompt']);
+    await checkFields(user, 'Judge Prompt', ['expected']);
+    await user.type(screen.getByLabelText('Judge Model'), 'default/judge');
+    expect(screen.queryByLabelText('Agent Prompt')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Judge Prompt')).not.toBeInTheDocument();
+    await leaveConfiguration(user);
+    await nameAndRun(user);
+
+    expect(await submittedSpec()).toMatchObject({
+      prompt_template: 'expected:\n{{ item["expected"] }}\n\nprompt:\n{{ item["prompt"] }}',
+      metrics: [
+        {
+          payload: {
+            metric: {
+              prompt_template: {
+                messages: [
+                  {
+                    role: 'user',
+                    content:
+                      '## Response to evaluate\n{{ sample.output_text }}\n\n' +
+                      '## Ground Truth\nexpected:\n{{ item["expected"] }}',
+                  },
+                ],
+              },
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  it('starts with no fields and the prompts collapsed, asking for one only on Next', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openConfigurationStep(user);
+    await pickDataset(user);
+    await findPromptFields('Agent Prompt');
+    for (const box of promptFields('Agent Prompt').getAllByRole('checkbox')) {
+      expect(box).not.toBeChecked();
+    }
+    expect(screen.queryByLabelText('Agent Prompt')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Judge Prompt')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Select at least one field, or write a prompt.')
+    ).not.toBeInTheDocument();
+
+    await clickNextWhenReady(user);
+    expect(await screen.findByText('Select at least one field, or write a prompt.')).toBeVisible();
+    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toBeInTheDocument();
+
+    await user.click(promptFields('Agent Prompt').getByRole('checkbox', { name: 'prompt' }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText('Select at least one field, or write a prompt.')
+      ).not.toBeInTheDocument()
+    );
+  });
+
+  it('asks for a prompt when the edited one is empty', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openConfigurationStep(user);
+    await pickDataset(user);
+    await checkFields(user, 'Agent Prompt', ['prompt']);
+    await user.click(screen.getByRole('button', { name: 'Edit Agent Prompt' }));
+    await user.clear(screen.getByLabelText('Agent Prompt'));
+    await clickNextWhenReady(user);
+
+    expect(await screen.findByText('Select at least one field, or write a prompt.')).toBeVisible();
+    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toBeInTheDocument();
+  });
+
+  it('builds the prompt in the order fields are checked, dropping unchecked ones', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openConfigurationStep(user);
+    await pickDataset(user);
+    await checkFields(user, 'Agent Prompt', ['expected', 'prompt']);
+    expect(await readPrompt(user, 'Agent Prompt')).toBe(
+      'expected:\n{{ item["expected"] }}\n\nprompt:\n{{ item["prompt"] }}'
+    );
+
+    await checkFields(user, 'Agent Prompt', ['expected']);
+    expect(await readPrompt(user, 'Agent Prompt')).toBe('prompt:\n{{ item["prompt"] }}');
+  });
+
+  it('shows the fields an edited prompt reads, and resets it to the checked ones', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openConfigurationStep(user);
+    await pickDataset(user);
+    await checkFields(user, 'Agent Prompt', ['prompt']);
+    await user.click(screen.getByRole('button', { name: 'Edit Agent Prompt' }));
+    const prompt = screen.getByLabelText('Agent Prompt');
+    await user.clear(prompt);
+    await user.paste('Expected: {{ item.expected }}');
+    await user.click(screen.getByRole('button', { name: 'Hide Agent Prompt' }));
+
+    await findPromptFields('Agent Prompt');
+    expect(promptFields('Agent Prompt').getByRole('checkbox', { name: 'expected' })).toBeChecked();
+    expect(
+      promptFields('Agent Prompt').getByRole('checkbox', { name: 'prompt' })
+    ).not.toBeChecked();
+    for (const box of promptFields('Agent Prompt').getAllByRole('checkbox')) {
+      expect(box).toBeDisabled();
+    }
+
+    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    expect(promptFields('Agent Prompt').getByRole('checkbox', { name: 'prompt' })).toBeEnabled();
+    expect(promptFields('Agent Prompt').getByRole('checkbox', { name: 'prompt' })).toBeChecked();
+    expect(await readPrompt(user, 'Agent Prompt')).toBe('prompt:\n{{ item["prompt"] }}');
+  });
+
+  it("always sends the agent's response to the judge", async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openConfigurationStep(user);
+    await pickDataset(user);
+    await findPromptFields('Judge Prompt');
+    const response = promptFields('Judge Prompt').getByRole('checkbox', {
+      name: 'Agent response (sample.output_text)',
+    });
+    expect(response).toBeChecked();
+    expect(response).toBeDisabled();
+  });
+
   it('sends the agent prompt as edited', async () => {
     const user = userEvent.setup();
     renderWizard();
 
     await openConfigurationStep(user);
     await pickDataset(user);
-    const prompt = await screen.findByLabelText('Agent Prompt');
+    await user.click(await screen.findByRole('button', { name: 'Edit Agent Prompt' }));
+    const prompt = screen.getByLabelText('Agent Prompt');
     await user.clear(prompt);
     await user.paste('Q: {{ item.prompt }}');
     await user.type(screen.getByLabelText('Judge Model'), 'default/judge');

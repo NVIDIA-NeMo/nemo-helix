@@ -49,6 +49,8 @@ interface DatasetPanelProps {
   showMapping?: boolean;
   /** Rendered between the file checks and the field mapping. */
   children?: ReactNode;
+  /** Called when the user picks or clears the dataset file. */
+  onFileSelected?: () => void;
 }
 
 export const DatasetPanel: FC<DatasetPanelProps> = ({
@@ -56,6 +58,7 @@ export const DatasetPanel: FC<DatasetPanelProps> = ({
   acceptedFileTypes = [...MAPPABLE_FILE_TYPES],
   showMapping = true,
   children,
+  onFileSelected,
 }) => {
   const workspace = useWorkspaceFromPath();
   const { control, setError, clearErrors, setValue } = useFormContext<EvaluationFormValues>();
@@ -136,9 +139,12 @@ export const DatasetPanel: FC<DatasetPanelProps> = ({
           filesetPurpose={FilesetPurpose.dataset}
           autoSelectFirstAcceptable
           formFieldProps={slotLabel ? { slotLabel } : undefined}
-          onFileSelected={
-            showMapping ? () => setValue('fieldMapping', EMPTY_FIELD_MAPPING) : undefined
-          }
+          onFileSelected={() => {
+            if (showMapping) {
+              setValue('fieldMapping', EMPTY_FIELD_MAPPING);
+            }
+            onFileSelected?.();
+          }}
         />
 
         {error ? (
