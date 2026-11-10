@@ -1131,6 +1131,9 @@ target "nhx-safe-synthesizer-tasks-docker" {
   target     = "runtime"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-safe-synthesizer-tasks"
+  contexts = {
+    nhx-jobs-launcher = "target:nhx-jobs-launcher"
+  }
   args = {
     CONTAINER_VARIANT    = "${SAFE_SYNTHESIZER_CONTAINER_VARIANT}"
     NHX_COLLECT_SOURCES  = NHX_COLLECT_SOURCES
@@ -1148,6 +1151,9 @@ target "nhx-safe-synthesizer-tasks-smoke-test" {
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-safe-synthesizer-tasks"
+  contexts = {
+    nhx-jobs-launcher = "target:nhx-jobs-launcher"
+  }
   args = {
     CONTAINER_VARIANT    = "${SAFE_SYNTHESIZER_CONTAINER_VARIANT}"
     NHX_COLLECT_SOURCES  = NHX_COLLECT_SOURCES
