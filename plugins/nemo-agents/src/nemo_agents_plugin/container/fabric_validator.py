@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from nemo_agents_plugin.agent_config import AgentConfig, AgentConfigLoadError, load_agent_config
-from nemo_agents_plugin.fabric.adapters import uses_default_deepagents_backend
+from nemo_agents_plugin.fabric.adapters import uses_deepagents_backend
 from nemo_agents_plugin.fabric.environment import discover_skill_directories
 from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
 from nemo_agents_plugin.fabric.validation import FabricValidationError, plan_fabric_config
@@ -102,7 +102,9 @@ def validate_fabric_package_artifacts(
     resolved_config = agent_config_path.resolve()
     errors: list[str] = []
     harness = config.harnesses.get(config.default_harness or "")
-    allow_collections = harness is not None and uses_default_deepagents_backend(harness)
+    allow_collections = harness is not None and (
+        uses_deepagents_backend(harness) or uses_deepagents_backend(harness, "local_shell")
+    )
 
     if not resolved_config.is_relative_to(resolved_context):
         errors.append(f"agent config {agent_config_path} is outside Docker build context {resolved_context}")

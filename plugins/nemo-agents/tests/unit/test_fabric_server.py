@@ -160,15 +160,23 @@ def _sse_line_payload(line: str) -> dict[str, object]:
 
 
 @pytest.mark.parametrize("stop_failed", [False, True])
+@pytest.mark.parametrize("backend", [None, "local_shell"])
 def test_shutdown_removes_a_staged_agent_root_only_after_runtime_stop(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     stop_failed: bool,
+    backend: str | None,
 ) -> None:
     mounted = tmp_path / "mounted"
     mounted.mkdir()
     config = _example_config()
     config["harnesses"]["hermes"]["kind"] = "deepagents"
+    if backend is not None:
+        config["harnesses"]["hermes"]["settings"] = {"deepagents": {"backend": {"type": backend}}}
+    bundle = mounted / "skills/review"
+    bundle.mkdir(parents=True)
+    (bundle / "SKILL.md").write_text("Review inputs")
+    config["skills"] = {"paths": ["skills/review"]}
     config_path = _write_agent_config(mounted, config)
     mounted.chmod(0o555)
     app = create_fabric_serving_app(config_path)
@@ -185,9 +193,10 @@ def test_shutdown_removes_a_staged_agent_root_only_after_runtime_stop(
             )
             assert client.portal is not None
             session = client.portal.call(app.state.session_registry.register, runtime)
-            session.workspace_dir = environment.create_deepagents_workspace(app.state.workspace_baseline)
+            session.workspace_dir = client.portal.call(app.state.session_manager._create_workspace)
 
         assert staged.exists() is stop_failed
+        assert (session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR / "review/SKILL.md").exists() is stop_failed
         assert config_path.exists()
     finally:
         mounted.chmod(0o755)
@@ -332,10 +341,11 @@ def test_startup_leaves_other_backends_without_a_workspace_baseline(
 
 
 @pytest.mark.parametrize(
-    ("kind", "skill_path", "expected_names"),
+    ("kind", "skill_path", "expected_names", "backend"),
     [
-        ("deepagents", "skills/review", ["review"]),
-        ("nvidia.fabric.langchain.deepagents", "skills", ["audit", "review"]),
+        ("deepagents", "skills/review", ["review"], None),
+        ("nvidia.fabric.langchain.deepagents", "skills", ["audit", "review"], None),
+        ("deepagents", "skills", ["audit", "review"], "local_shell"),
     ],
 )
 def test_startup_stages_skills_and_maps_runtime_paths(
@@ -345,6 +355,7 @@ def test_startup_stages_skills_and_maps_runtime_paths(
     kind: str,
     skill_path: str,
     expected_names: list[str],
+    backend: str | None,
 ) -> None:
     linked_asset = tmp_path / "linked-asset.txt"
     linked_asset.write_text("skill input")
@@ -357,6 +368,8 @@ def test_startup_stages_skills_and_maps_runtime_paths(
         (bundle / "references/input.txt").symlink_to(linked_asset)
     config = _example_config()
     config["harnesses"]["hermes"]["kind"] = kind
+    if backend is not None:
+        config["harnesses"]["hermes"]["settings"] = {"deepagents": {"backend": {"type": backend}}}
     config["skills"] = {"paths": [skill_path]}
     start_runtime = AsyncMock(return_value=SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED))
     fabric = Fabric()
@@ -374,17 +387,25 @@ def test_startup_stages_skills_and_maps_runtime_paths(
             assert (skills / name / "references/input.txt").read_text() == "skill input"
             assert not (skills / name / "references/input.txt").is_symlink()
         runtime_config = start_runtime.call_args.args[0]
-        assert tmp_path / runtime_config.environment.workspace == session.workspace_dir
-        assert runtime_config.skills.paths == [f"/{environment.DEEPAGENTS_SKILLS_DIR}"]
+        if backend is None:
+            assert tmp_path / runtime_config.environment.workspace == session.workspace_dir
+            assert runtime_config.skills.paths == [f"/{environment.DEEPAGENTS_SKILLS_DIR}"]
+        else:
+            assert runtime_config.environment.workspace == app.state.agent_config.environment.workspace
+            assert runtime_config.skills.paths == [str(skills)]
+            assert app.state.workspace_baseline is None
         assert app.state.agent_config.skills.paths == [skill_path]
 
 
-@pytest.mark.parametrize("configured_workspace", ["workspace", ".", ""])
+@pytest.mark.parametrize(
+    ("configured_workspace", "backend"), [("workspace", None), (".", None), ("", None), (".", "local_shell")]
+)
 def test_startup_refreshes_skills_without_recapturing_workspace(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     monkeypatch: pytest.MonkeyPatch,
     configured_workspace: str,
+    backend: str | None,
 ) -> None:
     workspace = tmp_path / configured_workspace
     workspace.mkdir(exist_ok=True)
@@ -395,6 +416,8 @@ def test_startup_refreshes_skills_without_recapturing_workspace(
         (bundle / "SKILL.md").write_text(name)
     config = _example_config()
     config["harnesses"]["hermes"]["kind"] = "deepagents"
+    if backend is not None:
+        config["harnesses"]["hermes"]["settings"] = {"deepagents": {"backend": {"type": backend}}}
     config["environment"] = {"workspace": configured_workspace}
     config["skills"] = {"paths": [".agents/skills/review", ".agents/skills/retired"]}
     config_path = _write_agent_config(tmp_path, config)
@@ -427,13 +450,17 @@ def test_startup_refreshes_skills_without_recapturing_workspace(
         assert restarted.state.workspace_baseline == baseline
         assert client.portal is not None
         session = client.portal.call(restarted.state.session_manager.open_session)
-        assert (session.workspace_dir / "input.txt").read_text() == "original input"
+        if backend is None:
+            assert (session.workspace_dir / "input.txt").read_text() == "original input"
+        else:
+            assert (workspace / "input.txt").read_text() == "later conversation output"
+            assert not (session.workspace_dir / "input.txt").exists()
         skills = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR
         assert {path.parent.name: path.read_text() for path in skills.glob("*/SKILL.md")} == {
             "review": "updated review",
             "new": "new",
         }
-    assert not list(baseline.parent.glob("skills-*"))
+    assert not list((workspace / environment.DEEPAGENTS_WORKSPACE_DIR).glob("skills-*"))
 
 
 def test_skill_collision_cleans_up_partial_snapshot(

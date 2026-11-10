@@ -81,7 +81,7 @@ class FabricOneShotRequest:
     overrides: dict[str, Any] | None = None
     timeout_seconds: float | None = None
     relay_session_root: str | None = None
-    # Set only for private serving workspaces owned by this invocation.
+    # Owned runtime files: a private workspace or staged local_shell skills.
     workspace_dir: Path | None = None
 
 

@@ -541,12 +541,23 @@ class TestValidateFabricPackageArtifacts:
             context_dir=tmp_path,
         )
 
-    @pytest.mark.parametrize(("kind", "skill_path"), [("codex", "../skills/review"), ("deepagents", "../skills")])
-    def test_accepts_skill_relative_to_nested_agent_config(self, tmp_path: Path, kind: str, skill_path: str) -> None:
+    @pytest.mark.parametrize(
+        ("kind", "skill_path", "backend"),
+        [
+            ("codex", "../skills/review", None),
+            ("deepagents", "../skills", None),
+            ("deepagents", "../skills", "local_shell"),
+        ],
+    )
+    def test_accepts_skill_relative_to_nested_agent_config(
+        self, tmp_path: Path, kind: str, skill_path: str, backend: str | None
+    ) -> None:
         agent_config_path = _agent_config_path(tmp_path, "configs/agent.yaml")
         _skill(tmp_path / "skills" / "review")
         config = _agent_config(skill_path)
         config.harnesses["codex"].kind = kind
+        if backend is not None:
+            config.harnesses["codex"].settings = {"deepagents": {"backend": {"type": backend}}}
 
         validate_fabric_package_artifacts(
             config,

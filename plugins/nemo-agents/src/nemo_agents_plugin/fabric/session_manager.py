@@ -287,7 +287,7 @@ class FabricSessionManager:
         await await_resource_task(asyncio.create_task(stop()))
 
     async def _create_workspace(self) -> Path | None:
-        if self._workspace_baseline is None:
+        if self._workspace_baseline is None and self._skills_snapshot is None:
             return None
         copy_task = asyncio.create_task(
             asyncio.to_thread(create_deepagents_workspace, self._workspace_baseline, self._skills_snapshot)
@@ -307,14 +307,17 @@ class FabricSessionManager:
         agent_config = self._agent_config
         if workspace_dir is not None:
             agent_config = deepagents_workspace_config(
-                agent_config, base_dir=self._base_dir, workspace_dir=workspace_dir
+                agent_config,
+                base_dir=self._base_dir,
+                workspace_dir=workspace_dir,
+                isolate_workspace=self._workspace_baseline is not None,
             )
         try:
             fabric_config = translate_agent_config(agent_config)
         except FabricTranslationError as error:
             raise FabricRuntimeStartError(f"Fabric config translation failed: {error}") from error
 
-        if workspace_dir is not None:
+        if workspace_dir is not None and self._workspace_baseline is not None:
             preserve_deepagents_mcp_cwd(
                 fabric_config, workspace=(self._base_dir / self._agent_config.environment.workspace).resolve()
             )

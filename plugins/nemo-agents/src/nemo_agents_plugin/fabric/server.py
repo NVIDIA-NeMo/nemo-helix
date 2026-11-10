@@ -346,10 +346,7 @@ def create_fabric_serving_app(
         try:
             validation_result = await _validate_agent_config(agent_config, base_dir=base_dir)
             workspace_baseline = await asyncio.to_thread(prepare_deepagents_workspace_baseline, agent_config, base_dir)
-            if workspace_baseline is not None:
-                skills_snapshot = await asyncio.to_thread(
-                    prepare_deepagents_skills, agent_config, base_dir, workspace_baseline
-                )
+            skills_snapshot = await asyncio.to_thread(prepare_deepagents_skills, agent_config, base_dir)
             app.state.workspace_baseline = workspace_baseline
             app.state.agent_config = agent_config
             app.state.base_dir = base_dir
@@ -387,7 +384,9 @@ def create_fabric_serving_app(
         finally:
             if skills_snapshot is not None:
                 await asyncio.to_thread(remove_deepagents_workspace, skills_snapshot)
-            await asyncio.to_thread(release_runtime_base_dir, runtime_base_dir, workspace_baseline=workspace_baseline)
+            await asyncio.to_thread(
+                release_runtime_base_dir, runtime_base_dir, workspace_inputs=workspace_baseline or skills_snapshot
+            )
 
     app = FastAPI(title="NeMo Agents Fabric Server", lifespan=lifespan)
     runtime_instance_id = str(uuid.uuid4())

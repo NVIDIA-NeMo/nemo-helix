@@ -136,12 +136,19 @@ def resolve_adapter_id(kind: str, root: Path | None = None) -> str:
     )
 
 
-def uses_default_deepagents_backend(harness: HarnessConfig) -> bool:
-    """Return whether the harness selects DeepAgents without a backend override."""
+def uses_deepagents_backend(harness: HarnessConfig, backend: str | None = None) -> bool:
+    """Match a DeepAgents backend; None selects the default filesystem backend."""
     if HARNESS_ADAPTER_IDS.get(harness.kind, harness.kind) != HARNESS_ADAPTER_IDS["deepagents"]:
         return False
     settings = harness.settings.get("deepagents")
-    return settings is None or (isinstance(settings, dict) and settings.get("backend") is None)
+    if settings is None:
+        return backend is None
+    if not isinstance(settings, dict):
+        return False
+    configured = settings.get("backend")
+    if backend is None:
+        return configured is None
+    return isinstance(configured, dict) and configured.get("type") == backend
 
 
 def validate_harness_kinds(config: AgentConfig) -> None:

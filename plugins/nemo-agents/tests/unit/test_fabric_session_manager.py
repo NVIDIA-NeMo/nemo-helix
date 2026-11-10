@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from mcp.client.stdio import get_default_environment
-from nemo_agents_plugin.agent_config import AgentConfig, McpConfig, McpServerConfig
+from nemo_agents_plugin.agent_config import AgentConfig, McpConfig, McpServerConfig, SkillsConfig
 from nemo_agents_plugin.fabric import environment, server, session_manager
 from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
@@ -500,6 +500,58 @@ async def test_deepagents_sessions_isolate_files_and_reuse_their_workspace(
     await manager.close_all_sessions()
     assert not second.workspace_dir.exists()
     assert (baseline / "input.txt").read_text() == "original input"
+
+
+@pytest.mark.asyncio
+async def test_local_shell_copies_skills_without_changing_workspace_or_mcp(tmp_path: Path) -> None:
+    config = _agent_config()
+    config.harnesses["hermes"].kind = "deepagents"
+    config.harnesses["hermes"].settings = {"deepagents": {"backend": {"type": "local_shell"}}}
+    config.skills = SkillsConfig(paths=["skills"])
+    config.mcp = McpConfig(
+        servers={"local": McpServerConfig(transport="stdio", url="../.venv/bin/python", args=["../server.py"])}
+    )
+    source = tmp_path / "skills/review"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("original skill")
+    snapshot = environment.prepare_deepagents_skills(config, tmp_path)
+    assert snapshot is not None
+    workspace = tmp_path / config.environment.workspace
+    (workspace / "input.txt").write_text("workspace input")
+    original_config = config.model_copy(deep=True)
+    expected = session_manager.translate_agent_config(config)
+    fabric = _SequenceFabric([_FakeRuntime(), _FakeRuntime()])
+    manager = FabricSessionManager(
+        config,
+        base_dir=tmp_path,
+        session_registry=FabricSessionRegistry(),
+        skills_snapshot=snapshot,
+        fabric=cast(Any, fabric),
+    )
+
+    first = await manager.open_session()
+    assert first.workspace_dir is not None
+    relative_skill = Path(environment.DEEPAGENTS_SKILLS_DIR) / "review/SKILL.md"
+    (first.workspace_dir / relative_skill).write_text("edited in first session")
+    second = await manager.open_session()
+    request, _ = await manager._to_one_shot_request(FabricInvocationRequest(input="test"), streaming=False)
+    assert second.workspace_dir is not None
+    assert request.workspace_dir is not None
+    assert len({first.workspace_dir, second.workspace_dir, request.workspace_dir}) == 3
+    for directory in (second.workspace_dir, request.workspace_dir):
+        assert (directory / relative_skill).read_text() == "original skill"
+        assert not (directory / "input.txt").exists()
+    for actual in [*(call["config"] for call in fabric.start_calls), request.fabric_config]:
+        assert actual.environment == expected.environment
+        assert actual.mcp == expected.mcp
+        assert actual.skills is not None
+        assert Path(actual.skills.paths[0]).is_relative_to(workspace)
+    assert config == original_config
+    assert (source / "SKILL.md").read_text() == "original skill"
+    await manager.close_all_sessions()
+    await session_manager.release_fabric_workspace(request.workspace_dir)
+    assert not any((snapshot.parent / "sessions").iterdir())
+    assert (workspace / "input.txt").read_text() == "workspace input"
 
 
 @pytest.mark.asyncio

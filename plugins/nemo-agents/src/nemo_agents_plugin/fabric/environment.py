@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nemo_agents_plugin.agent_config import AgentConfig
-from nemo_agents_plugin.fabric.adapters import uses_default_deepagents_backend
+from nemo_agents_plugin.fabric.adapters import uses_deepagents_backend
 from nemo_fabric import FabricConfig
 
 logger = logging.getLogger(__name__)
@@ -74,12 +74,12 @@ def resolve_runtime_base_dir(config_path: Path) -> RuntimeBaseDir:
     return RuntimeBaseDir(path=target, staged=True)
 
 
-def release_runtime_base_dir(base_dir: RuntimeBaseDir, *, workspace_baseline: Path | None = None) -> None:
+def release_runtime_base_dir(base_dir: RuntimeBaseDir, *, workspace_inputs: Path | None = None) -> None:
     """Remove a staged agent root. A root used in place is left alone."""
     if not base_dir.staged:
         return
-    if workspace_baseline is not None:
-        sessions = workspace_baseline.parent / "sessions"
+    if workspace_inputs is not None:
+        sessions = workspace_inputs.parent / "sessions"
         if sessions.is_dir() and any(sessions.iterdir()):
             logger.warning("Retaining staged agent root %s: private workspace cleanup is incomplete.", base_dir.path)
             return
@@ -113,7 +113,7 @@ def prepare_deepagents_workspace_baseline(agent_config: AgentConfig, base_dir: P
     Configured skills are captured separately for each server run.
     """
     harness = agent_config.harnesses.get(agent_config.default_harness or "")
-    if harness is None or not uses_default_deepagents_backend(harness):
+    if harness is None or not uses_deepagents_backend(harness):
         return None
     if agent_config.environment.provider != "local":
         return None
@@ -153,12 +153,22 @@ def _deepagents_workspace_exclusions(agent_config: AgentConfig, base_dir: Path, 
     return excluded
 
 
-def prepare_deepagents_skills(agent_config: AgentConfig, base_dir: Path, baseline: Path) -> Path | None:
+def prepare_deepagents_skills(agent_config: AgentConfig, base_dir: Path) -> Path | None:
     """Capture configured skills once per server run, independently of frozen workspace inputs."""
     if agent_config.skills is None or not agent_config.skills.paths:
         return None
+    harness = agent_config.harnesses.get(agent_config.default_harness or "")
+    if harness is None or not (uses_deepagents_backend(harness) or uses_deepagents_backend(harness, "local_shell")):
+        return None
+    if agent_config.environment.provider != "local":
+        return None
+    ensure_local_workspace_dir(agent_config, base_dir)
     workspace = (base_dir / agent_config.environment.workspace).resolve()
-    snapshot = Path(tempfile.mkdtemp(prefix="skills-", dir=baseline.parent))
+    storage = workspace / DEEPAGENTS_WORKSPACE_DIR
+    if storage.is_symlink():
+        raise ValueError("DeepAgents skill storage must not be a symlink.")
+    storage.mkdir(exist_ok=True)
+    snapshot = Path(tempfile.mkdtemp(prefix="skills-", dir=storage))
     try:
         _stage_deepagents_skills(
             agent_config, base_dir, snapshot, _deepagents_workspace_exclusions(agent_config, base_dir, workspace)
@@ -170,16 +180,19 @@ def prepare_deepagents_skills(agent_config: AgentConfig, base_dir: Path, baselin
     return snapshot
 
 
-def create_deepagents_workspace(baseline: Path, skills_snapshot: Path | None = None) -> Path:
-    """Copy frozen workspace inputs and this server's skills into one runtime workspace."""
-    sessions = baseline.parent / "sessions"
+def create_deepagents_workspace(baseline: Path | None, skills_snapshot: Path | None = None) -> Path:
+    """Copy runtime-owned inputs; local_shell needs only skills and keeps its existing workspace."""
+    inputs = baseline or skills_snapshot
+    assert inputs is not None
+    sessions = inputs.parent / "sessions"
     if sessions.is_symlink():
         raise ValueError("DeepAgents session storage must not be a symlink.")
     sessions.mkdir(exist_ok=True)
     workspace = Path(tempfile.mkdtemp(prefix="session-", dir=sessions))
     try:
         # Baseline links are already relative to the copied tree.
-        shutil.copytree(baseline, workspace, symlinks=True, dirs_exist_ok=True)
+        if baseline is not None:
+            shutil.copytree(baseline, workspace, symlinks=True, dirs_exist_ok=True)
         if skills_snapshot is not None:
             shutil.copytree(skills_snapshot, workspace / DEEPAGENTS_SKILLS_DIR)
     except BaseException:
@@ -224,12 +237,17 @@ def _stage_deepagents_skills(config: AgentConfig, base_dir: Path, target: Path, 
         _copy_workspace_inputs(source, target / name, excluded, follow_symlinks=True)
 
 
-def deepagents_workspace_config(config: AgentConfig, *, base_dir: Path, workspace_dir: Path) -> AgentConfig:
-    """Derive a runtime config for a workspace populated from the DeepAgents baseline."""
+def deepagents_workspace_config(
+    config: AgentConfig, *, base_dir: Path, workspace_dir: Path, isolate_workspace: bool = True
+) -> AgentConfig:
+    """Map runtime-owned files while preserving local_shell's workspace and host paths."""
     runtime_config = config.model_copy(deep=True)
-    runtime_config.environment.workspace = workspace_dir.resolve().relative_to(base_dir.resolve()).as_posix()
+    if isolate_workspace:
+        runtime_config.environment.workspace = workspace_dir.resolve().relative_to(base_dir.resolve()).as_posix()
     if runtime_config.skills is not None and runtime_config.skills.paths:
-        runtime_config.skills.paths = [f"/{DEEPAGENTS_SKILLS_DIR}"]
+        runtime_config.skills.paths = [
+            f"/{DEEPAGENTS_SKILLS_DIR}" if isolate_workspace else str(workspace_dir.resolve() / DEEPAGENTS_SKILLS_DIR)
+        ]
     return runtime_config
 
 
