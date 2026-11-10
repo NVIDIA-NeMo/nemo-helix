@@ -76,6 +76,7 @@ backend_registry: BackendRegistryT = {
     BackendKey("cpu", "docker"): CPUDockerJobBackend,
     BackendKey("gpu", "docker"): GPUDockerJobBackend,
     BackendKey("cpu", "openshell"): OpenShellJobBackend,
+    BackendKey("gpu", "openshell"): OpenShellJobBackend,
     BackendKey("cpu", "kubernetes_job"): CPUKubernetesJobBackend,
     BackendKey("gpu", "kubernetes_job"): GPUKubernetesJobBackend,
     BackendKey("gpu_distributed", "kubernetes_job"): GPUKubernetesJobBackend,

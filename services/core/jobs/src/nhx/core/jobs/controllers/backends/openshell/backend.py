@@ -25,7 +25,7 @@ import uuid
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias
 from urllib.parse import urlsplit, urlunsplit
 
 from nemo_helix_plugin.auth import AuthContext as PluginAuthContext
@@ -40,6 +40,7 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     OpenShellJobExecutionProfileConfig as PluginOpenShellJobExecutionProfileConfig,
 )
 from nemo_helix_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.jobs.providers import CPUExecutionProvider, GPUExecutionProvider
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
 from nemo_helix_plugin.openshell.types import GatewayWorkload, ProviderAccessRevoked
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
@@ -126,6 +127,9 @@ _DEFAULT_ENTRYPOINT = ("nemo-helix",)
 # world-writable in every image. The launcher creates the step-config directory
 # when it writes the fetched config.
 _TASK_STORAGE_PATH = "/tmp"
+
+# The step executors this backend is registered for (see backends.registry).
+OpenShellExecutionProvider: TypeAlias = CPUExecutionProvider | GPUExecutionProvider
 _CONFIG_STORAGE_PATH = "/tmp/nhx-job-config"
 _STEP_CONFIG_FILE_PATH = f"{_CONFIG_STORAGE_PATH}/{NEMO_JOB_STEP_CONFIG_FILE_NAME}"
 
@@ -223,7 +227,7 @@ def _condition_message(status: Any) -> str:
     return ""
 
 
-class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConfig]):
+class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShellJobExecutionProfileConfig]):
     """Schedule job steps as OpenShell sandboxes via the gateway gRPC API."""
 
     BACKEND_NAME = "openshell"
@@ -307,10 +311,16 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
 
     def schedule(
         self,
-        executor_config: Any,
+        executor_config: OpenShellExecutionProvider,
         step: HelixJobStepWithContext,
     ) -> JobUpdate:
         step_spec = self._require_step_spec(step)
+        num_gpus = self._resolve_num_gpus(executor_config)
+        if num_gpus is not None and num_gpus < 1:
+            return JobUpdate(
+                status=HelixJobStatus.ERROR,
+                status_details={"message": f"num_gpus must be greater than 0, got {num_gpus}."},
+            )
         if any(item.from_secret is not None for item in step_spec.environment or []):
             return JobUpdate(
                 status=HelixJobStatus.ERROR,
@@ -379,16 +389,12 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
             env.setdefault("HTTPS_PROXY", self._execution_profile_config.egress_proxy)
             env.setdefault("NO_PROXY", "127.0.0.1,localhost")
 
-        container = getattr(executor_config, "container", None)
-        image = (
-            (container.image if container is not None else None)
-            or self._execution_profile_config.image
-            or get_qualified_image(OPENSHELL_JOB_TASK_IMAGE)
-        )
-        entrypoint = list(container.entrypoint or []) if container is not None else []
+        container = executor_config.container
+        image = container.image or self._execution_profile_config.image or get_qualified_image(OPENSHELL_JOB_TASK_IMAGE)
+        entrypoint = list(container.entrypoint)
         if not entrypoint:
             entrypoint = list(self._execution_profile_config.default_entrypoint or _DEFAULT_ENTRYPOINT)
-        command = list(container.command or []) if container is not None else []
+        command = list(container.command)
 
         # The launcher is the canonical main process: it fetches the step config,
         # injects secrets, then execs the task command.
@@ -406,7 +412,19 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         }
 
         template = pb.SandboxTemplate(image=image, environment=env)
-        spec = pb.SandboxSpec(template=template, environment=env, policy=self._policy, command=sandbox_command)
+        # Presence of resource_requirements.gpu is what makes the GPU request, so a step
+        # that wants no GPU sends none: an empty GpuResourceRequirements would count as a
+        # request for one device and change gateway driver selection.
+        resource_requirements = (
+            pb.ResourceRequirements(gpu=pb.GpuResourceRequirements(count=num_gpus)) if num_gpus is not None else None
+        )
+        spec = pb.SandboxSpec(
+            template=template,
+            environment=env,
+            policy=self._policy,
+            command=sandbox_command,
+            resource_requirements=resource_requirements,
+        )
 
         if step_spec.gateway_providers:
             try:
@@ -471,6 +489,21 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
             status=HelixJobStatus.PENDING,
             status_details={"message": f"Sandbox {sandbox_name} created; awaiting READY"},
         )
+
+    def _resolve_num_gpus(self, executor_config: OpenShellExecutionProvider) -> int | None:
+        """GPUs this step's sandbox requests, or None when it wants no GPU.
+
+        The step's own ``resources.num_gpus`` wins over the profile's ``num_gpus``. A
+        ``gpu`` step that declares neither asks for one GPU, which is what the docker
+        and k8s GPU backends do for an unset count.
+        """
+        if executor_config.resources.num_gpus is not None:
+            return executor_config.resources.num_gpus
+        if self._executor_config.num_gpus is not None:
+            return self._executor_config.num_gpus
+        if isinstance(executor_config, GPUExecutionProvider):
+            return 1
+        return None
 
     def sync(self, step: HelixJobStepWithContext) -> JobUpdate:
         sandbox_name = _sandbox_name(step.workspace, step.job, step.attempt_id, step.name)
