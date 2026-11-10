@@ -179,7 +179,7 @@ def test_reap_completes_when_called_inside_a_running_event_loop(
 def test_exit_and_cancel_both_reap(monkeypatch: pytest.MonkeyPatch, restore_process_state) -> None:
     """atexit covers a failed process. SIGTERM covers a cancel, which does not run atexit."""
     calls: list[str] = []
-    monkeypatch.setattr("os.kill", lambda pid, sig: calls.append(f"kill:{sig}"))
+    monkeypatch.setattr(orchestrator_module, "kill", lambda pid, sig: calls.append(f"kill:{sig}"))
     monkeypatch.setattr(
         "sandboxed_gym.job_reaper.reap_job_sandboxes",
         lambda job_id, **kwargs: calls.append(job_id) or (),
