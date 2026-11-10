@@ -60,9 +60,12 @@ const isTextPart = (part: unknown): part is TextMessagePart => {
   return 'type' in part && part.type === 'text' && 'text' in part && typeof part.text === 'string';
 };
 
-/** The explanation of a failed reply: its last text part. Earlier parts are the partial answer. */
+export const getFailedReplyExplanationPart = (
+  parts: readonly unknown[]
+): TextMessagePart | undefined => parts.findLast(isTextPart);
+
 export const getFailedReplyExplanation = (parts: readonly unknown[]): string | undefined => {
-  const explanation = parts.findLast(isTextPart)?.text.trim();
+  const explanation = getFailedReplyExplanationPart(parts)?.text.trim();
   return explanation || undefined;
 };
 

@@ -857,6 +857,25 @@ describe('AssistantChat', () => {
     interactionTimeoutMs
   );
 
+  it('omits the details row when a failed reply carries no raw error', async () => {
+    renderAssistantChat(
+      <StaticAssistantChatThread
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'There was an error generating a response.' }],
+            status: { type: 'incomplete', reason: 'error' },
+          },
+        ]}
+      />
+    );
+
+    const banner = await screen.findByTestId('assistant-chat-error-banner');
+    expect(banner).toHaveTextContent('There was an error generating a response.');
+    expect(screen.queryByTestId('assistant-chat-error-details')).not.toBeInTheDocument();
+  });
+
   it(
     'offers Regenerate response on a failed reply instead of an action in the banner',
     async () => {
