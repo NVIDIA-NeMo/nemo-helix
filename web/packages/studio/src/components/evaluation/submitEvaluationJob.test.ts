@@ -12,6 +12,7 @@ import {
   buildEvalJobName,
   JOB_NAME_MAX_LENGTH,
   buildPersistedSpec,
+  buildRerunRequestBody,
   injectJudgeModel,
   type InlineMetricBundle,
   parseEvalConfig,
@@ -282,5 +283,23 @@ describe('parseEvalConfig', () => {
         })
       )
     ).toThrow(/payload\.metric/);
+  });
+});
+
+describe('buildRerunRequestBody', () => {
+  it('copies the spec and re-points publication at the new evaluation', () => {
+    const spec = {
+      dataset: 'ws/fs#data.jsonl',
+      params: { parallelism: 3 },
+      publication: { intake: { evaluation_id: 'old' } },
+    };
+    const body = buildRerunRequestBody(spec, 'new-run', 'new-run');
+    expect(body.name).toMatch(/^new-run-[a-z0-9]{8}$/);
+    expect(body.spec).toEqual({
+      dataset: 'ws/fs#data.jsonl',
+      params: { parallelism: 3 },
+      publication: { intake: { evaluation_id: 'new-run' } },
+    });
+    expect(spec.publication.intake.evaluation_id).toBe('old');
   });
 });

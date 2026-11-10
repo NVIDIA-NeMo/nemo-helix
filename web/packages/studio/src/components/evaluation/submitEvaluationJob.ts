@@ -18,9 +18,8 @@ export const MODE_EXPERIMENT = 'experiment';
  *  `description` is the only tag the fileset API can filter on. */
 export const MODEL_EVAL_CONFIG_DESCRIPTION = 'Model Evaluation Config';
 
-/** The fileset that stores an experiment's eval config and data artifacts. */
-export const filesetNameForExperiment = (experimentName: string): string =>
-  `${experimentName}-data`;
+/** The fileset that stores a run's eval config and uploaded dataset, named after the run. */
+export const dataFilesetName = (evaluationName: string): string => `${evaluationName}-data`;
 
 /** Default parallelism for a submitted eval (Studio default; the config value is a hint). */
 export const DEFAULT_MAX_CONCURRENT_TASKS = 1;
@@ -151,6 +150,17 @@ const publicationSpec = (evaluationId: string | undefined) =>
 const jobName = (selections: SubmitSelections) => {
   const stem = selections.experimentName ?? selections.filesetName;
   return stem ? { name: buildEvalJobName(stem) } : {};
+};
+
+/** A copy of a submitted job's spec, re-pointed to publish into ``evaluationId``. Everything else
+ *  — dataset, metrics, target, params — is reused verbatim, so the copy measures the same thing. */
+export const buildRerunRequestBody = (
+  spec: Record<string, unknown>,
+  stem: string,
+  evaluationId: string
+) => {
+  const rest = Object.fromEntries(Object.entries(spec).filter(([key]) => key !== 'publication'));
+  return { name: buildEvalJobName(stem), spec: { ...rest, ...publicationSpec(evaluationId) } };
 };
 
 /** Strip an optional ``workspace/`` prefix, returning the bare model/agent name. */

@@ -6,6 +6,7 @@ import { evalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-j
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import {
   createExperiment,
+  getExperiment,
   getListExperimentsQueryKey,
 } from '@nemo/sdk/generated/platform/experiments';
 import {
@@ -33,6 +34,7 @@ vi.mock('@nemo/sdk/generated/evals/evals-plugin-jobs-routes', async (importOrigi
 vi.mock('@nemo/sdk/generated/platform/experiments', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/experiments')>()),
   createExperiment: vi.fn(),
+  getExperiment: vi.fn(),
 }));
 
 vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
@@ -53,6 +55,7 @@ vi.mock('@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer', () => 
 vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@studio/components/evaluation/experimentEvalConfig')>()),
   createRunEvaluation: vi.fn(),
+  recordRunJob: vi.fn(),
 }));
 
 const AGENT = 'my-agent';
@@ -127,24 +130,18 @@ const datasetSource = () => within(screen.getByRole('radiogroup', { name: 'Datas
 const configSource = () =>
   within(screen.getByRole('radiogroup', { name: 'Evaluator config source' }));
 
-const openDatasetStep = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
-  await user.click(screen.getByRole('button', { name: 'Next' }));
-  await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-  await user.click(screen.getByRole('button', { name: 'Next' }));
+const openDatasetStep = async () => {
+  await screen.findByLabelText('Dataset file');
 };
 
-/** Leaves the configuration step and submits the run under a name. Next is retried because the
- *  picked files are read asynchronously, and it only advances once they are ready. */
+/** Names the run and submits it. Run Evaluation is retried because the picked files are read
+ *  asynchronously, and it only submits once they are ready. */
 const nameAndRun = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.type(screen.getByLabelText('Evaluation Name (Optional)'), 'run-1');
   await waitFor(async () => {
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    expect(screen.getByLabelText('Evaluation Name')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
+    expect(evalsCreateEvaluateJob).toHaveBeenCalled();
   });
-  await user.type(screen.getByLabelText('Evaluation Name'), 'run-1');
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled());
-  await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 };
 
 const pickFilesetFile = async (user: ReturnType<typeof userEvent.setup>) => {
@@ -180,6 +177,7 @@ beforeEach(() => {
     name: 'model-update-tests',
   } as never);
   vi.mocked(createRunEvaluation).mockResolvedValue('eval_new' as never);
+  vi.mocked(getExperiment).mockResolvedValue({ id: 'grp_default' } as never);
 });
 
 afterEach(() => {
@@ -191,7 +189,7 @@ describe('AgentEvaluationWizard dataset from a fileset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await pickFilesetFile(user);
     await user.upload(
       screen.getByLabelText('Eval configuration file'),
@@ -227,7 +225,7 @@ describe('AgentEvaluationWizard dataset from a fileset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await user.click(datasetSource().getByRole('radio', { name: 'Choose from a fileset' }));
     await user.click(await screen.findByRole('combobox', { name: 'Fileset' }));
     await user.click(await screen.findByRole('option', { name: 'generated' }));
@@ -254,45 +252,30 @@ describe('AgentEvaluationWizard dataset from a fileset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await pickFilesetFile(user);
     await user.click(datasetSource().getByRole('radio', { name: 'Upload a file' }));
     await user.upload(
       screen.getByLabelText('Eval configuration file'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
-    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     expect(screen.getByLabelText('Dataset file')).toBeInTheDocument();
     expect(await screen.findByText('Add a dataset')).toBeVisible();
     expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
   });
 
-  it('still shows the picked file after stepping back and forward', async () => {
-    const user = userEvent.setup();
-    renderWizard();
-
-    await openDatasetStep(user);
-    await pickFilesetFile(user);
-    await user.click(screen.getByRole('button', { name: 'Back' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-
-    expect(await screen.findByRole('combobox', { name: 'File' })).toHaveTextContent(
-      'output/part-0.parquet'
-    );
-  });
-
-  it('holds Next and says why while the picked fileset file is still being read', async () => {
+  it('holds Run Evaluation and says why while the picked fileset file is still being read', async () => {
     vi.mocked(filesDownloadFile).mockReturnValue(new Promise(() => {}));
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await pickFilesetFile(user);
 
     expect(await screen.findByText('Reading the selected file...')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
   });
 
   it('shows why a fileset file could not be downloaded', async () => {
@@ -300,7 +283,7 @@ describe('AgentEvaluationWizard dataset from a fileset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await pickFilesetFile(user);
 
     expect(await screen.findByText('Unable to find base file.')).toBeVisible();
@@ -311,7 +294,7 @@ describe('AgentEvaluationWizard dataset from a fileset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await pickFilesetFile(user);
 
     expect(await screen.findByText('File contains no data')).toBeVisible();
@@ -323,7 +306,7 @@ describe('AgentEvaluationWizard uploaded Parquet dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await user.upload(screen.getByLabelText('Dataset file'), parquetFile(PARQUET.twoRows));
     await user.upload(
       screen.getByLabelText('Eval configuration file'),
@@ -339,8 +322,7 @@ describe('AgentEvaluationWizard uploaded Parquet dataset', () => {
       DEFAULT_WORKSPACE,
       expect.any(String),
       'dataset.parquet',
-      expect.any(File),
-      expect.anything()
+      expect.any(File)
     );
   });
 
@@ -348,7 +330,7 @@ describe('AgentEvaluationWizard uploaded Parquet dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await user.upload(screen.getByLabelText('Dataset file'), [
       parquetFile(PARQUET.twoRows, 'a.parquet'),
       parquetFile(PARQUET.twoRows, 'b.parquet'),
@@ -378,7 +360,7 @@ describe('AgentEvaluationWizard uploaded Parquet dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await user.upload(screen.getByLabelText('Dataset file'), [
       parquetFile(PARQUET.twoRows, 'a.parquet'),
       new File(['prompt,expected\nhi,hi\n'], 'b.csv'),
@@ -387,17 +369,17 @@ describe('AgentEvaluationWizard uploaded Parquet dataset', () => {
     expect(await screen.findByText('Only Parquet files can be added together.')).toBeVisible();
   });
 
-  it('keeps Next from passing a fileset dataset that was never picked', async () => {
+  it('keeps Run Evaluation from passing a fileset dataset that was never picked', async () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await user.click(datasetSource().getByRole('radio', { name: 'Choose from a fileset' }));
     await user.upload(
       screen.getByLabelText('Eval configuration file'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
-    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     expect(await screen.findByText('Add a dataset')).toBeVisible();
     expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
@@ -420,13 +402,17 @@ describe('AgentEvaluationWizard evaluator config from a fileset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await user.click(configSource().getByRole('radio', { name: 'Choose from a fileset' }));
     await user.click(await configPicker().findByRole('combobox', { name: 'Fileset' }));
     await user.click(await screen.findByRole('option', { name: CONFIG_FILESET }));
     await user.click(await configPicker().findByRole('combobox', { name: 'File' }));
 
-    const options = await screen.findAllByRole('option');
+    // The experiment select keeps its own listbox mounted, so read only the file picker's.
+    const fileList = (await screen.findAllByRole('listbox')).find((list) =>
+      within(list).queryByRole('option', { name: 'eval-config.yaml' })
+    );
+    const options = within(fileList as HTMLElement).getAllByRole('option');
     expect(options.map((option) => option.textContent)).toEqual([
       'configs/strict.json',
       'eval-config.yaml',
@@ -437,7 +423,7 @@ describe('AgentEvaluationWizard evaluator config from a fileset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await pickFilesetFile(user);
     await pickFilesetConfig(user, 'eval-config.yaml');
 
@@ -455,7 +441,7 @@ describe('AgentEvaluationWizard evaluator config from a fileset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await pickFilesetConfig(user, 'configs/strict.json');
 
     expect(await screen.findByText(/must contain a non-empty "metrics" array/)).toBeVisible();
@@ -465,11 +451,11 @@ describe('AgentEvaluationWizard evaluator config from a fileset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openDatasetStep(user);
+    await openDatasetStep();
     await pickFilesetFile(user);
     await pickFilesetConfig(user, 'eval-config.yaml');
     await user.click(configSource().getByRole('radio', { name: 'Upload a file' }));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     expect(screen.getByLabelText('Eval configuration file')).toBeInTheDocument();
     expect(await screen.findByText('Select an eval configuration')).toBeVisible();

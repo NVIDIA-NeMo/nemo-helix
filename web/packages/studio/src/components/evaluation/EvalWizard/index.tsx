@@ -21,9 +21,9 @@ import { useLocation, useNavigate } from 'react-router';
 interface EvalWizardProps {
   heading: string;
   headingDescription: string;
-  /** Step headings, in order. */
-  steps: string[];
-  activeStep: number;
+  /** Step headings, in order. Omitted for a single-screen form, which shows no stepper. */
+  steps?: string[];
+  activeStep?: number;
   /** Where Cancel lands when there is no in-app page to go back to, e.g. after a deep link. */
   cancelTo: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -47,8 +47,8 @@ interface EvalWizardProps {
 export const EvalWizard: FC<EvalWizardProps> = ({
   heading,
   headingDescription,
-  steps,
-  activeStep,
+  steps = [],
+  activeStep = 0,
   cancelTo,
   onSubmit,
   slotBanner,
@@ -82,12 +82,14 @@ export const EvalWizard: FC<EvalWizardProps> = ({
 
             <Flex justify="center" className="w-full">
               <Stack gap="density-2xl" className={CONTENT_WIDTH}>
-                <Stepper
-                  className="eval-wizard-stepper"
-                  aria-label={`${heading} progress`}
-                  activeStep={activeStep}
-                  items={steps.map((slotHeading) => ({ slotHeading }))}
-                />
+                {steps.length > 1 && (
+                  <Stepper
+                    className="eval-wizard-stepper"
+                    aria-label={`${heading} progress`}
+                    activeStep={activeStep}
+                    items={steps.map((slotHeading) => ({ slotHeading }))}
+                  />
+                )}
                 {slotBanner}
               </Stack>
             </Flex>
