@@ -63,6 +63,7 @@ def test_a_row_training_rejects_fails(tmp_path: Path) -> None:
 @pytest.mark.parametrize("url", ["a.png", _PNG_DATA_URL], ids=["dataset-path", "data-url"])
 @pytest.mark.parametrize("has_vision_tower", [True, False])
 def test_an_image_row_passes_only_for_a_vision_model(tmp_path: Path, has_vision_tower: bool, url: str) -> None:
+    """Dry-run accepts an image row, by path or data URL, only when the model has a vision tower."""
     (tmp_path / "train.jsonl").write_text(json.dumps(_image_chat(url)) + "\n")
     traits = CheckpointTraits(has_vision_tower=has_vision_tower)
     [dataset] = AutomodelJob._dry_run_datasets(_spec(), "ws", traits)
