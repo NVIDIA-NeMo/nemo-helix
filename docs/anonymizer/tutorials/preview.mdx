@@ -118,21 +118,27 @@ preview.display_record(0)  # render record 0 with entity highlights in a noteboo
 
 The CLI accepts the same request as a YAML or JSON spec file and streams NDJSON frames.
 To use the request from Step 1 with the CLI instead of calling `anonymizer.preview`, first
-serialize it to a local JSON file (no preview call is needed to write the spec):
+serialize it to a local YAML file (no preview call is needed to write the spec):
 
 ```python
 from pathlib import Path
 
-Path("/tmp/anonymizer-preview.json").write_text(
-    request.model_dump_json(indent=2), encoding="utf-8"
+import yaml
+
+Path("/tmp/anonymizer-preview.yaml").write_text(
+    yaml.safe_dump(request.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
 )
 ```
 
-To display and save all emitted frames as NDJSON, run:
+Preview frames may contain original input text and PII. Treat both terminal output
+and saved files as sensitive. To display and save all emitted frames as NDJSON in a
+new owner-only file, run:
 
 ```bash
+output=$(mktemp ./anonymizer-preview.ndjson.XXXXXX) &&
 nemo anonymizer preview \
-  --spec-file /tmp/anonymizer-preview.json | tee anonymizer-preview.ndjson
+  --spec-file /tmp/anonymizer-preview.yaml | tee "$output"
+printf 'Saved to %s\n' "$output"
 ```
 
 The saved file contains all frame kinds, not just the anonymized records. This CLI

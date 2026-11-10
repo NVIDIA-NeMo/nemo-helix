@@ -6,6 +6,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
+import yaml
 from nemo_anonymizer_plugin.app.task_config import PreviewRequest
 from nemo_helix_plugin.files.client import FilesClient
 
@@ -34,15 +35,15 @@ def test_file_progress_example_runs_in_isolation(tmp_path: Path, monkeypatch) ->
 def test_anonymizer_preview_spec_is_created_and_round_trips(tmp_path: Path) -> None:
     snippets = extract_python_snippets(DOCS / "anonymizer/tutorials/preview.mdx")
     build = next(snippet.source for snippet in snippets if "request = PreviewRequest(" in snippet.source)
-    export = next(snippet.source for snippet in snippets if "request.model_dump_json(" in snippet.source)
+    export = next(snippet.source for snippet in snippets if "yaml.safe_dump(" in snippet.source)
     namespace = {}
     with patch("nemo_helix_plugin.client.client.NemoClient.from_config") as from_config:
         from_config.return_value.resolve_workspace.return_value = "example-workspace"
         exec(build, namespace)
-    output = tmp_path / "anonymizer-preview.json"
+    output = tmp_path / "anonymizer-preview.yaml"
     # Redirect only the documented output path, keeping the snippet's real I/O.
-    exec(export.replace("/tmp/anonymizer-preview.json", str(output)), namespace)
-    restored = PreviewRequest.model_validate_json(output.read_text())
+    exec(export.replace("/tmp/anonymizer-preview.yaml", str(output)), namespace)
+    restored = PreviewRequest.model_validate(yaml.safe_load(output.read_text()))
     assert restored == namespace["request"]
     assert restored.data.source == "fileset://example-workspace/anonymizer-inputs#anonymizer-input.csv"
     assert restored.num_records == 2
