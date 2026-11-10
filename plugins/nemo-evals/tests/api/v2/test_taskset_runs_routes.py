@@ -383,13 +383,59 @@ def test_real_authorization_denies_missing_read_list_and_direct_service(tmp_path
         dependency_overrides={get_taskset_run_service: lambda: service},
     ) as ctx:
         for principal in ["no-run-permissions@example.com", "service:integration-test"]:
-            for suffix in ["", "/run-selected", "/run-selected/tasks"]:
+            for suffix in ["", "/run-selected", "/run-selected/tasks", "/run-selected/tasks/0"]:
                 response = ctx.test_client.get(
                     PATH.replace("/default/", "/private/") + suffix, headers={"X-NHX-Principal-Id": principal}
                 )
                 assert response.status_code == 403, response.text
     get.assert_not_awaited()
     listing.assert_not_awaited()
+
+
+async def test_get_task_returns_its_trials_and_omits_nulls(read_client, seed_run, entity_store, fake_task_jobs):
+    run = await seed_run()
+    member = TasksetRunMemberEntity(
+        name="task-2",
+        workspace="default",
+        task_index=2,
+        task_name="hello",
+        phase=MemberPhase.REGISTERED,
+        task_job="run-selected-task-2",
+        job_id="job-2",
+        job_status=HelixJobStatus.ACTIVE,
+    )
+    member._parent = run.id
+    await entity_store.create(member)
+
+    fake_task_jobs.details["run-selected-task-2"] = {
+        "trials": [{"trial": "hello__a", "phase": "verifying", "attempts": 1}]
+    }
+    fake_task_jobs.job_ids["run-selected-task-2"] = "job-2"
+
+    response = await read_client.get(f"{PATH}/run-selected/tasks/2")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "task": "task-2",
+        "task_index": 2,
+        "task_name": "hello",
+        "phase": "registered",
+        "job": "run-selected-task-2",
+        "job_status": "active",
+        "trial_counts": {
+            "total": 1,
+            "phases": {"verifying": 1},
+            "rewarded": 0,
+            "errors": {},
+        },
+        "trials": [{"trial": "hello__a", "phase": "verifying", "attempts": 1}],
+    }
+
+
+@pytest.mark.parametrize("suffix", ["/unknown/tasks/0", "/run-selected/tasks/9"])
+async def test_get_task_of_an_unknown_run_or_task_returns_404(read_client, seed_run, suffix):
+    await seed_run()
+    assert (await read_client.get(PATH + suffix)).status_code == 404
 
 
 async def test_run_lists_include_progress_only_when_asked(read_client, seed_run, entity_store):

@@ -32,9 +32,9 @@ catalog:
   # if NVIDIA renames the package, update only this one line.
   '@nemo/icons': 'npm:@nvidia/react-gui-icons@1.0.0'
   'lucide-react': ^1.30.0
-  '@storybook/addon-a11y': ^10.5.5
-  '@storybook/react': ^10.5.5
-  '@storybook/react-vite': ^10.5.5
+  '@storybook/addon-a11y': ^10.6.6
+  '@storybook/react': ^10.6.6
+  '@storybook/react-vite': ^10.6.6
   '@tailwindcss/postcss': ^4.1.18
   '@tanstack/react-query': ^5.69.0
   '@tanstack/react-query-devtools': ^5.69.0
@@ -46,12 +46,11 @@ catalog:
   '@types/react': ^19.2.5
   '@types/react-dom': ^19.2.3
   '@types/qs': ^6.14.0
-  '@vitejs/plugin-react': ^6.0.2
-  '@vitejs/plugin-react-swc': ^3.11.0
-  '@vitest/coverage-v8': 4.1.10
+  '@vitejs/plugin-react': ^6.3.0
+  '@vitest/coverage-v8': 4.1.12
   '@vitest/eslint-plugin': ^1.6.15
   'eslint-plugin-jsx-a11y': ^6.10.2
-  '@vitest/ui': 4.1.10
+  '@vitest/ui': 4.1.12
   axios: 1.18.0
   classnames: ^2.5.1
   concurrently: ^10.0.3
@@ -75,15 +74,14 @@ catalog:
   react-oidc-context: ^3.3.0
   react-router: ^8.3.0
   recharts: ^2.15.1
-  storybook: ^10.5.5
+  storybook: ^10.6.6
   tailwindcss: ^4.1.11
   tsx: ^4.22.4
   typescript: ~7.0.0
   use-debounce: ^10.0.6
   vite: ^8.0.16
   vite-plugin-mkcert: ^1.17.8
-  vitest: ^4.1.10
+  vitest: ^4.1.12
   vitest-fail-on-console: ^0.10.1
-  vite-plugin-dts: ^4.5.4
-  vite-plugin-svgr: ^4.5.0
+  vite-plugin-svgr: ^5.2.0
   zod: ^3.25.76
