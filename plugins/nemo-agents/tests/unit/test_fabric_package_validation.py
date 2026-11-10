@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest import mock
 from unittest.mock import AsyncMock, MagicMock
@@ -612,6 +613,33 @@ class TestValidateFabricPackageArtifacts:
                 agent_config_path=agent_config_path,
                 context_dir=context_dir,
             )
+
+    @pytest.mark.parametrize("link_kind", ["external", "absolute", "relative"])
+    @pytest.mark.parametrize("linked_directory", [False, True], ids=["nested-asset", "linked-directory"])
+    def test_validates_skill_asset_links(self, tmp_path: Path, link_kind: str, linked_directory: bool) -> None:
+        context_dir = tmp_path / "project"
+        bundle = _skill(context_dir / "skills" / "review")
+        agent_config_path = _agent_config_path(context_dir)
+        references = context_dir / "references" if linked_directory else bundle / "references"
+        references.mkdir()
+        if linked_directory:
+            (bundle / "references").symlink_to("../../references", target_is_directory=True)
+        asset = (tmp_path if link_kind == "external" else context_dir) / "asset.txt"
+        asset.write_text("Skill reference")
+        target = str(asset) if link_kind == "absolute" else os.path.relpath(asset, references)
+        (references / "asset.txt").symlink_to(target)
+
+        if link_kind == "relative":
+            validate_fabric_package_artifacts(
+                _agent_config("skills/review"), agent_config_path=agent_config_path, context_dir=context_dir
+            )
+            assert (references / "asset.txt").readlink() == Path(target)
+        else:
+            message = "outside Docker build context" if link_kind == "external" else "must use a relative target"
+            with pytest.raises(FabricPackageArtifactError, match=message):
+                validate_fabric_package_artifacts(
+                    _agent_config("skills/review"), agent_config_path=agent_config_path, context_dir=context_dir
+                )
 
     def test_rejects_agent_config_outside_context(self, tmp_path: Path) -> None:
         context_dir = tmp_path / "project"

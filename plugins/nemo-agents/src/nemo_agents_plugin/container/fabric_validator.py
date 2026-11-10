@@ -138,6 +138,11 @@ def validate_fabric_package_artifacts(
             if not bundle.is_relative_to(resolved_context):
                 errors.append(f"Skill directory {bundle} resolves outside Docker build context {resolved_context}")
                 continue
+            try:
+                errors.extend(_validate_skill_symlinks(bundle, resolved_context))
+            except (OSError, RuntimeError) as error:
+                errors.append(f"Cannot inspect skill directory {bundle}: {error}")
+                continue
             skill_manifest = bundle / "SKILL.md"
             if not skill_manifest.is_file():
                 errors.append(f"skills.paths entry {configured_path!r} does not contain SKILL.md: {bundle}")
@@ -151,3 +156,26 @@ def validate_fabric_package_artifacts(
     if errors:
         details = "\n".join(f"  - {error}" for error in errors)
         raise FabricPackageArtifactError(f"Fabric package artifact validation failed:\n{details}")
+
+
+def _validate_skill_symlinks(bundle: Path, context_dir: Path) -> list[str]:
+    """Check linked skill assets, including those reached through linked directories."""
+    errors: list[str] = []
+    visited: set[Path] = set()
+    pending = [bundle]
+    while pending:
+        path = pending.pop()
+        if path.is_symlink():
+            target = path.readlink()
+            if target.is_absolute():
+                errors.append(f"Skill symlink {path} must use a relative target; absolute targets are not portable")
+            elif not path.resolve().is_relative_to(context_dir):
+                errors.append(f"Skill symlink {path} resolves outside Docker build context {context_dir}")
+            else:
+                pending.append(path.parent / target)
+        elif path.is_dir():
+            directory = path.resolve()
+            if directory not in visited:
+                visited.add(directory)
+                pending.extend(directory.iterdir())
+    return errors
