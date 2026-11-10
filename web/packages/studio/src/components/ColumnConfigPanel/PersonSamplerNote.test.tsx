@@ -3,13 +3,14 @@
 
 import type { CreateJobRequest } from '@nemo/sdk/generated/data-designer/schema';
 import { getFilesRetrieveFilesetQueryKey } from '@nemo/sdk/generated/platform/files';
+import { NEMOTRON_PERSONAS_LOCALES } from '@studio/components/agents/PersonaTestSet/nemotronPersonas';
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { DataDesignerJobBuildRoute } from '@studio/routes/DataDesignerJobBuildRoute';
 import { getDataDesignerJobBuildRoute } from '@studio/routes/utils';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 
@@ -78,6 +79,16 @@ describe('PersonSamplerNote', () => {
     await screen.findByRole('textbox', { name: /Column name/ });
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.queryByText(/Nemotron Personas/)).not.toBeInTheDocument();
+  });
+
+  it('offers only the supported locales', async () => {
+    mockRegisteredLocales('nemotron-personas-dataset-en_us');
+    await openPersonColumn();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: /Locale/ }));
+    const listbox = await screen.findByRole('listbox', { name: /Locale/ });
+    const options = within(listbox).getAllByRole('option');
+    expect(options.map((option) => option.textContent)).toEqual([...NEMOTRON_PERSONAS_LOCALES]);
   });
 
   it('names the supported locales for one without a dataset', async () => {

@@ -58,7 +58,7 @@ const FieldControl: FC<FieldControlProps> = ({ columnIndex, field }) => {
           }
           useControllerProps={useControllerProps}
           formFieldProps={{ ...formFieldProps, slotLabel: field.label, required: field.required }}
-          placeholder="Select…"
+          placeholder={field.placeholder ?? 'Select…'}
         />
       );
     case 'switch':
