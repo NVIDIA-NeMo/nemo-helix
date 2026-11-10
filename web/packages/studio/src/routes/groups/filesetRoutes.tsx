@@ -20,6 +20,11 @@ const FilesetDetailRoute = lazy(() =>
     default: module.FilesetDetailRoute,
   }))
 );
+const FilesetDetailTabContent = lazy(() =>
+  import('@studio/routes/FilesetDetailRoute/FilesetDetailTabContent').then((module) => ({
+    default: module.FilesetDetailTabContent,
+  }))
+);
 
 export const filesetRoutes: RouteObject[] = [
   {
@@ -37,6 +42,12 @@ export const filesetRoutes: RouteObject[] = [
     path: ROUTES.workspace.filesetDetail,
     element: <FilesetDetailRoute />,
     errorElement: <RouteErrorPanel title="Fileset" />,
+    children: [
+      {
+        path: ROUTES.workspace.filesetDetailTab,
+        element: <FilesetDetailTabContent />,
+      },
+    ],
   },
 ];
 

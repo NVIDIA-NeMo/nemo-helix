@@ -493,12 +493,13 @@ export const getFilesetDetailRoute = (
   filesetName: string,
   options?: { tab?: FilesetDetailTab; folder?: string; file?: string }
 ) => {
-  const base = generatePath(ROUTES.workspace.filesetDetail, { workspace, filesetName });
-  const search = new URLSearchParams();
   // Folder and file selection only render on the Files tab, so default to it.
   const tab =
     options?.tab ?? (options?.folder || options?.file ? FilesetDetailTab.Files : undefined);
-  if (tab) search.set(QUERY_PARAMETERS.tab, tab);
+  const base = tab
+    ? generatePath(ROUTES.workspace.filesetDetailTab, { workspace, filesetName, filesetTab: tab })
+    : generatePath(ROUTES.workspace.filesetDetail, { workspace, filesetName });
+  const search = new URLSearchParams();
   if (options?.folder) search.set(QUERY_PARAMETERS.filesetFolder, options.folder);
   if (options?.file) search.set(QUERY_PARAMETERS.file, options.file);
   return search.size ? `${base}?${search.toString()}` : base;

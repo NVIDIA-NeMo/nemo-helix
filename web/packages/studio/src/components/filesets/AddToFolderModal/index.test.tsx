@@ -373,7 +373,7 @@ describe('AddToFolderModal', () => {
       await waitFor(() => {
         expect(mockNavigate).toHaveBeenCalledWith(
           expect.stringContaining(
-            `/workspaces/${DEFAULT_WORKSPACE}/filesets/${MOCK_DATASET_NAME}/detail?tab=files`
+            `/workspaces/${DEFAULT_WORKSPACE}/filesets/${MOCK_DATASET_NAME}/files`
           )
         );
       });

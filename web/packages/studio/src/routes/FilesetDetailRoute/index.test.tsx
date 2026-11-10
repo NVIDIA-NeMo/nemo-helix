@@ -3,12 +3,13 @@
 
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
+import { ROUTES } from '@studio/constants/routes';
 import { FilesetDetailRoute } from '@studio/routes/FilesetDetailRoute';
-import { render } from '@studio/tests/util/render';
+import { FilesetDetailTabContent } from '@studio/routes/FilesetDetailRoute/FilesetDetailTabContent';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render as rtlRender, act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { createMemoryRouter, RouterProvider } from 'react-router';
 
 // The fileset returned by the route's fetch. Mutated per-test to exercise the
 // purpose-dependent branches (Dataset Card vs Model Card).
@@ -63,91 +64,108 @@ vi.mock('@studio/util/hooks/useRequiredPathParams', () => ({
   useRequiredPathParams: () => ({ filesetName: 'test-fileset' }),
 }));
 
+const detailUrl = (tab?: string) =>
+  `/workspaces/default/filesets/test-fileset${tab ? `/${tab}` : ''}`;
+
+const openAtUrl = (url: string) => {
+  const router = createMemoryRouter(
+    [
+      {
+        path: ROUTES.workspace.filesetDetail,
+        element: <FilesetDetailRoute />,
+        children: [
+          { path: ROUTES.workspace.filesetDetailTab, element: <FilesetDetailTabContent /> },
+        ],
+      },
+    ],
+    { initialEntries: [url] }
+  );
+  rtlRender(
+    <TestProviders>
+      <RouterProvider router={router} />
+    </TestProviders>
+  );
+  return router;
+};
+
+// The empty Files tab's self-service help renders a CodeSnippet whose syntax
+// highlighting resolves asynchronously after mount. Flush it so the state
+// update lands inside act() instead of leaking past the test.
+const flushFilesTab = () =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
 describe('FilesetDetailRoute', () => {
   beforeEach(() => {
     mockFileset = makeFileset(FilesetPurpose.dataset);
   });
 
-  it('labels the card tab by purpose — "Dataset Card" for a dataset fileset', () => {
-    render(<FilesetDetailRoute />);
+  it('redirects a dataset with no tab in the path to its card', async () => {
+    const router = openAtUrl(detailUrl());
 
-    expect(screen.getByRole('tab', { name: 'Dataset Card' })).toHaveAttribute(
+    expect(await screen.findByTestId('fileset-card')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(detailUrl('card'));
+  });
+
+  it('redirects an unknown tab to the default tab', async () => {
+    const router = openAtUrl(detailUrl('garbage'));
+
+    expect(await screen.findByTestId('fileset-card')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(detailUrl('card'));
+  });
+
+  it('labels the card tab by purpose — "Dataset Card" for a dataset fileset', async () => {
+    openAtUrl(detailUrl('card'));
+
+    expect(await screen.findByRole('tab', { name: 'Dataset Card' })).toHaveAttribute(
       'aria-selected',
       'true'
     );
     expect(screen.getByRole('tab', { name: 'Files' })).toHaveAttribute('aria-selected', 'false');
-    expect(screen.getByTestId('fileset-card')).toBeInTheDocument();
   });
 
   it('labels the card tab "Model Card" for a model fileset and renders the shared card', async () => {
-    const user = userEvent.setup();
     mockFileset = makeFileset(FilesetPurpose.model);
-    render(<FilesetDetailRoute />);
+    openAtUrl(detailUrl('card'));
 
-    const modelCardTab = screen.getByRole('tab', { name: 'Model Card' });
-    expect(modelCardTab).toBeInTheDocument();
-
-    // Both purposes share FilesetCard; selecting the card tab mounts it.
-    await user.click(modelCardTab);
+    expect(await screen.findByRole('tab', { name: 'Model Card' })).toBeInTheDocument();
     expect(screen.getByTestId('fileset-card')).toBeInTheDocument();
   });
 
-  it('switches to the Files tab when clicked and renders the file explorer', async () => {
+  it('navigates to the Files path when the Files tab is clicked', async () => {
     const user = userEvent.setup();
-    render(<FilesetDetailRoute />);
+    const router = openAtUrl(detailUrl('card'));
 
-    await user.click(screen.getByRole('tab', { name: 'Files' }));
+    await user.click(await screen.findByRole('tab', { name: 'Files' }));
 
+    expect(router.state.location.pathname).toBe(detailUrl('files'));
     expect(screen.getByRole('tab', { name: 'Files' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('fileset-files-tab')).toBeInTheDocument();
+    await flushFilesTab();
   });
 
-  const renderAtUrl = (url: string) =>
-    rtlRender(
-      <TestProviders>
-        <MemoryRouter initialEntries={[url]}>
-          <FilesetDetailRoute />
-        </MemoryRouter>
-      </TestProviders>
-    );
+  it('opens the Files tab from the path', async () => {
+    openAtUrl(detailUrl('files'));
 
-  it('opens the Files tab when the initial URL has ?tab=files', async () => {
-    renderAtUrl('/?tab=files');
-
+    expect(await screen.findByTestId('fileset-files-tab')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Files' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('fileset-files-tab')).toBeInTheDocument();
-
-    // The empty Files tab's self-service help renders a CodeSnippet whose
-    // syntax highlighting resolves asynchronously after mount. Flush it here
-    // so the state update lands inside act() instead of leaking past this
-    // test's synchronous assertions.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await flushFilesTab();
   });
 
-  it('falls back to the default tab when ?tab= is an unknown value', () => {
-    renderAtUrl('/?tab=garbage');
+  it('renders the file preview when ?file= is set on the Files tab', async () => {
+    openAtUrl(`${detailUrl('files')}?file=folder%2Fdata.json`);
 
-    expect(screen.getByRole('tab', { name: 'Dataset Card' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    );
-  });
-
-  it('renders the file preview when ?file= is set on the Files tab', () => {
-    renderAtUrl('/?tab=files&file=folder%2Fdata.json');
-
-    expect(screen.getByTestId('fileset-files-tab-preview')).toBeInTheDocument();
+    expect(await screen.findByTestId('fileset-files-tab-preview')).toBeInTheDocument();
     expect(screen.getByTestId('mock-file-preview-content')).toHaveTextContent('folder/data.json');
   });
 
   it('renders the explorer when no file is selected on the Files tab', async () => {
-    const user = userEvent.setup();
-    render(<FilesetDetailRoute />);
-    await user.click(screen.getByRole('tab', { name: 'Files' }));
+    openAtUrl(detailUrl('files'));
 
+    expect(await screen.findByTestId('fileset-files-tab')).toBeInTheDocument();
     expect(screen.queryByTestId('fileset-files-tab-preview')).toBeNull();
     expect(screen.queryByTestId('mock-file-preview-content')).toBeNull();
+    await flushFilesTab();
   });
 });
