@@ -107,7 +107,8 @@ from nhx_evals_sdk.agent_eval.runtimes.gym import GymRewardMetric, discover_gym_
 tasks = discover_gym_tasks("path/to/example.jsonl", metrics=[GymRewardMetric()])
 ```
 
-Task identity is the row's content hash. Each task's id is `gym-` followed by 59 hex digits of
+Unless rows are named by a key (`id_field`, see [Keep tasks across edits](#keep-tasks-across-edits)),
+task identity is the row's content hash. Each task's id is `gym-` followed by 59 hex digits of
 the hash, which is also a valid platform entity name. Content-hash identity has two consequences
 worth knowing before you build a dataset:
 
