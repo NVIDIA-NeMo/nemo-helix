@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 import typer
 from nhx.customization_common.cli.overrides import apply_job_cli_overrides
+from nhx.customization_common.cli.uploads import SpecRefs
 from nhx.customization_common.contributor.jobs import BaseSubmitJob
 from pydantic import BaseModel, ConfigDict
 from typer.testing import CliRunner
@@ -27,11 +28,16 @@ class _Job(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: dict[str, str]
+    dataset: str | None = None
+
+
+def _validate_job_spec(data: dict) -> str:
+    return _Job.model_validate(data).model_dump_json()
 
 
 def _load_job_json(path: Path) -> str:
     """Read and validate the file against a strict schema, as each backend's loader does."""
-    return _Job.model_validate(json.loads(path.read_text())).model_dump_json()
+    return _validate_job_spec(json.loads(path.read_text()))
 
 
 class _ContextState:
@@ -61,6 +67,8 @@ def _build_app(calls: list[dict[str, object]]) -> typer.Typer:
         backend="plugin",
         load_job_json=_load_job_json,
         job_json_help="Path to the job JSON.",
+        spec_refs=SpecRefs(model=("model", "name"), dataset=("dataset",)),
+        validate_job_spec=_validate_job_spec,
         job_cls=BaseSubmitJob,
     )
     return app
@@ -150,22 +158,33 @@ class TestSubmitWorkspaceResolution:
         assert calls == []
 
 
-@pytest.mark.parametrize("flags", [[], ["--dry-run"]], ids=["submit", "dry-run"])
+@pytest.mark.parametrize(
+    "flags",
+    [[], ["--dry-run"], ["--upload-dataset", "data"], ["--upload-dataset", "data", "--dry-run"]],
+    ids=["submit", "dry-run", "upload-submit", "upload-dry-run"],
+)
 @pytest.mark.parametrize(
     ("content", "expected"),
     [
         ('{"model": {"name": "m"}, "unrecognized_option": true}', ["invalid job JSON", "unrecognized_option"]),
         ('{"model": ', ["could not read"]),
+        (b'{"model": {"name": "\xff"}}', ["could not read", "can't decode"]),
         (None, ["could not read", "No such file"]),
     ],
-    ids=["unknown-field", "malformed-json", "missing-file"],
+    ids=["unknown-field", "malformed-json", "not-utf8", "missing-file"],
 )
 def test_a_bad_job_json_is_a_cli_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: list[str], content: str | None, expected: list[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flags: list[str],
+    content: str | bytes | None,
+    expected: list[str],
 ) -> None:
     monkeypatch.delenv("NHX_WORKSPACE", raising=False)
     job_file = tmp_path / "job.json"
-    if content is not None:
+    if isinstance(content, bytes):
+        job_file.write_bytes(content)
+    elif content is not None:
         job_file.write_text(content)
     calls: list[dict[str, object]] = []
     parent = _app_with_state(_build_app(calls), None)

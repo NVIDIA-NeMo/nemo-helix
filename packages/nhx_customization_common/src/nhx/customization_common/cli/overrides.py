@@ -403,7 +403,7 @@ def _load(job_json: Path, load_job_json: LoadJobJson) -> str:
     """Run the backend's ``load_job_json``, reporting a bad file or schema as a CLI error."""
     try:
         return load_job_json(job_json)
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         typer.echo(f"Error: could not read {job_json}: {exc}", err=True)
         raise typer.Exit(code=2) from exc
     except ValidationError as exc:
@@ -415,7 +415,7 @@ def _read_job_json(job_json: Path) -> dict:
     """Read the file as a JSON object, reporting a bad file as a CLI error."""
     try:
         spec = json.loads(job_json.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         typer.echo(f"Error: could not read {job_json}: {exc}", err=True)
         raise typer.Exit(code=2) from exc
     if not isinstance(spec, dict):
