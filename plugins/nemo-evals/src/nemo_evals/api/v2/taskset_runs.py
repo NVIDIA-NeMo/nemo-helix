@@ -223,6 +223,10 @@ async def list_taskset_runs(
     active: bool = Query(default=False, description="Include only accepted and running runs."),
     mine: bool = Query(default=False, description="Include only runs created by the effective caller."),
     page_params: PageParams = Depends(make_page_dep()),
+    progress: bool = Query(
+        default=False,
+        description="Include each run's progress (task and trial counts), the same as getting a single run does.",
+    ),
     caller: str = Depends(get_effective_principal_id),
     service: TasksetRunService = Depends(get_taskset_run_service),
 ) -> Page[TasksetRunStatus]:
@@ -234,11 +238,13 @@ async def list_taskset_runs(
         mine: Restrict to the effective caller's records when True.
         page: One-based page number, validated by FastAPI.
         page_size: Maximum page size, from 1 to 1000.
+        progress: Include each run's progress when True.
         caller: Effective principal supplied by the platform dependency.
         service: Shared request-scoped run service.
 
     Returns:
-        Stored statuses and filtered pagination counts, excluding null optionals.
+        Stored statuses and filtered pagination counts, excluding null optionals; each status includes its
+        progress when ``progress`` is True.
 
     Raises:
         HTTPException: Permission denied (403), or unexpected storage or projection failure (500).
@@ -251,6 +257,7 @@ async def list_taskset_runs(
             mine=mine,
             page=page_params.page,
             page_size=page_params.page_size,
+            progress=progress,
         )
     except PermissionDeniedError as exc:
         logger.warning(

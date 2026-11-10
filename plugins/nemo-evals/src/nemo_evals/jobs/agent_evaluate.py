@@ -145,7 +145,7 @@ from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult
 from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
-from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborJobScope, HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTarget
 from nhx_evals_sdk.values import AgentBase, Model, ModelRef, RunConfigOnline, RunConfigOnlineModel
@@ -513,6 +513,7 @@ class _AgentEvalJobBase(NemoJob):
         configure_harbor: Callable[[HarborRuntimeConfig], HarborRuntimeConfig] | None = None,
         fabric_gateway_origin: str | None = None,
         trial_issuer: TrialCredentialIssuer | None = None,
+        trial_progress: Callable[[HarborRuntimeConfig], HarborJobScope | None] | None = None,
     ) -> tuple[AgentEvalTarget | None, str | dict[str, Any] | None, RunConfigOnline | RunConfigOnlineModel | None]:
         """Resolve a target spec to ``(runtime target, prompt_template, params)`` for the SDK run config.
 
@@ -520,7 +521,7 @@ class _AgentEvalJobBase(NemoJob):
         shapes its own request, so it contributes neither a prompt template nor inference params.
         ``configure_harbor`` adjusts a Harbor runner's config last (a Kubernetes task Job selects its
         sandbox environment there). ``trial_issuer`` issues each trial of a Harbor agent that calls a gateway
-        model its own gateway key.
+        model its own gateway key. ``trial_progress`` gives the scope that reports a Harbor job's trials as they run.
         """
         if isinstance(target, ModelTarget):
             return target.model, target.prompt_template, target.params or RunConfigOnlineModel()
@@ -582,15 +583,18 @@ class _AgentEvalJobBase(NemoJob):
                 )
                 harbor_config = trust_the_gateway_ca(harbor_config, origin)
             gateway = _trial_gateway(target)
-            job_scope = (
+            # Each scope wraps every Harbor job: one issues trial keys, the other reports trial progress.
+            job_scopes = (
                 gateway_job_scope(harbor_config, trial_issuer, gateway[1])
                 if trial_issuer is not None and gateway is not None
-                else None
+                else None,
+                trial_progress(harbor_config) if trial_progress is not None else None,
             )
+
             harbor_runtime = HarborAgentTaskRunner(
                 config=harbor_config,
                 secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
-                job_scope=job_scope,
+                job_scopes=[scope for scope in job_scopes if scope is not None],
             )
             return harbor_runtime, None, None
         return None, None, None
@@ -656,6 +660,7 @@ class _AgentEvalJobBase(NemoJob):
                 configure_harbor=lambda harbor_config: self._configure_harbor_runtime(harbor_config, ctx),
                 fabric_gateway_origin=fabric_gateway_origin,
                 trial_issuer=trial_issuer,
+                trial_progress=lambda harbor_config: self._trial_progress_scope(harbor_config, ctx, async_client),
             )
             bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
             if bundle_dir.exists():
@@ -766,6 +771,12 @@ class _AgentEvalJobBase(NemoJob):
     def _configure_harbor_runtime(self, config: HarborRuntimeConfig, ctx: JobContext) -> HarborRuntimeConfig:
         """Hook: adjust a Harbor runner's config before it runs. Returns it unchanged by default."""
         return config
+
+    def _trial_progress_scope(
+        self, config: HarborRuntimeConfig, ctx: JobContext, async_client: AsyncNemoClient | None
+    ) -> HarborJobScope | None:
+        """Hook: a scope that reports the Harbor job's trials as they run. None by default: nothing reads them."""
+        return None
 
 
 def _trial_credential_issuer(
