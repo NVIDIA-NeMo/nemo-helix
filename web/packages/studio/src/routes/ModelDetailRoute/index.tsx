@@ -7,12 +7,13 @@ import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
 import { toInferenceModelName } from '@nemo/common/src/utils/models';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
-import { Badge, Button, Stack, TabsContent } from '@nvidia/foundations-react-core';
+import { Badge, Stack, TabsContent } from '@nvidia/foundations-react-core';
 import { CustomizationOverview } from '@studio/components/CustomizationOverview';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
 import { EvaluationResultsDataView } from '@studio/components/dataViews/EvaluationResultsDataView';
 import { DetailPageLayout, type DetailPageTab } from '@studio/components/Layouts/DetailPageLayout';
 import { Loading } from '@studio/components/Layouts/Loading';
+import { DEFAULT_NAMESPACE } from '@studio/constants/constants';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
 import { useModelLineage } from '@studio/hooks/useModelLineage';
@@ -21,30 +22,36 @@ import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { LogsTab } from '@studio/routes/CustomizationJobDetailsRoute/LogsTab';
 import { ChatTab } from '@studio/routes/ModelDetailRoute/ChatTab';
-import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
+import { type ModelDetailParent, ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { DeploymentTab } from '@studio/routes/ModelDetailRoute/DeploymentTab';
-import { DeploymentActions } from '@studio/routes/ModelDetailRoute/DeploymentTab/DeploymentActions';
 import { DetailsTab } from '@studio/routes/ModelDetailRoute/DetailsTab';
 import { FilesTab } from '@studio/routes/ModelDetailRoute/FilesTab';
+import { ModelDetailActions } from '@studio/routes/ModelDetailRoute/ModelDetailActions';
 import {
   getCustomizationJobListRoute,
   getEvaluationNewRoute,
-  getFilesetRoute,
   getModelDetailRoute,
-  getWorkspaceCustomizationJobDetailsRoute,
+  getWorkspaceBaseModelsRoute,
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import type { FC } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 
-export const ModelDetailRoute: FC = () => {
+export interface ModelDetailRouteProps {
+  parent?: ModelDetailParent;
+}
+
+export const ModelDetailRoute: FC<ModelDetailRouteProps> = ({ parent = 'fine-tuning' }) => {
   const workspace = useWorkspaceFromPath();
   const { modelName } = useRequiredPathParams([ROUTE_PARAMS.modelName]);
   const { [ROUTE_PARAMS.adapterName]: adapterName } = useParams();
   const { getQueryParam, setQueryParam } = useQueryParams();
   const navigate = useNavigate();
 
-  const lineage = useModelLineage(workspace, modelName, adapterName);
+  // The catalog lists the `default` workspace's models too, so a catalog page falls back to it.
+  const lineage = useModelLineage(workspace, modelName, adapterName, {
+    fallbackWorkspace: parent === 'catalog' ? DEFAULT_NAMESPACE : undefined,
+  });
   const { model, adapter, job, fileset } = lineage;
   const name = adapterName ?? modelName;
 
@@ -55,7 +62,9 @@ export const ModelDetailRoute: FC = () => {
 
   useBreadcrumbs({
     items: [
-      { href: getCustomizationJobListRoute(workspace), slotLabel: 'Fine-tuning' },
+      parent === 'catalog'
+        ? { href: getWorkspaceBaseModelsRoute(workspace), slotLabel: 'Model Catalog' }
+        : { href: getCustomizationJobListRoute(workspace), slotLabel: 'Fine-tuning' },
       ...(adapterName
         ? [{ href: getModelDetailRoute(workspace, modelName), slotLabel: modelName }]
         : []),
@@ -82,27 +91,11 @@ export const ModelDetailRoute: FC = () => {
   const tabFromUrl = getQueryParam(QUERY_PARAMETERS.tab);
   const selectedTab = tabs.find((tab) => tab.value === tabFromUrl)?.value ?? ModelDetailTab.Details;
 
-  const isJobTab = selectedTab === ModelDetailTab.Training || selectedTab === ModelDetailTab.Logs;
   // An adapter is named with the `model::adapter` encoding the wizard's picker
   // round-trips, so the run opens pre-set to the entity whose page this is.
   const runEvaluationRoute = getEvaluationNewRoute(workspace, {
     model: adapterName ? `${workspace}/${modelName}::${adapterName}` : `${workspace}/${modelName}`,
   });
-
-  let headerAction: { label: string; to: string } | undefined;
-  if (isJobTab && job.jobName) {
-    headerAction = {
-      label: 'Open Job',
-      to: getWorkspaceCustomizationJobDetailsRoute(job.workspace, job.jobName),
-    };
-  } else if (selectedTab === ModelDetailTab.Evaluations) {
-    headerAction = { label: 'Run Evaluation', to: runEvaluationRoute };
-  } else if (selectedTab === ModelDetailTab.Files && fileset) {
-    headerAction = {
-      label: 'Open Fileset',
-      to: getFilesetRoute(fileset.workspace, `${fileset.workspace}/${fileset.name}`),
-    };
-  }
 
   if (lineage.isLoading) {
     return <Loading description="Loading model..." />;
@@ -160,19 +153,14 @@ export const ModelDetailRoute: FC = () => {
         selectedTab={selectedTab}
         onTabChange={(tab) => setQueryParam(QUERY_PARAMETERS.tab, tab)}
         slotActions={
-          selectedTab === ModelDetailTab.Deployment ? (
-            <DeploymentActions
-              model={model}
-              adapter={adapter}
-              deployment={lineage.baseDeployment}
-            />
-          ) : (
-            headerAction && (
-              <Button color="brand" asChild>
-                <Link to={headerAction.to}>{headerAction.label}</Link>
-              </Button>
-            )
-          )
+          <ModelDetailActions
+            selectedTab={selectedTab}
+            parent={parent}
+            model={model}
+            adapter={adapter}
+            lineage={lineage}
+            runEvaluationRoute={runEvaluationRoute}
+          />
         }
       >
         <TabsContent
