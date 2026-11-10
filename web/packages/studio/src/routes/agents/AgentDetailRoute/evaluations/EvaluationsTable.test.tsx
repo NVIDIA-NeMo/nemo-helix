@@ -1,14 +1,24 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experiments';
 import { type EvalJobRow, toEvalJobRow } from '@studio/api/evaluation/utils';
+import { DEFAULT_EXPERIMENT_AGENT_KEY } from '@studio/components/evaluation/defaultExperiment';
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { ROUTES } from '@studio/constants/routes';
 import { makeEvaluatorJob } from '@studio/mocks/evaluation/jobs';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
+import { server } from '@studio/mocks/node';
 import { EvaluationsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/EvaluationsTable';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
-import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
+import { getAgentRunEvaluationRoute } from '@studio/routes/utils';
+import { LG_SELECTOR_TIMEOUT, LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
+import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
+import { renderRoute, waitFor, within } from '@studio/tests/util/render';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 import { MemoryRouter } from 'react-router';
 
 const makeEval = (overrides: Partial<AgentEvaluationRow> & { name: string }): AgentEvaluationRow =>
@@ -166,5 +176,103 @@ describe('EvaluationsTable Scores column', () => {
     expect(await screen.findByText(/safety 0\.90 \(1 failed\)/)).toBeInTheDocument();
     expect(screen.getByText(/tone 0\.70/)).toBeInTheDocument();
     expect(screen.getByText(/empathy 0\.60/)).toBeInTheDocument();
+  });
+});
+
+describe('EvaluationsTable experiment linking', () => {
+  const AGENT = 'my-agent';
+  const DEFAULT_EXPERIMENT = { id: 'grp_default', name: 'my-agent-runs' };
+
+  const renderAgentTable = (evaluations: AgentEvaluationRow[], jobs: EvalJobRow[] = []) =>
+    renderRoute(undefined, {
+      history: '/workspaces/default',
+      routes: [
+        {
+          path: '/workspaces/:workspace',
+          element: (
+            <EvaluationsTable
+              workspace="default"
+              agentName={AGENT}
+              evaluations={evaluations}
+              jobs={jobs}
+            />
+          ),
+        },
+        { path: ROUTES.workspace.agentEvaluationNew, element: <LocationDisplay /> },
+      ],
+    });
+
+  const unlinked = makeEval({
+    name: 'quick-run',
+    id: 'eval_quick',
+    experiment_ids: [DEFAULT_EXPERIMENT.id],
+    experiments: [{ ...DEFAULT_EXPERIMENT } as AgentEvaluationRow['experiments'][number]],
+  });
+
+  it('marks a run still in the default experiment as not linked', async () => {
+    renderAgentTable([unlinked]);
+
+    expect(
+      (await screen.findAllByText('Not linked', undefined, { timeout: LG_SELECTOR_TIMEOUT })).length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText('my-agent-runs')).not.toBeInTheDocument();
+  });
+
+  it("re-runs a row's job from the wizard's re-run form", async () => {
+    const job = toEvalJobRow(
+      makeEvaluatorJob({
+        id: 'job-1',
+        name: 'job-1',
+        spec: { publication: { intake: { evaluation_id: 'quick-run' } } },
+      })
+    );
+    const user = userEvent.setup();
+    renderAgentTable([unlinked], [job]);
+
+    await screen.findAllByText('quick-run', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+    await user.click(screen.getAllByRole('button', { name: /actions/i })[0]);
+    await user.click(await screen.findByRole('menuitem', { name: 'Re-run' }));
+
+    expect(await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
+      getAgentRunEvaluationRoute('default', AGENT, 'job-1')
+    );
+  });
+
+  it('links an unlinked run by moving it out of the default experiment', async () => {
+    let patched: unknown;
+    server.use(
+      http.get(mockApiUrl(getListExperimentsQueryKey, ':workspace'), () =>
+        HttpResponse.json({
+          data: [
+            { id: 'grp_primary', name: 'primary-use-cases-benchmark', workspace: 'default' },
+            {
+              ...DEFAULT_EXPERIMENT,
+              workspace: 'default',
+              metadata: { [DEFAULT_EXPERIMENT_AGENT_KEY]: AGENT },
+            },
+          ],
+        })
+      ),
+      http.patch(
+        `${PLATFORM_BASE_URL}/apis/intake/v2/workspaces/:workspace/evaluations/:name`,
+        async ({ request }) => {
+          patched = await request.json();
+          return HttpResponse.json({ ...unlinked, experiment_ids: ['grp_primary'] });
+        }
+      )
+    );
+    const user = userEvent.setup();
+    renderAgentTable([unlinked]);
+
+    await screen.findAllByText('quick-run', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+    await user.click(screen.getAllByRole('button', { name: /actions/i })[0]);
+    await user.click(await screen.findByRole('menuitem', { name: 'Link to experiment' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('combobox', { name: 'Experiment' }));
+    expect(screen.queryByRole('option', { name: 'my-agent-runs' })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('option', { name: 'primary-use-cases-benchmark' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => expect(patched).toEqual({ experiment_ids: ['grp_primary'] }));
   });
 });

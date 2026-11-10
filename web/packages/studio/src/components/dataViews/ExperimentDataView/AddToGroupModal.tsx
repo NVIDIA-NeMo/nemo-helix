@@ -29,6 +29,7 @@ import {
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 import { DefaultSortControl } from '@studio/components/DefaultSortControl';
 import { DEFAULT_SORT } from '@studio/components/DefaultSortControl/util';
+import { isDefaultExperiment } from '@studio/components/evaluation/defaultExperiment';
 import {
   experimentCreateSchema,
   type ExperimentCreateFormFields,
@@ -49,6 +50,10 @@ export interface AddToGroupModalProps extends Pick<FormModalProps, 'open' | 'onC
   workspace: string;
   /** The evaluations being curated into another group (the bulk row selection). */
   evaluations: EvaluationRow[];
+  /** Groups to drop the evaluations from while adding them, e.g. the agent's default experiment
+   *  that holds runs until they are linked. */
+  detachExperimentIds?: string[];
+  title?: string;
 }
 
 /**
@@ -68,6 +73,8 @@ export const AddToGroupModal: FC<AddToGroupModalProps> = ({
   onSuccess,
   workspace,
   evaluations,
+  detachExperimentIds = [],
+  title = 'Add to experiment',
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -109,7 +116,9 @@ export const AddToGroupModal: FC<AddToGroupModalProps> = ({
   const groups = useMemo(
     () =>
       (groupsPage?.data ?? []).filter(
-        (group) => !evaluations.every((evaluation) => evaluation.experiment_ids.includes(group.id))
+        (group) =>
+          !isDefaultExperiment(group) &&
+          !evaluations.every((evaluation) => evaluation.experiment_ids.includes(group.id))
       ),
     [groupsPage, evaluations]
   );
@@ -136,7 +145,14 @@ export const AddToGroupModal: FC<AddToGroupModalProps> = ({
         patchEvaluation({
           workspace,
           name: evaluation.name,
-          data: { experiment_ids: [...new Set([...evaluation.experiment_ids, groupId])] },
+          data: {
+            experiment_ids: [
+              ...new Set([
+                ...evaluation.experiment_ids.filter((id) => !detachExperimentIds.includes(id)),
+                groupId,
+              ]),
+            ],
+          },
         })
       )
     );
@@ -230,7 +246,7 @@ export const AddToGroupModal: FC<AddToGroupModalProps> = ({
 
   return (
     <FormModal
-      title="Add to experiment"
+      title={title}
       instruction={`Add ${countLabel} to another experiment to compare across boards.`}
       submitButtonText={submitButtonText}
       disabled={busy}

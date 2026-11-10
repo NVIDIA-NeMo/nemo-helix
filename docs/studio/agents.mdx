@@ -61,13 +61,20 @@ Agent evaluations are not a separate item under the **Agents** navigation parent
 2. Select an agent.
 3. Select the **Evaluations** tab.
 
-Select **Run Evaluation** in the page header to open the **Run Agent Evaluation** wizard. The button is available whenever the agent has a stored configuration; the agent doesn't need a running deployment. The wizard has these steps:
+Select **Run Evaluation** in the page header to open the **Run Agent Evaluation** form. The button is available whenever the agent has a stored configuration; the agent doesn't need a running deployment. The form is a single screen:
 
-1. **Begin**: Choose **Re-run an existing evaluation** or **Create a new experiment**. Re-running reuses the eval config from a previous run, adds the new run to that run's experiment, and skips directly to **Run Evaluation**.
-2. **Create experiment**: Enter a **Name** for the new experiment and, optionally, its description and default sort order.
-3. **Run Evaluation**: Name the run and set **Parallel requests**. When re-running, select the evaluation to base the run on and enter a **New Evaluation Name**. When creating an experiment, enter an **Evaluation Name** and choose the evaluation dataset and evaluator config. Upload the dataset or choose it from a fileset; datasets can be `.jsonl`, `.json`, `.csv`, or `.parquet` files, and you can upload several Parquet files to combine them. When a fileset folder holds more than one Parquet file, the file list also offers all of them as one dataset, which the evaluator reads through a `<folder>/*.parquet` pattern. Upload the evaluator config as a JSON or YAML file, or choose one from a fileset.
+- **Dataset File**: Upload the dataset or choose it from a fileset. Datasets can be `.jsonl`, `.json`, `.csv`, or `.parquet` files, and you can upload several Parquet files to combine them. When a fileset folder holds more than one Parquet file, the file list also offers all of them as one dataset, which the evaluator reads through a `<folder>/*.parquet` pattern.
+- **Eval Configuration File**: Upload the evaluator config as a JSON or YAML file, or choose one from a fileset.
+- **Experiment** (optional): Link the run to an existing experiment. When you leave it empty, the run is kept in the agent's default `<agent>-runs` experiment and shows as **Not linked** until you link it.
+- **Evaluation Name** (optional): Name the run. When you leave it empty, a name is generated from the agent's name.
+- **Parallel requests**: Set how many dataset rows are sent to the agent at once.
 
-The tab's **Evaluations** view lists completed evaluations and in-progress runs in a single table. Switch to **Experiments** to group the runs by experiment. This agent-scoped view differs from **Models > Evaluations**, which shows model evaluation results.
+The tab's **Evaluations** view lists completed evaluations and in-progress runs in a single table. Each row's actions include:
+
+- **Re-run**: Submits a copy of the run's evaluation job. Only the experiment and evaluation name are asked for; the dataset, metrics, and target are reused as-is.
+- **Link to experiment**: Moves a run that is not linked yet out of the agent's default experiment and into the experiment you choose, or into a new one. For a run that is already linked, this action is **Add to experiment**.
+
+Switch to **Experiments** to group the runs by experiment. This agent-scoped view differs from **Models > Evaluations**, which shows model evaluation results.
 
 ## Optimize an Agent
 

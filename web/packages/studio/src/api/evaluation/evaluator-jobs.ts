@@ -42,6 +42,12 @@ export const fetchEvaluatorJobs = async (
                       'spec.target.kind': { $in: ['fabric', 'harbor', 'gym'] },
                       'spec.target.source.agent': { $in: [agentName, `${workspace}/${agentName}`] },
                     },
+                    // Dataset-driven `evaluate` jobs take the bare endpoint as their target, with
+                    // no `kind` to match on.
+                    {
+                      'spec.target.format': { $eq: 'generic' },
+                      'spec.target.name': { $in: [agentName, `${workspace}/${agentName}`] },
+                    },
                   ],
                 },
               ],

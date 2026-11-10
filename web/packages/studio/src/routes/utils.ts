@@ -673,14 +673,14 @@ export const getAgentOptimizationsTabRoute = (workspace: string, agentName: stri
   return `${getAgentDetailRoute(workspace, agentName)}?tab=optimizations`;
 };
 
-/** The Run Agent Evaluation wizard, opened on its last step when re-running `sourceEvaluation`. */
+/** The Run Agent Evaluation wizard, or its re-run form when `sourceJob` names a job to copy. */
 export const getAgentRunEvaluationRoute = (
   workspace: string,
   agentName: string,
-  sourceEvaluation?: string
+  sourceJob?: string
 ) => {
   const path = generatePath(ROUTES.workspace.agentEvaluationNew, { workspace, agentName });
-  return sourceEvaluation ? `${path}?${new URLSearchParams({ source: sourceEvaluation })}` : path;
+  return sourceJob ? `${path}?${new URLSearchParams({ job: sourceJob })}` : path;
 };
 
 /** The Optimizations tab with the Optimize agent modal open on arrival. */
