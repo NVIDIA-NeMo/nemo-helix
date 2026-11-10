@@ -781,6 +781,35 @@ async def test_drift_recovery_recreate(
 
 
 @pytest.mark.asyncio
+async def test_drift_recovery_preserves_terminal_policy_failure(
+    deployment_reconciler: DeploymentReconciler,
+    mock_backend: MockDeploymentBackend,
+    mock_entities: AsyncMock,
+) -> None:
+    """A rejected legacy policy is terminal and must not be reported as recreated."""
+    dep = make_deployment()
+    dep.status = "LOST"
+    cfg = make_deployment_config()
+    cfg.restart_policy = "Always"
+    deployment_reconciler.set_config_cache({("default", "cfg1"): cfg})
+    message = "Per-deployment OpenShell policy paths are not supported; configure the executor policy instead"
+    mock_backend.read_status_result = BackendStatusUpdate(status="LOST", status_message="missing")
+    mock_backend.create_status = BackendStatusUpdate(status="FAILED", status_message=message)
+
+    await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+
+    assert dep.status == "FAILED"
+    assert dep.status_message == message
+    assert dep.status_history[-1].message == message
+    mock_entities.update.assert_awaited()
+
+    # Terminal failures must not consume further recovery attempts on later cycles.
+    await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+    assert len(mock_backend.create_calls) == 1
+    assert dep.status_message == message
+
+
+@pytest.mark.asyncio
 async def test_drift_recovery_exhausted(
     deployment_reconciler: DeploymentReconciler,
     mock_backend: MockDeploymentBackend,

@@ -327,7 +327,10 @@ class OpenShellDeploymentBackend(DeploymentBackend):
     ) -> BackendStatusUpdate:
         openshell_cfg = OpenShellDeploymentConfig.model_validate(backend_config.get("openshell") or {})
         # Also reject persisted configs and callers that bypass public request validation.
-        openshell_cfg.validate_client_policy()
+        try:
+            openshell_cfg.validate_client_policy()
+        except ValueError as exc:
+            return BackendStatusUpdate(status="FAILED", status_message=str(exc))
         sandbox_name = _sandbox_name(workspace, name)
 
         existing = await self._try_get_sandbox(sandbox_name)

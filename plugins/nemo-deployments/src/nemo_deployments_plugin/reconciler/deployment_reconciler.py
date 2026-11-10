@@ -341,6 +341,9 @@ class DeploymentReconciler:
                 ),
             )
             return
+        if status_update.status == "FAILED":
+            await self._update_deployment_status(deployment, status_update)
+            return
         message = (
             f"Recovering deployment — backend resources recreated "
             f"(attempt {attempt}/{limits.max_attempts}). {status_update.status_message}"

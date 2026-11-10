@@ -576,11 +576,9 @@ async def test_create_rejects_legacy_policy_path_before_file_or_gateway_access(
     alias: str,
     path: str,
 ) -> None:
-    with (
-        patch("nemo_deployments_plugin.backends.openshell.policy.open", create=True) as open_file,
-        pytest.raises(ValueError, match="Per-deployment OpenShell policy paths are not supported") as exc,
-    ):
-        await openshell_backend.create_deployment(
+    """Legacy overrides fail terminally before opening a file or contacting OpenShell."""
+    with patch("nemo_deployments_plugin.backends.openshell.policy.open", create=True) as open_file:
+        update = await openshell_backend.create_deployment(
             workspace="default",
             name="srv",
             config_name="cfg1",
@@ -588,7 +586,8 @@ async def test_create_rejects_legacy_policy_path_before_file_or_gateway_access(
             backend_config={"openshell": {alias: path}},
         )
 
-    assert str(exc.value) == (
+    assert update.status == "FAILED"
+    assert update.status_message == (
         "Per-deployment OpenShell policy paths are not supported; configure the executor policy instead"
     )
     open_file.assert_not_called()
