@@ -23,8 +23,12 @@ The Files service supports multiple storage backends and can be used to store da
  - `s3`: Amazon S3 or S3-compatible storage such as MinIO (read/write)
  - `ngc`: NVIDIA GPU Cloud storage (read-only)
  - `huggingface`: HuggingFace Hub repositories (read-only)
+ - `git`: Git repositories (read-only)
+ - `github`: GitHub repositories (read-only)
 
  Read-only backends allow you to create a fileset that acts as a handle to external resources. This provides a unified interface to access files from different sources using the same SDK methods, and allows other Helix services to reference external data through a fileset.
+
+ Uploading or deleting individual files in a read-only fileset returns HTTP `409 Conflict` with a read-only storage message. Uploads are rejected before reading the request body, and neither operation changes the external data. Use a `local` or `s3` fileset when you need to write files. Deleting the fileset itself removes its registration, not the external data.
 
 - **Purpose**: A fileset field that indicates the intended use. Each purpose enables specific **metadata** fields under the corresponding key. Select a tab below to see the available metadata fields for each purpose:
 
