@@ -71,13 +71,6 @@ class BaseResultManager:
 
 @dataclass
 class ResultManager(BaseResultManager):
-    """Publishes job results into the job's fileset.
-
-    ``fileset`` and ``artifact_base_path`` describe where the job's artifacts live.
-    They are required: reading them from the job record needs access that sandboxes on
-    the restricted platform policy do not have.
-    """
-
     job_name: str
     workspace: str
     files_client: FilesClient
@@ -144,8 +137,6 @@ class ResultManager(BaseResultManager):
 
 @dataclass
 class AsyncResultManager(BaseResultManager):
-    """Async twin of :class:`ResultManager`; ``fileset`` is required for the same reason."""
-
     job_name: str
     workspace: str
     files_client: AsyncFilesClient
