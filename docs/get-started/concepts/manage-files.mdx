@@ -564,9 +564,13 @@ The CLI displays progress bars automatically during uploads and downloads. This 
 Track progress during large file transfers using the `RichProgressCallback` context manager:
 
 ```python
+from pathlib import Path
+
 from filesets import FilesetFileSystem, RichProgressCallback
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 
+client = NemoClient.from_config()
 files = client.files
 assert isinstance(files, FilesClient)
 fs = FilesetFileSystem(client=files)
