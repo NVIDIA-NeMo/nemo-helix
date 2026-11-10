@@ -145,14 +145,14 @@ class Evaluator:
         *,
         tasks: TasksetRef | FilesetTaskSource,
         target: GymAgentTaskRunner,
-        placement: GymPlacement,
+        placement: GymPlacement | None = None,
     ) -> AgentEvaluatorJobResource: ...
 
     @overload
     def submit(
         self,
         *,
-        tasks: TasksetRef | FilesetTaskSource,
+        tasks: TasksetRef,
         target: AgentTaskRunner,
     ) -> AgentEvaluatorJobResource: ...
 
@@ -342,14 +342,14 @@ class AsyncEvaluator:
         *,
         tasks: TasksetRef | FilesetTaskSource,
         target: GymAgentTaskRunner,
-        placement: GymPlacement,
+        placement: GymPlacement | None = None,
     ) -> AsyncAgentEvaluatorJobResource: ...
 
     @overload
     async def submit(
         self,
         *,
-        tasks: TasksetRef | FilesetTaskSource,
+        tasks: TasksetRef,
         target: AgentTaskRunner,
     ) -> AsyncAgentEvaluatorJobResource: ...
 
