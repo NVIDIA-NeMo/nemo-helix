@@ -91,15 +91,36 @@ class FakeEntityStore:
             raise EntityNotFoundError(name) from exc
 
 
+def _owned_session_request(session_id: str) -> Request:
+    assistant._session_authority[session_id] = ("local-user", "default", "test-capability")
+    return Request({"type": "http", "headers": []})
+
+
+class CallbackClient(TestClient):
+    """Provision private callback authority for the legacy MCP payload tests."""
+
+    def post(self, url, **kwargs):
+        parsed = httpx.URL(url)
+        if parsed.path.startswith("/v2/assistant/mcp/"):
+            sid = parsed.path.rsplit("/", 1)[-1]
+            workspace = parsed.params.get("workspace", "default")
+            assistant._session_authority[sid] = ("local-user", workspace, "test-capability")
+            url = str(parsed.copy_merge_params({"workspace": workspace}))
+            kwargs["headers"] = {**kwargs.get("headers", {}), "x-nhx-studio-capability": "test-capability"}
+        return super().post(url, **kwargs)
+
+
 @pytest.fixture(autouse=True)
 def reset_assistant_state():
     """Reset module-level bridge state between tests."""
     assistant._initialized_sessions.clear()
+    assistant._session_authority.clear()
     assistant._session_streams.clear()
     assistant._pending_permissions.clear()
     assistant._pending_agent_inputs.clear()
     assistant._session_workspace_cache.clear()
     yield
+    assistant._session_authority.clear()
     assistant._initialized_sessions.clear()
     assistant._session_streams.clear()
     assistant._pending_permissions.clear()
@@ -116,7 +137,7 @@ def entity_store() -> FakeEntityStore:
 def service_client(entity_store: FakeEntityStore) -> TestClient:
     service = StudioService()
     service.app.dependency_overrides[get_entity_client] = lambda: entity_store
-    return TestClient(service.app)
+    return CallbackClient(service.app)
 
 
 def service_client_with_feature_flags(
@@ -126,7 +147,7 @@ def service_client_with_feature_flags(
         "nhx.studio.config.Configuration.get_global_settings_from_env",
         lambda: {"studio": {"feature_flags": feature_flags}},
     )
-    return TestClient(StudioService().with_config(StudioConfig()).app)
+    return CallbackClient(StudioService().with_config(StudioConfig()).app)
 
 
 def test_history_preserves_distinct_answers_under_an_agent_header():
@@ -1882,6 +1903,7 @@ async def test_resolve_permission_rejects_cross_session_request():
             other_session_id,
             request_id,
             assistant.PermissionDecision(approved=True),
+            _owned_session_request(other_session_id),
         )
 
     assert exc_info.value.status_code == 404
@@ -1898,6 +1920,7 @@ async def test_resolve_permission_sets_result_for_owning_session():
         session_id,
         request_id,
         assistant.PermissionDecision(approved=True),
+        _owned_session_request(session_id),
     )
 
     assert response == {"ok": True}
@@ -1914,6 +1937,7 @@ async def test_resolve_agent_input_sets_result_for_owning_session():
         session_id,
         request_id,
         assistant.AgentInputDecision(value={"agent": "react-agent"}),
+        _owned_session_request(session_id),
     )
 
     assert response == {"ok": True}
@@ -1932,6 +1956,7 @@ async def test_request_agent_input_rejects_reserved_response_keys():
         session_id,
         request_id,
         assistant.AgentInputDecision(value={"agent": "react-agent", "status": "submitted"}),
+        _owned_session_request(session_id),
     )
 
     assert await request_task == {
@@ -1960,6 +1985,7 @@ async def test_permission_request_waits_until_user_resolves_it():
         session_id,
         request_id,
         assistant.PermissionDecision(approved=True),
+        _owned_session_request(session_id),
     )
 
     assert await request_task == {"behavior": "allow", "updatedInput": {"question": "Continue?"}}
@@ -2195,7 +2221,7 @@ def test_assistant_url_uses_only_configured_base_url(monkeypatch: pytest.MonkeyP
     )
 
 
-def test_assistant_request_headers_strip_credentials_for_http():
+def test_assistant_request_headers_strip_credentials_for_remote_http():
     request = Request(
         {
             "type": "http",
@@ -2206,7 +2232,7 @@ def test_assistant_request_headers_strip_credentials_for_http():
         }
     )
 
-    assert assistant._assistant_request_headers(request, "http://127.0.0.1:8080/agent") == {}
+    assert assistant._assistant_request_headers(request, "http://remote.test:8080/agent") == {}
 
 
 def test_assistant_request_headers_forward_credentials_for_https():
@@ -2566,16 +2592,7 @@ def test_public_mcp_route_is_mounted_before_static_fallback():
     get_response = client.get(f"/studio/api/assistant/mcp/{session_id}")
     delete_response = client.delete(f"/studio/api/assistant/mcp/{session_id}")
 
-    assert response.status_code == 200
-    assert [tool["name"] for tool in response.json()["result"]["tools"]] == [
-        "approval_prompt",
-        "select_agent",
-        "select_eval_config",
-        "select_dataset_file",
-        "select_model",
-        "job_progress",
-        "studio_link",
-    ]
+    assert response.status_code == 401
     assert get_response.status_code == 405
     assert get_response.headers["allow"] == "POST"
     assert delete_response.status_code == 405
@@ -2592,8 +2609,11 @@ def test_public_mcp_route_uses_running_studio_config(monkeypatch: pytest.MonkeyP
     app.dependency_overrides.update(service.app.dependency_overrides)
     service.configure_app(app)
 
+    sid = str(uuid.uuid4())
+    assistant._session_authority[sid] = ("local-user", "default", "test-capability")
     response = TestClient(app).post(
-        f"/studio/api/assistant/mcp/{uuid.uuid4()}",
+        f"/studio/api/assistant/mcp/{sid}?workspace=default",
+        headers={"x-nhx-studio-capability": "test-capability"},
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
 

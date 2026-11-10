@@ -18,7 +18,7 @@ from functools import partial
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
 from nemo_agents_plugin.fabric.environment import release_runtime_base_dir, resolve_runtime_base_dir
@@ -51,6 +51,7 @@ from nemo_agents_plugin.fabric.streaming import (
     iter_fabric_chat_completion_sse,
     openai_chat_completion_error_sse,
 )
+from nemo_agents_plugin.fabric.tool_authority import CONTEXT_KEY, ToolAuthorityBroker
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER, session_id_to_uuid
 from starlette.types import Receive, Scope, Send
 from uvicorn import run
@@ -374,6 +375,10 @@ def create_fabric_serving_app(
             await asyncio.to_thread(release_runtime_base_dir, runtime_base_dir)
 
     app = FastAPI(title="NeMo Agents Fabric Server", lifespan=lifespan)
+    app.add_middleware(
+        ToolAuthorityBroker,
+        enabled=lambda: getattr(getattr(app.state, "agent_config", None), "name", None) == "nemo-studio-assistant",
+    )
     runtime_instance_id = str(uuid.uuid4())
     runtime_started_at = datetime.now(UTC)
 
@@ -402,6 +407,7 @@ def create_fabric_serving_app(
     async def chat_completions(
         request: ChatCompletionRequest,
         response: Response,
+        http_request: Request,
         session_id: Annotated[str | None, Header(alias=SESSION_ID_HEADER)] = None,
     ) -> ChatCompletionResponse | StreamingResponse:
         response_headers: dict[str, str] | None = None
@@ -420,6 +426,10 @@ def create_fabric_serving_app(
             response_headers = _session_headers(session.session_id)
             invoke = partial(app.state.session_manager.invoke_session, session)
             stream = partial(app.state.session_manager.stream_session, session)
+
+        capability = getattr(http_request.state, CONTEXT_KEY, None)
+        if capability is not None:
+            invocation_request.caller_context[CONTEXT_KEY] = capability
 
         if request.stream:
             stream_context = stream(invocation_request)
@@ -549,6 +559,8 @@ def main(argv: list[str] | None = None) -> int:
         host=args.host,
         port=args.port,
         fd=args.socket_fd,
+        # Broker locality must use the socket peer, not forwarded client claims.
+        proxy_headers=False,
         log_config=None,
     )
     return 0

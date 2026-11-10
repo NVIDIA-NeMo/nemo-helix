@@ -263,7 +263,7 @@ def test_main_starts_packaged_server(tmp_path: Path, socket_fd: int | None) -> N
 
     assert result == 0
     create_app.assert_called_once_with(config_path, settings=FabricServingSettings())
-    run.assert_called_once_with(app, host="0.0.0.0", port=8000, fd=socket_fd, log_config=None)
+    run.assert_called_once_with(app, host="0.0.0.0", port=8000, fd=socket_fd, proxy_headers=False, log_config=None)
 
 
 def test_shutdown_stops_all_registered_runtimes(
@@ -397,6 +397,43 @@ def test_chat_completion_without_session_id_invokes_once_without_creating_sessio
     assert all(request.caller_context == {} for request in invocation_calls)
     assert all(request.relay_session_root is None for request in invocation_calls)
     assert asyncio.run(app.state.session_registry.count()) == 0
+
+
+def test_studio_invocation_uses_revocable_broker_capability_not_credentials(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = {**_example_config(), "name": "nemo-studio-assistant"}
+    app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
+    contexts = []
+
+    async def invoke_once(request: Any) -> FabricRuntimeResult:
+        contexts.append(request.caller_context)
+        assert request.input == "hello"
+        return FabricRuntimeResult(status="succeeded", response="done")
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.session_manager, "invoke_once", invoke_once)
+        response = client.post(
+            "/v1/chat/completions",
+            headers={
+                "authorization": "Bearer caller-secret",
+                "cookie": "cookie-secret",
+                "x-nhx-tool-workspace": "default",
+                "x-nhx-studio-capability": "studio-secret",
+            },
+            json={"messages": [{"role": "user", "content": "hello"}]},
+        )
+        assert response.status_code == 200
+        descriptor = contexts[0]["nhx_tool_authority"]
+        assert set(descriptor) == {"broker_port", "capability"}
+        assert "secret" not in json.dumps(contexts)
+        revoked = client.get(
+            "/_internal/studio-tool-authority",
+            headers={"authorization": f"Bearer {descriptor['capability']}"},
+        )
+        assert revoked.status_code == 401
 
 
 def test_chat_completion_returns_reasoning_from_fabric_messages(

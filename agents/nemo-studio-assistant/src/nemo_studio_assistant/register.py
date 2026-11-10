@@ -16,7 +16,7 @@ from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
 import httpx
-from nemo_helix_ext.client.bootstrap import build_direct_nemo_client, build_nemo_client
+from httpx import Client
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.client.response import NemoBinaryResponse, NemoPaginatedResponse, NemoResponse
@@ -35,6 +35,14 @@ from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_studio_assistant.authorization import (
+    STUDIO_CAPABILITY_HEADER,
+    authority,
+    authority_key,
+    caller_client,
+    check_callback_transport,
+    platform_ssl_context,
+)
 from pydantic import BaseModel, Field
 
 DEFAULT_WORKSPACE = "default"
@@ -51,7 +59,6 @@ _REFUSAL_LIKE_PROBE_RE = re.compile(
     re.IGNORECASE,
 )
 
-_clients: dict[str, NemoClient] = {}
 _api_error_streaks: dict[str, int] = {}
 _guardrail_check_failures: dict[str, int] = {}
 _preflighted_guardrail_models: set[tuple[str, str, str]] = set()
@@ -75,16 +82,11 @@ def _active_workspace() -> str:
 
 
 def _get_client(workspace: str) -> NemoClient:
-    request_workspace = workspace.strip()
-    if not request_workspace:
-        raise ValueError("workspace is required")
-    if request_workspace not in _clients:
-        base_url = os.environ.get("NHX_BASE_URL") or os.environ.get("NEMO_BASE_URL")
-        if base_url:
-            _clients[request_workspace] = build_direct_nemo_client(base_url=base_url, workspace=request_workspace)
-        else:
-            _clients[request_workspace] = build_nemo_client(workspace=request_workspace)
-    return _clients[request_workspace]
+    authority(workspace)
+    base_url = os.environ.get("NHX_BASE_URL") or os.environ.get("NEMO_BASE_URL")
+    if not base_url:
+        raise PermissionError("An explicit platform base URL is required")
+    return caller_client(base_url, workspace)
 
 
 def _serialize(obj: Any) -> Any:
@@ -302,6 +304,8 @@ def _build_call_kwargs(
     and everything left is validated as the request body (or taken from an
     explicit ``body`` object).
     """
+    if params and "workspace" in params and params["workspace"] != workspace:
+        raise PermissionError("Tool parameters cannot change the invocation workspace")
     descriptor = inspect.getattr_static(client_cls, method_name)
     endpoint = getattr(descriptor, "endpoint", None)
     if endpoint is not None:
@@ -382,7 +386,7 @@ def _call_api_method(
 
 
 def _api_error_key(workspace: str, studio_session_id: str | None) -> str:
-    return studio_session_id or f"workspace:{workspace}"
+    return f"{authority_key()}:{studio_session_id or workspace}"
 
 
 def _record_api_error(key: str, exc: Exception) -> str:
@@ -693,9 +697,21 @@ def _call_studio_tool(
         "method": "tools/call",
         "params": {"name": tool_name, "arguments": arguments},
     }
-    with httpx.Client(timeout=STUDIO_CALLBACK_TIMEOUT_SECONDS) as client:
+    current = authority(workspace, session_id)
+    if not current.studio_capability:
+        raise PermissionError("A trusted Studio callback capability is required")
+    callback_url = _studio_callback_url(session_id, workspace=current.workspace, studio_base_url=studio_base_url)
+    check_callback_transport(callback_url, current)
+    with Client(
+        timeout=STUDIO_CALLBACK_TIMEOUT_SECONDS,
+        follow_redirects=False,
+        trust_env=False,
+        verify=platform_ssl_context(),
+    ) as client:
         response = client.post(
-            _studio_callback_url(session_id, workspace=workspace, studio_base_url=studio_base_url), json=body
+            callback_url,
+            json=body,
+            headers={STUDIO_CAPABILITY_HEADER: current.studio_capability},
         )
     return _parse_studio_callback_response(response)
 
@@ -764,7 +780,11 @@ def deploy_guardrail(
     blocking the assistant while gateway propagation completes.
     """
     try:
-        deployment_key = (_validated_session_id(studio_session_id), str(uuid.UUID(deployment_run_id)))
+        authority(workspace, studio_session_id)
+        deployment_key = (
+            f"{authority_key()}:{_validated_session_id(studio_session_id)}",
+            str(uuid.UUID(deployment_run_id)),
+        )
     except ValueError:
         return json.dumps(
             {"status": "failed", "error": "valid studio_session_id and deployment_run_id values are required"}
@@ -1069,6 +1089,7 @@ def nemo_api(
     try:
         parsed_params = _parse_nemo_api_params(params)
         workspace = _normalize_workspace(workspace, parsed_params)
+        authority(workspace, studio_session_id)
         error_key = _api_error_key(workspace or "", studio_session_id)
         if is_guardrail_check and _guardrail_check_failures.get(error_key, 0) >= _GUARDRAIL_CHECK_FAILURE_LIMIT:
             return _record_guardrail_check_failure(

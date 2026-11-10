@@ -6,15 +6,18 @@
 import ast
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import os
 import re
+import secrets
 import uuid
 from asyncio import create_subprocess_exec
-from collections.abc import AsyncIterator, Awaitable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Mapping
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
+from ipaddress import ip_address
 from pathlib import Path
 from shutil import which
 from typing import Any, Protocol
@@ -146,6 +149,9 @@ class SessionHistoryResponse(BaseModel):
 
 _initialized_sessions: set[str] = set()
 _session_streams: dict[str, asyncio.Queue[tuple[str, Any]]] = {}
+# Only active, ownership-checked Studio invocations can mint callback authority.
+# Capabilities are private transport headers, never model context or UI events.
+_session_authority: dict[str, tuple[str, str, str]] = {}
 _pending_permissions: dict[str, tuple[str, asyncio.Future[dict[str, Any]]]] = {}
 _pending_agent_inputs: dict[str, tuple[str, asyncio.Future[dict[str, Any]]]] = {}
 # Cache of Entity-Store-confirmed workspace names, keyed by session then by
@@ -1495,9 +1501,29 @@ def _studio_assistant_url(workspace: str) -> str:
     )
 
 
+def _require_private_assistant_transport(agent_url: str) -> None:
+    try:
+        target = httpx.URL(agent_url)
+    except httpx.InvalidURL as exc:
+        raise HTTPException(status_code=502, detail="Invalid Studio assistant URL") from exc
+    try:
+        loopback = target.host == "localhost" or ip_address(target.host).is_loopback
+    except ValueError:
+        loopback = False
+    if (
+        target.username
+        or target.password
+        or not target.host
+        or (target.scheme != "https" and not (target.scheme == "http" and loopback))
+    ):
+        raise HTTPException(status_code=502, detail="Studio assistant capabilities require HTTPS or loopback HTTP")
+
+
 def _assistant_request_headers(request: Request, agent_url: str) -> dict[str, str]:
-    """Forward end-user auth context only over an encrypted connection."""
-    if urlparse(agent_url).scheme != "https":
+    """Forward caller credentials over HTTPS or trusted loopback HTTP only."""
+    try:
+        _require_private_assistant_transport(agent_url)
+    except HTTPException:
         return {}
 
     forwarded = {}
@@ -1791,8 +1817,9 @@ async def _stream_assistant(
     studio_system_prompt: str,
     conversation: AssistantConversation,
     entity_store: _ConversationStore,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     """Invoke the deployed NeMo Assistant while preserving Studio's blocking UI event protocol."""
+    _require_private_assistant_transport(agent_url)
     if session_id in _session_streams:
         yield _sse(
             json.dumps({"message": "session already has an active stream"}),
@@ -1802,6 +1829,13 @@ async def _stream_assistant(
 
     queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
     _session_streams[session_id] = queue
+    capability = secrets.token_urlsafe(32)
+    _session_authority[session_id] = (conversation.owner_id, conversation.workspace, capability)
+    headers = {
+        **headers,
+        "x-nhx-studio-session": session_id,
+        "x-nhx-studio-capability": capability,
+    }
     deployment_run_id = str(uuid.uuid4())
     contextual_message = "\n\n".join(
         [
@@ -1907,6 +1941,7 @@ async def _stream_assistant(
         )
     finally:
         _session_streams.pop(session_id, None)
+        _session_authority.pop(session_id, None)
         if not invocation.done():
             invocation.cancel()
         if not queued_event.done():
@@ -1926,10 +1961,12 @@ async def send_message(
     """Send a message to the deployed NeMo Assistant and stream Studio events."""
     sid = _validate_session_id(session_id)
     workspace = _validated_workspace_or_default(body.workspace)
-    # Headers are forwarded only over HTTPS, and the scheme comes from the
-    # server-configured base URL, so deriving them before the workspace is
+    # Headers are forwarded only over HTTPS or loopback HTTP, and the origin
+    # comes from the server-configured base URL, so deriving them before the workspace is
     # confirmed is equivalent -- and the authorization lookup needs them.
-    agent_headers = _assistant_request_headers(request, _studio_assistant_url(workspace))
+    requested_agent_url = _studio_assistant_url(workspace)
+    _require_private_assistant_transport(requested_agent_url)
+    agent_headers = _assistant_request_headers(request, requested_agent_url)
     canonical_workspace = await _authorized_workspace(workspace, agent_headers, sid)
     conversation = await _get_owned_conversation(
         entity_store,
@@ -1938,6 +1975,7 @@ async def send_message(
         owner_id=_request_principal_id(request),
     )
     agent_url = _studio_assistant_url(canonical_workspace)
+    _require_private_assistant_transport(agent_url)
     studio_base_url = _studio_base_url_from_request(body, request)
     studio_pathname = _studio_pathname_from_request(body, request)
     enabled_destinations = studio_links.enabled_destinations(studio_links.feature_flags_from_config(config))
@@ -1963,12 +2001,33 @@ async def send_message(
     )
 
 
+def _require_session_owner(session_id: str, request: Request) -> None:
+    binding = _session_authority.get(session_id)
+    if binding is None or binding[0] != _request_principal_id(request):
+        raise HTTPException(status_code=404, detail="no active owned session")
+
+
+def _require_callback_authority(session_id: str, request: Request) -> None:
+    binding = _session_authority.get(session_id)
+    supplied = request.headers.get("x-nhx-studio-capability", "")
+    if binding is None or not supplied or not hmac.compare_digest(binding[2].encode(), supplied.encode()):
+        raise HTTPException(status_code=401, detail="invalid callback authority")
+    if request.query_params.get("workspace") != binding[1]:
+        raise HTTPException(status_code=403, detail="callback workspace mismatch")
+
+
 @router.post("/sessions/{session_id}/permissions/{request_id}")
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[])
-async def resolve_permission(session_id: str, request_id: str, body: PermissionDecision) -> dict[str, bool]:
+async def resolve_permission(
+    session_id: str,
+    request_id: str,
+    body: PermissionDecision,
+    request: Request,
+) -> dict[str, bool]:
     """Resolve a pending Claude tool permission request."""
     sid = _validate_session_id(session_id)
+    _require_session_owner(sid, request)
     pending = _pending_permissions.get(request_id)
     if pending is None:
         raise HTTPException(status_code=404, detail="no such pending permission")
@@ -1982,9 +2041,15 @@ async def resolve_permission(session_id: str, request_id: str, body: PermissionD
 @router.post("/sessions/{session_id}/inputs/{request_id}")
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[])
-async def resolve_agent_input(session_id: str, request_id: str, body: AgentInputDecision) -> dict[str, bool]:
+async def resolve_agent_input(
+    session_id: str,
+    request_id: str,
+    body: AgentInputDecision,
+    request: Request,
+) -> dict[str, bool]:
     """Resolve a pending Claude UI input request."""
     sid = _validate_session_id(session_id)
+    _require_session_owner(sid, request)
     pending = _pending_agent_inputs.get(request_id)
     if pending is None:
         raise HTTPException(status_code=404, detail="no such pending input")
@@ -1999,8 +2064,9 @@ async def resolve_agent_input(session_id: str, request_id: str, body: AgentInput
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[])
 async def mcp_endpoint(session_id: str, request: Request, config: StudioConfigDep) -> Response:
-    """Minimal MCP endpoint used by Claude's permission-prompt tool."""
+    """Minimal MCP endpoint authenticated by an active invocation capability."""
     sid = _validate_session_id(session_id)
+    _require_callback_authority(sid, request)
     try:
         body = await request.json()
     except ValueError:

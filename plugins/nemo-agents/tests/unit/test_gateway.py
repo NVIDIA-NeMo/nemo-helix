@@ -1101,6 +1101,35 @@ def _forwarded_request(httpx_mock: MagicMock) -> dict:
     return httpx_mock.__aenter__.return_value.stream.call_args.kwargs
 
 
+@pytest.mark.parametrize("route", ["agents/calc", "deployments/calc-dep"])
+def test_gateway_binds_tool_workspace_and_preserves_only_caller_credentials(
+    client: TestClient,
+    mock_entity_client: AsyncMock,
+    route: str,
+) -> None:
+    dep = _make_deployment(agent="calc", config={"config_format": NEMO_AGENTS_SPEC_CONFIG_FORMAT})
+    mock_entity_client.get = AsyncMock(return_value=_make_agent("calc") if route.startswith("agents/") else dep)
+    mock_entity_client.list = AsyncMock(return_value=_list_response([dep]))
+    httpx_mock = _make_httpx_mock(200, b'{"choices": []}')
+    with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
+        response = client.post(
+            f"/apis/agents/v2/workspaces/default/{route}/-/v1/chat/completions",
+            headers={
+                "authorization": "Bearer caller",
+                "cookie": "caller=session",
+                "x-nhx-tool-workspace": "other",
+                "x-nhx-principal-id": "forged-admin",
+            },
+            json={"messages": []},
+        )
+    assert response.status_code == 200
+    forwarded = _forwarded_request(httpx_mock)["headers"]
+    assert forwarded["x-nhx-tool-workspace"] == "default"
+    assert forwarded["authorization"] == "Bearer caller"
+    assert forwarded["cookie"] == "caller=session"
+    assert "x-nhx-principal-id" not in forwarded
+
+
 class TestRequestModelStripping:
     """The gateway routes by URL path; ``nat serve`` would otherwise forward ``model`` to IGW."""
 

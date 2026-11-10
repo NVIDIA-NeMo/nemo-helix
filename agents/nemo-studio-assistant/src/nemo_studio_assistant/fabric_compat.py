@@ -109,6 +109,66 @@ def apply_deepagents_mcp_env_compatibility() -> None:
     adapter._mcp_connection = mcp_connection
 
 
+def apply_caller_authority_compatibility() -> None:
+    """Bridge Fabric's private invocation context to stdio MCP request metadata.
+
+    Fabric 0.6 and langchain-mcp-adapters do not expose an MCP metadata
+    interceptor. Keep the bridge request-local and restricted to the bundled
+    server; never inject credentials into tool arguments or process environment.
+    """
+    from contextvars import ContextVar
+
+    from langchain_mcp_adapters.client import MultiServerMCPClient
+    from mcp import ClientSession
+    from nemo_fabric_adapters.deepagents import adapter as adapter_module
+    from nemo_studio_assistant.authorization import CONTEXT_KEY
+
+    adapter: Any = adapter_module
+    original_invoke = adapter.DeepAgentsRuntime.invoke
+    if original_invoke in _INSTALLED:
+        return
+    invocation: ContextVar[Any] = ContextVar("studio_invocation_authority", default=None)
+    tool_call: ContextVar[Any] = ContextVar("studio_mcp_authority", default=None)
+    original_call_tool = ClientSession.call_tool
+
+    async def invoke(self: Any, request: Any, runtime_context: Any) -> Any:
+        token = invocation.set(request.context.get(CONTEXT_KEY))
+        try:
+            return await original_invoke(self, request, runtime_context)
+        finally:
+            invocation.reset(token)
+
+    async def intercept(request: Any, handler: Any) -> Any:
+        token = tool_call.set(invocation.get() if request.server_name == "nemo_studio" else None)
+        try:
+            return await handler(request)
+        finally:
+            tool_call.reset(token)
+
+    async def call_tool(self: Any, *args: Any, **kwargs: Any) -> Any:
+        meta = dict(kwargs.pop("meta", None) or {})
+        meta.pop(CONTEXT_KEY, None)
+        value = tool_call.get()
+        if value is not None:
+            meta[CONTEXT_KEY] = value
+        return await original_call_tool(self, *args, meta=meta or None, **kwargs)
+
+    async def mcp_tools(config: Any) -> list[Any]:
+        servers = config.mcp.servers if config.mcp is not None else {}
+        connections = {name: adapter._mcp_connection(name, spec) for name, spec in servers.items()}
+        if not connections:
+            return []
+        if "nemo_studio" in connections and connections["nemo_studio"].get("transport") != "stdio":
+            raise ValueError("Studio caller authority requires the bundled stdio MCP server")
+        client = MultiServerMCPClient(connections, tool_interceptors=[intercept])
+        return list(await client.get_tools())
+
+    _INSTALLED.add(invoke)
+    adapter.DeepAgentsRuntime.invoke = invoke
+    adapter._mcp_tools = mcp_tools
+    ClientSession.call_tool = call_tool
+
+
 def apply_platform_skill_translation_compatibility() -> None:
     """Translate packaged relative skill roots to Deep Agents virtual paths."""
     from nemo_agents_plugin.fabric import translator as translator_module

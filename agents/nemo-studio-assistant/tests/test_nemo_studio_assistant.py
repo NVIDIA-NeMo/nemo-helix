@@ -72,6 +72,22 @@ EVAL_CASES = _load_eval_cases()
 
 
 @pytest.fixture(autouse=True)
+def _trusted_tool_invocation(monkeypatch: pytest.MonkeyPatch):
+    from nemo_studio_assistant.authorization import tool_authority
+
+    monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
+    with tool_authority(
+        {
+            "workspace": "default",
+            "headers": {},
+            "studio_session": "90a877d5-19f6-49a8-bf09-d0020ae0833a",
+            "studio_capability": "test-callback-capability",
+        }
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_api_error_streaks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(register, "_api_error_streaks", {})
     monkeypatch.setattr(register, "_guardrail_check_failures", {})
@@ -108,6 +124,7 @@ def test_agent_config_translates_to_fabric_deepagents() -> None:
     assert translated.mcp.servers["nemo_studio"].env == {
         "NHX_BASE_URL": "http://host.docker.internal:8080",
         "NHX_WORKSPACE": "default",
+        "NHX_STUDIO_LOCAL_HTTP": "1",
     }
     assert translated.skills is not None
     assert translated.skills.paths == ["/skills"]
@@ -436,7 +453,9 @@ def _guardrail_workflow_client(check_statuses: list[str]) -> tuple[NemoClient, d
 
 
 def _install_client(monkeypatch: pytest.MonkeyPatch, client: NemoClient, workspace: str = "default") -> None:
-    monkeypatch.setattr(register, "_clients", {workspace: client})
+    from nemo_studio_assistant.authorization import authority
+
+    authority(workspace).client = client
 
 
 def test_deploy_guardrail_uses_one_approval_and_reports_milestones(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -701,8 +720,9 @@ def test_deploy_guardrail_rejects_refusal_like_probe_before_any_platform_action(
     monkeypatch: pytest.MonkeyPatch,
     blocked_message: str,
 ) -> None:
+    from nemo_studio_assistant.authorization import authority
+
     callbacks: list[str] = []
-    monkeypatch.setattr(register, "_clients", {})
     monkeypatch.setattr(
         register,
         "_call_studio_tool",
@@ -727,12 +747,12 @@ def test_deploy_guardrail_rejects_refusal_like_probe_before_any_platform_action(
         "status": "failed",
         "error": ("blocked_message must be an actual policy-violating user request, not refusal-like assistant output"),
     }
-    assert register._clients == {}
+    assert authority().client is None
     assert callbacks == []
 
 
 def test_deploy_guardrail_rejects_identical_probe_messages(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(register, "_clients", {})
+    from nemo_studio_assistant.authorization import authority
 
     response = json.loads(
         register.deploy_guardrail(
@@ -750,7 +770,7 @@ def test_deploy_guardrail_rejects_identical_probe_messages(monkeypatch: pytest.M
 
     assert response["status"] == "failed"
     assert response["error"] == ("blocked_message and allowed_message must be different representative user requests")
-    assert register._clients == {}
+    assert authority().client is None
 
 
 def test_deploy_guardrail_selects_backend_inside_fast_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1062,7 +1082,7 @@ def test_guardrail_model_preflight_surfaces_provider_failure() -> None:
 def test_successful_api_call_resets_api_error_circuit_breaker(monkeypatch: pytest.MonkeyPatch) -> None:
     platform = _FakeHelix({("GET", f"{_GUARDRAILS}/configs"): lambda _request: _page([_entity("fruit-blocker")])})
     _install_client(monkeypatch, platform.client())
-    register._api_error_streaks["workspace:default"] = 2
+    register._api_error_streaks[register._api_error_key("default", None)] = 2
 
     response = json.loads(register.nemo_api("guardrail.configs", "list", workspace="default"))
 
@@ -1246,9 +1266,7 @@ def test_mutating_nemo_api_rejects_approved_workspace_change(monkeypatch: pytest
         return {"behavior": "allow", "updatedInput": updated_input}
 
     platforms = {"default": _ok_helix("POST", _WORKSPACES), "other": _ok_helix("POST", _WORKSPACES)}
-    monkeypatch.setattr(
-        register, "_clients", {workspace: platform.client(workspace) for workspace, platform in platforms.items()}
-    )
+    _install_client(monkeypatch, platforms["default"].client())
     monkeypatch.setattr(register, "_call_studio_tool", approve)
 
     response = register.nemo_api(
@@ -1321,7 +1339,7 @@ def test_nemo_api_uses_request_workspace_for_each_client(monkeypatch: pytest.Mon
     created_workspaces: list[str] = []
     seen_paths: list[str] = []
 
-    def build_client(*, base_url: str, workspace: str) -> NemoClient:
+    def build_client(base_url: str, workspace: str) -> NemoClient:
         created_workspaces.append(workspace)
 
         def handle(request: httpx.Request) -> httpx.Response:
@@ -1330,12 +1348,13 @@ def test_nemo_api_uses_request_workspace_for_each_client(monkeypatch: pytest.Mon
 
         return mock_nemo_client(handle, NemoClient, workspace=workspace)
 
-    monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
-    monkeypatch.setattr(register, "_clients", {})
-    monkeypatch.setattr(register, "build_direct_nemo_client", build_client)
+    from nemo_studio_assistant.authorization import tool_authority
 
-    first = json.loads(register.nemo_api("models", "list", workspace="first"))
-    second = json.loads(register.nemo_api("models", "list", workspace="second"))
+    monkeypatch.setattr(register, "caller_client", build_client)
+    with tool_authority({"workspace": "first", "headers": {}}):
+        first = json.loads(register.nemo_api("models", "list", workspace="first"))
+    with tool_authority({"workspace": "second", "headers": {}}):
+        second = json.loads(register.nemo_api("models", "list", workspace="second"))
 
     assert first["data"][0]["name"] == "model-in-first"
     assert second["data"][0]["name"] == "model-in-second"
@@ -1361,15 +1380,16 @@ def test_get_client_prefers_platform_base_url(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
     monkeypatch.setenv("NEMO_BASE_URL", "http://model-gateway:8000")
-    monkeypatch.setattr(register, "build_direct_nemo_client", fake_client)
-    monkeypatch.setattr(register, "_clients", {})
+    monkeypatch.setattr(
+        register, "caller_client", lambda base_url, workspace: fake_client(base_url=base_url, workspace=workspace)
+    )
 
     register._get_client("default")
 
     assert created_with == {"workspace": "default", "base_url": "http://platform:8080"}
 
 
-def test_get_client_reads_the_active_cli_context_without_a_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_client_never_reads_cli_context_without_a_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
     created_with: dict[str, object] = {}
 
     def fake_client(**kwargs: object) -> object:
@@ -1378,12 +1398,12 @@ def test_get_client_reads_the_active_cli_context_without_a_base_url(monkeypatch:
 
     monkeypatch.delenv("NHX_BASE_URL", raising=False)
     monkeypatch.delenv("NEMO_BASE_URL", raising=False)
-    monkeypatch.setattr(register, "build_nemo_client", fake_client)
-    monkeypatch.setattr(register, "_clients", {})
+    monkeypatch.setattr(register, "caller_client", fake_client)
 
-    register._get_client("default")
+    with pytest.raises(PermissionError, match="explicit platform base URL"):
+        register._get_client("default")
 
-    assert created_with == {"workspace": "default"}
+    assert created_with == {}
 
 
 _JOB_STATUS = {

@@ -77,6 +77,8 @@ mcp:
       env:
         NHX_BASE_URL: http://host.docker.internal:8080
         NHX_WORKSPACE: default
+        # Developer-only, credential-free callback hop to the local Docker host.
+        NHX_STUDIO_LOCAL_HTTP: "1"
       exposure: harness_native
 
 tools:

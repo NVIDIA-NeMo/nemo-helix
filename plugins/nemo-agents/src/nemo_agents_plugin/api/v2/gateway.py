@@ -109,7 +109,14 @@ _PLATFORM_INTERNAL_HEADERS = {
 }
 
 # Headers we strip before forwarding to the agent process (hop-by-hop + platform-internal + session ID)
-_REQUEST_HEADERS_TO_STRIP = _HOP_BY_HOP_HEADERS | _PLATFORM_INTERNAL_HEADERS | {SESSION_ID_HEADER.lower()}
+_REQUEST_HEADERS_TO_STRIP = (
+    _HOP_BY_HOP_HEADERS
+    | _PLATFORM_INTERNAL_HEADERS
+    | {
+        SESSION_ID_HEADER.lower(),
+        "x-nhx-tool-workspace",
+    }
+)
 
 # Headers we strip before forwarding to the client (hop-by-hop + platform-internal)
 _RESPONSE_HEADERS_TO_STRIP = _HOP_BY_HOP_HEADERS | _PLATFORM_INTERNAL_HEADERS
@@ -371,6 +378,7 @@ async def _proxy_deployment(
         on_start=persist_start_activity if tracks_session_activity else None,
         on_complete=persist_finish_activity if tracks_session_activity else None,
         strip_request_model=_is_nat_deployment(deployment),
+        tool_workspace=deployment.workspace,
     )
 
     if session is not None:
@@ -691,6 +699,7 @@ async def _proxy(
     on_start: Callable[[], Awaitable[None]] | None = None,
     on_complete: Callable[[], Awaitable[None]] | None = None,
     strip_request_model: bool = False,
+    tool_workspace: str | None = None,
 ) -> StreamingResponse:
     """Forward *request* to ``{endpoint}/{trailing_uri}`` and stream the response.
 
@@ -734,6 +743,10 @@ async def _proxy(
     # Build forwarded headers — strip hop-by-hop and platform-internal headers
     headers = {k: v for k, v in request.headers.items() if k.lower() not in _REQUEST_HEADERS_TO_STRIP}
     headers.update(routing_headers)
+    # Bind downstream tools to the resolved deployment, never a caller/model
+    # supplied workspace header. Credentials remain the invoking caller's.
+    if tool_workspace is not None:
+        headers["x-nhx-tool-workspace"] = tool_workspace
     if session_id is not None:
         headers[SESSION_ID_HEADER] = session_id
 
