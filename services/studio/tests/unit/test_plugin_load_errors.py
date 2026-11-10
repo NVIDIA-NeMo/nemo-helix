@@ -51,7 +51,14 @@ def _client(flag: bool | None = None) -> TestClient:
 
 
 def _records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
-    return [r for r in caplog.records if r.name.startswith("nhx.studio") and r.levelno == logging.WARNING]
+    # Only report lines: configure_app also warns "Static files not ready" when Studio's dist/ is not built (CI).
+    return [
+        r
+        for r in caplog.records
+        if r.name.startswith("nhx.studio")
+        and r.levelno == logging.WARNING
+        and r.getMessage().startswith("Studio plugin '")
+    ]
 
 
 @pytest.fixture
