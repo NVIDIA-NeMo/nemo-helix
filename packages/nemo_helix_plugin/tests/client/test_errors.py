@@ -139,20 +139,20 @@ class Spoofed(BaseModel):
     @field_validator("limit")
     @classmethod
     def _built_in_template(cls, value: str) -> str:
-        raise PydanticCustomError("greater_than", "Input should be over {gt}", {"gt": value})
+        raise PydanticCustomError("greater_than", "Input should be greater than {gt}", {"gt": value})
 
 
-def test_custom_error_reusing_a_built_in_type_is_withheld() -> None:
+def test_custom_error_reusing_a_built_in_type_prints_only_the_template() -> None:
     body = {"count": "secret-count", "limit": "secret-limit"}
 
     message = str(NemoResponseValidationError(_response(body), _validation_error(Spoofed, body)))
 
     assert "secret" not in message
-    assert f"  count: {WITHHELD} (int_parsing)" in message
-    assert f"  limit: {WITHHELD} (greater_than)" in message
+    assert "  count: Input should be a valid integer, unable to parse string as an integer (int_parsing)" in message
+    assert "  limit: Input should be greater than {gt} (greater_than)" in message
 
 
-def test_built_in_messages_with_context_are_kept() -> None:
+def test_built_in_messages_print_their_template_unfilled() -> None:
     class Bounded(BaseModel):
         n: int = Field(gt=3)
 
@@ -160,7 +160,7 @@ def test_built_in_messages_with_context_are_kept() -> None:
 
     message = str(NemoResponseValidationError(_response(body), _validation_error(Bounded, body)))
 
-    assert "  n: Input should be greater than 3 (greater_than)" in message
+    assert "  n: Input should be greater than {gt} (greater_than)" in message
 
 
 def test_more_than_five_errors_are_capped() -> None:

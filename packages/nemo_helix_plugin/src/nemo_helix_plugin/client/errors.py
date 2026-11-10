@@ -37,19 +37,18 @@ _REDACTED_MESSAGE = "Invalid value (message withheld: it can quote response data
 
 
 def _schema_only_message(detail: ErrorDetails) -> str:
-    """Pydantic's own message for a built-in error type, else the withheld text.
+    """Pydantic's message template for a built-in error type, never the error's own text; else the withheld text.
 
-    A ``PydanticCustomError`` may reuse a built-in type name with its own text, so the message is printed only when
-    pydantic's template for that type renders it exactly.
+    The template is printed unfilled (``Input should be greater than {gt}``): a ``PydanticCustomError`` may reuse a
+    built-in type name and template with response data in its context, so no context value is ever printed.
     """
     if detail["type"] not in _SCHEMA_ONLY_ERROR_TYPES:
         return _REDACTED_MESSAGE
+    error_type = typing.cast(ErrorType, detail["type"])  # a member of ErrorType, checked above
     try:
-        error_type = typing.cast(ErrorType, detail["type"])  # a member of ErrorType, checked above
-        rendered = PydanticKnownError(error_type, detail.get("ctx")).message()
+        return PydanticKnownError(error_type, detail.get("ctx")).message_template  # needs the context's keys only
     except Exception:  # noqa: BLE001 - a context the template can't take means it isn't pydantic's own error
         return _REDACTED_MESSAGE
-    return rendered if rendered == detail["msg"] else _REDACTED_MESSAGE
 
 
 class NemoClientError(Exception):
