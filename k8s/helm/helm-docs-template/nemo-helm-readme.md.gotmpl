@@ -45,31 +45,18 @@ the other migration requirements above still apply.
 
 ## Embedded PostgreSQL credentials and isolation
 
-The embedded PostgreSQL is for evaluation and development, not production.
-New installations generate a random password when `postgresql.auth.password`
-is unset. Upgrades reuse the existing chart-managed Secret, including legacy
-passwords; upgrading does **not** rotate an existing `nemo` password. Helm must
-be able to look up that Secret. Offline upgrade renders must supply the current
-password or an `existingSecret` reference; a missing Secret fails rather than
-silently generating credentials incompatible with persisted database data.
+The evaluation-only database generates a random password on install and reuses
+its Secret on upgrades; existing passwords are not rotated. For offline renders
+or reinstalls with retained data, supply the original `postgresql.auth.password`
+or `postgresql.auth.existingSecret` (and `existingSecretPasswordKey`). Offline
+`helm template` generates a new password unless `--is-upgrade` is set to reject
+missing credentials. Applying that Secret does not change the database role
+password; coordinate rotation with the Secret update and API/controller restarts.
 
-Use `postgresql.auth.existingSecret` and `existingSecretPasswordKey` to source
-credentials from a user-managed Secret. Neither changing a Secret nor setting
-`postgresql.auth.password` updates the role password in initialized PostgreSQL.
-For existing installations, back up the database and coordinate an authenticated
-role password change with the matching Secret update and API/controller
-restarts. Keep the existing PVC and verify old credentials no longer work.
-Changing Secret data alone does not automatically restart consumers.
-
-Set `networkPolicies.enabled=true` to enable PostgreSQL ingress isolation along
-with the other chart policies. A NetworkPolicy-enforcing CNI is required. Only
-same-release API and controller pods in the release namespace can reach the
-PostgreSQL pod on TCP 5432 by default; managed jobs are not allowed. Configure
-`networkPolicies.postgresql.extraIngress` for trusted additional database clients.
-Other Kubernetes policies can add allowances, and pod labels must not be
-controllable by untrusted workloads. The top-level switch remains off by default
-for connectivity compatibility, so install random credentials even when network
-isolation is not enabled. External databases require separately managed isolation.
+Enable `networkPolicies.enabled` with an enforcing CNI to restrict PostgreSQL
+ingress to same-release API/controller pods. Use
+`networkPolicies.postgresql.extraIngress` for additional trusted clients;
+other policies and untrusted pod-label changes can broaden access.
 
 ## Platform Secrets Encryption Key
 
