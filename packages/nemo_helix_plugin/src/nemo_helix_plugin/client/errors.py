@@ -10,11 +10,18 @@ can distinguish an HTTP status from transport and response-validation errors.
 
 from __future__ import annotations
 
+import typing
+
 import httpx
 from pydantic import ValidationError
+from pydantic_core.core_schema import ErrorType
 
 _MAX_REPORTED_VALIDATION_ERRORS = 5
 _VERSION_SKEW_ERROR_TYPES = frozenset({"extra_forbidden", "missing"})
+# Pydantic's own messages describe the schema, never the value. A custom validator's (value_error, assertion_error,
+# or a PydanticCustomError type) can quote response data, so those print a fixed text instead.
+_SCHEMA_ONLY_ERROR_TYPES = frozenset(typing.get_args(ErrorType)) - {"value_error", "assertion_error"}
+_CUSTOM_VALIDATOR_MESSAGE = "Failed a custom validator"
 
 
 class NemoClientError(Exception):
@@ -63,7 +70,8 @@ class NemoResponseValidationError(NemoClientError):
         lines = [f"Response{source} did not match {error.title} ({len(details)} validation error(s)):"]
         for detail in details[:_MAX_REPORTED_VALIDATION_ERRORS]:
             location = ".".join(str(part) for part in detail["loc"]) or "<root>"
-            lines.append(f"  {location}: {detail['msg']} ({detail['type']})")
+            message = detail["msg"] if detail["type"] in _SCHEMA_ONLY_ERROR_TYPES else _CUSTOM_VALIDATOR_MESSAGE
+            lines.append(f"  {location}: {message} ({detail['type']})")
         if len(details) > _MAX_REPORTED_VALIDATION_ERRORS:
             lines.append(f"  +{len(details) - _MAX_REPORTED_VALIDATION_ERRORS} more")
         if any(detail["type"] in _VERSION_SKEW_ERROR_TYPES for detail in details):

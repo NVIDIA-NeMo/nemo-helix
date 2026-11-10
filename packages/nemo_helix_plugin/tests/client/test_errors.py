@@ -4,7 +4,8 @@
 import httpx
 import pytest
 from nemo_helix_plugin.client.errors import NemoResponseValidationError
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic_core import PydanticCustomError
 
 VERSION_HINT = "The server and this client may be on different versions"
 
@@ -75,6 +76,31 @@ def test_type_error_has_no_version_hint() -> None:
     assert "  progress.completed: Input should be a valid integer" in message
     assert "(int_parsing)" in message
     assert VERSION_HINT not in message
+
+
+class Referenced(BaseModel):
+    fileset: str
+    schema_ref: str
+
+    @field_validator("fileset")
+    @classmethod
+    def _known_fileset(cls, value: str) -> str:
+        raise ValueError(f"Fileset '{value}' not found.")
+
+    @field_validator("schema_ref")
+    @classmethod
+    def _known_schema(cls, value: str) -> str:
+        raise PydanticCustomError("unknown_schema", "Schema {ref} is unknown", {"ref": value})
+
+
+def test_custom_validator_messages_are_not_printed() -> None:
+    body = {"fileset": "secret-ws/private-files", "schema_ref": "secret-ws/private-schema"}
+
+    message = str(NemoResponseValidationError(_response(body), _validation_error(Referenced, body)))
+
+    assert "secret-ws" not in message
+    assert "  fileset: Failed a custom validator (value_error)" in message
+    assert "  schema_ref: Failed a custom validator (unknown_schema)" in message
 
 
 def test_more_than_five_errors_are_capped() -> None:
