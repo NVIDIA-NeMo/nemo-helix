@@ -15,6 +15,15 @@ export const RUNNER_LABELS = {
   evaluator: 'Inline',
 } as const satisfies Record<Task['spec']['kind'], string>;
 
+export const RUNNER_OPTIONS = Object.entries(RUNNER_LABELS).map(([value, label]) => ({
+  value,
+  label,
+}));
+
+/** A one-line gist of what the task asks for: an inline task's intent, a Harbor instruction. */
+export const taskSummary = ({ spec }: Pick<Task, 'spec'>): string | undefined =>
+  spec.kind === 'harbor' ? spec.instruction : spec.intent;
+
 /** Splits a `[workspace/]name[#revision]` ref; a bare name lives in `fallbackWorkspace`. */
 export const parseTaskRef = (ref: string, fallbackWorkspace: string): TaskRefParts => {
   const [path, version] = ref.split('#');

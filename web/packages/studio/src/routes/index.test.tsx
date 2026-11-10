@@ -200,12 +200,19 @@ describe('Routes', () => {
       ['true', 'false', false],
       ['true', 'true', true],
     ])(
-      'includes taskset routes only with evals and tasksets on (tasksets=%s, evals=%s)',
+      'includes taskset and task routes only with evals and tasksets on (tasksets=%s, evals=%s)',
       async (tasksets, evals, expected) => {
         vi.stubEnv('VITE_FF_TASKSETS_ENABLED', tasksets);
         vi.stubEnv('VITE_FF_EVALS_ENABLED', evals);
         const { routes } = await import('@studio/routes/index');
-        [ROUTES.workspace.tasksets, ROUTES.workspace.tasksetDetail].forEach((route) => {
+        [
+          ROUTES.workspace.tasksets,
+          ROUTES.workspace.tasksetDetail,
+          ROUTES.workspace.tasksetDetailTab,
+          ROUTES.workspace.tasks,
+          ROUTES.workspace.taskDetail,
+          ROUTES.workspace.taskDetailTab,
+        ].forEach((route) => {
           expect(findIfRouteExists(routes, route)).toBe(expected);
         });
       }

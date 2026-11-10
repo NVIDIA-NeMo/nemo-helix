@@ -14,12 +14,11 @@ import {
   parseTaskRef,
   requestStatus,
   RUNNER_LABELS,
+  RUNNER_OPTIONS,
 } from '@studio/routes/evaluation/tasksets/helpers';
 import type { TaskFilters, TasksetTaskRow } from '@studio/routes/evaluation/tasksets/types';
 import { useResolvedTasks } from '@studio/routes/evaluation/tasksets/useResolvedTasks';
 import { type ComponentProps, type FC, useMemo } from 'react';
-
-const RUNNER_OPTIONS = Object.entries(RUNNER_LABELS).map(([value, label]) => ({ value, label }));
 
 interface TaskTableProps {
   taskset: Taskset;

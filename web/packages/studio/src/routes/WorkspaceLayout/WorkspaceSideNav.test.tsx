@@ -148,7 +148,7 @@ describe('WorkspaceSideNav', () => {
     expect(labels).toEqual(MODEL_FUNNEL);
   });
 
-  it('places Tasksets in the Evaluations group, not under Models', () => {
+  it('places Tasksets then Tasks in the Evaluations group, not under Models', () => {
     renderSideNav();
 
     // "Evaluations" is both a Models child link and the group heading; the heading comes last.
@@ -156,8 +156,10 @@ describe('WorkspaceSideNav', () => {
     const tasksets = screen.getByRole('link', { name: 'Tasksets' });
     const follows = (a: Node | undefined, b: Node) =>
       Boolean(a && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const tasks = screen.getByRole('link', { name: 'Tasks' });
     expect(follows(heading, tasksets)).toBe(true);
-    expect(follows(tasksets, screen.getByText('Data'))).toBe(true);
+    expect(follows(tasksets, tasks)).toBe(true);
+    expect(follows(tasks, screen.getByText('Data'))).toBe(true);
   });
 
   it('starts every parent expanded regardless of the current route', () => {
