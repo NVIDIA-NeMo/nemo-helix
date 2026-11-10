@@ -1,7 +1,11 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# OPA Authorization Policies
+# Shared Rego Authorization Policies
+
+The embedded PDP interprets these sources with Regorus; the external PDP evaluates
+these same sources with OPA. No compiled policy artifact or OPA build is needed
+for the embedded runtime.
 
 ## Entry Points
 
@@ -96,4 +100,8 @@ the data document (`app/scope_families.py`). If it is missing, scope validation 
 ```bash
 make test-policy
 ```
+
+This runs the shared Rego assertions with the embedded Regorus evaluator through
+pytest. Tests use native `with` modifiers for fixtures and `every` for tables so
+that all cases must pass. Run it after changing policy behavior.
 

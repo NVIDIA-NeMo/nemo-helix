@@ -14,16 +14,16 @@ reusable actions, and supporting docs.
   handling, and releases.
 
 - `actions/`
-  Local composite actions shared across workflows: change detection, policy
-  WASM builds, disk cleanup, and self-hosted runner metadata.
+  Local composite actions shared across workflows: change detection,
+  disk cleanup, and self-hosted runner metadata.
 
 ## Workflow Overview
 
 ### CI Check Workflows
 
 - `ci.yaml`
-  Main source validation workflow. It runs linting, OPA policy WASM build,
-  Python unit tests, Python integration tests, OPA policy tests, Studio web
+  Main source validation workflow. It runs linting,
+  Python unit tests (including the shared Rego assertions), Python integration tests, Studio web
   checks for relevant web changes, and PR coverage comments. It runs on pushes
   to `main`, pull requests to `main` or `release/*`, merge queue checks, and
   manual dispatch.
@@ -100,8 +100,8 @@ Unlabeling or converting to draft does not cancel an existing run. No
 The label enables CPU image publication, all Kind suites (including builder
 with auth off and on), Authentik/ZITADEL runtime tests and their static
 prerequisites, both Python e2e jobs, and Studio
-UI E2E tests. Policy-WASM is built within the E2E workflow, and successful
-published image prerequisites remain enforced. E2E jobs no longer participate
+UI E2E tests. Embedded authorization evaluates packaged Rego sources directly;
+successful published image prerequisites remain enforced. E2E jobs no longer participate
 in the required `CI status` aggregate; auth-IDP static tests remain in CI too.
 
 CI also builds CPU smoke images without E2E opt-in when CPU-smoke, auth-IDP,

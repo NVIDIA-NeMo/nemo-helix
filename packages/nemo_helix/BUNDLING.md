@@ -79,6 +79,12 @@ For the wrapper specifically, `make vendor` also creates aggregate extras from `
 
 Hand-written extras (e.g. the wrapper's `all` alias, or a plugin's `test` group) live directly in the pyproject's `[project.optional-dependencies]` table without the generator marker. The vendor tool will preserve them on every run; only extras with the `# Generated from [tool.bundle-package]; do not edit by hand.` marker are touched by `make vendor`.
 
+## Embedded policy dependency
+
+The auth-service extras depend on `gordon-to-regorus==0.13.0` (Python import
+`regorus`). The native extension is installed as a separate platform wheel;
+the universal `nemo-helix` wheel contains only the Python adapter and Rego sources.
+
 ## Dependency groups
 
 The wrapper's `[project.dependencies]` is hand-written with the true workspace dependencies for the base install:

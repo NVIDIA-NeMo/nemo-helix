@@ -201,8 +201,8 @@ Type checking runs automatically in CI via the `lint:uv` job.
 - Update SDK: `make update-sdk`
 
 **OPA Policy:**
-- Check policy WASM is up-to-date: `make check-policy`
-- Build policy WASM: `make build-policy`
+- Run the shared Rego assertions with the embedded Regorus evaluator: `make test-policy`
+- Embedded authorization evaluates the packaged Rego sources with Regorus; no policy build step is required.
 
 Linting runs automatically in CI via GitHub Actions in `.github/workflows/ci.yaml`; Studio web linting is covered by `.github/workflows/studio-ci.yaml`.
 
@@ -222,7 +222,6 @@ Pre-commit hooks run automatically before commits and pushes to ensure code qual
 - **Helm Docs Container** - Runs `helm-docs` container to regenerate Helm documentation in `k8s/helm/README.md`
 - **Check merge conflicts** - Detects merge conflict markers
 - **OpenAPI generator** (manual stage) - Regenerates OpenAPI spec when API files change
-- **Check policy WASM** (pre-push only) - Verifies OPA policy WASM is up-to-date
 
 **Before attempting to commit:**
 Ensure all pre-commit hooks pass by running `uv run pre-commit run -a`. A clean run (no changes) means you're ready to commit. Type checking errors may require manual fixes.

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Authorization API endpoints using embedded WASM policy evaluation."""
+"""Authorization API endpoints using embedded Rego policy evaluation."""
 
 import logging
 
