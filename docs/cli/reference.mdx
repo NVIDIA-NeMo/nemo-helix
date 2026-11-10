@@ -1360,6 +1360,7 @@ nemo files [OPTIONS] COMMAND [ARGS]...
 * `list`: List files in a fileset.
 * `delete`: Delete a file from a fileset.
 * `filesets`: Manage filesets
+* `git-repositories`: Look up git repositories before creating a fileset
 * `otlp`: OTLP operations
 
 #### nemo files upload
@@ -1766,6 +1767,68 @@ Example: metadata = FilesetMetadata( dataset=DatasetMetadataContent( schema=`{"c
 
 * `--input-file`: Path to JSON file (use '-' for stdin)
 * `--input-data`: Input data for the request (JSON or YAML)
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+#### nemo files git-repositories
+
+Look up git repositories before creating a fileset
+
+**Usage:**
+
+```shell
+nemo files git-repositories [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `find-files`: Find every file with a name in a git repository, without...
+
+##### nemo files git-repositories find-files
+
+Find every file with a name in a git repository, without creating a fileset.
+
+The files service scans the host's SSH keys first. The key is trusted when it
+matches `--host-key` or `--known-hosts-file`; otherwise you confirm its fingerprint,
+as ssh asks on a first connection. The trusted known_hosts line is printed to
+stderr for the storage of a fileset created afterwards.
+
+**Examples:**
+
+```shell
+nemo files git-repositories find-files git@gitlab.example.com:org/repo.git --ssh-key-secret deploy-key --file-name agent.yaml
+nemo files git-repositories find-files ssh://host:2222/org/repo.git --revision main --ssh-key-secret deploy-key --file-name agent.yaml --host-key SHA256:...
+```
+
+**Usage:**
+
+```shell
+nemo files git-repositories find-files [OPTIONS] URL
+```
+
+**Arguments:**
+
+* `<URL>`: SSH remote, e.g. git@gitlab.example.com:org/repo.git or ssh://host:2222/org/repo.git
+
+**Options:**
+
+* `--file-name`: File name, without a directory, to look for anywhere under `--path`
+* `--ssh-key-secret`: Secret holding an unencrypted SSH private key with read access
+* `--revision`: Branch, tag, or commit SHA. Defaults to the remote's HEAD.
+* `--path`: Directory within the repository to search
+* `--host-key`: SHA256 fingerprint of the host key to trust, checked against one from a trusted source. Without it, the key must already be in `--known-hosts-file`, or you confirm it at a prompt.
+* `--known-hosts-file <PATH>`: known_hosts file to recognize the host from. A host listed there under another key is refused. [default: ~/.ssh/known_hosts]
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
 
 **Output Options:**
 
