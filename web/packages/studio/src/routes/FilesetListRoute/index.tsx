@@ -40,9 +40,7 @@ export const FilesetListRoute: FC = () => {
           className="p-0"
           slotHeading="Filesets"
           slotDescription="Filesets organize files by purpose — Generic, Dataset, or Model. Purpose determines which metadata fields are available and can't be changed after creation. Use Dataset for training and evaluation data, Model for model weights and checkpoints, and Generic for everything else."
-          slotActions={
-            <NewModelFilesetButton color="brand" />
-          }
+          slotActions={<NewModelFilesetButton color="brand" />}
         />
         <FilesetsTable
           enableFilters
