@@ -338,13 +338,12 @@ def create_fabric_serving_app(
         agent_config = load_agent_config(config_path)
         runtime_base_dir = await asyncio.to_thread(resolve_runtime_base_dir, config_path)
         base_dir = runtime_base_dir.path
-        # Startup can still fail past this point, and a staged root must not outlive
-        # the process that made it even when the runtime never comes up.
+        workspace_baseline: Path | None = None
+        # Release staged inputs after startup failures as well as normal shutdown.
         try:
             validation_result = await _validate_agent_config(agent_config, base_dir=base_dir)
-            app.state.workspace_baseline = await asyncio.to_thread(
-                prepare_deepagents_workspace_baseline, agent_config, base_dir
-            )
+            workspace_baseline = await asyncio.to_thread(prepare_deepagents_workspace_baseline, agent_config, base_dir)
+            app.state.workspace_baseline = workspace_baseline
             app.state.agent_config = agent_config
             app.state.base_dir = base_dir
             app.state.validation_result = validation_result
@@ -378,7 +377,7 @@ def create_fabric_serving_app(
                     # A staged root is only safe to remove once no runtime can still write to it.
                     await session_manager.close_all_sessions()
         finally:
-            await asyncio.to_thread(release_runtime_base_dir, runtime_base_dir)
+            await asyncio.to_thread(release_runtime_base_dir, runtime_base_dir, workspace_baseline=workspace_baseline)
 
     app = FastAPI(title="NeMo Agents Fabric Server", lifespan=lifespan)
     runtime_instance_id = str(uuid.uuid4())

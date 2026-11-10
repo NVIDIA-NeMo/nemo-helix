@@ -34,7 +34,7 @@ from nemo_agents_plugin.fabric.session_manager import (
     FabricSessionStopError,
 )
 from nemo_agents_plugin.fabric.session_registry import FabricSessionNotFoundError, FabricSessionRegistry
-from nemo_fabric import Fabric
+from nemo_fabric import Fabric, FabricError, RuntimeStatus
 from starlette.requests import ClientDisconnect
 
 SESSION_ID = "agent-session-RFppQd3GgwudZJeKDx5t8K"
@@ -159,13 +159,17 @@ def _sse_line_payload(line: str) -> dict[str, object]:
     return json.loads(line.removeprefix("data: "))
 
 
-def test_shutdown_removes_a_staged_agent_root(
+@pytest.mark.parametrize("stop_failed", [False, True])
+def test_shutdown_removes_a_staged_agent_root_only_after_runtime_stop(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    stop_failed: bool,
 ) -> None:
     mounted = tmp_path / "mounted"
     mounted.mkdir()
-    config_path = _write_agent_config(mounted)
+    config = _example_config()
+    config["harnesses"]["hermes"]["kind"] = "deepagents"
+    config_path = _write_agent_config(mounted, config)
     mounted.chmod(0o555)
     app = create_fabric_serving_app(config_path)
     try:
@@ -175,11 +179,20 @@ def test_shutdown_removes_a_staged_agent_root(
 
             assert staged != mounted
             assert (staged / "agent.yaml").exists()
+            runtime = SimpleNamespace(
+                stop=AsyncMock(side_effect=FabricError("stop failed") if stop_failed else None),
+                status=RuntimeStatus.FAILED if stop_failed else RuntimeStatus.STOPPED,
+            )
+            assert client.portal is not None
+            session = client.portal.call(app.state.session_registry.register, runtime)
+            session.workspace_dir = environment.create_deepagents_workspace(app.state.workspace_baseline)
 
-        assert not staged.exists()
+        assert staged.exists() is stop_failed
         assert config_path.exists()
     finally:
         mounted.chmod(0o755)
+        if app.state.base_dir.exists():
+            environment.release_runtime_base_dir(environment.RuntimeBaseDir(path=app.state.base_dir, staged=True))
 
 
 def test_failed_startup_removes_a_staged_agent_root(

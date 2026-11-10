@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from nemo_agents_plugin.fabric import environment
 from nemo_agents_plugin.fabric import runtime as fabric_runtime
 from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
@@ -24,7 +25,7 @@ from nemo_agents_plugin.fabric.runtime import (
     stream_fabric_runtime,
 )
 from nemo_agents_plugin.fabric.streaming import iter_fabric_chat_completion_sse
-from nemo_fabric import FabricConfig, HarnessConfig, MetadataConfig
+from nemo_fabric import FabricConfig, HarnessConfig, MetadataConfig, RuntimeStatus
 
 SESSION_UUID = "c46d3588-d205-497f-b96b-37f938263064"
 
@@ -83,6 +84,7 @@ class _FakeRuntime:
         self.invoke_stream_requests: list[Any] = []
         self.invoke_openai_stream_requests: list[Any] = []
         self.stream = stream
+        self.status = RuntimeStatus.ACTIVE
 
     async def __aenter__(self) -> "_FakeRuntime":
         if self.enter_delay:
@@ -101,7 +103,12 @@ class _FakeRuntime:
         self.exited = True
         self.exit_calls += 1
         if self.exit_error is not None:
+            self.status = RuntimeStatus.FAILED
             raise self.exit_error
+        self.status = RuntimeStatus.STOPPED
+
+    async def stop(self) -> None:
+        await self.__aexit__(None, None, None)
 
     async def invoke(self, *, request: Any) -> Any:
         self.invoke_requests.append(request)
@@ -212,6 +219,68 @@ class _SequenceFabric:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize(
+    "outcome", ["success", "invoke-error", "timeout", "stop-error", "suppressed-stop", "remove-error"]
+)
+async def test_one_shot_private_workspace_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, streaming: bool, outcome: str
+) -> None:
+    workspace = tmp_path / "private"
+    workspace.mkdir()
+    input_file = tmp_path / "input.txt"
+    input_file.write_text("keep deployment inputs")
+    (workspace / "input-link").symlink_to(input_file)
+
+    class _CleanupRuntime(_FakeRuntime):
+        async def __aexit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+            assert workspace.is_dir()
+            try:
+                await super().__aexit__(exc_type, exc, traceback)
+            except fabric_runtime.FabricError:
+                if outcome != "suppressed-stop":
+                    raise
+
+    runtime = _CleanupRuntime(
+        invoke_error=fabric_runtime.FabricError("invoke failed")
+        if outcome in {"invoke-error", "suppressed-stop"}
+        else None,
+        invoke_delay=1 if outcome == "timeout" else 0,
+        exit_error=fabric_runtime.FabricError("stop failed") if outcome in {"stop-error", "suppressed-stop"} else None,
+    )
+    if outcome == "remove-error":
+
+        def fail_remove(path: Path) -> None:
+            raise PermissionError("removal failed")
+
+        monkeypatch.setattr(environment.shutil, "rmtree", fail_remove)
+    request = FabricOneShotRequest(
+        fabric_config=cast(FabricConfig, object()), base_dir=tmp_path, workspace_dir=workspace, timeout_seconds=0.01
+    )
+
+    async def invoke() -> None:
+        fabric = _FakeFabric(runtime=runtime)
+        if streaming:
+            async with stream_fabric_agent_once(
+                request, fabric=fabric, streaming_method=StreamingMethod.BUFFERED
+            ) as stream:
+                await stream.result()
+        else:
+            await run_fabric_agent_once(request, fabric=fabric)
+
+    if outcome in {"success", "remove-error"}:
+        await invoke()
+    else:
+        with pytest.raises(FabricRuntimeExecutionError):
+            await invoke()
+    retained = outcome in {"stop-error", "suppressed-stop", "remove-error"}
+    assert workspace.exists() is retained
+    assert input_file.read_text() == "keep deployment inputs"
+    if retained:
+        assert str(workspace) in caplog.text
+
+
+@pytest.mark.asyncio
 class TestRunFabricAgentOnce:
     async def test_starts_invokes_and_cleans_up_ephemeral_runtime(self) -> None:
         fabric_config = cast(FabricConfig, object())
@@ -295,15 +364,19 @@ class TestRunFabricAgentOnce:
 
         assert exc_info.value.__cause__ is timeout_error
 
-    async def test_wraps_runtime_start_errors(self) -> None:
+    async def test_wraps_runtime_start_errors(self, tmp_path: Path) -> None:
         fake_fabric = _FakeFabric(start_error=fabric_runtime.FabricError("native unavailable"))
+        workspace = tmp_path / "private"
+        workspace.mkdir()
         request = FabricOneShotRequest(
             fabric_config=cast(FabricConfig, object()),
             base_dir=Path("/tmp/agent"),
+            workspace_dir=workspace,
         )
 
         with pytest.raises(FabricRuntimeStartError, match="Fabric runtime startup failed: native unavailable"):
             await run_fabric_agent_once(request, fabric=fake_fabric)
+        assert not workspace.exists()
 
     async def test_wraps_runtime_context_entry_errors_as_start_errors(self) -> None:
         fake_runtime = _FakeRuntime(enter_error=fabric_runtime.FabricError("harness unavailable"))
@@ -347,14 +420,20 @@ class TestRunFabricAgentOnce:
 
         assert fake_runtime.exit_calls == 1
 
-    async def test_cleans_up_once_after_cancellation(self) -> None:
+    @pytest.mark.parametrize("phase", ["start", "invoke"])
+    async def test_cleans_up_once_after_cancellation(self, tmp_path: Path, phase: str) -> None:
         fake_runtime = _FakeRuntime(invoke_delay=60)
+        workspace = tmp_path / "private"
+        workspace.mkdir()
         request = FabricOneShotRequest(
             fabric_config=cast(FabricConfig, object()),
             base_dir=Path("/tmp/agent"),
+            workspace_dir=workspace,
         )
-        invocation = asyncio.create_task(run_fabric_agent_once(request, fabric=_FakeFabric(runtime=fake_runtime)))
-        while not fake_runtime.invoke_requests:
+        fabric = _FakeFabric(runtime=fake_runtime, start_delay=0.05 if phase == "start" else 0)
+        invocation = asyncio.create_task(run_fabric_agent_once(request, fabric=fabric))
+        calls = fabric.start_calls if phase == "start" else fake_runtime.invoke_requests
+        while not calls:
             await asyncio.sleep(0)
 
         invocation.cancel()
@@ -362,6 +441,7 @@ class TestRunFabricAgentOnce:
             await invocation
 
         assert fake_runtime.exit_calls == 1
+        assert not workspace.exists()
 
     async def test_maps_cleanup_errors_after_successful_invocation(self) -> None:
         fake_runtime = _FakeRuntime(exit_error=fabric_runtime.FabricError("stop failed"))
@@ -589,13 +669,16 @@ class TestStreamFabricAgentOnce:
 
         assert fake_runtime.exit_calls == 1
 
-    async def test_cleans_up_once_after_cancellation(self) -> None:
+    async def test_cleans_up_once_after_cancellation(self, tmp_path: Path) -> None:
         fake_runtime = _FakeRuntime()
+        workspace = tmp_path / "private"
+        workspace.mkdir()
         request = FabricOneShotRequest(
             fabric_config=FabricConfig(
                 metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
             ),
             base_dir=Path("/tmp/agent"),
+            workspace_dir=workspace,
         )
         stream_started = asyncio.Event()
 
@@ -611,6 +694,7 @@ class TestStreamFabricAgentOnce:
             await invocation
 
         assert fake_runtime.exit_calls == 1
+        assert not workspace.exists()
 
 
 @pytest.mark.asyncio

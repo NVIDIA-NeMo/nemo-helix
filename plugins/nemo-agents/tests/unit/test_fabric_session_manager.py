@@ -8,12 +8,15 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
+from deepagents.backends import FilesystemBackend
 from mcp.client.stdio import get_default_environment
 from nemo_agents_plugin.agent_config import AgentConfig, McpConfig, McpServerConfig
 from nemo_agents_plugin.fabric import environment, server, session_manager
@@ -29,15 +32,17 @@ from nemo_agents_plugin.fabric.session_registry import (
     FabricSessionRegistry,
 )
 from nemo_agents_plugin.fabric.streaming import StreamingMethod
-from nemo_fabric import FabricConfigError, RunPlan
+from nemo_fabric import FabricConfigError, RunPlan, RuntimeStatus
 
 
 class _FakeRuntime:
     def __init__(self) -> None:
         self.stop_calls = 0
+        self.status = RuntimeStatus.ACTIVE
 
     async def stop(self) -> None:
         self.stop_calls += 1
+        self.status = RuntimeStatus.STOPPED
 
 
 class _FakeFabricConfig:
@@ -114,6 +119,126 @@ def _agent_config() -> AgentConfig:
             },
         }
     )
+
+
+@pytest.fixture
+def private_manager(tmp_path: Path) -> FabricSessionManager:
+    config = _agent_config()
+    config.harnesses["hermes"].kind = "deepagents"
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace/input.txt").write_text("deployment input")
+    return FabricSessionManager(
+        config,
+        base_dir=tmp_path,
+        session_registry=FabricSessionRegistry(),
+        workspace_baseline=environment.prepare_deepagents_workspace_baseline(config, tmp_path),
+        fabric=cast(Any, _FakeFabric(_FakeRuntime(), method=StreamingMethod.BUFFERED)),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "invocation"),
+    [
+        ("copy", "session"),
+        ("plan", "session"),
+        ("start", "session"),
+        ("register", "session"),
+        ("plan", "once"),
+        ("plan", "stream"),
+    ],
+)
+async def test_failed_session_start_removes_private_workspace(
+    private_manager: FabricSessionManager, monkeypatch: pytest.MonkeyPatch, failure: str, invocation: str
+) -> None:
+    if failure == "copy":
+
+        def fail_copy(source: Path, target: Path, **kwargs: Any) -> None:
+            (target / "partial.txt").write_text("incomplete")
+            raise OSError("copy failed")
+
+        monkeypatch.setattr(environment.shutil, "copytree", fail_copy)
+    else:
+        target, method = {
+            "plan": (private_manager, "_materialize_fabric_config"),
+            "start": (private_manager._fabric, "start_runtime"),
+            "register": (private_manager._session_registry, "register"),
+        }[failure]
+        monkeypatch.setattr(target, method, AsyncMock(side_effect=session_manager.FabricRuntimeStartError("failed")))
+
+    with pytest.raises(session_manager.FabricRuntimeStartError):
+        if invocation == "session":
+            await private_manager.open_session()
+        elif invocation == "once":
+            await private_manager.invoke_once(FabricInvocationRequest(input="hello"))
+        else:
+            async with private_manager.stream_once(FabricInvocationRequest(input="hello")):
+                pass
+
+    baseline = private_manager._workspace_baseline
+    assert baseline is not None
+    assert list((baseline.parent / "sessions").iterdir()) == []
+    assert (baseline / "input.txt").read_text() == "deployment input"
+    assert await private_manager._session_registry.count() == 0
+
+
+@pytest.mark.asyncio
+async def test_cancelled_copy_finishes_before_workspace_removal(
+    private_manager: FabricSessionManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    copy = environment.shutil.copytree
+
+    def slow_copy(source: Path, target: Path, **kwargs: Any) -> Any:
+        started.set()
+        assert release.wait(timeout=5)
+        return copy(source, target, **kwargs)
+
+    monkeypatch.setattr(environment.shutil, "copytree", slow_copy)
+    opening = asyncio.create_task(private_manager.open_session())
+    try:
+        assert await asyncio.to_thread(started.wait, 5)
+        opening.cancel()
+        await asyncio.sleep(0)
+        opening.cancel()
+        assert not opening.done()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await opening
+    baseline = private_manager._workspace_baseline
+    assert baseline is not None
+    assert list((baseline.parent / "sessions").iterdir()) == []
+    assert (baseline / "input.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_start_stops_runtime_before_workspace_removal(
+    private_manager: FabricSessionManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    runtime = _FakeRuntime()
+
+    async def start(*args: Any, **kwargs: Any) -> _FakeRuntime:
+        started.set()
+        await release.wait()
+        return runtime
+
+    monkeypatch.setattr(private_manager._fabric, "start_runtime", start)
+    opening = asyncio.create_task(private_manager.open_session())
+    await started.wait()
+    opening.cancel()
+    await asyncio.sleep(0)
+    assert not opening.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await opening
+    assert runtime.stop_calls == 1
+    baseline = private_manager._workspace_baseline
+    assert baseline is not None
+    assert list((baseline.parent / "sessions").iterdir()) == []
 
 
 @pytest.mark.asyncio
@@ -390,6 +515,12 @@ async def test_deepagents_sessions_isolate_files_and_reuse_their_workspace(
     for root in (workspace, baseline, second.workspace_dir):
         assert (root / "input.txt").read_text() == "original input"
         assert not any((root / name).exists() for name in outputs)
+    backend = FilesystemBackend(root_dir=str(second.workspace_dir), virtual_mode=True)
+    for name in outputs:
+        assert backend.read(f"/{name}").error is not None
+    assert not backend.grep("private session content").matches
+    with pytest.raises(ValueError, match="traversal"):
+        backend.read(f"../{first.workspace_dir.name}/report.md")
     assert len(fabric.start_calls) == 2
     for session, call in zip((first, second), fabric.start_calls, strict=True):
         assert session.workspace_dir is not None
@@ -398,6 +529,13 @@ async def test_deepagents_sessions_isolate_files_and_reuse_their_workspace(
         assert tmp_path / call["config"].environment.workspace == session.workspace_dir
         assert call["base_dir"] == tmp_path
     assert config == original_config
+
+    await manager.close_session(first.session_id)
+    assert not first.workspace_dir.exists()
+    assert second.workspace_dir.exists()
+    await manager.close_all_sessions()
+    assert not second.workspace_dir.exists()
+    assert (baseline / "input.txt").read_text() == "original input"
 
 
 @pytest.mark.asyncio
@@ -428,6 +566,7 @@ async def test_deepagents_one_shot_invocations_get_private_workspaces(
         assert request.fabric_config.environment is not None
         assert request.fabric_config.environment.workspace is not None
         private = tmp_path / request.fabric_config.environment.workspace
+        assert request.workspace_dir == private
         assert (private / "input.txt").read_text() == "original input"
         assert not (private / "result.txt").exists()
         (private / "input.txt").write_text("edited by this invocation")
@@ -634,13 +773,17 @@ async def test_close_session_removes_session_and_stops_runtime(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_close", [False, True])
 async def test_close_session_waits_for_active_invocation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    cancel_close: bool,
 ) -> None:
     runtime = _FakeRuntime()
     registry = FabricSessionRegistry()
     session = await registry.register(cast(Any, runtime), session_id="session-1")
+    session.workspace_dir = tmp_path / "private"
+    session.workspace_dir.mkdir()
     manager = FabricSessionManager(
         _agent_config(),
         base_dir=tmp_path,
@@ -664,14 +807,22 @@ async def test_close_session_waits_for_active_invocation(
     await asyncio.sleep(0)
 
     assert runtime.stop_calls == 0
+    assert session.workspace_dir.exists()
     with pytest.raises(FabricSessionNotFoundError, match="session-1"):
         await manager.resolve_session(session.session_id)
 
+    if cancel_close:
+        close.cancel()
     release_invocation.set()
     await invocation
-    await close
+    if cancel_close:
+        with pytest.raises(asyncio.CancelledError):
+            await close
+    else:
+        await close
 
     assert runtime.stop_calls == 1
+    assert not session.workspace_dir.exists()
 
 
 @pytest.mark.asyncio
@@ -720,6 +871,8 @@ async def test_expire_idle_sessions_stops_expired_runtime(
     runtime = _FakeRuntime()
     registry = FabricSessionRegistry()
     session = await registry.register(cast(Any, runtime), session_id="session-1")
+    session.workspace_dir = tmp_path / "private"
+    session.workspace_dir.mkdir()
     manager = FabricSessionManager(
         _agent_config(),
         base_dir=tmp_path,
@@ -732,6 +885,7 @@ async def test_expire_idle_sessions_stops_expired_runtime(
     assert expired_count == 1
     assert runtime.stop_calls == 1
     assert await registry.count() == 0
+    assert not session.workspace_dir.exists()
 
 
 @pytest.mark.asyncio
@@ -793,8 +947,11 @@ async def test_close_all_sessions_continues_after_stop_failure(tmp_path: Path) -
     failing_runtime = _FailingRuntime()
     healthy_runtime = _FakeRuntime()
     registry = FabricSessionRegistry()
-    await registry.register(cast(Any, failing_runtime), session_id="session-1")
-    await registry.register(cast(Any, healthy_runtime), session_id="session-2")
+    failing = await registry.register(cast(Any, failing_runtime), session_id="session-1")
+    healthy = await registry.register(cast(Any, healthy_runtime), session_id="session-2")
+    for session in (failing, healthy):
+        session.workspace_dir = tmp_path / session.session_id
+        session.workspace_dir.mkdir()
     manager = FabricSessionManager(
         _agent_config(),
         base_dir=tmp_path,
@@ -806,6 +963,10 @@ async def test_close_all_sessions_continues_after_stop_failure(tmp_path: Path) -
     assert closed_count == 2
     assert failing_runtime.stop_calls == 1
     assert healthy_runtime.stop_calls == 1
+    assert failing.workspace_dir is not None
+    assert healthy.workspace_dir is not None
+    assert failing.workspace_dir.is_dir()
+    assert not healthy.workspace_dir.exists()
 
 
 @pytest.mark.asyncio

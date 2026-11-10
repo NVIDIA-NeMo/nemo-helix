@@ -26,8 +26,10 @@ from nemo_agents_plugin.fabric.runtime import (
     FabricRuntimeStartError,
     FabricRuntimeStream,
     StreamingMethod,
+    await_resource_task,
     fabric_streaming_options,
     invoke_fabric_runtime,
+    release_fabric_workspace,
     run_fabric_agent_once,
     stream_fabric_agent_once,
     stream_fabric_runtime,
@@ -40,7 +42,7 @@ from nemo_agents_plugin.fabric.session_registry import (
 from nemo_agents_plugin.fabric.streaming import resolve_streaming_method
 from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
 from nemo_agents_plugin.fabric.validation import FabricValidationError, plan_fabric_config
-from nemo_fabric import Fabric, FabricConfig, FabricError
+from nemo_fabric import Fabric, FabricConfig, FabricError, Runtime
 
 logger = logging.getLogger(__name__)
 
@@ -97,34 +99,49 @@ class FabricSessionManager:
 
     async def open_session(self, *, session_id: str | None = None) -> FabricRuntimeSession:
         """Materialize a Fabric config, start its runtime, and register the session."""
+        workspace_dir: Path | None = None
+        runtime: Runtime | None = None
+        registered = False
         try:
-            workspace_dir = await self._create_workspace()
-            fabric_config, method = await self._materialize_fabric_config(streaming=True, workspace_dir=workspace_dir)
-        except FabricRuntimeStartError as error:
-            raise FabricSessionStartError(str(error)) from error
-        fabric = self._fabric or Fabric()
-        relay_streaming = method is StreamingMethod.RELAY
-        try:
-            runtime = await fabric.start_runtime(
-                fabric_config,
-                base_dir=self._base_dir,
-                streaming=relay_streaming,
-                **(fabric_streaming_options(fabric_config) if relay_streaming else {}),
-            )
-        except (FabricError, FabricRuntimeStartError) as error:
-            raise FabricSessionStartError(f"Fabric runtime startup failed: {error}") from error
+            try:
+                workspace_dir = await self._create_workspace()
+                fabric_config, method = await self._materialize_fabric_config(
+                    streaming=True, workspace_dir=workspace_dir
+                )
+            except FabricRuntimeStartError as error:
+                raise FabricSessionStartError(str(error)) from error
+            fabric = self._fabric or Fabric()
+            relay_streaming = method is StreamingMethod.RELAY
 
-        try:
+            async def start() -> None:
+                nonlocal runtime
+                runtime = await fabric.start_runtime(
+                    fabric_config,
+                    base_dir=self._base_dir,
+                    streaming=relay_streaming,
+                    **(fabric_streaming_options(fabric_config) if relay_streaming else {}),
+                )
+
+            try:
+                await await_resource_task(asyncio.create_task(start()))
+            except (FabricError, FabricRuntimeStartError) as error:
+                raise FabricSessionStartError(f"Fabric runtime startup failed: {error}") from error
+
+            assert runtime is not None
             session = await self._session_registry.register(runtime, session_id=session_id, streaming_method=method)
             session.workspace_dir = workspace_dir
+            registered = True
             return session
         except BaseException:
-            # A started runtime must not leak if registration fails or is cancelled.
-            try:
-                await runtime.stop()
-            except FabricError:
-                logger.exception("Failed to stop Fabric runtime after session registration failed.")
+            if runtime is not None:
+                try:
+                    await await_resource_task(asyncio.create_task(runtime.stop()))
+                except Exception:
+                    logger.exception("Failed to stop Fabric runtime after session startup was interrupted.")
             raise
+        finally:
+            if not registered:
+                await release_fabric_workspace(workspace_dir, runtime=runtime)
 
     async def resolve_session(self, session_id: str) -> FabricRuntimeSession:
         """Resolve a session, lazily starting a runtime under a supplied Platform ID."""
@@ -217,35 +234,26 @@ class FabricSessionManager:
     async def expire_idle_sessions(self, *, idle_timeout_seconds: float) -> int:
         """Stop and remove sessions that have exceeded the idle timeout."""
         expired = await self._session_registry.remove_expired(idle_timeout_seconds=idle_timeout_seconds)
-        for session in expired:
-            try:
-                await self._stop_session(session)
-            except FabricSessionStopError:
-                logger.exception("Failed to stop expired Fabric session %s.", session.session_id)
+        await self._stop_sessions(expired)
         return len(expired)
 
     async def close_all_sessions(self) -> int:
         """Drain the registry and stop every remaining runtime."""
         sessions = await self._session_registry.drain()
+        await self._stop_sessions(sessions)
+        return len(sessions)
 
-        async def stop_session(session: FabricRuntimeSession) -> None:
-            try:
-                await self._stop_session(session)
-            except FabricSessionStopError:
-                logger.exception("Failed to stop Fabric session %s during shutdown.", session.session_id)
-
-        results = await asyncio.gather(
-            *(stop_session(session) for session in sessions),
-            return_exceptions=True,
+    async def _stop_sessions(self, sessions: list[FabricRuntimeSession]) -> None:
+        results = await await_resource_task(
+            asyncio.gather(*(self._stop_session(session) for session in sessions), return_exceptions=True)
         )
         for session, result in zip(sessions, results, strict=True):
             if isinstance(result, BaseException):
                 logger.error(
-                    "Unexpected error stopping Fabric session %s during shutdown.",
+                    "Failed to stop Fabric session %s.",
                     session.session_id,
                     exc_info=(type(result), result, result.__traceback__),
                 )
-        return len(sessions)
 
     def _claim_session_creation_gate(self, session_id: str) -> _SessionCreationGate:
         """Claim the shared startup gate for one session ID."""
@@ -264,17 +272,28 @@ class FabricSessionManager:
 
     async def _stop_session(self, session: FabricRuntimeSession) -> None:
         """Stop one session after any active invocation releases its lock."""
-        async with session.invocation_lock:
-            try:
-                await session.runtime.stop()
-            except FabricError as error:
-                raise FabricSessionStopError(f"Fabric runtime shutdown failed: {error}") from error
+
+        async def stop() -> None:
+            async with session.invocation_lock:
+                try:
+                    await session.runtime.stop()
+                except FabricError as error:
+                    raise FabricSessionStopError(f"Fabric runtime shutdown failed: {error}") from error
+                finally:
+                    await release_fabric_workspace(session.workspace_dir, runtime=session.runtime)
+
+        await await_resource_task(asyncio.create_task(stop()))
 
     async def _create_workspace(self) -> Path | None:
         if self._workspace_baseline is None:
             return None
+        copy_task = asyncio.create_task(asyncio.to_thread(create_deepagents_workspace, self._workspace_baseline))
         try:
-            return await asyncio.to_thread(create_deepagents_workspace, self._workspace_baseline)
+            return await await_resource_task(copy_task)
+        except asyncio.CancelledError:
+            if not copy_task.cancelled() and copy_task.exception() is None:
+                await release_fabric_workspace(copy_task.result())
+            raise
         except (OSError, ValueError) as error:
             raise FabricRuntimeStartError(f"DeepAgents workspace creation failed: {error}") from error
 
@@ -314,7 +333,13 @@ class FabricSessionManager:
         streaming: bool,
     ) -> tuple[FabricOneShotRequest, StreamingMethod]:
         workspace_dir = await self._create_workspace()
-        fabric_config, method = await self._materialize_fabric_config(streaming=streaming, workspace_dir=workspace_dir)
+        try:
+            fabric_config, method = await self._materialize_fabric_config(
+                streaming=streaming, workspace_dir=workspace_dir
+            )
+        except BaseException:
+            await release_fabric_workspace(workspace_dir)
+            raise
         one_shot_request = FabricOneShotRequest(
             fabric_config=fabric_config,
             base_dir=self._base_dir,
@@ -323,6 +348,7 @@ class FabricSessionManager:
             caller_context=request.caller_context,
             relay_session_root=request.relay_session_root,
             timeout_seconds=request.timeout_seconds,
+            workspace_dir=workspace_dir,
         )
         return one_shot_request, method
 

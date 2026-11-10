@@ -66,10 +66,15 @@ def resolve_runtime_base_dir(config_path: Path) -> RuntimeBaseDir:
     return RuntimeBaseDir(path=target, staged=True)
 
 
-def release_runtime_base_dir(base_dir: RuntimeBaseDir) -> None:
+def release_runtime_base_dir(base_dir: RuntimeBaseDir, *, workspace_baseline: Path | None = None) -> None:
     """Remove a staged agent root. A root used in place is left alone."""
     if not base_dir.staged:
         return
+    if workspace_baseline is not None:
+        sessions = workspace_baseline.parent / "sessions"
+        if sessions.is_dir() and any(sessions.iterdir()):
+            logger.warning("Retaining staged agent root %s: private workspace cleanup is incomplete.", base_dir.path)
+            return
     shutil.rmtree(base_dir.path, ignore_errors=True)
     logger.info("Removed staged agent root %s.", base_dir.path)
 
@@ -145,9 +150,19 @@ def create_deepagents_workspace(baseline: Path) -> Path:
         # Baseline links are already relative to the copied tree.
         shutil.copytree(baseline, workspace, symlinks=True, dirs_exist_ok=True)
     except BaseException:
-        shutil.rmtree(workspace, ignore_errors=True)
+        remove_deepagents_workspace(workspace)
         raise
     return workspace
+
+
+def remove_deepagents_workspace(workspace: Path) -> None:
+    """Remove one owned runtime directory without masking an invocation error."""
+    try:
+        shutil.rmtree(workspace)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.exception("Failed to remove DeepAgents workspace %s.", workspace)
 
 
 def discover_skill_directories(directory: Path) -> list[Path]:
