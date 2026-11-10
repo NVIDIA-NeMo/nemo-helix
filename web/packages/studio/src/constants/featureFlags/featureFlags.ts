@@ -84,7 +84,6 @@ export const flagDefinitions = {
   inferenceProviderEnabled: previewFlag('VITE_FF_INFERENCE_PROVIDER_ENABLED', true),
   intakeEnabled: previewFlag('VITE_FF_INTAKE_ENABLED', true),
   membersEnabled: previewFlag('VITE_FF_MEMBERS_ENABLED', true),
-  modelCompareEnabled: previewFlag('VITE_FF_MODEL_COMPARE_ENABLED'),
   modelDetailsEnabled: previewFlag('VITE_FF_MODEL_DETAILS_ENABLED'),
   modelEvaluationFormEnabled: previewFlag('VITE_FF_MODEL_EVALUATION_FORM_ENABLED', true),
   monitorEnabled: previewFlag('VITE_FF_MONITOR_ENABLED'),
