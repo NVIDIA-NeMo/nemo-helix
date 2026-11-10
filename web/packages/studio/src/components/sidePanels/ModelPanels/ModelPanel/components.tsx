@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { CopyButton } from '@nemo/common/src/components/CopyButton';
 import { ExpandableMessage } from '@nemo/common/src/components/ExpandableMessage';
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { parametersToString } from '@nemo/common/src/components/ModelDetailsTooltip/utils';
@@ -34,7 +35,6 @@ import {
   Text,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { CopyButton } from '@studio/components/CopyButton';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import { formatFinetuningType } from '@studio/util/customizations';
 import { type FC, useState } from 'react';

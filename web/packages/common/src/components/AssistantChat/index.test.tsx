@@ -10,6 +10,7 @@ import {
 import { AssistantChatThread } from '@nemo/common/src/components/AssistantChat/AssistantChatThread';
 import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import { AssistantChat } from '@nemo/common/src/components/AssistantChat/index';
+import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
 import {
   ThemeProvider as KaizenThemeProvider,
   TooltipProvider,
@@ -138,7 +139,9 @@ interface CompletionRequestWithSignal {
 const renderAssistantChat = (element: ReactElement) =>
   render(
     <KaizenThemeProvider className="h-full" density="standard" theme="light">
-      <TooltipProvider>{element}</TooltipProvider>
+      <MockToastProvider>
+        <TooltipProvider>{element}</TooltipProvider>
+      </MockToastProvider>
     </KaizenThemeProvider>
   );
 
@@ -877,15 +880,19 @@ describe('AssistantChat', () => {
   });
 
   it.each([
-    { outcome: 'copied', writeText: () => Promise.resolve(), tooltip: 'Copy' },
+    {
+      outcome: 'copied',
+      writeText: () => Promise.resolve(),
+      toast: 'Successfully copied to clipboard!',
+    },
     {
       outcome: 'blocked',
       writeText: () => Promise.reject(new Error('denied')),
-      tooltip: 'Could not copy: clipboard access was blocked',
+      toast: 'Error copying text to clipboard',
     },
   ])(
     'copies the raw error from the details row when the clipboard is $outcome',
-    async ({ writeText, tooltip }) => {
+    async ({ writeText, toast }) => {
       const user = userEvent.setup({ delay: null });
       const writeTextMock = vi.fn(writeText);
       vi.spyOn(navigator, 'clipboard', 'get').mockReturnValue({
@@ -907,12 +914,10 @@ describe('AssistantChat', () => {
 
       const details = await screen.findByTestId('assistant-chat-error-details');
       await user.click(within(details).getByText('Show details'));
-      const copyButton = within(details).getByRole('button', { name: 'Copy' });
-      await user.click(copyButton);
-      await user.hover(copyButton);
+      await user.click(within(details).getByRole('button', { name: 'Copy' }));
 
       expect(writeTextMock).toHaveBeenCalledWith('502 Bad Gateway');
-      expect(await screen.findAllByText(tooltip)).not.toHaveLength(0);
+      expect(await screen.findByText(toast)).toBeInTheDocument();
     }
   );
 
