@@ -204,7 +204,7 @@ describe('Routes', () => {
       async (tasksets, evals, expected) => {
         vi.stubEnv('VITE_FF_TASKSETS_ENABLED', tasksets);
         vi.stubEnv('VITE_FF_EVALS_ENABLED', evals);
-        const { routes } = await import('./index');
+        const { routes } = await import('@studio/routes/index');
         [ROUTES.workspace.tasksets, ROUTES.workspace.tasksetDetail].forEach((route) => {
           expect(findIfRouteExists(routes, route)).toBe(expected);
         });
