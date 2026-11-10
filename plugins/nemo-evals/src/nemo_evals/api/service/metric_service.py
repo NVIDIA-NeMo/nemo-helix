@@ -31,6 +31,7 @@ from nemo_evals.api.schemas import (
 )
 from nemo_evals.entities import MetricBundleEntity
 from nemo_evals.metric_storage import delete_bundle_by_id, store_bundle
+from nemo_evals.schema_migrations import migrate_schema_metric
 from nemo_evals.shared.metric_bundles.bundles import MetricBundle as RuntimeMetricBundle
 from nemo_evals.shared.metric_bundles.cloudpickle import CLOUDPICKLE_KIND, require_cloudpickle_metrics_allowed
 from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
@@ -142,7 +143,11 @@ def _require_payload_allowed(metric: MetricInline) -> None:
 class MetricService:
     """Service layer for stored metric CRUD."""
 
-    def __init__(self, entity_client: NemoEntitiesClientProtocol[MetricBundleEntity], files_client: AsyncFilesClient):
+    def __init__(
+        self,
+        entity_client: NemoEntitiesClientProtocol[MetricBundleEntity],
+        files_client: AsyncFilesClient,
+    ):
         self.entity_client = entity_client
         self.files_client = files_client
 
@@ -285,13 +290,14 @@ class MetricService:
             filter=None,
         )
 
-    async def delete_metric(self, workspace: str, name: str) -> bool:
+    async def delete_metric(self, workspace: str, name: str, *, files_metadata_client: AsyncFilesClient) -> bool:
         """Delete a stored metric and its backing bundle. Returns False if not found."""
         try:
             entity = await self.entity_client.get(MetricBundleEntity, workspace=workspace, name=name)
         except NemoEntityNotFoundError:
             return False
 
+        entity = await migrate_schema_metric(entity, files_client=files_metadata_client)
         try:
             await self.entity_client.delete_by_id(MetricBundleEntity, entity.id, expected_db_version=entity.db_version)
         except NemoEntityNotFoundError:

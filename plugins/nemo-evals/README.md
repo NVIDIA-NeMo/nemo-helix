@@ -27,6 +27,14 @@ update external service-identity and job-source filters. Existing classes, types
 permissions, and entity kinds retain their names. Older jobs remain stored in the
 core Jobs service but do not appear in lists filtered by the new sources.
 
+## Fileset cleanup
+
+Metric bundles, taskset plans, and registered-agent snapshots retain their fileset IDs
+for cleanup. Cleanup uses a recorded ID even if another fileset reuses the name. Older
+name-only records capture the current allocation ID during supported mutations or cleanup;
+this cannot recover the original allocation if its name was already reused. Missing
+filesets need no cleanup, and cleanup failures are logged.
+
 ## Registered plugin interfaces
 
 | Surface | Entry point | Behavior |

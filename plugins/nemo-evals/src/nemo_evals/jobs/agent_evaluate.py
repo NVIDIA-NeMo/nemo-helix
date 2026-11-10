@@ -45,10 +45,7 @@ from nemo_evals.jobs.agent_compiler import (
     _secret_refs,
     compile_agent_eval_job,
 )
-from nemo_evals.jobs.agent_files_snapshot import (
-    discard_registered_agent_files,
-    discard_registered_agent_files_sync,
-)
+from nemo_evals.jobs.agent_files_snapshot import discard_registered_agent_files
 from nemo_evals.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
@@ -98,6 +95,7 @@ from nemo_evals.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
 from nemo_evals.jobs.kinds.types import PrepareContext, SubmitContext, TaskKindAdapter
 from nemo_evals.jobs.metric_resolution import gateway_models_as_job
 from nemo_evals.jobs.publication import publish_agent_eval_result
+from nemo_evals.jobs.registered_agent_cleanup import discard_snapshot_sync
 from nemo_evals.jobs.registered_agent_resolution import (
     expand_mcp_secret_env,
     resolve_registered_agent,
@@ -814,13 +812,8 @@ class _AgentEvalJobBase(NemoJob):
 
         # The run is complete and its bundle durable; the files snapshot taken at submit has served its
         # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.
-        snapshot = (
-            registered_agent_files_receipt(spec.target)
-            if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
-            else None
-        )
-        if snapshot is not None and self.discard_agent_files:
-            discard_registered_agent_files_sync(platform_client, snapshot)
+        if self.discard_agent_files:
+            discard_snapshot_sync(spec.target, platform_client)
 
         return output
 

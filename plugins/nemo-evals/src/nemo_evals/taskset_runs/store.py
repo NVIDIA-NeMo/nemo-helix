@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Protocol, Self, cast
 
 from nemo_evals._fileset_receipt import FilesetReceipt
+from nemo_evals.schema_migrations import migrate_schema_taskset_run
 from nemo_evals.taskset_runs.entities import (
     TERMINAL_RUN_PHASES,
     MemberPhase,
@@ -494,6 +495,11 @@ class TasksetRunStore:
                 return runs
             page += 1
 
+    async def _update_run(self, run: TasksetRunEntity) -> TasksetRunEntity:
+        """Pin a legacy plan's allocation in the same versioned write as the mutation."""
+        run = await migrate_schema_taskset_run(run, files_client=self.files_client)
+        return await self.entity_client.update(run)
+
     async def set_state(
         self,
         run: TasksetRunEntity,
@@ -520,7 +526,7 @@ class TasksetRunStore:
             update["error"] = error
         if not update:
             return run
-        return await self.entity_client.update(run.model_copy(update=update))
+        return await self._update_run(run.model_copy(update=update))
 
     async def start(self, run: TasksetRunEntity, *, now: datetime) -> TasksetRunEntity:
         """The run's first slot: start its execution clock; one versioned write, before its first create intent.
@@ -539,7 +545,7 @@ class TasksetRunStore:
             "execution_deadline_at": execution,
             "finalization_deadline_at": finalization,
         }
-        return await self.entity_client.update(run.model_copy(update=update))
+        return await self._update_run(run.model_copy(update=update))
 
     async def request_cancel(self, workspace: str, run_id: str, *, now: datetime) -> TasksetRunEntity:
         """Record the intent to cancel: one versioned write of ``cancel_requested_at``, and nothing else.
@@ -564,7 +570,7 @@ class TasksetRunStore:
             if run.phase in TERMINAL_RUN_PHASES:
                 raise RunAlreadyFinished(run_id, run.phase)
             try:
-                return await self.entity_client.update(run.model_copy(update={"cancel_requested_at": now}))
+                return await self._update_run(run.model_copy(update={"cancel_requested_at": now}))
             except NemoEntityConflictError:
                 continue  # the controller wrote first; re-read and keep its fields
         raise CancelContended(run_id)
