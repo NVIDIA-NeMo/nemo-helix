@@ -198,6 +198,10 @@ def _delegated_principal_headers(on_behalf_of: str | RuntimePrincipal) -> dict[s
         headers["X-NHX-Subject-Account-Id"] = effective.account_id
     if effective.authz_aliases:
         headers["X-NHX-Subject-Aliases"] = ",".join(effective.authz_aliases)
+    # getattr: principals from an older nhx-common have no access_key_jti.
+    access_key_jti = getattr(effective, "access_key_jti", None)
+    if access_key_jti:
+        headers["X-NHX-Subject-Access-Key-Jti"] = access_key_jti
     return headers
 
 

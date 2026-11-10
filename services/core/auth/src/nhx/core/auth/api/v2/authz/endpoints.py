@@ -10,6 +10,11 @@ from nemo_helix_plugin.iam.types import AuthzErrorResponse, AuthzRequest, AuthzR
 from nhx.common.config import get_service_config
 from nhx.common.entities import EntityClient
 from nhx.common.service.dependencies import get_entity_client
+from nhx.core.auth.app.access_key_workspace_limits import (
+    ACCESS_KEY_WORKSPACES_FIELD,
+    AccessKeyWorkspaceLimitUnavailableError,
+    resolve_access_key_workspaces,
+)
 from nhx.core.auth.app.account_resolution import (
     AccountResolutionError,
     ServicePrincipalNotAllowedError,
@@ -34,6 +39,7 @@ logger = logging.getLogger(__name__)
     responses={
         400: {"model": AuthzErrorResponse, "description": "Invalid entrypoint"},
         500: {"description": "Policy evaluation error"},
+        503: {"description": "Access key workspace limits could not be read"},
     },
     summary="Evaluate authorization policy",
     description="""
@@ -95,10 +101,19 @@ async def evaluate_policy(
             await load_policy_data(entity_client)
 
         account_context = await resolve_authz_account_context(request.input, config)
-        enriched_input = {**request.input, **account_context.to_policy_fields()}
+        access_key_workspaces = await resolve_access_key_workspaces(entrypoint, request.input)
+        # Always set, so a caller can't supply its own value.
+        enriched_input = {
+            **request.input,
+            **account_context.to_policy_fields(),
+            ACCESS_KEY_WORKSPACES_FIELD: access_key_workspaces,
+        }
 
         result = evaluate(entrypoint, enriched_input)
-        return AuthzResponse(result={**result, **account_context.to_policy_fields()})
+        response = {**result, **account_context.to_policy_fields()}
+        if access_key_workspaces is not None:
+            response[ACCESS_KEY_WORKSPACES_FIELD] = access_key_workspaces
+        return AuthzResponse(result=response)
 
     except ServicePrincipalNotAllowedError as e:
         logger.warning("Service principal resolution failed closed: %s", e)
@@ -106,6 +121,8 @@ async def evaluate_policy(
     except AccountResolutionError as e:
         logger.warning("Account resolution failed: %s", e)
         raise HTTPException(status_code=403, detail=str(e)) from e
+    except AccessKeyWorkspaceLimitUnavailableError as e:
+        raise HTTPException(status_code=503, detail="Access key workspace limits are unavailable") from e
 
     except PolicyEngineError as e:
         logger.error("Policy engine error: %s", e)

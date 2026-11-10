@@ -46,11 +46,13 @@ PRINCIPAL_OBO_GROUPS_HEADER = "X-NHX-Principal-On-Behalf-Of-Groups"
 PRINCIPAL_OBO_EMAIL_HEADER = "X-NHX-Principal-On-Behalf-Of-Email"
 SUBJECT_ACCOUNT_ID_HEADER = "X-NHX-Subject-Account-Id"
 SUBJECT_ALIASES_HEADER = "X-NHX-Subject-Aliases"
+SUBJECT_ACCESS_KEY_JTI_HEADER = "X-NHX-Subject-Access-Key-Jti"
 DELEGATED_PRINCIPAL_HEADERS = (
     PRINCIPAL_OBO_GROUPS_HEADER,
     PRINCIPAL_OBO_EMAIL_HEADER,
     SUBJECT_ACCOUNT_ID_HEADER,
     SUBJECT_ALIASES_HEADER,
+    SUBJECT_ACCESS_KEY_JTI_HEADER,
 )
 
 SyncRequestHook = Callable[[httpx.Request], None]
@@ -355,6 +357,8 @@ def delegated_principal_headers(principal: str | Principal) -> dict[str, str]:
         headers[SUBJECT_ACCOUNT_ID_HEADER] = effective_principal.account_id
     if effective_principal.authz_aliases:
         headers[SUBJECT_ALIASES_HEADER] = ",".join(effective_principal.authz_aliases)
+    if effective_principal.access_key_jti:
+        headers[SUBJECT_ACCESS_KEY_JTI_HEADER] = effective_principal.access_key_jti
     return headers
 
 

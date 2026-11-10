@@ -66,6 +66,7 @@ Use embedded for new deployments and when you do not already have an OPA fleet.
 - An external OPA sidecar (or server) fetches policy bundles from the auth service and evaluates requests.
 - Set `policy_decision_point_base_url` to the OPA service URL (e.g., `http://opa:8181`).
 - `bundle_cache_seconds` controls how long OPA caches the bundle.
+- Workspace-limited Scoped Access Keys are rejected, because an external OPA never calls the auth service that enforces their limits. The service account's other keys and jobs aren't denied here, so switch to this mode before issuing limited keys.
 
 Use external OPA when you already use OPA for other services or need a single policy engine at the edge.
 

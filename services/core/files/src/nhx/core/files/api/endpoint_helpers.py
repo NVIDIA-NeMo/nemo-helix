@@ -315,6 +315,8 @@ _REQUEST_PRINCIPAL_HEADERS = (
     "X-NHX-Principal-On-Behalf-Of-Groups",
     "X-NHX-Subject-Account-Id",
     "X-NHX-Subject-Aliases",
+    "X-NHX-Access-Key-Jti",
+    "X-NHX-Subject-Access-Key-Jti",
 )
 
 
@@ -329,6 +331,7 @@ def delegated_secrets_client(client: AsyncNemoClient, auth_client: AuthClient) -
         on_behalf_of_groups=effective_principal.groups,
         on_behalf_of_account_id=effective_principal.account_id,
         on_behalf_of_authz_aliases=effective_principal.authz_aliases,
+        on_behalf_of_access_key_jti=effective_principal.access_key_jti,
     )
     headers = {name: "" for name in _REQUEST_PRINCIPAL_HEADERS}
     headers.update(MARK_INTERNAL_REQUEST_HEADERS)

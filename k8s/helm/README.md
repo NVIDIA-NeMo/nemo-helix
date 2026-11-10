@@ -409,7 +409,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | envoyProxy.adminPort | int | `9901` | Envoy Admin port |
 | envoyProxy.affinity | object | `{}` | Affinity configuration for the Envoy pods. |
 | envoyProxy.annotations | object | `{}` | Annotations to add to the Envoy service deployment. |
-| envoyProxy.autoscaling | object | [See values.yaml](values.yaml#L1488) | Specifies autoscaling configurations for the deployment. |
+| envoyProxy.autoscaling | object | [See values.yaml](values.yaml#L1490) | Specifies autoscaling configurations for the deployment. |
 | envoyProxy.autoscaling.annotations | object | `{}` | Annotations for the HorizontalPodAutoscaler. |
 | envoyProxy.autoscaling.enabled | bool | `false` | Whether to enable horizontal pod autoscaler. |
 | envoyProxy.autoscaling.maxReplicas | int | `10` | The maximum number of replicas for the deployment. |
@@ -422,25 +422,25 @@ For the complete default values, see [values.yaml](values.yaml).
 | envoyProxy.extraVolumeMounts | list | `[]` | Additional volume mounts to add to the Envoy container. |
 | envoyProxy.extraVolumes | list | `[]` | Additional volumes to add to the Envoy pod. |
 | envoyProxy.image.digest | string | `""` | Optional image digest. When set, the Envoy image renders as repository@digest. |
-| envoyProxy.livenessProbe | object | [See values.yaml](values.yaml#L1449) | Liveness probe for the Envoy container (admin interface /ready). |
+| envoyProxy.livenessProbe | object | [See values.yaml](values.yaml#L1451) | Liveness probe for the Envoy container (admin interface /ready). |
 | envoyProxy.nodeSelector | object | `{}` | Node selector configuration for the Envoy pods. |
 | envoyProxy.podAnnotations | object | `{}` | Annotations to add to the Envoy service pod. |
-| envoyProxy.podDisruptionBudget | object | [See values.yaml](values.yaml#L1475) | PodDisruptionBudget configuration for the Envoy service. |
+| envoyProxy.podDisruptionBudget | object | [See values.yaml](values.yaml#L1477) | PodDisruptionBudget configuration for the Envoy service. |
 | envoyProxy.podDisruptionBudget.annotations | object | `{}` | Annotations for the PodDisruptionBudget. |
 | envoyProxy.podDisruptionBudget.enabled | bool | `false` | Whether to create a PodDisruptionBudget for the Envoy pods. |
 | envoyProxy.podDisruptionBudget.minAvailable | int | `1` | Minimum number of Envoy pods that must remain available during voluntary disruptions. Only one of minAvailable or maxUnavailable may be set. |
 | envoyProxy.podLabels | object | `{}` | Labels for the Envoy service pod. |
-| envoyProxy.podSecurityContext | object | [See values.yaml](values.yaml#L1409) | Pod-level security context settings for the Envoy service. |
+| envoyProxy.podSecurityContext | object | [See values.yaml](values.yaml#L1411) | Pod-level security context settings for the Envoy service. |
 | envoyProxy.podSecurityContext.fsGroup | int | `1000` | The file system group ID to use for all containers. |
-| envoyProxy.readinessProbe | object | [See values.yaml](values.yaml#L1457) | Readiness probe for the Envoy container (admin interface /ready). |
+| envoyProxy.readinessProbe | object | [See values.yaml](values.yaml#L1459) | Readiness probe for the Envoy container (admin interface /ready). |
 | envoyProxy.resources | object | `{}` | Kubernetes deployment resources configuration for the Envoy service. Utilization-based autoscaling requires a matching resource request. |
 | envoyProxy.securityContext | object | `{}` | Container-level security context settings for the Envoy service. |
-| envoyProxy.service | object | [See values.yaml](values.yaml#L1416) | Service configuration for the Envoy service. |
+| envoyProxy.service | object | [See values.yaml](values.yaml#L1418) | Service configuration for the Envoy service. |
 | envoyProxy.service.annotations | object | `{}` | Annotations for the Envoy service. |
 | envoyProxy.service.exposeAdminPort | bool | `false` | Expose the Envoy admin port through the Kubernetes Service. Enable only for controlled in-cluster scraping or debugging. |
 | envoyProxy.service.port | int | `8080` | The port number to expose for the service. |
 | envoyProxy.service.type | string | `"ClusterIP"` | The Kubernetes service type to create. |
-| envoyProxy.serviceAccount | object | [See values.yaml](values.yaml#L1392) | Service account configuration for the Envoy service. |
+| envoyProxy.serviceAccount | object | [See values.yaml](values.yaml#L1394) | Service account configuration for the Envoy service. |
 | envoyProxy.serviceAccount.annotations | object | `{}` | Annotations to add to the service account. |
 | envoyProxy.serviceAccount.automount | bool | `true` | Automatically mount a ServiceAccount's API credentials. |
 | envoyProxy.serviceAccount.create | bool | `true` | Specifies whether a service account should be created. |
@@ -450,8 +450,8 @@ For the complete default values, see [values.yaml](values.yaml).
 | envoyProxy.serviceMonitor.interval | string | `"30s"` | Scrape interval for the ServiceMonitor |
 | envoyProxy.serviceMonitor.labels | object | `{}` | Additional labels to add to the ServiceMonitor |
 | envoyProxy.serviceMonitor.scheme | string | `"http"` | Scheme to use for scraping metrics (http or https) |
-| envoyProxy.startupProbe | object | [See values.yaml](values.yaml#L1465) | Startup probe for the Envoy container (admin interface /ready). |
-| envoyProxy.timeouts | object | [See values.yaml](values.yaml#L1431) | Timeouts for proxying to long-lived streams (e.g. inference gateway). Use "0s" to disable a timeout. |
+| envoyProxy.startupProbe | object | [See values.yaml](values.yaml#L1467) | Startup probe for the Envoy container (admin interface /ready). |
+| envoyProxy.timeouts | object | [See values.yaml](values.yaml#L1433) | Timeouts for proxying to long-lived streams (e.g. inference gateway). Use "0s" to disable a timeout. |
 | envoyProxy.timeouts.connect | string | `"30s"` | Cluster connect timeout (time to establish connection to backend). |
 | envoyProxy.timeouts.request | string | `"0s"` | Total request timeout. 0 = disabled (required for streaming; not compatible with streaming if set). |
 | envoyProxy.timeouts.requestHeaders | string | `"60s"` | Time to receive full request headers. 0 = disabled. |

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from nhx.core.entities.entities import Entity, Workspace, WorkspaceDeletionStage
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.engine.default import DefaultExecutionContext
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -289,4 +289,25 @@ class DBAccountCredential(Base):
         Index("idx_account_credentials_identity", "account_identity_id"),
         Index("idx_account_credentials_type_status", "credential_type", "status"),
         Index("idx_account_credentials_expires", "expires_at"),
+        Index("idx_account_credentials_type_issued", "credential_type", text("issued_at DESC"), "id"),
+    )
+
+
+class DBAccessKeyWorkspace(Base):
+    """A workspace a workspace-limited Scoped Access Key may be used in.
+
+    Rows hold immutable workspace IDs and are written with the credential. They have no foreign key to
+    workspaces, so deleting a workspace leaves the row and a recreated workspace with the same name gets a new ID.
+    """
+
+    __tablename__ = "access_key_workspaces"
+
+    credential_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("account_credentials.id", ondelete="CASCADE"), primary_key=True
+    )
+    workspace_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = (
+        Index("idx_access_key_workspaces_workspace_issued", "workspace_id", text("issued_at DESC"), "credential_id"),
     )

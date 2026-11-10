@@ -52,7 +52,7 @@ NeMo Helix supports two authentication modes: **service-level** bearer-token val
 
 In both modes, identity arrives in the `Authorization: Bearer <token>` header. The bearer token is validated exactly once — either by the first NeMo Helix service or by the auth service behind the gateway callout. After validation, the authenticated identity (email, subject, groups) is propagated to downstream services via **trusted `X-NHX-Principal-*` headers**. Downstream services accept these headers without re-validating the token, but they still run authorization checks.
 
-This "validate once, propagate via headers" design means that **network perimeter security is critical**: anything inside the trust boundary that receives `X-NHX-Principal-*` headers will trust them unconditionally. The gateway must strip these headers from all incoming external requests to prevent clients from forging an identity. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
+This "validate once, propagate via headers" design means that **network perimeter security is critical**: anything inside the trust boundary that receives `X-NHX-Principal-*` headers will trust them unconditionally. The gateway must strip these headers, and the other trusted `X-NHX-*` headers listed in [Gateway Integration](/documentation/access-control/deployment/gateway-integration), from all incoming external requests to prevent clients from forging an identity.
 
 ### Service-Level Authentication
 
@@ -105,6 +105,7 @@ The following headers carry the authenticated identity through the system:
 | `X-NHX-Principal-Email` | The principal's email address, when the authenticated token has one. |
 | `X-NHX-Principal-Groups` | Comma-separated list of groups the principal belongs to, when the authenticated token has group claims. |
 | `X-NHX-Scopes` | Space-separated list of token scopes, when the authenticated token has a `scp` or `scope` claim. Used by the PDP for scope-based authorization checks. |
+| `X-NHX-Access-Key-Jti` | ID of the Scoped Access Key, when the bearer token is one. The PDP uses it to apply a service-account key's workspace limit. |
 
 These headers are set after bearer-token validation and forwarded on every internal service-to-service call. As described in [Authentication Modes](#authentication-modes), services inside the trust boundary accept them unconditionally — they are never re-validated. Services still call the PDP for authorization when `auth.enabled=true`.
 
@@ -141,7 +142,7 @@ PDP endpoints under `/apis/auth/v2/authz/` are the exception: service principals
 
 <Note>
 
-Service principals rely on perimeter security — the gateway strips `X-NHX-Principal-*` headers from incoming requests, so external callers cannot forge a `service:` identity. The gateway must also block external access to `/internal/*` paths. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
+Service principals rely on perimeter security — the gateway strips the trusted `X-NHX-*` headers from incoming requests, so external callers cannot forge a `service:` identity. The gateway must also block external access to `/internal/*` paths. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
 
 </Note>
 #### On-Behalf-Of Delegation
@@ -174,6 +175,12 @@ Many NeMo Helix operations — customization, evaluation, synthetic data generat
 Job containers need to run inside the trust boundary. In token-exchange mode, managed jobs call NeMo Helix APIs with delegated bearer tokens obtained through workload identity token exchange. In trusted-header mode, callers use the propagated identity headers. In both modes, jobs act as the submitting user and remain subject to the same authorization checks as any other caller.
 
 </Note>
+
+<Warning>
+
+Once a service account has been issued a workspace-limited Scoped Access Key, only its limited keys work, and only in their workspaces. Its unlimited keys are denied, as are the jobs and model deployments it starts, including ones already running. Revoking or expiring the limited key doesn't undo this, because stored job and deployment contexts don't keep a key ID. Issue limited keys to a separate service account.
+
+</Warning>
 ## Authorization: Workspace-Scoped RBAC
 
 NeMo Helix uses **workspace-scoped Role-Based Access Control (RBAC)**. All resources (models, datasets, jobs, evaluations) belong to exactly one workspace, and access is controlled at the workspace level — not per-resource.

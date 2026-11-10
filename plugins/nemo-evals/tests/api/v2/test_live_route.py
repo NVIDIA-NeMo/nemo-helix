@@ -426,6 +426,7 @@ def _delegated_service_client(monkeypatch: pytest.MonkeyPatch, service_secrets_c
         yield service_secrets_client
 
     monkeypatch.setattr(api_dependencies, "current_auth_context", lambda: _EDITOR)
+    monkeypatch.setattr(api_dependencies, "current_request_principal", _EDITOR.to_principal)
     monkeypatch.setattr(api_dependencies, "get_async_nemo_client", fake_get_async_nemo_client)
     return calls
 

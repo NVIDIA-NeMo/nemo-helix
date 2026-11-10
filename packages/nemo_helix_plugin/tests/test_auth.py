@@ -123,3 +123,29 @@ def test_service_principal_id_fallback_without_nhx_common(
     monkeypatch.delattr(nhx_common_auth, "is_service_principal")
 
     assert is_service_principal_id(principal_id) is expected
+
+
+def test_current_request_principal_keeps_the_access_key_id():
+    from nemo_helix_plugin.auth import current_request_principal
+
+    jti = "ak_" + "b" * 32
+    principal = Principal(id="service-account:ci", access_key_jti=jti)
+    token = auth_client_context.set(AuthClient(principal=principal, config=AuthConfig(enabled=True)))
+    try:
+        returned = current_request_principal()
+    finally:
+        auth_client_context.reset(token)
+
+    assert returned is principal
+    assert returned.access_key_jti == jti
+
+
+def test_current_request_principal_is_none_without_a_request_principal():
+    from nemo_helix_plugin.auth import current_request_principal
+
+    assert current_request_principal() is None
+    token = auth_client_context.set(AuthClient(principal=Principal(), config=AuthConfig(enabled=True)))
+    try:
+        assert current_request_principal() is None
+    finally:
+        auth_client_context.reset(token)

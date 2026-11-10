@@ -12,6 +12,7 @@ import re
 from typing import Dict, List, Literal, Optional, Self
 from urllib.parse import quote
 
+from nemo_helix_plugin.auth.access_keys.types import ACCESS_KEY_JTI_PATTERN
 from pydantic import BaseModel, Field, ValidationError
 
 from .exceptions import InvalidPrincipalHeader
@@ -36,6 +37,7 @@ MAX_AUTHZ_ALIAS_LENGTH = 256
 MAX_AUTHZ_ALIASES_COUNT = 100
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+$")
+ACCESS_KEY_JTI_RE = re.compile(ACCESS_KEY_JTI_PATTERN)
 
 CallerKind = Literal["principal", "service_principal"]
 
@@ -107,6 +109,16 @@ def _optional_principal_id_from_headers(headers: Dict[str, str], header_key: str
     return value
 
 
+def _access_key_jti_from_headers(headers: Dict[str, str], header_key: str, header_label: str) -> str | None:
+    raw = headers.get(header_key)
+    if raw is None or not raw.strip():
+        return None
+    jti = raw.strip()
+    if not ACCESS_KEY_JTI_RE.match(jti):
+        raise InvalidPrincipalHeader(f"{header_label} is not a valid access key ID")
+    return jti
+
+
 def _principal_aliases_from_headers(headers: Dict[str, str], header_key: str, header_label: str) -> list[str]:
     aliases_header = headers.get(header_key, "")
     if not aliases_header:
@@ -173,6 +185,14 @@ class Principal(BaseModel):
         default_factory=list,
         description="Alternate trusted identifiers for the on-behalf-of principal",
     )
+    access_key_jti: Optional[str] = Field(
+        None,
+        description="ID (jti) of the Scoped Access Key that authenticated this principal",
+    )
+    on_behalf_of_access_key_jti: Optional[str] = Field(
+        None,
+        description="ID (jti) of the Scoped Access Key that authenticated the on-behalf-of principal",
+    )
 
     @property
     def caller_kind(self) -> CallerKind:
@@ -215,6 +235,13 @@ class Principal(BaseModel):
         return list(self.authz_aliases)
 
     @property
+    def effective_access_key_jti(self) -> Optional[str]:
+        """The acting user's Scoped Access Key ID, when it authenticated with one."""
+        if self.on_behalf_of:
+            return self.on_behalf_of_access_key_jti
+        return self.access_key_jti
+
+    @property
     def effective_principal(self) -> Principal:
         """The acting user's principal: on_behalf_of principal if delegated, otherwise the principal's own principal."""
         return Principal(
@@ -223,6 +250,7 @@ class Principal(BaseModel):
             email=self.effective_email,
             account_id=self.effective_account_id,
             authz_aliases=self.effective_authz_aliases,
+            access_key_jti=self.effective_access_key_jti,
         )
 
     @property
@@ -274,10 +302,12 @@ class Principal(BaseModel):
             "x-nhx-actor-aliases",
             "X-NHX-Actor-Aliases",
         )
+        access_key_jti = _access_key_jti_from_headers(headers, "x-nhx-access-key-jti", "X-NHX-Access-Key-Jti")
         on_behalf_of_groups: Optional[List[str]] = None
         on_behalf_of_email: Optional[str] = None
         on_behalf_of_account_id: Optional[str] = None
         on_behalf_of_authz_aliases: List[str] = []
+        on_behalf_of_access_key_jti: Optional[str] = None
 
         on_behalf_of = headers.get("x-nhx-principal-on-behalf-of")
         if on_behalf_of is not None:
@@ -307,7 +337,16 @@ class Principal(BaseModel):
                 "x-nhx-subject-aliases",
                 "X-NHX-Subject-Aliases",
             )
-        if on_behalf_of is None and (headers.get("x-nhx-subject-account-id") or headers.get("x-nhx-subject-aliases")):
+            on_behalf_of_access_key_jti = _access_key_jti_from_headers(
+                headers,
+                "x-nhx-subject-access-key-jti",
+                "X-NHX-Subject-Access-Key-Jti",
+            )
+        if on_behalf_of is None and (
+            headers.get("x-nhx-subject-account-id")
+            or headers.get("x-nhx-subject-aliases")
+            or headers.get("x-nhx-subject-access-key-jti")
+        ):
             raise InvalidPrincipalHeader(
                 "X-NHX-Principal-On-Behalf-Of is required when delegated account headers are present"
             )
@@ -323,6 +362,8 @@ class Principal(BaseModel):
             on_behalf_of_email=on_behalf_of_email,
             on_behalf_of_account_id=on_behalf_of_account_id,
             on_behalf_of_authz_aliases=on_behalf_of_authz_aliases,
+            access_key_jti=access_key_jti,
+            on_behalf_of_access_key_jti=on_behalf_of_access_key_jti,
         )
 
     def get_headers(self) -> Dict[str, str]:
@@ -345,6 +386,9 @@ class Principal(BaseModel):
         if self.authz_aliases:
             headers["X-NHX-Actor-Aliases"] = ",".join(self.authz_aliases)
 
+        if self.access_key_jti:
+            headers["X-NHX-Access-Key-Jti"] = self.access_key_jti
+
         if self.on_behalf_of:
             headers["X-NHX-Principal-On-Behalf-Of"] = self.on_behalf_of
 
@@ -359,6 +403,9 @@ class Principal(BaseModel):
 
         if self.on_behalf_of_authz_aliases:
             headers["X-NHX-Subject-Aliases"] = ",".join(self.on_behalf_of_authz_aliases)
+
+        if self.on_behalf_of and self.on_behalf_of_access_key_jti:
+            headers["X-NHX-Subject-Access-Key-Jti"] = self.on_behalf_of_access_key_jti
 
         return headers
 
@@ -377,6 +424,7 @@ class Principal(BaseModel):
             email=self.on_behalf_of_email,
             account_id=self.on_behalf_of_account_id,
             authz_aliases=list(self.on_behalf_of_authz_aliases),
+            access_key_jti=self.on_behalf_of_access_key_jti,
         )
 
     def get_env_var(self, env_var_name: str = NHX_PRINCIPAL_ENVVAR) -> Dict[str, str]:
@@ -413,6 +461,9 @@ class Principal(BaseModel):
             aliases_value = ",".join(self.authz_aliases)
             parts.append(f"X-NHX-Actor-Aliases={quote(aliases_value, safe='')}")
 
+        if self.access_key_jti:
+            parts.append(f"X-NHX-Access-Key-Jti={quote(self.access_key_jti, safe='')}")
+
         if self.on_behalf_of:
             parts.append(f"X-NHX-Principal-On-Behalf-Of={quote(self.on_behalf_of, safe='')}")
 
@@ -429,6 +480,9 @@ class Principal(BaseModel):
         if self.on_behalf_of_authz_aliases:
             aliases_value = ",".join(self.on_behalf_of_authz_aliases)
             parts.append(f"X-NHX-Subject-Aliases={quote(aliases_value, safe='')}")
+
+        if self.on_behalf_of and self.on_behalf_of_access_key_jti:
+            parts.append(f"X-NHX-Subject-Access-Key-Jti={quote(self.on_behalf_of_access_key_jti, safe='')}")
 
         return ",".join(parts)
 

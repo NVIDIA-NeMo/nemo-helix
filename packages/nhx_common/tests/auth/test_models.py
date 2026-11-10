@@ -862,3 +862,82 @@ class TestPrincipalHeaderValidation:
         }
         with pytest.raises(InvalidPrincipalHeader, match="X-NHX-Principal-Id"):
             Principal.from_headers(headers)
+
+
+ACTOR_KEY_JTI = "ak_" + "a" * 32
+SUBJECT_KEY_JTI = "ak_" + "b" * 32
+
+
+class TestPrincipalAccessKeyJti:
+    """The Scoped Access Key ID travels with the principal so the PDP can apply the key's workspace limit."""
+
+    def test_headers_round_trip_actor_and_subject_key_ids(self):
+        principal = Principal(
+            id="service:jobs",
+            access_key_jti=ACTOR_KEY_JTI,
+            on_behalf_of="service-account:ci",
+            on_behalf_of_access_key_jti=SUBJECT_KEY_JTI,
+        )
+
+        headers = principal.get_headers()
+
+        assert headers["X-NHX-Access-Key-Jti"] == ACTOR_KEY_JTI
+        assert headers["X-NHX-Subject-Access-Key-Jti"] == SUBJECT_KEY_JTI
+        parsed = Principal.from_headers(headers)
+        assert parsed is not None
+        assert parsed.access_key_jti == ACTOR_KEY_JTI
+        assert parsed.on_behalf_of_access_key_jti == SUBJECT_KEY_JTI
+
+    def test_otlp_headers_carry_key_ids(self):
+        principal = Principal(
+            id="service:jobs",
+            access_key_jti=ACTOR_KEY_JTI,
+            on_behalf_of="service-account:ci",
+            on_behalf_of_access_key_jti=SUBJECT_KEY_JTI,
+        )
+
+        value = principal.get_otlp_headers_value()
+
+        assert f"X-NHX-Access-Key-Jti={ACTOR_KEY_JTI}" in value
+        assert f"X-NHX-Subject-Access-Key-Jti={SUBJECT_KEY_JTI}" in value
+
+    def test_from_headers_rejects_malformed_key_id(self):
+        with pytest.raises(InvalidPrincipalHeader, match="X-NHX-Access-Key-Jti"):
+            Principal.from_headers({"x-nhx-principal-id": "service-account:ci", "x-nhx-access-key-jti": "ak_bad"})
+
+    def test_from_headers_rejects_subject_key_id_without_delegation(self):
+        with pytest.raises(InvalidPrincipalHeader, match="On-Behalf-Of is required"):
+            Principal.from_headers(
+                {"x-nhx-principal-id": "service:jobs", "x-nhx-subject-access-key-jti": SUBJECT_KEY_JTI}
+            )
+
+    def test_effective_principal_and_on_behalf_of_keep_the_subject_key_id(self):
+        principal = Principal(
+            id="service:jobs",
+            on_behalf_of="service-account:ci",
+            on_behalf_of_access_key_jti=SUBJECT_KEY_JTI,
+        )
+
+        assert principal.effective_principal.access_key_jti == SUBJECT_KEY_JTI
+        assert principal.to_on_behalf_of().access_key_jti == SUBJECT_KEY_JTI
+
+    def test_effective_principal_keeps_own_key_id_when_not_delegated(self):
+        assert Principal(id="service-account:ci", access_key_jti=ACTOR_KEY_JTI).effective_principal.access_key_jti == (
+            ACTOR_KEY_JTI
+        )
+
+    def test_auth_context_does_not_store_key_ids(self):
+        """Stored contexts are returned by APIs, so they never hold a key ID; delegation from them fails closed."""
+        principal = Principal(
+            id="service:jobs",
+            access_key_jti=ACTOR_KEY_JTI,
+            on_behalf_of="service-account:ci",
+            on_behalf_of_access_key_jti=SUBJECT_KEY_JTI,
+        )
+
+        context = AuthContext.from_principal(principal)
+
+        assert "jti" not in context.model_dump_json()
+        restored = context.to_principal()
+        assert restored.access_key_jti is None
+        assert restored.on_behalf_of_access_key_jti is None
