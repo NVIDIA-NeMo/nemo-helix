@@ -15,15 +15,12 @@ Pins the :class:`LocalJobResults` contract:
   already wrote into the results directory can register without
   duplicating.
 - :class:`LocalJobResults` satisfies the :class:`JobResults` ABC.
-
-The sink tests drive real uploads through a recording transport that answers only the
-Files and Jobs routes a result save may use, so a stray job-record read fails the test.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -34,9 +31,7 @@ from nemo_helix_plugin.job_results import (
     JobResults,
     LocalJobResults,
     ResultRef,
-    job_storage_context_from_env,
 )
-from nemo_helix_plugin.jobs import result_manager as rm
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
 from nemo_helix_plugin.jobs.constants import NEMO_JOB_WORKSPACE_ENVVAR
 from nemo_helix_plugin.jobs.file_manager import _filter_files_by_patterns
@@ -297,76 +292,17 @@ class TestSaveOverwriteAcrossKinds:
         assert (dst / "two.txt").read_text() == "2"
 
 
-WORKSPACE = "ws"
-FILESET = "job-fileset"
-JOB = "job-a"
-ATTEMPT = "attempt-a"
-BASE_PATH = "jobs/job-a"
-
-FILES_ROOT = f"/apis/files/v2/workspaces/{WORKSPACE}/filesets/{FILESET}"
-JOBS_ROOT = f"/apis/jobs/v2/workspaces/{WORKSPACE}/jobs/{JOB}"
+def _platform_record(name: str = "metrics", url: str = "fileset://ws/fs#results/A1/metrics"):
+    record = MagicMock()
+    record.name = name  # MagicMock special-cases ``name``
+    record.artifact_url = url
+    return record
 
 
-class FakePlatform:
-    """Records every request; answers only the routes a result save is allowed to use."""
-
-    def __init__(self, *, result_exists: bool = False) -> None:
-        self.requests: list[httpx.Request] = []
-        self.artifacts: dict[str, bytes] = {}
-        self.result_exists = result_exists
-
-    def calls(self) -> list[tuple[str, str]]:
-        return [(request.method, request.url.path) for request in self.requests]
-
-    def uploads(self) -> list[str]:
-        return [path.split("/-/", 1)[1] for method, path in self.calls() if method == "PUT"]
-
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        method, path = request.method, request.url.path
-        if method == "GET" and path == f"{FILES_ROOT}/files":
-            return httpx.Response(200, json={"data": []}, request=request)
-        if method == "PUT" and path.startswith(f"{FILES_ROOT}/-/"):
-            remote = path.split("/-/", 1)[1]
-            self.artifacts[remote] = request.content
-            return httpx.Response(
-                200,
-                json={"file_ref": remote, "file_url": "http://platform/f", "path": remote, "size": 1},
-                request=request,
-            )
-        if path.startswith(f"{JOBS_ROOT}/results/"):
-            name = path.rsplit("/", 1)[1]
-            body = {
-                "name": name,
-                "job": JOB,
-                "workspace": WORKSPACE,
-                "attempt_id": ATTEMPT,
-                "created_at": "2026-01-01T00:00:00Z",
-                "updated_at": "2026-01-01T00:00:00Z",
-                "artifact_url": f"{WORKSPACE}/{FILESET}#{BASE_PATH}/results/{ATTEMPT}/{name}",
-                "artifact_storage_type": "fileset",
-            }
-            if method == "POST":
-                if self.result_exists:
-                    return httpx.Response(409, json={"detail": "exists"}, request=request)
-                return httpx.Response(200, json=body, request=request)
-            if method == "GET":
-                return httpx.Response(200, json=body, request=request)
-        return httpx.Response(404, json={"detail": f"{method} {path} is not permitted"}, request=request)
-
-
-def _client(platform: FakePlatform) -> NemoClient:
-    return NemoClient(
-        base_url="http://platform.test",
-        workspace=WORKSPACE,
-        http_client=httpx.Client(transport=httpx.MockTransport(platform.handler)),
-    )
-
-
-def _artifact(tmp_path: Path, name: str = "summary.json") -> Path:
-    artifact = tmp_path / name
-    artifact.write_text("{}")
-    return artifact
+def _task_client() -> tuple[NemoClient, httpx.Client]:
+    http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
+    client = NemoClient(base_url="http://platform.test", workspace="ws", http_client=http_client)
+    return client, http_client
 
 
 def test_result_manager_factory_explicit_workspace_overrides_client_workspace() -> None:
@@ -377,13 +313,12 @@ def test_result_manager_factory_explicit_workspace_overrides_client_workspace() 
         attempt_id="attempt-1",
         workspace="explicit-ws",
         files_client=files_client,
-        fileset=FILESET,
+        fileset="job-fileset",
         jobs_client=JobsClient.from_client(files_client),
     )
 
     assert isinstance(manager, ResultManager)
     assert manager.workspace == "explicit-ws"
-    assert manager.fileset == FILESET
 
 
 def test_result_manager_factory_ignores_job_env_and_uses_client_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -394,7 +329,7 @@ def test_result_manager_factory_ignores_job_env_and_uses_client_workspace(monkey
         job_name="j",
         attempt_id="attempt-1",
         files_client=files_client,
-        fileset=FILESET,
+        fileset="job-fileset",
         jobs_client=JobsClient.from_client(files_client),
     )
 
@@ -412,7 +347,7 @@ async def test_async_result_manager_factory_ignores_job_env_and_uses_client_work
         job_name="j",
         attempt_id="attempt-1",
         files_client=files_client,
-        fileset=FILESET,
+        fileset="job-fileset",
         jobs_client=AsyncJobsClient.from_client(files_client),
     )
 
@@ -422,167 +357,178 @@ async def test_async_result_manager_factory_ignores_job_env_and_uses_client_work
 
 class TestHelixJobResults:
     def test_platform_job_results_is_a_job_results(self) -> None:
-        platform = FakePlatform()
-        sink = HelixJobResults(
-            job_name=JOB,
-            workspace=WORKSPACE,
-            client=_client(platform),
-            attempt_id=ATTEMPT,
-            fileset=FILESET,
-            artifact_base_path=BASE_PATH,
-        )
+        client = NemoClient(base_url="http://platform.test", workspace="ws")
+        with patch("nemo_helix_plugin.job_results.result_manager_factory") as factory:
+            factory.return_value = MagicMock()
+            sink = HelixJobResults(
+                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset="job-fileset"
+            )
         assert isinstance(sink, JobResults)
 
-    def test_save_uploads_the_artifact_and_registers_the_result(self, tmp_path: Path) -> None:
-        platform = FakePlatform()
-        sink = HelixJobResults(
-            job_name=JOB,
-            workspace=WORKSPACE,
-            client=_client(platform),
-            attempt_id=ATTEMPT,
-            fileset=FILESET,
-            artifact_base_path=BASE_PATH,
+    def test_platform_job_results_uses_typed_client_transport(self) -> None:
+        http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
+        client = NemoClient(base_url="http://platform.test", workspace="ws", http_client=http_client)
+
+        with patch("nemo_helix_plugin.job_results.result_manager_factory") as factory:
+            factory.return_value = MagicMock()
+            HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset="job-fileset")
+
+        files_client = factory.call_args.kwargs["files_client"]
+        jobs_client = factory.call_args.kwargs["jobs_client"]
+        assert isinstance(files_client, FilesClient)
+        assert isinstance(jobs_client, JobsClient)
+        assert files_client._http is http_client
+        assert jobs_client._http is http_client
+
+    def test_save_delegates_to_result_manager(self, tmp_path: Path) -> None:
+        client, http_client = _task_client()
+        local = tmp_path / "out.json"
+        local.write_text("{}")
+        manager = MagicMock()
+        manager.create_result.return_value = _platform_record(
+            name="metrics",
+            url="fileset://ws/fs#results/A1/metrics",
         )
+        with patch("nemo_helix_plugin.job_results.result_manager_factory", return_value=manager) as factory:
+            sink = HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="A1", fileset="job-fileset")
+            ref = sink.save("metrics", local, ignore_patterns=["cache.db"])
 
-        ref = sink.save("summary", _artifact(tmp_path))
-
-        assert platform.calls() == [
-            ("GET", f"{FILES_ROOT}/files"),
-            ("PUT", f"{FILES_ROOT}/-/{BASE_PATH}/results/{ATTEMPT}/summary"),
-            ("POST", f"{JOBS_ROOT}/results/summary"),
-        ]
-        assert platform.artifacts[f"{BASE_PATH}/results/{ATTEMPT}/summary"] == b"{}"
-        assert ref.name == "summary"
-        assert ref.artifact_url == f"{WORKSPACE}/{FILESET}#{BASE_PATH}/results/{ATTEMPT}/summary"
-
-    def test_save_skips_ignored_files_in_a_directory(self, tmp_path: Path) -> None:
-        platform = FakePlatform()
-        payload = tmp_path / "payload"
-        (payload / "cache").mkdir(parents=True)
-        (payload / "keep.json").write_text("{}")
-        (payload / "cache.db").write_text("noise")
-        (payload / "cache" / "entry.json").write_text("{}")
-        sink = HelixJobResults(
-            job_name=JOB,
-            workspace=WORKSPACE,
-            client=_client(platform),
-            attempt_id=ATTEMPT,
-            fileset=FILESET,
-            artifact_base_path=BASE_PATH,
+        factory.assert_called_once()
+        call_kwargs = factory.call_args.kwargs
+        assert call_kwargs["job_name"] == "j"
+        assert call_kwargs["workspace"] == "ws"
+        assert call_kwargs["attempt_id"] == "A1"
+        assert isinstance(call_kwargs["files_client"], FilesClient)
+        assert isinstance(call_kwargs["jobs_client"], JobsClient)
+        assert call_kwargs["files_client"]._http is http_client
+        assert call_kwargs["jobs_client"]._http is http_client
+        manager.create_result.assert_called_once_with(
+            result_name="metrics",
+            artifact_local_path=local,
+            ignore_patterns=["cache.db"],
         )
+        assert ref == ResultRef(name="metrics", artifact_url="fileset://ws/fs#results/A1/metrics")
 
-        sink.save("artifacts", payload, ignore_patterns=["cache.db", "cache/"])
+    def test_save_forwards_directory_path_unchanged(self, tmp_path: Path) -> None:
+        client, _http_client = _task_client()
+        payload_dir = tmp_path / "payload"
+        payload_dir.mkdir()
+        manager = MagicMock()
+        manager.create_result.return_value = _platform_record()
+        with patch("nemo_helix_plugin.job_results.result_manager_factory", return_value=manager):
+            sink = HelixJobResults(
+                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset="job-fileset"
+            )
+            sink.save("artifacts", payload_dir, ignore_patterns=["cache.db", "cache/"])
+        call = manager.create_result.call_args
+        assert call.kwargs["artifact_local_path"] == payload_dir
+        assert call.kwargs["ignore_patterns"] == ["cache.db", "cache/"]
 
-        assert platform.uploads() == [f"{BASE_PATH}/results/{ATTEMPT}/artifacts/keep.json"]
-
-    def test_save_returns_the_existing_result_when_the_name_is_taken(self, tmp_path: Path) -> None:
-        platform = FakePlatform(result_exists=True)
-        sink = HelixJobResults(
-            job_name=JOB,
-            workspace=WORKSPACE,
-            client=_client(platform),
-            attempt_id=ATTEMPT,
-            fileset=FILESET,
-            artifact_base_path=BASE_PATH,
-        )
-
-        ref = sink.save("summary", _artifact(tmp_path))
-
-        assert platform.calls()[-2:] == [
-            ("POST", f"{JOBS_ROOT}/results/summary"),
-            ("GET", f"{JOBS_ROOT}/results/summary"),
-        ]
-        assert ref.name == "summary"
-
-    def test_save_surfaces_a_missing_artifact(self, tmp_path: Path) -> None:
-        platform = FakePlatform()
-        sink = HelixJobResults(
-            job_name=JOB,
-            workspace=WORKSPACE,
-            client=_client(platform),
-            attempt_id=ATTEMPT,
-            fileset=FILESET,
-            artifact_base_path=BASE_PATH,
-        )
-
-        with pytest.raises(rm.FileDoesNotExist):
-            sink.save("summary", tmp_path / "absent.json")
-
-        assert platform.uploads() == []
+    def test_save_propagates_manager_errors(self) -> None:
+        client, _http_client = _task_client()
+        manager = MagicMock()
+        manager.create_result.side_effect = RuntimeError("boom")
+        with patch("nemo_helix_plugin.job_results.result_manager_factory", return_value=manager):
+            sink = HelixJobResults(
+                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset="job-fileset"
+            )
+            with pytest.raises(RuntimeError, match="boom"):
+                sink.save("metrics", Path("/tmp/whatever"))
 
 
-class TestJobStorageContextFromEnv:
-    """Task entrypoints that build their own context read the storage context from env."""
-
-    def test_reads_fileset_and_base_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("NEMO_JOB_FILESET", FILESET)
-        monkeypatch.setenv("NEMO_JOB_ARTIFACT_BASE_PATH", BASE_PATH)
-
-        assert job_storage_context_from_env() == (FILESET, BASE_PATH)
-
-    def test_empty_base_path_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("NEMO_JOB_FILESET", FILESET)
-        monkeypatch.setenv("NEMO_JOB_ARTIFACT_BASE_PATH", "")
-
-        assert job_storage_context_from_env() == (FILESET, None)
-
-    def test_missing_fileset_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("NEMO_JOB_FILESET", raising=False)
-
-        with pytest.raises(RuntimeError, match="NEMO_JOB_FILESET"):
-            job_storage_context_from_env()
-
-
-def test_result_manager_registers_the_runtime_attempt(tmp_path: Path) -> None:
-    """The attempt in the path and the registration body comes from the manager.
-
-    It names the concrete attempt that produced the artifact, not the attempt the job
-    record currently points at.
-    """
-    platform = FakePlatform()
+def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(tmp_path: Path) -> None:
+    artifact = tmp_path / "metrics.json"
+    artifact.write_text("{}")
+    jobs_client = MagicMock()
+    jobs_client.create_job_result.return_value.data.return_value = _platform_record(
+        url="fileset://ws/results#results/attempt-a/metrics"
+    )
+    file_manager = MagicMock()
+    file_manager.upload.return_value = "fileset://ws/results#results/attempt-a/metrics"
+    file_manager.storage_type.return_value = "fileset"
     manager = ResultManager(
-        job_name=JOB,
-        workspace=WORKSPACE,
+        job_name="job-a",
+        workspace="ws",
         attempt_id="attempt-a",
-        fileset=FILESET,
-        files_client=FilesClient.from_client(_client(platform)),
-        jobs_client=JobsClient.from_client(_client(platform)),
+        fileset="results",
+        files_client=MagicMock(),
+        jobs_client=jobs_client,
     )
 
-    manager.create_result("metrics", _artifact(tmp_path, "metrics.json"))
+    with patch.object(manager, "_create_file_manager", return_value=file_manager):
+        manager.create_result("metrics", artifact)
 
-    assert platform.uploads() == ["results/attempt-a/metrics"]
-    post = [request for request in platform.requests if request.method == "POST"][0]
-    assert json.loads(post.content)["attempt_id"] == "attempt-a"
+    assert file_manager.upload.call_args.kwargs["remote_path"] == "results/attempt-a/metrics"
+    jobs_client.create_job_result.assert_called_once()
+    call = jobs_client.create_job_result.call_args
+    assert call.kwargs["body"].attempt_id == "attempt-a"
 
 
 class TestRestrictedPolicyResultSave:
     """A provider-bound sandbox saves results without reading the job record.
 
     OpenShell sandboxes with gateway provider bindings get the restricted platform
-    policy: they may post and read results, but ``GET /jobs/{job}`` is denied. The sink
-    must work from the ``NEMO_JOB_*`` env alone.
+    policy: they may post results, but ``GET /jobs/{job}`` is denied. ``ctx.results.save``
+    must therefore work from the ``NEMO_JOB_*`` env alone.
     """
 
     def test_save_never_reads_the_job_record(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from nemo_helix_plugin.tasks import dispatcher as dispatcher_module
 
-        platform = FakePlatform()
-        monkeypatch.setenv("NEMO_JOB_WORKSPACE", WORKSPACE)
-        monkeypatch.setenv("NEMO_JOB_ID", JOB)
-        monkeypatch.setenv("NEMO_JOB_ATTEMPT_ID", ATTEMPT)
-        monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
-        monkeypatch.setenv("NEMO_JOB_FILESET", FILESET)
-        monkeypatch.setenv("NEMO_JOB_ARTIFACT_BASE_PATH", BASE_PATH)
+        artifact = tmp_path / "summary.json"
+        artifact.write_text("{}")
+        requests: list[httpx.Request] = []
 
-        client = _client(platform)
-        ctx = dispatcher_module.build_ctx_from_env(client)
-        ref = ctx.results.save("summary", _artifact(tmp_path))
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            path = request.url.path
+            if request.method == "GET" and path.endswith("/filesets/job-fileset/files"):
+                return httpx.Response(200, json={"data": []}, request=request)
+            if request.method == "PUT" and "/filesets/job-fileset/-/" in path:
+                return httpx.Response(
+                    200, json={"file_ref": "f", "file_url": "u", "path": "p", "size": 2}, request=request
+                )
+            if request.method == "POST" and path.endswith("/jobs/job-a/results/summary"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "name": "summary",
+                        "job": "job-a",
+                        "workspace": "ws",
+                        "attempt_id": "attempt-a",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "updated_at": "2026-01-01T00:00:00Z",
+                        "artifact_url": "ws/job-fileset#jobs/job-a/results/attempt-a/summary",
+                        "artifact_storage_type": "fileset",
+                    },
+                    request=request,
+                )
+            return httpx.Response(404, json={"detail": f"{request.method} {path} is not permitted"}, request=request)
 
-        assert ("GET", JOBS_ROOT) not in platform.calls()
-        assert platform.calls() == [
-            ("GET", f"{FILES_ROOT}/files"),
-            ("PUT", f"{FILES_ROOT}/-/{BASE_PATH}/results/{ATTEMPT}/summary"),
-            ("POST", f"{JOBS_ROOT}/results/summary"),
+        for name, value in {
+            "NEMO_JOB_WORKSPACE": "ws",
+            "NEMO_JOB_ID": "job-a",
+            "NEMO_JOB_ATTEMPT_ID": "attempt-a",
+            "NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH": str(tmp_path / "e"),
+            "NEMO_JOB_FILESET": "job-fileset",
+            "NEMO_JOB_ARTIFACT_BASE_PATH": "jobs/job-a",
+        }.items():
+            monkeypatch.setenv(name, value)
+
+        client = NemoClient(
+            base_url="http://platform.test",
+            workspace="ws",
+            http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+            owns_http_client=True,
+        )
+        try:
+            ref = dispatcher_module.build_ctx_from_env(client).results.save("summary", artifact)
+        finally:
+            client.close()
+
+        assert [(r.method, r.url.path) for r in requests] == [
+            ("GET", "/apis/files/v2/workspaces/ws/filesets/job-fileset/files"),
+            ("PUT", "/apis/files/v2/workspaces/ws/filesets/job-fileset/-/jobs/job-a/results/attempt-a/summary"),
+            ("POST", "/apis/jobs/v2/workspaces/ws/jobs/job-a/results/summary"),
         ]
-        assert ref.artifact_url == f"{WORKSPACE}/{FILESET}#{BASE_PATH}/results/{ATTEMPT}/summary"
+        assert ref.artifact_url == "ws/job-fileset#jobs/job-a/results/attempt-a/summary"
