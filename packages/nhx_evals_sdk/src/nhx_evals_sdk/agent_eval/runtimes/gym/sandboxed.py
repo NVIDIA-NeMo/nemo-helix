@@ -38,6 +38,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from time import monotonic
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from httpx import AsyncClient
@@ -333,6 +334,7 @@ class SandboxedGymAgentTaskRunner:
         tasks: Sequence[AgentEvalTask],
         config: AgentEvalRunConfig | None = None,
     ) -> list[AgentEvalTrial]:
+        run_id = config.run_id if config is not None and config.run_id else str(uuid4())
         self._run_aggregations = None  # reset per run so a reused runner never leaks prior numbers
         cfg = self._config
 
@@ -376,7 +378,7 @@ class SandboxedGymAgentTaskRunner:
 
         self._run_aggregations = read_run_aggregations(rollouts_path)
         trials = trials_from_rollouts(
-            rollouts_path, tasks, index_to_task_id, reward_key=cfg.reward_key, capture_dir=capture_dir
+            rollouts_path, tasks, index_to_task_id, run_id=run_id, reward_key=cfg.reward_key, capture_dir=capture_dir
         )
         require_full_coverage(tasks, covered_task_ids={trial.task_id for trial in trials}, rollouts_path=rollouts_path)
         return trials
