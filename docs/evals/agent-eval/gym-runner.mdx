@@ -489,7 +489,7 @@ choose an `id_prefix`, and a task is named by its key instead:
 - `id_prefix` is 1-8 characters: a lowercase letter, then lowercase letters or digits. It can't be
   `gym`, which ids without a key use. Use one prefix
   per dataset, so two files that both use keys like `1`, `2`, `3` keep separate tasks in a workspace.
-- Every row needs a non-empty string or number in `id_field`. A missing key or a key two rows share
+- Every row needs a non-empty string or finite number in `id_field`. A missing key or a key two rows share
   fails the submit with HTTP 422 naming the line. The key is hashed in its JSON form, so `1` and
   `"1"` are different keys.
 - `discover_gym_tasks(path, id_field="uid", id_prefix="gold")` gives the same ids locally.

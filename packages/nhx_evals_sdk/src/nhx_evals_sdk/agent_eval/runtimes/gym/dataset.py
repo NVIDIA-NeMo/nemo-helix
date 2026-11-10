@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -224,10 +225,17 @@ def discover_gym_tasks(
             )
         if id_field is not None and id_prefix is not None:
             key = row.get(id_field)
-            if isinstance(key, bool) or not isinstance(key, (str, int, float)) or key == "":
+            # A non-finite number is refused too: JSON's 1e400 and 2e400 both parse as infinity, so they
+            # would name one task.
+            if (
+                isinstance(key, bool)
+                or not isinstance(key, (str, int, float))
+                or key == ""
+                or (isinstance(key, float) and not math.isfinite(key))
+            ):
                 raise ValueError(
-                    f"{label}:{line_no}: row has no usable {id_field!r} value (need a non-empty string or number, "
-                    f"got {key!r})"
+                    f"{label}:{line_no}: row has no usable {id_field!r} value (need a non-empty string or finite "
+                    f"number, got {key!r})"
                 )
             task_id = _keyed_task_id(key, id_prefix)
             if task_id in key_lines:

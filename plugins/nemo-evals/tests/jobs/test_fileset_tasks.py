@@ -289,6 +289,8 @@ def test_an_edited_keyed_row_is_a_new_revision_of_its_task(ctx: ClientContext) -
         ([json.dumps({"responses_create_params": {"input": "q"}})], r"golden\.jsonl:1: row has no usable 'uid'"),
         ([_keyed(True, "q1")], r"golden\.jsonl:1: row has no usable 'uid'"),
         ([_keyed("", "q1")], r"golden\.jsonl:1: row has no usable 'uid'"),
+        (['{"uid": 1e400, "responses_create_params": {"input": "q"}}'], r"golden\.jsonl:1: row has no usable 'uid'"),
+        (['{"uid": NaN, "responses_create_params": {"input": "q"}}'], r"golden\.jsonl:1: row has no usable 'uid'"),
     ],
 )
 def test_a_bad_key_is_refused_naming_its_line(ctx: ClientContext, lines: list[str], message: str) -> None:

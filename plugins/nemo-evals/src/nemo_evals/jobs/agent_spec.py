@@ -848,7 +848,7 @@ class FilesetTaskSource(BaseModel):
         default=None,
         min_length=1,
         description="Row key that names each task, so an edited row keeps its task (and, with `snapshot`, gets a "
-        "new revision of it) instead of becoming a new task. Every row must carry a non-empty string or "
+        "new revision of it) instead of becoming a new task. Every row must carry a non-empty string or finite "
         "number there, unique within the file. Requires `id_prefix`.",
     )
     id_prefix: str | None = Field(
