@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from nhx.common.auth.principal_identifier import MAX_PRINCIPAL_ID_LENGTH
 from nhx.common.entities.constants import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
+from nhx.core.entities.entities import WorkspaceLimits
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -21,6 +22,10 @@ class WorkspaceInput(BaseModel):
         examples=["ml-team", "research"],
     )
     description: Optional[str] = Field(None, description="Optional description of the workspace")
+    limits: Optional[WorkspaceLimits] = Field(
+        None,
+        description="Optional per-workspace limits. Only persisted when provided; requires workspace Admin.",
+    )
 
     model_config = ConfigDict(regex_engine="python-re")
 
@@ -29,6 +34,10 @@ class WorkspaceUpdate(BaseModel):
     """Schema for updating a workspace."""
 
     description: Optional[str] = Field(None, description="Updated description")
+    limits: Optional[WorkspaceLimits] = Field(
+        None,
+        description="Updated per-workspace limits. Omit to leave unchanged; requires workspace Admin.",
+    )
 
 
 # =================== Workspace Member Schemas ===================

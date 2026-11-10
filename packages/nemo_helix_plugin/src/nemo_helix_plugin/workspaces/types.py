@@ -21,12 +21,19 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 
+class WorkspaceLimits(BaseModel):
+    """Optional per-workspace resource limits (unset = platform default)."""
+
+    max_concurrent_jobs: int | None = Field(default=None, ge=1)
+
+
 class Workspace(BaseModel):
     """Workspace schema for API responses."""
 
     id: str = Field(description="System-generated UUID")
     name: str = Field(description="Workspace name (user-provided)")
     description: str | None = None
+    limits: WorkspaceLimits | None = None
     created_at: datetime
     created_by: str | None = None
     updated_at: datetime
@@ -72,12 +79,14 @@ class CreateWorkspaceRequest(BaseModel):
 
     name: str
     description: str | None = None
+    limits: WorkspaceLimits | None = None
 
 
 class UpdateWorkspaceRequest(BaseModel):
     """Schema for updating a workspace."""
 
     description: str | None = None
+    limits: WorkspaceLimits | None = None
 
 
 class CreateWorkspaceMemberRequest(BaseModel):
