@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import logging.config
 from datetime import datetime
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Literal
 
 import structlog
 import yaml
@@ -25,7 +25,32 @@ from .otel import settings
 
 if TYPE_CHECKING:
     from opentelemetry._logs import Logger as OTELLogger
+    from opentelemetry.sdk._logs import LoggerProvider
+    from opentelemetry.sdk._logs.export import LogRecordExporter
     from opentelemetry.sdk.resources import Resource
+
+
+def _otlp_log_exporter_class(transport: Literal["http", "grpc"]) -> Callable[..., LogRecordExporter]:
+    """Import the OTLP log exporter for a transport; deferred so only enabled export pays for it."""
+    if transport == "http":
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter as HTTPOTLPLogExporter
+
+        return HTTPOTLPLogExporter
+    from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as GRPCOTLPLogExporter
+
+    return GRPCOTLPLogExporter
+
+
+def _new_logger_provider(resource: Resource) -> LoggerProvider:
+    from opentelemetry.sdk._logs import LoggerProvider
+
+    return LoggerProvider(resource=resource)
+
+
+def _set_logger_provider(logger_provider: LoggerProvider) -> None:
+    from opentelemetry._logs import set_logger_provider
+
+    set_logger_provider(logger_provider)
 
 
 def _SpanLogProcessor(logger: logging.Logger, method_name: str, event_dict: dict):
@@ -207,8 +232,6 @@ def initialize_logging(resource: Resource | None = None):
 
     if not settings.otel_sdk_disabled and settings.otel_logs_exporter == "otlp":
         # NOTE: deferred imports -- only reached when OTEL log export is enabled
-        from opentelemetry._logs import set_logger_provider
-        from opentelemetry.sdk._logs import LoggerProvider
         from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
         from .tracing import create_otel_resource
@@ -216,21 +239,21 @@ def initialize_logging(resource: Resource | None = None):
         protocol = settings.otel_exporter_otlp_logs_protocol or settings.otel_exporter_otlp_protocol
         endpoint = settings.otel_exporter_otlp_logs_endpoint or settings.otel_exporter_otlp_endpoint
         if protocol == "http/protobuf":
-            from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+            exporter_class = _otlp_log_exporter_class("http")
 
             # HTTP general endpoints are base URLs; signal-specific endpoints are used as-is.
             if not settings.otel_exporter_otlp_logs_endpoint and endpoint:
                 endpoint = endpoint.rstrip("/") + "/v1/logs"
         elif protocol == "grpc":
-            from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+            exporter_class = _otlp_log_exporter_class("grpc")
         else:
             raise ValueError(f"Unsupported OTLP logs protocol: {protocol}")
 
         if resource is None:
             resource = create_otel_resource()
-        logger_provider = LoggerProvider(resource=resource)
-        logger_provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=endpoint)))
-        set_logger_provider(logger_provider)
+        logger_provider = _new_logger_provider(resource)
+        logger_provider.add_log_record_processor(BatchLogRecordProcessor(exporter_class(endpoint=endpoint)))
+        _set_logger_provider(logger_provider)
         otel_logger = logger_provider.get_logger(__name__)
         final_processors.append(create_otel_log_processor(otel_logger))
 

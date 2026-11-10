@@ -66,7 +66,7 @@ def test_round_trip_and_repeatability(root, tmp_path):
 @pytest.mark.parametrize("name", ["/outside", "../../outside", "a/b", "a\\b"])
 def test_step_escape_before_native(root, name):
     (root / "task.toml").write_text(f"[[steps]]\nname = {name!r}\n")
-    with patch("harbor.models.task.task.Task") as native:
+    with patch.object(harbor_archive, "_native_task_name") as native:
         with pytest.raises(ValueError):
             harbor_archive.validate_native_task_inputs(root)
         native.assert_not_called()
@@ -83,7 +83,7 @@ def test_step_escape_before_native(root, name):
 def test_metadata_rejected_before_native(root, monkeypatch, filename, constant):
     monkeypatch.setattr(harbor_archive, constant, 4)
     (root / filename).write_text("x" * 5)
-    with patch("harbor.models.task.task.Task") as native:
+    with patch.object(harbor_archive, "_native_task_name") as native:
         with pytest.raises(ValueError):
             harbor_archive.validate_native_task_inputs(root)
         native.assert_not_called()
@@ -152,7 +152,7 @@ def test_crafted_symlinks_rejected_before_native(tmp_path, links, error):
                 header.linkname = str(outside) if target == "OUTSIDE" else target
             output.addfile(header)
     (tmp_path / "out").mkdir()
-    with patch("harbor.models.task.task.Task") as native:
+    with patch.object(harbor_archive, "_native_task_name") as native:
         with pytest.raises(ValueError, match=error):
             archive.extract_task(path, tmp_path / "out")
         native.assert_not_called()
@@ -238,7 +238,7 @@ def test_unsafe_archive_member_before_native(tmp_path, bad_name):
         output.addfile(header)
         output.addfile(tarfile.TarInfo(bad_name))
     (tmp_path / "out").mkdir()
-    with patch("harbor.models.task.task.Task") as native:
+    with patch.object(harbor_archive, "_native_task_name") as native:
         with pytest.raises(ValueError):
             archive.extract_task(path, tmp_path / "out")
         native.assert_not_called()
@@ -298,10 +298,11 @@ def test_sparse_pax_rejected_before_decoder(tmp_path, headers, decoder):
         member.size = 512
         member.pax_headers = headers
         output.addfile(member, io.BytesIO(b"1\n0\n1\n".ljust(512, b"\0")))
-    with patch.object(tarfile.TarInfo, decoder) as native_decoder:
-        with pytest.raises(ValueError, match="Unsupported sparse"):
-            archive.extract_task(path, tmp_path)
-        native_decoder.assert_not_called()
+    # The decoder the archive dispatches to is the rejecting override, never tarfile's native one.
+    assert decoder in vars(archive._SafeTarInfo)
+    assert getattr(archive._SafeTarInfo, decoder) is not getattr(tarfile.TarInfo, decoder)
+    with pytest.raises(ValueError, match="Unsupported sparse"):
+        archive.extract_task(path, tmp_path)
     assert not (tmp_path / "task/data").exists()
 
 
@@ -313,15 +314,16 @@ def test_unreadable_subtree_fails_inventory(root, tmp_path, operation):
     data = root / "data"
     data.mkdir()
     (data / "payload").write_text("required task content")
-    scandir = os.scandir
+    walk = harbor_archive._walk_task_tree
 
-    def unreadable(path):
-        if Path(path) == data:
-            raise PermissionError("Cannot enumerate task data")
-        return scandir(path)
+    def unreadable(top):
+        for directory, dirs, files in walk(top):
+            if Path(directory) == data:
+                raise PermissionError("Cannot enumerate task data")
+            yield directory, dirs, files
 
-    # Simulate the actual scandir error even when tests run as root.
-    with patch("os.scandir", side_effect=unreadable):
+    # Simulate the walk's scandir error even when tests run as root.
+    with patch.object(harbor_archive, "_walk_task_tree", side_effect=unreadable):
         with pytest.raises(PermissionError, match="Cannot enumerate"):
             if operation == "capture":
                 harbor_archive.capture_task(root, tmp_path / "capture")

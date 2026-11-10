@@ -97,7 +97,7 @@ describe('getJobProgressDetailRoute', () => {
   });
 
   it('uses the Jobs table route helper for platform job sources', () => {
-    const job = createJob({ name: 'designer-job-1', source: 'data-designer' });
+    const job = createJob({ name: 'designer-job-1', source: 'nemo-data-designer-plugin' });
 
     expect(
       getJobProgressDetailRoute({
@@ -108,7 +108,7 @@ describe('getJobProgressDetailRoute', () => {
     ).toBe('/jobs/studio-job-1');
 
     expect(getJobDetailRouteMock).toHaveBeenCalledWith(
-      { name: 'designer-job-1', source: 'data-designer' },
+      { name: 'designer-job-1', source: 'nemo-data-designer-plugin' },
       'default'
     );
   });

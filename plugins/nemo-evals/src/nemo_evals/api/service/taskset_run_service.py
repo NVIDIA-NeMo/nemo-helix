@@ -39,12 +39,11 @@ from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJ
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalSpec,
-    HarborRunnerTarget,
     ResolvedTask,
     registered_agent_source,
     target_agent_identity,
 )
-from nemo_evals.jobs.gateway_models import closed_book_run, platform_gateway_url_override, require_closed_book_route
+from nemo_evals.jobs.gateway_models import open_book_notice, platform_gateway_url_override, require_closed_book_route
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment
 from nemo_evals.revisions import RevisionNotFoundError, get_revision
 from nemo_evals.source_authorization import remember_allowed
@@ -364,15 +363,10 @@ class TasksetRunService:
         snapshot = source.files if source is not None else None
         acceptance_started = False
         try:
-            configs = [(t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
             try:
-                await require_closed_book_route(
-                    spec.target, configs, async_sdk=self._async_client, authorize=self._authorizer
-                )
+                await require_closed_book_route(spec.target, async_sdk=self._async_client, authorize=self._authorizer)
             except ValueError as exc:
                 raise TasksetRunResolutionError(str(exc)) from exc
-            if isinstance(spec.target, HarborRunnerTarget) and closed_book_run(spec.target, configs):
-                spec = spec.model_copy(update={"target": spec.target.model_copy(update={"closed_book": True})})
             intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
             prepared, task_notices = await self._prepare_images(spec.tasks, policy, caller=caller)
             plan = TasksetRunPlan(
@@ -425,6 +419,8 @@ class TasksetRunService:
         configs = [(t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
         if (resources := defaulted_resources_notice(configs, policy)) is not None:
             notices.append(resources)
+        if (open_book := open_book_notice(spec.target, configs)) is not None:
+            notices.append(open_book)
         status = TasksetRunSubmitResponse(**to_status(result.run).model_dump(), warnings=[*warnings, *notices])
         return SubmitOutcome(status, created=result.created)
 

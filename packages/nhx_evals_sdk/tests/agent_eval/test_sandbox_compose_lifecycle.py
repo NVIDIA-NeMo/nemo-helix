@@ -385,8 +385,8 @@ def test_project_lock_and_generated_names(
             closed_fds.append(fd)
         close_fd(fd)
 
-    monkeypatch.setattr(compose_state.os, "open", record_open)
-    monkeypatch.setattr(compose_state.os, "close", record_close)
+    monkeypatch.setattr(compose_state, "os_open", record_open)
+    monkeypatch.setattr(compose_state, "close", record_close)
     first_lock = compose_state._ComposeProjectLock.acquire(first.lock_path)
     try:
         with pytest.raises(SandboxCreateError, match="Another Compose sandbox"):

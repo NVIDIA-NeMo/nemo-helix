@@ -19,6 +19,7 @@ from dulwich.object_store import DiskObjectStore
 from dulwich.objects import Blob, ObjectID
 from dulwich.pack import OFS_DELTA, REF_DELTA, write_pack_index_v2
 from dulwich.repo import Repo
+from nhx.core.files.app.backends import git_objects
 from nhx.core.files.app.backends.git_objects import (
     GitObjectError,
     ObjectTooLargeError,
@@ -207,7 +208,7 @@ def test_closing_a_delta_stream_early_closes_its_temp_files(
     store = stores["ofs"]
     deepest, _depth = _deepest_blob(store)
     recorded = _RecordedTemporaryFiles()
-    monkeypatch.setattr(tempfile, "TemporaryFile", recorded)
+    monkeypatch.setattr(git_objects, "TemporaryFile", recorded)
     stream = iter_blob(store, deepest, tmp_path, chunk_size=1)
 
     next(stream)
@@ -225,7 +226,7 @@ def test_finished_delta_stream_closes_its_temp_files(
     store = stores["ofs"]
     deepest, _depth = _deepest_blob(store)
     recorded = _RecordedTemporaryFiles()
-    monkeypatch.setattr(tempfile, "TemporaryFile", recorded)
+    monkeypatch.setattr(git_objects, "TemporaryFile", recorded)
 
     list(iter_blob(store, deepest, tmp_path))
 

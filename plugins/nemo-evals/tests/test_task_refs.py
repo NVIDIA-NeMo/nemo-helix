@@ -27,6 +27,7 @@ from nemo_evals.jobs.agent_spec import (
     GymAgentSource,
     ResolvedTask,
 )
+from nemo_evals.jobs.attempt_tasks import TASKS_DIGEST_KEY, frozen_tasks_digest
 from nemo_evals.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evals.jobs.kinds.registry import KIND_ADAPTERS
 from nemo_evals.jobs.kinds.types import LoadedTask, SubmitContext
@@ -894,7 +895,8 @@ async def test_direct_evaluator_references_resolve_and_compile(kind, entity_stor
             async_sdk=_async_platform(),
         )
     )
-    assert compiled.steps[0].config["tasks"] == spec.model_dump(mode="json")["tasks"]
+    assert "tasks" not in compiled.steps[0].config
+    assert compiled.steps[0].config[TASKS_DIGEST_KEY] == frozen_tasks_digest(spec.model_dump(mode="json"))
     if kind in {"model", "agent"}:
         return  # These endpoints execute in the platform integration matrix.
 

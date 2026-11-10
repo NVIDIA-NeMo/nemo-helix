@@ -586,12 +586,10 @@ class FakeGitRegistry:
 
 @pytest.fixture
 def git_registry(monkeypatch):
-    from harbor.registry.client import git_repo
-
     FakeGitRegistry.downloads = []
     FakeGitRegistry.repos = []
     FakeGitRegistry.commits = None
-    monkeypatch.setattr(git_repo, "GitRepoRegistryClient", FakeGitRegistry)
+    monkeypatch.setattr(runs_cli, "GitRepoRegistryClient", FakeGitRegistry)
     return FakeGitRegistry
 
 
@@ -664,13 +662,11 @@ def test_a_tree_url_reads_tasks_from_its_directory(git_registry):
     ],
 )
 def test_a_failed_git_command_is_an_error_not_a_traceback(monkeypatch, error, message):
-    from harbor.registry.client import git_repo
-
     class UnreachableRepo(FakeGitRegistry):
         async def get_dataset_metadata(self, name):
             raise error
 
-    monkeypatch.setattr(git_repo, "GitRepoRegistryClient", UnreachableRepo)
+    monkeypatch.setattr(runs_cli, "GitRepoRegistryClient", UnreachableRepo)
     client = NemoClient(base_url="http://platform.test", workspace="default")
     app = typer.Typer()
     add_runs_commands(app, lambda: client)
@@ -1685,5 +1681,5 @@ def test_a_regular_spec_file_is_not_a_stream(tmp_path):
 
 @pytest.mark.parametrize("path", ["/dev/shm/run.json", "/proc/self/cwd/spec.json"])
 def test_a_regular_file_under_dev_or_proc_is_not_a_stream(monkeypatch, path):
-    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr(runs_cli, "_is_file", lambda path: True)
     assert not runs_cli._is_stream(Path(path))

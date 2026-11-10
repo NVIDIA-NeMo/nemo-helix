@@ -720,7 +720,7 @@ class TestRetryPolicy:
             request=httpx.Request("GET", f"{BASE}/apis/test/v2/items/alice"),
         )
         with patch(
-            "nemo_helix_plugin.client.retry.email.utils.parsedate_to_datetime",
+            "nemo_helix_plugin.client.retry.parsedate_to_datetime",
             side_effect=OverflowError("date value out of range"),
         ):
             assert _retry_after(response) is None
@@ -735,7 +735,7 @@ class TestRetryPolicy:
         overflowing.tzinfo = timezone.utc
         overflowing.timestamp.side_effect = OverflowError("timestamp out of range")
         with patch(
-            "nemo_helix_plugin.client.retry.email.utils.parsedate_to_datetime",
+            "nemo_helix_plugin.client.retry.parsedate_to_datetime",
             return_value=overflowing,
         ):
             assert _retry_after(response) is None

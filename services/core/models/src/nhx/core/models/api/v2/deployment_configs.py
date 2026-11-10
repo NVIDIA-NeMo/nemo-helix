@@ -6,7 +6,8 @@ from typing import Annotated, List
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.openapi.models import Example
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
@@ -21,8 +22,6 @@ from nhx.core.models.api.service.model_deployment_config_service import (
 from nhx.core.models.api.service.model_entity_service import _has_tool_call_plugin, validate_tool_call_plugin_allowed
 from nhx.core.models.api.v2.utils import (
     ERR_DEPLOYMENTS_NOT_ENABLED,
-    LIST_REQUEST_ERRORS,
-    NOT_FOUND_ERRORS,
     deployments_enabled,
 )
 from nhx.core.models.schemas import (
@@ -77,8 +76,7 @@ _UPDATE_DEPLOYMENT_CONFIG_OPENAPI_EXAMPLES: dict[str, Example] = {
 )
 async def list_deployment_configs(
     workspace: str,
-    page: int = Query(default=1, description="Page number."),
-    page_size: int = Query(default=100, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: str = Query(
         default="created_at",
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -98,15 +96,13 @@ async def list_deployment_configs(
     try:
         result = await service.list_deployment_configs(
             workspace=filter_workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_operation=parsed_filter.operation,
         )
         return result
-    except LIST_REQUEST_ERRORS:
-        raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Unexpected error listing deployment configs by workspace")
@@ -160,9 +156,7 @@ async def create_deployment_config(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         )
-    except NOT_FOUND_ERRORS:
-        raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Unexpected error creating deployment config")
@@ -200,9 +194,7 @@ async def get_latest_deployment_config(
         return config
     except HTTPException:
         raise
-    except NOT_FOUND_ERRORS:
-        raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Unexpected error getting deployment config")
@@ -229,7 +221,7 @@ async def list_deployment_config_versions(
     try:
         versions = await service.list_deployment_config_versions(workspace, deployment_config_name)
         return versions
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Unexpected error listing deployment config versions")
@@ -241,6 +233,7 @@ async def list_deployment_config_versions(
 @router.get(
     "/v2/workspaces/{workspace}/deployment-configs/{config}/versions/{name}",
     summary="Get Specific ModelDeploymentConfig Version",
+    responses={404: {"model": ErrorResponse, "description": "Deployment configuration version not found"}},
     response_description="Return a specific version of a model deployment configuration",
     status_code=status.HTTP_200_OK,
 )
@@ -275,7 +268,7 @@ async def get_deployment_config_version(
         return result
     except HTTPException:
         raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Unexpected error getting deployment config version")
@@ -326,7 +319,7 @@ async def update_deployment_config(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         )
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Unexpected error updating deployment config")
@@ -381,7 +374,7 @@ async def delete_all_deployment_config_versions(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Unexpected error deleting deployment config")
@@ -447,7 +440,7 @@ async def delete_deployment_config_version(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Unexpected error deleting deployment config version")

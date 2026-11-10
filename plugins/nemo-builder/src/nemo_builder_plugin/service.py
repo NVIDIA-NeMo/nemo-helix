@@ -25,7 +25,7 @@ from nemo_builder_plugin.completion import (
     submit_refusal,
 )
 from nemo_builder_plugin.config import BuilderConfig
-from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.entities import MAX_REVISION, ContainerImage
 from nemo_builder_plugin.identity import ImageReference
 from nemo_builder_plugin.schema import BuildSet, SubmitBuildResponse
 from nemo_builder_plugin.submit import (
@@ -36,6 +36,7 @@ from nemo_builder_plugin.submit import (
     submit_build_set,
 )
 from nemo_builder_plugin.upstream import UpstreamRegistry
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError, PermissionDeniedError
@@ -172,12 +173,13 @@ def _build_router() -> APIRouter:
         build_set: str | None = Query(
             default=None, max_length=128, description="Only the images of the build set with this `name`."
         ),
-        revision: int | None = Query(default=None, ge=1, description="Only the images of this `revision`."),
+        revision: int | None = Query(
+            default=None, ge=1, le=MAX_REVISION, description="Only the images of this `revision`."
+        ),
         status: Literal["queued", "pending", "ready", "failed"] | None = Query(
             default=None, description="Only images in this state."
         ),
-        page: int = Query(default=1, ge=1),
-        page_size: int = Query(default=100, ge=1, le=100),
+        page_params: PageParams = Depends(make_page_dep(max_size=100)),
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
     ) -> list[ContainerImage]:
         """List the images in a workspace, in whatever state they are in, or only one job's or one build set's."""
@@ -191,7 +193,11 @@ def _build_router() -> APIRouter:
         if status is not None:
             filters["status"] = status
         response = await entity_client.list(
-            ContainerImage, workspace=workspace, filter_obj=filters or None, page=page, page_size=page_size
+            ContainerImage,
+            workspace=workspace,
+            filter_obj=filters or None,
+            page=page_params.page,
+            page_size=page_params.page_size,
         )
         return response.data
 

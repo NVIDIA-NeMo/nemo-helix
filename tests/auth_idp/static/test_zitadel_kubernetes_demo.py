@@ -113,7 +113,7 @@ def test_zitadel_kubernetes_runner_is_provider_specific() -> None:
 
 
 def test_zitadel_kubernetes_runtime_is_in_auth_idp_ci_matrix() -> None:
-    workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
+    workflow = Path(".github/workflows/e2e.yaml").read_text(encoding="utf-8")
     job = _workflow_job_block(workflow, "python-auth-idp-e2e-test")
 
     assert "runtime: authentik-compose" in job
@@ -134,7 +134,7 @@ def test_zitadel_kubernetes_runtime_is_in_auth_idp_ci_matrix() -> None:
     assert "playwright install --with-deps chromium" in job
     assert 'kind delete cluster --name "${AUTH_IDP_K8S_CLUSTER_NAME}"' in job
 
-    workflow_document = _load_yaml(Path(".github/workflows/ci.yaml"))
+    workflow_document = _load_yaml(Path(".github/workflows/e2e.yaml"))
     commands = {
         entry["runtime"]: entry["command"]
         for entry in workflow_document["jobs"]["python-auth-idp-e2e-test"]["strategy"]["matrix"]["include"]
@@ -436,6 +436,10 @@ def test_zitadel_envoy_strips_trusted_headers_and_checks_zitadel_discovery() -> 
     assert 'path: "/apis/auth/authenticate"' in envoy_template
     assert 'path_prefix: "/apis/auth/ext-authz"' in envoy_template
     assert "direct_response:\n                            status: 404" in envoy_template
+    # Encoded paths must be normalized before the ext-authz 404 prefix match.
+    assert "normalize_path: true" in envoy_template
+    assert "merge_slashes: true" in envoy_template
+    assert "path_with_escaped_slashes_action: UNESCAPE_AND_REDIRECT" in envoy_template
     assert 'path: "/apis/auth/jwks"' in envoy_template
     assert 'path: "/apis/auth/token"' in envoy_template
     assert "host_rewrite_literal: {{ $publicGatewayAuthority | quote }}" in envoy_template

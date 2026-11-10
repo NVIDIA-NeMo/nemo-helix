@@ -26,7 +26,7 @@ from nhx.common.docker.gpu_detection import detect_gpu_device_ids
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.network import Network
 
-import docker
+from docker import from_env as docker_from_env
 
 from .base import E2EBackend
 
@@ -89,7 +89,7 @@ def _create_test_network(network: Network) -> None:
         if os.environ.get("GITHUB_ACTIONS") != "true" or "all predefined address pools" not in str(exc):
             raise
         logger.warning("Docker address pools exhausted; pruning unused testcontainers networks older than 24h")
-        client = docker.from_env()
+        client = docker_from_env()
         try:
             result = client.networks.prune(
                 filters={"label": ["org.testcontainers=true", "org.testcontainers.lang=python"], "until": "24h"}

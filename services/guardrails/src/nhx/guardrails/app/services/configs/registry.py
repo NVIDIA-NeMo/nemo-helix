@@ -5,6 +5,7 @@
 
 import asyncio
 import logging
+from asyncio import create_task
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Union
@@ -198,7 +199,7 @@ class ConfigRegistry:
 
         # If the entry is older than the TTL, delete it
         if entry.is_older_than(self.staleness_threshold):
-            asyncio.create_task(self.refresh_all())
+            create_task(self.refresh_all())
 
         return entry
 

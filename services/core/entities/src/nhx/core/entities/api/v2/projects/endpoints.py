@@ -15,7 +15,8 @@ Core Operations:
 import logging
 import textwrap
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nhx.common.api.common import DeleteResponse, ErrorResponse, GenericSortField, Page, PaginationData
 from nhx.core.entities.api.dependencies import EntityRepository
 from nhx.core.entities.api.v2.projects.schemas import (
@@ -138,8 +139,7 @@ async def list_projects(
     workspace: str,
     repository: EntityRepository,
     filter: FilterDep,
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(100, ge=1, le=1000, description="Items per page"),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: GenericSortField = Query(GenericSortField.CREATED_AT_DESC, description="Sort field"),
 ) -> Page[Project]:
     """List projects in the workspace."""
@@ -147,8 +147,8 @@ async def list_projects(
         entities, total = await repository.list_entities(
             workspace=workspace,
             entity_type=PROJECT_ENTITY_TYPE,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_op=filter,
         )
@@ -160,10 +160,10 @@ async def list_projects(
     return Page(
         data=projects,
         pagination=PaginationData(
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             total_results=total,
-            total_pages=(total + page_size - 1) // page_size,
+            total_pages=(total + page_params.page_size - 1) // page_params.page_size,
             current_page_size=len(projects),
         ),
         sort=sort,
@@ -210,6 +210,7 @@ async def get_project(
     response_model=Project,
     tags=[API_TAG],
     summary="Update project",
+    responses={404: {"model": ErrorResponse, "description": "Project not found"}},
     description=textwrap.dedent("""
         Update a project's description.
 
@@ -261,6 +262,7 @@ async def update_project(
     response_model=DeleteResponse,
     tags=[API_TAG],
     summary="Delete project",
+    responses={404: {"model": ErrorResponse, "description": "Project not found"}},
     description=textwrap.dedent("""
         Delete a project.
 

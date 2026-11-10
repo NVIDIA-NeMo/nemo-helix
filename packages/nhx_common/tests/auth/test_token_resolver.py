@@ -151,6 +151,7 @@ async def test_resolver_uses_extra_resolvers_before_oidc() -> None:
         access_keys=AccessKeyConfig(enabled=False),
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             public_client=OIDCPublicClientConfig(client_id="nemo-helix-cli"),
         ),
@@ -183,6 +184,7 @@ async def test_resolver_falls_back_to_oidc_validator() -> None:
         access_keys=AccessKeyConfig(enabled=True),
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             public_client=OIDCPublicClientConfig(client_id="nemo-helix-cli"),
         ),
@@ -213,6 +215,7 @@ async def test_resolver_rejects_an_invalid_access_key_without_trying_other_issue
         access_keys=AccessKeyConfig(enabled=True),
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             public_client=OIDCPublicClientConfig(client_id="nemo-helix-cli"),
         ),

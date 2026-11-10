@@ -1,0 +1,65 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- /*
+Ingress isolation for OpenSandbox sandbox pods. Each sandbox runs execd, which executes the commands it is sent, as the
+image's user, on the pod IP. Harbor evaluations give every sandbox they create its own execd token, which works on any
+cluster; this policy is the second layer, for clusters whose CNI enforces it. It also covers what the token doesn't:
+ports other than execd, such as Compose services, and sandboxes created by other clients. OpenSandbox creates no NetworkPolicy, and its
+egress sidecar filters only what leaves a sandbox. Platform clients reach sandboxes through the OpenSandbox server's
+proxy, so the server's namespace is the only source a sandbox needs to admit.
+
+Every install with OpenSandbox gets it, whatever networkPolicies.enabled says, because execd takes commands from anyone
+who reaches it. It has no off switch: opensandbox.sandboxNetworkPolicy.extraIngress admits anything else that needs in.
+*/}}
+{{- $sandboxes := .Values.opensandbox.sandboxNetworkPolicy }}
+{{- $sandboxCapable := or .Values.sandboxClusterCapable (dig "platform" "sandbox_cluster_capable" false .Values.platformConfig) }}
+{{- if $sandboxCapable }}
+{{- $serverNamespace := .Values.opensandbox.namespace }}
+{{- if not $serverNamespace }}
+{{- fail "opensandbox.namespace is required with OpenSandbox: sandbox pods admit traffic only from that namespace" }}
+{{- end }}
+{{- /* An in-cluster domain names the server's namespace. If it disagrees, the policy would shut the server out of every sandbox. */}}
+{{- $domain := .Values.opensandbox.domain | default "" }}
+{{- if regexMatch "^[^.]+\\.[^.]+\\.svc(\\.|:|$)" $domain }}
+{{- $domainNamespace := index (splitList "." $domain) 1 }}
+{{- if ne $domainNamespace $serverNamespace }}
+{{- fail (printf "opensandbox.namespace (%s) doesn't match the namespace in opensandbox.domain (%s): sandbox pods would admit traffic only from a namespace the server isn't in" $serverNamespace $domainNamespace) }}
+{{- end }}
+{{- end }}
+{{- $sandboxNamespace := .Values.opensandbox.composeServices.sandboxNamespace | default .Release.Namespace }}
+{{- if and (eq $serverNamespace $sandboxNamespace) (not $sandboxes.serverPodSelector) }}
+{{- fail "opensandbox.sandboxNetworkPolicy.serverPodSelector is required when the OpenSandbox server runs in the sandbox namespace: admitting the whole namespace would admit the sandboxes themselves" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-opensandbox-sandbox-ingress" (include "nemo-helix.fullname" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $sandboxNamespace }}
+  labels:
+    app.kubernetes.io/component: opensandbox-sandbox
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+spec:
+  # The OpenSandbox server puts this label on every sandbox pod it creates.
+  podSelector:
+    matchExpressions:
+      - key: opensandbox.io/id
+        operator: Exists
+  policyTypes:
+    - Ingress
+  ingress:
+    # Every port: the server proxies to whichever endpoint port a client asks for, not only execd's.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $serverNamespace | quote }}
+          {{- with $sandboxes.serverPodSelector }}
+          podSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+    {{- with $sandboxes.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
