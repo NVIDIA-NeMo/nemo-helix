@@ -74,7 +74,7 @@ describe('JobsDataView', () => {
 
   it('renders job data in the table', async () => {
     const jobs = [
-      makeJob({ name: 'data-designer-run-1', source: 'data-designer' }),
+      makeJob({ name: 'data-designer-run-1', source: 'nemo-data-designer-plugin' }),
       makeJob({ name: 'eval-run-2', source: 'evaluator-metrics', id: 'job-id-2' }),
     ];
     server.use(http.get(JOBS_URL, () => HttpResponse.json(makeJobsPage(jobs))));
@@ -91,7 +91,7 @@ describe('JobsDataView', () => {
     // The tooltip otherwise falls back to the raw accessor value — the API's own word for
     // the service — so a row reads one thing and hovers another. Checked on data-designer
     // because this file disables the customizer flag, which filters those rows out.
-    const jobs = [makeJob({ name: 'data-designer-run-1', source: 'data-designer' })];
+    const jobs = [makeJob({ name: 'data-designer-run-1', source: 'nemo-data-designer-plugin' })];
     server.use(http.get(JOBS_URL, () => HttpResponse.json(makeJobsPage(jobs))));
 
     renderComponent();
@@ -99,7 +99,7 @@ describe('JobsDataView', () => {
     await screen.findByText('data-designer-run-1');
 
     expect(screen.getByTitle('Data Designer')).toBeInTheDocument();
-    expect(screen.queryByTitle('data-designer')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('nemo-data-designer-plugin')).not.toBeInTheDocument();
   });
 
   it('hides customizer jobs when customizer is disabled', async () => {

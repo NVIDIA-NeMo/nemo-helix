@@ -178,22 +178,22 @@ async def test_registry_discards_unreturned_key() -> None:
 
     await registry.discard_unreturned("ak_orphaned")
 
-    entity_client.delete.assert_awaited_once_with(
+    entity_client.delete_by_id.assert_awaited_once_with(
         AccessKeyEntity,
-        name="ak_orphaned",
-        workspace="system",
+        entity_client.get.return_value.id,
+        expected_db_version=entity_client.get.return_value.db_version,
     )
 
 
 @pytest.mark.asyncio
 async def test_registry_discard_unreturned_is_idempotent_when_record_is_missing() -> None:
     entity_client = AsyncMock()
-    entity_client.delete.side_effect = EntityNotFoundError("missing")
+    entity_client.delete_by_id.side_effect = EntityNotFoundError("missing")
     registry = AccessKeyRegistry(entity_client)
 
     await registry.discard_unreturned("ak_missing")
 
-    entity_client.delete.assert_awaited_once()
+    entity_client.delete_by_id.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -303,7 +303,7 @@ async def test_registry_revokes_owned_key_without_deleting_audit_record() -> Non
     assert updated is not original
     assert original.status == "ACTIVE"
     assert updated.status == "REVOKED"
-    entity_client.delete.assert_not_awaited()
+    entity_client.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1088,3 +1088,26 @@ async def test_registry_begin_rotation_concurrent_conflict_surfaces_state_confli
         await registry.begin_rotation(
             "ak_example", "alice@example.com", grace_period_seconds=3600, successor_jti="ak_successor"
         )
+
+
+@pytest.mark.parametrize("retry_outcome", [None, EntityNotFoundError("gone"), EntityConflictError("changed again")])
+async def test_discard_unreturned_retries_the_same_allocation(
+    retry_outcome: Exception | None, caplog: pytest.LogCaptureFixture
+) -> None:
+    selected = _record()
+    selected._id = "original-key-id"
+    refreshed = selected.model_copy()
+    refreshed._db_version = selected.db_version + 1
+    entity_client = AsyncMock()
+    entity_client.get.return_value = selected
+    entity_client.get_by_id.return_value = refreshed
+    entity_client.delete_by_id.side_effect = [EntityConflictError("changed"), retry_outcome]
+
+    await AccessKeyRegistry(entity_client).discard_unreturned(selected.name)
+
+    entity_client.get.assert_awaited_once()
+    entity_client.get_by_id.assert_awaited_once_with(AccessKeyEntity, selected.id)
+    assert [call.args[1] for call in entity_client.delete_by_id.await_args_list] == [selected.id, selected.id]
+    assert entity_client.delete_by_id.await_args_list[-1].kwargs["expected_db_version"] == refreshed.db_version
+    if isinstance(retry_outcome, EntityConflictError):
+        assert "original-key-id remains" in caplog.text

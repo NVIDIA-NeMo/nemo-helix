@@ -111,7 +111,11 @@ describe('RecentJobsTable', () => {
       http.get(JOBS_URL, () =>
         HttpResponse.json(
           makeJobsPage([
-            makeJob({ name: 'dd-run', source: 'data-designer', status: HelixJobStatus.active }),
+            makeJob({
+              name: 'dd-run',
+              source: 'nemo-data-designer-plugin',
+              status: HelixJobStatus.active,
+            }),
             makeJob({ id: 'job-id-2', name: 'eval-run', status: HelixJobStatus.completed }),
           ])
         )

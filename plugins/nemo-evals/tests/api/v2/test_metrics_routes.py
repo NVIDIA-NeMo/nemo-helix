@@ -61,6 +61,18 @@ class _FakeEntityClient:
         self.entity_versions[key] = entity.db_version
         return entity
 
+    async def delete_by_id(self, entity_type, entity_id, *, expected_db_version=None):
+        for key, entity in self.entities.items():
+            if isinstance(entity, entity_type) and entity.id == entity_id:
+                return await self.delete(
+                    entity_type,
+                    entity.name,
+                    workspace=entity.workspace,
+                    parent=entity._parent,
+                    expected_db_version=expected_db_version,
+                )
+        raise NemoEntityNotFoundError(entity_id)
+
     async def delete(
         self,
         entity_type: type[MetricBundleEntity],

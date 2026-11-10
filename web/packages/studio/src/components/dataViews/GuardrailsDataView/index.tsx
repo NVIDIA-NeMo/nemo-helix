@@ -10,6 +10,7 @@ import {
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
@@ -20,7 +21,7 @@ import type {
   GuardrailConfigFilter,
   GuardrailsListGuardrailConfigsParams,
 } from '@nemo/sdk/generated/platform/schema';
-import { Badge, Button, type DropdownEntry, Flex, Text } from '@nvidia/foundations-react-core';
+import { Badge, Button, Flex, Text } from '@nvidia/foundations-react-core';
 import {
   getMainModelName,
   getRailCounts,
@@ -155,17 +156,12 @@ export const GuardrailsDataView: FC<GuardrailsDataViewProps> = ({
         rowActionsColumn({
           size: ROW_ACTIONS_COLUMN_SIZE,
           enableResizing: false,
-          rowActions: (config: GuardrailConfig): DropdownEntry[] => [
-            {
-              children: 'Duplicate',
-              onSelect: () => onRequestDuplicate?.(config),
-            },
-            {
-              children: 'Delete',
-              danger: true,
-              onSelect: () => onRequestDelete?.(config),
-            },
-          ],
+          cell: ({ row: { original: config } }) => (
+            <QuickActionsMenuRoot
+              actions={[{ label: 'Duplicate', onSelect: () => onRequestDuplicate?.(config) }]}
+              deleteAction={{ onSelect: () => onRequestDelete?.(config) }}
+            />
+          ),
         }),
       ],
       [onRequestDuplicate, onRequestDelete]

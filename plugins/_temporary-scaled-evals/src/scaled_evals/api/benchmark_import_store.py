@@ -31,7 +31,7 @@ def import_id_for(owner_id: str, manifest_sha256: str, visibility: str) -> str:
     return f"bmi_{identity[:26]}"
 
 
-def _row(entity: ScaledEvalsBenchmarkImport) -> dict[str, Any]:
+def benchmark_import_row(entity: ScaledEvalsBenchmarkImport) -> dict[str, Any]:
     return {
         "id": entity.name,
         "owner_id": entity.owner_id,
@@ -83,8 +83,8 @@ class BenchmarkImportStore:
         manifest: dict[str, Any],
         visibility: str,
         description: str | None,
-    ) -> dict[str, Any] | None:
-        """Create the import; None if one with this id already exists."""
+    ) -> ScaledEvalsBenchmarkImport | None:
+        """Return the persisted import, including its allocation ID; None if its name exists."""
         entity = ScaledEvalsBenchmarkImport(
             name=import_id,
             workspace=entity_store.private_workspace(),
@@ -95,19 +95,29 @@ class BenchmarkImportStore:
             description=description,
         )
         try:
-            return _row(self._client.create(entity))
+            return self._client.create(entity)
         except EntityConflictError:
             return None
 
     def delete(self, import_id: str) -> None:
         try:
-            self._client.delete(ScaledEvalsBenchmarkImport, import_id, workspace=entity_store.private_workspace())
+            _delete_target = self._client.get(
+                ScaledEvalsBenchmarkImport, name=import_id, workspace=entity_store.private_workspace()
+            )
+            self._client.delete_by_id(ScaledEvalsBenchmarkImport, _delete_target.id)
+        except EntityNotFoundError:
+            pass
+
+    def delete_by_id(self, entity_id: str) -> None:
+        """Remove the captured import allocation, even if its old name has been reused."""
+        try:
+            self._client.delete_by_id(ScaledEvalsBenchmarkImport, entity_id)
         except EntityNotFoundError:
             pass
 
     def get(self, import_id: str, *, owner_id: str) -> dict[str, Any] | None:
         entity = self._get(import_id)
-        return _row(entity) if entity is not None and entity.owner_id == owner_id else None
+        return benchmark_import_row(entity) if entity is not None and entity.owner_id == owner_id else None
 
     def add_task(
         self,

@@ -32,6 +32,7 @@ import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from sandboxed_gym.environment_package import (
@@ -92,6 +93,9 @@ NEMO_GYM_EXTRA_ROOTS_ENV_KEY = "NEMO_GYM_EXTRA_ROOTS"
 #: Writable copy of the image Gym checkout. ``gym_host.sh`` stages it here before this process starts.
 IMAGE_GYM_SRC_ENV_KEY = "SANDBOXED_GYM_SRC_DIR"
 DEFAULT_IMAGE_GYM_SRC = "/tmp/gym-src/Gym"
+# The checkout gym_host.sh copies from. The training container can read it before that copy.
+IMAGE_GYM_TREE_ENV_KEY = "SANDBOXED_GYM_TREE"
+DEFAULT_IMAGE_GYM_TREE = "/opt/nemo-rl/3rdparty/Gym-workspace/Gym"
 #: Which agent, resources server, and model to run. Gym has no schema for this key, so
 #: the host pops it and rewrites ``config_paths`` before Gym parses the dict.
 ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nhx_environment_component_selection"
@@ -725,15 +729,50 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
 _OPEN_SANDBOX_CONFIG = "nemo_gym/sandbox/providers/opensandbox/configs/opensandbox.yaml"
 
 
-def _require_vendored_gym_matches_image(package: EnvironmentPackage | None) -> None:
+def _image_gym_tree() -> Path | None:
+    """Gym checkout shipped in the training image, before the sandbox copies it writable."""
+    root = Path(os.environ.get(IMAGE_GYM_TREE_ENV_KEY, DEFAULT_IMAGE_GYM_TREE))
+    if (root / "nemo_gym").is_dir():
+        return root
+    return None
+
+
+def require_packaged_nemo_gym_matches_image(environment_root: Path, image_gym_root: Path | None = None) -> bool:
+    """Reject a packaged nemo-gym wheel that is not this image's Gym.
+
+    The training container calls this before Ray starts. The sandbox host repeats it after
+    copying the checkout, which is the tree Gym then imports. A package with no nemo-gym
+    wheel, such as native-v1, is not a mismatch.
+
+    Returns True when a wheel was compared. Returns False when there is nothing to compare.
+    """
+    root = image_gym_root if image_gym_root is not None else _image_gym_tree()
+    if root is None or not (root / "nemo_gym").is_dir():
+        return False
+    wheelhouse = environment_root / "wheels"
+    if not wheelhouse.is_dir():
+        return False
+    wheel = next((path for path in sorted(wheelhouse.glob("*.whl")) if _is_nemo_gym_wheel(path)), None)
+    if wheel is None:
+        return False
+    _require_vendored_gym_matches_image(SimpleNamespace(wheel_files=(wheel,)), image_root=root)
+    return True
+
+
+def _require_vendored_gym_matches_image(
+    package: EnvironmentPackage | None,
+    image_root: Path | None = None,
+) -> None:
     """Reject a nemo-gym wheel whose library is not the one in this image.
 
     Both can report the same version. The wheel then lands on PYTHONPATH ahead of the image
     checkout and Gym imports a mix of the two.
     """
     wheel_files = getattr(package, "wheel_files", ())
-    image_root = _image_gym_search_root()
-    library = Path(image_root, "nemo_gym") if image_root else None
+    if image_root is None:
+        found = _image_gym_search_root()
+        image_root = Path(found) if found else None
+    library = image_root / "nemo_gym" if image_root is not None else None
     wheel = next((path for path in wheel_files if _is_nemo_gym_wheel(path)), None)
     if wheel is None or library is None or not library.is_dir():
         return

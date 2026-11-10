@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
-from nhx.common.api.common import DeleteResponse, Page
+from nhx.common.api.common import DeleteResponse, ErrorResponse, Page
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
@@ -215,6 +215,7 @@ async def create_role_binding(
 
 @router.get(
     "/v2/iam/role-bindings/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Role binding not found"}},
     response_model=RoleBinding,
     summary="Get role binding",
     description="Get a specific role binding (Platform Admin only)",
@@ -236,6 +237,7 @@ async def get_role_binding(
 
 @router.delete(
     "/v2/iam/role-bindings/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Role binding not found"}},
     response_model=DeleteResponse,
     summary="Revoke role binding",
     description="Revoke a role binding (Platform Admin only)",

@@ -16,6 +16,14 @@ from pydantic import ValidationError
 from starlette import status
 from starlette.responses import JSONResponse
 
+# Jobs ``source`` identifiers. Each list route filters job entities using the source AND renders every match against a schema;
+# therefore each job type must have a distinct source: we can't list-and-validate a heterogeneous job collection. The standard
+# DD create job keeps the original, default, module-derived source value so that existing jobs stay listed.
+CREATE_JOB_SOURCE = "nemo-data-designer-plugin"
+RETRIEVAL_GENERATE_JOB_SOURCE = "data-designer.retrieval-generate"
+RETRIEVAL_PREPARE_JOB_SOURCE = "data-designer.retrieval-prepare"
+RETRIEVAL_RUN_JOB_SOURCE = "data-designer.retrieval-run"
+
 
 class DataDesignerService(NemoService):
     """Data Designer service for NeMo Helix."""
@@ -60,25 +68,40 @@ class DataDesignerService(NemoService):
                 description="Streaming preview of retrieval synthetic data generation.",
             ),
             RouterSpec(
-                add_job_routes(CreateJob, authz=scope),
+                add_job_routes(CreateJob, service_name=CREATE_JOB_SOURCE, authz=scope),
                 prefix=prefix,
                 tag="Data Designer",
                 description="Job endpoints",
             ),
             RouterSpec(
-                add_job_routes(RetrievalGenerateJob, default_profile=job_profile, authz=scope),
+                add_job_routes(
+                    RetrievalGenerateJob,
+                    service_name=RETRIEVAL_GENERATE_JOB_SOURCE,
+                    default_profile=job_profile,
+                    authz=scope,
+                ),
                 prefix=prefix,
                 tag="Data Designer",
                 description="Retrieval synthetic data generation job endpoints.",
             ),
             RouterSpec(
-                add_job_routes(RetrievalPrepareJob, default_profile=job_profile, authz=scope),
+                add_job_routes(
+                    RetrievalPrepareJob,
+                    service_name=RETRIEVAL_PREPARE_JOB_SOURCE,
+                    default_profile=job_profile,
+                    authz=scope,
+                ),
                 prefix=prefix,
                 tag="Data Designer",
                 description="Retrieval dataset preparation job endpoints.",
             ),
             RouterSpec(
-                add_job_routes(RetrievalRunJob, default_profile=job_profile, authz=scope),
+                add_job_routes(
+                    RetrievalRunJob,
+                    service_name=RETRIEVAL_RUN_JOB_SOURCE,
+                    default_profile=job_profile,
+                    authz=scope,
+                ),
                 prefix=prefix,
                 tag="Data Designer",
                 description="Retrieval generation and preparation job endpoints.",
