@@ -5,7 +5,7 @@ import {
   type MessageSelector,
   messagesPath,
   messagesShape,
-} from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
+} from '@studio/components/evaluation/EvalWizard/useDatasetPreview';
 
 /** Mirrors ``extractUserFriendlyKeysFromRow``: `null` is a contentless message
  *  it drops, which still consumes an index. */

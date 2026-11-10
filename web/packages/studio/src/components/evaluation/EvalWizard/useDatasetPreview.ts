@@ -12,7 +12,7 @@ import {
   useFilesListFilesetFiles,
   useFilesRetrieveFileset,
 } from '@nemo/sdk/generated/platform/files';
-import { isArrayPath } from '@studio/components/evaluation/ModelEvaluationWizard/types';
+import { isArrayPath } from '@studio/components/evaluation/EvalWizard/types';
 import { useDownloadFileHead } from '@studio/components/filesets/hooks/useDownloadFileHead';
 import {
   detectFormatFromPath,
