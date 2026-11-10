@@ -19,6 +19,7 @@ from typing import Annotated, Any, Dict, List, Optional
 # NB: ``AuthContext`` is intentionally NOT re-exported from the plugin here —
 # this module exposes the behaviour-carrying ``nhx.common.auth.AuthContext``
 # (imported above), which the ``HelixJobStepWithContext`` subclass uses.
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.jobs import types as _types
 from nhx.common.auth import AuthContext
 from nhx.common.entities import (
@@ -94,8 +95,28 @@ class HelixJobStepWithContext(_types.HelixJobStepWithContext):
 # =============================================================================
 
 
+def _normalize_job_status_lists(operation: FilterOperation) -> FilterOperation:
+    """Interpret list-valued job statuses as membership, not scalar equality."""
+    if (
+        isinstance(operation, ComparisonOperation)
+        and operation.field == "status"
+        and operation.operator == FilterOperator.EQ
+        and isinstance(operation.value, list)
+    ):
+        return operation.model_copy(update={"operator": FilterOperator.IN})
+    if isinstance(operation, LogicalOperation):
+        return operation.model_copy(
+            update={"operations": [_normalize_job_status_lists(child) for child in operation.operations]}
+        )
+    return operation
+
+
 class HelixJobsListFilter(Filter):
     """Filter options for listing platform jobs."""
+
+    @classmethod
+    def translate_operation(cls, operation: FilterOperation) -> FilterOperation:
+        return super().translate_operation(_normalize_job_status_lists(operation))
 
     workspace: Optional[str] = Field(None, description="Workspace of the job.")
     project: Optional[str] = Field(None, description="Project of the job.")

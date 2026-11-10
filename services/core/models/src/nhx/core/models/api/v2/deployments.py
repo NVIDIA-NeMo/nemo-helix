@@ -245,6 +245,7 @@ async def list_deployment_versions(
 @deployment_routes.get(
     "/v2/workspaces/{workspace}/deployments/{deployment}/versions/{name}",
     summary="Get Specific ModelDeployment Version",
+    responses={404: {"model": ErrorResponse, "description": "Deployment version not found"}},
     response_description="Return a specific version of a model deployment",
     status_code=status.HTTP_200_OK,
 )
