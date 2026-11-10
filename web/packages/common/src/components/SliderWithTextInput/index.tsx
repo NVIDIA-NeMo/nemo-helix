@@ -88,20 +88,25 @@ export const SliderWithTextInput = ({
   const handleTextInputBlur = (event: React.FocusEvent<HTMLInputElement>) => {
     const rawValue = draftValue;
     setDraftValue(null);
+    const numberValue = rawValue === null || rawValue === '' ? NaN : parseFloat(rawValue);
+    if (!Number.isNaN(numberValue)) {
+      const clampedValue = clamp(numberValue, min, max);
+      if (clampedValue !== field.value) {
+        field.onChange(clampedValue);
+        attributes?.Slider?.onValueChange?.(clampedValue);
+      }
+    }
+    // After the clamp, so the handler reads the committed value.
     attributes?.TextInput?.onBlur?.(event);
-    if (rawValue === null || rawValue === '') return;
-    const numberValue = parseFloat(rawValue);
-    if (Number.isNaN(numberValue)) return;
-    const clampedValue = clamp(numberValue, min, max);
-    if (clampedValue === field.value) return;
-    field.onChange(clampedValue);
-    attributes?.Slider?.onValueChange?.(clampedValue);
   };
   const handleReset = () => {
     setDraftValue(null);
     field.onChange(defaultValue);
     // Nothing numeric to forward when the field resets to unset.
-    if (defaultValue !== undefined) attributes?.Slider?.onValueChange?.(defaultValue);
+    if (defaultValue !== undefined) {
+      attributes?.Slider?.onValueChange?.(defaultValue);
+      attributes?.Slider?.onValueCommit?.(defaultValue);
+    }
   };
   const fallback = defaultValue ?? unsetValue ?? min;
   const isFieldValueNumber = typeof field.value === 'number' && !Number.isNaN(field.value);
