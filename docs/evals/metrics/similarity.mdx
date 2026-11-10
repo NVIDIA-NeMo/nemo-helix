@@ -337,12 +337,12 @@ Finance QA scores answers to financial document questions the way the [Nemotron 
 | `relaxed` | When both parse as numbers (ignoring `,`, `$`, `€`, and `£`): within `tolerance` relative error (default 0.05), and in the same scale (`%`, `percent`, `thousand`, `million`, `billion`) when the reference has one. Otherwise `exact`. |
 | `task_correct` | For `multi-span` tasks, the same spans in any order, split on a pipe, `##`, or `;`. For `span` tasks, `exact`. For other tasks, `relaxed`. |
 | `answer_f1` | For `span` and `multi-span` tasks, token F1. For other tasks, `relaxed` as 1 or 0. |
-| `trace_closed` | The completion contains `</think>`. |
+| `trace_closed` | The completion contains `</think>`. When the response puts the trace in `reasoning_content`, any row with reasoning counts, even one cut off mid-trace, as in the cookbook; use `hit_max_new_tokens` to find truncated rows. |
 | `program_syntax_valid` | Only for `program_synthesis_tasks` (default `CodeFinQA` and `CodeTAT-QA`): the reasoning trace parses as Python. It is parsed, never run. |
-| `hit_max_new_tokens` | Only when `max_new_tokens` is set and the response reports usage: the completion used all `max_new_tokens` tokens. Its aggregate `sum` is the number of rows that did. |
+| `hit_max_new_tokens` | Only when `max_new_tokens` is set, and the response reports usage: the completion used all `max_new_tokens` tokens. Its aggregate `sum` is the number of rows that did. |
 | `task` | The row's task, as a label. It isn't aggregated. |
 
-The `task` template selects how each row is scored. It must render a task name such as `TAT-DQA/span`, `TAT-DQA/multi-span`, `TAT-DQA/arithmetic`, `TAT-DQA/count`, or `CodeFinQA`. For online evaluations, omit `candidate`: the metric rebuilds the completion from the response's `reasoning_content` (or `reasoning`) and `content`. To score as the cookbook does, enable thinking, use temperature 0, set `max_new_tokens` to the request's `max_tokens`, and leave `reasoning` unset in the run config, because its `end_token` handling rewrites the response the metric reads.
+The `task` template selects how each row is scored. It must render `TAT-DQA/span`, `TAT-DQA/multi-span`, `TAT-DQA/arithmetic`, `TAT-DQA/count`, or one of `program_synthesis_tasks`; any other value is a row error. For online evaluations, omit `candidate`: the metric rebuilds the completion from the response's `reasoning_content` (or `reasoning`) and `content`. To score as the cookbook does, enable thinking, use temperature 0, and set `max_new_tokens` to the request's `max_tokens`. The cookbook's limit is 256 tokens for arithmetic and count tasks and 512 for the others, so score tasks with different limits in separate jobs.
 
 <Tabs>
 
@@ -433,8 +433,7 @@ result = job.get_result()
     {"name": "finance-qa.task_correct", "count": 3, "mean": 1.0},
     {"name": "finance-qa.answer_f1", "count": 3, "mean": 1.0},
     {"name": "finance-qa.trace_closed", "count": 3, "mean": 1.0},
-    {"name": "finance-qa.program_syntax_valid", "count": 1, "nan_count": 2, "mean": 1.0},
-    {"name": "finance-qa.hit_max_new_tokens", "count": 0, "nan_count": 3, "mean": null}
+    {"name": "finance-qa.program_syntax_valid", "count": 1, "nan_count": 2, "mean": 1.0}
   ]
 }
 ```

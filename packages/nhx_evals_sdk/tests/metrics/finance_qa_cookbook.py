@@ -98,7 +98,10 @@ def completion_text(message: dict) -> tuple[str, str, str]:
 def cookbook_row(
     *, task: str, task_family: str, answer: str, response: dict, task_limit: int, tolerance: float
 ) -> dict:
-    """The per-row scores ``evaluate_route`` records for one response."""
+    """The per-row scores ``evaluate_route`` records for one response.
+
+    ``task_limit`` is the row's completion limit, which ``evaluate_route`` computes per task (lines 428-431).
+    """
     message = response["choices"][0]["message"]
     prediction, reasoning, raw = completion_text(message)
     syntax_valid = None

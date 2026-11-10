@@ -491,10 +491,13 @@ class FinanceQA(MetricBase):
     task: str = Field(
         description=(
             "The template for the row's task, such as `TAT-DQA/span`, `TAT-DQA/multi-span`, `TAT-DQA/arithmetic`, "
-            "`TAT-DQA/count`, `CodeFinQA` or `CodeTAT-QA`. The task selects how `task_correct` and `answer_f1` "
-            "are scored."
+            "`TAT-DQA/count`, or one of `program_synthesis_tasks`. The task selects how `task_correct` and "
+            "`answer_f1` are scored; any other value is a row error."
         ),
-        examples=["{{item.messages[0].content.splitlines()[0].removeprefix('Task: ')}}"],
+        examples=[
+            "{{item.messages[0].content.splitlines()[0].removeprefix('Task: ')}}",
+            "{{item.messages[0].content[1].text.splitlines()[0].removeprefix('Task: ')}}",
+        ],
     )
     candidate: str | None = Field(
         default=None,
@@ -513,8 +516,10 @@ class FinanceQA(MetricBase):
         default=None,
         ge=1,
         description=(
-            "The completion token limit the requests used. When set, `hit_max_new_tokens` reports whether a "
-            "response's `usage.completion_tokens` reached it."
+            "The completion token limit the requests used (their `max_tokens`). When set, `hit_max_new_tokens` "
+            "reports whether a response's `usage.completion_tokens` reached it. The cookbook's limit depends on "
+            "the task (256 for arithmetic and count, 512 otherwise), so score tasks with different limits in "
+            "separate jobs."
         ),
     )
     program_synthesis_tasks: list[str] = Field(

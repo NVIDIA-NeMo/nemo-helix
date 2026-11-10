@@ -73,8 +73,9 @@ class TestTaskScoring:
 
     @pytest.mark.asyncio
     async def test_matches_the_cookbook_on_generated_rows(self):
+        """Each task is scored with its cookbook token limit, as one job per capability does."""
         rng = random.Random(1087)
-        metric = _metric(max_new_tokens=256)
+        metrics = {limit: _metric(max_new_tokens=limit) for limit in (256, 512)}
         for _ in range(600):
             task = rng.choice(list(TASKS))
             reference, prediction = _answer_pair(rng, task)
@@ -84,10 +85,12 @@ class TestTaskScoring:
                 task_family=TASKS[task],
                 answer=reference,
                 response=response,
-                task_limit=256,
+                task_limit=_task_limit(task),
                 tolerance=0.05,
             )
-            scores = await _scores(metric, {"answer": reference, "task": task}, {"response": response})
+            scores = await _scores(
+                metrics[_task_limit(task)], {"answer": reference, "task": task}, {"response": response}
+            )
             context = f"task={task!r} reference={reference!r} response={response!r}"
             for name in ("exact", "relaxed", "task_correct", "answer_f1", "trace_closed"):
                 assert scores[name] == expected[name], f"{name}: {context}"
@@ -157,8 +160,15 @@ class TestCompletionParsing:
 
     @pytest.mark.asyncio
     async def test_raises_clear_error_without_a_completion(self):
-        with pytest.raises(ValueError, match="FinanceQAMetric has no completion to score"):
+        with pytest.raises(ValueError, match="FinanceQAMetric has missing `candidate` field"):
             await compute_scores(_metric(), {"answer": "1", "task": "TAT-DQA/count"}, {})
+
+    @pytest.mark.asyncio
+    async def test_end_token_reasoning_is_wrapped_once(self):
+        """``reasoning.end_token`` moves ``<think>...</think>`` into reasoning_content; the trace still closes once."""
+        response = _response("0.25", reasoning_content="<think>answer = 30 / 120</think>")
+        scores = await _scores(_metric(), {"answer": "0.25", "task": "CodeFinQA"}, {"response": response})
+        assert (scores["exact"], scores["program_syntax_valid"], scores["trace_closed"]) == (True, True, True)
 
 
 class TestOptionalScores:
@@ -168,6 +178,8 @@ class TestOptionalScores:
             ("CodeFinQA", "revenue = 120\ncost = 80\nanswer = revenue - cost", True),
             ("CodeTAT-QA", "answer = (120 - 80", False),
             ("CodeTAT-QA", "answer = 1\x00", False),
+            ("CodeTAT-QA", "x = " + "-" * 8000 + "1", False),  # The parser's stack overflows: MemoryError.
+            ("CodeTAT-QA", "+".join(["1"] * 10000), False),  # Too deep for the AST: RecursionError.
             ("TAT-DQA/arithmetic", "answer = 120 - 80", None),
         ],
     )
@@ -187,6 +199,17 @@ class TestOptionalScores:
             _metric(max_new_tokens=max_new_tokens),
             {"answer": "1", "task": "TAT-DQA/count"},
             {"response": _response("1", completion_tokens=completion_tokens)},
+        )
+        assert scores.get("hit_max_new_tokens") is expected
+
+    @pytest.mark.parametrize(("completion_tokens", "expected"), [(None, False), (512.0, True), (True, None)])
+    @pytest.mark.asyncio
+    async def test_usage_is_read_as_the_cookbook_reads_it(self, completion_tokens, expected):
+        """A null count is 0, a float count is truncated, and a bool is not a count."""
+        response = _response("1")
+        response["usage"] = {"completion_tokens": completion_tokens}
+        scores = await _scores(
+            _metric(max_new_tokens=512), {"answer": "1", "task": "TAT-DQA/count"}, {"response": response}
         )
         assert scores.get("hit_max_new_tokens") is expected
 
@@ -245,6 +268,19 @@ class TestRows:
             await compute_scores(_metric(), {"answer": "1"}, {"output_text": "1"})
         assert "could not render its 'task' template for this row" in str(exc_info.value)
 
+    @pytest.mark.parametrize("task", ["Task: CodeFinQA", "TAT-DQA/Span", "TAT-DQA/span ", "CodeFinQA\n"])
+    @pytest.mark.asyncio
+    async def test_raises_for_an_unknown_task(self, task):
+        """A task template that renders the wrong text fails instead of changing how the row is scored."""
+        with pytest.raises(ValueError, match="which is not a TAT-DQA task"):
+            await compute_scores(_metric(), {"answer": "1", "task": task}, {"output_text": "1"})
+
+    @pytest.mark.asyncio
+    async def test_custom_program_synthesis_tasks_are_known(self):
+        metric = _metric(program_synthesis_tasks=["FinCode"])
+        scores = await _scores(metric, {"answer": "1", "task": "FinCode"}, {"output_text": "<think>a = 1</think>1"})
+        assert scores["program_syntax_valid"] is True
+
 
 class TestConfig:
     def test_score_names(self):
@@ -257,9 +293,9 @@ class TestConfig:
             "answer_f1",
             "trace_closed",
             "program_syntax_valid",
-            "hit_max_new_tokens",
             "task",
         ]
+        assert "hit_max_new_tokens" in output_names(_metric(max_new_tokens=512))
 
     def test_round_trips_through_metrics_union(self):
         metric = _metric(candidate="{{item.completion}}", tolerance=0.01, max_new_tokens=512)
@@ -293,6 +329,12 @@ class TestConfig:
         syntax = aggregates["finance-qa.program_syntax_valid"]
         assert (syntax.mean, syntax.count, syntax.nan_count) == (0.5, 2, 1)
         assert "finance-qa.task" not in aggregates
+        assert "finance-qa.hit_max_new_tokens" not in aggregates
+
+
+def _task_limit(task: str) -> int:
+    """The cookbook's per-task completion limit (evaluation.py lines 428-431, with its default 768)."""
+    return min(768, 256 if task.endswith(("arithmetic", "count")) else 512)
 
 
 def _number(rng: random.Random) -> float:
@@ -333,7 +375,7 @@ def _answer_pair(rng: random.Random, task: str) -> tuple[str, str]:
 
 def _random_response(rng: random.Random, prediction: str) -> dict[str, Any]:
     reasoning = rng.choice(["revenue = 120\nanswer = revenue * 2", "answer = (120", "Read the table.", ""])
-    tokens = rng.choice([None, 100, 255, 256, 300])
+    tokens = rng.choice([None, 100, 255, 256, 300, 511, 512])
     form = rng.randrange(6)
     if form == 0:
         return _response(prediction, tokens, reasoning_content=reasoning)
@@ -360,7 +402,7 @@ def test_generated_rows_cover_every_outcome():
             task_family=TASKS[task],
             answer=reference,
             response=_random_response(rng, prediction),
-            task_limit=256,
+            task_limit=_task_limit(task),
             tolerance=0.05,
         )
         for name, value in row.items():
