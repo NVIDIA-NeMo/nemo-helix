@@ -35,6 +35,7 @@ import {
   getOptimizerSideNavItems,
   getSafeSynthesizerSideNavItems,
   getSettingsSideNavItems,
+  getTasksetSideNavItems,
   getVirtualModelsSideNavItems,
 } from '@studio/routes/groups';
 import { getAgentsListRoute } from '@studio/routes/utils';
@@ -73,7 +74,10 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
     const customizerNav = getCustomizationSideNavItems(workspace);
     const evalNav = getEvaluationSideNavItems(workspace);
     const tracesNav = getIntakeSideNavItems(workspace);
-    const experimentNav = getExperimentSideNavItems(workspace);
+    const evaluationItems = [
+      ...getExperimentSideNavItems(workspace),
+      ...getTasksetSideNavItems(workspace),
+    ];
     const safeSynthesizerNav = getSafeSynthesizerSideNavItems(workspace);
     const dataDesignerNav = getDataDesignerSideNavItems(workspace);
     const anonymizerNav = getAnonymizerSideNavItems(workspace);
@@ -145,7 +149,7 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
         ? [{ group: 'Observability', items: observabilityItems }]
         : []),
       ...(componentItems.length > 0 ? [{ group: 'Components', items: componentItems }] : []),
-      ...(experimentNav.length > 0 ? [{ group: 'Evaluations', items: experimentNav }] : []),
+      ...(evaluationItems.length > 0 ? [{ group: 'Evaluations', items: evaluationItems }] : []),
       ...(dataItems.length > 0 ? [{ group: 'Data', items: dataItems }] : []),
       ...(governanceItems.length > 0 ? [{ group: 'Governance', items: governanceItems }] : []),
     ];

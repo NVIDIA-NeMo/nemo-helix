@@ -13,6 +13,7 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_CUSTOMIZER_ENABLED', 'true');
   vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'true');
   vi.stubEnv('VITE_FF_MONITOR_ENABLED', 'true');
+  vi.stubEnv('VITE_FF_TASKSETS_ENABLED', 'true');
 });
 
 /** The Models children, in the order a user walks the funnel. Virtual Models trails them. */
@@ -145,6 +146,18 @@ describe('WorkspaceSideNav', () => {
       .filter((label) => MODEL_FUNNEL.includes(label ?? ''));
 
     expect(labels).toEqual(MODEL_FUNNEL);
+  });
+
+  it('places Tasksets in the Evaluations group, not under Models', () => {
+    renderSideNav();
+
+    // "Evaluations" is both a Models child link and the group heading; the heading comes last.
+    const heading = screen.getAllByText('Evaluations').at(-1);
+    const tasksets = screen.getByRole('link', { name: 'Tasksets' });
+    const follows = (a: Node | undefined, b: Node) =>
+      Boolean(a && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(heading, tasksets)).toBe(true);
+    expect(follows(tasksets, screen.getByText('Data'))).toBe(true);
   });
 
   it('starts every parent expanded regardless of the current route', () => {

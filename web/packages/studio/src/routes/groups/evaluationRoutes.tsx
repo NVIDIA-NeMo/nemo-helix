@@ -114,15 +114,18 @@ export const getEvaluationSideNavItems = (workspace: string) =>
           slotLabel: 'Evaluations',
           href: getEvaluationResultsRoute(workspace),
         },
-        ...(TASKSETS_ENABLED
-          ? [
-              {
-                id: 'tasksets',
-                slotIcon: <TasksetsIcon className={iconColorClass} />,
-                slotLabel: 'Tasksets',
-                href: getTasksetsRoute(workspace),
-              },
-            ]
-          : []),
+      ]
+    : [];
+
+/** Tasksets sit in the Evaluations nav group, beside the Experiments they feed. */
+export const getTasksetSideNavItems = (workspace: string) =>
+  EVALS_ENABLED && TASKSETS_ENABLED
+    ? [
+        {
+          id: 'tasksets',
+          slotIcon: <TasksetsIcon className={iconColorClass} />,
+          slotLabel: 'Tasksets',
+          href: getTasksetsRoute(workspace),
+        },
       ]
     : [];
