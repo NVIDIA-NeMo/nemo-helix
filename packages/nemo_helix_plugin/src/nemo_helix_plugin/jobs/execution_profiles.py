@@ -634,11 +634,10 @@ class OpenShellJobExecutionProfileConfig(JobExecutionProfileConfig):
         default=None,
         ge=1,
         description=(
-            "GPUs requested for every step of this profile that does not declare its own "
-            "resources.num_gpus. Unset requests no GPU at all: the sandbox spec carries no "
-            "resource_requirements, so the gateway never selects a GPU driver. A step whose "
-            "provider is gpu with neither one asks for a single GPU, matching the docker and "
-            "k8s GPU backends."
+            "GPUs requested for a gpu step of this profile that does not declare its own "
+            "resources.num_gpus; a gpu step with neither asks for one. cpu steps never request "
+            "a GPU, as on the docker and k8s backends. A GPU sandbox keeps the k8s default "
+            "/dev/shm, since OpenShell has no shm sizing; a step's shm_size is ignored."
         ),
     )
     egress_proxy: str | None = Field(

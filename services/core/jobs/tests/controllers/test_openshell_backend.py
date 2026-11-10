@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime
+import logging
 import subprocess
 import sys
 from collections.abc import AsyncGenerator
@@ -358,25 +359,65 @@ class TestSchedule:
 
         assert _create_request(backend).spec.resource_requirements.gpu.count == 2
 
-    def test_profile_gpu_count_applies_to_a_cpu_step(
+    def test_profile_gpu_count_does_not_apply_to_a_cpu_step(
         self, mock_nemo_client, mock_platform_config, test_step_pending
     ) -> None:
         backend = _backend(mock_nemo_client, mock_platform_config, num_gpus=4)
 
         backend.schedule(test_step_pending.step_spec.executor, test_step_pending)
 
+        assert not _create_request(backend).spec.HasField("resource_requirements")
+
+    def test_profile_gpu_count_applies_to_a_gpu_step(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config, num_gpus=4)
+
+        backend.schedule(_gpu_executor(num_gpus=None), test_step_pending)
+
         assert _create_request(backend).spec.resource_requirements.gpu.count == 4
 
-    def test_zero_gpu_count_is_rejected_before_creation(
-        self, mock_nemo_client, mock_platform_config, test_step_pending
+    def test_cpu_step_gpu_count_is_ignored(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        executor = CPUExecutionProvider(container=ContainerSpec(image="img"), resources=ComputeResources(num_gpus=2))
+
+        backend.schedule(executor, test_step_pending)
+
+        assert not _create_request(backend).spec.HasField("resource_requirements")
+
+    def test_zero_gpu_count_means_no_gpu(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config, num_gpus=4)
+
+        update = backend.schedule(_gpu_executor(num_gpus=0), test_step_pending)
+
+        assert update.status == HelixJobStatus.PENDING
+        assert not _create_request(backend).spec.HasField("resource_requirements")
+
+    @pytest.mark.parametrize("num_gpus", [-1, 2**32])
+    def test_out_of_range_gpu_count_is_rejected_before_creation(
+        self, mock_nemo_client, mock_platform_config, test_step_pending, num_gpus: int
     ) -> None:
         backend = _backend(mock_nemo_client, mock_platform_config)
 
-        update = backend.schedule(_gpu_executor(num_gpus=0), test_step_pending)
+        update = backend.schedule(_gpu_executor(num_gpus=num_gpus), test_step_pending)
 
         assert update.status == HelixJobStatus.ERROR
         assert "num_gpus" in update.status_details["message"]
         backend._client.create.assert_not_called()
+
+    def test_shm_size_on_a_step_is_warned_and_ignored(
+        self, mock_nemo_client, mock_platform_config, test_step_pending, caplog
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        executor = GPUExecutionProvider(
+            container=ContainerSpec(image="img"), resources=ComputeResources(num_gpus=1, shm_size="8Gi")
+        )
+
+        with caplog.at_level(logging.WARNING):
+            backend.schedule(executor, test_step_pending)
+
+        assert any("shm_size" in record.getMessage() for record in caplog.records)
+        assert _create_request(backend).spec.resource_requirements.gpu.count == 1
 
     def test_default_image_when_step_declares_none(
         self, mock_nemo_client, mock_platform_config, test_step_pending

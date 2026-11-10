@@ -127,11 +127,14 @@ _DEFAULT_ENTRYPOINT = ("nemo-helix",)
 # world-writable in every image. The launcher creates the step-config directory
 # when it writes the fetched config.
 _TASK_STORAGE_PATH = "/tmp"
+_CONFIG_STORAGE_PATH = "/tmp/nhx-job-config"
+_STEP_CONFIG_FILE_PATH = f"{_CONFIG_STORAGE_PATH}/{NEMO_JOB_STEP_CONFIG_FILE_NAME}"
 
 # The step executors this backend is registered for (see backends.registry).
 OpenShellExecutionProvider: TypeAlias = CPUExecutionProvider | GPUExecutionProvider
-_CONFIG_STORAGE_PATH = "/tmp/nhx-job-config"
-_STEP_CONFIG_FILE_PATH = f"{_CONFIG_STORAGE_PATH}/{NEMO_JOB_STEP_CONFIG_FILE_NAME}"
+
+# GpuResourceRequirements.count is a uint32 on the wire.
+_MAX_GPU_COUNT = 2**32 - 1
 
 # Platform URLs the backend injects into the sandbox environment. The sandbox
 # can only reach the platform at the egress host (the policy allows exactly that
@@ -316,10 +319,17 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
     ) -> JobUpdate:
         step_spec = self._require_step_spec(step)
         num_gpus = self._resolve_num_gpus(executor_config)
-        if num_gpus is not None and num_gpus < 1:
+        if num_gpus is not None and not 0 < num_gpus <= _MAX_GPU_COUNT:
             return JobUpdate(
                 status=HelixJobStatus.ERROR,
-                status_details={"message": f"num_gpus must be greater than 0, got {num_gpus}."},
+                status_details={"message": f"num_gpus must be between 1 and {_MAX_GPU_COUNT}, got {num_gpus}."},
+            )
+        if executor_config.resources.shm_size is not None:
+            logger.warning(
+                "OpenShell sandboxes cannot size /dev/shm; shm_size %s on step %s is ignored",
+                executor_config.resources.shm_size,
+                step.name,
+                extra={"job": step.job, "step": step.name},
             )
         if any(item.from_secret is not None for item in step_spec.environment or []):
             return JobUpdate(
@@ -493,17 +503,19 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
     def _resolve_num_gpus(self, executor_config: OpenShellExecutionProvider) -> int | None:
         """GPUs this step's sandbox requests, or None when it wants no GPU.
 
-        The step's own ``resources.num_gpus`` wins over the profile's ``num_gpus``. A
-        ``gpu`` step that declares neither asks for one GPU, which is what the docker
-        and k8s GPU backends do for an unset count.
+        Only a ``gpu`` step requests GPUs, as on the docker and k8s backends, whose
+        cpu variants never read a GPU count. The step's own ``resources.num_gpus``
+        wins over the profile's ``num_gpus``; a step that declares neither asks for
+        one GPU. A step count of zero means no GPU, matching the k8s backend.
         """
-        if executor_config.resources.num_gpus is not None:
-            return executor_config.resources.num_gpus
+        if not isinstance(executor_config, GPUExecutionProvider):
+            return None
+        step_count = executor_config.resources.num_gpus
+        if step_count is not None:
+            return step_count if step_count != 0 else None
         if self._executor_config.num_gpus is not None:
             return self._executor_config.num_gpus
-        if isinstance(executor_config, GPUExecutionProvider):
-            return 1
-        return None
+        return 1
 
     def sync(self, step: HelixJobStepWithContext) -> JobUpdate:
         sandbox_name = _sandbox_name(step.workspace, step.job, step.attempt_id, step.name)
