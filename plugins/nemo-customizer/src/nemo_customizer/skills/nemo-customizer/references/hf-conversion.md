@@ -155,7 +155,7 @@ if "validation" in ds:
     write_jsonl(Path("/tmp/train-data/validation.jsonl"), ds["validation"], "validation", train_images)
 ```
 
-Each `image_url.url` is that relative path, or a base64 `data:` URL when the bytes stay inline (PNG, JPEG, GIF or WebP, at most 25 MiB; `dataset-formats.md` § MULTIMODAL). A row with several images gets one `image_url` part per image, then the text part. Upload `/tmp/train-data/` to the dataset fileset and `/tmp/test-data/` to `<DATASET_NAME>-test`. Each directory holds its JSONL and `images/`. Validate with `nemo files list <DATASET_NAME> --workspace default`.
+Each `image_url.url` is that relative path, or a base64 `data:` URL when the bytes stay inline (PNG, JPEG, GIF or WebP, at most 25 MiB; `dataset-formats.md` § **Image rows**). A row with several images gets one `image_url` part per image, then the text part. Upload `/tmp/train-data/` to the dataset fileset and `/tmp/test-data/` to `<DATASET_NAME>-test`. Each directory holds its JSONL and `images/`. Validate with `nemo files list <DATASET_NAME> --workspace default`.
 
 A Gym row that needs an image uses Responses API parts on `responses_create_params.input[].content`: `{type: input_image, image_url: "<string>"}` followed by `{type: input_text, text}`. A string `content` stays one text part. The automodel fileset stays `{type: image_url, image_url: {url}}`. See the **nemo-gym-environments** skill, `references/rollout-rows.md`.
 
