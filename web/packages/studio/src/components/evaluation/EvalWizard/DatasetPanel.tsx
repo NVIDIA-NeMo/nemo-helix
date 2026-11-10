@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ControlledDatasetFileSelect } from '@nemo/common/src/components/DatasetFileSelect/ControlledDatasetFileSelect';
+import type { AcceptedFileType } from '@nemo/common/src/components/DatasetFileSelect/DatasetFileSelect';
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
 import { DatasetRowPager } from '@nemo/common/src/components/DatasetRowPager';
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
@@ -23,9 +24,8 @@ import {
   messagesShape,
   useDatasetPreview,
 } from '@studio/components/evaluation/EvalWizard/useDatasetPreview';
-import { useMessagesBinding } from '@studio/components/evaluation/EvalWizard/useMessagesBinding';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { type FC, useEffect, useMemo, useState } from 'react';
+import { type FC, type ReactNode, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 const asText = (value: unknown): string =>
@@ -42,7 +42,24 @@ const Check: FC<{ ok: boolean; label: string }> = ({ ok, label }) => (
   </Flex>
 );
 
-export const DatasetPanel: FC = () => {
+interface DatasetPanelProps {
+  slotLabel?: ReactNode;
+  acceptedFileTypes?: AcceptedFileType[];
+  /** Off where the row is rendered into a prompt rather than mapped. */
+  showMapping?: boolean;
+  /** Rendered between the file checks and the field mapping. */
+  children?: ReactNode;
+  /** Called when the user picks or clears the dataset file. */
+  onFileSelected?: () => void;
+}
+
+export const DatasetPanel: FC<DatasetPanelProps> = ({
+  slotLabel,
+  acceptedFileTypes = [...MAPPABLE_FILE_TYPES],
+  showMapping = true,
+  children,
+  onFileSelected,
+}) => {
   const workspace = useWorkspaceFromPath();
   const { control, setError, clearErrors, setValue } = useFormContext<EvaluationFormValues>();
   const dataset = useWatch({ control, name: 'dataset' });
@@ -53,10 +70,8 @@ export const DatasetPanel: FC = () => {
     dataset ?? null
   );
 
-  useMessagesBinding();
-
-  const [rowIndex, setRowIndex] = useState(0);
-  useEffect(() => setRowIndex(0), [dataset]);
+  const [rowPick, setRowPick] = useState({ dataset, index: 0 });
+  const rowIndex = rowPick.dataset === dataset ? rowPick.index : 0;
   const { row: previewRow, rowCount, isPartial } = useDatasetPreview(dataset ?? null, rowIndex);
   const fileName = dataset ? parseFilesetLocation(dataset)?.objectPath.split('/').pop() : null;
 
@@ -119,11 +134,17 @@ export const DatasetPanel: FC = () => {
           useControllerProps={{ name: 'dataset', control }}
           setError={(fieldError) => setError('dataset', fieldError)}
           clearError={() => clearErrors('dataset')}
-          acceptedFileTypes={[...MAPPABLE_FILE_TYPES]}
+          acceptedFileTypes={acceptedFileTypes}
           invalidFileMode="disable"
           filesetPurpose={FilesetPurpose.dataset}
           autoSelectFirstAcceptable
-          onFileSelected={() => setValue('fieldMapping', EMPTY_FIELD_MAPPING)}
+          formFieldProps={slotLabel ? { slotLabel } : undefined}
+          onFileSelected={() => {
+            if (showMapping) {
+              setValue('fieldMapping', EMPTY_FIELD_MAPPING);
+            }
+            onFileSelected?.();
+          }}
         />
 
         {error ? (
@@ -136,7 +157,7 @@ export const DatasetPanel: FC = () => {
           <Stack gap="density-sm" className="rounded-md border border-base p-density-lg">
             <Text kind="label/bold/sm">File Validation</Text>
             <Check ok label={`${formatLabel} is valid`} />
-            {messagesColumn ? (
+            {!showMapping ? null : messagesColumn ? (
               <>
                 <Check ok label={`Standard messages array found in "${messagesColumn}"`} />
                 <Check
@@ -166,7 +187,9 @@ export const DatasetPanel: FC = () => {
             last user turn is the input and the last assistant turn is the ground
             truth, bound by role in useMessagesBinding. Asking the user to map
             that would be busywork. */}
-        {hasIngestedKeys && !messagesColumn ? (
+        {children}
+
+        {showMapping && hasIngestedKeys && !messagesColumn ? (
           <Stack gap="density-sm" className="min-w-0">
             <Text kind="body/bold/lg">Field Mapping</Text>
             <Text kind="body/regular/md" className="text-secondary">
@@ -188,7 +211,7 @@ export const DatasetPanel: FC = () => {
                 rowIndex={rowIndex}
                 rowCount={rowCount}
                 isPartial={isPartial}
-                onChange={setRowIndex}
+                onChange={(index) => setRowPick({ dataset, index })}
               />
             ) : null}
           </Stack>
