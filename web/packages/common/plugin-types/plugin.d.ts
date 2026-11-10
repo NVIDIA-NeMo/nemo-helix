@@ -4093,6 +4093,298 @@ interface PaginationRootProps extends PrimitivePropsWithRef<"div"> {
    */
   action?: PaginationAction;
 }
+interface SliderInputProps extends Omit<ComponentPropsWithoutRef<"input">, "type"> {}
+/**
+ * The native `<input type="range">` that owns the slider's value, focus, and keyboard interaction.
+ * @param props - {@link SliderInputProps}
+ */
+declare const SliderInput: React$1.ForwardRefExoticComponent<SliderInputProps & React$1.RefAttributes<HTMLInputElement>>;
+interface SliderRootProps extends PrimitivePropsWithRef<"span"> {
+  /**
+   * Whether the track runs horizontally or vertically.
+   * @defaultValue "horizontal"
+   */
+  orientation?: "horizontal" | "vertical";
+}
+interface SliderStepsProps extends Omit<ComponentPropsWithRef<"span">, "children"> {
+  /** Formats each step label before it is rendered. Receives the numeric value and returns the display string. */
+  stepFormatFn?: (value: number) => string;
+  /**
+   * Side of the track the step markers render on.
+   * @defaultValue "end"
+   */
+  position?: "start" | "end";
+  /** Distance between rendered step markers. Falls back to the slider's `step` value when omitted. */
+  stepInterval?: number;
+  /** Explicit list of values to render as markers. Overrides `step` and `stepInterval` when provided. */
+  customSteps?: number[];
+  /**
+   * Lower bound of the value range.
+   * @defaultValue 0
+   */
+  min?: number;
+  /**
+   * Upper bound of the value range.
+   * @defaultValue 100
+   */
+  max?: number;
+  /**
+   * Step increment used to generate marker positions.
+   * @defaultValue 1
+   */
+  step?: number;
+}
+/**
+ * Tick marks and labels rendered alongside the slider track to communicate the available range.
+ * @param props - {@link SliderStepsProps}
+ */
+declare const SliderSteps: React$1.ForwardRefExoticComponent<Omit<SliderStepsProps, "ref"> & React$1.RefAttributes<HTMLSpanElement>>;
+type InputAttributes$1 = Exclude<AttributesFor<"input">, "type">;
+interface PropsFromRoot$2 extends Omit<SliderRootProps, InputAttributes$1> {}
+interface PropsFromInput$1 extends Pick<SliderInputProps, InputAttributes$1> {}
+interface PropsFromSteps extends Pick<SliderStepsProps, "stepInterval" | "customSteps" | "stepFormatFn"> {
+  /** Side of the track the step markers render on. Markers are hidden when omitted. */
+  stepPosition?: SliderStepsProps["position"];
+}
+interface SliderProps$1 extends PropsFromRoot$2, PropsFromInput$1, PropsFromSteps {
+  /**
+   * Lower bound of the value range.
+   * @defaultValue 0
+   */
+  min?: number;
+  /**
+   * Upper bound of the value range.
+   * @defaultValue 100
+   */
+  max?: number;
+  /**
+   * Step increment between selectable values.
+   * @defaultValue 1
+   */
+  step?: number;
+  /** Initial value for uncontrolled use. */
+  defaultValue?: number;
+  /** Controlled value. Pair with `onValueChange` to keep the slider in sync. */
+  value?: number;
+  /** Fires on every value change while the user drags or steps the thumb. */
+  onValueChange?: (value: number) => void;
+  /** Fires once when the user releases the thumb. Useful for committing the final value to a backend. */
+  onValueCommit?: (value: number) => void;
+  /** Native HTML attributes forwarded to the internal composed components. */
+  attributes?: {
+    SliderInput?: NativeElementAttributes<"input", typeof SliderInput>;
+    SliderSteps?: NativeElementAttributes<"span", typeof SliderSteps>;
+  };
+}
+/**
+ * A single-value range input rendered along a bar. Use for continuous settings like volume, brightness, or threshold values where the relative position carries meaning.
+ * @param props - {@link SliderProps}
+ * @alias Range Input, Input Range
+ *
+ * @llm Use Slider when the relative position within a range matters more than the exact value. For precise numeric entry (port number, replica count, timeout) use TextInput with `type="number"` instead.
+ * @llm Pair the Slider with a TextInput that displays and accepts the current value when the range is large (e.g. 0-10000), users may know their target value, or precision matters but the range context is still useful.
+ * @llm Default to `orientation="horizontal"`. Reach for `orientation="vertical"` only when the metaphor is inherently vertical (audio fader, equalizer band, temperature).
+ * @llm Show step marks (`stepPosition`) when the range has a small number of discrete valid values or when the step size is non-obvious. Hide them for continuous ranges or many fine-grained steps.
+ * @llm Always render the slider's min and max values near the track so users understand the boundaries of the range.
+ * @llm Set `step` to match the smallest meaningful increment so the thumb cannot land between valid values.
+ * @see {@link RangeSlider}
+ *
+ * @example
+ * <caption>Basic Slider</caption>
+ * ```tsx
+ * <Slider defaultValue={50} aria-label="Volume" />
+ * ```
+ *
+ * @example
+ * <caption>With Step Marks Slider</caption>
+ * Use step marks to show discrete positions and help users pick precise values.
+ * ```tsx
+ * <Slider
+ * 	defaultValue={40}
+ * 	step={10}
+ * 	stepPosition="end"
+ * 	aria-label="Brightness"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>Custom Range Slider</caption>
+ * Use custom min/max/step when the default 0–100 range does not match the domain.
+ * ```tsx
+ * <Slider
+ * 	defaultValue={250}
+ * 	min={100}
+ * 	max={500}
+ * 	step={50}
+ * 	stepPosition="end"
+ * 	aria-label="Budget"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>Disabled Slider</caption>
+ * Use when the slider value is locked and cannot be changed.
+ * ```tsx
+ * <Slider defaultValue={30} disabled aria-label="Locked" />
+ * ```
+ *
+ * @example
+ * <caption>Vertical Slider</caption>
+ * Use vertical orientation for controls like volume faders or equalizer bands.
+ * ```tsx
+ * <Slider
+ * 	defaultValue={60}
+ * 	orientation="vertical"
+ * 	stepPosition="start"
+ * 	step={20}
+ * 	aria-label="Level"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>With Step Interval Slider</caption>
+ * Use stepInterval to space the visible step markers at a coarser interval than the slider's underlying step value, so users can drag with fine precision while still seeing key reference points.
+ * ```tsx
+ * <Slider
+ * 	defaultValue={50}
+ * 	min={0}
+ * 	max={100}
+ * 	step={1}
+ * 	stepInterval={20}
+ * 	stepPosition="end"
+ * 	aria-label="Precision control"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>With Custom Steps Slider</caption>
+ * Use customSteps when the meaningful tick positions are non-uniform or only certain anchor values matter (e.g. quality presets, named breakpoints). It overrides both step and stepInterval for marker placement.
+ * ```tsx
+ * <Slider
+ * 	defaultValue={50}
+ * 	min={0}
+ * 	max={100}
+ * 	step={5}
+ * 	customSteps={[0, 25, 50, 75, 100]}
+ * 	stepPosition="end"
+ * 	aria-label="Quality preset"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>With Formatted Steps Slider</caption>
+ * Use stepFormatFn to render step labels in a domain-specific format like currency, percentages, units, or descriptive words (e.g. Mute / Quiet / Loud). Works with both orientations.
+ * ```tsx
+ * <Slider
+ * 	defaultValue={60}
+ * 	min={0}
+ * 	max={100}
+ * 	step={1}
+ * 	stepInterval={20}
+ * 	stepPosition="end"
+ * 	stepFormatFn={(value) => `${value}°C`}
+ * 	aria-label="Temperature"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>With Form Name Slider</caption>
+ * Set name to submit the slider value as a standard form field — the underlying native range input participates in form submission with no extra wiring.
+ * ```tsx
+ * <Slider
+ * 	name="volume"
+ * 	defaultValue={50}
+ * 	step={10}
+ * 	stepPosition="end"
+ * 	aria-label="Volume"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>With Text Input Slider</caption>
+ * Pair a Slider with a TextInput by sharing controlled state — useful when users need both quick coarse adjustment via the slider and precise numeric entry via the input. Track the numeric value alongside a string buffer so the user can type freely, then clamp the buffer into the slider's range on blur.
+ * ```tsx
+ * () => {
+ * 	const min = 0;
+ * 	const max = 100;
+ * 	const [value, setValue] = useState(50);
+ * 	const [inputValue, setInputValue] = useState("50");
+ *
+ * 	return (
+ * 		<Flex align="center" gap="density-md">
+ * 			<TextInput
+ * 				className="w-fit"
+ * 				type="number"
+ * 				min={min}
+ * 				max={max}
+ * 				value={inputValue}
+ * 				onValueChange={(next) => {
+ * 					setInputValue(next);
+ * 					const parsed = Number(next);
+ * 					if (next.trim() !== "" && !Number.isNaN(parsed)) {
+ * 						const clamped = Math.min(max, Math.max(min, parsed));
+ * 						setValue(clamped);
+ * 					}
+ * 				}}
+ * 				onBlur={() => {
+ * 					const parsed = Number(inputValue);
+ * 					const clamped = Number.isNaN(parsed)
+ * 						? value
+ * 						: Math.min(max, Math.max(min, parsed));
+ * 					setValue(clamped);
+ * 					setInputValue(String(clamped));
+ * 				}}
+ * 				aria-label="Volume"
+ * 			/>
+ * 			<Slider
+ * 				min={min}
+ * 				max={max}
+ * 				value={value}
+ * 				onValueChange={(next) => {
+ * 					setValue(next);
+ * 					setInputValue(String(next));
+ * 				}}
+ * 				aria-label="Volume"
+ * 			/>
+ * 		</Flex>
+ * 	);
+ * }
+ * ```
+ *
+ * @example
+ * <caption>Composed</caption>
+ * Use the composed primitives when you need full control over the slider track, input, and step label layout.
+ * ```tsx
+ * <SliderRoot orientation="horizontal" aria-label="Custom slider">
+ * 	<SliderInput
+ * 		aria-label="Custom slider input"
+ * 		defaultValue={50}
+ * 		min={0}
+ * 		max={100}
+ * 		step={25}
+ * 	/>
+ * 	<SliderSteps min={0} max={100} step={25} position="end" />
+ * </SliderRoot>
+ * ```
+ *
+ * @example
+ * <caption>HTML</caption>
+ * The track fill reads the `--slider-percent` custom property on the root, which CSS cannot derive from the input's value. Leave it unset — as above — unless JS keeps it in sync on every `input` event, or the fill will freeze at its authored width while the thumb moves: `root.style.setProperty("--slider-percent", ((value - min) / (max - min)) * 100 + "%")`.
+ * ```html
+ * <span class="nv-slider-root">
+ *   <input
+ *     class="nv-slider-input"
+ *     type="range"
+ *     min="0"
+ *     max="100"
+ *     step="1"
+ *     value="50"
+ *     aria-label="Volume"
+ *   />
+ * </span>
+ * ```
+ */
+declare const Slider: React$1.ForwardRefExoticComponent<Omit<SliderProps$1, "ref"> & React$1.RefAttributes<HTMLInputElement>>;
 interface StatusMessageFooterProps extends PrimitivePropsWithRef<"div"> {}
 /**
  * The action area of a status message. Aligns and spaces call-to-action buttons that help the user recover from or act on the state.
@@ -9870,6 +10162,33 @@ type ModelWorkspaceGroup = {
   models: ModelEntity[];
 };
 //#endregion
+//#region src/components/TrainingParameterSlider/types.d.ts
+type SliderProps = ComponentProps<typeof Slider>;
+type HyperparameterFieldMetadata<T> = { readonly [K in keyof Required<T>]: {
+  readonly name: string;
+  readonly min: number;
+  readonly max: number;
+  readonly description?: string;
+  readonly default: number;
+  readonly step?: SliderProps['step'];
+  readonly values?: readonly number[];
+  readonly customSteps?: SliderProps['customSteps'];
+}; };
+//#endregion
+//#region src/components/ModelSelectV2/InferenceParameters.d.ts
+declare const INFERENCE_PARAMETER_FIELDS: ["temperature", "max_tokens", "top_p"];
+type InferenceParameterField = (typeof INFERENCE_PARAMETER_FIELDS)[number];
+type FieldMetadata = HyperparameterFieldMetadata<Record<InferenceParameterField, number>>[InferenceParameterField];
+interface InferenceParametersProps {
+  value: Partial<InferenceParams>;
+  onChange: (value: Partial<InferenceParams>) => void;
+  disabled?: boolean;
+  /** Per-field overrides of the shared bounds and defaults, for callers whose backend differs. */
+  fieldMetadata?: Partial<Record<InferenceParameterField, Partial<FieldMetadata>>>;
+  /** The fields to show, for callers whose request only carries some of them. Defaults to all. */
+  fields?: readonly InferenceParameterField[];
+}
+//#endregion
 //#region src/components/ModelSelectV2/types.d.ts
 interface ModelSelection {
   /** Model URN (e.g. "workspace/model_name") */
@@ -9883,7 +10202,27 @@ interface ModelSelection {
    */
   entity?: ModelEntity;
 }
-interface ModelSelectProps {
+/** The params control shown beside the model button. */
+interface ModelSelectParamsProps {
+  /** Show the params button alongside the model button */
+  showParams?: boolean;
+  /** Current inference parameter values */
+  inferenceParams?: Partial<InferenceParams>;
+  /** Called when the user changes any inference parameter */
+  onInferenceParamsChange?: (params: Partial<InferenceParams>) => void;
+  /**
+   * Disable the params control on its own. Defaults to `disabled`; pass `false` to keep
+   * params editable while the model is fixed (e.g. a locked chat panel).
+   */
+  paramsDisabled?: boolean;
+  /** Per-field bounds and defaults for the params control, for callers whose backend differs. */
+  paramsFieldMetadata?: InferenceParametersProps['fieldMetadata'];
+  /** The params to show, for callers whose request only carries some of them. Defaults to all. */
+  paramsFields?: InferenceParametersProps['fields'];
+  /** Show only the icon on the params button, for tight layouts. */
+  paramsIconOnly?: boolean;
+}
+interface ModelSelectProps extends ModelSelectParamsProps {
   /** Currently selected model (and optional adapter) */
   value: ModelSelection | null;
   /** Called when user selects a model or adapter */
@@ -9927,8 +10266,6 @@ interface ModelSelectProps {
    * the caller owns the filter and the dropdown stops applying it to {@link groups}.
    */
   onModelTypeChange?: (modelType: ModelType) => void;
-  /** Show the params button alongside the model button */
-  showParams?: boolean;
   /**
    * Hide each model's adapter sub-list. When true, models render as flat,
    * directly-selectable items even if they have adapters.
@@ -9942,10 +10279,6 @@ interface ModelSelectProps {
   fullWidth?: boolean;
   /** Preferred side for the dropdown content */
   dropdownSide?: 'top' | 'bottom';
-  /** Current inference parameter values */
-  inferenceParams?: Partial<InferenceParams>;
-  /** Called when the user changes any inference parameter */
-  onInferenceParamsChange?: (params: Partial<InferenceParams>) => void;
   /** Called when the model dropdown opens or closes */
   onOpenChange?: (open: boolean) => void;
   /** aria-label for the button group */
