@@ -6,6 +6,7 @@ import collections
 import io
 import json
 import os
+import shutil
 import socket
 import subprocess
 import threading
@@ -14,6 +15,7 @@ import urllib.error
 import zipfile
 from email.message import Message
 from http.server import HTTPServer, ThreadingHTTPServer
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -23,6 +25,8 @@ import pytest
 from sandboxed_gym.environment_package import (
     WHEELS_V1_SUBDIR,
     EnvironmentMetadata,
+    NativeV1Manifest,
+    NativeV1Package,
     WheelsV1Manifest,
     WheelsV1Package,
 )
@@ -742,6 +746,77 @@ def test_an_operators_own_uv_offline_setting_is_not_overwritten(tmp_path, monkey
     assert runtime.os.environ[runtime.UV_OFFLINE_ENV_KEY] == "0"
 
 
+_PACKAGED_SERVER_STAGING = Path(__file__).parent / "fixtures" / "packaged_server_staging"
+
+
+def test_packaged_server_is_staged_onto_the_gym_checkout_and_searched_first(tmp_path, monkeypatch):
+    """Stage tests/fixtures/packaged_server_staging onto a writable copy of its image checkout."""
+    package_src = _PACKAGED_SERVER_STAGING / "package"
+    image_src = _PACKAGED_SERVER_STAGING / "image"
+    package = tmp_path / "pkg"
+    image = tmp_path / "gym"
+    shutil.copytree(package_src, package)
+    shutil.copytree(image_src, image)
+    monkeypatch.delenv(runtime.IMAGE_GYM_SRC_ENV_KEY, raising=False)
+    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(image))
+    monkeypatch.delenv(runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY, raising=False)
+
+    loaded = NativeV1Package(
+        root=package,
+        manifest=NativeV1Manifest(
+            metadata=EnvironmentMetadata(name="math-with-judge"),
+            config_paths=("resources_servers/math_with_judge/configs/math_with_judge.yaml",),
+        ),
+        config_paths=(),
+    )
+    assert runtime._stage_packaged_servers_into_gym_checkout(loaded)
+    runtime._prepend_environment_search_root(str(loaded.root), checkout_first=True)
+
+    server = Path("resources_servers/math_with_judge")
+    # The packaged server replaces the image server. Shared data from the package root
+    # overlays the checkout, and a checkout file the package does not ship stays.
+    assert (image / server / "app.py").read_bytes() == (package_src / server / "app.py").read_bytes()
+    assert (image / server / "requirements.txt").read_bytes() == (
+        package_src / server / "requirements.txt"
+    ).read_bytes()
+    assert (image / "shared/settings.json").read_bytes() == (package_src / "shared/settings.json").read_bytes()
+    assert (image / "shared/keep.txt").read_bytes() == (image_src / "shared/keep.txt").read_bytes()
+    assert (image / "resources_servers/settings.json").read_bytes() == (
+        package_src / "resources_servers/settings.json"
+    ).read_bytes()
+    # nemo_gym and a configs-only reference stay the image's. The reference is not copied over.
+    builtin = Path("resources_servers/builtin_judge")
+    assert (image / "nemo_gym/__init__.py").read_bytes() == (image_src / "nemo_gym/__init__.py").read_bytes()
+    assert (image / builtin / "app.py").read_bytes() == (image_src / builtin / "app.py").read_bytes()
+    assert not (image / builtin / "configs").exists()
+    assert (image / "pyproject.toml").is_file()
+    roots = runtime.os.environ[runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY].split(os.pathsep)
+    assert roots[0] == str(image.resolve())
+    assert roots[1] == str(loaded.root)
+
+
+def test_a_reference_only_server_does_not_replace_the_image_checkout(tmp_path, monkeypatch):
+    package = tmp_path / "pkg" / "resources_servers" / "math_with_judge" / "configs"
+    package.mkdir(parents=True)
+    (package / "math_with_judge.yaml").write_text("entrypoint: app.py\n")
+    image_server = tmp_path / "gym" / "resources_servers" / "math_with_judge"
+    image_server.mkdir(parents=True)
+    (image_server / "app.py").write_text("print('image')\n")
+    monkeypatch.delenv(runtime.IMAGE_GYM_SRC_ENV_KEY, raising=False)
+    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(tmp_path / "gym"))
+
+    loaded = NativeV1Package(
+        root=tmp_path / "pkg",
+        manifest=NativeV1Manifest(
+            metadata=EnvironmentMetadata(name="math-with-judge"),
+            config_paths=("resources_servers/math_with_judge/configs/math_with_judge.yaml",),
+        ),
+        config_paths=(),
+    )
+    assert not runtime._stage_packaged_servers_into_gym_checkout(loaded)
+    assert (image_server / "app.py").read_text() == "print('image')\n"
+
+
 def test_search_root_puts_the_image_gym_checkout_after_the_package(tmp_path, monkeypatch):
     package = tmp_path / "pkg"
     image = tmp_path / "gym"
@@ -850,6 +925,36 @@ def test_opensandbox_yaml_must_match_when_the_image_checkout_has_it(tmp_path, mo
 
     with pytest.raises(RuntimeError, match="Rebuild the wheelhouse"):
         runtime._require_vendored_gym_matches_image(package)
+
+
+def test_a_packaged_wheel_is_rejected_before_the_sandbox_copies_the_checkout(tmp_path):
+    image, package = _nemo_gym_wheel(tmp_path, "x = 1\n", "x = 2\n")
+    environment = tmp_path / "env" / "wheels"
+    environment.mkdir(parents=True)
+    packaged = environment / package.wheel_files[0].name
+    packaged.write_bytes(package.wheel_files[0].read_bytes())
+
+    with pytest.raises(RuntimeError, match="Rebuild the wheelhouse"):
+        runtime.require_packaged_nemo_gym_matches_image(environment.parent, image_gym_root=image)
+
+
+def test_a_packaged_wheel_that_matches_the_image_checkout_is_accepted(tmp_path):
+    image, package = _nemo_gym_wheel(tmp_path, "x = 1\n", "x = 1\n")
+    environment = tmp_path / "env" / "wheels"
+    environment.mkdir(parents=True)
+    (environment / package.wheel_files[0].name).write_bytes(package.wheel_files[0].read_bytes())
+
+    assert runtime.require_packaged_nemo_gym_matches_image(environment.parent, image_gym_root=image)
+
+
+def test_a_package_without_a_nemo_gym_wheel_is_not_a_mismatch(tmp_path):
+    image = tmp_path / "gym"
+    (image / "nemo_gym").mkdir(parents=True)
+    environment = tmp_path / "env" / "wheels"
+    environment.mkdir(parents=True)
+    (environment / "other-1.0-py3-none-any.whl").write_bytes(b"")
+
+    assert not runtime.require_packaged_nemo_gym_matches_image(environment.parent, image_gym_root=image)
 
 
 def test_opensandbox_yaml_with_the_same_bytes_is_accepted(tmp_path, monkeypatch):
@@ -987,8 +1092,13 @@ def test_bootstrap_installs_wheels_before_starting_gym(monkeypatch):
     )
     monkeypatch.setattr(
         runtime,
+        "_stage_packaged_servers_into_gym_checkout",
+        lambda loaded_package: False,
+    )
+    monkeypatch.setattr(
+        runtime,
         "_prepend_environment_search_root",
-        lambda environment_root: events.append("environment-root-prepended"),
+        lambda environment_root, **kwargs: events.append("environment-root-prepended"),
     )
     monkeypatch.setattr(
         runtime,

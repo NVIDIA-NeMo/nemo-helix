@@ -238,6 +238,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --no-install-package tokenizers \
         --no-install-package triton
 
+# The release workspace relock is blocked by the DataDesignerPlugins index.
+# Apply the same narrow post-sync fix as nhx-tasks until it can be relocked.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv --no-config pip install --python /opt/venv/bin/python --no-deps "urllib3==2.8.0"
+
 # Fail the image build if a later sync changes the pinned training versions.
 RUN python - <<'PY'
 from importlib.metadata import version
@@ -298,6 +303,12 @@ RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/r
 RUN mkdir -p "${XDG_CACHE_HOME}" "${MPLCONFIGDIR}" "${OUTLINES_CACHE_DIR}" && \
     chown -R ${USER_UID}:${USER_GID} "/home/${USERNAME}" /workspace
 
+# OpenShell sandboxes have no init container or pre-start file injection to place
+# the jobs launcher, so the image carries it at the profile's launcher_tool_path.
+# The binary is static and unused by the Docker and Kubernetes backends, which
+# supply their own copy.
+COPY --chmod=0755 --from=nhx-jobs-launcher /artifacts/jobs-launcher /tools/jobs-launcher
+
 USER ${USER_UID}:${USER_GID}
 WORKDIR /workspace
 ENTRYPOINT ["tini", "--", "python", "-m", "nemo_safe_synthesizer_plugin.tasks.safe_synthesizer"]
@@ -326,3 +337,10 @@ for module in (
     print(f"importing {module}", flush=True)
     importlib.import_module(module)
 PY
+
+# The launcher is the sandbox main process: it must run as the image user with a
+# minimal environment and propagate the wrapped exit code.
+RUN set -eu; \
+    env -i HOME=/home/nemo PATH=/opt/venv/bin /tools/jobs-launcher run -- /opt/venv/bin/python -c 'import sys; sys.exit(0)'; \
+    rc=0; env -i PATH=/opt/venv/bin /tools/jobs-launcher run -- /usr/bin/sh -c 'exit 7' || rc=$?; \
+    test "$rc" -eq 7

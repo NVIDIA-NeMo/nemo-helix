@@ -7,6 +7,7 @@ import {
   ROW_ACTIONS_COLUMN_SIZE,
   ROW_SELECTION_COLUMN_SIZE,
 } from '@nemo/common/src/components/DataView/StudioDataView';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { Cloud, Db } from '@nemo/icons/icons';
 import {
@@ -14,7 +15,7 @@ import {
   StorageConfigType,
   type FilesetOutput as Dataset,
 } from '@nemo/sdk/generated/platform/schema';
-import { type DropdownEntry, Flex, Tag, Text } from '@nvidia/foundations-react-core';
+import { Flex, Tag, Text } from '@nvidia/foundations-react-core';
 import { PURPOSE_LABELS, PURPOSE_TAG_COLORS } from '@studio/components/DatasetsTable/constants';
 import { getStorageBackend, getStoragePath } from '@studio/components/DatasetsTable/helpers';
 import type {
@@ -31,7 +32,6 @@ interface MakeDatasetsTableColumnsArgs {
   selectionType: DatasetsTableProps['selectionType'];
   enableFilters: DatasetsTableProps['enableFilters'];
   enableActions: DatasetsTableProps['enableActions'];
-  getDatasetRoute: DatasetsTableProps['getDatasetRoute'];
   renderRowActions: DatasetsTableProps['renderRowActions'];
   setModalDataset: Dispatch<SetStateAction<Dataset | undefined>>;
   setModalOpen: Dispatch<SetStateAction<ModalOpenState | undefined>>;
@@ -43,7 +43,6 @@ export function makeDatasetsTableColumns({
   selectionType,
   enableFilters,
   enableActions,
-  getDatasetRoute,
   renderRowActions,
   setModalDataset,
   setModalOpen,
@@ -192,36 +191,9 @@ export function makeDatasetsTableColumns({
         },
       }),
       enableActions &&
-        rowActionsColumn({
+        rowActionsColumn<DatasetWithId>({
           size: ROW_ACTIONS_COLUMN_SIZE,
           enableResizing: false,
-          rowActions: (data: DatasetWithId): DropdownEntry[] => [
-            ...(getDatasetRoute
-              ? [
-                  {
-                    children: 'View',
-                    onSelect: () => {
-                      // Navigation handled by Link
-                    },
-                  },
-                ]
-              : []),
-            {
-              children: 'Edit',
-              onSelect: () => {
-                setModalDataset(data);
-                setModalOpen('edit');
-              },
-            },
-            {
-              children: 'Delete',
-              danger: true,
-              onSelect: () => {
-                setModalDataset(data);
-                setModalOpen('delete');
-              },
-            },
-          ],
           cell: renderRowActions
             ? ({ row }) => (
                 <Flex justify="center" align="center">
@@ -241,7 +213,25 @@ export function makeDatasetsTableColumns({
                   })}
                 </Flex>
               )
-            : undefined,
+            : ({ row: { original: data } }) => (
+                <QuickActionsMenuRoot
+                  actions={[
+                    {
+                      label: 'Edit',
+                      onSelect: () => {
+                        setModalDataset(data);
+                        setModalOpen('edit');
+                      },
+                    },
+                  ]}
+                  deleteAction={{
+                    onSelect: () => {
+                      setModalDataset(data);
+                      setModalOpen('delete');
+                    },
+                  }}
+                />
+              ),
         }),
     ].filter((col): col is DataView.TanstackTable.ColumnDef<DatasetWithId> => Boolean(col));
 

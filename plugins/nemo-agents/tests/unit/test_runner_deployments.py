@@ -35,7 +35,7 @@ from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStag
 from nemo_deployments_plugin.entities import ConfigFile, Deployment, DeploymentConfig
 from nemo_deployments_plugin.types import Endpoint as PluginEndpoint
 from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.refs import FilesetRef
 from pydantic import ValidationError
 
@@ -1719,8 +1719,11 @@ async def test_create_deployment_missing_image_fails() -> None:
 async def test_create_deployment_cleans_config_on_deployment_failure() -> None:
     backend = _backend(default_image="nat:latest")
     entities = AsyncMock()
-    entities.create = AsyncMock(side_effect=[None, RuntimeError("boom")])
-    entities.delete = AsyncMock()
+    saved_config = DeploymentConfig(name="hello-dep", workspace="default")
+    saved_config._id = "original-config-id"
+    saved_config._db_version = 7
+    entities.create = AsyncMock(side_effect=[saved_config, RuntimeError("boom")])
+    entities.delete_by_id = AsyncMock()
     backend._entities = entities
 
     with (
@@ -1735,11 +1738,11 @@ async def test_create_deployment_cleans_config_on_deployment_failure() -> None:
             deployment_mode="docker",
         )
 
-    entities.delete.assert_awaited_once()
-    delete_call = entities.delete.await_args
+    entities.delete_by_id.assert_awaited_once()
+    delete_call = entities.delete_by_id.await_args
     assert delete_call is not None
-    assert delete_call.args[0] is DeploymentConfig
-    assert delete_call.kwargs["expected_db_version"] == 1
+    assert delete_call.args == (DeploymentConfig, "original-config-id")
+    assert delete_call.kwargs["expected_db_version"] == 7
 
 
 @pytest.mark.asyncio
@@ -1796,11 +1799,14 @@ async def test_delete_waits_for_deployment_gone_before_config_delete() -> None:
         status="READY",
     )
     deployment_config = DeploymentConfig(name="hello-dep", workspace="default")
-    # First get returns the deployment; the wait-loop get raises NotFound; final get
-    # fetches the config version used for the conditional delete.
-    entities.get = AsyncMock(side_effect=[deployment, NemoEntityNotFoundError("gone"), deployment_config])
+    # Retain the config ID across the wait, then reload its current version.
+    deployment_config._id = "original-config-id"
+    refreshed = deployment_config.model_copy()
+    refreshed._db_version = 2
+    entities.get_by_id = AsyncMock(return_value=refreshed)
+    entities.get = AsyncMock(side_effect=[deployment, deployment_config, NemoEntityNotFoundError("gone")])
     entities.update = AsyncMock()
-    entities.delete = AsyncMock()
+    entities.delete_by_id = AsyncMock()
     backend._entities = entities
 
     with patch("nemo_agents_plugin.runner.deployments_backend.async_sleep", new_callable=AsyncMock):
@@ -1809,11 +1815,12 @@ async def test_delete_waits_for_deployment_gone_before_config_delete() -> None:
     assert cleaned
     entities.update.assert_awaited_once()
     assert deployment.status == "DELETING"
-    entities.delete.assert_awaited_once()
-    delete_call = entities.delete.await_args
+    entities.delete_by_id.assert_awaited_once()
+    delete_call = entities.delete_by_id.await_args
     assert delete_call is not None
-    assert delete_call.args[0] is DeploymentConfig
-    assert delete_call.kwargs["expected_db_version"] == 1
+    assert delete_call.args == (DeploymentConfig, "original-config-id")
+    assert delete_call.kwargs["expected_db_version"] == 2
+    entities.get_by_id.assert_awaited_once_with(DeploymentConfig, "original-config-id")
 
 
 @pytest.mark.asyncio
@@ -1833,7 +1840,7 @@ async def test_delete_leaves_timed_out_teardown_failed() -> None:
 
     assert not await backend.delete_deployment("default", "hello-dep")
     entities.update.assert_not_awaited()
-    entities.delete.assert_not_awaited()
+    entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1848,7 +1855,7 @@ async def test_delete_returns_false_when_deployment_still_present() -> None:
     )
     entities.get = AsyncMock(return_value=deployment)
     entities.update = AsyncMock()
-    entities.delete = AsyncMock()
+    entities.delete_by_id = AsyncMock()
     backend._entities = entities
 
     with patch("nemo_agents_plugin.runner.deployments_backend.async_sleep", new_callable=AsyncMock):
@@ -1856,7 +1863,7 @@ async def test_delete_returns_false_when_deployment_still_present() -> None:
             cleaned = await backend.delete_deployment("default", "hello-dep")
 
     assert not cleaned
-    entities.delete.assert_not_called()
+    entities.delete_by_id.assert_not_called()
 
 
 def test_agent_deployment_defaults_are_subprocess() -> None:
@@ -2052,3 +2059,20 @@ async def test_create_deployment_enables_workload_identity_with_auth_context() -
     assert created_config.workload_identity.workload_id == "hello-dep"
     assert created_config.workload_identity.token_audience == "agent-audience"
     assert created_dep.auth_context == auth_context
+
+
+@pytest.mark.parametrize("failure", [NemoEntityConflictError("changed"), NemoEntityNotFoundError("gone")])
+async def test_config_delete_handles_concurrent_change(failure: Exception) -> None:
+    backend = _backend()
+    entities = AsyncMock()
+    config = DeploymentConfig(name="hello-dep", workspace="default")
+    config._id = "original-config-id"
+    entities.get.side_effect = [NemoEntityNotFoundError("deployment gone"), config]
+    entities.get_by_id.return_value = config
+    entities.delete_by_id.side_effect = failure
+    backend._entities = entities
+
+    cleaned = await backend.delete_deployment("default", "hello-dep")
+
+    assert cleaned is isinstance(failure, NemoEntityNotFoundError)
+    entities.get_by_id.assert_awaited_once_with(DeploymentConfig, "original-config-id")

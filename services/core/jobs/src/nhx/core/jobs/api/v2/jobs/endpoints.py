@@ -1263,6 +1263,7 @@ async def list_attempt_steps(
 
 @router.get(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}",
+    responses={status.HTTP_404_NOT_FOUND: {"description": "Attempt step not found"}},
     status_code=status.HTTP_200_OK,
 )
 async def get_attempt_step(
@@ -1428,6 +1429,7 @@ async def list_attempt_step_tasks(
 
 @router.put(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks/{name}",
+    responses={status.HTTP_404_NOT_FOUND: {"description": "Attempt or step not found"}},
     status_code=status.HTTP_200_OK,
 )
 async def update_attempt_step_task(
@@ -1456,6 +1458,7 @@ async def update_attempt_step_task(
 
 @router.get(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks/{name}",
+    responses={status.HTTP_404_NOT_FOUND: {"description": "Attempt step or task not found"}},
     status_code=status.HTTP_200_OK,
 )
 async def get_attempt_step_task(

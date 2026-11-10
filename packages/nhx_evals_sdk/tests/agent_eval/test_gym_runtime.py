@@ -12,8 +12,10 @@ tests lock that behaviour in (including against the real captured output)."""
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
+import re
 from collections import Counter, deque
 from pathlib import Path
 from typing import Any
@@ -62,6 +64,8 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     require_full_coverage,
     trials_from_rollouts,
 )
+from nhx_evals_sdk.agent_eval.runtimes.gym.runtime import FIRST_ERROR_CONTEXT_LINES, FIRST_ERROR_LINE_MAX_CHARS
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import UNKNOWN_ERROR_TYPE, AgentEvalTrialStatus, TrialError, TrialMeasurements
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nhx_evals_sdk.values import SecretRef
@@ -185,7 +189,7 @@ def test_discover_gym_tasks_still_requires_responses_create_params(row: dict, tm
     # case while letting a list through to fail deep inside Gym.
     dataset = tmp_path / "bad_params.jsonl"
     dataset.write_text(json.dumps(row) + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="row 1 .* has no 'responses_create_params' mapping"):
+    with pytest.raises(ValueError, match=r"bad_params\.jsonl:1: row has no 'responses_create_params' mapping"):
         discover_gym_tasks(dataset)
 
 
@@ -194,7 +198,7 @@ def test_discover_gym_tasks_from_example_fixture() -> None:
     assert len(tasks) == len(_rows(EXAMPLE))
     assert len({task.id for task in tasks}) == len(tasks)  # unique ids
     for task in tasks:
-        assert len(task.id) == 64  # sha256 hex
+        assert re.fullmatch(r"gym-[0-9a-f]{59}", task.id)  # a valid platform entity name
         assert task.inputs["instruction"]  # non-empty instruction
         assert task.metadata["gym_dataset_path"].endswith("gym_mcqa_example.jsonl")
         assert [type(metric).__name__ for metric in task.metrics] == ["GymRewardMetric"]
@@ -291,6 +295,120 @@ def test_discover_gym_tasks_warns_on_duplicate_rows(tmp_path: Path, caplog) -> N
     assert len(tasks) == 1
     assert "duplicate row" in caplog.text
     assert "num_repeats" in caplog.text
+
+
+def _write_rows(path: Path, *lines: str) -> Path:
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _row(question: str, **extras: object) -> str:
+    return json.dumps({"responses_create_params": {"input": question}, **extras})
+
+
+def test_discover_gym_tasks_content_does_not_depend_on_the_file_name(tmp_path: Path) -> None:
+    # A row shared by two golden files must be one task, or each file's snapshot would revise the
+    # other's: nothing about the file may leak into task content except the local path stamp.
+    first = discover_gym_tasks(_write_rows(tmp_path / "golden-a.jsonl", _row("q1"), _row("q2")))
+    second = discover_gym_tasks(_write_rows(tmp_path / "golden-b.jsonl", _row("q2"), _row("q1")))
+
+    def content(task: AgentEvalTask) -> tuple:
+        metadata = {key: value for key, value in task.metadata.items() if key != "gym_dataset_path"}
+        return task.id, task.intent, task.inputs, metadata
+
+    assert sorted(map(content, first)) == sorted(map(content, second))
+    assert {task.intent for task in first} == {"Gym row"}
+
+
+def test_discover_gym_tasks_reads_a_stream_like_the_file(tmp_path: Path) -> None:
+    dataset = _write_rows(tmp_path / "golden.jsonl", _row("q1"), "", _row("q2"))
+    from_file = discover_gym_tasks(dataset)
+    from_stream = discover_gym_tasks(io.BytesIO(dataset.read_bytes()), name="ws/fs#golden.jsonl")
+    assert [(t.id, t.inputs) for t in from_stream] == [(t.id, t.inputs) for t in from_file]
+    # Only a path is stamped: a stream has no local location worth recording.
+    assert "gym_dataset_path" not in from_stream[0].metadata
+    with pytest.raises(ValueError, match=r"ws/fs#golden\.jsonl:2: malformed JSON"):
+        discover_gym_tasks(io.BytesIO(b'{"responses_create_params": {}}\n{bad\n'), name="ws/fs#golden.jsonl")
+
+
+def test_discover_gym_tasks_stops_at_the_row_limit() -> None:
+    rows = (_row(f"q{i}") for i in range(3))
+
+    class Lines:
+        """Fails the test if discovery reads past the row that breaks the limit."""
+
+        def __iter__(self):
+            for index, row in enumerate(rows):
+                assert index < 3
+                yield f"{row}\n".encode()
+            raise AssertionError("read past the limit")
+
+    with pytest.raises(ValueError, match=r"x:3: more than the 2-row limit"):
+        discover_gym_tasks(Lines(), name="x", max_rows=2)
+
+
+#: The platform's entity-name rule, which every task id must satisfy to be stored.
+ENTITY_NAME = re.compile(r"^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$")
+
+
+def _keyed_ids(*rows: dict, prefix: str = "gold") -> list[str]:
+    lines = b"".join(json.dumps(row).encode() + b"\n" for row in rows)
+    return [t.id for t in discover_gym_tasks(io.BytesIO(lines), name="x", id_field="uid", id_prefix=prefix)]
+
+
+@pytest.mark.parametrize("prefix", ["g", "gold", "golden12"])
+def test_keyed_ids_fill_a_valid_entity_name(prefix: str) -> None:
+    [task_id] = _keyed_ids({"uid": "t1", "responses_create_params": {"input": "q"}}, prefix=prefix)
+    assert task_id.startswith(f"{prefix}-")
+    assert len(task_id) == 63
+    assert ENTITY_NAME.fullmatch(task_id)
+
+
+def test_a_keyed_id_depends_only_on_the_key() -> None:
+    before, other = _keyed_ids(
+        {"uid": "t1", "responses_create_params": {"input": "q"}, "expected_answer": "A"},
+        {"uid": "t2", "responses_create_params": {"input": "q"}, "expected_answer": "A"},
+    )
+    [after] = _keyed_ids({"uid": "t1", "responses_create_params": {"input": "edited"}, "expected_answer": "B"})
+    assert before == after != other
+    # The key is hashed as JSON, so a number and its string are different keys.
+    assert _keyed_ids({"uid": 1, "responses_create_params": {}}) != _keyed_ids(
+        {"uid": "1", "responses_create_params": {}}
+    )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"id_field": "uid"}, "go together"),
+        ({"id_prefix": "gold"}, "go together"),
+        ({"id_field": "uid", "id_prefix": "golden123"}, "1-8 characters"),
+        ({"id_field": "uid", "id_prefix": "g-x"}, "1-8 characters"),
+        ({"id_field": "uid", "id_prefix": "Gold"}, "1-8 characters"),
+        ({"id_field": "uid", "id_prefix": "gym"}, "reserved"),
+    ],
+)
+def test_keyed_ids_need_both_fields_and_a_valid_prefix(kwargs: dict, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        discover_gym_tasks(io.BytesIO(b'{"uid": "t1", "responses_create_params": {}}\n'), name="x", **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        # The bad line follows a valid line and a blank one, so the number must be the file's line.
+        (b'{"responses_create_params": {"input": "q"}}\n\n{not json}\n', r"rows\.jsonl:3: malformed JSON"),
+        (b"[1, 2]\n", r"rows\.jsonl:1: expected a JSON object, got list"),
+        (b"null\n", r"rows\.jsonl:1: expected a JSON object, got null"),
+        (b'"text"\n', r"rows\.jsonl:1: expected a JSON object, got str"),
+        (b'{"responses_create_params": {"input": "q"}}\n\xff\xfe\n', r"rows\.jsonl:2: line is not valid UTF-8"),
+    ],
+)
+def test_discover_gym_tasks_names_the_line_of_a_bad_row(tmp_path: Path, raw: bytes, message: str) -> None:
+    dataset = tmp_path / "rows.jsonl"
+    dataset.write_bytes(raw)
+    with pytest.raises(ValueError, match=message):
+        discover_gym_tasks(dataset)
 
 
 def test_materialize_dataset_reports_empty_task_list(tmp_path: Path) -> None:
@@ -1656,6 +1774,195 @@ def test_startup_timeout_bounds_inline_startup_output(tmp_path: Path) -> None:
 
     assert "old diagnostic" not in startup_output
     assert len(startup_output) == 16000
+
+
+# As uv 0.11 printed it under `gym env start` on a deployment whose SSL_CERT_FILE held a private CA.
+_UV_CA_FAILURE = (
+    "(mcqa) error: Failed to install seed packages into virtual environment\n"
+    "(mcqa)   cause: No solution found when resolving: `pip`\n"
+    "(mcqa)   cause: Failed to fetch: https://pypi.org/simple/pip/\n"
+    "(mcqa)   cause: invalid peer certificate: UnknownIssuer"
+)
+
+
+@pytest.mark.asyncio
+async def test_early_exit_carries_the_reason_gym_printed(tmp_path: Path) -> None:
+    # Observed on a deployment whose SSL_CERT_FILE held only a private CA: uv could not reach PyPI,
+    # and the job failed with nothing but "`gym env start` exited early", the log on job storage.
+    env_log = tmp_path / "gym_env.log"
+    script = f"cat <<'EOF'\n{_UV_CA_FAILURE}\nProcess `mcqa` finished unexpectedly!\nEOF\nexit 3\n"
+    proc = await asyncio.create_subprocess_exec(
+        "sh", "-c", script, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+    )
+    pump = asyncio.create_task(pump_stream(proc.stdout, env_log, label="gym env start"))
+    await proc.wait()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await GymAgentTaskRunner(config=_config())._wait_for_servers(env_log, proc, pump)
+
+    message = str(excinfo.value)
+    assert "exited early (rc=3)" in message
+    assert "invalid peer certificate: UnknownIssuer" in message
+    assert "Process `mcqa` finished unexpectedly!" in message
+    assert str(env_log) in message
+
+
+def test_early_exit_shows_an_error_that_other_servers_pushed_out_of_the_tail(tmp_path: Path) -> None:
+    # One component's install fails while the others keep downloading, so its error can be hundreds
+    # of lines above the end of the log.
+    noise = "\n".join(f"(policy_model) Downloading package-{i}" for i in range(LOG_TAIL_LINES * 5))
+    transcript = f"{_UV_CA_FAILURE}\n{noise}\nProcess `mcqa` finished unexpectedly!"
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    tail, first_error = message.split("--- first error in startup output ---", 1)
+    assert "Process `mcqa` finished unexpectedly!" in tail
+    assert "invalid peer certificate: UnknownIssuer" not in tail
+    # Last, because the task record on Kubernetes keeps only the end of the pod log.
+    assert "invalid peer certificate: UnknownIssuer" in first_error
+
+
+def test_early_exit_does_not_repeat_an_error_already_in_the_tail(tmp_path: Path) -> None:
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(_UV_CA_FAILURE, tmp_path / "gym_env.log", 1)
+
+    assert "first error" not in message
+    assert message.count("UnknownIssuer") == 1
+
+
+def _traceback(prefix: str, frames: int, exception: str) -> list[str]:
+    lines = [f"{prefix}Traceback (most recent call last):"]
+    for frame in range(frames):
+        lines += [f'{prefix}  File "/app/server.py", line {frame}, in step_{frame}', f"{prefix}    step_{frame + 1}()"]
+    return [*lines, f"{prefix}{exception}"]
+
+
+def test_early_exit_keeps_the_exception_that_ends_a_long_traceback(tmp_path: Path) -> None:
+    # Six frames put the exception past a 12-line window; the frames alone don't say what failed.
+    exception = "PermissionError: [Errno 13] cannot create server environment: '/opt/Gym'"
+    traceback = _traceback("(mcqa) ", 6, exception)
+    noise = [f"(policy_model) Downloading package-{i}" for i in range(LOG_TAIL_LINES + 10)]
+    transcript = "\n".join([*traceback, *noise, "Process `mcqa` finished unexpectedly!"])
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    first_error = message.split("--- first error in startup output ---", 1)[1]
+    assert "(mcqa) Traceback (most recent call last):" in first_error
+    assert f"(mcqa) {exception}" in first_error
+    assert "line(s) omitted" in first_error
+    assert len(first_error.strip().splitlines()) <= FIRST_ERROR_CONTEXT_LINES
+
+
+def test_early_exit_reads_a_traceback_through_other_servers_output(tmp_path: Path) -> None:
+    # Servers start in parallel, so another server's lines can land between a traceback's frames.
+    exception = "RuntimeError: resources server failed to bind"
+    frames = _traceback("(mcqa) ", 2, exception)
+    interleaved = [frames[0], "(policy_model) Downloading pyarrow", *frames[1:]]
+    noise = [f"(policy_model) Downloading package-{i}" for i in range(LOG_TAIL_LINES + 10)]
+    transcript = "\n".join([*interleaved, *noise])
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    first_error = message.split("--- first error in startup output ---", 1)[1]
+    assert f"(mcqa) {exception}" in first_error
+    assert "Downloading pyarrow" not in first_error
+
+
+def test_early_exit_finds_a_traceback_end_far_below_its_start(tmp_path: Path) -> None:
+    # Heavy parallel installs can put hundreds of other servers' lines between a traceback's frames.
+    exception = "RuntimeError: resources server failed to bind"
+    frames = _traceback("(mcqa) ", 3, exception)
+    spread: list[str] = []
+    for frame in frames:
+        spread += [frame, *(f"(policy_model) Downloading package-{i}" for i in range(300))]
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message("\n".join(spread), tmp_path / "gym_env.log", 1)
+
+    first_error = message.split("--- first error in startup output ---", 1)[1]
+    assert "(mcqa) Traceback (most recent call last):" in first_error
+    assert f"(mcqa) {exception}" in first_error
+    assert "Downloading" not in first_error
+
+
+def _first_error_section(transcript_lines: list[str], tmp_path: Path) -> str:
+    noise = [f"(policy_model) Downloading package-{i}" for i in range(LOG_TAIL_LINES + 10)]
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(
+        "\n".join([*transcript_lines, *noise]), tmp_path / "gym_env.log", 1
+    )
+    return message.split("--- first error in startup output ---\n", 1)[1]
+
+
+def test_early_exit_keeps_every_line_of_a_report_that_fits(tmp_path: Path) -> None:
+    # Exactly at the limit: nothing is omitted, so no line may be dropped and no marker shown.
+    report = [
+        "(mcqa) error: Failed to install",
+        *(f"(mcqa)   cause: reason {i}" for i in range(FIRST_ERROR_CONTEXT_LINES - 1)),
+    ]
+
+    first_error = _first_error_section(report, tmp_path)
+
+    assert first_error.strip().splitlines() == report
+
+
+def test_early_exit_shortens_a_long_line_without_losing_the_exception(tmp_path: Path) -> None:
+    # One frame repeats a huge value; the exception after it must still be shown.
+    exception = "ValueError: config rejected"
+    report = [
+        "(mcqa) Traceback (most recent call last):",
+        '(mcqa)   File "/app/server.py", line 3, in start',
+        f"(mcqa)     load({'x' * 50_000!r})",
+        f"(mcqa) {exception}",
+    ]
+
+    first_error = _first_error_section(report, tmp_path)
+
+    assert f"(mcqa) {exception}" in first_error
+    assert "characters omitted)" in first_error
+    assert all(len(line) <= FIRST_ERROR_LINE_MAX_CHARS for line in first_error.splitlines())
+
+
+def test_early_exit_keeps_both_ends_of_a_long_exception_line(tmp_path: Path) -> None:
+    # The part of an exception line that explains it often comes after a long value.
+    cause = "because the policy server refused the connection"
+    exception = f"RuntimeError: startup failed for {'y' * 5_000} {cause}"
+    report = [
+        "(mcqa) Traceback (most recent call last):",
+        '(mcqa)   File "/app/server.py", line 3, in start',
+        f"(mcqa) {exception}",
+    ]
+
+    first_error = _first_error_section(report, tmp_path)
+    exception_line = first_error.strip().splitlines()[-1]
+
+    assert exception_line.startswith("(mcqa) RuntimeError: startup failed for ")
+    assert exception_line.endswith(cause)
+    assert len(exception_line) <= FIRST_ERROR_LINE_MAX_CHARS
+    omitted = int(exception_line.split(" ... (", 1)[1].split(" characters omitted", 1)[0])
+    assert omitted == len(f"(mcqa) {exception}") - len(
+        exception_line.replace(f" ... ({omitted} characters omitted) ... ", "")
+    )
+
+
+def test_early_exit_shows_an_error_that_long_lines_pushed_past_the_character_limit(tmp_path: Path) -> None:
+    # The error is among the last 40 lines, but the long lines after it fill the character limit.
+    long_lines = [f"(policy_model) {'z' * 2_000} {i}" for i in range(10)]
+    transcript = "\n".join([*_UV_CA_FAILURE.splitlines(), *long_lines])
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    tail, first_error = message.split("--- first error in startup output ---", 1)
+    assert "invalid peer certificate: UnknownIssuer" not in tail
+    assert "invalid peer certificate: UnknownIssuer" in first_error
+
+
+def test_early_exit_ignores_gym_deprecation_text_that_mentions_errors(tmp_path: Path) -> None:
+    # Gym's startup warning talks about errors without being one; only a line that starts an error
+    # report should be pulled out of the log.
+    warning = "To make this an error now, set error_on_agent_without_environment_server: true in your config."
+    transcript = warning + "\n" + "\n".join("(mcqa) ok" for _ in range(LOG_TAIL_LINES))
+
+    message = GymAgentTaskRunner(config=_config())._early_exit_message(transcript, tmp_path / "gym_env.log", 1)
+
+    assert "first error" not in message
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from urllib.parse import unquote
+from uuid import uuid4
 
 import httpx
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -32,6 +33,7 @@ from nhx.testing.client import mock_async_nemo_client
 Failure = int | Exception
 
 _FILESETS = re.compile(r"^/apis/files/v2/workspaces/(?P<workspace>[^/]+)/filesets(?:/(?P<name>[^/]+))?$")
+_FILESET_ID = re.compile(r"^/apis/files/v2/workspaces/(?P<workspace>[^/]+)/filesets/by-id/(?P<fileset_id>[^/]+)$")
 _FILE = re.compile(r"^/apis/files/v2/workspaces/(?P<workspace>[^/]+)/filesets/(?P<name>[^/]+)/-/(?P<path>.+)$")
 
 
@@ -45,6 +47,7 @@ class InMemoryFilesService:
     def __init__(self) -> None:
         #: Stored filesets, keyed by ``(workspace, name)``, mapping file path to content.
         self.filesets: dict[tuple[str, str], dict[str, bytes]] = {}
+        self.allocations: dict[tuple[str, str], str] = {}
         #: Every request as ``(operation, workspace, name)``, in order. Operations are ``"create"``,
         #: ``"get"``, ``"delete"``, ``"upload"`` and ``"download"``.
         self.calls: list[tuple[str, str, str]] = []
@@ -67,6 +70,14 @@ class InMemoryFilesService:
         # Match the still-encoded path and decode each captured segment once, so a literal "%2F"
         # in a file name isn't decoded a second time into a "/".
         path = request.url.raw_path.partition(b"?")[0].decode("ascii")
+        if match := _FILESET_ID.match(path):
+            workspace, fileset_id = (unquote(match[group]) for group in ("workspace", "fileset_id"))
+            key = next(
+                (key for key, value in self.allocations.items() if key[0] == workspace and value == fileset_id), None
+            )
+            if key is None:
+                return httpx.Response(404, json={"detail": f"fileset ID {fileset_id} not found"})
+            return self._fileset(request, *key)
         if match := _FILE.match(path):
             workspace, name, file_path = (unquote(match[group]) for group in ("workspace", "name", "path"))
             return await self._file(request, workspace, name, file_path)
@@ -95,7 +106,10 @@ class InMemoryFilesService:
             if (workspace, name) in self.filesets:
                 return httpx.Response(409, json={"detail": f"fileset {workspace}/{name} already exists"})
             self.filesets[(workspace, name)] = {}
-            return httpx.Response(201, json=_fileset_json(workspace, name))
+            self.allocations[(workspace, name)] = uuid4().hex
+            return httpx.Response(
+                201, json=_fileset_json(workspace, name, self.allocations.setdefault((workspace, name), uuid4().hex))
+            )
         operation = {"GET": "get", "DELETE": "delete"}.get(request.method)
         if name is None or operation is None:
             return httpx.Response(405, json={"detail": f"{request.method} is not supported here"})
@@ -104,9 +118,12 @@ class InMemoryFilesService:
         if (workspace, name) not in self.filesets:
             return httpx.Response(404, json={"detail": f"fileset {workspace}/{name} not found"})
         if request.method == "GET":
-            return httpx.Response(200, json=_fileset_json(workspace, name))
+            return httpx.Response(
+                200, json=_fileset_json(workspace, name, self.allocations.setdefault((workspace, name), uuid4().hex))
+            )
         del self.filesets[(workspace, name)]
-        return httpx.Response(200, json=_fileset_json(workspace, name))
+        fileset_id = self.allocations.pop((workspace, name), uuid4().hex)
+        return httpx.Response(200, json=_fileset_json(workspace, name, fileset_id))
 
     async def _file(self, request: httpx.Request, workspace: str, name: str, path: str) -> httpx.Response:
         operation = {"PUT": "upload", "GET": "download"}.get(request.method)
@@ -133,9 +150,9 @@ class InMemoryFilesService:
         return httpx.Response(200, content=files[path])
 
 
-def _fileset_json(workspace: str, name: str) -> dict[str, object]:
+def _fileset_json(workspace: str, name: str, fileset_id: str) -> dict[str, object]:
     fileset = FilesetOutput(
-        id=f"fileset-{workspace}-{name}",
+        id=fileset_id,
         name=name,
         workspace=workspace,
         description="",

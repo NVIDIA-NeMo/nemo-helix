@@ -90,18 +90,20 @@ class _InMemoryVolumeStore:
         self._volumes[(volume.workspace, volume.name)] = volume
         return volume
 
-    async def delete(
+    async def delete_by_id(
         self,
         entity_type: type[Volume],
-        name: str,
+        entity_id: str,
         *,
-        workspace: str,
         expected_db_version: int | None = None,
     ) -> None:
         assert entity_type is Volume
-        volume = await self.get(entity_type, name=name, workspace=workspace)
-        assert expected_db_version == volume.db_version
-        del self._volumes[(workspace, name)]
+        for key, volume in self._volumes.items():
+            if volume.id == entity_id:
+                assert expected_db_version == volume.db_version
+                del self._volumes[key]
+                return
+        raise NemoEntityNotFoundError(entity_id)
 
 
 @pytest.mark.asyncio

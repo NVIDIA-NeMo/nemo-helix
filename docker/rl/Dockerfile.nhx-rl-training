@@ -54,8 +54,10 @@ RUN UV_CACHE_DIR=/root/.cache/uv \
 # OpenTelemetry is the exception: its frozen lines are replaced by docker/rl/opentelemetry-overrides.txt,
 # which pins one matched release line (see that file for why).
 #
-# nemo-sandboxed-gym is not a dependency of nhx-rl. The driver venv gets it here.
-# The nemo_gym worker venvs get the same tree in the following step.
+# nemo-sandboxed-gym is not a dependency of nhx-rl. The base skips the published
+# wheel that NeMo-RL's nemo_gym extra pins, so this is the only install. The driver
+# venv gets the in-tree package here. The nemo_gym worker venvs get the same tree
+# in the following step.
 #
 # UV_CACHE_DIR is overridden to the build-only mount here: the base sets it to /opt/uv_cache, which
 # this step must not write into (that cache is shipped read-only, see below).
@@ -70,7 +72,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     UV_CACHE_DIR=/root/.cache/uv \
     uv-glue pip install --python /opt/nemo_rl_venv/bin/python --no-cache \
     --overrides /tmp/base-overrides.txt \
-
     -e /app/packages/filesets \
     -e /app/packages/nemo_helix_plugin \
     -e /app/packages/nemo_helix_ext \
@@ -80,10 +81,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     -e "/app/services/rl[integrations]"
 
 # Same package as the driver venv. These workers import sandboxed_gym.
+# --no-deps: the nemo_gym extra already installed fastapi, uvicorn, pyyaml,
+# opensandbox, and ray. Resolving the package here would move the RL stack.
 RUN --mount=type=cache,target=/root/.cache/uv <<"EOF" bash -eu
 umask 022
 export UV_CACHE_DIR=/root/.cache/uv
 for python in \
+    /opt/ray_venvs/nemo_rl.models.policy.workers.automodel_policy_worker.AutomodelPolicyWorker/bin/python \
     /opt/ray_venvs/nemo_rl.models.policy.workers.megatron_policy_worker.MegatronPolicyWorker/bin/python \
     /opt/ray_venvs/nemo_rl.models.generation.vllm.vllm_worker.VllmGenerationWorker/bin/python \
     /opt/ray_venvs/nemo_rl.models.generation.vllm.vllm_worker_async.VllmAsyncGenerationWorker/bin/python \

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import Database, get_db
+from scaled_evals.api.evaluation_store import EvaluationGlobalQueries
 from scaled_evals.api.repositories.base_repository import Conflict
 from scaled_evals.api.schemas.common import DeleteResponse, ListEnvelope, page_from_rows
 from scaled_evals.api.schemas.config_profiles import (
@@ -53,11 +54,11 @@ def _validate_profile_config(profile_type: ConfigProfileType, config: dict[str, 
         raise _http_error(422, "invalid_config", str(exc)) from exc
 
 
-def _reject_if_in_use(db: Database, profile_id: str) -> None:
+def _reject_if_in_use(profile_id: str) -> None:
     # ponytail: checked before the write rather than under a lock, so a run
     # submitted in between still starts; it runs from its own snapshot, so the
     # edit cannot change it.
-    if db.evaluations.profile_in_active_use(profile_id):
+    if EvaluationGlobalQueries().profile_in_active_use(profile_id):
         raise _http_error(409, "profile_in_use", "config profile is referenced by an active evaluation")
 
 
@@ -138,7 +139,7 @@ def patch_profile(
         raise _http_error(404, "not_found", "config profile not found")
     if body.config is not None:
         _validate_profile_config(existing["type"], body.config)
-        _reject_if_in_use(db, profile_id)
+        _reject_if_in_use(profile_id)
     try:
         row = db.config_profiles.update(profile_id, name=body.name, config=body.config, owner_id=owner_id)
     except Conflict as exc:
@@ -160,7 +161,7 @@ def delete_profile(profile_id: str, db: Db, current: Principal, admin: IsAdmin) 
     existing = db.config_profiles.get(profile_id)
     if existing is None or (owner_id is not None and existing["owner_id"] != owner_id):
         raise _http_error(404, "not_found", "config profile not found")
-    _reject_if_in_use(db, profile_id)
+    _reject_if_in_use(profile_id)
     try:
         deleted = db.config_profiles.delete(profile_id, owner_id=owner_id)
     except Conflict as exc:

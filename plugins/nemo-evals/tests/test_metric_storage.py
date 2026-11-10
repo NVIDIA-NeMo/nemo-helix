@@ -8,7 +8,7 @@ from nemo_evals.metric_storage import (
     BUNDLE_FILENAME,
     FILESET_PREFIX,
     MetricBundleStorageError,
-    delete_bundle_by_ref,
+    delete_bundle_by_id,
     load_bundle,
     parse_bundle_ref,
     store_bundle,
@@ -46,8 +46,8 @@ async def test_store_returns_unique_per_metric_ref() -> None:
     ref1 = await store_bundle(fake_files, "default", "my-metric", bundle)
     ref2 = await store_bundle(fake_files, "default", "my-metric", bundle)
 
-    assert ref1.startswith("default/metric-bundle.")
-    assert ref1.endswith(f"#{BUNDLE_FILENAME}")
+    assert ref1.ref.startswith("default/metric-bundle.")
+    assert ref1.ref.endswith(f"#{BUNDLE_FILENAME}")
     assert ref1 != ref2
 
 
@@ -59,7 +59,7 @@ async def test_store_fileset_name_stays_within_limit_for_long_metric_name() -> N
 
     ref = await store_bundle(fake_files, "default", long_name, bundle)
 
-    _, fileset, _ = parse_bundle_ref(ref)
+    _, fileset, _ = parse_bundle_ref(ref.ref)
     assert len(fileset) <= 255
 
 
@@ -82,7 +82,7 @@ async def test_store_then_load_round_trips_bundle() -> None:
     bundle = _sample_bundle()
 
     ref = await store_bundle(fake_files, "default", "my-metric", bundle)
-    loaded = await load_bundle(fake_files, ref, expected_digest=bundle.payload.digest)
+    loaded = await load_bundle(fake_files, ref.ref, expected_digest=bundle.payload.digest)
 
     assert loaded.metric_type == bundle.metric_type
     assert loaded.payload.digest == bundle.payload.digest
@@ -95,7 +95,7 @@ async def test_load_rejects_digest_mismatch() -> None:
 
     ref = await store_bundle(fake_files, "default", "my-metric", bundle)
     with pytest.raises(MetricBundleStorageError, match="digest mismatch"):
-        await load_bundle(fake_files, ref, expected_digest="deadbeef")
+        await load_bundle(fake_files, ref.ref, expected_digest="deadbeef")
 
 
 async def test_load_rejects_corrupt_bundle() -> None:
@@ -115,16 +115,16 @@ async def test_load_wraps_download_failure() -> None:
         await load_bundle(fake_files, "default/metric-bundle.missing#bundle.json")
 
 
-async def test_delete_by_ref_removes_only_that_fileset() -> None:
+async def test_delete_by_id_removes_only_that_fileset() -> None:
     files_service = InMemoryFilesService()
     fake_files = files_service.client()
     bundle = _sample_bundle()
 
     ref1 = await store_bundle(fake_files, "default", "my-metric", bundle)
     ref2 = await store_bundle(fake_files, "default", "my-metric", bundle)
-    await delete_bundle_by_ref(fake_files, ref1)
+    await delete_bundle_by_id(fake_files, workspace="default", fileset_id=ref1.fileset_id)
 
-    _, fileset1, _ = parse_bundle_ref(ref1)
-    _, fileset2, _ = parse_bundle_ref(ref2)
+    _, fileset1, _ = parse_bundle_ref(ref1.ref)
+    _, fileset2, _ = parse_bundle_ref(ref2.ref)
     assert ("default", fileset1) not in files_service.filesets
     assert ("default", fileset2) in files_service.filesets

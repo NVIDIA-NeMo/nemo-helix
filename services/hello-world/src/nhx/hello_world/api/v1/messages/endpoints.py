@@ -108,7 +108,10 @@ async def delete_message(
 ) -> None:
     """Delete a HelloWorld message."""
     try:
-        await entity_store.delete(HelloWorldMessage, name, workspace=workspace)
+        _delete_target = await entity_store.get(HelloWorldMessage, name=name, workspace=workspace)
+        await entity_store.delete_by_id(
+            HelloWorldMessage, _delete_target.id, expected_db_version=_delete_target.db_version
+        )
     except EntityConflictError as e:
         raise HTTPException(status_code=409, detail="Concurrent modification - please retry.") from e
     except EntityNotFoundError as e:

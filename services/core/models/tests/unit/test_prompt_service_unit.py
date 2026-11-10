@@ -233,19 +233,23 @@ async def test_delete_prompt_success(prompt_service, mock_entity_client, sample_
     result = await prompt_service.delete_prompt(DeletePromptRequest(workspace="default", name="summarizer"))
 
     assert result is True
-    mock_entity_client.delete.assert_called_once_with(
+    mock_entity_client.delete_by_id.assert_called_once_with(
         PromptEntity,
-        "summarizer",
-        workspace="default",
+        mock_entity_client.get.return_value.id,
+        expected_db_version=mock_entity_client.get.return_value.db_version,
     )
 
 
 @pytest.mark.asyncio
 async def test_delete_prompt_not_found(prompt_service, mock_entity_client):
     """Test that deleting a missing prompt returns False."""
-    mock_entity_client.delete.side_effect = EntityNotFoundError("not found")
+    mock_entity_client.delete_by_id.side_effect = EntityNotFoundError("not found")
 
     result = await prompt_service.delete_prompt(DeletePromptRequest(workspace="default", name="missing"))
 
     assert result is False
-    mock_entity_client.delete.assert_called_once_with(PromptEntity, "missing", workspace="default")
+    mock_entity_client.delete_by_id.assert_called_once_with(
+        PromptEntity,
+        mock_entity_client.get.return_value.id,
+        expected_db_version=mock_entity_client.get.return_value.db_version,
+    )

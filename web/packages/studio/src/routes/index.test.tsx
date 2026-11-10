@@ -138,6 +138,7 @@ describe('Routes', () => {
         ROUTES.workspace.filesetFile,
         ROUTES.workspace.jobs,
         ROUTES.workspace.jobDetail,
+        ROUTES.workspace.modelCompare,
         `${ROUTES.workspace.plugin}/*`,
         ROUTES.workspace.safeSynthesizer,
         ROUTES.workspace.safeSynthesizerNew,

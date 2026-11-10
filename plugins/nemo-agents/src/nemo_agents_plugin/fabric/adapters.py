@@ -27,7 +27,7 @@ import subprocess
 import sysconfig
 from pathlib import Path
 
-from nemo_agents_plugin.agent_config import AgentConfig
+from nemo_agents_plugin.agent_config import AgentConfig, HarnessConfig
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +134,14 @@ def resolve_adapter_id(kind: str, root: Path | None = None) -> str:
         f"Unsupported harness kind {kind!r}. Supported harness kinds: {', '.join(sorted(HARNESS_ADAPTER_IDS))}; "
         f"or an installed Fabric adapter ID: {', '.join(sorted(accepted))}."
     )
+
+
+def uses_default_deepagents_backend(harness: HarnessConfig) -> bool:
+    """Return whether the harness selects DeepAgents without a backend override."""
+    if HARNESS_ADAPTER_IDS.get(harness.kind, harness.kind) != HARNESS_ADAPTER_IDS["deepagents"]:
+        return False
+    settings = harness.settings.get("deepagents")
+    return settings is None or (isinstance(settings, dict) and settings.get("backend") is None)
 
 
 def validate_harness_kinds(config: AgentConfig) -> None:

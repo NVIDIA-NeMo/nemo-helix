@@ -58,7 +58,7 @@ async def test_deleting_volume_removes_backend_then_entity(
     await volume_reconciler.reconcile_one(vol)
 
     assert mock_backend.volume_delete_calls == [("default", "vol1")]
-    mock_entities.delete.assert_awaited_once()
+    mock_entities.delete_by_id.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -84,7 +84,7 @@ async def test_deleting_volume_keeps_entity_when_backend_delete_fails(
     assert vol.status_message == "PVC deletion failed"
     assert vol.error_details == {"reason": "forbidden"}
     mock_entities.update.assert_awaited_once_with(vol)
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -95,17 +95,12 @@ async def test_deleting_volume_delete_conflict_is_handled_for_retry(
 ) -> None:
     vol = make_volume()
     vol.status = "DELETING"
-    mock_entities.delete.side_effect = NemoEntityConflictError("conflict")
+    mock_entities.delete_by_id.side_effect = NemoEntityConflictError("conflict")
 
     await volume_reconciler.reconcile_one(vol)
 
     assert mock_backend.volume_delete_calls == [("default", "vol1")]
-    mock_entities.delete.assert_awaited_once_with(
-        type(vol),
-        name="vol1",
-        workspace="default",
-        expected_db_version=vol.db_version,
-    )
+    mock_entities.delete_by_id.assert_awaited_once_with(type(vol), vol.id, expected_db_version=vol.db_version)
 
 
 @pytest.mark.asyncio
@@ -122,7 +117,7 @@ async def test_deleting_volume_waits_for_executor(
 
     await reconciler.reconcile_one(vol)
 
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -149,7 +144,7 @@ async def test_deleting_volume_backend_failure_preserves_entity_for_retry(
     # Backend was asked to delete (so a retry occurs next cycle) ...
     assert mock_backend.volume_delete_calls == [("default", "vol1")]
     # ... but the entity row survives rather than orphaning the PVC.
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
     # ... and the retry is logged with the backend's reported status interpolated
     # (the %s renders the status word, so the message reads sensibly end to end).
     rendered = caplog.text
@@ -180,7 +175,7 @@ async def test_deleting_volume_non_released_status_preserves_entity(
     await volume_reconciler.reconcile_one(vol)
 
     assert mock_backend.volume_delete_calls == [("default", "vol1")]
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
-from scaled_evals.api.db import Database, get_db
+from scaled_evals.api.db import Database, RequestDatabase, get_db, get_request_db
 from scaled_evals.api.schemas.common import (
     ActivityRecord,
     ListEnvelope,
@@ -21,7 +21,8 @@ from scaled_evals.api.settings import settings
 router = APIRouter(prefix="/users", tags=["users"])
 
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
-Db = Annotated[Database, Depends(get_db)]
+Db = Annotated[RequestDatabase, Depends(get_request_db)]
+CatalogDb = Annotated[Database, Depends(get_db)]
 
 
 @router.get("/me", response_model=CurrentUserResponse)
@@ -83,7 +84,7 @@ def users_me_evaluations(
 @router.get("/me/tasks", response_model=ListEnvelope[Task])
 def users_me_tasks(
     current: Principal,
-    db: Db,
+    db: CatalogDb,
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = None,
 ) -> ListEnvelope[Task]:
