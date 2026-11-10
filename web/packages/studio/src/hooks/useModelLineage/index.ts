@@ -101,7 +101,7 @@ export const useModelLineage = (
 
   const resolve = (state: DeploymentIndicatorState | undefined): DeploymentIndicatorState => {
     if (!state) return isLoading ? { kind: 'loading' } : { kind: 'unknown' };
-    if (state.kind !== 'not-deployed') return state;
+    if (state.kind !== 'not-deployed' && state.kind !== 'unlisted') return state;
     if (latest.isLoading) return { kind: 'loading' };
     return latest.deployment ? { kind: 'not-serving', deployment: latest.deployment } : state;
   };

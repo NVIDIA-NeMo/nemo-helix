@@ -111,6 +111,37 @@ describe('useModelDeploymentStatuses', () => {
     expect(result.current.get('row')?.kind).toBe('unknown');
   });
 
+  it('reports unlisted when one provider is deleted and the other no longer lists the model', async () => {
+    const notFound = Object.assign(new Error('not found'), { response: { status: 404 } });
+    mockedGetProvider.mockImplementation((_ws: string, name: string) =>
+      name === 'provider-a'
+        ? Promise.resolve(provider(['ws/other'], null))
+        : Promise.reject(notFound)
+    );
+    const linked = { ...model, model_providers: ['ws/provider-a', 'ws/deleted'] } as ModelEntity;
+    const { result } = renderStatuses([{ key: 'row', model: linked }]);
+    await waitFor(() => expect(result.current.get('row')?.kind).not.toBe('loading'));
+    expect(result.current.get('row')).toEqual({
+      kind: 'unlisted',
+      missingProviders: ['ws/deleted'],
+      unlistingProviders: ['ws/provider-a'],
+    });
+  });
+
+  it('reports not-deployed while a deployment-backed provider lists nothing yet', async () => {
+    mockedGetProvider.mockResolvedValue(provider([]));
+    const { result } = renderStatuses([{ key: 'row', model }]);
+    await waitFor(() => expect(result.current.get('row')?.kind).not.toBe('loading'));
+    expect(result.current.get('row')?.kind).toBe('not-deployed');
+  });
+
+  it('reports an adapter not-deployed when its base is not served', async () => {
+    mockedGetProvider.mockResolvedValue(provider(['ws/other'], null));
+    const { result } = renderStatuses([{ key: 'row', model, adapter }]);
+    await waitFor(() => expect(result.current.get('row')?.kind).not.toBe('loading'));
+    expect(result.current.get('row')?.kind).toBe('not-deployed');
+  });
+
   it('keeps an adapter unknown when one of several providers cannot be read', async () => {
     // provider-a serves the base only; provider-b fails and may be serving the adapter.
     mockedGetProvider.mockImplementation((_ws: string, name: string) =>

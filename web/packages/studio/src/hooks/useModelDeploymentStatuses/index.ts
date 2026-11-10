@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isNotFoundError } from '@nemo/common/src/api/common/utils';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { toInferenceModelEntityId } from '@nemo/common/src/utils/models';
 import {
@@ -44,6 +45,11 @@ export type DeploymentIndicatorState =
   | { kind: 'adapter-not-loaded' }
   /** Nothing serves this id, and (for an adapter) nothing serves its base either. */
   | { kind: 'not-deployed' }
+  /**
+   * Nothing serves the model, and a linked provider is gone or is an external catalog that no
+   * longer lists it. Never set for an adapter.
+   */
+  | { kind: 'unlisted'; missingProviders: string[]; unlistingProviders: string[] }
   /**
    * Nothing serves it yet, but a deployment of the model exists: still starting, or
    * failed. Providers can't show this, so only `useModelLineage` reports it.
@@ -100,14 +106,16 @@ export function useModelDeploymentStatuses(
     (results: UseQueryResult<ModelProvider>[]) => {
       const map = new Map<
         string,
-        { provider?: ModelProvider; isLoading: boolean; isError: boolean }
+        { provider?: ModelProvider; isLoading: boolean; isError: boolean; isMissing: boolean }
       >();
       providerRefs.forEach((ref, index) => {
         const query = results[index];
+        const isMissing = Boolean(query?.isError) && isNotFoundError(query?.error);
         map.set(ref, {
           provider: query?.data,
           isLoading: Boolean(query?.isLoading),
-          isError: Boolean(query?.isError),
+          isError: Boolean(query?.isError) && !isMissing,
+          isMissing,
         });
       });
       return map;
@@ -140,14 +148,23 @@ export function useModelDeploymentStatuses(
         let servesBase = false;
         let isLoading = false;
         let isError = false;
+        const missingProviders: string[] = [];
+        const unlistingProviders: string[] = [];
 
         for (const ref of refs) {
           const entry = providersByRef.get(ref);
           if (!entry) continue;
           if (entry.isLoading) isLoading = true;
           if (entry.isError) isError = true;
+          if (entry.isMissing) missingProviders.push(ref);
           const served = entry.provider?.served_models ?? [];
-          if (!servesTarget && served.some((sm) => sm.model_entity_id === targetId)) {
+          const listsTarget = served.some((sm) => sm.model_entity_id === targetId);
+          // A deployment-backed provider lists nothing while it starts, so only an external
+          // catalog not listing the model means it was dropped.
+          if (entry.provider && !entry.provider.model_deployment_id && !listsTarget) {
+            unlistingProviders.push(ref);
+          }
+          if (!servesTarget && listsTarget) {
             servesTarget = entry.provider;
           }
           if (!servesBase && served.some((sm) => sm.model_entity_id === baseId)) {
@@ -155,7 +172,15 @@ export function useModelDeploymentStatuses(
           }
         }
 
-        return { target, servesTarget, servesBase, isLoading, isError: isError && !servesTarget };
+        return {
+          target,
+          servesTarget,
+          servesBase,
+          isLoading,
+          isError: isError && !servesTarget,
+          missingProviders,
+          unlistingProviders,
+        };
       }),
     [targets, providersByRef]
   );
@@ -202,7 +227,15 @@ export function useModelDeploymentStatuses(
   return useMemo(() => {
     const states = new Map<string, DeploymentIndicatorState>();
 
-    for (const { target, servesTarget, servesBase, isLoading, isError } of matches) {
+    for (const {
+      target,
+      servesTarget,
+      servesBase,
+      isLoading,
+      isError,
+      missingProviders,
+      unlistingProviders,
+    } of matches) {
       const hasProviders = (target.model.model_providers ?? []).length > 0;
 
       if (hasProviders && isLoading) {
@@ -242,7 +275,14 @@ export function useModelDeploymentStatuses(
         continue;
       }
 
-      states.set(target.key, { kind: 'not-deployed' });
+      const isUnlisted =
+        !target.adapter && (missingProviders.length > 0 || unlistingProviders.length > 0);
+      states.set(
+        target.key,
+        isUnlisted
+          ? { kind: 'unlisted', missingProviders, unlistingProviders }
+          : { kind: 'not-deployed' }
+      );
     }
 
     return states;

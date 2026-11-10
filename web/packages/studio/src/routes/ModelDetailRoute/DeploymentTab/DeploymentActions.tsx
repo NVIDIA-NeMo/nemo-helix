@@ -55,6 +55,7 @@ export const DeploymentActions: FC<DeploymentActionsProps> = ({ model, adapter, 
         </Flex>
       );
     }
+    case 'unlisted':
     case 'not-deployed':
       return (
         <DeployModelCta modelRef={modelRef} label={adapter ? 'Deploy base model' : 'Deploy'} />

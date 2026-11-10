@@ -13,6 +13,14 @@ describe('getDeployAction', () => {
     expect(action?.href).toBe('/workspaces/default/deployments/~new?model=default%2Fmy-model');
   });
 
+  it("offers Deploy when the model's providers no longer list it", () => {
+    const action = getDeployAction(
+      { kind: 'unlisted', missingProviders: [], unlistingProviders: ['default/p'] },
+      model
+    );
+    expect(action?.label).toBe('Deploy');
+  });
+
   it('labels an adapter row "Deploy" too, pointed at the base model that gets deployed', () => {
     const action = getDeployAction({ kind: 'adapter-not-loaded' }, model);
     expect(action?.label).toBe('Deploy');

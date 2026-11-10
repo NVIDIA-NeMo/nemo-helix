@@ -13,6 +13,7 @@ import { LIVE_STATUSES } from '@studio/hooks/useBaseModelDeploymentReadiness';
 import type { DeploymentIndicatorState } from '@studio/hooks/useModelDeploymentStatuses';
 import { ServedView } from '@studio/routes/ModelDetailRoute/DeploymentTab/ServedView';
 import { LineageCard } from '@studio/routes/ModelDetailRoute/DetailsTab/LineageSection/LineageCard';
+import { getUnlistedReason } from '@studio/routes/ModelDetailRoute/unlistedReason';
 import { getWorkspaceDeploymentDetailsRoute } from '@studio/routes/utils';
 import type { FC } from 'react';
 
@@ -79,6 +80,17 @@ export const DeploymentTab: FC<DeploymentTabProps> = ({ model, adapter, deployme
                 ? `Deploy ${model.name} to serve this adapter.`
                 : 'Deploy this model to chat with it and serve inference.'
             }
+          />
+        </Flex>
+      );
+
+    case 'unlisted':
+      return (
+        <Flex direction="col" justify="center" className="flex-1">
+          <Empty
+            icon={<DeploymentsIcon className="size-12" />}
+            title="Not served"
+            description={`${getUnlistedReason(deployment)}, so nothing serves it.`}
           />
         </Flex>
       );

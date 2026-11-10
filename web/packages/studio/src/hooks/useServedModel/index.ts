@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isNotFoundError } from '@nemo/common/src/api/common/utils';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import {
   getModelsGetProviderQueryKey,
@@ -88,6 +89,6 @@ export function useServedModel(
       }
     }
 
-    return { isLoading, isError: queries.some((q) => q.isError) };
+    return { isLoading, isError: queries.some((q) => q.isError && !isNotFoundError(q.error)) };
   }, [enabled, queries, modelEntityId, providerRefs]);
 }

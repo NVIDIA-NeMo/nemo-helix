@@ -25,6 +25,7 @@ const STATUS_CONFIG: Record<string, StatusConfigEntry> = {
   failed: { label: 'Failed', color: 'red' },
   unavailable: { label: 'Unavailable', color: 'gray' },
   'not-deployed': { label: 'Not deployed', color: 'gray' },
+  'not-served': { label: 'Not served', color: 'yellow' },
   'base-not-deployed': { label: 'Base not deployed', color: 'gray' },
   unknown: { label: 'Unknown', color: 'purple' },
 };
@@ -57,6 +58,9 @@ function toStatusKey(state: DeploymentIndicatorState, isAdapter: boolean): strin
       // Nothing serves it. For an adapter that means its base model, which is what
       // needs deploying, so it is not reported like an adapter waiting to be loaded.
       return isAdapter ? 'base-not-deployed' : 'not-deployed';
+
+    case 'unlisted':
+      return 'not-served';
 
     case 'unknown':
       return 'unknown';

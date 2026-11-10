@@ -97,6 +97,15 @@ describe('DeploymentStatusBadge', () => {
     expect(screen.queryByText('Not deployed')).not.toBeInTheDocument();
   });
 
+  it("reads 'Not served' when the model's providers no longer list it", () => {
+    render(
+      <DeploymentStatusBadge
+        state={{ kind: 'unlisted', missingProviders: ['ws/gone'], unlistingProviders: [] }}
+      />
+    );
+    expect(screen.getByText('Not served')).toBeVisible();
+  });
+
   it('shows no status text while the row is still resolving', () => {
     render(<DeploymentStatusBadge state={undefined} />);
     for (const label of ['Deployed', 'Active', 'Not deployed', 'Not active', 'Unknown']) {

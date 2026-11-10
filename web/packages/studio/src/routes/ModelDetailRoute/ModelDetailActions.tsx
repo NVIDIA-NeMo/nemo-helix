@@ -40,7 +40,12 @@ export const ModelDetailActions: FC<ModelDetailActionsProps> = ({
     case ModelDetailTab.Details:
       // A base model can only be deleted while no provider serves it.
       return parent === 'catalog' ? (
-        <DetailsActions model={model} canDelete={!adapter && !model.model_providers?.length} />
+        <DetailsActions
+          model={model}
+          canDelete={
+            !adapter && (!model.model_providers?.length || lineage.deployment.kind === 'unlisted')
+          }
+        />
       ) : null;
     case ModelDetailTab.Deployment:
       return (

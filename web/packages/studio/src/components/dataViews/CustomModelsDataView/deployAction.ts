@@ -44,6 +44,7 @@ export function getDeployAction(
 
   const offer =
     state.kind === 'not-deployed' ||
+    state.kind === 'unlisted' ||
     state.kind === 'adapter-not-loaded' ||
     (state.kind === 'served' &&
       (state.status === ModelDeploymentStatus.ERROR ||

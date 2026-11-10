@@ -264,6 +264,19 @@ describe('ModelDetailRoute', () => {
       expect(await screen.findByRole('button', { name: 'details actions' })).toBeInTheDocument();
     });
 
+    it('offers delete when the linked provider no longer serves the model', async () => {
+      mockLineage({
+        model: { ...baseModel, model_providers: ['ws/provider'] } as ModelEntity,
+        job: { jobName: undefined, workspace: 'ws', isLoading: false },
+        deployment: { kind: 'unlisted', missingProviders: ['ws/provider'], unlistingProviders: [] },
+      });
+      renderPage('/workspaces/ws/base-models/my-model');
+
+      expect(
+        await screen.findByRole('button', { name: 'details actions with delete' })
+      ).toBeInTheDocument();
+    });
+
     it('looks the model up in the default workspace too', async () => {
       mockLineage({ model: baseModel });
       renderPage('/workspaces/ws/base-models/my-model');
