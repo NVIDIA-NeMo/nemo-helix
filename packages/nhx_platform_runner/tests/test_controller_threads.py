@@ -20,10 +20,21 @@ from nhx.platform_runner.controller_threads import (
     start_sidecar_threads,
 )
 
-#: Hang guard for every wait, join and poll below. Each returns as soon as its event happens, so this
-#: never slows a passing test. It must outlast any stall of a loaded CI worker: a helper thread that
-#: releases itself before the test releases it exits and is untracked while the test expects it running.
+#: How long the test itself waits for something that should happen promptly before failing.
 _GUARD_S = 30.0
+#: Events a helper thread blocks on, opened at teardown so a failed test leaves no thread blocked.
+_GATES: list[threading.Event] = []
+
+
+def _gate() -> threading.Event:
+    """An event a helper thread blocks on, untimed, until the test sets it.
+
+    Only the test may end the wait: a helper that gave up on its own would exit while the test still
+    expects it running, and the test would see it untracked.
+    """
+    gate = threading.Event()
+    _GATES.append(gate)
+    return gate
 
 
 class _HealthyLoop:
@@ -36,20 +47,23 @@ class _HealthyLoop:
 def reset_controller_manager() -> Iterator[None]:
     ControllerManager._instance = None
     yield
+    for gate in _GATES:
+        gate.set()
+    _GATES.clear()
     ControllerManager._instance = None
 
 
 def test_controller_is_pending_until_run_func_registers_loop() -> None:
     manager = ControllerManager.get_instance()
-    allow_registration = threading.Event()
+    allow_registration = _gate()
     registered = threading.Event()
-    stop_signal = threading.Event()
+    stop_signal = _gate()
 
     def run(stop_signal: threading.Event) -> None:
-        allow_registration.wait(timeout=_GUARD_S)
+        allow_registration.wait()
         manager.register("models_controller", cast(Loop, _HealthyLoop()))
         registered.set()
-        stop_signal.wait(timeout=_GUARD_S)
+        stop_signal.wait()
 
     threads = start_controller_threads({"models": run}, stop_signal)
     try:
@@ -66,7 +80,7 @@ def test_controller_is_pending_until_run_func_registers_loop() -> None:
 
 def test_controller_that_exits_without_shutdown_is_unhealthy(caplog: pytest.LogCaptureFixture) -> None:
     manager = ControllerManager.get_instance()
-    stop_signal = threading.Event()
+    stop_signal = _gate()
 
     with caplog.at_level(logging.ERROR, logger="nhx.platform_runner.controller_threads"):
         threads = start_controller_threads({"models": lambda _stop_signal: None}, stop_signal)
@@ -92,7 +106,7 @@ def test_controller_system_exit_is_recorded_as_a_crash(caplog: pytest.LogCapture
 
 
 def test_controller_thread_name_does_not_duplicate_prefix() -> None:
-    stop_signal = threading.Event()
+    stop_signal = _gate()
 
     threads = start_controller_threads({"controller-models": lambda _stop_signal: None}, stop_signal)
     for thread in threads:
@@ -103,7 +117,7 @@ def test_controller_thread_name_does_not_duplicate_prefix() -> None:
 
 def test_required_sidecar_failure_is_unhealthy(caplog: pytest.LogCaptureFixture) -> None:
     manager = ControllerManager.get_instance()
-    stop_signal = threading.Event()
+    stop_signal = _gate()
 
     def crash(_stop_signal: threading.Event) -> None:
         raise ValueError("optional configuration is missing")
@@ -121,13 +135,13 @@ def test_required_sidecar_failure_is_unhealthy(caplog: pytest.LogCaptureFixture)
 def test_self_tracking_sidecar_is_pending_before_its_thread_runs_any_code() -> None:
     """Expose a self-tracking sidecar before its thread is scheduled."""
     manager = ControllerManager.get_instance()
-    stop_signal = threading.Event()
-    thread_may_proceed = threading.Event()
+    stop_signal = _gate()
+    thread_may_proceed = _gate()
 
     def run(stop_signal: threading.Event) -> None:
         # Hold the thread before its own registration call.
-        thread_may_proceed.wait(timeout=_GUARD_S)
-        stop_signal.wait(timeout=_GUARD_S)
+        thread_may_proceed.wait()
+        stop_signal.wait()
 
     threads = start_sidecar_threads({"auth-proxy": run}, stop_signal)
     try:
@@ -147,11 +161,11 @@ def test_delayed_runner_exit_is_untracked_after_its_generation_stops(
 ) -> None:
     monkeypatch.setattr(controller_threads, "DEFAULT_RUNNER_JOIN_TIMEOUT_SECONDS", 0.05)
     manager = ControllerManager.get_instance()
-    stop_signal = threading.Event()
-    release = threading.Event()
+    stop_signal = _gate()
+    release = _gate()
 
     def run(_stop_signal: threading.Event) -> None:
-        release.wait(timeout=_GUARD_S)
+        release.wait()
 
     threads = start_controller_threads({"models": run}, stop_signal)
     stop_signal.set()
@@ -171,10 +185,8 @@ def test_delayed_runner_exit_is_untracked_after_its_generation_stops(
 
 def test_join_timeout_override_remains_supported() -> None:
     manager = ControllerManager.get_instance()
-    release = threading.Event()
-    threads = start_controller_threads(
-        {"models": lambda _stop_signal: release.wait(timeout=_GUARD_S)}, threading.Event()
-    )
+    release = _gate()
+    threads = start_controller_threads({"models": lambda _stop_signal: release.wait()}, threading.Event())
 
     started_at = time.monotonic()
     join_and_untrack_runner_threads(
@@ -196,11 +208,11 @@ def test_join_timeout_override_remains_supported() -> None:
 
 def test_delayed_runner_hands_cleanup_to_delayed_control_loop() -> None:
     manager = ControllerManager.get_instance()
-    stop_signal = threading.Event()
+    stop_signal = _gate()
     wrapper_started = threading.Event()
     loop_started = threading.Event()
-    release_wrapper = threading.Event()
-    release_loop = threading.Event()
+    release_wrapper = _gate()
+    release_loop = _gate()
 
     class _BlockingLoop(threading.Thread):
         name = ""
@@ -209,14 +221,14 @@ def test_delayed_runner_hands_cleanup_to_delayed_control_loop() -> None:
 
         def run(self) -> None:
             loop_started.set()
-            release_loop.wait(timeout=_GUARD_S)
+            release_loop.wait()
 
     def run(_stop_signal: threading.Event) -> None:
         loop = cast(Loop, _BlockingLoop(daemon=True))
         manager.register("models_controller", loop)
         loop.start()
         wrapper_started.set()
-        release_wrapper.wait(timeout=_GUARD_S)
+        release_wrapper.wait()
 
     threads = start_controller_threads({"models": run}, stop_signal)
     assert wrapper_started.wait(timeout=_GUARD_S)
@@ -244,9 +256,9 @@ def test_delayed_runner_hands_cleanup_to_delayed_control_loop() -> None:
 
 def test_dead_runner_with_live_control_loop_is_untracked_after_loop_exits() -> None:
     manager = ControllerManager.get_instance()
-    stop_signal = threading.Event()
+    stop_signal = _gate()
     loop_started = threading.Event()
-    release_loop = threading.Event()
+    release_loop = _gate()
 
     class _BlockingLoop(threading.Thread):
         name = ""
@@ -255,13 +267,13 @@ def test_dead_runner_with_live_control_loop_is_untracked_after_loop_exits() -> N
 
         def run(self) -> None:
             loop_started.set()
-            release_loop.wait(timeout=_GUARD_S)
+            release_loop.wait()
 
     def run(stop_signal: threading.Event) -> None:
         loop = cast(Loop, _BlockingLoop(daemon=True))
         manager.register("models_controller", loop)
         loop.start()
-        stop_signal.wait(timeout=_GUARD_S)
+        stop_signal.wait()
         # Simulate a controller wrapper whose own shutdown deadline expires
         # before its owned control-loop thread has stopped.
 
@@ -289,9 +301,9 @@ def test_loop_exit_between_cleanup_and_watcher_does_not_leave_stopping_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = ControllerManager.get_instance()
-    stop_signal = threading.Event()
+    stop_signal = _gate()
     loop_started = threading.Event()
-    release_loop = threading.Event()
+    release_loop = _gate()
     owned_loop: threading.Thread | None = None
 
     class _BlockingLoop(threading.Thread):
@@ -301,14 +313,14 @@ def test_loop_exit_between_cleanup_and_watcher_does_not_leave_stopping_state(
 
         def run(self) -> None:
             loop_started.set()
-            release_loop.wait(timeout=_GUARD_S)
+            release_loop.wait()
 
     def run(stop_signal: threading.Event) -> None:
         nonlocal owned_loop
         owned_loop = _BlockingLoop(daemon=True)
         manager.register("models_controller", cast(Loop, owned_loop))
         owned_loop.start()
-        stop_signal.wait(timeout=_GUARD_S)
+        stop_signal.wait()
 
     threads = start_controller_threads({"models": run}, stop_signal)
     assert loop_started.wait(timeout=_GUARD_S)
@@ -330,8 +342,8 @@ def test_loop_exit_between_cleanup_and_watcher_does_not_leave_stopping_state(
 
 def test_existing_stopping_owner_keeps_control_of_delayed_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = ControllerManager.get_instance()
-    release = threading.Event()
-    threads = start_sidecar_threads({"auth-proxy": lambda _stop: release.wait(timeout=_GUARD_S)}, threading.Event())
+    release = _gate()
+    threads = start_sidecar_threads({"auth-proxy": lambda _stop: release.wait()}, threading.Event())
     thread = threads[0]
     assert isinstance(thread, controller_threads._RunnerThread)
     manager.mark_controller_stopping("auth-proxy", thread.generation)
@@ -360,12 +372,12 @@ def test_thread_start_failure_rolls_back_already_started_components(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = ControllerManager.get_instance()
-    stop_signal = threading.Event()
+    stop_signal = _gate()
     first_stopped = threading.Event()
 
     def first_run(stop_signal: threading.Event) -> None:
         manager.register("first_loop", cast(Loop, _HealthyLoop()))
-        stop_signal.wait(timeout=_GUARD_S)
+        stop_signal.wait()
         first_stopped.set()
 
     original_start = controller_threads._RunnerThread.start
