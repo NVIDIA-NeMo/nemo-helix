@@ -17,6 +17,9 @@ from nemo_helix_plugin.files.client import AsyncFilesClient
 logger = logging.getLogger(__name__)
 
 DEFAULT_HF_HOME = "/app/.cache/huggingface"
+# Per-phase httpx timeout for the weight downloads. A fileset backed by a remote source
+# can take a while to produce the first byte of a large shard.
+DOWNLOAD_TIMEOUT_SECONDS = 600.0
 
 
 @dataclass
@@ -191,7 +194,9 @@ async def init_models(
     """
     filesets = filesets or DEFAULT_MODEL_FILESETS
     results = {}
-    async with AsyncFilesClient.from_client(get_async_nemo_client()) as client:
+    # The platform client owns the HTTP transport; the Files client is a view over it.
+    async with get_async_nemo_client() as platform_client:
+        client = AsyncFilesClient.from_client(platform_client).with_options(timeout=DOWNLOAD_TIMEOUT_SECONDS)
         logger.info("Initializing models from Files API: %s", client.base_url)
         for fileset in filesets:
             results[fileset.hf_model_id] = await download_model_fileset(client, fileset, hf_home, force)
