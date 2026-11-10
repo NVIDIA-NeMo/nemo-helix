@@ -1,10 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from typing import Literal
+
 import httpx
 import pytest
 from nemo_helix_plugin.client.errors import NemoResponseValidationError
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from pydantic_core import PydanticCustomError
 
 VERSION_HINT = "The server and this client may be on different versions"
@@ -99,8 +101,29 @@ def test_custom_validator_messages_are_not_printed() -> None:
     message = str(NemoResponseValidationError(_response(body), _validation_error(Referenced, body)))
 
     assert "secret-ws" not in message
-    assert "  fileset: Failed a custom validator (value_error)" in message
-    assert "  schema_ref: Failed a custom validator (unknown_schema)" in message
+    assert "  fileset: Invalid value (message withheld: it can quote response data) (value_error)" in message
+    assert "  schema_ref: Invalid value (message withheld: it can quote response data) (unknown_schema)" in message
+
+
+class Cat(BaseModel):
+    kind: Literal["cat"]
+
+
+class Dog(BaseModel):
+    kind: Literal["dog"]
+
+
+class Pet(BaseModel):
+    pet: Cat | Dog = Field(discriminator="kind")
+
+
+def test_union_tag_from_the_response_is_not_printed() -> None:
+    body = {"pet": {"kind": "secret-tag"}}
+
+    message = str(NemoResponseValidationError(_response(body), _validation_error(Pet, body)))
+
+    assert "secret-tag" not in message
+    assert "(union_tag_invalid)" in message
 
 
 def test_more_than_five_errors_are_capped() -> None:
