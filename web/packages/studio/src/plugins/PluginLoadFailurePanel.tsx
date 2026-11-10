@@ -6,12 +6,12 @@ import { PageHeader, Panel, Stack } from '@nvidia/foundations-react-core';
 import type { PluginLoadFailure } from '@studio/plugins/types';
 import type { ReactElement } from 'react';
 
-// Shown in place of a plugin that is installed but could not be loaded.
-export const PluginLoadFailurePanel = ({
-  failure,
-}: {
+interface PluginLoadFailurePanelProps {
   failure: PluginLoadFailure;
-}): ReactElement => (
+}
+
+// Shown in place of a plugin that is installed but could not be loaded.
+export const PluginLoadFailurePanel = ({ failure }: PluginLoadFailurePanelProps): ReactElement => (
   <Stack className="h-full" padding="4" gap="3">
     <PageHeader slotHeading={`Plugin: ${failure.name}`} />
     {failure.issues.map((issue, i) => (
