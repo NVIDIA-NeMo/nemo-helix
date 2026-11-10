@@ -2,12 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ThreadAssistantMessagePart, ThreadMessageLike } from '@assistant-ui/react';
+import { GENERIC_CHAT_ERROR } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import { getMessageText } from '@nemo/common/src/components/AssistantChat/messageUtils';
 import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
   ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
   ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
+import {
+  ASSISTANT_RUN_INTERRUPTED_ERROR,
+  describeAssistantRunError,
+} from '@studio/routes/agents/AssistantChatRoute/describeAssistantRunError';
 import {
   STUDIO_MESSAGE_SUMMARY_END,
   STUDIO_MESSAGE_SUMMARY_START,
@@ -126,10 +131,7 @@ describe('useCustomAssistantChatRuntime', () => {
     });
 
     const messages = getMockRuntime(result.current.runtime).messages;
-    expect(messages.map(getMessageText)).toEqual([
-      'Create a guardrail',
-      'NeMo Assistant stopped before completing.',
-    ]);
+    expect(messages.map(getMessageText)).toEqual(['Create a guardrail', GENERIC_CHAT_ERROR]);
     expect(messages[1]?.status).toEqual({
       type: 'incomplete',
       reason: 'error',
@@ -143,9 +145,11 @@ describe('useCustomAssistantChatRuntime', () => {
   it('preserves streamed assistant content when a run later fails', async () => {
     const onRun = vi.fn(async (context: CustomAssistantRunContext) => {
       context.appendAssistantText('I inspected the current configuration.');
-      throw new Error('Connection to NeMo Assistant was interrupted.');
+      throw new Error(ASSISTANT_RUN_INTERRUPTED_ERROR);
     });
-    const { result } = renderHook(() => useCustomAssistantChatRuntime({ onRun }));
+    const { result } = renderHook(() =>
+      useCustomAssistantChatRuntime({ describeError: describeAssistantRunError, onRun })
+    );
 
     await act(async () => {
       await result.current.submitPrompt('Create a guardrail');
@@ -154,12 +158,12 @@ describe('useCustomAssistantChatRuntime', () => {
     const messages = getMockRuntime(result.current.runtime).messages;
     expect(messages[1]?.content).toEqual([
       { type: 'text', text: 'I inspected the current configuration.' },
-      { type: 'text', text: 'NeMo Assistant stopped before completing.' },
+      { type: 'text', text: ASSISTANT_RUN_INTERRUPTED_ERROR },
     ]);
     expect(messages[1]?.status).toEqual({
       type: 'incomplete',
       reason: 'error',
-      error: 'Connection to NeMo Assistant was interrupted.',
+      error: ASSISTANT_RUN_INTERRUPTED_ERROR,
     });
   });
 
