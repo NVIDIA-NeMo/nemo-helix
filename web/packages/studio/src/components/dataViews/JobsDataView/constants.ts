@@ -5,8 +5,6 @@ import { CUSTOMIZER_ENABLED } from '@studio/constants/environment';
 
 export const JOB_SOURCE = {
   CUSTOMIZATION: 'customization',
-  // Data Designer create jobs. Must match CREATE_JOB_SOURCE in the data-designer plugin's service.py;
-  // its retrieval jobs use their own data-designer.retrieval-* sources and have no detail page here.
   DATA_DESIGNER: 'nemo-data-designer-plugin',
   SAFE_SYNTHESIZER: 'safe-synthesizer',
   EVALUATOR_METRICS: 'evaluator-metrics',
