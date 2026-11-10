@@ -101,11 +101,6 @@ vi.mock('@studio/components/FilesetCreateModal', () => ({
   ),
 }));
 
-vi.mock('@studio/constants/environment', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@studio/constants/environment')>();
-  return { ...actual, FILESET_DETAILS_ENABLED: true };
-});
-
 const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`;
 
 const makeDataset = (overrides: Partial<FilesetOutput> & { name: string }): FilesetOutput =>

@@ -98,12 +98,9 @@ export const ROUTES = {
     modelAdapterDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}/adapters/:${P.adapterName}`,
     filesets: `/workspaces/:${P.workspace}/filesets`,
     filesetNew: `/workspaces/:${P.workspace}/filesets/new`,
-    filesetDetails: `/workspaces/:${P.workspace}/filesets/:${P.filesetId}`,
-    filesetFile: `/workspaces/:${P.workspace}/filesets/:${P.filesetId}/file/:${P.filePathEncoded}`,
     /**
-     * Unified fileset detail page (gated by VITE_FF_FILESET_DETAILS_ENABLED).
-     * One route serves all purposes — the page branches on `fileset.purpose`
-     * to render Model/Dataset/Generic card content.
+     * Unified fileset detail page. One route serves all purposes — the page
+     * branches on `fileset.purpose` to render Model/Dataset/Generic card content.
      */
     filesetDetail: `/workspaces/:${P.workspace}/filesets/:${P.filesetName}/detail`,
     inferenceProviders: `/workspaces/:${P.workspace}/inference-providers`,

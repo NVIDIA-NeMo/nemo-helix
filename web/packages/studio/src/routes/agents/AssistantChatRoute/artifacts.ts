@@ -73,9 +73,10 @@ const STUDIO_LINK_PATH_TEMPLATES: Record<string, string> = {
   job: '/workspaces/{workspace}/jobs/{name}',
   filesets: '/workspaces/{workspace}/filesets',
   fileset_new: '/workspaces/{workspace}/filesets/new',
-  fileset_panel: '/workspaces/{workspace}/filesets/{name}',
   fileset: '/workspaces/{workspace}/filesets/{name}/detail',
-  fileset_file: '/workspaces/{workspace}/filesets/{name}/file/{file_path}',
+  // The side panel is gone; older assistant sessions may still name it.
+  fileset_panel: '/workspaces/{workspace}/filesets/{name}/detail',
+  fileset_file: '/workspaces/{workspace}/filesets/{name}/detail?tab=files&file={file_path}',
   deployments: '/workspaces/{workspace}/deployments',
   deployment: '/workspaces/{workspace}/deployments/{name}/details',
   inference_providers: '/workspaces/{workspace}/inference-providers',
