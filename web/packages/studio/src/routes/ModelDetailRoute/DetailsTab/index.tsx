@@ -18,6 +18,7 @@ import {
 import { InferenceSection } from '@studio/routes/ModelDetailRoute/DetailsTab/InferenceSection';
 import { DetailPanel } from '@studio/routes/ModelDetailRoute/DetailsTab/layout/DetailPanel';
 import { LineageSection } from '@studio/routes/ModelDetailRoute/DetailsTab/LineageSection';
+import { DeploymentCard } from '@studio/routes/ModelDetailRoute/DetailsTab/LineageSection/DeploymentCard';
 import { PromptSection } from '@studio/routes/ModelDetailRoute/DetailsTab/PromptSection';
 import { getModelDetailRoute } from '@studio/routes/utils';
 import type { CustomizationJob } from '@studio/util/customizationBackend';
@@ -57,16 +58,14 @@ export const DetailsTab: FC<DetailsTabProps> = ({ model, adapter, lineage, jobRe
 
   return (
     <Stack gap="density-3xl" className="w-full pb-density-2xl">
-      <LineageSection
-        base={baseCard}
-        job={jobCard}
-        fileset={lineage.fileset}
-        deployment={lineage.deployment}
-        deploymentTo={getModelTabLink(ModelDetailTab.Deployment)}
-        isAdapter={Boolean(adapter)}
-      />
-
       <Grid cols={{ base: 1, lg: 2 }} gap="density-xl">
+        <DeploymentCard
+          deployment={lineage.deployment}
+          to={getModelTabLink(ModelDetailTab.Deployment)}
+          isAdapter={Boolean(adapter)}
+        />
+        {model.api_endpoint && <InferenceSection model={model} />}
+        <LineageSection base={baseCard} job={jobCard} fileset={lineage.fileset} />
         {adapter ? (
           <>
             <DetailPanel
@@ -103,7 +102,6 @@ export const DetailsTab: FC<DetailsTabProps> = ({ model, adapter, lineage, jobRe
         <AdaptersSection workspace={workspace} modelName={model.name} adapters={adapters} />
       )}
 
-      {model.api_endpoint && <InferenceSection model={model} />}
       <PromptSection model={model} />
       {adapter && model.spec && (
         <DetailPanel
