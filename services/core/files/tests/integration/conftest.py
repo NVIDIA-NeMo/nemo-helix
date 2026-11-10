@@ -24,6 +24,7 @@ from nhx.common.config import AuthConfig
 from nhx.common.config.base import get_service_config
 from nhx.core.files.app.backends import storage_impl_factory
 from nhx.core.files.app.backends.base import StorageImpl
+from nhx.core.files.app.backends.huggingface import HuggingfaceStorageImpl
 from nhx.core.files.app.backends.local import LocalStorageConfig
 from nhx.core.files.config import FilesConfig
 from nhx.core.files.service import FilesService
@@ -124,6 +125,21 @@ def async_files_client(client_context: ClientContext) -> AsyncFilesClient:
 def files_resource(client: NemoClient, files_client: FilesClient) -> FilesResource:
     """Provide a FilesResource backed by the test FilesClient."""
     return FilesResource(client, files_client=files_client)
+
+
+@pytest.fixture
+def no_hf_network(monkeypatch):
+    """Fixture to disable live HuggingFace network calls: make validation/config-resolution purely local."""
+
+    async def _validate_noop(self):
+        return None
+
+    async def _resolve_passthrough(self):
+        # Keep config unchanged; enough for create path testing.
+        return self.config
+
+    monkeypatch.setattr(HuggingfaceStorageImpl, "validate_storage", _validate_noop)
+    monkeypatch.setattr(HuggingfaceStorageImpl, "resolve_config", _resolve_passthrough)
 
 
 @pytest.fixture

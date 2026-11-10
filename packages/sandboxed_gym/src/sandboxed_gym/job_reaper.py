@@ -21,23 +21,30 @@ from sandboxed_gym.run_sync import run_coro_sync
 
 LOGGER = logging.getLogger(__name__)
 
+DEFAULT_REAP_TIMEOUT_S = 30.0
+
 
 def reap_job_sandboxes(
     job_id: str,
     *,
     host_provider: str,
     host_provider_options: Mapping[str, Any] | None = None,
+    timeout_s: float = DEFAULT_REAP_TIMEOUT_S,
 ) -> tuple[str, ...]:
     """Destroy every sandbox labeled with ``job_id``. Failures are logged, not raised.
 
     Raising from an ``atexit`` hook or a signal handler would skip the rest of
     process teardown. A sandbox that is already gone is not a failure of the exit.
+
+    ``timeout_s`` bounds the sweep. A caller reaping inside a container's termination
+    grace period passes less than the default so the rest of its own teardown still runs.
     """
     options = dict(host_provider_options or {})
 
     async def _destroy() -> tuple[str, ...]:
+        """Destroy the job's sandboxes through the host provider."""
         provider = get_host_provider(host_provider, options)
-        return await asyncio.wait_for(provider.destroy_job_sandboxes(job_id), timeout=30)
+        return await asyncio.wait_for(provider.destroy_job_sandboxes(job_id), timeout=timeout_s)
 
     try:
         removed = run_coro_sync(_destroy())

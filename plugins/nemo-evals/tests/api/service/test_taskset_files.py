@@ -24,6 +24,10 @@ class _FakeTaskService:
     def __init__(self, existing: set[tuple[str, str]]) -> None:
         self.existing = existing
 
+    async def resolve_pinned_revisions(self, workspace: str, pins) -> None:
+        for name, digest in pins:
+            await self.resolve_revision(workspace, name, digest)
+
     async def head_by_id(self, task_id):
         raise NotImplementedError("Use the real TaskService for ID tests")
 

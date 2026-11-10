@@ -71,7 +71,7 @@ export const ROUTES = {
      */
     newCustomizationJobScratch: `/workspaces/:${P.workspace}/fine-tune/new/scratch`,
     baseModels: `/workspaces/:${P.workspace}/base-models`,
-    /** Base models list with a specific model panel open (model name in path) */
+    /** Model detail page; with model details off, the catalog with that model's panel open */
     baseModelsModel: `/workspaces/:${P.workspace}/base-models/:${P.modelName}`,
     evaluation: `/workspaces/:${P.workspace}/evaluation`,
     /** Dataset-driven model evaluation builder. */

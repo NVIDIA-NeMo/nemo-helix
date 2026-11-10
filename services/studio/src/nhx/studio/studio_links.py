@@ -382,7 +382,6 @@ _STUDIO_LINK_DESTINATION_FEATURE_FLAGS: dict[str, tuple[str, ...]] = {
     "customization_new": ("customizer_enabled",),
     "customization": ("customizer_enabled",),
     "prompt_tuning": ("customizer_enabled",),
-    "model_chat": ("model_compare_enabled",),
     # Studio only mounts the Monitor route behind MONITOR_ENABLED, not the agents gate.
     "agent_monitor": ("monitor_enabled",),
     "fileset": ("fileset_details_enabled",),

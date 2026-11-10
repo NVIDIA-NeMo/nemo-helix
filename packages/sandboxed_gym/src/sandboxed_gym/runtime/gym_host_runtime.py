@@ -19,7 +19,6 @@ import concurrent.futures
 import json
 import os
 import re
-import select
 import shutil
 import socket
 import subprocess
@@ -31,7 +30,15 @@ import urllib.error
 import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from os import access
+from os import close as os_close
+from os import dup2 as os_dup2
+from os import read as os_read
 from pathlib import Path
+from select import select
+from subprocess import check_output
+from subprocess import run as run_process
+from types import SimpleNamespace
 from typing import Any
 
 from sandboxed_gym.environment_package import (
@@ -92,6 +99,9 @@ NEMO_GYM_EXTRA_ROOTS_ENV_KEY = "NEMO_GYM_EXTRA_ROOTS"
 #: Writable copy of the image Gym checkout. ``gym_host.sh`` stages it here before this process starts.
 IMAGE_GYM_SRC_ENV_KEY = "SANDBOXED_GYM_SRC_DIR"
 DEFAULT_IMAGE_GYM_SRC = "/tmp/gym-src/Gym"
+# The checkout gym_host.sh copies from. The training container can read it before that copy.
+IMAGE_GYM_TREE_ENV_KEY = "SANDBOXED_GYM_TREE"
+DEFAULT_IMAGE_GYM_TREE = "/opt/nemo-rl/3rdparty/Gym-workspace/Gym"
 #: Which agent, resources server, and model to run. Gym has no schema for this key, so
 #: the host pops it and rewrites ``config_paths`` before Gym parses the dict.
 ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nhx_environment_component_selection"
@@ -226,8 +236,8 @@ class _FdOutputTail:
         self._destination = os.fdopen(os.dup(fd), "wb", buffering=0)
         self._tail: _OutputTail | None = _OutputTail(None, _OUTPUT_TAIL, secrets)
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        os.dup2(write_fd, fd)
-        os.close(write_fd)
+        os_dup2(write_fd, fd)
+        os_close(write_fd)
         threading.Thread(target=self._run, daemon=True, name=f"gym-output-{fd}").start()
 
     def drain(self, *, max_chunks: int = 1) -> str:
@@ -235,7 +245,7 @@ class _FdOutputTail:
         with self._lock:
             for _ in range(max_chunks):
                 try:
-                    chunk = os.read(self._read_fd, 65536)
+                    chunk = os_read(self._read_fd, 65536)
                 except BlockingIOError:
                     break
                 if not chunk:
@@ -269,15 +279,15 @@ class _FdOutputTail:
         """Pump until process exit; a broken reader must not leave writers blocked."""
         try:
             while True:
-                select.select([self._read_fd], [], [])
+                select([self._read_fd], [], [])
                 self.drain()
         except Exception:
             # If the pipe itself fails, restore the host fd for subsequent writes. Closing the
             # reader also makes existing children fail fast rather than hang on a full pipe.
             try:
-                os.dup2(self._destination.fileno(), self._fd)
+                os_dup2(self._destination.fileno(), self._fd)
             finally:
-                os.close(self._read_fd)
+                os_close(self._read_fd)
 
 
 _OUTPUT_CAPTURES: tuple[_FdOutputTail, ...] = ()
@@ -526,7 +536,7 @@ def _uv_cache_dir() -> str | None:
     if configured:
         return configured
     try:
-        resolved = subprocess.check_output(["uv", "cache", "dir"], text=True).strip()
+        resolved = check_output(["uv", "cache", "dir"], text=True).strip()
     except (OSError, subprocess.SubprocessError):
         return None
     return resolved or None
@@ -636,6 +646,16 @@ def _load_runtime_environment_package(
     return package
 
 
+def _host_stderr() -> Any:
+    """The current ``sys.stderr``, looked up at call time because the host replaces it."""
+    return sys.stderr
+
+
+def _import_path() -> list[str]:
+    """This interpreter's module search path, which the wheels-v1 install extends."""
+    return sys.path
+
+
 def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_path: str) -> None:
     """Install a wheels-v1 environment's vendored dependencies, with no package-index access.
 
@@ -663,7 +683,7 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
     # source-distribution path opened by --find-links, including for transitive dependencies.
     # Keep uv's failure reason separately so it also reaches the exception message, even if
     # subsequent Gym output would push it out of the bounded host tail.
-    result = subprocess.run(
+    result = run_process(
         [
             "uv",
             "pip",
@@ -683,7 +703,7 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
     )
     # Forwarded to the host fds so the output tail keeps it, with secrets masked.
     sys.stdout.write(result.stdout)
-    sys.stderr.write(result.stderr)
+    _host_stderr().write(result.stderr)
     if result.returncode != 0:
         lines = [line for line in result.stderr.splitlines() if line.strip()]
         reason = "\n".join(lines[-_UV_FAILURE_REASON_LINES:]) or "uv printed no error output"
@@ -718,22 +738,58 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
     # Updating PYTHONPATH does not change the current interpreter's `sys.path`. Prepend the wheel
     # target so the host can import wheel-only packages, with the staged environment taking
     # precedence over packages baked into the runtime image.
-    if wheels_install_dir not in sys.path:
-        sys.path.insert(0, wheels_install_dir)
+    import_path = _import_path()
+    if wheels_install_dir not in import_path:
+        import_path.insert(0, wheels_install_dir)
 
 
 _OPEN_SANDBOX_CONFIG = "nemo_gym/sandbox/providers/opensandbox/configs/opensandbox.yaml"
 
 
-def _require_vendored_gym_matches_image(package: EnvironmentPackage | None) -> None:
+def _image_gym_tree() -> Path | None:
+    """Gym checkout shipped in the training image, before the sandbox copies it writable."""
+    root = Path(os.environ.get(IMAGE_GYM_TREE_ENV_KEY, DEFAULT_IMAGE_GYM_TREE))
+    if (root / "nemo_gym").is_dir():
+        return root
+    return None
+
+
+def require_packaged_nemo_gym_matches_image(environment_root: Path, image_gym_root: Path | None = None) -> bool:
+    """Reject a packaged nemo-gym wheel that is not this image's Gym.
+
+    The training container calls this before Ray starts. The sandbox host repeats it after
+    copying the checkout, which is the tree Gym then imports. A package with no nemo-gym
+    wheel, such as native-v1, is not a mismatch.
+
+    Returns True when a wheel was compared. Returns False when there is nothing to compare.
+    """
+    root = image_gym_root if image_gym_root is not None else _image_gym_tree()
+    if root is None or not (root / "nemo_gym").is_dir():
+        return False
+    wheelhouse = environment_root / "wheels"
+    if not wheelhouse.is_dir():
+        return False
+    wheel = next((path for path in sorted(wheelhouse.glob("*.whl")) if _is_nemo_gym_wheel(path)), None)
+    if wheel is None:
+        return False
+    _require_vendored_gym_matches_image(SimpleNamespace(wheel_files=(wheel,)), image_root=root)
+    return True
+
+
+def _require_vendored_gym_matches_image(
+    package: EnvironmentPackage | None,
+    image_root: Path | None = None,
+) -> None:
     """Reject a nemo-gym wheel whose library is not the one in this image.
 
     Both can report the same version. The wheel then lands on PYTHONPATH ahead of the image
     checkout and Gym imports a mix of the two.
     """
     wheel_files = getattr(package, "wheel_files", ())
-    image_root = _image_gym_search_root()
-    library = Path(image_root, "nemo_gym") if image_root else None
+    if image_root is None:
+        found = _image_gym_search_root()
+        image_root = Path(found) if found else None
+    library = image_root / "nemo_gym" if image_root is not None else None
     wheel = next((path for path in wheel_files if _is_nemo_gym_wheel(path)), None)
     if wheel is None or library is None or not library.is_dir():
         return
@@ -805,7 +861,7 @@ def _writable_component_venv_root(configured_root: str, work_path: str, global_c
     root = Path(configured_root)
     try:
         root.mkdir(parents=True, exist_ok=True)
-        writable = os.access(root, os.W_OK)
+        writable = access(root, os.W_OK)
     except OSError:
         writable = False
     if writable:

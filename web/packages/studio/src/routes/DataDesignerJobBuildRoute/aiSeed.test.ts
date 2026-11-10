@@ -150,15 +150,19 @@ describe('validateGeneratedJobRequest', () => {
     expect(result.errors).toContain(ERROR_NO_LOADABLE_COLUMNS);
   });
 
-  it('rejects an LLM column pointing at an alias no model config defines', () => {
+  it('adds a model config for an alias no model config defines', () => {
     const result = validateGeneratedJobRequest(
       jobRequest({ model_configs: [{ alias: 'other', model: 'gpt-4o', provider: 'openai' }] }),
-      MODEL_GROUPS
+      MODEL_GROUPS,
+      { model: 'default/drafting-model', provider: 'default/nim' }
     );
 
-    expect(result.status).toBe('invalid');
-    if (result.status !== 'invalid') return;
-    expect(result.errors).toContain('question: no model is configured with alias "gen".');
+    expect(result.status).toBe('valid');
+    if (result.status !== 'valid') return;
+    expect(result.jobRequest.spec.config.model_configs?.map((config) => config.alias)).toEqual([
+      'other',
+      'gen',
+    ]);
   });
 
   it('rejects a column missing a required field', () => {

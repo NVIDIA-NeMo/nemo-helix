@@ -88,7 +88,6 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
     selectionType,
     enableFilters,
     enableActions,
-    getDatasetRoute,
     renderRowActions,
     setModalDataset,
     setModalOpen,

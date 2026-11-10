@@ -19,6 +19,7 @@ import type {
   ColumnTypeOption,
   DataDesignerColumnType,
 } from '@studio/components/AddColumnPalette/types';
+import { NEMOTRON_PERSONAS_LOCALES } from '@studio/components/agents/PersonaTestSet/nemotronPersonas';
 import type { TemplateColumnSpec } from '@studio/components/CreateFilesetStart/types';
 import type { DagEdge, DagNode } from '@studio/components/DagCanvas/types';
 import {
@@ -364,13 +365,14 @@ const DIST_PARAMS_FIELD: ColumnField = {
   helperText: 'JSON object of parameters for the scipy.stats distribution.',
 };
 
-/** `locale` / `sex` / `city` / `age_range` fields shared by the two Person samplers. */
+/** `locale` / `sex` / `city` / `age_range` fields for the Nemotron Personas person sampler. */
 const PERSON_SHARED_FIELDS: ColumnField[] = [
   {
     key: 'locale',
     label: 'Locale (optional)',
-    kind: 'text',
-    placeholder: 'e.g. en_US',
+    kind: 'select',
+    options: asOptions(NEMOTRON_PERSONAS_LOCALES),
+    placeholder: 'en_US (default)',
     helperText: 'Language and geographic region to sample from.',
   },
   {
@@ -879,6 +881,9 @@ const fieldValueError = (field: ColumnField, value: string): string | null => {
     splitList(value).some((v) => !Number.isFinite(Number(v)))
   ) {
     return `${field.label} must be a comma-separated list of numbers.`;
+  }
+  if (field.key === 'locale' && field.options && !field.options.some((o) => o.value === value)) {
+    return `${field.label}: "${value}" is not a supported locale.`;
   }
   return null;
 };

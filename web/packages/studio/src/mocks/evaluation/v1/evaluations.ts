@@ -7,76 +7,6 @@ import {
   HelixJobStatus,
 } from '@nemo/sdk/generated/evals/schema';
 
-export const mockEvalConfigOnline1 = {
-  id: 'eval-config-online-1',
-  namespace: 'default',
-  name: 'online-eval-config-1',
-  custom_fields: {},
-  type: 'custom',
-  schema_version: '1.0',
-  version_id: '',
-  tasks: {
-    default: {
-      type: 'chat-completion',
-      dataset: {
-        files_url: 'hf://datasets/e2e-namespace/e2e_eval_fileset/eval.json',
-      },
-      params: {
-        batch_size: 1,
-        max_length_generation: 512,
-        temperature: 1.0,
-        top_k: 1,
-        top_p: 0.0,
-        n_samples: 1,
-        num_chunks: 1,
-      },
-      metrics: { bleu: { type: 'bleu' } },
-    },
-  },
-  params: {},
-};
-
-export const mockEvalConfigOffline1 = {
-  id: 'eval-config-offline-1',
-  namespace: 'default',
-  name: 'offline-eval-config-1',
-  custom_fields: {},
-  type: 'custom',
-  schema_version: '1.0',
-  type_prefix: null,
-  version_id: '',
-  tasks: {
-    default: {
-      type: 'data',
-      dataset: {
-        files_url: 'input.json',
-      },
-      params: {
-        batch_size: 1,
-        max_length_generation: 512,
-        temperature: 1.0,
-        top_k: 1,
-        top_p: 0.0,
-        n_samples: 1,
-        num_chunks: 1,
-      },
-      metrics: { bleu: { type: 'bleu' } },
-    },
-  },
-  params: {},
-};
-
-export const getEvaluationConfigsListResponse: EvaluateJobsPage = {
-  pagination: {
-    total_results: 2,
-    total_pages: 1,
-    current_page_size: 2,
-    page: 1,
-    page_size: 2,
-  },
-  data: [mockEvalConfigOnline1, mockEvalConfigOffline1] as unknown as EvaluateJob[],
-};
-
 export const metricEvaluationJob1: EvaluateJob = {
   id: 'eval-job-1',
   name: 'eval-job-1',
@@ -91,7 +21,7 @@ export const metricEvaluationJob1: EvaluateJob = {
   custom_fields: {},
 };
 
-export const metricEvaluationJob2: EvaluateJob = {
+const metricEvaluationJob2: EvaluateJob = {
   id: 'eval-job-2',
   name: 'eval-job-2',
   workspace: 'default',
@@ -105,7 +35,7 @@ export const metricEvaluationJob2: EvaluateJob = {
   custom_fields: {},
 };
 
-export const metricEvaluationJob3: EvaluateJob = {
+const metricEvaluationJob3: EvaluateJob = {
   id: 'eval-job-3',
   name: 'eval-job-3',
   workspace: 'default',

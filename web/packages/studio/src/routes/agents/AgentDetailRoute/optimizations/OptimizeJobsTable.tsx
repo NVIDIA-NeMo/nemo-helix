@@ -5,6 +5,7 @@ import type { FilterOperators, WithFilterOperators } from '@nemo/common/src/api/
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
@@ -19,7 +20,7 @@ import type {
   RunStrategyJob,
   RunStrategyJobsListFilter,
 } from '@nemo/sdk/generated/agent-optimization/schema';
-import { Banner, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
+import { Banner, Text } from '@nvidia/foundations-react-core';
 import { deleteStudioBundleFileset } from '@studio/api/agents/useLaunchOptimizeStudy';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
@@ -142,15 +143,17 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName, onOpt
       rowActionsColumn({
         size: 70,
         enableResizing: false,
-        rowActions: (job): DropdownEntry[] => [
-          {
-            children: 'Delete',
-            danger: true,
-            // The jobs service refuses to delete a study that has not finished.
-            disabled: !TERMINAL_STATUSES.has(job.status ?? ''),
-            onSelect: () => setDeleteTarget(job),
-          },
-        ],
+        cell: ({ row: { original: job } }) => (
+          <QuickActionsMenuRoot
+            actions={[]}
+            deleteAction={{
+              // The jobs service refuses to delete a study that has not finished.
+              disabled: !TERMINAL_STATUSES.has(job.status ?? ''),
+              disabledReason: 'Only finished studies can be deleted.',
+              onSelect: () => setDeleteTarget(job),
+            }}
+          />
+        ),
       }),
     ],
     []

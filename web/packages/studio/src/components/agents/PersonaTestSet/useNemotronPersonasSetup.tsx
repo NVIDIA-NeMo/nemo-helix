@@ -49,8 +49,8 @@ export const useNemotronPersonasSetup = (workspace: string, locale: NemotronPers
           Register <code>{personas.filesetRef}</code> once for the whole platform. It reads the
           dataset from NGC with the API key in the secret you pick.
         </Text>
-        <Flex gap="density-md" align="end">
-          <Block className="flex-1">
+        <Flex gap="density-md" align="end" wrap="wrap">
+          <Block className="min-w-0 grow basis-48">
             <SecretSearchableSelect
               workspace={workspace}
               queryEnabled

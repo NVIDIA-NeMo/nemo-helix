@@ -27,7 +27,8 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Protocol, TypeVar
+from collections.abc import Sequence
+from typing import Protocol, TypeVar, cast
 
 from nemo_evals.api.schemas import LATEST_TAG, REF_FRAGMENT_CHARSET
 from nemo_evals.content_hash import DIGEST_PATTERN, content_hash
@@ -285,6 +286,77 @@ async def get_revision(
         ) from exc
     _verify_content(head, revision)
     return revision
+
+
+#: Names (and so heads) looked up per batched query. Well under the entity store's 1000-row page cap.
+_PIN_BATCH = 200
+#: Rows per page when listing the revisions a batch of pins names.
+_PIN_PAGE_SIZE = 1000
+
+
+async def verify_task_pins(
+    entity_client: EntityClientProtocol[TaskEntity],
+    workspace: str,
+    pins: Sequence[tuple[str, str]],
+) -> None:
+    """Check that each ``(task name, digest)`` pin in one workspace names a published, intact revision.
+
+    The batched form of ``get(TaskEntity)`` + :func:`get_revision` per pin: one query for each batch
+    of heads and one (paged, stopping once every pin is found) for their revisions, instead of two
+    round trips per pin, so pinning a taskset of thousands of members costs a handful of queries.
+    Each found revision's content is re-verified against its digest.
+
+    Raises:
+        NemoEntityNotFoundError: A named task does not exist.
+        RevisionNotFoundError: A task has no revision with its pinned digest.
+    """
+    revision_client = cast(EntityClientProtocol[TaskRevisionEntity], entity_client)
+    unique = list(dict.fromkeys(pins))
+    for start in range(0, len(unique), _PIN_BATCH):
+        batch = unique[start : start + _PIN_BATCH]
+        names = sorted({name for name, _ in batch})
+        heads_page = await entity_client.list(
+            TaskEntity,
+            workspace=workspace,
+            filter_operation=ComparisonOperation(field="name", operator=FilterOperator.IN, value=names),
+            page_size=len(names),
+        )
+        heads = {head.name: head for head in heads_page.data}
+        for name in names:
+            if name not in heads:
+                raise NemoEntityNotFoundError(f"Task '{workspace}/{name}' not found")
+        missing = {(heads[name].id, digest): name for name, digest in batch}
+        page = 1
+        while missing:
+            revisions = await revision_client.list(
+                TaskRevisionEntity,
+                workspace=workspace,
+                filter_operation=LogicalOperation(
+                    operator=FilterOperator.AND,
+                    operations=[
+                        ComparisonOperation(
+                            field="parent", operator=FilterOperator.IN, value=sorted(h.id for h in heads.values())
+                        ),
+                        ComparisonOperation(
+                            field="data.content_hash",
+                            operator=FilterOperator.IN,
+                            value=sorted({digest for _, digest in batch}),
+                        ),
+                    ],
+                ),
+                page=page,
+                page_size=_PIN_PAGE_SIZE,
+            )
+            for revision in revisions.data:
+                name = missing.pop((revision.parent or "", revision.content_hash), None)
+                if name is not None:
+                    _verify_content(heads[name], revision)
+            if page >= revisions.pagination.total_pages:
+                break
+            page += 1
+        if missing:
+            (_, digest), name = next(iter(missing.items()))
+            raise RevisionNotFoundError(f"'{workspace}/{name}' has no revision with digest {digest!r}")
 
 
 def _verify_content(head: TaskEntity | TasksetEntity, revision: TaskRevisionEntity | TasksetRevisionEntity) -> None:

@@ -3,7 +3,7 @@
 
 # Connect a local OpenShell gateway to Helix secrets
 
-The NeMo credential driver lets OpenShell retrieve secrets from Helix for agents running in its sandboxes. This example runs the driver alongside an OpenShell 0.1.6 gateway dedicated to Helix providers, since the driver accepts only credential registrations issued by Helix.
+The NeMo credential driver lets OpenShell retrieve Helix secrets for agents and store its own SSH keys and launch material. This example runs it alongside an OpenShell 0.1.6 gateway whose providers are registered by Helix.
 
 Before starting, follow the JWT-key generation instructions in [docker-compose.yml](docker-compose.yml) and check that another gateway is not using `/var/lib/openshell` or host port 17670. Both are fixed in the base configuration, regardless of the Compose project name.
 
@@ -12,7 +12,11 @@ Before starting, follow the JWT-key generation instructions in [docker-compose.y
 The driver needs a signing key shared with the Helix controller and, when authentication is enabled, a token for calling Helix. Create a private directory outside the checkout with mode `0700` for these files:
 
 - `registration.key` contains at least 32 random bytes. The controller uses this key to sign credential registrations, and the driver uses it to verify them.
-- `helix.token` contains a platform-issued service workload access token accepted by the Auth policy-evaluation endpoint. Its identity needs Secrets value access and read access to the relevant Jobs and deployment entities; an ordinary user or access-key token is not sufficient.
+- `helix.token` contains a platform-issued internal service workload access token. Its identity needs Secrets value access, read access to relevant Jobs and deployment entities, and permission to initialize the internal workspace and inspect its access grants. An ordinary user or service-account token is not sufficient.
+
+At startup, the driver creates or validates a private workspace for encrypted gateway-owned values. It defaults to `openshell-internal`; `NEMO_DRIVER_OWNED_SECRETS_WORKSPACE` selects another name in Compose, or `--owned-secrets-workspace` when running the driver directly. It rejects workspace grants to ordinary users and ensures its service identity can store, read and delete these values. Deleting an internal handle removes its owned Secret; deleting a provider binding leaves the user's source Secret intact.
+
+The workspace is fixed once the driver stores an internal credential. Changing the setting does not migrate keys; startup rejects a name that differs from the existing state. The driver does not increase service permissions in an existing workspace. If initial setup stops between workspace creation and granting service access, an operator must grant the driver `ServiceSystem` in the selected workspace before restarting it.
 
 The initializer copies these files into the driver's private credential volume. Each must be a regular file rather than a symlink, no larger than 64 KiB, with mode `0600`.
 
@@ -32,7 +36,7 @@ export NEMO_DRIVER_CACHE_LIFETIME_SECONDS=300
 
 The Helix URL must be reachable from the driver container over HTTPS with a trusted certificate. The overlay provides `host.docker.internal` for reaching Helix on the Docker host. For certificates issued by a private CA, mount the CA's PEM bundle read-only through an additional Compose overlay and point `SSL_CERT_FILE` in `credential-driver.environment` to that path.
 
-OpenShell may cache resolved credentials for `NEMO_DRIVER_CACHE_LIFETIME_SECONDS`, which defaults to 300 seconds and accepts values from 1–3600. Changing this setting requires recreating the driver container and affects newly resolved credentials; those already cached retain their existing deadlines.
+OpenShell may cache resolved provider credentials for `NEMO_DRIVER_CACHE_LIFETIME_SECONDS`, which defaults to 300 seconds and accepts values from 1–3600. Changing this setting requires recreating the driver container and affects newly resolved credentials; those already cached retain their existing deadlines. Internal SSH keys and launch material remain valid until OpenShell deletes their handles.
 
 From this directory, start the driver and wait for its readiness check:
 
@@ -63,4 +67,6 @@ docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.crede
 
 The running driver reads that copy on subsequent Helix requests, so it does not need a restart. The initializer refuses changes to `registration.key`; this command rotates only the service token.
 
-Keep the signing key and binding database across driver restarts so the driver retains its registration and revocation history. This setup supports a single driver instance with persistent storage on one host.
+Keep the signing key and the entire driver state directory across restarts, including the binding database and its `.owned-key` file. Recovery also depends on the Helix Secrets database and its encryption keys. This setup supports a single driver instance with persistent storage on one host.
+
+The driver can also run as a foreground systemd service in a dedicated venv using `python -m nemo_deployments_plugin.backends.openshell.credential_driver.server`. The gateway and driver need the same trusted Unix user to share the private socket. Keep persistent state outside the venv and start the driver after Helix is available.

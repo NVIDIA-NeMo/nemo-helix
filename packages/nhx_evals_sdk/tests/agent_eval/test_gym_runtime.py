@@ -12,8 +12,10 @@ tests lock that behaviour in (including against the real captured output)."""
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
+import re
 from collections import Counter, deque
 from pathlib import Path
 from typing import Any
@@ -63,6 +65,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     trials_from_rollouts,
 )
 from nhx_evals_sdk.agent_eval.runtimes.gym.runtime import FIRST_ERROR_CONTEXT_LINES, FIRST_ERROR_LINE_MAX_CHARS
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import UNKNOWN_ERROR_TYPE, AgentEvalTrialStatus, TrialError, TrialMeasurements
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nhx_evals_sdk.values import SecretRef
@@ -186,7 +189,7 @@ def test_discover_gym_tasks_still_requires_responses_create_params(row: dict, tm
     # case while letting a list through to fail deep inside Gym.
     dataset = tmp_path / "bad_params.jsonl"
     dataset.write_text(json.dumps(row) + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="row 1 .* has no 'responses_create_params' mapping"):
+    with pytest.raises(ValueError, match=r"bad_params\.jsonl:1: row has no 'responses_create_params' mapping"):
         discover_gym_tasks(dataset)
 
 
@@ -195,7 +198,7 @@ def test_discover_gym_tasks_from_example_fixture() -> None:
     assert len(tasks) == len(_rows(EXAMPLE))
     assert len({task.id for task in tasks}) == len(tasks)  # unique ids
     for task in tasks:
-        assert len(task.id) == 64  # sha256 hex
+        assert re.fullmatch(r"gym-[0-9a-f]{59}", task.id)  # a valid platform entity name
         assert task.inputs["instruction"]  # non-empty instruction
         assert task.metadata["gym_dataset_path"].endswith("gym_mcqa_example.jsonl")
         assert [type(metric).__name__ for metric in task.metrics] == ["GymRewardMetric"]
@@ -292,6 +295,120 @@ def test_discover_gym_tasks_warns_on_duplicate_rows(tmp_path: Path, caplog) -> N
     assert len(tasks) == 1
     assert "duplicate row" in caplog.text
     assert "num_repeats" in caplog.text
+
+
+def _write_rows(path: Path, *lines: str) -> Path:
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _row(question: str, **extras: object) -> str:
+    return json.dumps({"responses_create_params": {"input": question}, **extras})
+
+
+def test_discover_gym_tasks_content_does_not_depend_on_the_file_name(tmp_path: Path) -> None:
+    # A row shared by two golden files must be one task, or each file's snapshot would revise the
+    # other's: nothing about the file may leak into task content except the local path stamp.
+    first = discover_gym_tasks(_write_rows(tmp_path / "golden-a.jsonl", _row("q1"), _row("q2")))
+    second = discover_gym_tasks(_write_rows(tmp_path / "golden-b.jsonl", _row("q2"), _row("q1")))
+
+    def content(task: AgentEvalTask) -> tuple:
+        metadata = {key: value for key, value in task.metadata.items() if key != "gym_dataset_path"}
+        return task.id, task.intent, task.inputs, metadata
+
+    assert sorted(map(content, first)) == sorted(map(content, second))
+    assert {task.intent for task in first} == {"Gym row"}
+
+
+def test_discover_gym_tasks_reads_a_stream_like_the_file(tmp_path: Path) -> None:
+    dataset = _write_rows(tmp_path / "golden.jsonl", _row("q1"), "", _row("q2"))
+    from_file = discover_gym_tasks(dataset)
+    from_stream = discover_gym_tasks(io.BytesIO(dataset.read_bytes()), name="ws/fs#golden.jsonl")
+    assert [(t.id, t.inputs) for t in from_stream] == [(t.id, t.inputs) for t in from_file]
+    # Only a path is stamped: a stream has no local location worth recording.
+    assert "gym_dataset_path" not in from_stream[0].metadata
+    with pytest.raises(ValueError, match=r"ws/fs#golden\.jsonl:2: malformed JSON"):
+        discover_gym_tasks(io.BytesIO(b'{"responses_create_params": {}}\n{bad\n'), name="ws/fs#golden.jsonl")
+
+
+def test_discover_gym_tasks_stops_at_the_row_limit() -> None:
+    rows = (_row(f"q{i}") for i in range(3))
+
+    class Lines:
+        """Fails the test if discovery reads past the row that breaks the limit."""
+
+        def __iter__(self):
+            for index, row in enumerate(rows):
+                assert index < 3
+                yield f"{row}\n".encode()
+            raise AssertionError("read past the limit")
+
+    with pytest.raises(ValueError, match=r"x:3: more than the 2-row limit"):
+        discover_gym_tasks(Lines(), name="x", max_rows=2)
+
+
+#: The platform's entity-name rule, which every task id must satisfy to be stored.
+ENTITY_NAME = re.compile(r"^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$")
+
+
+def _keyed_ids(*rows: dict, prefix: str = "gold") -> list[str]:
+    lines = b"".join(json.dumps(row).encode() + b"\n" for row in rows)
+    return [t.id for t in discover_gym_tasks(io.BytesIO(lines), name="x", id_field="uid", id_prefix=prefix)]
+
+
+@pytest.mark.parametrize("prefix", ["g", "gold", "golden12"])
+def test_keyed_ids_fill_a_valid_entity_name(prefix: str) -> None:
+    [task_id] = _keyed_ids({"uid": "t1", "responses_create_params": {"input": "q"}}, prefix=prefix)
+    assert task_id.startswith(f"{prefix}-")
+    assert len(task_id) == 63
+    assert ENTITY_NAME.fullmatch(task_id)
+
+
+def test_a_keyed_id_depends_only_on_the_key() -> None:
+    before, other = _keyed_ids(
+        {"uid": "t1", "responses_create_params": {"input": "q"}, "expected_answer": "A"},
+        {"uid": "t2", "responses_create_params": {"input": "q"}, "expected_answer": "A"},
+    )
+    [after] = _keyed_ids({"uid": "t1", "responses_create_params": {"input": "edited"}, "expected_answer": "B"})
+    assert before == after != other
+    # The key is hashed as JSON, so a number and its string are different keys.
+    assert _keyed_ids({"uid": 1, "responses_create_params": {}}) != _keyed_ids(
+        {"uid": "1", "responses_create_params": {}}
+    )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"id_field": "uid"}, "go together"),
+        ({"id_prefix": "gold"}, "go together"),
+        ({"id_field": "uid", "id_prefix": "golden123"}, "1-8 characters"),
+        ({"id_field": "uid", "id_prefix": "g-x"}, "1-8 characters"),
+        ({"id_field": "uid", "id_prefix": "Gold"}, "1-8 characters"),
+        ({"id_field": "uid", "id_prefix": "gym"}, "reserved"),
+    ],
+)
+def test_keyed_ids_need_both_fields_and_a_valid_prefix(kwargs: dict, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        discover_gym_tasks(io.BytesIO(b'{"uid": "t1", "responses_create_params": {}}\n'), name="x", **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        # The bad line follows a valid line and a blank one, so the number must be the file's line.
+        (b'{"responses_create_params": {"input": "q"}}\n\n{not json}\n', r"rows\.jsonl:3: malformed JSON"),
+        (b"[1, 2]\n", r"rows\.jsonl:1: expected a JSON object, got list"),
+        (b"null\n", r"rows\.jsonl:1: expected a JSON object, got null"),
+        (b'"text"\n', r"rows\.jsonl:1: expected a JSON object, got str"),
+        (b'{"responses_create_params": {"input": "q"}}\n\xff\xfe\n', r"rows\.jsonl:2: line is not valid UTF-8"),
+    ],
+)
+def test_discover_gym_tasks_names_the_line_of_a_bad_row(tmp_path: Path, raw: bytes, message: str) -> None:
+    dataset = tmp_path / "rows.jsonl"
+    dataset.write_bytes(raw)
+    with pytest.raises(ValueError, match=message):
+        discover_gym_tasks(dataset)
 
 
 def test_materialize_dataset_reports_empty_task_list(tmp_path: Path) -> None:

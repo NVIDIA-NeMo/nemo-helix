@@ -507,10 +507,6 @@ def _build_studio_system_prompt(
                 "For model chat, model comparison, or trying an available model, use destination='model_chat'.",
             ]
         )
-    else:
-        lines.append(
-            "The model_chat destination is not enabled in this Studio instance; do not link to the Studio Chat page."
-        )
     return "\n".join(lines)
 
 
