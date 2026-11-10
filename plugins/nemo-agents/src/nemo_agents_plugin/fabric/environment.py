@@ -27,7 +27,14 @@ DEEPAGENTS_WORKSPACE_DIR = ".nemo-deepagents"
 DEEPAGENTS_SKILLS_DIR = f"{DEEPAGENTS_WORKSPACE_DIR}/skills"
 _WORKSPACE_DEPENDENCY_DIRS = {".venv", "node_modules", "__pycache__"}
 _MCP_COMMAND_ENV_VAR_RE = re.compile(r"\$(\w+|\{[^}]*\})", re.ASCII)
-_MCP_STDIO_LAUNCHER = "import os, sys; os.chdir(sys.argv[1]); os.execvpe(sys.argv[2], sys.argv[2:], os.environ)"
+_MCP_STDIO_LAUNCHER = """
+import os
+import sys
+
+workspace, command, *args = sys.argv[1:]
+os.chdir(workspace)
+os.execvpe(command, [command, *args], os.environ)
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +166,7 @@ def prepare_deepagents_skills(agent_config: AgentConfig, base_dir: Path, baselin
     except BaseException:
         remove_deepagents_workspace(snapshot)
         raise
+    # The server lifespan owns successful snapshots and removes them at shutdown.
     return snapshot
 
 
@@ -233,14 +241,23 @@ def preserve_deepagents_mcp_cwd(config: FabricConfig, *, workspace: Path) -> Non
     for server in config.mcp.servers.values():
         if server.transport != "stdio":
             continue
-        # Match the adapter's expandvars/strip before moving the command into args.
-        command = _MCP_COMMAND_ENV_VAR_RE.sub(
-            lambda match: runtime_env.get(match.group(1).removeprefix("{").removesuffix("}"), match.group(0)),
-            server.url,
-        ).strip()
+        # Fabric only expands the command URL, so expand it before moving it into args.
+        command = _expand_mcp_command(server.url, runtime_env)
         # Isolate only the launcher from Python startup hooks; exec retains the server's env.
         server.args = ["-I", "-S", "-c", _MCP_STDIO_LAUNCHER, str(workspace), command, *server.args]
         server.url = sys.executable
+
+
+def _expand_mcp_command(command: str, runtime_env: dict[str, str]) -> str:
+    """Match Fabric's command expansion without changing the process environment."""
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name.startswith("{"):
+            name = name[1:-1]
+        return runtime_env.get(name, match.group(0))
+
+    return _MCP_COMMAND_ENV_VAR_RE.sub(replace, command).strip()
 
 
 def _copy_workspace_inputs(source: Path, target: Path, excluded: set[Path], *, follow_symlinks: bool = False) -> None:
