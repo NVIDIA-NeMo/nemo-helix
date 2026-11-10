@@ -4,12 +4,12 @@
 import {
   type EvaluationFormValues,
   isArrayPath,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
 import {
   messagesPath,
   messagesShape,
   useDatasetPreview,
-} from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
+} from '@studio/components/evaluation/EvalWizard/useDatasetPreview';
 import { useEffect } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 

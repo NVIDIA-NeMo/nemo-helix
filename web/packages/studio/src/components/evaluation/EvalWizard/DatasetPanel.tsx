@@ -18,12 +18,12 @@ import {
   isArrayPath,
   MAPPABLE_FILE_TYPES,
   PRIMARY_CANONICAL_FIELDS,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
 import {
   messagesShape,
   useDatasetPreview,
-} from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
-import { useMessagesBinding } from '@studio/components/evaluation/ModelEvaluationWizard/useMessagesBinding';
+} from '@studio/components/evaluation/EvalWizard/useDatasetPreview';
+import { useMessagesBinding } from '@studio/components/evaluation/EvalWizard/useMessagesBinding';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { type FC, useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';

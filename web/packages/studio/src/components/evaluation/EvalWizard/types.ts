@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PanelScoreFormData } from '@studio/components/evaluation/Jobs/form/ScoreModal';
 import {
   entityNameField,
   unsalvageableNameError,
-} from '@studio/components/evaluation/shared/entityNameField';
+} from '@studio/components/evaluation/EvalWizard/entityNameField';
+import type { PanelScoreFormData } from '@studio/components/evaluation/Jobs/form/ScoreModal';
 import { z } from 'zod';
 
 /** Canonical evaluator fields a dataset column can be bound to, mirroring

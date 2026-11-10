@@ -4,7 +4,7 @@
 import {
   classifyJudgePromptVariables,
   expressionRoot,
-} from '@studio/components/evaluation/ModelEvaluationWizard/judgePromptVariables';
+} from '@studio/components/evaluation/EvalWizard/judgePromptVariables';
 
 const COLUMNS = ['query', 'answer', 'difficulty'];
 const MAPPING = { input: 'query', reference: 'answer' } as const;

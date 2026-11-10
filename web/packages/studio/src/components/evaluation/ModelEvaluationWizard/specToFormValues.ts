@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PanelScoreFormData } from '@studio/components/evaluation/Jobs/form/ScoreModal';
 import {
   type CanonicalField,
   EMPTY_FIELD_MAPPING,
@@ -10,7 +9,8 @@ import {
   NUMBER_CHECK_OPERATIONS,
   type SelectableMetric,
   STRING_CHECK_OPERATIONS,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
+import type { PanelScoreFormData } from '@studio/components/evaluation/Jobs/form/ScoreModal';
 import type {
   DatasetEvalSpec,
   InlineMetricBundle,
