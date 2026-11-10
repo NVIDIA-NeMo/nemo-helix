@@ -25,6 +25,12 @@ import data.common
 #   "allowed": true
 # }
 has_permissions := result if {
+	# A workspace-limited Scoped Access Key outside its workspaces; overrides the platform admin bypass.
+	access_key_limited
+	not access_key_workspace_allowed(input.workspace)
+
+	result := {"allowed": false}
+} else := result if {
 	# Platform admin bypass - has access to everything
 	applicable_principals := common.get_applicable_principals
 	count(applicable_principals) > 0

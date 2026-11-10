@@ -4,7 +4,9 @@
 """Tests for evals service dependency wiring."""
 
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
@@ -138,6 +140,7 @@ async def test_taskset_run_dependency_delegates_the_callers_full_principal(monke
 
         monkeypatch.setattr(dependencies, "get_async_nemo_client", provide)
         monkeypatch.setattr(dependencies, "current_auth_context", lambda: principal)
+        monkeypatch.setattr(dependencies, "current_request_principal", principal.to_principal)
         dependency = get_taskset_run_service("user:bob", AsyncMock())
         service = await anext(dependency)
         try:
@@ -150,3 +153,62 @@ async def test_taskset_run_dependency_delegates_the_callers_full_principal(monke
         finally:
             await dependency.aclose()
             await service._async_client._http.aclose()
+
+
+async def test_taskset_run_dependency_keeps_the_callers_access_key_id(monkeypatch):
+    """A limited service-account key keeps its workspace limit on the calls evals makes for it."""
+    jti = "ak_" + "b" * 32
+    # The platform's request principal, as current_request_principal returns it, carrying the key ID.
+    request_principal: Any = AuthContext(principal_id="service-account:ci").to_principal()
+    caller = request_principal.model_copy(update={"access_key_jti": jti})
+    sent: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(404, json={"detail": "absent"})
+
+    factory = dependencies.get_async_nemo_client
+    async with httpx.MockTransport(answer) as transport:
+
+        def provide(**kwargs):
+            client = factory(**kwargs)
+            monkeypatch.setattr(client._http, "_transport_for_url", lambda url: transport)
+            return client
+
+        monkeypatch.setattr(dependencies, "get_async_nemo_client", provide)
+        monkeypatch.setattr(dependencies, "current_auth_context", lambda: AuthContext.from_principal(caller))
+        monkeypatch.setattr(dependencies, "current_request_principal", lambda: caller)
+        dependency = get_taskset_run_service("service-account:ci", AsyncMock())
+        service = await anext(dependency)
+        try:
+            assert await service._store.find("default", "run-x") is None
+            assert sent[0].headers["X-NHX-Principal-On-Behalf-Of"] == "service-account:ci"
+            assert sent[0].headers["X-NHX-Subject-Access-Key-Jti"] == jti
+            assert service._auth_context is not None
+            assert "jti" not in service._auth_context.model_dump_json()  # the stored context keeps no key ID
+        finally:
+            await dependency.aclose()
+            await service._async_client._http.aclose()
+
+
+async def test_delegated_service_client_keeps_the_callers_access_key_id(monkeypatch):
+    """Service-only reads (judge secrets, models) made for a limited key keep its workspace limit."""
+    jti = "ak_" + "b" * 32
+    request_principal: Any = AuthContext(principal_id="service-account:ci").to_principal()
+    caller = request_principal.model_copy(update={"access_key_jti": jti})
+    calls: list[dict[str, Any]] = []
+    service_client = object()
+
+    @asynccontextmanager
+    async def fake_get_async_nemo_client(**kwargs: Any):
+        calls.append(kwargs)
+        yield service_client
+
+    monkeypatch.setattr(dependencies, "current_request_principal", lambda: caller)
+    monkeypatch.setattr(dependencies, "get_async_nemo_client", fake_get_async_nemo_client)
+
+    async with dependencies.delegated_service_client(AsyncMock()) as client:
+        assert client is service_client
+
+    assert calls[0]["as_service"] == "evals"
+    assert calls[0]["on_behalf_of"].access_key_jti == jti

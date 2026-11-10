@@ -83,3 +83,16 @@ def test_dependency_provider_caches_runtime_context_for_platform_config() -> Non
     assert provider.get_runtime_context() is runtime_context
     assert runtime_context.platform_config is platform_config
     assert runtime_context.endpoint.connect_base_url == "https://platform.example.test"
+
+
+def test_delegated_principal_headers_carry_subject_access_key_id() -> None:
+    from nhx.common.auth.models import Principal
+    from nhx.common.platform_client_context import delegated_principal_headers
+
+    jti = "ak_" + "b" * 32
+    caller = Principal(id="service:gateway", on_behalf_of="service-account:ci", on_behalf_of_access_key_jti=jti)
+
+    headers = delegated_principal_headers(caller)
+
+    assert headers["X-NHX-Principal-On-Behalf-Of"] == "service-account:ci"
+    assert headers["X-NHX-Subject-Access-Key-Jti"] == jti

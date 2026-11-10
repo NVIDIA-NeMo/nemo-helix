@@ -13,12 +13,11 @@ from nemo_helix_plugin.auth.access_keys.issuer import (
     AccessKeyFeatureDisabledError,
     AccessKeyOperationNotImplementedError,
 )
-from nemo_helix_plugin.auth.access_keys.types import AccessKeyReversibleStatus
+from nemo_helix_plugin.auth.access_keys.types import ACCESS_KEY_JTI_PATTERN, AccessKeyReversibleStatus
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.auth.access_keys import (
-    ACCESS_KEY_JTI_PATTERN,
     AccessKeyServiceAttributesForbiddenError,
     AccessKeyValidationError,
 )

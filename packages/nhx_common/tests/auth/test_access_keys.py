@@ -919,3 +919,79 @@ async def test_validate_access_key_token_parses_list_scp_claim(tmp_path) -> None
 
     assert claims is not None
     assert claims.scopes == ["read", "write"]
+
+
+async def _signed_access_key_with_metadata(
+    config: AuthConfig, metadata: dict[str, Any], *, subject: str = "service-account:ci"
+) -> str:
+    now = 1785280000
+    signing_key = await access_keys_mod._access_key_signing_key_async(config)
+    return jwt.encode(
+        {
+            "iss": access_keys_mod.access_key_issuer(config),
+            "aud": config.access_keys.audience,
+            "sub": subject,
+            "iat": now,
+            "nbf": now,
+            "jti": "ak_" + "0" * 32,
+            "nhx_token_type": ACCESS_KEY_TOKEN_TYPE,
+            "nhx_access_key": {"version": 2, **metadata},
+        },
+        signing_key.private_key,
+        algorithm="RS256",
+        headers={"kid": config.token_signing.key_id},
+    )
+
+
+async def test_validate_access_key_token_accepts_workspace_ids(tmp_path):
+    config = _access_key_config(tmp_path, max_expires_in_seconds=None)
+    workspace_ids = ["workspace-7hxkp9Q2LoF8z8M9JZxZsH", "workspace-5Q2LoF8z8M9JZxZsHwJKNn"]
+    token = await _signed_access_key_with_metadata(
+        config, {"entity_type": "SERVICE_ACCOUNT", "workspace_ids": workspace_ids}
+    )
+    jwks = {"keys": [await public_jwk_from_private_key_pem_async(config)]}
+
+    claims = await validate_access_key_token(config, token, jwks_override=jwks)
+
+    assert claims is not None
+    metadata = claims.raw_claims["nhx_access_key"]
+    assert isinstance(metadata, dict)
+    assert access_keys_mod.access_key_workspace_ids(metadata) == workspace_ids
+
+
+@pytest.mark.parametrize(
+    "workspace_ids",
+    [
+        [],
+        "workspace-7hxkp9Q2LoF8z8M9JZxZsH",
+        None,
+        ["team-a"],
+        ["workspace-"],
+        ["workspace-0OIl"],
+        [123],
+        ["workspace-7hxkp9Q2LoF8z8M9JZxZsH", "workspace-7hxkp9Q2LoF8z8M9JZxZsH"],
+    ],
+    ids=["empty", "string", "null", "name", "no-suffix", "not-base58", "not-string", "duplicate"],
+)
+async def test_validate_access_key_token_rejects_malformed_workspace_ids(tmp_path, workspace_ids):
+    config = _access_key_config(tmp_path, max_expires_in_seconds=None)
+    token = await _signed_access_key_with_metadata(
+        config, {"entity_type": "SERVICE_ACCOUNT", "workspace_ids": workspace_ids}
+    )
+    jwks = {"keys": [await public_jwk_from_private_key_pem_async(config)]}
+
+    assert await validate_access_key_token(config, token, jwks_override=jwks) is None
+
+
+async def test_validate_access_key_token_rejects_workspace_ids_on_a_user_key(tmp_path):
+    config = _access_key_config(tmp_path, max_expires_in_seconds=None)
+    token = await _signed_access_key_with_metadata(
+        config, {"workspace_ids": ["workspace-7hxkp9Q2LoF8z8M9JZxZsH"]}, subject="alice@example.com"
+    )
+    jwks = {"keys": [await public_jwk_from_private_key_pem_async(config)]}
+
+    assert await validate_access_key_token(config, token, jwks_override=jwks) is None
+
+
+def test_access_key_workspace_ids_is_none_without_the_field():
+    assert access_keys_mod.access_key_workspace_ids({"version": 2}) is None

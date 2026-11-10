@@ -37,6 +37,8 @@ class AuthorizationResult:
     actor_aliases: list[str] = field(default_factory=list)
     subject_account_id: Optional[str] = None
     subject_aliases: list[str] = field(default_factory=list)
+    # Names of the workspaces a workspace-limited Scoped Access Key may use; None when no key limit applies.
+    access_key_workspaces: Optional[list[str]] = None
 
     def apply_to_principal(self, principal: Principal) -> Principal:
         """Return ``principal`` with account context from the PDP response applied."""
@@ -96,6 +98,10 @@ class AuthClient(BaseModel):
     identity_resolution: Optional[dict[str, Any]] = Field(
         default=None,
         description="Trusted identity material used by the PDP to resolve stable account context.",
+    )
+    access_key_workspaces: Optional[list[str]] = Field(
+        default=None,
+        description="Workspaces a workspace-limited Scoped Access Key may use, from the PDP; None when unlimited.",
     )
 
     model_config = {"arbitrary_types_allowed": True, "validate_assignment": False}
@@ -158,6 +164,10 @@ class AuthClient(BaseModel):
             auth_input["subject_account_id"] = principal.on_behalf_of_account_id
         if principal.on_behalf_of_authz_aliases:
             auth_input["subject_aliases"] = list(principal.on_behalf_of_authz_aliases)
+        if principal.access_key_jti:
+            auth_input["access_key_jti"] = principal.access_key_jti
+        if principal.on_behalf_of and principal.on_behalf_of_access_key_jti:
+            auth_input["subject_access_key_jti"] = principal.on_behalf_of_access_key_jti
         if include_identity_resolution and self.identity_resolution:
             auth_input["identity_resolution"] = self.identity_resolution
 
@@ -243,6 +253,14 @@ class AuthClient(BaseModel):
         subject_aliases = result.get("subject_aliases", [])
         if not isinstance(subject_aliases, list):
             subject_aliases = []
+        access_key_workspaces = result.get("access_key_workspaces")
+        if access_key_workspaces is not None:
+            # Any limit marker that isn't a list of names fails closed to "no workspaces".
+            access_key_workspaces = (
+                [name for name in access_key_workspaces if isinstance(name, str)]
+                if isinstance(access_key_workspaces, list)
+                else []
+            )
 
         logger.debug(
             "PDP response: method=%s, path=%s, allowed=%s, reason=%s",
@@ -259,6 +277,7 @@ class AuthClient(BaseModel):
             actor_aliases=[str(alias) for alias in actor_aliases if isinstance(alias, str)],
             subject_account_id=result.get("subject_account_id"),
             subject_aliases=[str(alias) for alias in subject_aliases if isinstance(alias, str)],
+            access_key_workspaces=access_key_workspaces,
         )
 
     async def _pdp_check(self, pdp_endpoint: str, auth_input: dict, result_key: str, check_name: str) -> bool:
@@ -384,6 +403,8 @@ class AuthClient(BaseModel):
         if self.principal.on_behalf_of:
             auth_input["on_behalf_of_principal_id"] = self.principal.on_behalf_of
         self._add_principal_context(auth_input, principal=effective_principal, include_identity_resolution=False)
+        if self.principal.on_behalf_of and self.principal.on_behalf_of_access_key_jti:
+            auth_input["subject_access_key_jti"] = self.principal.on_behalf_of_access_key_jti
 
         return await self._pdp_check("has_role", auth_input, "has_role", "role check")
 
@@ -540,6 +561,8 @@ class AuthClient(BaseModel):
                             "principal_id": principal,
                             "workspace": workspace_id,
                             "role": role,
+                            # Asks about role bindings alone; no request, so no access key limit applies.
+                            "role_binding_probe": True,
                         }
                     }
 

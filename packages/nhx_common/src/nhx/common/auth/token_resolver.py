@@ -14,6 +14,8 @@ from .models import Principal
 from .token_claims import TokenClaims
 
 ResolvedTokenKind = Literal["access_key", "oidc_access_token", "workload_access_token", "workload_subject_token"]
+# Workload access tokens carry the Scoped Access Key ID of their subject, so a delegated call keeps the key's limits.
+WORKLOAD_ACCESS_KEY_JTI_CLAIM = "nhx_access_key_jti"
 
 
 def _identity_aliases(subject: str, email: str | None) -> list[str]:
@@ -23,12 +25,18 @@ def _identity_aliases(subject: str, email: str | None) -> list[str]:
     return aliases
 
 
-def _direct_principal_from_claims(claims: TokenClaims) -> Principal:
+def _string_claim(claims: TokenClaims, name: str) -> str | None:
+    value = claims.raw_claims.get(name)
+    return value if isinstance(value, str) and value else None
+
+
+def _direct_principal_from_claims(claims: TokenClaims, *, access_key_jti: str | None = None) -> Principal:
     return Principal(
         id=claims.subject,
         email=claims.email,
         groups=claims.groups,
         authz_aliases=_identity_aliases(claims.subject, claims.email),
+        access_key_jti=access_key_jti,
     )
 
 
@@ -48,8 +56,11 @@ def _workload_access_principal_from_claims(claims: TokenClaims) -> Principal:
                 email=claims.email,
                 groups=claims.groups,
                 authz_aliases=[alias for alias in aliases if isinstance(alias, str)],
+                access_key_jti=_string_claim(claims, WORKLOAD_ACCESS_KEY_JTI_CLAIM),
             )
-        return _direct_principal_from_claims(claims)
+        return _direct_principal_from_claims(
+            claims, access_key_jti=_string_claim(claims, WORKLOAD_ACCESS_KEY_JTI_CLAIM)
+        )
     return Principal(
         id=claims.actor.subject,
         groups=claims.actor.groups,
@@ -58,6 +69,7 @@ def _workload_access_principal_from_claims(claims: TokenClaims) -> Principal:
         on_behalf_of_email=claims.email,
         on_behalf_of_groups=claims.groups,
         on_behalf_of_authz_aliases=_identity_aliases(claims.subject, claims.email),
+        on_behalf_of_access_key_jti=_string_claim(claims, WORKLOAD_ACCESS_KEY_JTI_CLAIM),
     )
 
 
@@ -70,6 +82,8 @@ class ResolvedBearerToken:
     def principal(self) -> Principal:
         if self.token_kind == "workload_access_token":
             return _workload_access_principal_from_claims(self.claims)
+        if self.token_kind == "access_key":
+            return _direct_principal_from_claims(self.claims, access_key_jti=_string_claim(self.claims, "jti"))
         return _direct_principal_from_claims(self.claims)
 
     @property
@@ -95,10 +109,18 @@ async def resolve_bearer_token(
     skip_access_key_check: bool = False,
 ) -> ResolvedBearerToken | None:
     if config.access_keys.enabled and not skip_access_key_check:
-        from .access_keys import is_access_key_token_candidate, validate_access_key_token
+        from .access_keys import (
+            access_key_has_workspace_limit,
+            is_access_key_token_candidate,
+            validate_access_key_token,
+        )
 
         access_key_claims = await validate_access_key_token(config, token)
         if access_key_claims is not None:
+            if config.policy_decision_point_provider == "opa" and access_key_has_workspace_limit(access_key_claims):
+                # An external OPA never sees the auth service's workspace-limit lookup, so it can't enforce the
+                # limit; refuse the key rather than let it act unlimited.
+                return None
             return ResolvedBearerToken(claims=access_key_claims, token_kind="access_key")
         # validate_access_key_token returns None both for tokens that are not access keys and for
         # access keys that fail validation (bad signature, expired, wrong issuer). Only the former

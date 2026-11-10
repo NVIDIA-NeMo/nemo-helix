@@ -1120,3 +1120,46 @@ async def test_taskset_task_read_authorizer_preserves_caller_access(static_authz
             assert denied.value.status_code == 403
     finally:
         auth_client_context.reset(token)
+
+
+class TestAccessKeyWorkspaceLimitInWasm:
+    """The access key limit rules run in the compiled WASM, not only under `opa test`."""
+
+    @pytest.mark.parametrize(
+        ("access_key_workspaces", "path", "allowed"),
+        [
+            (None, "/apis/models/v2/workspaces/test-workspace/models", True),
+            (["test-workspace"], "/apis/models/v2/workspaces/test-workspace/models", True),
+            (["other-workspace"], "/apis/models/v2/workspaces/test-workspace/models", False),
+            ([], "/apis/models/v2/workspaces/test-workspace/models", False),
+            (["test-workspace"], "/apis/models/v2/workspaces/-/models", False),
+        ],
+        ids=["unlimited", "listed", "unlisted-helix-admin", "empty", "cross-workspace"],
+    )
+    def test_allow(self, minimal_authz_data, access_key_workspaces, path, allowed):
+        set_policy_data(minimal_authz_data)
+
+        result = evaluate(
+            "allow",
+            {
+                "principal_id": "test@example.com",
+                "method": "GET",
+                "path": path,
+                "access_key_workspaces": access_key_workspaces,
+            },
+        )
+
+        assert result["allowed"] is allowed
+
+    def test_has_permissions_and_has_role(self, minimal_authz_data):
+        set_policy_data(minimal_authz_data)
+        limited = {"principal_id": "test@example.com", "access_key_workspaces": ["other-workspace"]}
+
+        assert evaluate(
+            "has_permissions", {**limited, "workspace": "test-workspace", "permissions": ["models.read"]}
+        ) == {"allowed": False}
+        assert evaluate("has_role", {**limited, "workspace": "test-workspace", "role": "Editor"}) == {"has_role": False}
+        assert evaluate(
+            "has_role",
+            {**limited, "access_key_workspaces": ["test-workspace"], "workspace": "test-workspace", "role": "Editor"},
+        ) == {"has_role": True}

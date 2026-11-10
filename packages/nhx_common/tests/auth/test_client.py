@@ -709,3 +709,114 @@ class TestGetNemoClientOnBehalfOf:
         assert delegated2.default_headers["X-NHX-Principal-Id"] == "service:my-service"
         assert delegated2.default_headers["X-NHX-Principal-On-Behalf-Of"] == "user2@example.com"
         assert delegated1 is not delegated2
+
+
+ACTOR_KEY_JTI = "ak_" + "a" * 32
+SUBJECT_KEY_JTI = "ak_" + "b" * 32
+
+
+def _pdp_client_returning(result: dict) -> tuple[httpx.AsyncClient, MagicMock]:
+    mock_http_client = httpx.AsyncClient()
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"result": result}
+    mock_response.raise_for_status = MagicMock()
+    return mock_http_client, mock_response
+
+
+class TestAccessKeyJtiInPdpInput:
+    """Every PDP call carries the Scoped Access Key IDs so the auth service can apply their workspace limits."""
+
+    @pytest.mark.asyncio
+    async def test_authorize_request_sends_key_ids(self, auth_config):
+        principal = Principal(id="service-account:ci", access_key_jti=ACTOR_KEY_JTI)
+        mock_http_client, mock_response = _pdp_client_returning({"allowed": True})
+
+        with patch.object(mock_http_client, "post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+            auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
+            await auth_client.authorize_request("GET", "/apis/models/v2/workspaces/team-a/models")
+
+        body = mock_post.call_args.kwargs["json"]["input"]
+        assert body["access_key_jti"] == ACTOR_KEY_JTI
+        assert "subject_access_key_jti" not in body
+
+    @pytest.mark.asyncio
+    async def test_has_permissions_sends_subject_key_id_when_delegating(self, auth_config):
+        principal = Principal(
+            id="service:jobs",
+            on_behalf_of="service-account:ci",
+            on_behalf_of_access_key_jti=SUBJECT_KEY_JTI,
+        )
+        mock_http_client, mock_response = _pdp_client_returning({"allowed": True})
+
+        with patch.object(mock_http_client, "post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+            auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
+            await auth_client.has_permissions("team-a", ["models.read"])
+
+        body = mock_post.call_args.kwargs["json"]["input"]
+        assert body["subject_access_key_jti"] == SUBJECT_KEY_JTI
+        assert "access_key_jti" not in body
+
+    @pytest.mark.asyncio
+    async def test_has_role_sends_subject_key_id_for_both_identities_when_delegating(self, auth_config):
+        principal = Principal(
+            id="service:jobs",
+            on_behalf_of="service-account:ci",
+            on_behalf_of_access_key_jti=SUBJECT_KEY_JTI,
+        )
+        mock_http_client, mock_response = _pdp_client_returning({"has_role": True})
+
+        with patch.object(mock_http_client, "post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+            auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
+            await auth_client.has_role("team-a", "Viewer")
+
+        body = mock_post.call_args.kwargs["json"]["input"]
+        # has_role sends the subject as both principal_id and on_behalf_of_principal_id.
+        assert body["principal_id"] == "service-account:ci"
+        assert body["access_key_jti"] == SUBJECT_KEY_JTI
+        assert body["subject_access_key_jti"] == SUBJECT_KEY_JTI
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("pdp_value", "expected"),
+        [
+            (["team-a"], ["team-a"]),
+            ([], []),
+            ("team-a", []),
+        ],
+        ids=["list", "empty", "malformed-fails-closed"],
+    )
+    async def test_authorize_request_returns_key_workspace_limit(self, auth_config, pdp_value, expected):
+        principal = Principal(id="service-account:ci", access_key_jti=ACTOR_KEY_JTI)
+        mock_http_client, mock_response = _pdp_client_returning({"allowed": True, "access_key_workspaces": pdp_value})
+
+        with patch.object(mock_http_client, "post", new_callable=AsyncMock, return_value=mock_response):
+            auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
+            result = await auth_client.authorize_request("GET", "/apis/models/v2/workspaces/team-a/models")
+
+        assert result.access_key_workspaces == expected
+
+    @pytest.mark.asyncio
+    async def test_authorize_request_without_limit_returns_none(self, auth_config, principal):
+        mock_http_client, mock_response = _pdp_client_returning({"allowed": True})
+
+        with patch.object(mock_http_client, "post", new_callable=AsyncMock, return_value=mock_response):
+            auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
+            result = await auth_client.authorize_request("GET", "/apis/models/v2/workspaces/team-a/models")
+
+        assert result.access_key_workspaces is None
+
+
+@pytest.mark.asyncio
+async def test_wait_role_marks_its_pdp_input_as_a_role_binding_probe(auth_config, principal):
+    mock_http_client, mock_response = _pdp_client_returning({"has_role": True})
+
+    with patch.object(mock_http_client, "post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+        auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
+        assert (
+            await auth_client.wait_role(
+                "service-account:ci", "team-a", "Viewer", timeout=1, http_client=mock_http_client
+            )
+            is True
+        )
+
+    assert mock_post.call_args.kwargs["json"]["input"]["role_binding_probe"] is True
