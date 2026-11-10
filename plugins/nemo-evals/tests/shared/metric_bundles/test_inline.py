@@ -25,6 +25,7 @@ from nhx_evals_sdk.enums import ModelFormat
 from nhx_evals_sdk.metrics.bleu import BLEUMetric
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.f1 import F1Metric
+from nhx_evals_sdk.metrics.finance_qa import FinanceQAMetric
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.number_check import NumberCheckMetric
 from nhx_evals_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
@@ -81,6 +82,10 @@ def _builtin_metric_cases() -> Sequence[tuple[str, Metric]]:
     return [
         ("exact_match", ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")),
         ("f1", F1Metric(reference="{{item.expected}}", candidate="{{item.output}}")),
+        (
+            "finance_qa",
+            FinanceQAMetric(reference="{{item.expected}}", task="{{item.task}}", max_new_tokens=512),
+        ),
         ("bleu", BLEUMetric(references=["{{item.expected}}"], candidate="{{item.output}}")),
         ("rouge", ROUGEMetric(reference="{{item.expected}}", candidate="{{item.output}}")),
         (

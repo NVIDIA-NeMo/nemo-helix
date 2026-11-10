@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from nhx_evals_sdk.metrics.bleu import BLEUMetric
     from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
     from nhx_evals_sdk.metrics.f1 import F1Metric
+    from nhx_evals_sdk.metrics.finance_qa import FinanceQAMetric
     from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
     from nhx_evals_sdk.metrics.number_check import NumberCheckMetric
     from nhx_evals_sdk.metrics.retrieval import (
@@ -150,6 +151,7 @@ _LAZY_ATTRS: dict[str, str] = {
     "BLEUMetric": ".metrics.bleu",
     "ExactMatchMetric": ".metrics.exact_match",
     "F1Metric": ".metrics.f1",
+    "FinanceQAMetric": ".metrics.finance_qa",
     "LLMJudgeMetric": ".metrics.llm_judge",
     "NumberCheckMetric": ".metrics.number_check",
     "RetrievalNDCGMetric": ".metrics.retrieval",
@@ -232,6 +234,7 @@ __all__ = [
     "Evaluator",
     "ExactMatchMetric",
     "F1Metric",
+    "FinanceQAMetric",
     "FieldMapping",
     "InferenceParams",
     "InferenceFn",

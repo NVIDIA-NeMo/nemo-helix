@@ -321,6 +321,127 @@ result = job.get_result()
 </Tab>
 
 </Tabs>
+## Finance QA Metric
+
+Finance QA scores answers to financial document questions the way the [Nemotron finance LoRA cookbook](https://github.com/NVIDIA-NeMo/Nemotron/tree/main/usage-cookbook/Nemotron-3.5-Super-VL/lora-finance) does, so its scores match the cookbook's `evaluation.py` row for row. The prediction is the text after the first `</think>`, and the reasoning trace is the text before it.
+
+**Use Finance QA when:**
+- Scoring TAT-DQA or BizBench (`CodeFinQA`, `CodeTAT-QA`) questions, for example after fine-tuning on the cookbook's data
+- Reproducing the cookbook's accuracy and F1 figures
+
+**Metric Output:** Several scores per row:
+
+| Score | Value |
+|-------|-------|
+| `exact` | The prediction equals the reference after Unicode (NFKC) normalization, case folding, collapsing whitespace, and stripping `.,;:!?` from both ends. |
+| `relaxed` | When both parse as numbers (ignoring `,`, `$`, `€`, and `£`): within `tolerance` relative error (default 0.05), and in the same scale (`%`, `percent`, `thousand`, `million`, `billion`) when the reference has one. Otherwise `exact`. |
+| `task_correct` | For `multi-span` tasks, the same spans in any order, split on a pipe, `##`, or `;`. For `span` tasks, `exact`. For other tasks, `relaxed`. |
+| `answer_f1` | For `span` and `multi-span` tasks, token F1. For other tasks, `relaxed` as 1 or 0. |
+| `trace_closed` | The completion contains `</think>`. |
+| `program_syntax_valid` | Only for `program_synthesis_tasks` (default `CodeFinQA` and `CodeTAT-QA`): the reasoning trace parses as Python. It is parsed, never run. |
+| `hit_max_new_tokens` | Only when `max_new_tokens` is set and the response reports usage: the completion used all `max_new_tokens` tokens. Its aggregate `sum` is the number of rows that did. |
+| `task` | The row's task, as a label. It isn't aggregated. |
+
+The `task` template selects how each row is scored. It must render a task name such as `TAT-DQA/span`, `TAT-DQA/multi-span`, `TAT-DQA/arithmetic`, `TAT-DQA/count`, or `CodeFinQA`. For online evaluations, omit `candidate`: the metric rebuilds the completion from the response's `reasoning_content` (or `reasoning`) and `content`. To score as the cookbook does, enable thinking, use temperature 0, set `max_new_tokens` to the request's `max_tokens`, and leave `reasoning` unset in the run config, because its `end_token` handling rewrites the response the metric reads.
+
+<Tabs>
+
+<Tab title="Local Evaluation">
+
+```python
+from nhx_evals_sdk import Evaluator as LocalEvaluator
+
+from nhx_evals_sdk import FinanceQAMetric
+
+metric = FinanceQAMetric(
+    reference="{{item.answer}}",
+    task="{{item.task}}",
+    candidate="{{item.completion}}",
+)
+
+result = LocalEvaluator().run_sync(
+    metrics=[metric],
+    dataset=[
+        {
+            "task": "TAT-DQA/arithmetic",
+            "answer": "12.5%",
+            "completion": "<think>\n(150 - 133.3) / 133.3 = 0.1253\n</think>\n12.4%",
+        },
+        {
+            "task": "TAT-DQA/multi-span",
+            "answer": "2019 | 2018",
+            "completion": "<think>\nThe table covers two fiscal years.\n</think>\n2018; 2019",
+        },
+        {
+            "task": "CodeFinQA",
+            "answer": "0.25",
+            "completion": "<think>\nanswer = 30 / 120\n</think>\n0.25",
+        },
+    ],
+)
+
+for score in result.aggregate_scores.scores:
+    print(f"{score.name}: mean={score.mean}")
+```
+
+</Tab>
+<Tab title="Remote Job">
+
+```python
+from nhx_evals_sdk import FinanceQAMetric
+
+metric = FinanceQAMetric(
+    reference="{{item.answer}}",
+    task="{{item.task}}",
+    candidate="{{item.completion}}",
+)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "task": "TAT-DQA/arithmetic",
+            "answer": "12.5%",
+            "completion": "<think>\n(150 - 133.3) / 133.3 = 0.1253\n</think>\n12.4%",
+        },
+        {
+            "task": "TAT-DQA/multi-span",
+            "answer": "2019 | 2018",
+            "completion": "<think>\nThe table covers two fiscal years.\n</think>\n2018; 2019",
+        },
+        {
+            "task": "CodeFinQA",
+            "answer": "0.25",
+            "completion": "<think>\nanswer = 30 / 120\n</think>\n0.25",
+        },
+    ],
+)
+job.wait_until_done()
+result = job.get_result()
+```
+
+</Tab>
+<Tab title="Example Result">
+
+12.4% is within 5% of 12.5%, so it counts under `relaxed` but not `exact`. The spans match in any order, so every row is `task_correct`.
+
+```json
+{
+  "scores": [
+    {"name": "finance-qa.exact", "count": 3, "mean": 0.333},
+    {"name": "finance-qa.relaxed", "count": 3, "mean": 0.667},
+    {"name": "finance-qa.task_correct", "count": 3, "mean": 1.0},
+    {"name": "finance-qa.answer_f1", "count": 3, "mean": 1.0},
+    {"name": "finance-qa.trace_closed", "count": 3, "mean": 1.0},
+    {"name": "finance-qa.program_syntax_valid", "count": 1, "nan_count": 2, "mean": 1.0},
+    {"name": "finance-qa.hit_max_new_tokens", "count": 0, "nan_count": 3, "mean": null}
+  ]
+}
+```
+
+</Tab>
+
+</Tabs>
 ## Number Check Metric
 
 Number Check performs numerical comparisons and operations on extracted values. Supports equality, inequality, comparison operators, and absolute difference calculations.
@@ -718,6 +839,7 @@ The examples on this page use inline dataset rows with `dataset=[...]`. Template
 - `reference`, `references`, `left_template`, and `right_template` read from `item` fields in the dataset.
 - `candidate` reads from an `item` field for offline rows when configured.
 - If `candidate` is omitted for BLEU, Exact Match, F1, ROUGE, or Sequence Similarity, the metric uses `sample.output_text`, which is populated during online evaluations.
+- Finance QA also reads its `task` template from `item` fields. If its `candidate` is omitted, it uses the model response, or `sample.output_text` when there is no response.
 
 Keep field names consistent between the dataset rows and the templates you configure. For example, `{{item.expected}}` requires each row to include an `expected` field.
 

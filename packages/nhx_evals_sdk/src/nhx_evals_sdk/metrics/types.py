@@ -15,6 +15,7 @@ from nhx_evals_sdk.agent_eval.metrics import (
 from nhx_evals_sdk.metrics.bleu import BLEUMetric
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.f1 import F1Metric
+from nhx_evals_sdk.metrics.finance_qa import FinanceQAMetric
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.number_check import NumberCheckMetric
 from nhx_evals_sdk.metrics.ragas.metrics import (
@@ -50,6 +51,7 @@ MetricVariants: TypeAlias = (
     BLEUMetric
     | ExactMatchMetric
     | F1Metric
+    | FinanceQAMetric
     | LLMJudgeMetric
     | NumberCheckMetric
     | RemoteMetric

@@ -475,6 +475,61 @@ class SequenceSimilarity(MetricBase):
         return _input_schema_from_templates(templates)
 
 
+class FinanceQA(MetricBase):
+    """Finance question answering metric configuration: the per-row scores of the Nemotron finance LoRA cookbook.
+
+    The scores match ``evaluation.py`` in the cookbook (NVIDIA-NeMo/Nemotron,
+    ``usage-cookbook/Nemotron-3.5-Super-VL/lora-finance``): ``exact``, ``relaxed``, ``task_correct``,
+    ``answer_f1``, ``trace_closed``, ``program_syntax_valid``, ``hit_max_new_tokens``, and the row's ``task``.
+    """
+
+    type: Literal[MetricType.FINANCE_QA] = MetricType.FINANCE_QA
+    reference: str = Field(
+        description="The template for the reference answer.",
+        examples=["{{item.messages[-1].content}}"],
+    )
+    task: str = Field(
+        description=(
+            "The template for the row's task, such as `TAT-DQA/span`, `TAT-DQA/multi-span`, `TAT-DQA/arithmetic`, "
+            "`TAT-DQA/count`, `CodeFinQA` or `CodeTAT-QA`. The task selects how `task_correct` and `answer_f1` "
+            "are scored."
+        ),
+        examples=["{{item.messages[0].content.splitlines()[0].removeprefix('Task: ')}}"],
+    )
+    candidate: str | None = Field(
+        default=None,
+        description=(
+            "The template for the raw completion, with any reasoning trace before `</think>`. If not provided, the "
+            "completion is rebuilt from the model response's `reasoning_content` (or `reasoning`) and `content`, "
+            "or taken from the output text when there is no response."
+        ),
+    )
+    tolerance: float = Field(
+        default=0.05,
+        ge=0,
+        description="The relative tolerance for numeric answers in `relaxed`.",
+    )
+    max_new_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "The completion token limit the requests used. When set, `hit_max_new_tokens` reports whether a "
+            "response's `usage.completion_tokens` reached it."
+        ),
+    )
+    program_synthesis_tasks: list[str] = Field(
+        default_factory=lambda: ["CodeFinQA", "CodeTAT-QA"],
+        description="Tasks whose reasoning trace must parse as Python, reported as `program_syntax_valid`.",
+    )
+
+    def input_schema(self) -> InputSchema:
+        """Return the dataset fields the reference, task and candidate templates read."""
+        templates = [self.reference, self.task]
+        if self.candidate is not None:
+            templates.append(self.candidate)
+        return _input_schema_from_templates(templates)
+
+
 StringCheckOperation = Literal[
     "equals",
     "==",
