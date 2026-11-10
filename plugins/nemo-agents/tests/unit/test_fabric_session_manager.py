@@ -11,8 +11,13 @@ from typing import Any, cast
 
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig
-from nemo_agents_plugin.fabric import server, session_manager
-from nemo_agents_plugin.fabric.runtime import FabricInvocationRequest, FabricRuntimeResult, FabricRuntimeStream
+from nemo_agents_plugin.fabric import environment, server, session_manager
+from nemo_agents_plugin.fabric.runtime import (
+    FabricInvocationRequest,
+    FabricOneShotRequest,
+    FabricRuntimeResult,
+    FabricRuntimeStream,
+)
 from nemo_agents_plugin.fabric.session_manager import FabricSessionManager
 from nemo_agents_plugin.fabric.session_registry import (
     FabricSessionNotFoundError,
@@ -334,6 +339,120 @@ async def test_different_platform_sessions_get_separate_runtimes(
     assert first.runtime is first_runtime
     assert second.runtime is second_runtime
     assert len(fabric.start_calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("configured_workspace", ["workspace", "."])
+async def test_deepagents_sessions_isolate_files_and_reuse_their_workspace(
+    tmp_path: Path, configured_workspace: str
+) -> None:
+    config = _agent_config()
+    config.harnesses["hermes"].kind = "deepagents"
+    config.environment.workspace = configured_workspace
+    original_config = config.model_copy(deep=True)
+    workspace = tmp_path / configured_workspace
+    workspace.mkdir(exist_ok=True)
+    (workspace / "input.txt").write_text("original input")
+    (workspace / "linked-input").symlink_to(workspace / "input.txt")
+    baseline = environment.prepare_deepagents_workspace_baseline(config, tmp_path)
+    assert baseline is not None
+    fabric = _SequenceFabric([_FakeRuntime(), _FakeRuntime()])
+    manager = FabricSessionManager(
+        config,
+        base_dir=tmp_path,
+        session_registry=FabricSessionRegistry(),
+        workspace_baseline=baseline,
+        fabric=cast(Any, fabric),
+    )
+
+    first, concurrent = await asyncio.gather(
+        manager.resolve_session("../opaque-session"), manager.resolve_session("../opaque-session")
+    )
+    assert concurrent is first
+    assert first.workspace_dir is not None
+    (first.workspace_dir / "linked-input").write_text("edited in the first session")
+    outputs = ("large_tool_results/result.txt", "conversation_history/history.md", "report.md")
+    for name in outputs:
+        output = first.workspace_dir / name
+        output.parent.mkdir(exist_ok=True)
+        output.write_text("private session content")
+
+    second = await manager.resolve_session("second-session")
+    assert second.workspace_dir is not None
+    assert first.workspace_dir != second.workspace_dir
+    assert await manager.resolve_session("../opaque-session") is first
+    assert (first.workspace_dir / "input.txt").read_text() == "edited in the first session"
+    for root in (workspace, baseline, second.workspace_dir):
+        assert (root / "input.txt").read_text() == "original input"
+        assert not any((root / name).exists() for name in outputs)
+    assert len(fabric.start_calls) == 2
+    for session, call in zip((first, second), fabric.start_calls, strict=True):
+        assert session.workspace_dir is not None
+        assert session.workspace_dir.parent == baseline.parent / "sessions"
+        assert (session.workspace_dir / "linked-input").resolve() == session.workspace_dir / "input.txt"
+        assert tmp_path / call["config"].environment.workspace == session.workspace_dir
+        assert call["base_dir"] == tmp_path
+    assert config == original_config
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_deepagents_one_shot_invocations_get_private_workspaces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, streaming: bool
+) -> None:
+    config = _agent_config()
+    config.harnesses["hermes"].kind = "deepagents"
+    original_config = config.model_copy(deep=True)
+    workspace = tmp_path / config.environment.workspace
+    workspace.mkdir()
+    (workspace / "input.txt").write_text("original input")
+    baseline = environment.prepare_deepagents_workspace_baseline(config, tmp_path)
+    registry = FabricSessionRegistry()
+    assert baseline is not None
+    manager = FabricSessionManager(
+        config,
+        base_dir=tmp_path,
+        session_registry=registry,
+        workspace_baseline=baseline,
+        fabric=cast(Any, _FakeFabric(_FakeRuntime(), method=StreamingMethod.BUFFERED)),
+    )
+    workspaces: list[Path] = []
+
+    def record_workspace(request: FabricOneShotRequest) -> None:
+        assert request.base_dir == tmp_path
+        assert request.fabric_config.environment is not None
+        assert request.fabric_config.environment.workspace is not None
+        private = tmp_path / request.fabric_config.environment.workspace
+        assert (private / "input.txt").read_text() == "original input"
+        assert not (private / "result.txt").exists()
+        (private / "input.txt").write_text("edited by this invocation")
+        (private / "result.txt").write_text("private result")
+        workspaces.append(private)
+
+    async def run_once(request: FabricOneShotRequest, **kwargs: Any) -> FabricRuntimeResult:
+        record_workspace(request)
+        return FabricRuntimeResult(status="succeeded", response="done")
+
+    @asynccontextmanager
+    async def stream_once(request: FabricOneShotRequest, **kwargs: Any) -> Any:
+        record_workspace(request)
+        yield object()
+
+    monkeypatch.setattr(session_manager, "run_fabric_agent_once", run_once)
+    monkeypatch.setattr(session_manager, "stream_fabric_agent_once", stream_once)
+    for _ in range(2):
+        request = FabricInvocationRequest(input="hello")
+        if streaming:
+            async with manager.stream_once(request):
+                pass
+        else:
+            await manager.invoke_once(request)
+
+    assert len(set(workspaces)) == 2
+    assert all(private.parent == baseline.parent / "sessions" for private in workspaces)
+    assert (workspace / "input.txt").read_text() == "original input"
+    assert config == original_config
+    assert await registry.count() == 0
 
 
 @pytest.mark.asyncio

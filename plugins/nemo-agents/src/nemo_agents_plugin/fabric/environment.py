@@ -129,6 +129,22 @@ def prepare_deepagents_workspace_baseline(agent_config: AgentConfig, base_dir: P
     return baseline
 
 
+def create_deepagents_workspace(baseline: Path) -> Path:
+    """Copy the saved inputs into a private workspace for one runtime."""
+    sessions = baseline.parent / "sessions"
+    if sessions.is_symlink():
+        raise ValueError("DeepAgents session storage must not be a symlink.")
+    sessions.mkdir(exist_ok=True)
+    workspace = Path(tempfile.mkdtemp(prefix="session-", dir=sessions))
+    try:
+        # Baseline links are already relative to the copied tree.
+        shutil.copytree(baseline, workspace, symlinks=True, dirs_exist_ok=True)
+    except BaseException:
+        shutil.rmtree(workspace, ignore_errors=True)
+        raise
+    return workspace
+
+
 def discover_skill_directories(directory: Path) -> list[Path]:
     """Resolve one skill bundle or the bundles immediately inside a collection."""
     if not directory.is_dir():

@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
@@ -34,7 +34,6 @@ from nemo_agents_plugin.fabric.session_manager import (
     FabricSessionStopError,
 )
 from nemo_agents_plugin.fabric.session_registry import FabricSessionNotFoundError, FabricSessionRegistry
-from nemo_agents_plugin.fabric.translator import translate_agent_config
 from nemo_fabric import Fabric
 from starlette.requests import ClientDisconnect
 
@@ -332,6 +331,7 @@ def test_startup_leaves_other_backends_without_a_workspace_baseline(
 def test_baseline_stages_skills_and_maps_runtime_paths(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    monkeypatch: pytest.MonkeyPatch,
     configured_workspace: str,
     skill_path: str,
 ) -> None:
@@ -361,9 +361,11 @@ def test_baseline_stages_skills_and_maps_runtime_paths(
     config["skills"] = {"paths": [skill_path, str(bundle.relative_to(base_dir))]}
     config_path = _write_agent_config(base_dir, config)
     original_yaml = config_path.read_text()
+    start_runtime = AsyncMock(return_value=AsyncMock())
+    monkeypatch.setattr(Fabric, "start_runtime", start_runtime)
 
     app = create_fabric_serving_app(config_path)
-    with TestClient(app):
+    with TestClient(app) as client:
         baseline = app.state.workspace_baseline
         staged = baseline / environment.DEEPAGENTS_SKILLS_DIR / bundle.name
         assert (staged / "SKILL.md").read_text() == manifest
@@ -372,10 +374,16 @@ def test_baseline_stages_skills_and_maps_runtime_paths(
         assert (staged / "references/linked.txt").read_text() == "linked skill input"
         assert not (staged / "references/linked.txt").is_symlink()
         assert sorted(path.name for path in staged.parent.iterdir()) == expected_names
-        runtime_config = environment.deepagents_workspace_config(
-            app.state.agent_config, base_dir=base_dir, workspace_dir=baseline
-        )
-        plan = Fabric().plan(translate_agent_config(runtime_config), base_dir=base_dir)
+        assert client.portal is not None
+        session = client.portal.call(app.state.session_manager.open_session)
+        assert session.workspace_dir.parent == baseline.parent / "sessions"
+        private_skill = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR / bundle.name
+        assert (private_skill / "SKILL.md").read_text() == manifest
+        assert (private_skill / "references/linked.txt").read_text() == "linked skill input"
+        runtime_config = start_runtime.call_args.args[0]
+        assert base_dir / runtime_config.environment.workspace == session.workspace_dir
+        assert start_runtime.call_args.kwargs["base_dir"] == base_dir
+        plan = Fabric().plan(runtime_config, base_dir=base_dir)
         assert plan.to_mapping()["agent_config"]["skills"]["paths"] == ["/.agents/skills"]
         assert app.state.agent_config.skills.paths == config["skills"]["paths"]
         assert config_path.read_text() == original_yaml

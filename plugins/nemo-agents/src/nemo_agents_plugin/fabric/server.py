@@ -354,6 +354,7 @@ def create_fabric_serving_app(
                 agent_config,
                 base_dir=base_dir,
                 session_registry=session_registry,
+                workspace_baseline=app.state.workspace_baseline,
                 max_concurrent_invocations=settings.max_concurrent_invocations,
             )
             app.state.session_manager = session_manager

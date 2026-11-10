@@ -13,7 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nemo_agents_plugin.agent_config import AgentConfig
-from nemo_agents_plugin.fabric.environment import ensure_local_workspace_dir
+from nemo_agents_plugin.fabric.environment import (
+    create_deepagents_workspace,
+    deepagents_workspace_config,
+    ensure_local_workspace_dir,
+)
 from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
     FabricOneShotRequest,
@@ -72,6 +76,7 @@ class FabricSessionManager:
         *,
         base_dir: Path,
         session_registry: FabricSessionRegistry,
+        workspace_baseline: Path | None = None,
         fabric: Fabric | None = None,
         max_concurrent_invocations: int = DEFAULT_MAX_CONCURRENT_INVOCATIONS,
     ) -> None:
@@ -81,6 +86,7 @@ class FabricSessionManager:
         self._agent_config = agent_config
         self._base_dir = base_dir
         self._session_registry = session_registry
+        self._workspace_baseline = workspace_baseline
         self._fabric = fabric
         self._session_creation_gates: dict[str, _SessionCreationGate] = {}
         self._closed_session_ids: set[str] = set()
@@ -91,7 +97,8 @@ class FabricSessionManager:
     async def open_session(self, *, session_id: str | None = None) -> FabricRuntimeSession:
         """Materialize a Fabric config, start its runtime, and register the session."""
         try:
-            fabric_config, method = await self._materialize_fabric_config(streaming=True)
+            workspace_dir = await self._create_workspace()
+            fabric_config, method = await self._materialize_fabric_config(streaming=True, workspace_dir=workspace_dir)
         except FabricRuntimeStartError as error:
             raise FabricSessionStartError(str(error)) from error
         fabric = self._fabric or Fabric()
@@ -107,7 +114,9 @@ class FabricSessionManager:
             raise FabricSessionStartError(f"Fabric runtime startup failed: {error}") from error
 
         try:
-            return await self._session_registry.register(runtime, session_id=session_id, streaming_method=method)
+            session = await self._session_registry.register(runtime, session_id=session_id, streaming_method=method)
+            session.workspace_dir = workspace_dir
+            return session
         except BaseException:
             # A started runtime must not leak if registration fails or is cancelled.
             try:
@@ -260,13 +269,28 @@ class FabricSessionManager:
             except FabricError as error:
                 raise FabricSessionStopError(f"Fabric runtime shutdown failed: {error}") from error
 
-    async def _materialize_fabric_config(self, *, streaming: bool) -> tuple[FabricConfig, StreamingMethod]:
+    async def _create_workspace(self) -> Path | None:
+        if self._workspace_baseline is None:
+            return None
         try:
-            fabric_config = translate_agent_config(self._agent_config)
+            return await asyncio.to_thread(create_deepagents_workspace, self._workspace_baseline)
+        except (OSError, ValueError) as error:
+            raise FabricRuntimeStartError(f"DeepAgents workspace creation failed: {error}") from error
+
+    async def _materialize_fabric_config(
+        self, *, streaming: bool, workspace_dir: Path | None = None
+    ) -> tuple[FabricConfig, StreamingMethod]:
+        agent_config = self._agent_config
+        if workspace_dir is not None:
+            agent_config = deepagents_workspace_config(
+                agent_config, base_dir=self._base_dir, workspace_dir=workspace_dir
+            )
+        try:
+            fabric_config = translate_agent_config(agent_config)
         except FabricTranslationError as error:
             raise FabricRuntimeStartError(f"Fabric config translation failed: {error}") from error
 
-        await asyncio.to_thread(ensure_local_workspace_dir, self._agent_config, self._base_dir)
+        await asyncio.to_thread(ensure_local_workspace_dir, agent_config, self._base_dir)
         if not streaming:
             return fabric_config, StreamingMethod.BUFFERED
         try:
@@ -284,7 +308,8 @@ class FabricSessionManager:
         *,
         streaming: bool,
     ) -> tuple[FabricOneShotRequest, StreamingMethod]:
-        fabric_config, method = await self._materialize_fabric_config(streaming=streaming)
+        workspace_dir = await self._create_workspace()
+        fabric_config, method = await self._materialize_fabric_config(streaming=streaming, workspace_dir=workspace_dir)
         one_shot_request = FabricOneShotRequest(
             fabric_config=fabric_config,
             base_dir=self._base_dir,
