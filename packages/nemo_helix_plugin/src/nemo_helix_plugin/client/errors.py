@@ -14,6 +14,7 @@ import typing
 
 import httpx
 from pydantic import ValidationError
+from pydantic_core import ErrorDetails, PydanticKnownError
 from pydantic_core.core_schema import ErrorType
 
 _MAX_REPORTED_VALIDATION_ERRORS = 5
@@ -33,6 +34,22 @@ _SCHEMA_ONLY_ERROR_TYPES = frozenset(typing.get_args(ErrorType)) - {
     "datetime_object_invalid",
 }
 _REDACTED_MESSAGE = "Invalid value (message withheld: it can quote response data)"
+
+
+def _schema_only_message(detail: ErrorDetails) -> str:
+    """Pydantic's own message for a built-in error type, else the withheld text.
+
+    A ``PydanticCustomError`` may reuse a built-in type name with its own text, so the message is printed only when
+    pydantic's template for that type renders it exactly.
+    """
+    if detail["type"] not in _SCHEMA_ONLY_ERROR_TYPES:
+        return _REDACTED_MESSAGE
+    try:
+        error_type = typing.cast(ErrorType, detail["type"])  # a member of ErrorType, checked above
+        rendered = PydanticKnownError(error_type, detail.get("ctx")).message()
+    except Exception:  # noqa: BLE001 - a context the template can't take means it isn't pydantic's own error
+        return _REDACTED_MESSAGE
+    return rendered if rendered == detail["msg"] else _REDACTED_MESSAGE
 
 
 class NemoClientError(Exception):
@@ -81,8 +98,7 @@ class NemoResponseValidationError(NemoClientError):
         lines = [f"Response{source} did not match {error.title} ({len(details)} validation error(s)):"]
         for detail in details[:_MAX_REPORTED_VALIDATION_ERRORS]:
             location = ".".join(str(part) for part in detail["loc"]) or "<root>"
-            message = detail["msg"] if detail["type"] in _SCHEMA_ONLY_ERROR_TYPES else _REDACTED_MESSAGE
-            lines.append(f"  {location}: {message} ({detail['type']})")
+            lines.append(f"  {location}: {_schema_only_message(detail)} ({detail['type']})")
         if len(details) > _MAX_REPORTED_VALIDATION_ERRORS:
             lines.append(f"  +{len(details) - _MAX_REPORTED_VALIDATION_ERRORS} more")
         if any(detail["type"] in _VERSION_SKEW_ERROR_TYPES for detail in details):

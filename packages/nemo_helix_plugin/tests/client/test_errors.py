@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from pydantic_core import PydanticCustomError
 
 VERSION_HINT = "The server and this client may be on different versions"
+WITHHELD = "Invalid value (message withheld: it can quote response data)"
 
 
 class Progress(BaseModel):
@@ -124,6 +125,42 @@ def test_union_tag_from_the_response_is_not_printed() -> None:
 
     assert "secret-tag" not in message
     assert "(union_tag_invalid)" in message
+
+
+class Spoofed(BaseModel):
+    count: str
+    limit: str
+
+    @field_validator("count")
+    @classmethod
+    def _custom_text(cls, value: str) -> str:
+        raise PydanticCustomError("int_parsing", "Count {value} is wrong", {"value": value})
+
+    @field_validator("limit")
+    @classmethod
+    def _built_in_template(cls, value: str) -> str:
+        raise PydanticCustomError("greater_than", "Input should be over {gt}", {"gt": value})
+
+
+def test_custom_error_reusing_a_built_in_type_is_withheld() -> None:
+    body = {"count": "secret-count", "limit": "secret-limit"}
+
+    message = str(NemoResponseValidationError(_response(body), _validation_error(Spoofed, body)))
+
+    assert "secret" not in message
+    assert f"  count: {WITHHELD} (int_parsing)" in message
+    assert f"  limit: {WITHHELD} (greater_than)" in message
+
+
+def test_built_in_messages_with_context_are_kept() -> None:
+    class Bounded(BaseModel):
+        n: int = Field(gt=3)
+
+    body = {"n": 1}
+
+    message = str(NemoResponseValidationError(_response(body), _validation_error(Bounded, body)))
+
+    assert "  n: Input should be greater than 3 (greater_than)" in message
 
 
 def test_more_than_five_errors_are_capped() -> None:
