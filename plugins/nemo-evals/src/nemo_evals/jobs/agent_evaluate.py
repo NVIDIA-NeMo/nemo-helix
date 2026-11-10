@@ -746,8 +746,24 @@ class _AgentEvalJobBase(NemoJob):
                 result.metadata.target.config["url"] = endpoint.url
 
         files = self._write_result_files(result, ctx.storage.persistent)
-        artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir, ignore_patterns=spec.result_ignore_patterns)
-        ctx.results.save(SUMMARY_RESULT_NAME, files.summary)
+        artifact = None
+        bundle_error: Exception | None = None
+        try:
+            artifact = ctx.results.save(
+                DEFAULT_RESULT_NAME, files.bundle_dir, ignore_patterns=spec.result_ignore_patterns
+            )
+        except Exception as error:
+            error.add_note(f"Failed to save result {DEFAULT_RESULT_NAME!r}")
+            bundle_error = error
+        try:
+            ctx.results.save(SUMMARY_RESULT_NAME, files.summary)
+        except Exception:
+            logger.warning("Failed to save summary result; the bundle contains summary.json", exc_info=True)
+
+        # Publish only once the bundle is durable, after attempting both saves.
+        if bundle_error is not None:
+            raise bundle_error
+        assert artifact is not None
 
         outcome = agent_eval_outcome(result)
         report_run_outcome(outcome, ctx=ctx, async_client=async_client)
@@ -755,9 +771,8 @@ class _AgentEvalJobBase(NemoJob):
             logger.error(outcome.message)
 
         # Persist the queryable result record (aggregates + coverage); the full bundle (trials) lives
-        # in the fileset referenced by `artifact`. Best-effort: the authoritative output (bundle +
-        # summary artifacts) is already saved above, so a persistence failure must not fail an
-        # otherwise-successful eval — log and continue.
+        # in the fileset referenced by `artifact`. Best-effort: the authoritative bundle is already
+        # saved above, so a persistence failure must not fail an otherwise-successful eval — log and continue.
         try:
             persist_agent_eval_result(
                 result, target=spec.target, ctx=ctx, bundle_ref=artifact.artifact_url, async_client=async_client
@@ -776,8 +791,7 @@ class _AgentEvalJobBase(NemoJob):
         if outcome.failed:
             output["reason"] = outcome.message
 
-        # Publication runs last, after the bundle and the queryable record are both durable, so a
-        # failed publish costs a re-publish rather than a re-run. Nothing depends on its result.
+        # A supplementary save failure must not block publication of the durable bundle.
         publication = spec.publication.intake if spec.publication is not None else None
         if publication is not None:
             intake = AsyncIntakeClient.from_client(async_client) if async_client is not None else None
