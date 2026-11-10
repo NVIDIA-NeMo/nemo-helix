@@ -895,7 +895,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 NEMO_JOB_TASK_ENVVAR: task_id,
                 NEMO_JOB_WORKSPACE_ENVVAR: step.workspace,
                 NEMO_JOB_FILESET_ENVVAR: step.fileset,
-                **({NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR: step.artifact_base_path} if step.artifact_base_path else {}),
+                NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR: step.artifact_base_path or "",
                 EPHEMERAL_TASK_STORAGE_PATH_ENVVAR: DEFAULT_TASK_STORAGE_PATH,
                 CONFIG_TASK_STORAGE_PATH_ENVVAR: DEFAULT_CONFIG_STORAGE_PATH,
                 NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR: DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,

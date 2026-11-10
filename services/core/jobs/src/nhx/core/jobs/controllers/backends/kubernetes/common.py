@@ -1557,11 +1557,7 @@ def create_pod_template_spec(
             client.V1EnvVar(name=NEMO_JOB_STEP_ENVVAR, value=step.name),
             client.V1EnvVar(name=NEMO_JOB_WORKSPACE_ENVVAR, value=step.workspace),
             client.V1EnvVar(name=NEMO_JOB_FILESET_ENVVAR, value=step.fileset),
-            *(
-                [client.V1EnvVar(name=NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR, value=step.artifact_base_path)]
-                if step.artifact_base_path
-                else []
-            ),
+            client.V1EnvVar(name=NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR, value=step.artifact_base_path or ""),
             client.V1EnvVar(
                 name=NEMO_JOB_TASK_ENVVAR,
                 value_from=client.V1EnvVarSource(field_ref=client.V1ObjectFieldSelector(field_path="metadata.uid")),

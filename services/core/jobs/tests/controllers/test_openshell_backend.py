@@ -1171,7 +1171,7 @@ class TestResultStorageContext:
         assert env["NEMO_JOB_FILESET"] == "test-logs-fileset"
         assert env["NEMO_JOB_ARTIFACT_BASE_PATH"] == "jobs/test-job"
 
-    def test_job_without_output_location_omits_the_base_path(
+    def test_job_without_output_location_sets_an_empty_base_path(
         self, mock_nemo_client, mock_platform_config, test_step_pending
     ) -> None:
         backend = _backend(mock_nemo_client, mock_platform_config)
@@ -1181,4 +1181,4 @@ class TestResultStorageContext:
         backend.schedule(step.step_spec.executor, step)
 
         env = dict(_create_request(backend).spec.environment)
-        assert "NEMO_JOB_ARTIFACT_BASE_PATH" not in env
+        assert env["NEMO_JOB_ARTIFACT_BASE_PATH"] == ""
