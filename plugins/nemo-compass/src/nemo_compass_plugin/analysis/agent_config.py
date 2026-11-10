@@ -40,6 +40,8 @@ def build_compass_agent_config(
     base_url: str | None = None,
     enable_observability: bool | None = None,
     analysis_options: dict[str, Any] | None = None,
+    source_fileset: str | None = None,
+    embedding_model: str | None = None,
 ) -> dict[str, Any]:
     """Build Compass's ``nemo-agents-spec-v1`` config for one run.
 
@@ -55,6 +57,8 @@ def build_compass_agent_config(
             environment supply it.
         enable_observability: Whether Compass may export its own OTLP trace.
         analysis_options: User overrides passed to the installed Compass package.
+        source_fileset: Source reference staged by the execute job as its workdir.
+        embedding_model: Optional Platform Qwen3-Embedding-8B model reference.
 
     Returns:
         A config dict suitable for ``AgentInline.config``.
@@ -62,6 +66,8 @@ def build_compass_agent_config(
     settings: dict[str, Any] = {"agent": agent}
     if analysis_options is not None:
         settings["analysis_options"] = analysis_options
+    if source_fileset is not None:
+        settings["code_base"] = "."
     if ethos is not None:
         settings["ethos"] = ethos
     if base_url is not None:
@@ -69,6 +75,12 @@ def build_compass_agent_config(
     if enable_observability is not None:
         settings["enable_observability"] = enable_observability
 
+    models = {
+        "default": {"provider": _MODEL_PROVIDER, "model": default_model},
+        "fast": {"provider": _MODEL_PROVIDER, "model": fast_model},
+    }
+    if embedding_model is not None:
+        models["embedding"] = {"provider": _MODEL_PROVIDER, "model": embedding_model}
     return {
         "config_format": AGENT_CONFIG_FORMAT,
         "name": COMPASS_AGENT_NAME,
@@ -78,10 +90,7 @@ def build_compass_agent_config(
         # `default` drives the analysis; `fast` is used for context
         # summarization and falls back to `default` when the adapter cannot
         # find it.
-        "models": {
-            "default": {"provider": _MODEL_PROVIDER, "model": default_model},
-            "fast": {"provider": _MODEL_PROVIDER, "model": fast_model},
-        },
+        "models": models,
         # agents.execute only supports local Fabric environments.
         "environment": {"provider": "local"},
     }

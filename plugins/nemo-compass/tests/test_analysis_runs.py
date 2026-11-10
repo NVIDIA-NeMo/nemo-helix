@@ -709,3 +709,32 @@ async def test_list_surfaces_a_store_failure_as_a_500() -> None:
         await _list(entities)
 
     assert excinfo.value.status_code == 500
+
+
+def test_optional_inputs_use_execute_staging_and_model_configuration() -> None:
+    request = _request(source_fileset="default/source#agent/", embedding_model="default/qwen")
+    spec = ExecuteAgentJobConfig.model_validate(
+        build_execute_agent_job_config(request, workspace="default", run_name=RUN_NAME)
+    )
+    assert spec.workdir is not None
+    assert isinstance(spec.agent, AgentInline)
+    assert spec.workdir.base_workdir == "default/source#agent/"
+    agent = spec.agent.config
+    assert agent["harnesses"]["compass"]["settings"]["code_base"] == "."
+    assert agent["models"]["embedding"]["model"] == "default/qwen"
+
+    without_inputs = build_execute_agent_job_config(_request(), workspace="default", run_name=RUN_NAME)
+    assert "workdir" not in without_inputs
+    assert "code_base" not in without_inputs["agent"]["config"]["harnesses"]["compass"]["settings"]
+
+
+async def test_embedding_model_requires_openai_format_before_job_submission() -> None:
+    jobs, entities = _StubExecuteJobs(), _StubEntities()
+    models = _StubModels(backend_formats={"default/embedding": "ANTHROPIC_MESSAGES"})
+    with pytest.raises(HTTPException, match="OpenAI-compatible embeddings") as error:
+        await create_analysis_run(
+            "default", _request(embedding_model="embedding"), _client(jobs, models), _entities(entities)
+        )
+    assert error.value.status_code == 422
+    assert not jobs.calls
+    assert not entities.created

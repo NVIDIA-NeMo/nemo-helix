@@ -97,7 +97,7 @@ class CompassRuntime:
         """
         telemetry = context.telemetry
         if telemetry is None or not telemetry.relay_enabled:
-            return await self._run_analysis(request)
+            return await self._run_analysis(request, context)
 
         # Relay reads credentials for the export from the environment Fabric
         # names, so apply it before the exporter is built -- and only for this
@@ -108,9 +108,15 @@ class CompassRuntime:
             reject_ambient_relay_plugin_config()
             async with activate_relay_plugin(_relay_plugin_config(telemetry)) as activation:
                 reject_inherited_relay_plugin_config(activation.report)
-                return await self._run_analysis(request, relay_scope_name=COMPASS_RELAY_SCOPE)
+                return await self._run_analysis(request, context, relay_scope_name=COMPASS_RELAY_SCOPE)
 
-    async def _run_analysis(self, request: contract.AgentRunRequest, *, relay_scope_name: str | None = None):
+    async def _run_analysis(
+        self,
+        request: contract.AgentRunRequest,
+        context: contract.RuntimeContext,
+        *,
+        relay_scope_name: str | None = None,
+    ):
         target_agent = _string_setting(self._settings, "agent") or _string_setting(self._settings, "target_agent")
         if target_agent is None:
             raise CompassAdapterConfigError("harness.settings.agent is required for Compass adapter")
@@ -128,7 +134,12 @@ class CompassRuntime:
         )
         # Every settings and context read can raise, so resolve them before
         # opening the client: nothing is worth a live SDK handle that no one closes.
+        from nemo_compass_plugin.analysis.inputs import resolve_code_base
+
         ethos = _string_setting(self._settings, "ethos")
+        code_base = resolve_code_base(_string_setting(self._settings, "code_base"), context.environment.workspace)
+        embedding = self._models.get("embedding")
+        embedding_model = _string_setting(self._settings, "embedding_model") or (embedding.model if embedding else None)
         analysis_options = self._settings.get("analysis_options", {})
         if not isinstance(analysis_options, dict):
             raise CompassAdapterConfigError("harness.settings.analysis_options must be an object")
@@ -143,6 +154,8 @@ class CompassRuntime:
             result, _backend = await run_compass_change_set(
                 agent=target_agent,
                 ethos=ethos,
+                code_base=code_base,
+                embedding_model=embedding_model,
                 workspace=workspace,
                 base_url=base_url,
                 client=client,

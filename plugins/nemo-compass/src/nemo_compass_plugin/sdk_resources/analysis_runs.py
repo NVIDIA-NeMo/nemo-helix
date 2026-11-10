@@ -66,6 +66,8 @@ class _CreateAnalysisRunFields(TypedDict):
     since: NotRequired[datetime]
     evaluation_id: NotRequired[str]
     timeout_seconds: NotRequired[float]
+    source_fileset: NotRequired[str]
+    embedding_model: NotRequired[str]
 
 
 class _AnalysisRunsClient(Protocol):
@@ -110,6 +112,8 @@ def _build_create_body(
     evaluation_id: str | None,
     timeout_seconds: float | None,
     analysis_options: dict[str, Any] | None = None,
+    source_fileset: str | None = None,
+    embedding_model: str | None = None,
 ) -> CreateAnalysisRunRequest:
     body: _CreateAnalysisRunFields = {
         "agent": agent,
@@ -126,6 +130,10 @@ def _build_create_body(
         body["evaluation_id"] = evaluation_id
     if timeout_seconds is not None:
         body["timeout_seconds"] = timeout_seconds
+    if source_fileset is not None:
+        body["source_fileset"] = source_fileset
+    if embedding_model is not None:
+        body["embedding_model"] = embedding_model
     return CreateAnalysisRunRequest(**body)
 
 
@@ -229,6 +237,8 @@ class _AnalysisRunResource:
         evaluation_id: str | None = None,
         timeout_seconds: float | None = None,
         analysis_options: dict[str, Any] | None = None,
+        source_fileset: str | None = None,
+        embedding_model: str | None = None,
     ) -> AnalysisRunResponse:
         """Submit an analysis run. The model pair is required — see the route."""
         with httpx_status_errors():
@@ -243,6 +253,8 @@ class _AnalysisRunResource:
                     evaluation_id=evaluation_id,
                     timeout_seconds=timeout_seconds,
                     analysis_options=analysis_options,
+                    source_fileset=source_fileset,
+                    embedding_model=embedding_model,
                 ),
             )
             return _run_response_from_response(response.http_response.json())
@@ -315,6 +327,8 @@ class _AsyncAnalysisRunResource:
         evaluation_id: str | None = None,
         timeout_seconds: float | None = None,
         analysis_options: dict[str, Any] | None = None,
+        source_fileset: str | None = None,
+        embedding_model: str | None = None,
     ) -> AnalysisRunResponse:
         """Submit an analysis run. The model pair is required — see the route."""
         with httpx_status_errors():
@@ -329,6 +343,8 @@ class _AsyncAnalysisRunResource:
                     evaluation_id=evaluation_id,
                     timeout_seconds=timeout_seconds,
                     analysis_options=analysis_options,
+                    source_fileset=source_fileset,
+                    embedding_model=embedding_model,
                 ),
             )
             return _run_response_from_response(response.http_response.json())

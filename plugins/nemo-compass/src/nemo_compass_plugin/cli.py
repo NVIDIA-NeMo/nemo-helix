@@ -14,7 +14,8 @@ import click
 import typer
 from nemo_compass_plugin.client import CompassClient
 from nemo_compass_plugin.model_guidance import model_warning
-from nemo_compass_plugin.schema import AnalysisRunResponse, EnableAnalysisConfigRequest
+from nemo_compass_plugin.schema import AnalysisRunResponse
+from nemo_compass_plugin.sdk_resources.analysis_configs import _build_enable_body
 from nemo_compass_plugin.sdk_resources.analysis_configs import _list_params as _config_list_params
 from nemo_compass_plugin.sdk_resources.analysis_runs import (
     DEFAULT_POLL_INTERVAL,
@@ -96,6 +97,16 @@ class CompassCLI(NemoCLI):
                 "--fast-model",
                 help="Model Entity ref for context summarization. Default: the configured fast model.",
             ),
+            source_fileset: str | None = typer.Option(
+                None,
+                "--source-fileset",
+                help="Fileset reference containing agent source for validation and confidence review.",
+            ),
+            embedding_model: str | None = typer.Option(
+                None,
+                "--embedding-model",
+                help="Platform model reference serving Qwen3-Embedding-8B (4096 dimensions).",
+            ),
             analysis_options: Path | None = typer.Option(
                 None,
                 "--analysis-options",
@@ -113,10 +124,12 @@ class CompassCLI(NemoCLI):
             kwargs = {
                 "workspace": resolve_cli_workspace(ctx, workspace),
                 "agent": agent,
-                "body": EnableAnalysisConfigRequest(
+                "body": _build_enable_body(
                     default_model=default_model,
                     fast_model=fast_model,
                     analysis_options=_read_analysis_options(analysis_options) or {},
+                    source_fileset=source_fileset,
+                    embedding_model=embedding_model,
                 ),
             }
             if handle_code_generation(CompassClient, "enable_analysis_config", kwargs, resolved_output_format, state):
@@ -247,6 +260,16 @@ class CompassCLI(NemoCLI):
                 "--ethos",
                 help="Path to the agent's Ethos Markdown. Its contents are sent with the run.",
             ),
+            source_fileset: str | None = typer.Option(
+                None,
+                "--source-fileset",
+                help="Fileset reference containing agent source for validation and confidence review.",
+            ),
+            embedding_model: str | None = typer.Option(
+                None,
+                "--embedding-model",
+                help="Platform model reference serving Qwen3-Embedding-8B (4096 dimensions).",
+            ),
             analysis_options: Path | None = typer.Option(
                 None,
                 "--analysis-options",
@@ -300,6 +323,8 @@ class CompassCLI(NemoCLI):
                     fast_model=resolved_fast,
                     ethos=_read_ethos_file(ethos),
                     analysis_options=_read_analysis_options(analysis_options),
+                    source_fileset=source_fileset,
+                    embedding_model=embedding_model,
                     since=_parse_since(since),
                     evaluation_id=evaluation_id,
                     timeout_seconds=timeout_seconds,

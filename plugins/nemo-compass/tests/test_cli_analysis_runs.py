@@ -459,3 +459,11 @@ def test_options_file_requires_json_object(app, api, tmp_path, text):
     assert result.exit_code != 0
     assert "--analysis-options" in result.output
     assert api.requests == []
+
+
+def test_create_sends_optional_input_references(app: typer.Typer, api: FakeCompassAPI) -> None:
+    api.on("POST", RUNS, run_response_json())
+    result = _create(app, "--source-fileset", "default/source#agent/", "--embedding-model", "default/qwen")
+    assert result.exit_code == 0, result.output
+    assert api.requests[0].body["source_fileset"] == "default/source#agent/"
+    assert api.requests[0].body["embedding_model"] == "default/qwen"

@@ -302,6 +302,8 @@ class CompassAnalysisController(NemoController):
             default_model=config.default_model,
             fast_model=config.fast_model or config.default_model,
             analysis_options=config.analysis_options,
+            source_fileset=config.source_fileset,
+            embedding_model=config.embedding_model,
         )
         job_name = mint_analysis_run_name()
         pending = (

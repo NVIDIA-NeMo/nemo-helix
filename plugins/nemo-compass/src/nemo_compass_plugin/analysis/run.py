@@ -6,6 +6,7 @@
 import logging
 import os
 import sys
+from contextlib import AsyncExitStack
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,8 @@ async def run_compass(
     enable_observability: bool = True,
     model_refs: ConfiguredModelRefs | None = None,
     analysis_options: dict[str, Any] | None = None,
+    code_base: Path | None = None,
+    embedding_model: str | None = None,
 ) -> str:
     """Build and run Compass agent against an agent's telemetry.
 
@@ -94,6 +97,8 @@ async def run_compass(
             enable_observability=enable_observability,
             model_refs=model_refs,
             analysis_options=analysis_options,
+            code_base=code_base,
+            embedding_model=embedding_model,
         )
         return await backend.persist_result(workspace=workspace, agent=agent, result=result)
     finally:
@@ -117,6 +122,8 @@ async def run_compass_change_set(
     relay_scope_name: str | None = None,
     model_refs: ConfiguredModelRefs | None = None,
     analysis_options: dict[str, Any] | None = None,
+    code_base: Path | None = None,
+    embedding_model: str | None = None,
 ) -> tuple[CompassResult, CompassBackend]:
     """Build and run Compass agent without persisting its change-set.
 
@@ -129,6 +136,8 @@ async def run_compass_change_set(
             *enable_observability*, which is the older direct-to-Intake path.
     """
     try:
+        from compass.analysis import AnalysisOptions
+        from nemo_compass_plugin.analysis.inputs import platform_embeddings
         from nemo_compass_plugin.analysis.pipeline import analyze_snapshot, load_existing_insights
         from nemo_compass_plugin.analysis.trace_snapshot import load_trace_snapshot
     except ModuleNotFoundError as exc:
@@ -174,15 +183,25 @@ async def run_compass_change_set(
                 since=since,
                 evaluation_id=evaluation_id,
             )
-            result = await analyze_snapshot(
-                snapshot,
-                existing=existing,
-                model_clients=model_clients,
-                ethos=ethos,
-                analysis_options=analysis_options,
-                relay_scope_name=relay_scope_name,
-                event_handler=_echo_event if verbose else None,
-            )
+            options = AnalysisOptions.model_validate(analysis_options or {})
+            async with AsyncExitStack() as inputs:
+                embedding_generator = None
+                sentiment = options.compass_signals.user_sentiment
+                if embedding_model is not None and sentiment is not None:
+                    embedding_generator = await inputs.enter_async_context(
+                        platform_embeddings(client, embedding_model, config=sentiment.litellm)
+                    )
+                result = await analyze_snapshot(
+                    snapshot,
+                    existing=existing,
+                    model_clients=model_clients,
+                    ethos=ethos,
+                    analysis_options=analysis_options,
+                    code_base=code_base,
+                    embedding_generator=embedding_generator,
+                    relay_scope_name=relay_scope_name,
+                    event_handler=_echo_event if verbose else None,
+                )
         if model_warnings:
             result = result.model_copy(update={"notes": [*result.notes, *model_warnings]})
         return result, backend

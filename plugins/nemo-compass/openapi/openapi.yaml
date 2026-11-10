@@ -718,6 +718,18 @@ components:
           description: Workspace-qualified Model Entity used for latency-sensitive
             analysis work.
           default: ''
+        source_fileset:
+          title: Source Fileset
+          description: Fileset reference containing agent source, staged as the execute
+            job workdir.
+          type: string
+          minLength: 1
+        embedding_model:
+          title: Embedding Model
+          description: Platform model reference serving Qwen3-Embedding-8B with 4096
+            dimensions.
+          type: string
+          minLength: 1
         analysis_options:
           additionalProperties: true
           type: object
@@ -837,6 +849,18 @@ components:
           title: Fast Model
           description: Workspace-qualified Model Entity the run used for context summarization.
           default: ''
+        source_fileset:
+          title: Source Fileset
+          description: Fileset reference containing agent source, staged as the execute
+            job workdir.
+          type: string
+          minLength: 1
+        embedding_model:
+          title: Embedding Model
+          description: Platform model reference serving Qwen3-Embedding-8B with 4096
+            dimensions.
+          type: string
+          minLength: 1
         analysis_options:
           additionalProperties: true
           type: object
@@ -1065,6 +1089,18 @@ components:
           description: Optional run scope AND-pinned onto every span read.
           type: string
           minLength: 1
+        source_fileset:
+          title: Source Fileset
+          description: Fileset reference containing agent source, staged as the execute
+            job workdir.
+          type: string
+          minLength: 1
+        embedding_model:
+          title: Embedding Model
+          description: Platform model reference serving Qwen3-Embedding-8B with 4096
+            dimensions.
+          type: string
+          minLength: 1
         analysis_options:
           additionalProperties: true
           type: object
@@ -1157,6 +1193,18 @@ components:
           type: string
           minLength: 1
           title: Fast Model
+        source_fileset:
+          title: Source Fileset
+          description: Fileset reference containing agent source, staged as the execute
+            job workdir.
+          type: string
+          minLength: 1
+        embedding_model:
+          title: Embedding Model
+          description: Platform model reference serving Qwen3-Embedding-8B with 4096
+            dimensions.
+          type: string
+          minLength: 1
         analysis_options:
           additionalProperties: true
           type: object

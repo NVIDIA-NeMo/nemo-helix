@@ -9,7 +9,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from compass.analysis import AnalysisOptions, BorrowedModelClient, analyze
+from compass.analysis import AnalysisOptions, BorrowedModelClient, UserEmbeddingGenerator, analyze
 from compass.insight import Insight
 from compass.traces import TraceSnapshot
 from nemo_compass_plugin.analysis.backend import CompassBackend
@@ -106,6 +106,8 @@ async def analyze_snapshot(
     model_clients: ConfiguredModelClients,
     ethos: str | None,
     analysis_options: dict[str, Any] | None = None,
+    code_base: Path | None = None,
+    embedding_generator: UserEmbeddingGenerator | None = None,
     relay_scope_name: str | None = None,
     event_handler: Callable[[EventBase], None] | None = None,
 ) -> CompassResult:
@@ -123,6 +125,8 @@ async def analyze_snapshot(
             llm_factory=lambda: BorrowedModelClient(model_clients.default),
             fast_llm_factory=lambda: BorrowedModelClient(model_clients.fast),
             ethos_path=ethos_path,
+            code_base=code_base,
+            embedding_generator=embedding_generator,
             event_handler=event_handler,
             instrument_agent=(lambda events: relay_scope(events, relay_scope_name)) if relay_scope_name else None,
         )
