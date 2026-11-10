@@ -186,6 +186,7 @@ Unsloth, rl DPO and rl GRPO defaults: `references/defaults.md`. Worked examples 
 | rl Kubernetes runtime, sandboxed Gym | `references/rl-kubernetes-runtime.md` |
 | W&B secret, MLflow, jobs-launcher | `references/integrations-setup.md` |
 | Evaluation: frozen test split, base vs tuned, model IDs | `references/post-training-eval.md` |
+| Finance eval report: the cookbook's overall, per-capability and per-task scores from `finance-qa` row scores | `scripts/finance_report.py` |
 | Job polling and training health | `scripts/poll_customization_job.sh`, `scripts/job_health.py` |
 | GRPO environment package and rollout rows | the **nemo-gym-environments** skill |
 | CLEVR-CoGenT vision GRPO (VLM verifier + image rows) | `../nemo-gym-environments/references/example-scripts.md` |
