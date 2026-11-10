@@ -24,6 +24,7 @@ export const ROUTE_PARAMS = {
   modelNamespace: 'modelNamespace',
   modelName: 'modelName',
   adapterName: 'adapterName',
+  modelTab: 'modelTab',
   evalConfigNamespace: 'configNamespace',
   evalConfigName: 'configName',
   safeSynthesizerJobName: 'safeSynthesizerJobName',
@@ -73,7 +74,7 @@ export const ROUTES = {
     newCustomizationJobScratch: `/workspaces/:${P.workspace}/fine-tune/new/scratch`,
     baseModels: `/workspaces/:${P.workspace}/base-models`,
     /** Model detail page; with model details off, the catalog with that model's panel open */
-    baseModelsModel: `/workspaces/:${P.workspace}/base-models/:${P.modelName}`,
+    baseModelsModel: `/workspaces/:${P.workspace}/base-models/:${P.modelName}/:${P.modelTab}?`,
     evaluation: `/workspaces/:${P.workspace}/evaluation`,
     /** Dataset-driven model evaluation builder. */
     evaluationNew: `/workspaces/:${P.workspace}/evaluation/new`,
@@ -95,8 +96,8 @@ export const ROUTES = {
     customizationJobList: `/workspaces/:${P.workspace}/fine-tune`,
     customizationJobDetails: `/workspaces/:${P.workspace}/fine-tune/:${P.customizationJobName}`,
     /** Nested under fine-tune so the Fine-tuning nav item stays active. */
-    modelDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}`,
-    modelAdapterDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}/adapters/:${P.adapterName}`,
+    modelDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}/:${P.modelTab}?`,
+    modelAdapterDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}/adapters/:${P.adapterName}/:${P.modelTab}?`,
     /** Filesets scoped to `purpose: dataset`. */
     datasets: `/workspaces/:${P.workspace}/datasets`,
     /** The fileset detail page for a dataset, kept under the Datasets section. */
