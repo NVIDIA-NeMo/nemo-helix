@@ -19,12 +19,13 @@ const BATCH_SIZE = 100;
  */
 export function useResolvedTasks(rows: TasksetTaskRow[]) {
   const batches = useMemo(() => {
-    const grouped = new Map<string, string[]>();
-    rows.forEach(({ workspace, name }) =>
-      grouped.set(workspace, [...(grouped.get(workspace) ?? []), name])
-    );
+    const grouped = new Map<string, Set<string>>();
+    rows.forEach(({ workspace, name }) => {
+      if (!grouped.has(workspace)) grouped.set(workspace, new Set());
+      grouped.get(workspace)?.add(name);
+    });
     return [...grouped].flatMap(([workspace, names]) => {
-      const unique = [...new Set(names)];
+      const unique = [...names];
       return Array.from({ length: Math.ceil(unique.length / BATCH_SIZE) }, (_, i) => ({
         workspace,
         names: unique.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE),
