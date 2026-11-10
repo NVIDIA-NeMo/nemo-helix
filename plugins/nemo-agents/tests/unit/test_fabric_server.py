@@ -34,6 +34,8 @@ from nemo_agents_plugin.fabric.session_manager import (
     FabricSessionStopError,
 )
 from nemo_agents_plugin.fabric.session_registry import FabricSessionNotFoundError, FabricSessionRegistry
+from nemo_agents_plugin.fabric.translator import translate_agent_config
+from nemo_fabric import Fabric
 from starlette.requests import ClientDisconnect
 
 SESSION_ID = "agent-session-RFppQd3GgwudZJeKDx5t8K"
@@ -321,6 +323,91 @@ def test_startup_leaves_other_backends_without_a_workspace_baseline(
     with TestClient(app):
         assert app.state.workspace_baseline is None
         assert not (tmp_path / "workspace").exists()
+
+
+@pytest.mark.parametrize(
+    ("configured_workspace", "skill_path"),
+    [("workspace", "skills/review"), (".", "skills"), (".", ".agents/skills/review"), (".", ".")],
+)
+def test_baseline_stages_skills_and_maps_runtime_paths(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    configured_workspace: str,
+    skill_path: str,
+) -> None:
+    base_dir = tmp_path / "agent"
+    bundle = base_dir / ("skills/review" if skill_path == "skills" else skill_path)
+    (bundle / "references").mkdir(parents=True)
+    (bundle / "scripts").mkdir()
+    manifest = "---\nname: review\ndescription: Review input files\n---\nRead references/input.bin.\n"
+    (bundle / "SKILL.md").write_text(manifest)
+    (bundle / "references/input.bin").write_bytes(b"\x00skill input\xff")
+    (bundle / "scripts/review.py").write_text("print('review')\n")
+    linked_asset = tmp_path / "linked-asset.txt"
+    linked_asset.write_text("linked skill input")
+    (bundle / "references/linked.txt").symlink_to(linked_asset)
+    expected_names = [bundle.name]
+    if skill_path == "skills":
+        additional = base_dir / "skills" / "audit"
+        additional.mkdir()
+        (additional / "SKILL.md").write_text(manifest.replace("name: review", "name: audit"))
+        expected_names = ["audit", "review"]
+        unrelated = base_dir / "skills" / "not-a-skill" / "nested"
+        unrelated.mkdir(parents=True)
+        (unrelated / "SKILL.md").write_text("not an immediate child skill")
+    config = _example_config()
+    config["harnesses"]["hermes"]["kind"] = "deepagents"
+    config["environment"] = {"workspace": configured_workspace}
+    config["skills"] = {"paths": [skill_path, str(bundle.relative_to(base_dir))]}
+    config_path = _write_agent_config(base_dir, config)
+    original_yaml = config_path.read_text()
+
+    app = create_fabric_serving_app(config_path)
+    with TestClient(app):
+        baseline = app.state.workspace_baseline
+        staged = baseline / environment.DEEPAGENTS_SKILLS_DIR / bundle.name
+        assert (staged / "SKILL.md").read_text() == manifest
+        assert (staged / "references/input.bin").read_bytes() == b"\x00skill input\xff"
+        assert (staged / "scripts/review.py").read_text() == "print('review')\n"
+        assert (staged / "references/linked.txt").read_text() == "linked skill input"
+        assert not (staged / "references/linked.txt").is_symlink()
+        assert sorted(path.name for path in staged.parent.iterdir()) == expected_names
+        runtime_config = environment.deepagents_workspace_config(
+            app.state.agent_config, base_dir=base_dir, workspace_dir=baseline
+        )
+        plan = Fabric().plan(translate_agent_config(runtime_config), base_dir=base_dir)
+        assert plan.to_mapping()["agent_config"]["skills"]["paths"] == ["/.agents/skills"]
+        assert app.state.agent_config.skills.paths == config["skills"]["paths"]
+        assert config_path.read_text() == original_yaml
+        (bundle / "SKILL.md").write_text("changed after startup")
+
+    restarted = create_fabric_serving_app(config_path)
+    with TestClient(restarted):
+        assert restarted.state.workspace_baseline == baseline
+        assert (staged / "SKILL.md").read_text() == manifest
+
+
+@pytest.mark.parametrize("conflict", ["duplicate-name", "existing-input"])
+def test_skill_collision_does_not_publish_a_partial_baseline(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    conflict: str,
+) -> None:
+    paths = ["skills/review", "other/review"] if conflict == "duplicate-name" else ["skills/review"]
+    for skill_path in (*paths, "workspace/.agents/skills/review"):
+        bundle = tmp_path / skill_path
+        bundle.mkdir(parents=True)
+        (bundle / "SKILL.md").write_text(skill_path)
+    config = _example_config()
+    config["harnesses"]["hermes"]["kind"] = "deepagents"
+    config["skills"] = {"paths": paths}
+    app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
+
+    with pytest.raises(ValueError, match="both stage as|already exists"), TestClient(app):
+        pass
+
+    assert not (tmp_path / "workspace" / environment.DEEPAGENTS_WORKSPACE_DIR / "inputs").exists()
+    assert (tmp_path / "workspace/.agents/skills/review/SKILL.md").read_text() == "workspace/.agents/skills/review"
 
 
 def test_failed_baseline_copy_is_not_reused_on_retry(

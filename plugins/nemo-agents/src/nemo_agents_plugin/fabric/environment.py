@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 #: cannot be written to.
 RUNTIME_BASE_DIR_PREFIX = "nemo-agent-runtime"
 DEEPAGENTS_WORKSPACE_DIR = ".nemo-deepagents"
+DEEPAGENTS_SKILLS_DIR = ".agents/skills"
 _WORKSPACE_DEPENDENCY_DIRS = {".venv", "node_modules", "__pycache__"}
 
 
@@ -123,26 +124,77 @@ def prepare_deepagents_workspace_baseline(agent_config: AgentConfig, base_dir: P
     with tempfile.TemporaryDirectory(prefix=".inputs-", dir=storage) as temporary:
         staged = Path(temporary) / "inputs"
         _copy_workspace_inputs(workspace, staged, excluded)
+        _stage_deepagents_skills(agent_config, base_dir, workspace, staged, excluded)
         staged.rename(baseline)
     return baseline
 
 
-def _copy_workspace_inputs(source: Path, target: Path, excluded: set[Path]) -> None:
+def discover_skill_directories(directory: Path) -> list[Path]:
+    """Resolve one skill bundle or the bundles immediately inside a collection."""
+    if not directory.is_dir():
+        raise ValueError(f"Skill path {directory} must reference an existing directory.")
+    if (directory / "SKILL.md").is_file():
+        return [directory.resolve()]
+    skills = [child.resolve() for child in sorted(directory.iterdir()) if (child / "SKILL.md").is_file()]
+    if not skills:
+        raise ValueError(f"Skill path {directory} does not contain SKILL.md or any immediate child skill bundles.")
+    return skills
+
+
+def _stage_deepagents_skills(
+    config: AgentConfig, base_dir: Path, workspace: Path, target: Path, excluded: set[Path]
+) -> None:
+    if config.skills is None:
+        return
+    sources: dict[str, Path] = {}
+    for configured_path in config.skills.paths:
+        for source in discover_skill_directories(base_dir / Path(configured_path).expanduser()):
+            previous = sources.setdefault(source.name, source)
+            if previous != source:
+                raise ValueError(f"Skill directories {previous} and {source} both stage as {source.name!r}.")
+
+    for name, source in sources.items():
+        relative = Path(DEEPAGENTS_SKILLS_DIR) / name
+        destination = target / relative
+        if destination.exists() or destination.is_symlink():
+            if source != (workspace / relative).resolve():
+                raise ValueError(f"Cannot stage skill {source}: workspace path {relative} already exists.")
+            # Replace only this bundle's workspace copy so linked skill assets are included.
+            if destination.is_symlink():
+                destination.unlink()
+            else:
+                shutil.rmtree(destination)
+        _copy_workspace_inputs(source, destination, excluded, follow_symlinks=True)
+
+
+def deepagents_workspace_config(config: AgentConfig, *, base_dir: Path, workspace_dir: Path) -> AgentConfig:
+    """Derive a runtime config for a workspace populated from the DeepAgents baseline."""
+    runtime_config = config.model_copy(deep=True)
+    runtime_config.environment.workspace = workspace_dir.resolve().relative_to(base_dir.resolve()).as_posix()
+    if runtime_config.skills is not None and runtime_config.skills.paths:
+        runtime_config.skills.paths = [f"/{DEEPAGENTS_SKILLS_DIR}"]
+    return runtime_config
+
+
+def _copy_workspace_inputs(source: Path, target: Path, excluded: set[Path], *, follow_symlinks: bool = False) -> None:
     def ignore(directory: str, names: list[str]) -> set[str]:
         ignored: set[str] = set()
         for name in names:
             path = Path(directory) / name
             resolved = path.resolve()
+            relative = resolved.relative_to(source) if resolved.is_relative_to(source) else path.relative_to(source)
             if (
-                not resolved.is_relative_to(source)
-                or _WORKSPACE_DEPENDENCY_DIRS.intersection(resolved.relative_to(source).parts)
+                (not follow_symlinks and not resolved.is_relative_to(source))
+                or _WORKSPACE_DEPENDENCY_DIRS.intersection(relative.parts)
                 or any(resolved.is_relative_to(root) for root in excluded)
                 or (path.is_dir() and (path / "pyvenv.cfg").is_file())
             ):
                 ignored.add(name)
         return ignored
 
-    shutil.copytree(source, target, symlinks=True, ignore=ignore)
+    shutil.copytree(source, target, symlinks=not follow_symlinks, ignore=ignore)
+    if follow_symlinks:
+        return  # Configured skill bundles get independent copies of linked assets, too.
     # Internal links must resolve inside each copied workspace, including originally absolute links.
     for link in target.rglob("*"):
         if link.is_symlink():

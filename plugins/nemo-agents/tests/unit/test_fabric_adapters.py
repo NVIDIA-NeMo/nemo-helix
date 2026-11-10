@@ -99,6 +99,7 @@ def test_stock_short_names_resolve_without_manifests(tmp_path: Path, kind: str, 
         ("deepagents", {"deepagents": []}, False),
         ("codex", {}, False),
         ("nvidia.helix.compass.analyst", {}, False),
+        ("acme.image-only-adapter", {}, False),
     ],
 )
 def test_default_deepagents_backend_scope(kind: str, settings: dict[str, object], expected: bool) -> None:

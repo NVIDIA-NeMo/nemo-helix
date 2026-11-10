@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from nemo_agents_plugin.agent_config import AgentConfig, AgentConfigLoadError, load_agent_config
+from nemo_agents_plugin.fabric.adapters import uses_default_deepagents_backend
+from nemo_agents_plugin.fabric.environment import discover_skill_directories
 from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
 from nemo_agents_plugin.fabric.validation import FabricValidationError, plan_fabric_config
 
@@ -99,6 +101,8 @@ def validate_fabric_package_artifacts(
     resolved_context = context_dir.resolve()
     resolved_config = agent_config_path.resolve()
     errors: list[str] = []
+    harness = config.harnesses.get(config.default_harness or "")
+    allow_collections = harness is not None and uses_default_deepagents_backend(harness)
 
     if not resolved_config.is_relative_to(resolved_context):
         errors.append(f"agent config {agent_config_path} is outside Docker build context {resolved_context}")
@@ -125,15 +129,24 @@ def validate_fabric_package_artifacts(
             errors.append(f"skills.paths entry {configured_path!r} must reference a directory: {resolved_skill}")
             continue
 
-        skill_manifest = resolved_skill / "SKILL.md"
-        if not skill_manifest.is_file():
-            errors.append(f"skills.paths entry {configured_path!r} does not contain SKILL.md: {resolved_skill}")
-            continue
         try:
-            with skill_manifest.open("rb") as manifest:
-                manifest.read(1)
-        except OSError as error:
-            errors.append(f"skills.paths entry {configured_path!r} contains an unreadable SKILL.md: {error}")
+            bundles = discover_skill_directories(resolved_skill) if allow_collections else [resolved_skill]
+        except ValueError as error:
+            errors.append(f"skills.paths entry {configured_path!r}: {error}")
+            continue
+        for bundle in bundles:
+            if not bundle.is_relative_to(resolved_context):
+                errors.append(f"Skill directory {bundle} resolves outside Docker build context {resolved_context}")
+                continue
+            skill_manifest = bundle / "SKILL.md"
+            if not skill_manifest.is_file():
+                errors.append(f"skills.paths entry {configured_path!r} does not contain SKILL.md: {bundle}")
+                continue
+            try:
+                with skill_manifest.open("rb") as manifest:
+                    manifest.read(1)
+            except OSError as error:
+                errors.append(f"skills.paths entry {configured_path!r} contains an unreadable SKILL.md: {error}")
 
     if errors:
         details = "\n".join(f"  - {error}" for error in errors)
