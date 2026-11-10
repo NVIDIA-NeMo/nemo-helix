@@ -146,6 +146,7 @@ async def get_prompt(
 
 @router.put(
     "/v2/workspaces/{workspace}/prompts/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Prompt not found"}},
     summary="Update Prompt",
     response_description="Update an existing prompt",
     status_code=status.HTTP_200_OK,
@@ -180,6 +181,7 @@ async def update_prompt(
 
 @router.delete(
     "/v2/workspaces/{workspace}/prompts/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Prompt not found"}},
     summary="Delete Prompt",
     response_description="Delete a prompt",
     status_code=status.HTTP_204_NO_CONTENT,

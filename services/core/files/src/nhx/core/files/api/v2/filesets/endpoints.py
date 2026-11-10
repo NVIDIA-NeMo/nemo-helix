@@ -475,6 +475,7 @@ async def retrieve_fileset(
     summary="Delete Fileset",
     status_code=HTTP_200_OK,
     responses={
+        HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Fileset not found"},
         HTTP_409_CONFLICT: {
             "description": "Fileset is referenced by a model or adapter entity",
             **_HTTP_EXCEPTION_DETAIL,
@@ -671,6 +672,7 @@ async def _delete_fileset_locked(
 
 @router.patch(
     "/v2/workspaces/{workspace}/filesets/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Fileset not found"}},
     summary="Update Fileset Metadata",
     response_model=FilesetOutput,
     status_code=HTTP_200_OK,
