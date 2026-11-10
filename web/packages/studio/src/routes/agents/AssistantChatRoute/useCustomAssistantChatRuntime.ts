@@ -65,7 +65,6 @@ interface CompleteAssistantMessageOptions {
   readonly collapseAssistantContent?: boolean;
 }
 
-// Kept as its own trailing text part so the error banner can tell it apart from the partial answer.
 const FAILED_RUN_EXPLANATION = 'NeMo Assistant stopped before completing.';
 
 const isAbortError = (error: unknown): boolean =>
