@@ -32,6 +32,7 @@ from nemo_evals.api.taskset_run_schemas import TasksetRunStatus
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.sdk.taskset_run_resources import NamedTask, TasksetRunResults
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
 from nemo_helix_plugin.jobs.client import JobsClient
 from nhx.testing import NemoRun
@@ -161,9 +162,9 @@ def parse_status(body: Mapping[str, Any]) -> StatusView:
     return _validated("dispatch", StatusView, _without_state(body), "`runs status --json`")
 
 
-def parse_results(body: Mapping[str, Any]) -> TasksetRunResults:
-    """``runs results --json``."""
-    return _validated("verifier", TasksetRunResults, _without_state(body), "`runs results --json`")
+def parse_results(body: Mapping[str, Any], stage: str = "verifier") -> TasksetRunResults:
+    """``runs results --json``; a schema mismatch fails with ``[stage]``."""
+    return _validated(stage, TasksetRunResults, _without_state(body), "`runs results --json`")
 
 
 def read_bundle(bundle_dir: Path) -> tuple[list[AgentEvalTrial], list[AgentEvalTaskScore]]:
@@ -365,9 +366,9 @@ class RunDriver:
         """``runs status <run> --json``, parsed."""
         return parse_status(self.cli_json("dispatch", "evals", "runs", "status", run_id, "--json", cap=cap))
 
-    def results(self, run_id: str, cap: float = 60) -> TasksetRunResults:
-        """``runs results <run> --json``, parsed."""
-        return parse_results(self.cli_json("verifier", "evals", "runs", "results", run_id, "--json", cap=cap))
+    def results(self, run_id: str, cap: float = 60, *, stage: str = "verifier") -> TasksetRunResults:
+        """``runs results <run> --json``, parsed; a failed read fails with ``[stage]``."""
+        return parse_results(self.cli_json(stage, "evals", "runs", "results", run_id, "--json", cap=cap), stage)
 
     def wait(self, step: str, run_id: str, *, cap: float, poll: float = 5.0) -> StatusView:
         """Poll ``runs status --json`` until the run is terminal; fail with its last state after ``cap``."""
@@ -389,6 +390,35 @@ class RunDriver:
                 states = {task.name: _value(task.task.phase) if task.task else "waiting" for task in status.tasks}
                 raise AssertionError(f"[dispatch] run {run_id} still {phase} after {cap:.0f} s; tasks: {states}")
             self._sleep(poll)
+
+    def wait_for[T](
+        self, stage: str, what: str, read: Callable[[], T], done: Callable[[T], bool], *, cap: float, poll: float = 2.0
+    ) -> T:
+        """Poll ``read()`` until ``done`` holds; fail with ``[stage]`` and the last value after ``cap``.
+
+        For a precondition, such as a Job being active before the test cancels it, instead of a fixed sleep.
+        """
+        deadline = min(self._clock() + cap, self.end)
+        while True:
+            value = read()
+            if done(value):
+                return value
+            if self._clock() + poll >= deadline:
+                raise AssertionError(f"[{stage}] {what} didn't happen within {cap:.0f} s; last: {value}")
+            self._sleep(poll)
+
+    def pause(self, seconds: float) -> None:
+        """Wait ``seconds``, to show something does *not* happen in that time; fails if the budget can't cover it."""
+        if self.end - self._clock() < seconds:
+            raise BudgetExhausted(f"[budget] no time left to wait {seconds:.0f} s")
+        self._sleep(seconds)
+
+    def job_status(self, name: str) -> str | None:
+        """A Job's status from the Jobs API, or None when there's no such Job."""
+        try:
+            return _value(JobsClient.from_client(self.sdk()).get_job(workspace=self.workspace, name=name).data().status)
+        except NotFoundError:
+            return None
 
     def task_jobs(self, status: StatusView) -> tuple[list[JobView], dict[str, int]]:
         """The run's task Jobs as the Jobs API lists them, and each named Job's attempt count.
@@ -681,3 +711,51 @@ def check_snapshot_unchanged(before: Snapshot, after: Snapshot) -> None:
         assert {k: getattr(now, k) for k in same} == {k: getattr(build, k) for k in same}, (
             f"[reuse] {name} was rebuilt: {build} -> {now}"
         )
+
+
+# --- Cancel paths (nightly only) --------------------------------------------------------------------------------
+
+
+def check_cancelled_while_queued(status: StatusView, jobs: Sequence[JobView]) -> None:
+    """E1: a run cancelled while its one task waited for a slot ends cancelled, and no task Job was ever created.
+
+    ``jobs`` is the Jobs API's list of the run's task Jobs.
+    """
+    assert status.run.phase == "cancelled", f"[cancel] queued run is {_value(status.run.phase)}, expected cancelled"
+    assert len(status.tasks) == 1, f"[cancel] expected 1 task, got {len(status.tasks)}"
+    row = status.tasks[0].task
+    phase, error = (_value(row.phase), row.error) if row else ("not created", None)
+    assert phase == "cancelled", f"[cancel] its task is {phase}: {error}"
+    assert not jobs, f"[cancel] a task Job was created for the queued run: {[job.name for job in jobs]}"
+
+
+def check_foreign_job_cancel(results: TasksetRunResults, cancelled_job: str) -> None:
+    """C3: cancelling one task Job from outside fails only that task; the run completes with a result over the rest.
+
+    The surviving task must have solved its task, not merely ended: a trial that timed out still leaves its Job
+    ``completed`` and its task ``succeeded``, with reward 0 and an error.
+    """
+    run = results.run
+    assert run.phase == "completed", f"[cancel] run is {_value(run.phase)}: {run.error}"
+    assert run.result_state == "ready", f"[cancel] run result_state {_value(run.result_state)}"
+    assert len(results.tasks) == 2, f"[cancel] expected 2 tasks, got {len(results.tasks)}"
+    rows = {task.task.job if task.task else None: task.task for task in results.tasks}
+    assert cancelled_job in rows, f"[cancel] {cancelled_job} isn't one of the run's task Jobs {sorted(map(str, rows))}"
+    for job, row in rows.items():
+        expected = ("failed", "job_cancelled") if job == cancelled_job else ("succeeded", None)
+        actual = (_value(row.phase), row.error) if row else ("not created", None)
+        assert actual == expected, (
+            f"[cancel] task Job {job} is {actual[0]} ({actual[1]}), expected {expected[0]} ({expected[1]})"
+        )
+    survivor = next(task for task in results.tasks if task.task is None or task.task.job != cancelled_job)
+    result = survivor.result
+    assert result is not None, f"[cancel] surviving task {survivor.name} has no result record"
+    reward, errors = score_mean(result, REWARD), result.summary.error_count if result.summary else None
+    assert (reward, errors) == (1.0, 0), (
+        f"[cancel] surviving task {survivor.name}: reward {reward} with {errors} errored trials, expected 1.0 "
+        "with none (did its oracle time out?)"
+    )
+    # The merge counts every task of the run; one without an accepted bundle adds no trials.
+    summary = results.result.summary if results.result else None
+    counts = (summary.task_count, summary.trial_count, summary.error_count) if summary else (None, None, None)
+    assert counts == (2, 1, 0), f"[cancel] the run's result has (tasks, trials, errors) {counts}, expected (2, 1, 0)"

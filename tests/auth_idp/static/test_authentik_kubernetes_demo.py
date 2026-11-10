@@ -279,8 +279,11 @@ def test_cpu_smoke_image_build_is_required_in_ci_without_e2e_opt_in() -> None:
     )
     assert "build-cpu-smoke-images" in ci["jobs"]["ci-status"]["needs"]
     assert "build-cpu-smoke-images" in ci["jobs"]["post-merge-image-status"]["needs"]
-    assert job["steps"] == e2e["jobs"]["build-cpu-smoke-images"]["steps"]
-    assert job["permissions"] == e2e["jobs"]["build-cpu-smoke-images"]["permissions"]
+    # Both build through the shared workflow with the same inputs, so they tag the same images.
+    e2e_job = e2e["jobs"]["build-cpu-smoke-images"]
+    assert job["uses"] == e2e_job["uses"] == "./.github/workflows/build-cpu-smoke-images.yaml"
+    assert job["with"] == e2e_job["with"]
+    assert job["permissions"] == e2e_job["permissions"]
 
 
 def test_builder_e2e_moves_to_opt_in_workflow_with_both_auth_modes() -> None:
