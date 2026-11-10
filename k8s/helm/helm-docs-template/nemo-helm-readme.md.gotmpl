@@ -43,6 +43,34 @@ Retain those exact values on future upgrades, including old version labels.
 The default `{}` preserves current behavior. This addresses claim labels only;
 the other migration requirements above still apply.
 
+## Embedded PostgreSQL credentials and isolation
+
+The embedded PostgreSQL is for evaluation and development, not production.
+New installations generate a random password when `postgresql.auth.password`
+is empty. Upgrades reuse the existing chart-managed Secret, including legacy
+passwords; upgrading does **not** rotate an existing `nemo` password. Helm must
+be able to look up that Secret. Offline upgrade renders must supply the current
+password or an `existingSecret` reference; a missing Secret fails rather than
+silently generating credentials incompatible with persisted database data.
+
+Use `postgresql.auth.existingSecret` and `existingSecretPasswordKey` to source
+credentials from a user-managed Secret. Neither changing a Secret nor setting
+`postgresql.auth.password` updates the role password in initialized PostgreSQL.
+For existing installations, back up the database and coordinate an authenticated
+role password change with the matching Secret update and API/controller
+restarts. Keep the existing PVC and verify old credentials no longer work.
+Changing Secret data alone does not automatically restart consumers.
+
+Set `networkPolicies.enabled=true` to enable PostgreSQL ingress isolation along
+with the other chart policies. A NetworkPolicy-enforcing CNI is required. Only
+same-release API and controller pods in the release namespace can reach the
+PostgreSQL pod on TCP 5432 by default; managed jobs are not allowed. Configure
+`networkPolicies.postgresql.extraIngress` for trusted additional database clients.
+Other Kubernetes policies can add allowances, and pod labels must not be
+controllable by untrusted workloads. The top-level switch remains off by default
+for connectivity compatibility, so install random credentials even when network
+isolation is not enabled. External databases require separately managed isolation.
+
 ## Platform Secrets Encryption Key
 
 The platform secrets service reads `NHX_SECRETS_DEFAULT_ENCRYPTION_KEY` from the

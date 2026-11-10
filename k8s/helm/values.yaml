@@ -272,6 +272,13 @@ networkPolicies:
     # -- Extra NetworkPolicy ingress rules appended to the API policy, for cluster-specific ingress controllers, gateways, monitoring, or debugging pods.
     extraIngress: []
 
+  # -- Ingress isolation for embedded PostgreSQL. Requires a NetworkPolicy-enforcing CNI and the top-level switch. Only same-release API and controller pods are allowed by default.
+  postgresql:
+    # -- Create the embedded PostgreSQL ingress policy.
+    enabled: true
+    # -- Additional ingress rules for cluster-specific database clients. Kubernetes NetworkPolicy allowances are additive.
+    extraIngress: []
+
   # -- NetworkPolicy configuration for the core controller pods.
   # @default -- This object has the following default values for core controller pod ingress isolation.
   controller:
@@ -416,7 +423,8 @@ postgresql:
   # -- PostgreSQL authentication configuration.
   auth:
     username: nemo
-    password: nemo
+    # -- PostgreSQL password. If empty, generate a random password on install and reuse the existing Secret on upgrade. This does not rotate passwords in an initialized database; coordinate role password changes and workload restarts separately.
+    password: ""
     database: nemohelix
     # -- Name of an existing secret containing the PostgreSQL password. If set, the chart does not create a secret.
     existingSecret: ""
