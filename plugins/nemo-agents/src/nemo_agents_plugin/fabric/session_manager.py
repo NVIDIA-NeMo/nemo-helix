@@ -17,6 +17,7 @@ from nemo_agents_plugin.fabric.environment import (
     create_deepagents_workspace,
     deepagents_workspace_config,
     ensure_local_workspace_dir,
+    preserve_deepagents_mcp_cwd,
 )
 from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
@@ -290,6 +291,10 @@ class FabricSessionManager:
         except FabricTranslationError as error:
             raise FabricRuntimeStartError(f"Fabric config translation failed: {error}") from error
 
+        if workspace_dir is not None:
+            preserve_deepagents_mcp_cwd(
+                fabric_config, workspace=(self._base_dir / self._agent_config.environment.workspace).resolve()
+            )
         await asyncio.to_thread(ensure_local_workspace_dir, agent_config, self._base_dir)
         if not streaming:
             return fabric_config, StreamingMethod.BUFFERED

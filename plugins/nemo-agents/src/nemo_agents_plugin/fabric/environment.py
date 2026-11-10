@@ -5,14 +5,17 @@
 
 import logging
 import os
+import re
 import shutil
 import stat
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.adapters import uses_default_deepagents_backend
+from nemo_fabric import FabricConfig
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,8 @@ RUNTIME_BASE_DIR_PREFIX = "nemo-agent-runtime"
 DEEPAGENTS_WORKSPACE_DIR = ".nemo-deepagents"
 DEEPAGENTS_SKILLS_DIR = ".agents/skills"
 _WORKSPACE_DEPENDENCY_DIRS = {".venv", "node_modules", "__pycache__"}
+_MCP_COMMAND_ENV_VAR_RE = re.compile(r"\$(\w+|\{[^}]*\})", re.ASCII)
+_MCP_STDIO_LAUNCHER = "import os, sys; os.chdir(sys.argv[1]); os.execvpe(sys.argv[2], sys.argv[2:], os.environ)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +195,24 @@ def deepagents_workspace_config(config: AgentConfig, *, base_dir: Path, workspac
     if runtime_config.skills is not None and runtime_config.skills.paths:
         runtime_config.skills.paths = [f"/{DEEPAGENTS_SKILLS_DIR}"]
     return runtime_config
+
+
+def preserve_deepagents_mcp_cwd(config: FabricConfig, *, workspace: Path) -> None:
+    """Keep local MCP processes at their original cwd when file tools move to a private workspace."""
+    if config.mcp is None:
+        return
+    runtime_env = {**os.environ, **(config.environment.env if config.environment is not None else {})}
+    for server in config.mcp.servers.values():
+        if server.transport != "stdio":
+            continue
+        # Match the adapter's expandvars/strip before moving the command into args.
+        command = _MCP_COMMAND_ENV_VAR_RE.sub(
+            lambda match: runtime_env.get(match.group(1).removeprefix("{").removesuffix("}"), match.group(0)),
+            server.url,
+        ).strip()
+        # Isolate only the launcher from Python startup hooks; exec retains the server's env.
+        server.args = ["-I", "-S", "-c", _MCP_STDIO_LAUNCHER, str(workspace), command, *server.args]
+        server.url = sys.executable
 
 
 def _copy_workspace_inputs(source: Path, target: Path, excluded: set[Path], *, follow_symlinks: bool = False) -> None:

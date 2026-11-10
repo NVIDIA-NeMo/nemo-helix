@@ -4,13 +4,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from nemo_agents_plugin.agent_config import AgentConfig
+from mcp.client.stdio import get_default_environment
+from nemo_agents_plugin.agent_config import AgentConfig, McpConfig, McpServerConfig
 from nemo_agents_plugin.fabric import environment, server, session_manager
 from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
@@ -453,6 +458,99 @@ async def test_deepagents_one_shot_invocations_get_private_workspaces(
     assert (workspace / "input.txt").read_text() == "original input"
     assert config == original_config
     assert await registry.count() == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("configured_workspace", ["workspace", "."])
+@pytest.mark.parametrize("command_kind", ["script", "module", "executable", "venv", "path", "env"])
+async def test_private_workspace_preserves_local_mcp_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, configured_workspace: str, command_kind: str
+) -> None:
+    config = _agent_config()
+    config.harnesses["hermes"].kind = "deepagents"
+    config.environment.workspace = configured_workspace
+    workspace = tmp_path / configured_workspace
+    workspace.mkdir(exist_ok=True)
+    (workspace / "input.txt").write_text("original MCP input")
+    (tmp_path / ".venv").symlink_to(sys.prefix, target_is_directory=True)
+    dependencies = tmp_path / "dependencies"
+    dependencies.mkdir()
+    (dependencies / "probe_dependency.py").write_text("VALUE = 'installed dependency'\n")
+    module = workspace / "local_tools"
+    module.mkdir()
+    script = module / "probe.py"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys, probe_dependency\n"
+        "from pathlib import Path\n"
+        "print(json.dumps(dict(cwd=os.getcwd(), input=Path('input.txt').read_text(), "
+        "args=sys.argv[1:], env=dict(os.environ), python=sys.executable, dependency=probe_dependency.VALUE)))\n"
+    )
+    script.chmod(0o755)
+    python = os.path.relpath(tmp_path / ".venv/bin/python", workspace)
+    script_path = "./local_tools/probe.py"
+    command, args = {
+        "script": (sys.executable, [script_path]),
+        "module": (sys.executable, ["-m", "local_tools.probe"]),
+        "executable": (script_path, []),
+        "venv": (python, [script_path]),
+        "path": ("python", [script_path]),
+        "env": (" ${MCP_TEST_PYTHON} ", [script_path]),
+    }[command_kind]
+    monkeypatch.setenv("MCP_TEST_PYTHON", "overridden-by-runtime-env")
+    config.environment.env["MCP_TEST_PYTHON"] = python
+    local = McpServerConfig(
+        transport="stdio",
+        url=command,
+        args=[*args, "argument with spaces", "$literal;value"],
+        env={
+            "MCP_TEST_VALUE": "configured value",
+            "PYTHONPATH": os.path.relpath(dependencies, workspace),
+            "PATH": f"{os.path.dirname(python)}{os.pathsep}{os.environ['PATH']}",
+        },
+    )
+    remote = McpServerConfig(
+        transport="streamable-http", url="https://tools.invalid/mcp", custom_headers={"X-Probe": "value"}
+    )
+    config.mcp = McpConfig(servers={"local": local, "remote": remote})
+    original_config = config.model_copy(deep=True)
+    child_env = {**get_default_environment(), **local.env, "PYTHONDONTWRITEBYTECODE": "1"}
+    expected = subprocess.run(
+        [python if command_kind == "env" else command, *local.args],
+        cwd=workspace,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    baseline = environment.prepare_deepagents_workspace_baseline(config, tmp_path)
+    fabric = _FakeFabric(_FakeRuntime(), method=StreamingMethod.BUFFERED)
+    manager = FabricSessionManager(
+        config,
+        base_dir=tmp_path,
+        session_registry=FabricSessionRegistry(),
+        workspace_baseline=baseline,
+        fabric=cast(Any, fabric),
+    )
+    session = await manager.open_session()
+    assert session.workspace_dir is not None
+    (session.workspace_dir / "input.txt").write_text("private file-tool input")
+    started_config = fabric.start_calls[0]["config"]
+    wrapped = started_config.mcp.servers["local"]
+    actual = subprocess.run(
+        [wrapped.url, *wrapped.args],
+        cwd=session.workspace_dir,
+        env={**get_default_environment(), **wrapped.env, "PYTHONDONTWRITEBYTECODE": "1"},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert json.loads(actual.stdout) == json.loads(expected.stdout)
+    assert wrapped.env == local.env
+    assert started_config.mcp.servers["remote"].url == remote.url
+    assert started_config.mcp.servers["remote"].custom_headers == remote.custom_headers
+    assert not (session.workspace_dir / ".venv").exists()
+    assert config == original_config
 
 
 @pytest.mark.asyncio
