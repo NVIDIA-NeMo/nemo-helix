@@ -166,7 +166,7 @@ async def test_cancelled_copy_finishes_before_workspace_removal(
         assert release.wait(timeout=5)
         return copy(source, target, **kwargs)
 
-    monkeypatch.setattr(environment.shutil, "copytree", slow_copy)
+    monkeypatch.setattr(environment, "shutil", SimpleNamespace(copytree=slow_copy, rmtree=environment.shutil.rmtree))
     opening = asyncio.create_task(private_manager.open_session())
     try:
         assert await asyncio.to_thread(started.wait, 5)

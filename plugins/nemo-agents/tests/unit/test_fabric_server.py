@@ -359,10 +359,12 @@ def test_startup_stages_skills_and_maps_runtime_paths(
     config["harnesses"]["hermes"]["kind"] = kind
     config["skills"] = {"paths": [skill_path]}
     start_runtime = AsyncMock(return_value=SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED))
-    monkeypatch.setattr(Fabric, "start_runtime", start_runtime)
+    fabric = Fabric()
+    monkeypatch.setattr(fabric, "start_runtime", start_runtime)
 
     app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
     with TestClient(app) as client:
+        app.state.session_manager._fabric = fabric
         assert client.portal is not None
         session = client.portal.call(app.state.session_manager.open_session)
         skills = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR
@@ -397,10 +399,12 @@ def test_startup_refreshes_skills_without_recapturing_workspace(
     config["skills"] = {"paths": [".agents/skills/review", ".agents/skills/retired"]}
     config_path = _write_agent_config(tmp_path, config)
     start_runtime = AsyncMock(return_value=SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED))
-    monkeypatch.setattr(Fabric, "start_runtime", start_runtime)
+    fabric = Fabric()
+    monkeypatch.setattr(fabric, "start_runtime", start_runtime)
 
     app = create_fabric_serving_app(config_path)
     with TestClient(app) as client:
+        app.state.session_manager._fabric = fabric
         baseline = app.state.workspace_baseline
         (tmp_path / ".agents/skills/review/SKILL.md").write_text("updated review")
         new_bundle = tmp_path / ".agents/skills/new"
@@ -419,6 +423,7 @@ def test_startup_refreshes_skills_without_recapturing_workspace(
 
     restarted = create_fabric_serving_app(config_path)
     with TestClient(restarted) as client:
+        restarted.state.session_manager._fabric = fabric
         assert restarted.state.workspace_baseline == baseline
         assert client.portal is not None
         session = client.portal.call(restarted.state.session_manager.open_session)
