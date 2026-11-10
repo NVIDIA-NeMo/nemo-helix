@@ -146,17 +146,22 @@ async def publish_snapshot(
 
     Call only after every submission check has passed on ``resolved``, which must be ``inputs``
     resolved inline, in the same order: this is the submission's first write.
+
+    Raises:
+        PermissionError: The submitter may not read the taskset, or write it or its tasks.
+        ValueError: The writes kept conflicting, or the evals service did not respond.
     """
     assert source.snapshot is not None
     ts_workspace, ts_name, _ = parse_subentity_ref(source.snapshot.root, workspace)
+    taskset_path = f"/apis/evals/v2/workspaces/{quote(ts_workspace, safe='')}/tasksets/{quote(ts_name, safe='')}"
     if authorize is not None:
         # One representative task path: the platform authorizes task writes per workspace collection.
         await authorize(
             "PUT", f"/apis/evals/v2/workspaces/{quote(ts_workspace, safe='')}/tasks/{quote(inputs[0].id, safe='')}"
         )
-        await authorize(
-            "PUT", f"/apis/evals/v2/workspaces/{quote(ts_workspace, safe='')}/tasksets/{quote(ts_name, safe='')}"
-        )
+        # Reading the current revision is how unchanged rows are skipped, so a snapshot needs both.
+        await authorize("GET", taskset_path)
+        await authorize("PUT", taskset_path)
     client = client_from_platform(async_client, AsyncEvaluatorClient)
     tasks_resource = AsyncEvaluatorTasksResource(client)
     tasksets_resource = AsyncEvaluatorTasksetsResource(client)
@@ -202,6 +207,10 @@ async def publish_snapshot(
             ),
             workspace=ts_workspace,
         )
+    except PermissionDeniedError as exc:
+        raise PermissionError(
+            f"publishing taskset {ts_workspace}/{ts_name} needs read and write access to its tasks and tasksets"
+        ) from exc
     except ConflictError as exc:
         raise ValueError(
             f"publishing taskset {ts_workspace}/{ts_name} kept conflicting with concurrent writes; resubmit"

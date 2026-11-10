@@ -269,9 +269,11 @@ def test_the_caller_authorizer_checks_every_read_and_write_before_any_write(ctx:
             )
         )
 
-    methods = {(method, path.split("/")[-2] if method == "PUT" else path) for method, path in checked}
+    methods = {(method, path.split("/")[-2] if "/evals/" in path else path) for method, path in checked}
     assert ("GET", "/apis/files/v2/workspaces/default/filesets/golden/-/gym/golden.jsonl") in methods
     assert ("PUT", "tasks") in methods
+    # Reading the previous revision is checked too, before the taskset write.
+    assert checked[-1] == ("GET", "/apis/evals/v2/workspaces/default/tasksets/golden-suite")
     assert _writes(ctx, "tasks") == _writes(ctx, "tasksets") == 0
 
 
