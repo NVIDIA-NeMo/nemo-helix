@@ -24,6 +24,7 @@ class _ExampleMethods:
     get_item = method(endpoints.get_item)
     update_item = method(endpoints.update_item)
     delete_item = method(endpoints.delete_item)
+    delete_item_by_id = method(endpoints.delete_item_by_id)
     count = method(endpoints.count)
     upload_blob = method(endpoints.upload_blob)
     download_blob = method(endpoints.download_blob)
@@ -32,6 +33,7 @@ class _ExampleMethods:
     get_middleware_config = method(endpoints.get_middleware_config)
     update_middleware_config = method(endpoints.update_middleware_config)
     delete_middleware_config = method(endpoints.delete_middleware_config)
+    delete_middleware_config_by_id = method(endpoints.delete_middleware_config_by_id)
 
 
 class ExampleClient(_ExampleMethods, NemoClient):
