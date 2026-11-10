@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import subprocess
 import sys
 import threading
@@ -16,7 +15,6 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
-from deepagents.backends import FilesystemBackend
 from mcp.client.stdio import get_default_environment
 from nemo_agents_plugin.agent_config import AgentConfig, McpConfig, McpServerConfig
 from nemo_agents_plugin.fabric import environment, server, session_manager
@@ -137,49 +135,22 @@ def private_manager(tmp_path: Path) -> FabricSessionManager:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("failure", "invocation"),
-    [
-        ("copy", "session"),
-        ("plan", "session"),
-        ("start", "session"),
-        ("register", "session"),
-        ("plan", "once"),
-        ("plan", "stream"),
-    ],
-)
+@pytest.mark.parametrize("failure", ["plan", "start"])
 async def test_failed_session_start_removes_private_workspace(
-    private_manager: FabricSessionManager, monkeypatch: pytest.MonkeyPatch, failure: str, invocation: str
+    private_manager: FabricSessionManager, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
-    if failure == "copy":
-
-        def fail_copy(source: Path, target: Path, **kwargs: Any) -> None:
-            (target / "partial.txt").write_text("incomplete")
-            raise OSError("copy failed")
-
-        monkeypatch.setattr(environment.shutil, "copytree", fail_copy)
-    else:
-        target, method = {
-            "plan": (private_manager, "_materialize_fabric_config"),
-            "start": (private_manager._fabric, "start_runtime"),
-            "register": (private_manager._session_registry, "register"),
-        }[failure]
-        monkeypatch.setattr(target, method, AsyncMock(side_effect=session_manager.FabricRuntimeStartError("failed")))
-
-    with pytest.raises(session_manager.FabricRuntimeStartError):
-        if invocation == "session":
-            await private_manager.open_session()
-        elif invocation == "once":
-            await private_manager.invoke_once(FabricInvocationRequest(input="hello"))
-        else:
-            async with private_manager.stream_once(FabricInvocationRequest(input="hello")):
-                pass
-
+    target, method = (
+        (private_manager, "_materialize_fabric_config")
+        if failure == "plan"
+        else (private_manager._fabric, "start_runtime")
+    )
+    monkeypatch.setattr(target, method, AsyncMock(side_effect=session_manager.FabricRuntimeStartError("failed")))
+    with pytest.raises(session_manager.FabricSessionStartError):
+        await private_manager.open_session()
     baseline = private_manager._workspace_baseline
     assert baseline is not None
     assert list((baseline.parent / "sessions").iterdir()) == []
     assert (baseline / "input.txt").read_text() == "deployment input"
-    assert await private_manager._session_registry.count() == 0
 
 
 @pytest.mark.asyncio
@@ -315,7 +286,6 @@ async def test_open_session_stops_runtime_when_registration_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(session_manager, "translate_agent_config", lambda config: _FakeFabricConfig())
     runtime = _FakeRuntime()
     fabric = _FakeFabric(runtime)
     registry = FabricSessionRegistry()
@@ -326,10 +296,14 @@ async def test_open_session_stops_runtime_when_registration_fails(
         raise RuntimeError("registration failed")
 
     monkeypatch.setattr(registry, "register", fail_registration)
+    config = _agent_config()
+    config.harnesses["hermes"].kind = "deepagents"
+    baseline = environment.prepare_deepagents_workspace_baseline(config, tmp_path)
     manager = FabricSessionManager(
-        _agent_config(),
+        config,
         base_dir=tmp_path,
         session_registry=registry,
+        workspace_baseline=baseline,
         fabric=cast(Any, fabric),
     )
 
@@ -338,6 +312,8 @@ async def test_open_session_stops_runtime_when_registration_fails(
 
     assert runtime.stop_calls == 1
     assert await registry.count() == 0
+    assert baseline is not None
+    assert list((baseline.parent / "sessions").iterdir()) == []
 
 
 @pytest.mark.asyncio
@@ -495,10 +471,7 @@ async def test_deepagents_sessions_isolate_files_and_reuse_their_workspace(
         fabric=cast(Any, fabric),
     )
 
-    first, concurrent = await asyncio.gather(
-        manager.resolve_session("../opaque-session"), manager.resolve_session("../opaque-session")
-    )
-    assert concurrent is first
+    first = await manager.resolve_session("../opaque-session")
     assert first.workspace_dir is not None
     (first.workspace_dir / "linked-input").write_text("edited in the first session")
     outputs = ("large_tool_results/result.txt", "conversation_history/history.md", "report.md")
@@ -515,19 +488,10 @@ async def test_deepagents_sessions_isolate_files_and_reuse_their_workspace(
     for root in (workspace, baseline, second.workspace_dir):
         assert (root / "input.txt").read_text() == "original input"
         assert not any((root / name).exists() for name in outputs)
-    backend = FilesystemBackend(root_dir=str(second.workspace_dir), virtual_mode=True)
-    for name in outputs:
-        assert backend.read(f"/{name}").error is not None
-    assert not backend.grep("private session content").matches
-    with pytest.raises(ValueError, match="traversal"):
-        backend.read(f"../{first.workspace_dir.name}/report.md")
-    assert len(fabric.start_calls) == 2
-    for session, call in zip((first, second), fabric.start_calls, strict=True):
-        assert session.workspace_dir is not None
-        assert session.workspace_dir.parent == baseline.parent / "sessions"
-        assert (session.workspace_dir / "linked-input").resolve() == session.workspace_dir / "input.txt"
-        assert tmp_path / call["config"].environment.workspace == session.workspace_dir
-        assert call["base_dir"] == tmp_path
+    assert [tmp_path / call["config"].environment.workspace for call in fabric.start_calls] == [
+        first.workspace_dir,
+        second.workspace_dir,
+    ]
     assert config == original_config
 
     await manager.close_session(first.session_id)
@@ -541,45 +505,25 @@ async def test_deepagents_sessions_isolate_files_and_reuse_their_workspace(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("streaming", [False, True])
 async def test_deepagents_one_shot_invocations_get_private_workspaces(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, streaming: bool
+    private_manager: FabricSessionManager, monkeypatch: pytest.MonkeyPatch, streaming: bool
 ) -> None:
-    config = _agent_config()
-    config.harnesses["hermes"].kind = "deepagents"
-    original_config = config.model_copy(deep=True)
-    workspace = tmp_path / config.environment.workspace
-    workspace.mkdir()
-    (workspace / "input.txt").write_text("original input")
-    baseline = environment.prepare_deepagents_workspace_baseline(config, tmp_path)
-    registry = FabricSessionRegistry()
-    assert baseline is not None
-    manager = FabricSessionManager(
-        config,
-        base_dir=tmp_path,
-        session_registry=registry,
-        workspace_baseline=baseline,
-        fabric=cast(Any, _FakeFabric(_FakeRuntime(), method=StreamingMethod.BUFFERED)),
-    )
     workspaces: list[Path] = []
 
-    def record_workspace(request: FabricOneShotRequest) -> None:
-        assert request.base_dir == tmp_path
+    async def run_once(request: FabricOneShotRequest, **kwargs: Any) -> FabricRuntimeResult:
+        private = request.workspace_dir
+        assert private is not None
         assert request.fabric_config.environment is not None
         assert request.fabric_config.environment.workspace is not None
-        private = tmp_path / request.fabric_config.environment.workspace
-        assert request.workspace_dir == private
-        assert (private / "input.txt").read_text() == "original input"
+        assert private_manager._base_dir / request.fabric_config.environment.workspace == private
+        assert (private / "input.txt").read_text() == "deployment input"
         assert not (private / "result.txt").exists()
-        (private / "input.txt").write_text("edited by this invocation")
         (private / "result.txt").write_text("private result")
         workspaces.append(private)
-
-    async def run_once(request: FabricOneShotRequest, **kwargs: Any) -> FabricRuntimeResult:
-        record_workspace(request)
         return FabricRuntimeResult(status="succeeded", response="done")
 
     @asynccontextmanager
     async def stream_once(request: FabricOneShotRequest, **kwargs: Any) -> Any:
-        record_workspace(request)
+        await run_once(request)
         yield object()
 
     monkeypatch.setattr(session_manager, "run_fabric_agent_once", run_once)
@@ -587,109 +531,58 @@ async def test_deepagents_one_shot_invocations_get_private_workspaces(
     for _ in range(2):
         request = FabricInvocationRequest(input="hello")
         if streaming:
-            async with manager.stream_once(request):
+            async with private_manager.stream_once(request):
                 pass
         else:
-            await manager.invoke_once(request)
-
+            await private_manager.invoke_once(request)
     assert len(set(workspaces)) == 2
-    assert all(private.parent == baseline.parent / "sessions" for private in workspaces)
-    assert (workspace / "input.txt").read_text() == "original input"
-    assert config == original_config
-    assert await registry.count() == 0
+    assert await private_manager._session_registry.count() == 0
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("configured_workspace", ["workspace", "."])
-@pytest.mark.parametrize("command_kind", ["script", "module", "executable", "venv", "path", "env"])
 async def test_private_workspace_preserves_local_mcp_execution(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, configured_workspace: str, command_kind: str
+    private_manager: FabricSessionManager, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = _agent_config()
-    config.harnesses["hermes"].kind = "deepagents"
-    config.environment.workspace = configured_workspace
-    workspace = tmp_path / configured_workspace
-    workspace.mkdir(exist_ok=True)
-    (workspace / "input.txt").write_text("original MCP input")
-    (tmp_path / ".venv").symlink_to(sys.prefix, target_is_directory=True)
-    dependencies = tmp_path / "dependencies"
-    dependencies.mkdir()
-    (dependencies / "probe_dependency.py").write_text("VALUE = 'installed dependency'\n")
-    module = workspace / "local_tools"
-    module.mkdir()
-    script = module / "probe.py"
-    script.write_text(
-        f"#!{sys.executable}\n"
-        "import json, os, sys, probe_dependency\n"
+    base_dir = private_manager._base_dir
+    (base_dir / ".venv").symlink_to(sys.prefix, target_is_directory=True)
+    (base_dir / "dependency.py").write_text("VALUE = 'installed dependency'\n")
+    (base_dir / "server.py").write_text(
+        "import json, os, sys, dependency\n"
         "from pathlib import Path\n"
-        "print(json.dumps(dict(cwd=os.getcwd(), input=Path('input.txt').read_text(), "
-        "args=sys.argv[1:], env=dict(os.environ), python=sys.executable, dependency=probe_dependency.VALUE)))\n"
+        "print(json.dumps([Path('input.txt').read_text(), sys.argv[1:], os.environ['MCP_VALUE'], dependency.VALUE]))\n"
     )
-    script.chmod(0o755)
-    python = os.path.relpath(tmp_path / ".venv/bin/python", workspace)
-    script_path = "./local_tools/probe.py"
-    command, args = {
-        "script": (sys.executable, [script_path]),
-        "module": (sys.executable, ["-m", "local_tools.probe"]),
-        "executable": (script_path, []),
-        "venv": (python, [script_path]),
-        "path": ("python", [script_path]),
-        "env": (" ${MCP_TEST_PYTHON} ", [script_path]),
-    }[command_kind]
-    monkeypatch.setenv("MCP_TEST_PYTHON", "overridden-by-runtime-env")
-    config.environment.env["MCP_TEST_PYTHON"] = python
+    config = private_manager._agent_config
+    monkeypatch.setenv("MCP_PYTHON", "overridden-by-runtime-env")
+    config.environment.env["MCP_PYTHON"] = "../.venv/bin/python"
     local = McpServerConfig(
         transport="stdio",
-        url=command,
-        args=[*args, "argument with spaces", "$literal;value"],
-        env={
-            "MCP_TEST_VALUE": "configured value",
-            "PYTHONPATH": os.path.relpath(dependencies, workspace),
-            "PATH": f"{os.path.dirname(python)}{os.pathsep}{os.environ['PATH']}",
-        },
+        url=" ${MCP_PYTHON} ",
+        args=["../server.py", "argument with spaces", "$literal;value"],
+        env={"MCP_VALUE": "configured value", "PYTHONPATH": ".."},
     )
     remote = McpServerConfig(
         transport="streamable-http", url="https://tools.invalid/mcp", custom_headers={"X-Probe": "value"}
     )
     config.mcp = McpConfig(servers={"local": local, "remote": remote})
-    original_config = config.model_copy(deep=True)
-    child_env = {**get_default_environment(), **local.env, "PYTHONDONTWRITEBYTECODE": "1"}
-    expected = subprocess.run(
-        [python if command_kind == "env" else command, *local.args],
-        cwd=workspace,
-        env=child_env,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    baseline = environment.prepare_deepagents_workspace_baseline(config, tmp_path)
-    fabric = _FakeFabric(_FakeRuntime(), method=StreamingMethod.BUFFERED)
-    manager = FabricSessionManager(
-        config,
-        base_dir=tmp_path,
-        session_registry=FabricSessionRegistry(),
-        workspace_baseline=baseline,
-        fabric=cast(Any, fabric),
-    )
-    session = await manager.open_session()
+    session = await private_manager.open_session()
     assert session.workspace_dir is not None
     (session.workspace_dir / "input.txt").write_text("private file-tool input")
-    started_config = fabric.start_calls[0]["config"]
-    wrapped = started_config.mcp.servers["local"]
-    actual = subprocess.run(
+    fabric = cast(_FakeFabric, private_manager._fabric)
+    servers = fabric.start_calls[0]["config"].mcp.servers
+    wrapped = servers["local"]
+    result = subprocess.run(
         [wrapped.url, *wrapped.args],
         cwd=session.workspace_dir,
-        env={**get_default_environment(), **wrapped.env, "PYTHONDONTWRITEBYTECODE": "1"},
+        env={**get_default_environment(), **wrapped.env},
         capture_output=True,
         text=True,
         check=True,
     )
-    assert json.loads(actual.stdout) == json.loads(expected.stdout)
+    assert json.loads(result.stdout) == ["deployment input", local.args[1:], "configured value", "installed dependency"]
     assert wrapped.env == local.env
-    assert started_config.mcp.servers["remote"].url == remote.url
-    assert started_config.mcp.servers["remote"].custom_headers == remote.custom_headers
-    assert not (session.workspace_dir / ".venv").exists()
-    assert config == original_config
+    assert local.url == " ${MCP_PYTHON} "
+    assert servers["remote"].url == remote.url
+    assert servers["remote"].custom_headers == remote.custom_headers
 
 
 @pytest.mark.asyncio

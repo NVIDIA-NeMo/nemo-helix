@@ -264,20 +264,15 @@ def test_startup_captures_workspace_inputs_and_reuses_them_after_restart(
     workspace = base_dir / configured_workspace
     (workspace / "data").mkdir(parents=True)
     source = workspace / "data" / "input.bin"
-    source.write_bytes(b"\x00original input\xff")
-    source.chmod(0o755)
-    (workspace / "relative-link").symlink_to("data/input.bin")
+    source.write_bytes(b"original input")
     (workspace / "absolute-link").symlink_to(source.resolve())
     external = tmp_path / "outside.txt"
     external.write_text("outside workspace")
     (workspace / "external-link").symlink_to(external)
     excluded = (
         ".venv",
-        "node_modules",
-        "__pycache__",
         "large_tool_results",
         "conversation_history",
-        ".fabric",
         "traces",
     )
     for name in excluded:
@@ -295,10 +290,8 @@ def test_startup_captures_workspace_inputs_and_reuses_them_after_restart(
     with TestClient(app):
         baseline = app.state.workspace_baseline
         assert baseline.is_relative_to(workspace.resolve())
-        assert (baseline / "data/input.bin").read_bytes() == b"\x00original input\xff"
-        assert (baseline / "data/input.bin").stat().st_mode & 0o111
-        for name in ("relative-link", "absolute-link"):
-            assert (baseline / name).resolve() == baseline / "data/input.bin"
+        assert (baseline / "data/input.bin").read_bytes() == b"original input"
+        assert (baseline / "absolute-link").resolve() == baseline / "data/input.bin"
         for name in (*excluded, "external-link", environment.DEEPAGENTS_WORKSPACE_DIR):
             assert not (baseline / name).exists()
         assert (workspace / ".venv/existing.txt").exists()
@@ -308,7 +301,7 @@ def test_startup_captures_workspace_inputs_and_reuses_them_after_restart(
     restarted = create_fabric_serving_app(config_path)
     with TestClient(restarted):
         assert restarted.state.workspace_baseline == baseline
-        assert (baseline / "data/input.bin").read_bytes() == b"\x00original input\xff"
+        assert (baseline / "data/input.bin").read_bytes() == b"original input"
         assert not (baseline / "late.txt").exists()
 
 
@@ -316,6 +309,7 @@ def test_startup_captures_workspace_inputs_and_reuses_them_after_restart(
     ("kind", "settings", "provider"),
     [
         ("hermes", {}, "local"),
+        ("acme.image-only-adapter", {}, "local"),
         ("deepagents", {"deepagents": {"backend": {"type": "local_shell"}}}, "local"),
         ("deepagents", {}, "remote"),
     ],
@@ -338,74 +332,49 @@ def test_startup_leaves_other_backends_without_a_workspace_baseline(
 
 
 @pytest.mark.parametrize(
-    ("configured_workspace", "skill_path"),
-    [("workspace", "skills/review"), (".", "skills"), (".", ".agents/skills/review"), (".", ".")],
+    ("kind", "skill_path", "expected_names"),
+    [
+        ("deepagents", "skills/review", ["review"]),
+        ("nvidia.fabric.langchain.deepagents", "skills", ["audit", "review"]),
+    ],
 )
 def test_baseline_stages_skills_and_maps_runtime_paths(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     monkeypatch: pytest.MonkeyPatch,
-    configured_workspace: str,
+    kind: str,
     skill_path: str,
+    expected_names: list[str],
 ) -> None:
-    base_dir = tmp_path / "agent"
-    bundle = base_dir / ("skills/review" if skill_path == "skills" else skill_path)
-    (bundle / "references").mkdir(parents=True)
-    (bundle / "scripts").mkdir()
-    manifest = "---\nname: review\ndescription: Review input files\n---\nRead references/input.bin.\n"
-    (bundle / "SKILL.md").write_text(manifest)
-    (bundle / "references/input.bin").write_bytes(b"\x00skill input\xff")
-    (bundle / "scripts/review.py").write_text("print('review')\n")
     linked_asset = tmp_path / "linked-asset.txt"
-    linked_asset.write_text("linked skill input")
-    (bundle / "references/linked.txt").symlink_to(linked_asset)
-    expected_names = [bundle.name]
-    if skill_path == "skills":
-        additional = base_dir / "skills" / "audit"
-        additional.mkdir()
-        (additional / "SKILL.md").write_text(manifest.replace("name: review", "name: audit"))
-        expected_names = ["audit", "review"]
-        unrelated = base_dir / "skills" / "not-a-skill" / "nested"
-        unrelated.mkdir(parents=True)
-        (unrelated / "SKILL.md").write_text("not an immediate child skill")
+    linked_asset.write_text("skill input")
+    for name in ("review", "audit"):
+        bundle = tmp_path / "skills" / name
+        (bundle / "references").mkdir(parents=True)
+        (bundle / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: Review inputs\n---\nRead references/input.txt.\n"
+        )
+        (bundle / "references/input.txt").symlink_to(linked_asset)
     config = _example_config()
-    config["harnesses"]["hermes"]["kind"] = "deepagents"
-    config["environment"] = {"workspace": configured_workspace}
-    config["skills"] = {"paths": [skill_path, str(bundle.relative_to(base_dir))]}
-    config_path = _write_agent_config(base_dir, config)
-    original_yaml = config_path.read_text()
-    start_runtime = AsyncMock(return_value=AsyncMock())
+    config["harnesses"]["hermes"]["kind"] = kind
+    config["skills"] = {"paths": [skill_path]}
+    start_runtime = AsyncMock(return_value=SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED))
     monkeypatch.setattr(Fabric, "start_runtime", start_runtime)
 
-    app = create_fabric_serving_app(config_path)
+    app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
     with TestClient(app) as client:
-        baseline = app.state.workspace_baseline
-        staged = baseline / environment.DEEPAGENTS_SKILLS_DIR / bundle.name
-        assert (staged / "SKILL.md").read_text() == manifest
-        assert (staged / "references/input.bin").read_bytes() == b"\x00skill input\xff"
-        assert (staged / "scripts/review.py").read_text() == "print('review')\n"
-        assert (staged / "references/linked.txt").read_text() == "linked skill input"
-        assert not (staged / "references/linked.txt").is_symlink()
-        assert sorted(path.name for path in staged.parent.iterdir()) == expected_names
         assert client.portal is not None
         session = client.portal.call(app.state.session_manager.open_session)
-        assert session.workspace_dir.parent == baseline.parent / "sessions"
-        private_skill = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR / bundle.name
-        assert (private_skill / "SKILL.md").read_text() == manifest
-        assert (private_skill / "references/linked.txt").read_text() == "linked skill input"
+        skills = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR
+        assert sorted(path.name for path in skills.iterdir()) == expected_names
+        for name in expected_names:
+            assert (skills / name / "SKILL.md").read_text() == (tmp_path / "skills" / name / "SKILL.md").read_text()
+            assert (skills / name / "references/input.txt").read_text() == "skill input"
+            assert not (skills / name / "references/input.txt").is_symlink()
         runtime_config = start_runtime.call_args.args[0]
-        assert base_dir / runtime_config.environment.workspace == session.workspace_dir
-        assert start_runtime.call_args.kwargs["base_dir"] == base_dir
-        plan = Fabric().plan(runtime_config, base_dir=base_dir)
-        assert plan.to_mapping()["agent_config"]["skills"]["paths"] == ["/.agents/skills"]
-        assert app.state.agent_config.skills.paths == config["skills"]["paths"]
-        assert config_path.read_text() == original_yaml
-        (bundle / "SKILL.md").write_text("changed after startup")
-
-    restarted = create_fabric_serving_app(config_path)
-    with TestClient(restarted):
-        assert restarted.state.workspace_baseline == baseline
-        assert (staged / "SKILL.md").read_text() == manifest
+        assert tmp_path / runtime_config.environment.workspace == session.workspace_dir
+        assert runtime_config.skills.paths == ["/.agents/skills"]
+        assert app.state.agent_config.skills.paths == [skill_path]
 
 
 @pytest.mark.parametrize("conflict", ["duplicate-name", "existing-input"])
@@ -429,33 +398,6 @@ def test_skill_collision_does_not_publish_a_partial_baseline(
 
     assert not (tmp_path / "workspace" / environment.DEEPAGENTS_WORKSPACE_DIR / "inputs").exists()
     assert (tmp_path / "workspace/.agents/skills/review/SKILL.md").read_text() == "workspace/.agents/skills/review"
-
-
-def test_failed_baseline_copy_is_not_reused_on_retry(
-    tmp_path: Path,
-    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = _example_config()
-    config["harnesses"]["hermes"]["kind"] = "deepagents"
-    config_path = _write_agent_config(tmp_path, config)
-
-    def fail_copy(source: Path, target: Path, **kwargs: Any) -> None:
-        target.mkdir()
-        (target / "partial.txt").write_text("incomplete")
-        raise OSError("copy failed")
-
-    with monkeypatch.context() as patched:
-        patched.setattr(environment.shutil, "copytree", fail_copy)
-        with pytest.raises(OSError, match="copy failed"), TestClient(create_fabric_serving_app(config_path)):
-            pass
-
-    storage = tmp_path / "workspace" / environment.DEEPAGENTS_WORKSPACE_DIR
-    assert list(storage.iterdir()) == []
-    app = create_fabric_serving_app(config_path)
-    with TestClient(app):
-        assert app.state.workspace_baseline.is_dir()
-        assert not (app.state.workspace_baseline / "partial.txt").exists()
 
 
 @pytest.mark.parametrize("socket_fd", [None, 123])

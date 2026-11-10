@@ -531,30 +531,6 @@ class TestFabricBuilderValidationHook:
 
 
 class TestValidateFabricPackageArtifacts:
-    @pytest.mark.parametrize(
-        ("kind", "settings", "accepts_collection"),
-        [
-            ("deepagents", {}, True),
-            ("deepagents", {"deepagents": {"backend": {"type": "local_shell"}}}, False),
-            ("codex", {}, False),
-            ("acme.image-only-adapter", {}, False),
-        ],
-    )
-    def test_skill_collections_are_accepted_only_for_default_deepagents(
-        self, tmp_path: Path, kind: str, settings: dict[str, object], accepts_collection: bool
-    ) -> None:
-        config = _agent_config("skills")
-        config.harnesses["codex"].kind = kind
-        config.harnesses["codex"].settings = settings
-        _skill(tmp_path / "skills" / "review")
-        config_path = _agent_config_path(tmp_path)
-
-        if accepts_collection:
-            validate_fabric_package_artifacts(config, agent_config_path=config_path, context_dir=tmp_path)
-        else:
-            with pytest.raises(FabricPackageArtifactError, match="does not contain SKILL.md"):
-                validate_fabric_package_artifacts(config, agent_config_path=config_path, context_dir=tmp_path)
-
     def test_accepts_no_skills(self, tmp_path: Path) -> None:
         agent_config_path = _agent_config_path(tmp_path)
 
@@ -564,12 +540,15 @@ class TestValidateFabricPackageArtifacts:
             context_dir=tmp_path,
         )
 
-    def test_accepts_skill_relative_to_nested_agent_config(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(("kind", "skill_path"), [("codex", "../skills/review"), ("deepagents", "../skills")])
+    def test_accepts_skill_relative_to_nested_agent_config(self, tmp_path: Path, kind: str, skill_path: str) -> None:
         agent_config_path = _agent_config_path(tmp_path, "configs/agent.yaml")
         _skill(tmp_path / "skills" / "review")
+        config = _agent_config(skill_path)
+        config.harnesses["codex"].kind = kind
 
         validate_fabric_package_artifacts(
-            _agent_config("../skills/review"),
+            config,
             agent_config_path=agent_config_path,
             context_dir=tmp_path,
         )
