@@ -443,8 +443,6 @@ nemo evals agent-evaluate --spec-file gym_fileset_eval.json
 - `fileset` names one file: `workspace/fileset#path/to/file.jsonl`. A whole FileSet or a glob is
   refused. The FileSet can be backed by external storage such as your own S3 bucket.
 - `snapshot` is optional. Without it, the tasks run inline and nothing is stored but the job.
-  With it, the submitter also needs to read and write tasks and tasksets in the snapshot's
-  workspace.
 
 A file may be at most 64 MiB and 50,000 rows, because conversion runs inside the Evals API while the
 submission waits.
@@ -466,8 +464,8 @@ Each taskset revision records the file it came from in its metadata (`source_fil
 revision built from a given file. Members are pinned to the exact task revisions the submission
 published, and each task in the job spec records the stored revision it was frozen from.
 
-To snapshot, the submitter needs to read the source FileSet and write tasks and tasksets in the
-taskset's workspace. It also needs to create FileSets there, because the first task in a workspace
+To snapshot, the submitter needs to read the source FileSet and to read and write tasks and tasksets
+in the taskset's workspace. It also needs to create FileSets there, because the first task in a workspace
 stores the Gym reward metric's bundle.
 
 The first snapshot of a file writes one task per row, so for thousands of rows it can take minutes;
