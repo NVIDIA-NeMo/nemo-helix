@@ -9,11 +9,9 @@ import {
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { Cloud, Db } from '@nemo/icons/icons';
-import {
-  FilesetPurpose,
-  StorageConfigType,
-  type FilesetOutput as Dataset,
-} from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput as Dataset } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
+import { StorageConfigType } from '@nemo/sdk/generated/platform/schema/StorageConfigType';
 import { type DropdownEntry, Flex, Tag, Text } from '@nvidia/foundations-react-core';
 import { PURPOSE_LABELS, PURPOSE_TAG_COLORS } from '@studio/components/DatasetsTable/constants';
 import { getStorageBackend, getStoragePath } from '@studio/components/DatasetsTable/helpers';

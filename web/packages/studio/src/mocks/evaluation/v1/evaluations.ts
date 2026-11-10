@@ -1,11 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  type EvaluateJob,
-  type EvaluateJobsPage,
-  HelixJobStatus,
-} from '@nemo/sdk/generated/evals/schema';
+import type { EvaluateJob, EvaluateJobsPage } from '@nemo/sdk/generated/evals/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/evals/schema/HelixJobStatus';
 
 export const mockEvalConfigOnline1 = {
   id: 'eval-config-online-1',

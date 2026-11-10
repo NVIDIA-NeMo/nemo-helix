@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  FilesetPurpose,
-  type FilesetOutput,
-  type HuggingfaceStorageConfig,
-  type LocalStorageConfig,
-  type NGCStorageConfig,
+import type {
+  FilesetOutput,
+  HuggingfaceStorageConfig,
+  LocalStorageConfig,
+  NGCStorageConfig,
 } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { getModelSource, isRootReadme, parseReadme } from '@studio/routes/FilesetDetailRoute/utils';
 
 const makeFileset = (storage: FilesetOutput['storage']): FilesetOutput => ({

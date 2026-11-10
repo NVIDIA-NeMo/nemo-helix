@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
-import { FilesetPurpose, type FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
 import { DatasetsTable } from '@studio/components/DatasetsTable';
 import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';

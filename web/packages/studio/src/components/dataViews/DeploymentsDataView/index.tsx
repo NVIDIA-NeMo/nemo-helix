@@ -20,11 +20,8 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useModelsListDeployments } from '@nemo/sdk/generated/platform/model-deployments';
-import {
-  type ModelDeployment,
-  type ModelDeploymentFilter,
-  ModelDeploymentStatus,
-} from '@nemo/sdk/generated/platform/schema';
+import type { ModelDeployment, ModelDeploymentFilter } from '@nemo/sdk/generated/platform/schema';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import { keepPreviousData } from '@tanstack/react-query';
 import { type ComponentProps, type FC, useCallback } from 'react';

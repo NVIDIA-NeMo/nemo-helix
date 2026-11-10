@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { UnslothOptimizerSpecOptim } from '@nemo/sdk/generated/customizer/schema';
+import { UnslothOptimizerSpecOptim } from '@nemo/sdk/generated/customizer/schema/UnslothOptimizerSpecOptim';
 import { UNSLOTH_GRADIENT_CHECKPOINTING_ITEMS } from '@studio/components/NewCustomizationForm/constants';
 import { selectItems } from '@studio/util/forms/selectItems';
 

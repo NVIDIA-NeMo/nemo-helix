@@ -4,7 +4,7 @@
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
 import { agentOptimizationListRunStrategyJobResults } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import { filesDownloadFile, filesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
-import { FileStorageType } from '@nemo/sdk/generated/platform/schema';
+import { FileStorageType } from '@nemo/sdk/generated/platform/schema/FileStorageType';
 import Papa from 'papaparse';
 
 const SUMMARY_FILE = 'study_summary.json';

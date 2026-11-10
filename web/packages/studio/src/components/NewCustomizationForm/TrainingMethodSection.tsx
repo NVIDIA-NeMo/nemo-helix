@@ -6,11 +6,9 @@ import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/
 import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { RadioCard } from '@nemo/common/src/components/RadioCard';
-import {
-  AutomodelTrainingSpecFinetuningType,
-  AutomodelTrainingSpecTrainingType,
-  UnslothTrainingSpecFinetuningType,
-} from '@nemo/sdk/generated/customizer/schema';
+import { AutomodelTrainingSpecFinetuningType } from '@nemo/sdk/generated/customizer/schema/AutomodelTrainingSpecFinetuningType';
+import { AutomodelTrainingSpecTrainingType } from '@nemo/sdk/generated/customizer/schema/AutomodelTrainingSpecTrainingType';
+import { UnslothTrainingSpecFinetuningType } from '@nemo/sdk/generated/customizer/schema/UnslothTrainingSpecFinetuningType';
 import { RadioGroupRoot, Stack, Text } from '@nvidia/foundations-react-core';
 import { TEACHER_PRECISION_ITEMS } from '@studio/components/NewCustomizationForm/constants';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';

@@ -5,15 +5,15 @@ import { useProviderReady } from '@nemo/sdk/generated/platform/inference-gateway
 import { useModelsGetDeploymentConfigVersion } from '@nemo/sdk/generated/platform/model-deployment-configs';
 import { useModelsGetLatestDeployment } from '@nemo/sdk/generated/platform/model-deployments';
 import { useModelsGetProvider } from '@nemo/sdk/generated/platform/model-providers';
-import {
-  type Adapter,
-  Engine,
-  type ModelDeployment,
-  type ModelDeploymentConfig,
-  ModelDeploymentStatus,
-  type ModelEntity,
-  type ModelProvider,
+import type {
+  Adapter,
+  ModelDeployment,
+  ModelDeploymentConfig,
+  ModelEntity,
+  ModelProvider,
 } from '@nemo/sdk/generated/platform/schema';
+import { Engine } from '@nemo/sdk/generated/platform/schema/Engine';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 import { useGetVirtualModel } from '@nemo/sdk/generated/platform/virtual-models';
 import { useDeleteDeploymentAndConfig } from '@studio/routes/DeploymentsListRoute/useDeleteDeploymentAndConfig';
 import { ServedView } from '@studio/routes/ModelDetailRoute/DeploymentTab/ServedView';

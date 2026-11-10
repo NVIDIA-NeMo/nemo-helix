@@ -6,7 +6,7 @@ import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwi
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { Trash, Close } from '@nemo/icons/icons';
-import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
+import { SamplerType } from '@nemo/sdk/generated/data-designer/schema/SamplerType';
 import { Banner, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { ICON_COLOR_CLASS } from '@studio/components/AddColumnPalette/constants';
 import { SeedDatasetConfig } from '@studio/components/ColumnConfigPanel/SeedDatasetConfig';

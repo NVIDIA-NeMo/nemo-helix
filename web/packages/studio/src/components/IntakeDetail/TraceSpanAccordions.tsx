@@ -4,13 +4,13 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { useListAnnotations } from '@nemo/sdk/generated/platform/annotations';
-import {
-  AnnotationSortField,
-  type FeedbackAnnotationInputValue,
-  type Span,
-  SpanStatus,
-  type Trace,
+import type {
+  FeedbackAnnotationInputValue,
+  Span,
+  Trace,
 } from '@nemo/sdk/generated/platform/schema';
+import { AnnotationSortField } from '@nemo/sdk/generated/platform/schema/AnnotationSortField';
+import { SpanStatus } from '@nemo/sdk/generated/platform/schema/SpanStatus';
 import {
   type ListSpansQueryError,
   useGetSpan,
