@@ -26,7 +26,7 @@ from nemo_evals._fileset_receipt import FilesetReceipt
 from nemo_evals.api.schemas import AgentRef, TaskInputs, TaskMetadataList, TaskRef, TasksetRef
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
-from nemo_evals.filesets import FilesetRef
+from nemo_evals.filesets import FilesetRef, is_fileset_glob_pattern
 from nemo_evals.jobs.gateway_agents import GatewayAgentEnv, gateway_agent_env, validate_gateway_env
 from nemo_evals.jobs.publication_spec import PublicationSpec
 from nemo_evals.metric_refs import MetricRefOrInline
@@ -825,6 +825,45 @@ def target_agent_identity(target: Target | Model | AgentBase | ModelRef | None) 
     return None, None
 
 
+class FilesetTaskSource(BaseModel):
+    """A Gym jsonl dataset file in a FileSet, converted into tasks at submission, optionally published first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fileset: FilesetRef = Field(
+        description="The dataset file, as `workspace/fileset#path/to/file.jsonl`. One file only: a whole "
+        "FileSet or a glob is refused. It is read once, as the submitter, at submission. Each distinct "
+        "row becomes one task, `gym-<row content hash>`, scored by the Gym reward. Requires a `gym` target.",
+    )
+    snapshot: TasksetRef | None = Field(
+        default=None,
+        description="Taskset to publish the file's tasks as, `workspace/name` or `name`; it is created if "
+        "absent, and tasks are written to its workspace. Each submission publishes a revision only when "
+        "the file changed, and the evaluation runs exactly the published tasks. Omit to run the file's "
+        "tasks inline, storing nothing but the job.",
+    )
+
+    @field_validator("fileset")
+    @classmethod
+    def _require_one_file(cls, value: FilesetRef) -> FilesetRef:
+        try:
+            _, _, file_path = parse_fileset_ref(value.root, workspace_fallback="_validation")
+        except FilesetPathError as exc:
+            raise ValueError(f"invalid FileSet reference: {value.root!r}") from exc
+        if not file_path:
+            raise ValueError("name one dataset file in the FileSet: `workspace/fileset#path/to/file.jsonl`")
+        if is_fileset_glob_pattern(file_path):
+            raise ValueError("a FileSet task source names one file; globs are not supported")
+        return value
+
+    @field_validator("snapshot")
+    @classmethod
+    def _reject_revision_selector(cls, value: TasksetRef | None) -> TasksetRef | None:
+        if value is not None and "#" in value.root:
+            raise ValueError("a snapshot taskset is a write destination; drop its `#tag` or `#digest`")
+        return value
+
+
 class AgentEvalTaskInput(BaseModel):
     """Submitter-facing task DTO: metrics may be inline bundles or stored-metric references."""
 
@@ -1003,17 +1042,28 @@ class _AgentEvalSpecCommon(BaseModel):
 class AgentEvalInputSpec(_AgentEvalSpecCommon):
     """Submitter-facing agent-evaluation input.
 
-    ``tasks`` accepts inline tasks, stored task references, or a stored taskset reference.
-    Stored definitions and scoring expand at submission; Harbor archives are prepared on the worker.
+    ``tasks`` accepts inline tasks, stored task references, a stored taskset reference, or a dataset
+    file in a FileSet. Stored definitions, files and scoring expand at submission; Harbor archives are
+    prepared on the worker.
     """
 
     tasks: (
         TasksetRef
+        | FilesetTaskSource
         | Annotated[list[AgentEvalTaskInput], Field(min_length=1)]
         | Annotated[list[TaskRef], Field(min_length=1)]
     ) = Field(
-        description="Tasks to evaluate: a nonempty list containing only inline tasks or only task references, or a stored taskset reference.",
+        description="Tasks to evaluate: a nonempty list containing only inline tasks or only task references, "
+        "a stored taskset reference, or a FileSet task source (`{fileset, snapshot}`) whose dataset file is "
+        "converted to tasks at submission.",
     )
+
+    @model_validator(mode="after")
+    def _fileset_source_needs_a_matching_target(self) -> Self:
+        if isinstance(self.tasks, FilesetTaskSource) and not isinstance(self.target, GymRunnerTarget):
+            source = "precomputed `trials`" if self.target is None else f"a `{self.target.kind}` target"
+            raise ValueError(f"a FileSet task source needs a `gym` target, not {source}")
+        return self
 
     @model_validator(mode="after")
     def _reject_empty_inline_tasks(self) -> Self:

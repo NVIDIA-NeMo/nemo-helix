@@ -122,6 +122,18 @@ def _entity_from_bundle(
     )
 
 
+def derived_metric_ref(metric: MetricInline, *, workspace: str) -> MetricRef:
+    """The reference :meth:`MetricService.store_derived_metric` stores ``metric`` under, without storing it.
+
+    Pure, so a caller can compute the exact stored form of a task carrying ``metric`` (and so its
+    revision digest) before deciding whether to write it.
+    """
+    runtime_bundle = RuntimeMetricBundle.model_validate_json(metric.model_dump_json())
+    canonical = json.dumps(runtime_bundle.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    content_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return MetricRef(f"{workspace}/{_DERIVED_METRIC_PREFIX}{content_digest[:_DERIVED_DIGEST_LENGTH]}")
+
+
 def _require_payload_allowed(metric: MetricInline) -> None:
     if metric.payload.kind == CLOUDPICKLE_KIND:
         require_cloudpickle_metrics_allowed()
@@ -201,10 +213,8 @@ class MetricService:
         """
         _require_payload_allowed(metric)
         runtime_bundle = RuntimeMetricBundle.model_validate_json(metric.model_dump_json())
-        canonical = json.dumps(runtime_bundle.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-        content_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        name = f"{_DERIVED_METRIC_PREFIX}{content_digest[:_DERIVED_DIGEST_LENGTH]}"
-        ref = MetricRef(f"{workspace}/{name}")
+        ref = derived_metric_ref(metric, workspace=workspace)
+        name = ref.root.split("/", 1)[1]
 
         # Content-addressed: if this exact bundle is already stored, reuse it (dedup).
         try:

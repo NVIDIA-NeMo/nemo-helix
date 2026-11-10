@@ -3726,6 +3726,7 @@ components:
         tasks:
           anyOf:
           - $ref: '#/components/schemas/TasksetRef'
+          - $ref: '#/components/schemas/FilesetTaskSource'
           - items:
               $ref: '#/components/schemas/AgentEvalTaskInput'
             type: array
@@ -3736,7 +3737,9 @@ components:
             minItems: 1
           title: Tasks
           description: 'Tasks to evaluate: a nonempty list containing only inline
-            tasks or only task references, or a stored taskset reference.'
+            tasks or only task references, a stored taskset reference, or a FileSet
+            task source (`{fileset, snapshot}`) whose dataset file is converted to
+            tasks at submission.'
       additionalProperties: false
       type: object
       required:
@@ -3745,11 +3748,13 @@ components:
       description: 'Submitter-facing agent-evaluation input.
 
 
-        ``tasks`` accepts inline tasks, stored task references, or a stored taskset
-        reference.
+        ``tasks`` accepts inline tasks, stored task references, a stored taskset reference,
+        or a dataset
 
-        Stored definitions and scoring expand at submission; Harbor archives are prepared
-        on the worker.'
+        file in a FileSet. Stored definitions, files and scoring expand at submission;
+        Harbor archives are
+
+        prepared on the worker.'
     AgentEvalMetricOutputCoverage:
       properties:
         total:
@@ -5748,6 +5753,30 @@ components:
       title: FilesetRef
       description: Reference to a persisted platform fileset, optionally with a file
         fragment.
+    FilesetTaskSource:
+      properties:
+        fileset:
+          allOf:
+          - $ref: '#/components/schemas/FilesetRef'
+          description: 'The dataset file, as `workspace/fileset#path/to/file.jsonl`.
+            One file only: a whole FileSet or a glob is refused. It is read once,
+            as the submitter, at submission. Each distinct row becomes one task, `gym-<row
+            content hash>`, scored by the Gym reward. Requires a `gym` target.'
+        snapshot:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRef'
+          description: Taskset to publish the file's tasks as, `workspace/name` or
+            `name`; it is created if absent, and tasks are written to its workspace.
+            Each submission publishes a revision only when the file changed, and the
+            evaluation runs exactly the published tasks. Omit to run the file's tasks
+            inline, storing nothing but the job.
+      additionalProperties: false
+      type: object
+      required:
+      - fileset
+      title: FilesetTaskSource
+      description: A Gym jsonl dataset file in a FileSet, converted into tasks at
+        submission, optionally published first.
     GenericAgent:
       properties:
         url:
@@ -8915,6 +8944,15 @@ components:
           description: "Ordinal of the published revision this content corresponds\
             \ to. Every stored task has at least one revision \u2014 creating a task\
             \ publishes revision 1 \u2014 so this is never 0."
+        content_hash:
+          title: Content Hash
+          description: Digest of the revision this content corresponds to; pin it
+            as 'workspace/name#<content_hash>'. A create or replace returns the digest
+            it published, or of the existing revision it matched when the content
+            was unchanged. Always set by this server; optional only so clients still
+            read responses from servers that predate it.
+          type: string
+          pattern: ^[0-9a-f]{64}$
         tags:
           additionalProperties:
             type: integer

@@ -21,7 +21,7 @@ import logging
 import os
 import shutil
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -34,6 +34,7 @@ from nemo_agents_plugin.jobs.gateway_proxy import (
     rewrite_fabric_gateway_models,
     routes_fabric_inference_through_gateway,
 )
+from nemo_evals.api.schemas import TaskRef, TasksetRef
 from nemo_evals.config import get_config
 from nemo_evals.gateway.middleware.closed_book import MIDDLEWARE_NAME as CLOSED_BOOK_MIDDLEWARE
 from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
@@ -51,8 +52,10 @@ from nemo_evals.jobs.agent_files_snapshot import (
 from nemo_evals.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
+    AgentEvalTaskInput,
     AgentTarget,
     FabricRunnerTarget,
+    FilesetTaskSource,
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
@@ -65,6 +68,7 @@ from nemo_evals.jobs.agent_spec import (
 )
 from nemo_evals.jobs.attempt_tasks import load_attempt_tasks
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
+from nemo_evals.jobs.fileset_tasks import load_task_inputs, publish_snapshot
 from nemo_evals.jobs.gateway_models import (
     TrialRoute,
     add_gateway_key_placeholder,
@@ -132,6 +136,7 @@ from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
     CPUExecutionProviderSpec,
+    DeferWrite,
     HelixJobSpec,
     SubprocessExecutionProviderSpec,
 )
@@ -235,6 +240,17 @@ def _staged_agent_files(target: FabricRunnerTarget | HarborRunnerTarget, ctx: Jo
     return staged
 
 
+async def _discard_resolved_agent_files(target: object, async_sdk: AsyncHelixClient | None) -> None:
+    """Delete the registered agent's files snapshot resolution took, for a submission that creates no job."""
+    snapshot = (
+        registered_agent_files_receipt(target)
+        if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
+        else None
+    )
+    if snapshot is not None and async_sdk is not None:
+        await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
+
+
 class _AgentEvalJobBase(NemoJob):
     """Run agent evaluation (``AgentEvaluator``) over tasks against a Model/Agent endpoint or runner."""
 
@@ -262,10 +278,13 @@ class _AgentEvalJobBase(NemoJob):
         async_sdk: AsyncHelixClient | None,
         is_local: bool,
         authorize: SourceReadAuthorizer | None = None,
+        defer: DeferWrite | None = None,
     ) -> BaseModel:
         """Resolve each task's metric references into inline metrics for the canonical spec.
 
         ``authorize``, when set, checks each stored task, metric and model as the caller before it is read.
+        ``defer``, when set, receives a FileSet source's snapshot publication, which the job route runs only
+        once compilation has also passed; without it the snapshot is published here, after every check.
         """
         del is_local
         submit_spec = (
@@ -280,7 +299,24 @@ class _AgentEvalJobBase(NemoJob):
             adapters=cls.adapters,
             authorize=authorize,
         )
-        loaded_tasks = await load_tasks(submit_spec.tasks, ctx)
+        # A FileSet source becomes ordinary inline tasks here, so every check below covers its rows
+        # before a snapshot (the only write) is published at the very end.
+        fileset_source: FilesetTaskSource | None = None
+        file_inputs: list[AgentEvalTaskInput] = []
+        source_sha256 = ""
+        selection: TasksetRef | Sequence[AgentEvalTaskInput] | Sequence[TaskRef]
+        if isinstance(submit_spec.tasks, FilesetTaskSource):
+            fileset_source = submit_spec.tasks
+            source_sha256, file_inputs = await load_task_inputs(
+                fileset_source,
+                workspace=workspace,
+                async_client=require_platform_client(async_sdk, "reading a FileSet task source"),
+                authorize=authorize,
+            )
+            selection = file_inputs
+        else:
+            selection = submit_spec.tasks
+        loaded_tasks = await load_tasks(selection, ctx)
         resolved_tasks = await map_with_limited_concurrency(lambda task: snapshot_task(task, ctx), loaded_tasks)
         validate_task_collection(resolved_tasks)
         target = await resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
@@ -295,18 +331,37 @@ class _AgentEvalJobBase(NemoJob):
                 tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"})
             )
             add_gateway_key_placeholder(build_task_environment(_secret_refs(spec)), spec.target)
-            return spec
+            if fileset_source is None or fileset_source.snapshot is None:
+                return spec
+            source = fileset_source
+
+            async def publish(canonical: BaseModel) -> BaseModel:
+                # Publishing is the submission's only write, so it runs after every check.
+                assert isinstance(canonical, AgentEvalSpec)
+                try:
+                    pinned = await publish_snapshot(
+                        source,
+                        file_inputs,
+                        canonical.tasks,
+                        source_sha256=source_sha256,
+                        workspace=workspace,
+                        async_client=require_platform_client(async_sdk, "publishing a FileSet task snapshot"),
+                        authorize=authorize,
+                    )
+                except Exception:
+                    await _discard_resolved_agent_files(canonical.target, async_sdk)
+                    raise
+                return canonical.model_copy(update={"tasks": pinned})
+
+            if defer is not None:
+                defer(publish)
+                return spec
         except Exception:
             # Resolution may have snapshotted the agent's files; a submission that fails after that owns no job
             # to clean the snapshot up, so it goes here.
-            snapshot = (
-                registered_agent_files_receipt(target)
-                if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
-                else None
-            )
-            if snapshot is not None and async_sdk is not None:
-                await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
+            await _discard_resolved_agent_files(target, async_sdk)
             raise
+        return await publish(spec)
 
     @classmethod
     async def compile(
@@ -332,14 +387,7 @@ class _AgentEvalJobBase(NemoJob):
         try:
             return await cls._compile(canonical_spec, async_sdk=async_sdk, profile=profile)
         except Exception:
-            target = canonical_spec.target
-            snapshot = (
-                registered_agent_files_receipt(target)
-                if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
-                else None
-            )
-            if snapshot is not None and async_sdk is not None:
-                await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
+            await _discard_resolved_agent_files(canonical_spec.target, async_sdk)
             raise
 
     @classmethod

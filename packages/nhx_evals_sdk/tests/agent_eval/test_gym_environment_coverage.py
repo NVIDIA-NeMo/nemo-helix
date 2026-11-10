@@ -445,7 +445,7 @@ def _task_prompt(task: AgentEvalTask) -> str:
     """The prompt text Gym will send for a task, recovered from the source row we materialize.
 
     Read from ``inputs['gym_row']`` rather than ``intent``: for Gym rows ``intent`` is a dataset
-    label (``"Gym row from example.jsonl"``), identical across every row in a file, so keying an
+    label (``"Gym row"``), identical across every row, so keying an
     oracle on it would collapse all tasks onto one entry.
     """
     row = task.inputs.get("gym_row") or {}
