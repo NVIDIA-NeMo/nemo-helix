@@ -210,11 +210,13 @@ read in memory. The same calls exist on `AsyncAgentsResource`.
 ### List an Agent's Runs
 
 Each execute job records the `workspace/name` reference of the agent it ran as
-`spec.agent_ref`. Pass agents to list their runs. A bare name such as `calc` means that
-agent in the workspace you list; to list runs of another workspace's agent, use
-`workspace/name`. When listing every workspace you can read (workspace `-`), each agent
-must be given as `workspace/name`. Jobs that ran an [inline agent](#inline-agents) are
-not runs of any persisted agent and thus never match.
+`spec.agent_ref`. To view runs of particular agents, pass references to
+`nemo agents list-jobs` via the (repeatable) `--agent` flag. A bare name such
+as `calc` is accepted and will resolve to the current active workspace.
+When listing across every workspace you can read (workspace `-`), each agent
+must be given as `workspace/name`.
+
+Jobs that ran an [inline agent](#inline-agents) are not runs of any persisted agent and thus never match any `--agent`.
 
 <Tabs>
 
