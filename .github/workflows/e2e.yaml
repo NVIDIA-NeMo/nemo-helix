@@ -125,159 +125,22 @@ jobs:
   build-cpu-smoke-images:
     name: Build CPU smoke images
     needs: [eligibility]
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
-    outputs:
-      image_registry: ${{ steps.bake-vars.outputs.image_registry }}
-      image_tag: ${{ steps.bake-vars.outputs.image_tag }}
-      publish_images: ${{ steps.bake-vars.outputs.publish_images }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Free disk space
-        uses: ./.github/actions/free-disk-space
-        with:
-          disable_swap: "true"
-          remove_haskell: "true"
-          remove_java: "true"
-          remove_ruby: "true"
-          remove_swift: "true"
-          prune_docker: "true"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-        with:
-          name: nhx-builder
-          driver: docker-container
-          cleanup: true
-
-      - name: Configure bake variables
-        id: bake-vars
-        shell: bash
-        env:
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          INPUT_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
-          INPUT_PUBLISH: ${{ inputs.publish }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -euo pipefail
-
-          image_registry="ghcr.io/${GITHUB_REPOSITORY,,}"
-          source_sha="${SOURCE_SHA:-$GITHUB_SHA}"
-          bake_tag="${INPUT_IMAGE_TAG:-$source_sha}"
-          fastembed_cache_dir="${RUNNER_TEMP}/fastembed-cache"
-          publish_images="false"
-
-          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
-            publish_images="true"
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPOSITORY" = "$GITHUB_REPOSITORY" ]; then
-            publish_images="true"
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
-            publish_images="true"
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$INPUT_PUBLISH" = "true" ]; then
-            publish_images="true"
-          fi
-
-          {
-            printf 'IMAGE_REGISTRY=%s\n' "$image_registry"
-            printf 'BASE_REGISTRY=%s\n' "$image_registry"
-            printf 'CACHE_REGISTRY=%s\n' "$image_registry"
-            printf 'BAKE_TAG=%s\n' "$bake_tag"
-            printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
-            printf 'FASTEMBED_CACHE_CONTEXT=%s\n' "$fastembed_cache_dir"
-            printf 'FASTEMBED_CACHE_DIR=%s\n' "$fastembed_cache_dir"
-            printf 'DOCKER_BAKE_ALLOW_FS_READ=%s\n' "$fastembed_cache_dir"
-            printf 'FASTEMBED_MODEL_REPO=%s\n' "qdrant/all-MiniLM-L6-v2-onnx"
-            printf 'FASTEMBED_MODEL_REVISION=%s\n' "main"
-            printf 'PUBLISH_IMAGES=%s\n' "$publish_images"
-          } >> "$GITHUB_ENV"
-          {
-            printf 'image_registry=%s\n' "$image_registry"
-            printf 'image_tag=%s\n' "$bake_tag"
-            printf 'publish_images=%s\n' "$publish_images"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Prepare fastembed model cache directory
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "${FASTEMBED_CACHE_DIR}"
-          touch "${FASTEMBED_CACHE_DIR}/.cache-context"
-
-      - name: Restore fastembed model cache
-        id: fastembed-cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ${{ runner.temp }}/fastembed-cache
-          key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
-
-      - name: Install uv for fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          cache-dependency-glob: uv.lock
-
-      - name: Populate fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          HF_HUB_DISABLE_UPDATE_CHECK=1 uv run --no-project --with 'huggingface-hub>=1.0.1,<2.0.0' hf download \
-            "${FASTEMBED_MODEL_REPO}" \
-            --revision "${FASTEMBED_MODEL_REVISION}" \
-            --cache-dir "${FASTEMBED_CACHE_DIR}" \
-            --format quiet
-          find "${FASTEMBED_CACHE_DIR}/models--qdrant--all-MiniLM-L6-v2-onnx/snapshots" \
-            -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .
-
-      - name: Log in to GHCR
-        if: env.PUBLISH_IMAGES == 'true'
-        shell: bash
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-
-      - name: Print Docker bake graph
-        shell: bash
-        run: |
-          target=docker-cpu
-          if [ "${PUBLISH_IMAGES}" = "true" ]; then
-            target=docker-cpu-ci
-          fi
-          make docker-print TARGET="${target}"
-
-      - name: Build CPU images
-        if: env.PUBLISH_IMAGES != 'true'
-        shell: bash
-        run: make docker-load TARGET=docker-cpu
-
-      - name: Build and publish CPU images
-        if: env.PUBLISH_IMAGES == 'true'
-        shell: bash
-        run: make docker-push TARGET=docker-cpu-ci
-
-      - name: Save fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}/fastembed-cache
-          key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
+    # Shared with ci.yaml and nightly-taskset-runs-e2e.yaml. Outputs: image_registry, image_tag, publish_images.
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+      # Publish on a push to main, a same-repo PR, the merge queue, or a dispatch that asks to.
+      publish: >-
+        ${{
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+          github.event_name == 'merge_group' ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish)
+        }}
 
   kind-cpu-e2e:
     name: Kind CPU e2e
