@@ -130,9 +130,9 @@ def _rejected_task(task: ResolvedTask, error: PreparationErrorInfo | None) -> Ta
     )
     if error is None:
         return TasksetRunRejectedTask(
-            task=task.id, ref=ref, code="image_unavailable", detail="image preparation is still pending"
+            task=task.id, ref=ref, reason="image_unavailable", detail="image preparation is still pending"
         )
-    return TasksetRunRejectedTask(task=task.id, ref=ref, code=error.code, detail=error.detail)
+    return TasksetRunRejectedTask(task=task.id, ref=ref, reason=error.code, detail=error.detail)
 
 
 def utc_now() -> datetime:
@@ -152,7 +152,7 @@ class TasksRejectedError(TasksetRunResolutionError):
 
     def __init__(self, tasks: list[TasksetRunRejectedTask]) -> None:
         self.tasks = tasks
-        reasons = "; ".join(f"{t.task}: {t.code}: {t.detail}" for t in tasks)
+        reasons = "; ".join(f"{t.task}: {t.reason}: {t.detail}" for t in tasks)
         super().__init__(f"tasks without images: {reasons}")
 
 

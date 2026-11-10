@@ -64,7 +64,7 @@ class SelectionError(ValueError):
 class SubmitRejectedTasksError(RuntimeError):
     """The platform refused the run because of some of its tasks; ``tasks`` lists each one and why.
 
-    Each entry is the API's ``rejected_tasks`` item: ``task``, ``ref``, ``code`` and ``detail``. Kept apart from
+    Each entry is the API's ``rejected_tasks`` item: ``task``, ``ref``, ``reason`` and ``detail``. Kept apart from
     other refusals so submit can print the command that runs the other tasks.
     """
 
@@ -916,10 +916,10 @@ def _explain_rejected_tasks(
     echo = _stderr
 
     echo(f"Error: submit refused the run because of {len(tasks)} of {len(refs)} tasks:")
-    for line in _columns([(str(t.get("task")), str(t.get("code")), str(t.get("detail"))) for t in tasks]):
+    for line in _columns([(str(t.get("task")), str(t.get("reason")), str(t.get("detail"))) for t in tasks]):
         echo(f"  {line}")
 
-    if any(t.get("code") == "image_unavailable" for t in tasks):
+    if any(t.get("reason") == "image_unavailable" for t in tasks):
         # The ref names its workspace, and build-images takes no --workspace.
         echo(f"Check with: nemo evals tasksets build-images {shlex.quote(taskset_ref)} --status")
         return

@@ -285,7 +285,7 @@ async def test_a_task_without_images_is_422_and_stores_no_run(
     body = response.json()
     assert body["detail"].startswith("tasks without images: task-1: image_unavailable")
     (rejected,) = body["rejected_tasks"]  # each task, so a client can resubmit the others
-    assert rejected["task"] == "task-1" and rejected["code"] == "image_unavailable" and "#" in rejected["ref"]
+    assert rejected["task"] == "task-1" and rejected["reason"] == "image_unavailable" and "#" in rejected["ref"]
     assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
 
 

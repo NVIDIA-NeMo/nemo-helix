@@ -380,11 +380,11 @@ class TasksetRunRejectedTask(BaseModel):
     ref: str | None = Field(
         default=None, description="The stored task revision, workspace/name#digest; None when submit couldn't tell."
     )
-    code: str = Field(
-        description="Why the task can't run, as a stable code: e.g. gpu_unsupported, invalid_compose_file, "
-        "build_failed, or image_unavailable (its image isn't built yet)."
+    reason: str = Field(
+        description="A stable value that describes why the task can't run: e.g. gpu_unsupported, "
+        "invalid_compose_file, build_failed, or image_unavailable (its image isn't built yet)."
     )
-    detail: str = Field(description="Human-readable reason.")
+    detail: str = Field(description="A human-readable explanation of what went wrong with this task.")
 
 
 class TasksetRunRejectedResponse(BaseModel):

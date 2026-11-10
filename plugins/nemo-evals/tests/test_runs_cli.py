@@ -209,10 +209,10 @@ def test_a_refused_taskset_submit_says_how_to_check_the_builds(submitting, works
 
 
 def _rejected(*tasks: tuple[str, str]) -> SubmitRejectedTasksError:
-    """The error ``submit_run`` raises for a 422 that rejects ``(member name, code)`` tasks of ``MEMBERS``."""
+    """The error ``submit_run`` raises for a 422 that rejects ``(member name, reason)`` tasks of ``MEMBERS``."""
     rejected = [
-        {"task": f"deep-swe-{name}", "ref": f"ac9/deep-swe-{name}#" + "1" * 64, "code": code, "detail": "why"}
-        for name, code in tasks
+        {"task": f"deep-swe-{name}", "ref": f"ac9/deep-swe-{name}#" + "1" * 64, "reason": reason, "detail": "why"}
+        for name, reason in tasks
     ]
     return SubmitRejectedTasksError('submit failed (422): "tasks without images: ..."', rejected)
 

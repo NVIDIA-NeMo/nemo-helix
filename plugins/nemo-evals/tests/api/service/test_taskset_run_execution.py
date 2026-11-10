@@ -292,7 +292,7 @@ async def test_a_rejection_lists_each_task_its_revision_and_why(service, two_tas
     with pytest.raises(TasksRejectedError) as raised:
         await submit(service, two_task_body)
     (task,) = raised.value.tasks
-    assert (task.task, task.code, task.detail) == ("task-2", "gpu_unsupported", "scripted")
+    assert (task.task, task.reason, task.detail) == ("task-2", "gpu_unsupported", "scripted")
     assert task.ref is not None and task.ref.split("#")[0].endswith("/task-2") and len(task.ref.split("#")[1]) == 64
 
 
@@ -300,7 +300,7 @@ async def test_a_task_without_images_is_listed_with_its_code(service, request_bo
     run_preparer.fail = {"task-1": "build_failed"}
     with pytest.raises(TasksRejectedError) as raised:
         await submit(service, request_body)
-    assert [(t.task, t.code) for t in raised.value.tasks] == [("task-1", "build_failed")]
+    assert [(t.task, t.reason) for t in raised.value.tasks] == [("task-1", "build_failed")]
 
 
 async def test_a_replay_never_reads_images_again(service, request_body, fake_task_jobs, run_preparer, run_store):
