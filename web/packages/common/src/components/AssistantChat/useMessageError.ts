@@ -1,9 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useAuiState } from '@assistant-ui/react';
+import { type MessageStatus, useAuiState } from '@assistant-ui/react';
 import { GENERIC_CHAT_ERROR } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import { getFailedReplyExplanation } from '@nemo/common/src/components/AssistantChat/messageUtils';
+
+const isFailedReply = (status: MessageStatus | undefined): boolean =>
+  status?.type === 'incomplete' && status.reason === 'error';
 
 /**
  * The raw error of the current message when its reply failed, otherwise `undefined`. A failed
@@ -18,22 +21,15 @@ export const useMessageError = (): string | undefined =>
       : undefined;
   });
 
-export const useFailedReplyExplanation = (): string | undefined => {
-  const failed = useMessageError() !== undefined;
-  const explanation = useAuiState((state) => getFailedReplyExplanation(state.message.parts));
-  if (!failed) {
-    return undefined;
-  }
-  return explanation;
-};
-
-export const useIsFailedReplyExplanationPart = (): boolean => {
-  const failed = useMessageError() !== undefined;
-  const isExplanationPart = useAuiState(
-    (state) =>
-      state.part.type === 'text' &&
-      state.part === state.message.parts.findLast((part) => part.type === 'text') &&
-      getFailedReplyExplanation(state.message.parts) !== undefined
+export const useFailedReplyExplanation = (): string | undefined =>
+  useAuiState((state) =>
+    isFailedReply(state.message.status) ? getFailedReplyExplanation(state.message.parts) : undefined
   );
-  return failed && isExplanationPart;
-};
+
+export const useIsFailedReplyExplanationPart = (): boolean =>
+  useAuiState(
+    (state) =>
+      isFailedReply(state.message.status) &&
+      state.part.type === 'text' &&
+      state.part === state.message.parts.findLast((part) => part.type === 'text')
+  );
