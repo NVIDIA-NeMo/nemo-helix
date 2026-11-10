@@ -286,7 +286,6 @@ SKIP=(
     --no-install-package deep-gemm
     --no-install-package flash-attn
     --no-install-package transformer-engine-torch
-    # Match the cache-warming sync: do not install this unused Go/etcd-bearing wheel.
     --no-install-package mooncake-transfer-engine
     --no-install-package mooncake-transfer-engine-cuda13
     --no-install-package nemo-sandboxed-gym
