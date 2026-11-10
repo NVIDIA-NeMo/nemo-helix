@@ -187,8 +187,13 @@ def test_scheduler_shares_scarce_capacity_across_users(
         max_active_jobs_per_user=100,
     )
     scheduler = JobScheduler(backend_registry, mock_nemo_client, admission=admission)
-    # First call lists the schedulable queue; second lists in-flight work (none).
-    mock_jobs_client.list_steps.side_effect = [paginated_response(alice + bob), paginated_response([])]
+    # Calls in order: the schedulable queue; the in-flight recount for the running gauge; the
+    # admission snapshot of in-flight work (none).
+    mock_jobs_client.list_steps.side_effect = [
+        paginated_response(alice + bob),
+        paginated_response([]),
+        paginated_response([]),
+    ]
 
     with patch.object(
         scheduler, "schedule_step", return_value=JobUpdate(status=HelixJobStatus.PENDING)

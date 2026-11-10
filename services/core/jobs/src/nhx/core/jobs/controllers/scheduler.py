@@ -5,6 +5,8 @@ import logging
 import threading
 import time
 import traceback
+from collections import Counter
+from collections.abc import Iterable, Iterator
 from typing import cast
 
 from nemo_helix_plugin.client.client import NemoClient
@@ -17,7 +19,7 @@ from nemo_helix_plugin.jobs.types import (
 )
 from nhx.common.controller import Controller, HeartbeatMixin
 from nhx.common.jobs.schemas import HelixJobStatus
-from nhx.common.observability import start_span_with_ctx
+from nhx.common.observability import create_observable_gauge, start_span_with_ctx
 from nhx.core.jobs.app.ctx import JobBackendContext, JobContext
 from nhx.core.jobs.controllers.admission import AdmissionController, AlwaysAdmit
 from nhx.core.jobs.controllers.backends import JobUpdate, extract_provider_profile
@@ -27,9 +29,10 @@ from nhx.core.jobs.controllers.backends.exceptions import (
     SchedulingDeferred,
 )
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
-from nhx.core.jobs.controllers.concurrency_admission import round_robin_by_user
+from nhx.core.jobs.controllers.concurrency_admission import IN_FLIGHT_STATUSES, principal_of, round_robin_by_user
 from nhx.core.jobs.controllers.diagnostics import log_job_diagnostics_if_debug
 from opentelemetry import metrics, trace
+from opentelemetry.metrics import CallbackOptions, Observation
 
 tracer = trace.get_tracer(__name__)
 meter = metrics.get_meter(__name__)
@@ -37,6 +40,17 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PROFILE = "default"
 DEFAULT_PROVIDER = "cpu"
+UNKNOWN_USER = "unknown"
+
+# Step counts keyed by (workspace, user).
+StepCounts = dict[tuple[str, str], int]
+
+
+def _count_by_workspace_and_user(steps: Iterable[HelixJobStepWithContext]) -> StepCounts:
+    counts: Counter[tuple[str, str]] = Counter()
+    for step in steps:
+        counts[(step.workspace, principal_of(step) or UNKNOWN_USER)] += 1
+    return dict(counts)
 
 
 class JobScheduler(HeartbeatMixin, Controller):
@@ -67,9 +81,53 @@ class JobScheduler(HeartbeatMixin, Controller):
             description="Number of job scheduling errors",
         )
 
+        # Snapshots refreshed each scheduling pass. The gauge callbacks only read them (never call the
+        # API), and each refresh replaces the whole dict so the metric reader thread sees a consistent
+        # view. Keys with no steps are absent, so their series stop being reported.
+        self._queued_counts: StepCounts = {}
+        self._running_counts: StepCounts = {}
+        create_observable_gauge(
+            meter,
+            subsystem="jobs.scheduler",
+            name="queued",
+            description="Number of job steps queued waiting for capacity, by workspace and user",
+            callbacks=[self._observe_queued],
+        )
+        create_observable_gauge(
+            meter,
+            subsystem="jobs.scheduler",
+            name="running",
+            description="Number of job steps currently running, by workspace and user",
+            callbacks=[self._observe_running],
+        )
+
     @property
     def is_healthy(self) -> bool:
         return self._is_healthy
+
+    @staticmethod
+    def _observations(counts: StepCounts) -> Iterator[Observation]:
+        for (workspace, user), count in counts.items():
+            yield Observation(count, {"workspace": workspace, "user": user})
+
+    def _observe_queued(self, options: CallbackOptions) -> Iterator[Observation]:
+        return self._observations(self._queued_counts)
+
+    def _observe_running(self, options: CallbackOptions) -> Iterator[Observation]:
+        return self._observations(self._running_counts)
+
+    def _refresh_running_counts(self) -> None:
+        """Recount in-flight steps for the ``running`` gauge; keep the last value if the fetch fails."""
+        query = cast(
+            ListStepsQueryParams,
+            {"filter[status]": ",".join(s.value for s in IN_FLIGHT_STATUSES)},
+        )
+        try:
+            steps = list(self._jobs.list_steps(name="-", workspace="-", query_params=query).items())
+        except NemoClientError:
+            logger.warning("Could not count running job steps for metrics", exc_info=True)
+            return
+        self._running_counts = _count_by_workspace_and_user(steps)
 
     def step(self):
         # Check stop signal before making any API calls
@@ -88,6 +146,11 @@ class JobScheduler(HeartbeatMixin, Controller):
                 self._is_healthy = False
                 logger.exception("Could not fetch job steps for scheduling", exc_info=True)
                 return
+
+        self._queued_counts = _count_by_workspace_and_user(
+            s for s in steps if HelixJobStatus(s.status) == HelixJobStatus.QUEUED
+        )
+        self._refresh_running_counts()
 
         if len(steps) > 0:
             logger.info(f"Got {len(steps)} job steps to schedule")

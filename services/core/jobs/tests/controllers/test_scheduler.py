@@ -56,7 +56,7 @@ def test_does_schedule_job(
 
     # Verify the typed Jobs client was called with the correct deepObject filter.
     # The status list is encoded as ``filter[status]=created,resuming`` (comma form).
-    mock_jobs_client.list_steps.assert_called_once_with(
+    mock_jobs_client.list_steps.assert_any_call(
         workspace="-",
         name="-",
         query_params={
@@ -435,3 +435,50 @@ def test_admission_deferral_rewrites_when_reason_changes(
     body = mock_jobs_client.update_job_step_status.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.QUEUED
     assert body.status_details == {"message": "waiting for capacity"}
+
+
+def _gauge_points(reader) -> dict[str, dict[tuple[str, str], int]]:
+    points: dict[str, dict[tuple[str, str], int]] = {}
+    data = reader.get_metrics_data()
+    for rm in data.resource_metrics if data else []:
+        for sm in rm.scope_metrics:
+            for metric in sm.metrics:
+                points[metric.name] = {
+                    (p.attributes["workspace"], p.attributes["user"]): p.value for p in metric.data.data_points
+                }
+    return points
+
+
+def test_queued_and_running_gauges_report_counts_by_workspace_and_user(
+    backend_registry: BackendRegistry,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+):
+    from nhx.core.jobs.controllers import scheduler as scheduler_module
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    with patch.object(scheduler_module, "meter", provider.get_meter("test")):
+        scheduler = JobScheduler(backend_registry, mock_nemo_client, admission=_DeferringAdmission({"q1", "q2", "q3"}))
+
+    def _step(name: str, workspace: str, status: HelixJobStatus) -> HelixJobStepWithContext:
+        return test_step_created.model_copy(
+            update={"id": name, "name": name, "workspace": workspace, "status": status, "auth_context": None}
+        )
+
+    waiting = [
+        _step("q1", "ws-a", HelixJobStatus.QUEUED),
+        _step("q2", "ws-a", HelixJobStatus.QUEUED),
+        _step("q3", "ws-b", HelixJobStatus.QUEUED),
+    ]
+    running = [_step("r1", "ws-a", HelixJobStatus.ACTIVE)]
+    mock_jobs_client.list_steps.side_effect = [paginated_response(waiting), paginated_response(running)]
+
+    scheduler.step()
+
+    points = _gauge_points(reader)
+    assert points["nhx.jobs.scheduler.queued"] == {("ws-a", "unknown"): 2, ("ws-b", "unknown"): 1}
+    assert points["nhx.jobs.scheduler.running"] == {("ws-a", "unknown"): 1}
