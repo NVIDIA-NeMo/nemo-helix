@@ -507,7 +507,13 @@ def _build_export_module(
     from torch import nn
 
     class _CausalRerankerForExport(nn.Module):
-        """``logit("yes") - logit("no")`` at the last attended token, as Automodel trains it."""
+        """``logit("yes") - logit("no")`` at the last attended token, as Automodel trains it.
+
+        For Qwen3 cross-encoders on a ``Qwen3ForCausalLM`` base (``is_causal_reranker_checkpoint``).
+        Automodel trains these as ``Qwen3RerankerForCausalReranking``, which has no score head
+        (``nemo_automodel/components/models/qwen3_reranker/model.py``, ``forward``). The output
+        keeps the score-head graph's ``logits`` shape, ``[batch, 1]``.
+        """
 
         def __init__(self, model, yes_token_id: int, no_token_id: int):
             super().__init__()
