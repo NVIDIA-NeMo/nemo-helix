@@ -36,6 +36,7 @@ from nhx.core.entities.api.dependencies import (
 )
 from nhx.core.entities.api.v2.entities.schemas import EntityCreateInput, EntityUpdate
 from nhx.core.entities.api.v2.entity_access import (
+    get_control_entity_list_workspaces,
     require_control_entity_access,
     require_entity_read_access,
     require_relationship_access,
@@ -403,11 +404,14 @@ async def list_entities(
     ),
 ) -> EntitiesPage:
     """List entities with filtering, supporting cross-workspace queries."""
-    await require_control_entity_access(auth_client, workspace, entity_type, "list")
+    if workspace != ALL_WORKSPACES:
+        await require_control_entity_access(auth_client, workspace, entity_type, "list")
     await require_relationship_access(auth_client, filter)
-    # Handle cross-workspace query (workspace = "*")
     if workspace == ALL_WORKSPACES:
         accessible_workspaces = await get_accessible_workspaces(repository)
+        accessible_workspaces = await get_control_entity_list_workspaces(
+            auth_client, workspace_repository, entity_type, accessible_workspaces
+        )
         # Build combined filter for workspace access and user's filter
         query_workspace = ALL_WORKSPACES
         effective_filter = add_workspace_filtering(accessible_workspaces, filter, field="workspace")

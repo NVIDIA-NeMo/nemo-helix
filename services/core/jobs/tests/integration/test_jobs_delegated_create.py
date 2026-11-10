@@ -128,7 +128,8 @@ def test_service_create_for_user_without_access_is_forbidden(
     email = unique_email("outsider")
     user = Principal(id=email, email=email, authz_aliases=[email])
 
-    with pytest.raises(PermissionDeniedError, match="not allowed to create jobs"):
+    with pytest.raises(PermissionDeniedError) as denied:
         JobsClient.from_client(_on_behalf_of(client, user)).create_job(
             workspace=workspace, body=_job(short_unique_name("forbidden"))
         )
+    assert denied.value.status_code == 403
