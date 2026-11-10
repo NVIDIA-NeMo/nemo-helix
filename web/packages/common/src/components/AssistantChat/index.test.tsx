@@ -833,6 +833,9 @@ describe('AssistantChat', () => {
       await user.click(within(details).getByText('Show details'));
       expect(details).toHaveTextContent(/APIStatusError: Error code: 410/);
       expect(screen.getAllByText(/APIStatusError: Error code: 410/)).toHaveLength(1);
+
+      await user.click(within(details).getByText('Hide details'));
+      expect(within(details).getByText('Show details')).toBeInTheDocument();
     },
     interactionTimeoutMs
   );
