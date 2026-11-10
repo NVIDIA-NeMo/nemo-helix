@@ -5,7 +5,7 @@ import { CUSTOMIZER_ENABLED } from '@studio/constants/environment';
 
 export const JOB_SOURCE = {
   CUSTOMIZATION: 'customization',
-  DATA_DESIGNER: 'data-designer',
+  DATA_DESIGNER: 'nemo-data-designer-plugin',
   SAFE_SYNTHESIZER: 'safe-synthesizer',
   EVALUATOR_METRICS: 'evaluator-metrics',
   MODELS_SYSTEM: 'models-system',
