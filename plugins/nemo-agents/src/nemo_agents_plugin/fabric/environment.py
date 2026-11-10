@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 #: cannot be written to.
 RUNTIME_BASE_DIR_PREFIX = "nemo-agent-runtime"
 DEEPAGENTS_WORKSPACE_DIR = ".nemo-deepagents"
-DEEPAGENTS_SKILLS_DIR = ".agents/skills"
+# Configured skills must not be mixed with bundles in the frozen workspace inputs.
+DEEPAGENTS_SKILLS_DIR = f"{DEEPAGENTS_WORKSPACE_DIR}/skills"
 _WORKSPACE_DEPENDENCY_DIRS = {".venv", "node_modules", "__pycache__"}
 _MCP_COMMAND_ENV_VAR_RE = re.compile(r"\$(\w+|\{[^}]*\})", re.ASCII)
 _MCP_STDIO_LAUNCHER = "import os, sys; os.chdir(sys.argv[1]); os.execvpe(sys.argv[2], sys.argv[2:], os.environ)"
@@ -102,6 +103,7 @@ def prepare_deepagents_workspace_baseline(agent_config: AgentConfig, base_dir: P
     Initial capture assumes a fresh deployment workspace. Keep this baseline
     across process restarts; recapturing the live workspace could include session
     output. Replacing the deployment workspace also replaces its baseline.
+    Configured skills are captured separately for each server run.
     """
     harness = agent_config.harnesses.get(agent_config.default_harness or "")
     if harness is None or not uses_default_deepagents_backend(harness):
@@ -119,7 +121,18 @@ def prepare_deepagents_workspace_baseline(agent_config: AgentConfig, base_dir: P
         return baseline
     storage.mkdir(exist_ok=True)
 
-    excluded = {storage, *(workspace / name for name in ("large_tool_results", "conversation_history", ".fabric"))}
+    # Publish only a complete copy; a failed startup must not leave a reusable partial baseline.
+    with tempfile.TemporaryDirectory(prefix=".inputs-", dir=storage) as temporary:
+        staged = Path(temporary) / "inputs"
+        _copy_workspace_inputs(workspace, staged, _deepagents_workspace_exclusions(agent_config, base_dir, workspace))
+        staged.rename(baseline)
+    return baseline
+
+
+def _deepagents_workspace_exclusions(agent_config: AgentConfig, base_dir: Path, workspace: Path) -> set[Path]:
+    excluded = {
+        workspace / name for name in (DEEPAGENTS_WORKSPACE_DIR, "large_tool_results", "conversation_history", ".fabric")
+    }
     for configured_path in (
         agent_config.environment.artifacts,
         agent_config.runtime.artifacts,
@@ -130,17 +143,27 @@ def prepare_deepagents_workspace_baseline(agent_config: AgentConfig, base_dir: P
             if output != workspace and output.is_relative_to(workspace):
                 excluded.add(output)
 
-    # Publish only a complete copy; a failed startup must not leave a reusable partial baseline.
-    with tempfile.TemporaryDirectory(prefix=".inputs-", dir=storage) as temporary:
-        staged = Path(temporary) / "inputs"
-        _copy_workspace_inputs(workspace, staged, excluded)
-        _stage_deepagents_skills(agent_config, base_dir, workspace, staged, excluded)
-        staged.rename(baseline)
-    return baseline
+    return excluded
 
 
-def create_deepagents_workspace(baseline: Path) -> Path:
-    """Copy the saved inputs into a private workspace for one runtime."""
+def prepare_deepagents_skills(agent_config: AgentConfig, base_dir: Path, baseline: Path) -> Path | None:
+    """Capture configured skills once per server run, independently of frozen workspace inputs."""
+    if agent_config.skills is None or not agent_config.skills.paths:
+        return None
+    workspace = (base_dir / agent_config.environment.workspace).resolve()
+    snapshot = Path(tempfile.mkdtemp(prefix="skills-", dir=baseline.parent))
+    try:
+        _stage_deepagents_skills(
+            agent_config, base_dir, snapshot, _deepagents_workspace_exclusions(agent_config, base_dir, workspace)
+        )
+    except BaseException:
+        remove_deepagents_workspace(snapshot)
+        raise
+    return snapshot
+
+
+def create_deepagents_workspace(baseline: Path, skills_snapshot: Path | None = None) -> Path:
+    """Copy frozen workspace inputs and this server's skills into one runtime workspace."""
     sessions = baseline.parent / "sessions"
     if sessions.is_symlink():
         raise ValueError("DeepAgents session storage must not be a symlink.")
@@ -149,6 +172,8 @@ def create_deepagents_workspace(baseline: Path) -> Path:
     try:
         # Baseline links are already relative to the copied tree.
         shutil.copytree(baseline, workspace, symlinks=True, dirs_exist_ok=True)
+        if skills_snapshot is not None:
+            shutil.copytree(skills_snapshot, workspace / DEEPAGENTS_SKILLS_DIR)
     except BaseException:
         remove_deepagents_workspace(workspace)
         raise
@@ -177,9 +202,7 @@ def discover_skill_directories(directory: Path) -> list[Path]:
     return skills
 
 
-def _stage_deepagents_skills(
-    config: AgentConfig, base_dir: Path, workspace: Path, target: Path, excluded: set[Path]
-) -> None:
+def _stage_deepagents_skills(config: AgentConfig, base_dir: Path, target: Path, excluded: set[Path]) -> None:
     if config.skills is None:
         return
     sources: dict[str, Path] = {}
@@ -190,17 +213,7 @@ def _stage_deepagents_skills(
                 raise ValueError(f"Skill directories {previous} and {source} both stage as {source.name!r}.")
 
     for name, source in sources.items():
-        relative = Path(DEEPAGENTS_SKILLS_DIR) / name
-        destination = target / relative
-        if destination.exists() or destination.is_symlink():
-            if source != (workspace / relative).resolve():
-                raise ValueError(f"Cannot stage skill {source}: workspace path {relative} already exists.")
-            # Replace only this bundle's workspace copy so linked skill assets are included.
-            if destination.is_symlink():
-                destination.unlink()
-            else:
-                shutil.rmtree(destination)
-        _copy_workspace_inputs(source, destination, excluded, follow_symlinks=True)
+        _copy_workspace_inputs(source, target / name, excluded, follow_symlinks=True)
 
 
 def deepagents_workspace_config(config: AgentConfig, *, base_dir: Path, workspace_dir: Path) -> AgentConfig:
