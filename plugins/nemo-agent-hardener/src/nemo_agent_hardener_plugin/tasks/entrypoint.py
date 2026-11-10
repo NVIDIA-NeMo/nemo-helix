@@ -36,13 +36,13 @@ def run_job_task(job_type: type[NemoJob]) -> int:
         ctx = build_ctx_from_env(client)
         config = read_step_config()
         job = job_type()
-    except Exception:
-        logger.exception("Failed to prepare task for agent-hardener")
+    except Exception as exc:
+        logger.error("Failed to prepare task for agent-hardener: %s", exc)
         return 2
     try:
         return exit_code_for(job.run(config, ctx=ctx, sdk=client))
     except LocalRunError:
         raise
-    except Exception:
-        logger.exception("%s.run raised", job_type.__name__)
+    except Exception as exc:
+        logger.error("%s.run failed: %s", job_type.__name__, exc)
         return 1
