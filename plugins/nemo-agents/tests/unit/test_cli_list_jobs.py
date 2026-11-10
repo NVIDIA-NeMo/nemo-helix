@@ -151,6 +151,15 @@ def test_agent_combines_with_other_filters_and_execute_type(app: typer.Typer) ->
     assert api.filter() == {"status": "completed", "spec.agent_ref": {"$in": ["team-a/calc"]}}
 
 
+def test_agent_combines_with_repeated_status(app: typer.Typer) -> None:
+    api = _Api()
+
+    result = _invoke(app, api, "--agent", "calc", "--filter.status", "completed", "--filter.status", "error")
+
+    assert result.exit_code == 0, result.output
+    assert api.filter() == {"status": {"$in": ["completed", "error"]}, "spec.agent_ref": {"$in": ["team-a/calc"]}}
+
+
 def test_agent_across_workspaces_needs_qualified_refs(app: typer.Typer) -> None:
     api = _Api()
 

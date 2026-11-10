@@ -51,7 +51,7 @@ from nemo_helix_plugin.cli_pagination import (
 )
 from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace, resolve_output_format
 from nemo_helix_plugin.cli_warnings import add_warning, collect_warnings
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.job import NemoJob, job_collection_path_for
 from nemo_helix_plugin.plugin_jobs.client import PluginJobsClient
 from nemo_helix_plugin.plugin_jobs.types import ListPluginJobsQueryParams, PluginJob
@@ -81,9 +81,11 @@ JobFilterOption = Annotated[
 JobFilterNameOption = Annotated[str | None, typer.Option("--filter.name", rich_help_panel=_FILTER_PANEL)]
 JobFilterProjectOption = Annotated[str | None, typer.Option("--filter.project", rich_help_panel=_FILTER_PANEL)]
 JobFilterStatusOption = Annotated[
-    str | None,
+    list[str] | None,
     typer.Option(
-        "--filter.status", help="Only jobs in this status (e.g. active, completed).", rich_help_panel=_FILTER_PANEL
+        "--filter.status",
+        help="Only jobs in this status (e.g. active, completed). Repeat for several.",
+        rich_help_panel=_FILTER_PANEL,
     ),
 ]
 JobSortOption = Annotated[
@@ -267,8 +269,9 @@ def list_jobs_in_collections(
 
     One collection is passed straight through, so its pagination is exactly the server's. Several
     are fetched one by one and merged in *sort* order: the first *page_size* jobs overall, or all of
-    them with *all_pages*. A collection that answers 404 is skipped with a warning (the plugin's
-    service may not be enabled), unless every one does.
+    them with *all_pages*. A collection that answers 404 (the plugin's service may not be enabled)
+    or 403 (job types can be authorized separately) is skipped with a warning, unless every one
+    does. Any other error fails the listing, so a partial list is never mistaken for a full one.
     """
     if not collections:
         raise click.UsageError("No job types to list.")
@@ -289,7 +292,7 @@ def list_jobs_in_collections(
     items: list[PluginJob] = []
     total_results = 0
     server_page_size: int | None = None
-    not_found: list[NotFoundError] = []
+    skipped: list[NotFoundError | PermissionDeniedError] = []
     for collection in collections:
         try:
             response = client.list_plugin_jobs(
@@ -297,20 +300,30 @@ def list_jobs_in_collections(
             )
             listing = collect_offset_pages(response, all_pages=all_pages)
         except NotFoundError as exc:
-            not_found.append(exc)
+            skipped.append(exc)
             add_warning(
                 f"Skipping job type {collection.job_type!r}: the platform has no /{collection.path} route for it."
             )
             continue
+        except PermissionDeniedError as exc:
+            skipped.append(exc)
+            add_warning(f"Skipping job type {collection.job_type!r}: you don't have permission to list its jobs.")
+            continue
         items.extend(_with_type(item, collection.job_type) for item in listing.data)
         total_results += int(getattr(listing.pagination, "total_results", 0) or len(listing.data))
         server_page_size = server_page_size or getattr(listing.pagination, "page_size", None)
-    if len(not_found) == len(collections):
-        raise not_found[0]
+    if len(skipped) == len(collections):
+        raise skipped[0]
 
     merged = _merge(items, sort or _DEFAULT_SORT)
     if all_pages:
-        return AllPagesResponse(data=merged, total_items=len(merged), total_pages=1, page_size=len(merged) or None)
+        return AllPagesResponse(
+            data=merged,
+            total_items=len(merged),
+            total_pages=1,
+            page_size=len(merged) or None,
+            envelope={"sort": sort or _DEFAULT_SORT},
+        )
     limit = page_size or server_page_size or len(merged)
     shown = merged[:limit]
     return OffsetPageResponse(
@@ -326,18 +339,27 @@ def list_jobs_in_collections(
     )
 
 
+def job_status_filter(statuses: Sequence[str] | None) -> str | dict[str, list[str]] | None:
+    """The ``status`` filter value for repeated ``--filter.status``: one value as is, several as ``$in``."""
+    if not statuses:
+        return None
+    if len(statuses) == 1:
+        return statuses[0]
+    return {"$in": list(statuses)}
+
+
 def build_job_filter(
     filter_json: str | None,
     *,
     name: str | None = None,
     project: str | None = None,
-    status: str | None = None,
+    status: Sequence[str] | None = None,
     extra: Mapping[str, Any] | None = None,
 ) -> str | None:
     """Combine ``--filter`` with ``--filter.FIELD`` options (and *extra* fields) into one query value."""
     from nemo_helix_plugin.cli_kwargs import merge_filter_dict
 
-    merged = merge_filter_dict(filter_json, name=name, project=project, status=status)
+    merged = merge_filter_dict(filter_json, name=name, project=project, status=job_status_filter(status))
     if extra:
         if isinstance(merged, str):
             raise click.UsageError("A filter expression can't be combined with these options; pass --filter as JSON.")
@@ -496,6 +518,7 @@ __all__ = [
     "build_job_filter",
     "has_command",
     "job_collections",
+    "job_status_filter",
     "list_jobs_in_collections",
     "resolve_job_types",
     "run_list_jobs",

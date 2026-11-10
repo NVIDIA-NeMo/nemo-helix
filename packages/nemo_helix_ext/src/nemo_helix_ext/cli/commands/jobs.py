@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal, cast
 
 import click
 import typer
-from nemo_helix_plugin.cli_list_jobs import JobsSort, resolve_job_types, run_list_jobs
+from nemo_helix_plugin.cli_list_jobs import JobsSort, job_status_filter, resolve_job_types, run_list_jobs
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.jobs.client import JobsClient
@@ -930,12 +930,7 @@ def list_jobs(
     if columns is None or str(columns).strip() == "default":
         output_columns = default_columns
 
-    status_filter: str | dict[str, list[str]] | None = None
-    if filter_status:
-        if len(filter_status) == 1:
-            status_filter = filter_status[0]
-        else:
-            status_filter = {"$in": filter_status}
+    status_filter = job_status_filter(filter_status)
 
     if job_type:
         _list_jobs_by_type(

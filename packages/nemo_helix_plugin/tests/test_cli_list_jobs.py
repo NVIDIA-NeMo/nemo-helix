@@ -103,6 +103,10 @@ class _Api:
         self.routes.setdefault(path, []).extend(httpx.Response(200, json=body) for body in bodies)
         return self
 
+    def fail(self, path: str, status: int) -> _Api:
+        self.routes.setdefault(path, []).append(httpx.Response(status, json={"detail": "nope"}))
+        return self
+
     def query(self, index: int = 0) -> dict[str, list[str]]:
         return parse_qs(self.requests[index].url.query.decode())
 
@@ -284,6 +288,15 @@ def test_single_type_sends_merged_filter(app: typer.Typer) -> None:
     assert json.loads(api.query()["filter"][0]) == {"spec.size": 2, "status": "active", "name": "b1"}
 
 
+def test_repeated_status_is_sent_as_in(app: typer.Typer) -> None:
+    api = _Api().on(BUILD_PATH, _page())
+
+    result = _invoke(app, api, "-t", "build", "--filter.status", "active", "--filter.status", "pending")
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(api.query()["filter"][0]) == {"status": {"$in": ["active", "pending"]}}
+
+
 def test_text_filter_expression_is_forwarded_as_is(app: typer.Typer) -> None:
     api = _Api().on(BUILD_PATH, _page())
 
@@ -403,7 +416,23 @@ def test_all_pages_across_types_fetches_everything(app: typer.Typer) -> None:
 
     assert result.exit_code == 0, result.output
     assert _names(result) == ["b1", "t1", "b2"]
-    assert json.loads(result.stdout)["pagination"]["total_results"] == 3
+    body = json.loads(result.stdout)
+    assert body["pagination"]["total_results"] == 3
+    assert body["sort"] == "-created_at"
+
+
+def test_all_pages_across_types_reports_the_requested_sort(app: typer.Typer) -> None:
+    api = (
+        _Api()
+        .on(BUILD_PATH, _page(_job("b1", "2026-01-02T00:00:00Z")))
+        .on(TRAIN_PATH, _page(_job("t1", "2026-01-01T00:00:00Z")))
+    )
+
+    result = _invoke(app, api, "--all-pages", "--sort", "created_at")
+
+    assert result.exit_code == 0, result.output
+    assert _names(result) == ["t1", "b1"]
+    assert json.loads(result.stdout)["sort"] == "created_at"
 
 
 def test_page_number_needs_one_type(app: typer.Typer) -> None:
@@ -434,6 +463,45 @@ def test_all_collections_missing_is_an_api_error(app: typer.Typer) -> None:
     result = _invoke(app, _Api())
 
     assert result.exit_code == 3, result.output
+
+
+def test_forbidden_collection_is_skipped_with_a_warning(app: typer.Typer) -> None:
+    """Job types can be authorized separately; list the ones the caller may read."""
+    api = _Api().fail(BUILD_PATH, 403).on(TRAIN_PATH, _page(_job("t1", "2026-01-02T00:00:00Z")))
+
+    @collect_warnings
+    def _run() -> Result:
+        return _invoke(app, api)
+
+    result = _run()
+
+    assert result.exit_code == 0, result.output
+    assert _names(result) == ["t1"]
+    assert "Skipping job type 'demo.build': you don't have permission to list its jobs." in result.stderr
+
+
+def test_every_collection_forbidden_or_missing_is_an_error(app: typer.Typer) -> None:
+    result = _invoke(app, _Api().fail(BUILD_PATH, 403))
+
+    assert result.exit_code != 0, result.output
+    assert result.stdout == ""
+
+
+def test_forbidden_single_type_is_an_error(app: typer.Typer) -> None:
+    result = _invoke(app, _Api().fail(BUILD_PATH, 403), "-t", "build")
+
+    assert result.exit_code != 0, result.output
+    assert result.stdout == ""
+
+
+def test_server_error_on_one_collection_fails_the_listing(app: typer.Typer) -> None:
+    """A partial list after a server error would look complete, so it fails instead."""
+    api = _Api().fail(BUILD_PATH, 500).on(TRAIN_PATH, _page(_job("t1", "2026-01-02T00:00:00Z")))
+
+    result = _invoke(app, api)
+
+    assert result.exit_code != 0, result.output
+    assert result.stdout == ""
 
 
 def test_unknown_type_is_a_usage_error(app: typer.Typer) -> None:
