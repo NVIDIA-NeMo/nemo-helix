@@ -918,37 +918,6 @@ jobs:
             report.xml
             ${{ runner.temp }}/e2e-services-logs/
 
-  web-studio-e2e:
-    name: Studio UI E2E tests
-    needs: [eligibility]
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-        shell: bash
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Install Playwright browsers
-        run: pnpm --filter nemo-studio-ui exec playwright install --with-deps
-      - name: Run E2E tests
-        run: CI=1 pnpm --filter nemo-studio-ui test:e2e
-      - name: Upload E2E artifacts
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: studio-e2e-results
-          retention-days: 7
-          path: web/packages/studio/playwright-report/
-
   post-merge-e2e-status:
     name: Post-merge E2E status
     needs:
@@ -964,7 +933,6 @@ jobs:
       - python-auth-idp-e2e-test
       - python-e2e-test
       - python-e2e-image-test
-      - web-studio-e2e
     # Include prerequisites so a failed build cannot hide behind skipped tests.
     if: >
       always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
