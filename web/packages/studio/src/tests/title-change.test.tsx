@@ -37,6 +37,7 @@ const pathParams = {
   [RP.optimizeJobName]: 'test-optimize-job',
   [RP.jobName]: 'test-job',
   [RP.benchmarkName]: 'test-benchmark',
+  [RP.tasksetName]: 'sort-suite',
   [RP.experimentName]: 'test-experiment-group',
   [RP.evaluationName]: 'test-experiment',
   [RP.insightId]: 'test-insight',
