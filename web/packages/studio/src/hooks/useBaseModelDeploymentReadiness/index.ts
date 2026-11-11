@@ -7,7 +7,7 @@ import { useModelsGetDeploymentConfigVersion } from '@nemo/sdk/generated/platfor
 import { useModelsGetLatestDeployment } from '@nemo/sdk/generated/platform/model-deployments';
 import { useModelsGetProvider } from '@nemo/sdk/generated/platform/model-providers';
 import { useModelsGetModel } from '@nemo/sdk/generated/platform/models';
-import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 
 /**
  * What the fine-tuning form needs to know about a base model before training an

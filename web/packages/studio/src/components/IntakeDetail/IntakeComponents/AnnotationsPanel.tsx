@@ -7,11 +7,9 @@ import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTim
 import { DEFAULT_PAGE_SIZE } from '@nemo/common/src/constants/api';
 import { ChatNew, Trash } from '@nemo/icons/icons';
 import { useListAnnotations } from '@nemo/sdk/generated/platform/annotations';
-import {
-  AnnotationSortField,
-  FeedbackAnnotationInputValue,
-  type Annotation,
-} from '@nemo/sdk/generated/platform/schema';
+import type { Annotation } from '@nemo/sdk/generated/platform/schema';
+import { AnnotationSortField } from '@nemo/sdk/generated/platform/schema/AnnotationSortField';
+import { FeedbackAnnotationInputValue } from '@nemo/sdk/generated/platform/schema/FeedbackAnnotationInputValue';
 import {
   Button,
   CodeSnippet,

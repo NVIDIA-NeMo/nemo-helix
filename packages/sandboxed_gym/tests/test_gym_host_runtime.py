@@ -3,17 +3,21 @@
 
 import asyncio
 import collections
+import contextlib
 import io
 import json
 import os
+import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
 import zipfile
 from email.message import Message
 from http.server import HTTPServer, ThreadingHTTPServer
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -23,6 +27,8 @@ import pytest
 from sandboxed_gym.environment_package import (
     WHEELS_V1_SUBDIR,
     EnvironmentMetadata,
+    NativeV1Manifest,
+    NativeV1Package,
     WheelsV1Manifest,
     WheelsV1Package,
 )
@@ -217,7 +223,7 @@ def test_apply_uv_dirs_sets_config_keys_in_container(monkeypatch):
     monkeypatch.setenv("NRL_CONTAINER", "1")
     monkeypatch.setenv("NEMO_GYM_VENV_DIR", "/opt/gym_venvs")
     monkeypatch.delenv("UV_CACHE_DIR", raising=False)
-    monkeypatch.setattr(runtime.subprocess, "check_output", lambda *a, **k: "/opt/uv_cache\n")
+    monkeypatch.setattr(runtime, "check_output", lambda *a, **k: "/opt/uv_cache\n")
 
     config: dict = {}
     runtime._apply_uv_dirs(config)
@@ -240,7 +246,7 @@ def test_apply_uv_dirs_does_not_override_explicit_config(monkeypatch):
     monkeypatch.setenv("NRL_CONTAINER", "1")
     monkeypatch.setenv("NEMO_GYM_VENV_DIR", "/opt/gym_venvs")
     monkeypatch.delenv("UV_CACHE_DIR", raising=False)
-    monkeypatch.setattr(runtime.subprocess, "check_output", lambda *a, **k: "/opt/uv_cache\n")
+    monkeypatch.setattr(runtime, "check_output", lambda *a, **k: "/opt/uv_cache\n")
 
     config = {runtime.UV_CACHE_DIR_KEY: "/custom/cache"}
     runtime._apply_uv_dirs(config)
@@ -259,7 +265,7 @@ def test_uv_cache_dir_prefers_the_configured_env_var(monkeypatch):
     def _never(*a, **k):
         raise AssertionError("uv should not be invoked when UV_CACHE_DIR is set")
 
-    monkeypatch.setattr(runtime.subprocess, "check_output", _never)
+    monkeypatch.setattr(runtime, "check_output", _never)
 
     assert runtime._uv_cache_dir() == "/home/ubuntu/.cache/uv"
 
@@ -272,7 +278,7 @@ def test_uv_cache_dir_returns_none_when_uv_unavailable(monkeypatch):
     def _boom(*a, **k):
         raise FileNotFoundError("uv")
 
-    monkeypatch.setattr(runtime.subprocess, "check_output", _boom)
+    monkeypatch.setattr(runtime, "check_output", _boom)
 
     assert runtime._uv_cache_dir() is None
 
@@ -568,7 +574,7 @@ def test_native_v1_is_loaded_without_installing_wheels(tmp_path, monkeypatch):
     def fail_install(*args, **kwargs):
         pytest.fail("native-v1 must not install wheels")
 
-    monkeypatch.setattr(runtime.subprocess, "run", fail_install)
+    monkeypatch.setattr(runtime, "run_process", fail_install)
     runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
 
 
@@ -612,7 +618,7 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
         calls.append((a, k))
         return subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
 
-    monkeypatch.setattr(runtime.subprocess, "run", record)
+    monkeypatch.setattr(runtime, "run_process", record)
     monkeypatch.setenv("PYTHONPATH", "/image/packages")
 
     package = runtime._load_runtime_environment_package(str(tmp_path), required=True)
@@ -643,7 +649,7 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
     assert runtime.os.environ[runtime.UV_FIND_LINKS_ENV_KEY] == str(wheels_dir)
     # Child processes and the already-running host both prefer staged packages over image packages.
     assert runtime.os.environ["PYTHONPATH"] == f"{install_dir}{runtime.os.pathsep}/image/packages"
-    assert runtime.sys.path[0] == str(install_dir)
+    assert runtime._import_path()[0] == str(install_dir)
     # The wheelhouse is the closure. A reachable index would otherwise win with a newer build
     # and the server venvs would download packages this package already vendors.
     assert runtime.os.environ[runtime.UV_OFFLINE_ENV_KEY] == "1"
@@ -656,14 +662,14 @@ def _stage_wheelhouse(tmp_path, monkeypatch):
     wheels_dir.mkdir()
     (wheels_dir / "a_dep-1.0-py3-none-any.whl").write_bytes(b"")
     monkeypatch.setattr(
-        runtime.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+        runtime, "run_process", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
     )
     return runtime._load_runtime_environment_package(str(tmp_path), required=True)
 
 
 def _fail_uv(monkeypatch, stderr: str) -> None:
     monkeypatch.setattr(
-        runtime.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 1, stdout="", stderr=stderr)
+        runtime, "run_process", lambda *a, **k: subprocess.CompletedProcess(a[0], 1, stdout="", stderr=stderr)
     )
 
 
@@ -688,7 +694,8 @@ def test_a_failed_wheel_install_reaches_the_output_tail(tmp_path, monkeypatch, i
     package = _stage_wheelhouse(tmp_path, monkeypatch)
     _fail_uv(monkeypatch, "error: Failed to install: a_dep-1.0-py3-none-any.whl\n")
     monkeypatch.setattr(runtime, "_OUTPUT_TAIL", collections.deque(maxlen=runtime._OUTPUT_TAIL_LINES))
-    monkeypatch.setattr(runtime.sys, "stderr", runtime._OutputTail(io.StringIO(), runtime._OUTPUT_TAIL))
+    tail = runtime._OutputTail(io.StringIO(), runtime._OUTPUT_TAIL)
+    monkeypatch.setattr(runtime, "_host_stderr", lambda: tail)
 
     with pytest.raises(RuntimeError):
         runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
@@ -740,6 +747,77 @@ def test_an_operators_own_uv_offline_setting_is_not_overwritten(tmp_path, monkey
     runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
 
     assert runtime.os.environ[runtime.UV_OFFLINE_ENV_KEY] == "0"
+
+
+_PACKAGED_SERVER_STAGING = Path(__file__).parent / "fixtures" / "packaged_server_staging"
+
+
+def test_packaged_server_is_staged_onto_the_gym_checkout_and_searched_first(tmp_path, monkeypatch):
+    """Stage tests/fixtures/packaged_server_staging onto a writable copy of its image checkout."""
+    package_src = _PACKAGED_SERVER_STAGING / "package"
+    image_src = _PACKAGED_SERVER_STAGING / "image"
+    package = tmp_path / "pkg"
+    image = tmp_path / "gym"
+    shutil.copytree(package_src, package)
+    shutil.copytree(image_src, image)
+    monkeypatch.delenv(runtime.IMAGE_GYM_SRC_ENV_KEY, raising=False)
+    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(image))
+    monkeypatch.delenv(runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY, raising=False)
+
+    loaded = NativeV1Package(
+        root=package,
+        manifest=NativeV1Manifest(
+            metadata=EnvironmentMetadata(name="math-with-judge"),
+            config_paths=("resources_servers/math_with_judge/configs/math_with_judge.yaml",),
+        ),
+        config_paths=(),
+    )
+    assert runtime._stage_packaged_servers_into_gym_checkout(loaded)
+    runtime._prepend_environment_search_root(str(loaded.root), checkout_first=True)
+
+    server = Path("resources_servers/math_with_judge")
+    # The packaged server replaces the image server. Shared data from the package root
+    # overlays the checkout, and a checkout file the package does not ship stays.
+    assert (image / server / "app.py").read_bytes() == (package_src / server / "app.py").read_bytes()
+    assert (image / server / "requirements.txt").read_bytes() == (
+        package_src / server / "requirements.txt"
+    ).read_bytes()
+    assert (image / "shared/settings.json").read_bytes() == (package_src / "shared/settings.json").read_bytes()
+    assert (image / "shared/keep.txt").read_bytes() == (image_src / "shared/keep.txt").read_bytes()
+    assert (image / "resources_servers/settings.json").read_bytes() == (
+        package_src / "resources_servers/settings.json"
+    ).read_bytes()
+    # nemo_gym and a configs-only reference stay the image's. The reference is not copied over.
+    builtin = Path("resources_servers/builtin_judge")
+    assert (image / "nemo_gym/__init__.py").read_bytes() == (image_src / "nemo_gym/__init__.py").read_bytes()
+    assert (image / builtin / "app.py").read_bytes() == (image_src / builtin / "app.py").read_bytes()
+    assert not (image / builtin / "configs").exists()
+    assert (image / "pyproject.toml").is_file()
+    roots = runtime.os.environ[runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY].split(os.pathsep)
+    assert roots[0] == str(image.resolve())
+    assert roots[1] == str(loaded.root)
+
+
+def test_a_reference_only_server_does_not_replace_the_image_checkout(tmp_path, monkeypatch):
+    package = tmp_path / "pkg" / "resources_servers" / "math_with_judge" / "configs"
+    package.mkdir(parents=True)
+    (package / "math_with_judge.yaml").write_text("entrypoint: app.py\n")
+    image_server = tmp_path / "gym" / "resources_servers" / "math_with_judge"
+    image_server.mkdir(parents=True)
+    (image_server / "app.py").write_text("print('image')\n")
+    monkeypatch.delenv(runtime.IMAGE_GYM_SRC_ENV_KEY, raising=False)
+    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(tmp_path / "gym"))
+
+    loaded = NativeV1Package(
+        root=tmp_path / "pkg",
+        manifest=NativeV1Manifest(
+            metadata=EnvironmentMetadata(name="math-with-judge"),
+            config_paths=("resources_servers/math_with_judge/configs/math_with_judge.yaml",),
+        ),
+        config_paths=(),
+    )
+    assert not runtime._stage_packaged_servers_into_gym_checkout(loaded)
+    assert (image_server / "app.py").read_text() == "print('image')\n"
 
 
 def test_search_root_puts_the_image_gym_checkout_after_the_package(tmp_path, monkeypatch):
@@ -850,6 +928,36 @@ def test_opensandbox_yaml_must_match_when_the_image_checkout_has_it(tmp_path, mo
 
     with pytest.raises(RuntimeError, match="Rebuild the wheelhouse"):
         runtime._require_vendored_gym_matches_image(package)
+
+
+def test_a_packaged_wheel_is_rejected_before_the_sandbox_copies_the_checkout(tmp_path):
+    image, package = _nemo_gym_wheel(tmp_path, "x = 1\n", "x = 2\n")
+    environment = tmp_path / "env" / "wheels"
+    environment.mkdir(parents=True)
+    packaged = environment / package.wheel_files[0].name
+    packaged.write_bytes(package.wheel_files[0].read_bytes())
+
+    with pytest.raises(RuntimeError, match="Rebuild the wheelhouse"):
+        runtime.require_packaged_nemo_gym_matches_image(environment.parent, image_gym_root=image)
+
+
+def test_a_packaged_wheel_that_matches_the_image_checkout_is_accepted(tmp_path):
+    image, package = _nemo_gym_wheel(tmp_path, "x = 1\n", "x = 1\n")
+    environment = tmp_path / "env" / "wheels"
+    environment.mkdir(parents=True)
+    (environment / package.wheel_files[0].name).write_bytes(package.wheel_files[0].read_bytes())
+
+    assert runtime.require_packaged_nemo_gym_matches_image(environment.parent, image_gym_root=image)
+
+
+def test_a_package_without_a_nemo_gym_wheel_is_not_a_mismatch(tmp_path):
+    image = tmp_path / "gym"
+    (image / "nemo_gym").mkdir(parents=True)
+    environment = tmp_path / "env" / "wheels"
+    environment.mkdir(parents=True)
+    (environment / "other-1.0-py3-none-any.whl").write_bytes(b"")
+
+    assert not runtime.require_packaged_nemo_gym_matches_image(environment.parent, image_gym_root=image)
 
 
 def test_opensandbox_yaml_with_the_same_bytes_is_accepted(tmp_path, monkeypatch):
@@ -987,8 +1095,13 @@ def test_bootstrap_installs_wheels_before_starting_gym(monkeypatch):
     )
     monkeypatch.setattr(
         runtime,
+        "_stage_packaged_servers_into_gym_checkout",
+        lambda loaded_package: False,
+    )
+    monkeypatch.setattr(
+        runtime,
         "_prepend_environment_search_root",
-        lambda environment_root: events.append("environment-root-prepended"),
+        lambda environment_root, **kwargs: events.append("environment-root-prepended"),
     )
     monkeypatch.setattr(
         runtime,
@@ -1657,8 +1770,11 @@ def test_an_empty_chunk_is_never_written():
 
 @pytest.fixture(autouse=True)
 def _isolated_hf_environment(monkeypatch):
+    # The runtime writes these straight into os.environ. setenv first so monkeypatch records the
+    # key even when it was unset, and teardown removes whatever value the runtime left behind.
     for key in ("HF_HOME", "HF_DATASETS_CACHE", "HF_HUB_CACHE", "HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE"):
-        monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv(key, "")
+        monkeypatch.delenv(key)
 
 
 def _vendored_hf_cache(tmp_path):
@@ -2230,7 +2346,9 @@ def _wheels_package_with_servers(
     wheels_dir = tmp_path / WHEELS_V1_SUBDIR
     wheels_dir.mkdir(exist_ok=True)
     (wheels_dir / "a_dep-1.0-py3-none-any.whl").write_bytes(b"")
-    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(
+        runtime, "run_process", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+    )
     return runtime._load_runtime_environment_package(str(tmp_path), required=True)
 
 
@@ -2358,7 +2476,7 @@ def test_a_read_only_venv_root_is_mirrored_into_the_work_mount(tmp_path, monkeyp
     (baked / runtime.COMPONENT_VENV_DIRNAME / "bin").mkdir(parents=True)
     real_access = runtime.os.access
     monkeypatch.setattr(
-        runtime.os, "access", lambda path, mode: False if str(path) == str(image_root) else real_access(path, mode)
+        runtime, "access", lambda path, mode: False if str(path) == str(image_root) else real_access(path, mode)
     )
     work = tmp_path / "work"
     config = {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(image_root)}
@@ -2386,7 +2504,9 @@ def _extras_only_wheels_package(tmp_path, monkeypatch):
     wheels_dir = tmp_path / WHEELS_V1_SUBDIR
     wheels_dir.mkdir()
     (wheels_dir / "extra_dep-1.0-py3-none-any.whl").write_bytes(b"")
-    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(
+        runtime, "run_process", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+    )
     return runtime._load_runtime_environment_package(str(tmp_path), required=True)
 
 
@@ -2422,3 +2542,15 @@ def test_an_extras_only_wheels_package_links_no_venv_but_still_stages_its_wheels
 
     assert not venv_root.exists()
     assert runtime.os.environ["PYTHONPATH"].split(runtime.os.pathsep)[0] == str(work / runtime.WHEELS_V1_INSTALL_SUBDIR)
+
+
+def test_the_host_accessors_return_this_interpreters_live_objects() -> None:
+    # Tests replace these accessors to keep their writes out of the shared interpreter, so check
+    # the real ones here: the wheels-v1 install must extend sys.path itself, and log output must
+    # reach whatever sys.stderr is at call time.
+    assert runtime._import_path() is sys.path
+    assert runtime._host_stderr() is sys.stderr
+    # The host replaces sys.stderr after import, so the accessor must not cache the stream.
+    replacement = io.StringIO()
+    with contextlib.redirect_stderr(replacement):
+        assert runtime._host_stderr() is replacement

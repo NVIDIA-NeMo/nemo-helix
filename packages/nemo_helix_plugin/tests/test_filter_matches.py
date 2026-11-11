@@ -12,6 +12,7 @@ services/core/entities/tests/test_filter_matches_sql_parity.py.
 """
 
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator, LogicalOperation
@@ -98,6 +99,48 @@ class TestEqDataPath:
     def test_eq_descend_into_non_dict_is_missing(self):
         e = Entity(data={"a": "scalar"})
         assert evaluate(cmp(FilterOperator.EQ, "data.a.b", None), e) is True
+
+
+class TestEqJsonPath:
+    """Entity data and typed Job spec use the same rooted JSON traversal."""
+
+    @pytest.mark.parametrize("root", ["data", "spec"])
+    @pytest.mark.parametrize("as_mapping", [False, True], ids=["object", "mapping"])
+    @pytest.mark.parametrize(
+        "spec,field,value,expected",
+        [
+            ({"stop_after_synth": False}, "stop_after_synth", False, True),
+            ({"stop_after_synth": False}, "stop_after_synth", None, False),
+            ({"stop_after_synth": None}, "stop_after_synth", None, True),
+            ({}, "stop_after_synth", None, True),
+            ({}, "stop_after_synth", False, False),
+            (None, "stop_after_synth", None, True),
+            ({"target": {"format": "generic"}}, "target.format", "generic", True),
+            ({"target": {}}, "target.format", None, True),
+            ({"target": "scalar"}, "target.format", None, True),
+        ],
+        ids=[
+            "false",
+            "false-not-null",
+            "null",
+            "missing",
+            "missing-not-false",
+            "null-root",
+            "nested",
+            "nested-missing",
+            "nested-scalar",
+        ],
+    )
+    def test_json_path(self, root, as_mapping, spec, field, value, expected):
+        fields = {root: spec}
+        entity = fields if as_mapping else SimpleNamespace(**fields)
+        assert evaluate(cmp(FilterOperator.EQ, f"{root}.{field}", value), entity) is expected
+
+    @pytest.mark.parametrize("root", ["data", "spec"])
+    def test_does_not_traverse_object_attributes(self, root):
+        entity = SimpleNamespace(**{root: SimpleNamespace(stop_after_synth=False)})
+        with pytest.raises(ValueError, match="does not exist"):
+            evaluate(cmp(FilterOperator.EQ, f"{root}.stop_after_synth", False), entity)
 
 
 class TestLike:

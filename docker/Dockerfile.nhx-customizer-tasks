@@ -83,8 +83,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
     --reinstall-package wandb \
+    --reinstall-package fsspec \
     --overrides /app/docker/customizer/preserve_base_torch.txt \
     "aiohttp>=3.14.1,<4" \
+    "fsspec>=2026.6.0" \
     "grpcio>=1.81.1,<2" \
     "jupyter-server>=2.20.0,<3" \
     "mistune>=3.3.3,<4" \
@@ -94,7 +96,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "tornado>=6.5.7,<7" \
     "urllib3>=2.7.0,<3" \
     "GitPython>=3.1.60,<4" \
-    "wandb>=0.30.0"
+    "wandb>=0.31.0"
 
 # CVE cleanup for unused/stale packages from the NGC base image. The task entry
 # points import from /opt/venv; scanners still report the shadowed system copies.
@@ -106,7 +108,8 @@ RUN apt-get update && \
 RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
     --mount=type=bind,source=docker/removals/files/base/pytorch-ngc-common.txt,target=/tmp/common-file-removals.txt,readonly \
     --mount=type=bind,source=docker/removals/files/base/nhx-customizer-tasks.txt,target=/tmp/image-file-removals.txt,readonly \
-    python /tmp/remove-listed-files.py /tmp/common-file-removals.txt /tmp/image-file-removals.txt
+    --mount=type=bind,source=docker/removals/files/final/training-fsspec.txt,target=/tmp/fsspec-file-removals.txt,readonly \
+    python /tmp/remove-listed-files.py /tmp/common-file-removals.txt /tmp/image-file-removals.txt /tmp/fsspec-file-removals.txt
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
@@ -139,6 +142,7 @@ USER 0
 COPY tests/smoke_gpu/ /smoke_test/
 RUN --mount=type=bind,source=docker/removals/files/base/pytorch-ngc-common.txt,target=/smoke_test/removals/files/base/pytorch-ngc-common.txt,readonly \
     --mount=type=bind,source=docker/removals/files/base/nhx-customizer-tasks.txt,target=/smoke_test/removals/files/base/nhx-customizer-tasks.txt,readonly \
+    --mount=type=bind,source=docker/removals/files/final/training-fsspec.txt,target=/smoke_test/removals/files/final/training-fsspec.txt,readonly \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache --reinstall pytest && \
     ${VIRTUAL_ENV}/bin/pytest /smoke_test/ -m ${SMOKE_MARKER} -v
 

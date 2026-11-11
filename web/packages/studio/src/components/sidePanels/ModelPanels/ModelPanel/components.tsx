@@ -13,12 +13,8 @@ import {
 import { kebabCaseToTitleCase } from '@nemo/common/src/utils/formatters';
 import { isDefined } from '@nemo/common/src/utils/list';
 import { ChatMulti, Eye, EyeOff, Layers, TextAlignLeft, IconWindow } from '@nemo/icons/icons';
-import {
-  ModelDeploymentStatus,
-  type Adapter,
-  type ModelEntity,
-  type ModelDeployment,
-} from '@nemo/sdk/generated/platform/schema';
+import type { Adapter, ModelEntity, ModelDeployment } from '@nemo/sdk/generated/platform/schema';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 import {
   Accordion,
   Anchor,

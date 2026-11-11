@@ -177,12 +177,17 @@ async def delete_job_template(
 ) -> None:
     """Delete a job template."""
     try:
-        await entity_client.delete(CustomizationJobTemplate, name=name, workspace=workspace)
+        _delete_target = await entity_client.get(CustomizationJobTemplate, name=name, workspace=workspace)
+        await entity_client.delete_by_id(
+            CustomizationJobTemplate, _delete_target.id, expected_db_version=_delete_target.db_version
+        )
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,
             detail=f"Job template '{name}' not found in workspace '{workspace}'.",
         ) from exc
+    except NemoEntityConflictError as exc:
+        raise HTTPException(status_code=409, detail="Job template changed during deletion; refresh and retry.") from exc
     except Exception as exc:
         logger.exception("Failed to delete job template '%s'", sanitize_for_log(name))
         raise HTTPException(status_code=500, detail="Failed to delete job template.") from exc

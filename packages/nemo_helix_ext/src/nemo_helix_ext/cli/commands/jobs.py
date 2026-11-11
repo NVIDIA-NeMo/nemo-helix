@@ -917,13 +917,20 @@ def list_jobs(
     if columns is None or str(columns).strip() == "default":
         output_columns = default_columns
 
+    status_filter: str | dict[str, list[str]] | None = None
+    if filter_status:
+        if len(filter_status) == 1:
+            status_filter = filter_status[0]
+        else:
+            status_filter = {"$in": filter_status}
+
     filter_value = _source_filter_query(
         merge_filter_dict(
             filter,
             name=filter_name,
             project=filter_project,
             source=filter_source,
-            status=filter_status,
+            status=status_filter,
             workspace=filter_workspace,
         )
     )

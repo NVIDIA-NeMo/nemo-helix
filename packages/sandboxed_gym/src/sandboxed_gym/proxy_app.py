@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 from collections.abc import AsyncGenerator
 from typing import Any
+from urllib.request import urlopen
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -99,7 +100,7 @@ def build_proxy_app(session: SandboxedGymSession) -> FastAPI:
             headers=dict(session.host.headers),
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urlopen(request, timeout=30) as response:
                 body = response.read()
         except urllib.error.HTTPError as exc:
             raise HTTPException(status_code=exc.code, detail=exc.read().decode()) from exc
@@ -141,9 +142,7 @@ def build_proxy_app(session: SandboxedGymSession) -> FastAPI:
         # Opened off the event loop, and awaited before streaming so the upstream status and
         # headers still decide this response's own -- once bytes start flowing neither can change.
         try:
-            response = await asyncio.to_thread(
-                urllib.request.urlopen, upstream, timeout=session.cfg.sandbox.rollout_timeout_s
-            )
+            response = await asyncio.to_thread(urlopen, upstream, timeout=session.cfg.sandbox.rollout_timeout_s)
         except urllib.error.HTTPError as exc:
             return Response(
                 content=exc.read(),

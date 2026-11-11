@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
-import { FilesetPurpose, type FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
 import { DatasetsTable } from '@studio/components/DatasetsTable';
 import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
@@ -11,6 +12,7 @@ import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
+import { menuFor } from '@studio/tests/util/menuFor';
 import { mockUseParams } from '@studio/tests/util/mockUseParams';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -98,11 +100,6 @@ vi.mock('@studio/components/FilesetCreateModal', () => ({
     ) : null
   ),
 }));
-
-vi.mock('@studio/constants/environment', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@studio/constants/environment')>();
-  return { ...actual, FILESET_DETAILS_ENABLED: true };
-});
 
 const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`;
 
@@ -719,6 +716,43 @@ describe('DatasetsTable', () => {
       expect(
         onDatasetsSelected.mock.calls.some((args) => (args[0] as FilesetOutput[]).length > 0)
       ).toBe(false);
+    });
+  });
+
+  describe('Row actions (default menu)', () => {
+    it('shows Edit and Delete, with Delete styled as danger, and opens the delete modal', async () => {
+      installListHandler();
+      renderTable();
+
+      await screen.findAllByText('dataset-1', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+      const [trigger] = screen.getAllByRole('button', { name: 'Open quick actions menu' });
+      await user.click(trigger);
+
+      const menu = menuFor(trigger);
+      const items = within(menu).getAllByTestId('quick-actions-menu-item');
+      expect(items.map((item) => item.textContent)).toEqual(['Edit', 'Delete']);
+      expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
+
+      await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
+      expect(await screen.findByTestId('delete-title')).toHaveTextContent(
+        'Delete Dataset: dataset-1'
+      );
+    });
+
+    it('opens DatasetCreateModal in edit mode from the Edit action', async () => {
+      installListHandler();
+      renderTable();
+
+      await screen.findAllByText('dataset-1', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+      const [trigger] = screen.getAllByRole('button', { name: 'Open quick actions menu' });
+      await user.click(trigger);
+      await user.click(within(menuFor(trigger)).getByRole('menuitem', { name: 'Edit' }));
+
+      const modal = await screen.findByTestId('dataset-create-modal');
+      expect(within(modal).getByTestId('modal-mode')).toHaveTextContent(
+        DatasetCreateModalMode.Edit
+      );
+      expect(within(modal).getByTestId('modal-dataset-name')).toHaveTextContent('dataset-1');
     });
   });
 

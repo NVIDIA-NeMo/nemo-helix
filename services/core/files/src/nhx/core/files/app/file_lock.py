@@ -136,10 +136,9 @@ class FileLockManager:
     async def _release(self, lock: FileLock) -> None:
         """Release the lock."""
         try:
-            await self.entity_client.delete(
+            await self.entity_client.delete_by_id(
                 FileLock,
-                lock.name,
-                workspace=self.workspace,
+                lock.id,
                 expected_db_version=lock.db_version,
             )
             logger.debug("Lock released")

@@ -54,13 +54,28 @@ def setup_policy_data():
             },
             "endpoints": {
                 "/v2/workspaces/{workspace_id}/models": {
-                    "get": {"permissions": ["models.read"]},
-                    "post": {"permissions": ["models.create"]},
+                    "get": {
+                        "direct": {"actor_perms": ["models.read"]},
+                        "delegated": {"actor_perms": [], "subject_perms": ["models.read"]},
+                    },
+                    "post": {
+                        "direct": {"actor_perms": ["models.create"]},
+                        "delegated": {"actor_perms": [], "subject_perms": ["models.create"]},
+                    },
                 },
                 "/v2/workspaces/{workspace_id}/models/{model_id}": {
-                    "get": {"permissions": ["models.read"]},
-                    "put": {"permissions": ["models.update"]},
-                    "delete": {"permissions": ["models.delete"]},
+                    "get": {
+                        "direct": {"actor_perms": ["models.read"]},
+                        "delegated": {"actor_perms": [], "subject_perms": ["models.read"]},
+                    },
+                    "put": {
+                        "direct": {"actor_perms": ["models.update"]},
+                        "delegated": {"actor_perms": [], "subject_perms": ["models.update"]},
+                    },
+                    "delete": {
+                        "direct": {"actor_perms": ["models.delete"]},
+                        "delegated": {"actor_perms": [], "subject_perms": ["models.delete"]},
+                    },
                 },
             },
             "workspaces": {},

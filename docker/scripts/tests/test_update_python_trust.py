@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 import sys
 import tarfile
 from pathlib import Path
@@ -52,11 +53,11 @@ def test_source_collection_covers_archive_and_go_sources(tmp_path: Path, monkeyp
         ]
     }
     responses = iter([json.dumps(metadata).encode(), data])
-    monkeypatch.setattr(trust.urllib.request, "urlopen", lambda *args, **kwargs: io.BytesIO(next(responses)))
-    monkeypatch.setattr(trust.platform, "machine", lambda: "aarch64")
-    monkeypatch.setattr(trust.subprocess, "check_output", lambda *args, **kwargs: "wandb-core: go1.27.3\n")
+    monkeypatch.setattr(trust, "urlopen", lambda *args, **kwargs: io.BytesIO(next(responses)))
+    monkeypatch.setattr(trust, "machine", lambda: "aarch64")
+    monkeypatch.setattr(trust, "check_output", lambda *args, **kwargs: "wandb-core: go1.27.3\n")
     collected = []
-    monkeypatch.setattr(trust.subprocess, "run", lambda command, **kwargs: collected.append(command))
+    monkeypatch.setattr(trust, "run_process", lambda command, **kwargs: collected.append(command))
 
     binary = trust.rebuild_wandb("0.31.0", tmp_path)
 
@@ -73,14 +74,14 @@ def test_update_bundles_skips_unnamed_distributions(tmp_path: Path, monkeypatch)
         directory.mkdir()
         (directory / "METADATA").write_text(metadata)
     monkeypatch.setenv("PYTHONPATH", str(tmp_path))
-    original_run = trust.subprocess.run
+    original_run = trust.run_process
     installs = []
 
     def probe(command, **kwargs):
-        return original_run([command[0], "-S", *command[1:]], stdout=trust.subprocess.PIPE, check=True, **kwargs).stdout
+        return original_run([command[0], "-S", *command[1:]], stdout=subprocess.PIPE, check=True, **kwargs).stdout
 
-    monkeypatch.setattr(trust.subprocess, "check_output", probe)
-    monkeypatch.setattr(trust.subprocess, "run", lambda command, **kwargs: installs.append(command))
+    monkeypatch.setattr(trust, "check_output", probe)
+    monkeypatch.setattr(trust, "run_process", lambda command, **kwargs: installs.append(command))
 
     trust.update_bundles(Path(sys.executable))
 
@@ -119,7 +120,7 @@ def test_replace_binary_detaches_shared_files_and_updates_record(tmp_path: Path,
 def test_discovers_nested_gym_environments_without_resolving_python_symlinks(tmp_path: Path, monkeypatch) -> None:
     interpreter = tmp_path / "system-python"
     interpreter.touch()
-    monkeypatch.setattr(trust.shutil, "which", lambda _: str(interpreter))
+    monkeypatch.setattr(trust, "which", lambda _: str(interpreter))
     configs = [tmp_path / "gym/agents/a/.venv", tmp_path / "gym/resources/b/.venv"]
     for directory in configs:
         (directory / "bin").mkdir(parents=True)
@@ -139,7 +140,7 @@ def test_updates_bootstrap_wheel_as_well_as_ensurepip_version(tmp_path: Path, mo
     bundled.mkdir()
     old = bundled / "pip-26.2.1-py3-none-any.whl"
     old.write_bytes(b"old certificate bundle")
-    monkeypatch.setattr(trust.subprocess, "check_output", lambda *args, **kwargs: str(module))
+    monkeypatch.setattr(trust, "check_output", lambda *args, **kwargs: str(module))
     monkeypatch.setattr(trust, "fixed_pip_wheel", lambda: b"verified fixed wheel")
 
     trust.update_ensurepip(tmp_path / "python")

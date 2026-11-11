@@ -12,7 +12,8 @@ derivable from them by string substitution. Run
 The supported set is exactly: `bleu`, `exact-match`, `f1`, `llm-judge`,
 `nemo-agent-toolkit-remote`, `number-check`, `remote`, `rouge`,
 `retrieval-map`, `retrieval-ndcg`, `retrieval-precision`,
-`retrieval-recall`, `string-check`, and `tool-calling`.
+`retrieval-recall`, `sequence-similarity`, `string-check`, and
+`tool-calling`.
 
 | Goal | Prefer |
 | --- | --- |
@@ -20,6 +21,7 @@ The supported set is exactly: `bleu`, `exact-match`, `f1`, `llm-judge`,
 | Contains, equals, or starts/ends with | `StringCheckMetric` |
 | Numeric value or threshold | `NumberCheckMetric` |
 | Text overlap | `F1Metric`, `BLEUMetric`, or `ROUGEMetric` |
+| Partial credit for long structured text, or a `difflib` ratio | `SequenceSimilarityMetric` |
 | Semantic quality or a written rubric | `LLMJudgeMetric` |
 | BEIR retrieval quality | `RetrievalNDCGMetric`, `RetrievalRecallMetric`, `RetrievalPrecisionMetric`, and `RetrievalMAPMetric` |
 | Tool-call correctness | `ToolCallingMetric` |

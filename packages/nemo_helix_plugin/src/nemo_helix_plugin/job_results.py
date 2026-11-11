@@ -185,6 +185,11 @@ class HelixJobResults(JobResults):
     ``results/<attempt_id>/<result_name>`` and registers the result via
     ``JobsClient.create_job_result`` (conflict-idempotent).
 
+    Directory uploads attempt every nonignored file after ordinary file-upload
+    failures, retaining successful uploads. Failures are raised after all files
+    are attempted (as an ``ExceptionGroup`` for multiple failures), so a partial
+    upload is not registered as a complete result. Cancellation stops immediately.
+
     Args:
         job_name: Platform job name this sink publishes results for.
         workspace: Workspace the job lives in.

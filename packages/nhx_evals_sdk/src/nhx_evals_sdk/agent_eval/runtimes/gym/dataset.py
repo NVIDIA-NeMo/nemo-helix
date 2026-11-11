@@ -3,7 +3,7 @@
 
 """Gym rows to Evaluator tasks, and back to a dataset Gym will collect against.
 
-Task identity is the content hash of a row, and attribution is an index this module *assigns*
+Task identity is the content hash of a row (or of its key, with ``id_field``), and attribution is an index this module *assigns*
 rather than infers — see :func:`materialize_dataset`. Both halves live together because they are
 two directions of one translation: what breaks one silently breaks the other.
 """
@@ -13,14 +13,16 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Mapping, Sequence
+import math
+import re
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
     NG_TASK_INDEX,
     RUNTIME_KEYS,
-    read_jsonl,
+    iter_jsonl_objects,
 )
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.metrics.protocol import Metric
@@ -38,6 +40,50 @@ def _canonical_row_hash(row: Mapping[str, Any]) -> str:
     payload = {key: value for key, value in row.items() if key not in RUNTIME_KEYS}
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+#: Hash-mode task ids are ``gym-`` plus this many hex digits of the row hash (236 bits): the longest
+#: id that is still a valid platform entity name (a lowercase letter first, at most 63 characters), so
+#: the id a row gets locally is the name it is stored under and the test case id Intake records.
+_HASH_ID_HEX_DIGITS = 59
+
+
+def _hash_task_id(row: Mapping[str, Any]) -> str:
+    """A row's content-derived task id: ``gym-`` and a prefix of :func:`_canonical_row_hash`."""
+    return f"{RESERVED_ID_PREFIX}-{_canonical_row_hash(row)[:_HASH_ID_HEX_DIGITS]}"
+
+
+#: Longest platform entity name, which a keyed task id fills: ``<prefix>-`` plus as many hex digits of
+#: the key's hash as fit.
+_MAX_TASK_ID_LENGTH = 63
+#: A key prefix: a lowercase letter, then up to 7 lowercase letters or digits. No dashes, so the id can
+#: never contain ``--`` or end in ``-``, both of which the platform's entity names refuse.
+ID_PREFIX_PATTERN = r"^[a-z][a-z0-9]{0,7}$"
+#: Prefix of the ids rows get without a key. Keyed ids may not use it, so a task's name shows which kind it is.
+RESERVED_ID_PREFIX = "gym"
+
+
+def check_id_prefix(id_prefix: str) -> None:
+    """Raise ``ValueError`` unless ``id_prefix`` is a valid keyed-id prefix.
+
+    It must match :data:`ID_PREFIX_PATTERN` and must not be :data:`RESERVED_ID_PREFIX`.
+    """
+    if not re.fullmatch(ID_PREFIX_PATTERN, id_prefix):
+        raise ValueError(
+            f"id_prefix {id_prefix!r} must be 1-8 characters: a lowercase letter, then lowercase letters or digits"
+        )
+    if id_prefix == RESERVED_ID_PREFIX:
+        raise ValueError(f"id_prefix {id_prefix!r} is reserved for the ids of rows without a key; choose another")
+
+
+def _keyed_task_id(value: Any, id_prefix: str) -> str:
+    """A keyed row's task id: ``<id_prefix>-`` and the hash of the key's JSON encoding, filling 63 characters.
+
+    Only the key is hashed, so editing any other field of the row keeps its id. The key is hashed in
+    its JSON form, so ``1`` and ``"1"`` are different keys.
+    """
+    digest = hashlib.sha256(json.dumps(value).encode("utf-8")).hexdigest()
+    return f"{id_prefix}-{digest[: _MAX_TASK_ID_LENGTH - len(id_prefix) - 1]}"
 
 
 def _content_text(content: Any) -> str:
@@ -101,13 +147,36 @@ def _default_gym_metric() -> Metric:
     return GymRewardMetric()
 
 
-def discover_gym_tasks(dataset: str | Path, *, metrics: Sequence[Any] | None = None) -> list[AgentEvalTask]:
+def discover_gym_tasks(
+    dataset: str | Path | Iterable[bytes],
+    *,
+    metrics: Sequence[Any] | None = None,
+    name: str | None = None,
+    max_rows: int | None = None,
+    id_field: str | None = None,
+    id_prefix: str | None = None,
+) -> list[AgentEvalTask]:
     """Build one :class:`AgentEvalTask` per distinct row in a Gym dataset (jsonl).
 
-    Each task's id is the content hash of the row; its ``instruction`` is rendered
+    ``dataset`` is a path, or an iterable of byte lines (``io.BytesIO``) that ``name`` labels in
+    errors and logs. ``max_rows``, when set, refuses a dataset with more non-blank rows, stopping
+    at the first row past the limit.
+
+    **Task ids.** A task's id is ``gym-`` and 59 hex digits of its row's content hash, a valid
+    platform entity name, so the same row has the same id locally, inline and stored. An edited row
+    is therefore a new task.
+
+    With ``id_field`` and ``id_prefix`` (always together), a task's id instead comes from the row's
+    value of ``id_field``: ``<id_prefix>-`` and the hash of that value, 63 characters in all. Only
+    the key is hashed, so an edited row keeps its id. Every row must carry a non-empty string or
+    number in ``id_field``, and two rows with the same key are an error naming both lines.
+    ``id_prefix`` keeps two files' keys apart in one workspace: see :data:`ID_PREFIX_PATTERN`.
+
+    Every task's ``intent`` is the fixed label ``"Gym row"``: it never names the file, so the same
+    row yields the same task content from any file. Each task's ``instruction`` is rendered
     from ``responses_create_params.input`` *when the row carries one*; the raw params
     are stashed under ``inputs['gym_row']`` for provenance; and it is scored by a
-    :class:`GymRewardMetric`. The dataset path is stamped on
+    :class:`GymRewardMetric`. A path dataset is stamped on
     ``metadata['gym_dataset_path']``, and every *other* row key (the verifier's
     ground-truth fields, ``agent_ref``, and so on) on ``metadata['gym_row_extras']``.
     Together with ``inputs['gym_row']`` those reconstruct the complete source row,
@@ -134,19 +203,48 @@ def discover_gym_tasks(dataset: str | Path, *, metrics: Sequence[Any] | None = N
     (``rollout_collection._preprocess_rows_from_config``), so a row without it is rejected here
     rather than crashing Gym mid-collection.
     """
-    dataset = Path(dataset)
+    if (id_field is None) != (id_prefix is None):
+        raise ValueError("id_field and id_prefix go together: set both, or neither")
+    if id_prefix is not None:
+        check_id_prefix(id_prefix)
+    path = Path(dataset) if isinstance(dataset, (str, Path)) else None
+    label = name or (str(path) if path is not None else "<stream>")
     tasks: list[AgentEvalTask] = []
     seen: set[str] = set()
-    duplicates = 0
-    promptless = 0
-    for position, row in enumerate(read_jsonl(dataset), 1):
+    key_lines: dict[str, int] = {}
+    rows = duplicates = promptless = 0
+    for line_no, row in iter_jsonl_objects(path if path is not None else dataset, name=label):
+        rows += 1
+        if max_rows is not None and rows > max_rows:
+            raise ValueError(f"{label}:{line_no}: more than the {max_rows}-row limit")
         params = row.get("responses_create_params")
         if not isinstance(params, Mapping):
             raise ValueError(
-                f"row {position} of {dataset} has no 'responses_create_params' mapping; Gym requires that key "
+                f"{label}:{line_no}: row has no 'responses_create_params' mapping; Gym requires that key "
                 "on every dataset row"
             )
-        task_id = _canonical_row_hash(row)
+        if id_field is not None and id_prefix is not None:
+            key = row.get(id_field)
+            # A non-finite number is refused too: JSON's 1e400 and 2e400 both parse as infinity, so they
+            # would name one task.
+            if (
+                isinstance(key, bool)
+                or not isinstance(key, (str, int, float))
+                or key == ""
+                or (isinstance(key, float) and not math.isfinite(key))
+            ):
+                raise ValueError(
+                    f"{label}:{line_no}: row has no usable {id_field!r} value (need a non-empty string or finite "
+                    f"number, got {key!r})"
+                )
+            task_id = _keyed_task_id(key, id_prefix)
+            if task_id in key_lines:
+                raise ValueError(
+                    f"{label}:{line_no}: {id_field} {key!r} repeats line {key_lines[task_id]}; each row needs its own key"
+                )
+            key_lines[task_id] = line_no
+        else:
+            task_id = _hash_task_id(row)
         if task_id in seen:
             duplicates += 1
             continue
@@ -157,7 +255,9 @@ def discover_gym_tasks(dataset: str | Path, *, metrics: Sequence[Any] | None = N
         tasks.append(
             AgentEvalTask(
                 id=task_id,
-                intent=f"Gym row from {dataset.name}",
+                # Deliberately not the file name: the same row must be the same task content whichever
+                # file it came from, so stored tasks are shared across tasksets and runs compare.
+                intent="Gym row",
                 inputs={
                     # Absent, not empty, when the row carries no prompt — see the docstring.
                     **({"instruction": instruction} if instruction else {}),
@@ -165,7 +265,7 @@ def discover_gym_tasks(dataset: str | Path, *, metrics: Sequence[Any] | None = N
                 },
                 metrics=list(metrics) if metrics is not None else [_default_gym_metric()],
                 metadata={
-                    "gym_dataset_path": str(dataset),
+                    **({"gym_dataset_path": str(path)} if path is not None else {}),
                     # Everything except responses_create_params, which already lives in inputs['gym_row'].
                     "gym_row_extras": {
                         key: value
@@ -181,7 +281,7 @@ def discover_gym_tasks(dataset: str | Path, *, metrics: Sequence[Any] | None = N
             "repeating a row cannot request repeated attempts — set GymRuntimeConfig.num_repeats for that. "
             "Duplicate rows usually indicate a data problem.",
             duplicates,
-            dataset,
+            label,
             len(tasks),
         )
     if promptless:
@@ -192,10 +292,10 @@ def discover_gym_tasks(dataset: str | Path, *, metrics: Sequence[Any] | None = N
             "not read the instruction. A runner that hands the task straight to an agent will reject these tasks.",
             promptless,
             len(tasks),
-            dataset,
+            label,
         )
     if not tasks:
-        raise ValueError(f"no rows found in Gym dataset {dataset}")
+        raise ValueError(f"no rows found in Gym dataset {label}")
     return tasks
 
 

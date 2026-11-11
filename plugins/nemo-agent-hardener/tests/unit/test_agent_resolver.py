@@ -9,6 +9,7 @@ the agents service routes, so no live platform or agent-hardener install is need
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -469,6 +470,66 @@ def test_network_mcp_servers_and_model_endpoints_are_allow_listed() -> None:
         "inference-api.nvidia.com:443",
         "ledger-tools.internal:443",
     ]
+
+
+def test_harness_model_discovery_retains_custom_credentials() -> None:
+    """The Hermes model lives under its harness, not the shared models table."""
+    config = {
+        "harnesses": {
+            "hermes": {
+                "model": {
+                    "base_url": "https://inference-api.nvidia.com/v1",
+                    "api_key_env": "CUSTOM_MODEL_KEY",
+                    "api_key": "dummy-inline-value",
+                }
+            }
+        }
+    }
+    original = deepcopy(config)
+
+    assert derive_egress(config) == ["inference-api.nvidia.com:443"]
+    assert derive_secret_names(config) == ["CUSTOM_MODEL_KEY"]
+    assert config == original
+
+
+def test_model_and_mcp_discovery_deduplicates_and_ignores_non_mapping_models() -> None:
+    model = {"base_url": "https://model.example/v1", "api_key_env": "MODEL_KEY"}
+    config = {
+        "models": {"shared": model, "invalid": None},
+        "harnesses": {
+            "hermes": {"model": model},
+            "reference": {"model": "shared"},
+            "invalid": None,
+        },
+        "mcp": {
+            "servers": {
+                "remote": {
+                    "transport": "streamable-http",
+                    "url": "https://mcp.example/mcp",
+                    "env": {"TOKEN": "${MCP_KEY}", "INLINE": "dummy-inline-value"},
+                },
+                "local": {"transport": "stdio", "url": "/usr/bin/python"},
+            }
+        },
+    }
+
+    assert derive_egress(config) == ["mcp.example:443", "model.example:443"]
+    assert derive_secret_names(config, ["MODEL_KEY", "EXTRA_KEY"]) == ["EXTRA_KEY", "MCP_KEY", "MODEL_KEY"]
+
+
+@pytest.mark.parametrize("location", ["shared", "harness"])
+@pytest.mark.parametrize("base_url", [None, "https://explicit.example/v1"])
+def test_legacy_model_endpoint_matches_packaged_config(location: str, base_url: str | None) -> None:
+    """Fabric promotes settings.base_url only when base_url is absent or None."""
+    model = {"base_url": base_url, "settings": {"base_url": "http://legacy.example:8080/v1"}}
+    config = {"models": {"default": model}} if location == "shared" else {"harnesses": {"hermes": {"model": model}}}
+    original = deepcopy(config)
+    packaged = inject_gateway_url(config, "default", "https://platform.example")
+    expected = ["explicit.example:443"] if base_url is not None else ["legacy.example:8080"]
+
+    assert derive_egress(config) == expected
+    assert derive_egress(config) == derive_egress(packaged)
+    assert config == original
 
 
 def test_a_stdio_server_contributes_no_egress() -> None:

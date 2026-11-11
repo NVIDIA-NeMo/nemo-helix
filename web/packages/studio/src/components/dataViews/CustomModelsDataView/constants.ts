@@ -2,11 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
-import {
-  AutomodelTrainingSpecFinetuningType,
-  RlGRPOTrainingFinetuningType,
-  UnslothTrainingSpecFinetuningType,
-} from '@nemo/sdk/generated/customizer/schema';
+import { AutomodelTrainingSpecFinetuningType } from '@nemo/sdk/generated/customizer/schema/AutomodelTrainingSpecFinetuningType';
+import { RlGRPOTrainingFinetuningType } from '@nemo/sdk/generated/customizer/schema/RlGRPOTrainingFinetuningType';
+import { UnslothTrainingSpecFinetuningType } from '@nemo/sdk/generated/customizer/schema/UnslothTrainingSpecFinetuningType';
 import type { FinetuningType } from '@nemo/sdk/generated/platform/schema';
 
 /**

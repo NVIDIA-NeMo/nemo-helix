@@ -113,7 +113,7 @@ def test_zitadel_kubernetes_runner_is_provider_specific() -> None:
 
 
 def test_zitadel_kubernetes_runtime_is_in_auth_idp_ci_matrix() -> None:
-    workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
+    workflow = Path(".github/workflows/e2e.yaml").read_text(encoding="utf-8")
     job = _workflow_job_block(workflow, "python-auth-idp-e2e-test")
 
     assert "runtime: authentik-compose" in job
@@ -134,7 +134,7 @@ def test_zitadel_kubernetes_runtime_is_in_auth_idp_ci_matrix() -> None:
     assert "playwright install --with-deps chromium" in job
     assert 'kind delete cluster --name "${AUTH_IDP_K8S_CLUSTER_NAME}"' in job
 
-    workflow_document = _load_yaml(Path(".github/workflows/ci.yaml"))
+    workflow_document = _load_yaml(Path(".github/workflows/e2e.yaml"))
     commands = {
         entry["runtime"]: entry["command"]
         for entry in workflow_document["jobs"]["python-auth-idp-e2e-test"]["strategy"]["matrix"]["include"]
@@ -654,8 +654,9 @@ def test_zitadel_chart_references_precreated_workload_token_secrets_and_tokenrev
     assert any(mount["name"] == "workload-token-tls-ca" for mount in values["nemo-helix"]["api"]["extraVolumeMounts"])
     jobs_config = values["nemo-helix"]["platformConfig"]["jobs"]
     assert jobs_config["executor_defaults"]["kubernetes_job"]["env"] == {
-        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
+        "NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
+        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
     }
     workload_executor = next(
         executor
@@ -664,10 +665,20 @@ def test_zitadel_chart_references_precreated_workload_token_secrets_and_tokenrev
     )
     workload_config = workload_executor["config"]
     assert workload_config["env"] == {
-        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
+        "NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
+        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca-bundle.crt",
     }
-    assert workload_config["storage"] == jobs_config["executor_defaults"]["kubernetes_job"]["storage"]
+    # executor_defaults don't apply to cpu/workload, so its storage sets the core PVC beside the CA volume.
+    assert workload_config["storage"] == {
+        "pvc_name": '{{ include "nhx-core.persistentVolumeClaim" . }}',
+        "volume_permissions_image": "{{ .Values.core.storage.volumePermissionsImage }}",
+        **jobs_config["executor_defaults"]["kubernetes_job"]["storage"],
+    }
+    job_ca_items = jobs_config["executor_defaults"]["kubernetes_job"]["storage"]["additional_volumes"][0]["secret"][
+        "items"
+    ]
+    assert {"key": "ca-bundle.crt", "path": "ca-bundle.crt"} in job_ca_items
     assert not (HELM_DIR / "templates" / "workload-token-signing-key-secret.yaml").exists()
     assert not (HELM_DIR / "templates" / "workload-token-tls.yaml").exists()
     assert 'resources: ["tokenreviews"]' in tokenreview_template

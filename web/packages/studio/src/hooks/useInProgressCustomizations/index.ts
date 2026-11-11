@@ -5,14 +5,15 @@ import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { getQueryKeyInfiniteModels } from '@nemo/common/src/api/models/useModels';
 import { useJobsListJobs } from '@nemo/sdk/generated/platform/jobs';
 import { getModelsListModelsQueryKey } from '@nemo/sdk/generated/platform/models';
-import {
-  FinetuningType,
-  HelixJobStatus,
-  type HelixJobListSortField,
-  type HelixJobResponse,
-  type HelixJobsListFilter,
+import type {
+  HelixJobListSortField,
+  HelixJobResponse,
+  HelixJobsListFilter,
 } from '@nemo/sdk/generated/platform/schema';
+import { FinetuningType } from '@nemo/sdk/generated/platform/schema/FinetuningType';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { JOB_SOURCE } from '@studio/components/dataViews/JobsDataView/constants';
+import { asRecord } from '@studio/util/guards';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
 
@@ -55,9 +56,6 @@ export interface InProgressCustomization {
   finetuningType?: FinetuningType;
   createdAt?: string;
 }
-
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
 
 const asString = (value: unknown): string | undefined =>
   typeof value === 'string' && value.length > 0 ? value : undefined;

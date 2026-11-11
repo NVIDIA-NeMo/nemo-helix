@@ -31,6 +31,7 @@ from nemo_evals.jobs.agent_spec import (
     RegisteredAgentSource,
     registered_agent_config_needs_files,
     registered_agent_files,
+    registered_agent_files_receipt,
     registered_agent_name,
     target_agent_identity,
 )
@@ -122,9 +123,11 @@ def _platform(mocker: MockerFixture, agent: object, *, ethos_fileset: bool = Fal
     agents.get_agent = AsyncMock(return_value=response)
     files = mocker.Mock()
     files.get_fileset = AsyncMock(return_value=mocker.Mock()) if ethos_fileset else AsyncMock(side_effect=_not_found())
-    files.create_fileset = AsyncMock(return_value=mocker.Mock())
+    allocated = mocker.Mock()
+    allocated.data.return_value.id = "snapshot-id"
+    files.create_fileset = AsyncMock(return_value=allocated)
     files.upload_file = AsyncMock(return_value=mocker.Mock())
-    files.delete_fileset = AsyncMock(return_value=mocker.Mock())
+    files.delete_fileset_by_id = AsyncMock(return_value=mocker.Mock())
 
     async def fake_download(ref: FilesetRef, destination: str, **_: Any) -> Path:
         root = Path(destination) / ref.root
@@ -239,8 +242,8 @@ async def test_a_submission_that_fails_after_resolution_discards_its_snapshot(mo
             input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=False
         )
 
-    deleted = files.delete_fileset.await_args.kwargs
-    assert deleted == {"workspace": "dev", "name": files.create_fileset.await_args.kwargs["body"].name}
+    deleted = files.delete_fileset_by_id.await_args.kwargs
+    assert deleted == {"workspace": "dev", "fileset_id": "snapshot-id"}
 
 
 async def test_skills_without_an_ethos_fileset_are_a_submit_error(mocker: MockerFixture) -> None:
@@ -606,8 +609,8 @@ async def test_a_harbor_fill_that_fails_after_the_snapshot_discards_it(mocker: M
         await _resolve(_harbor_by_agent())
 
     files.create_fileset.assert_awaited_once()
-    deleted = files.delete_fileset.await_args.kwargs
-    assert deleted == {"workspace": "dev", "name": files.create_fileset.await_args.kwargs["body"].name}
+    deleted = files.delete_fileset_by_id.await_args.kwargs
+    assert deleted == {"workspace": "dev", "fileset_id": "snapshot-id"}
 
 
 async def test_harbor_environment_secrets_join_the_targets_own(mocker: MockerFixture) -> None:
@@ -811,7 +814,7 @@ async def test_a_compile_time_refusal_discards_the_snapshot(mocker: MockerFixtur
     from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 
     files = mocker.Mock()
-    files.delete_fileset = AsyncMock(return_value=mocker.Mock())
+    files.delete_fileset_by_id = AsyncMock(return_value=mocker.Mock())
     mocker.patch("nemo_evals.jobs.agent_evaluate.client_from_platform", return_value=files)
     mocker.patch.object(
         AgentEvalJob, "_execution_profile", side_effect=HelixJobCompilationError("no such execution profile")
@@ -822,7 +825,9 @@ async def test_a_compile_time_refusal_discards_the_snapshot(mocker: MockerFixtur
     ).model_copy(
         update={
             "source": RegisteredAgentSource(
-                agent=AgentRef(root="dev/calc"), files=FilesetRef(root="dev/agent-files-0123abcd4567")
+                agent=AgentRef(root="dev/calc"),
+                files=FilesetRef(root="dev/agent-files-0123abcd4567"),
+                fileset_id="snapshot-id",
             )
         }
     )
@@ -833,7 +838,7 @@ async def test_a_compile_time_refusal_discards_the_snapshot(mocker: MockerFixtur
             workspace="dev", spec=spec, entity_client=None, job_name=None, async_sdk=_async_platform()
         )
 
-    files.delete_fileset.assert_awaited_once_with(workspace="dev", name="agent-files-0123abcd4567")
+    files.delete_fileset_by_id.assert_awaited_once_with(workspace="dev", fileset_id="snapshot-id")
 
 
 # --- Spec boundary -------------------------------------------------------------------------------------
@@ -996,3 +1001,26 @@ async def test_registered_agent_rejects_unsupported_provider_bindings(mocker: Mo
     )
     with pytest.raises(ValueError, match="Provider fulfillments require a configured OpenShell"):
         await _resolve(_by_agent(environment=environment))
+
+
+@pytest.mark.parametrize(
+    ("files", "fileset_id"),
+    [(None, None), (FilesetRef(root="dev/snapshot"), None), (FilesetRef(root="dev/snapshot"), "snapshot-id")],
+)
+def test_receipt_accessor_is_silent_until_the_caller_upgrades_legacy_data(
+    files: FilesetRef | None, fileset_id: str | None, caplog: pytest.LogCaptureFixture
+) -> None:
+    target = FabricRunnerTarget(source=RegisteredAgentSource(agent=_AGENT, files=files, fileset_id=fileset_id))
+    receipt = registered_agent_files_receipt(target)
+    assert not caplog.records
+    if files is not None and fileset_id is not None:
+        assert receipt is not None
+        assert receipt.fileset_id == fileset_id and receipt.ref == files.root
+    else:
+        assert receipt is None
+
+
+def test_snapshot_cleanup_without_a_registered_agent_is_silent(caplog: pytest.LogCaptureFixture) -> None:
+    assert registered_agent_files_receipt(None) is None
+    assert registered_agent_files_receipt(FabricRunnerTarget(source=_INLINE)) is None
+    assert not caplog.records

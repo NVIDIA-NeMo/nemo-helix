@@ -385,6 +385,12 @@ rules:
     exception: TrainingEnvironmentError
     error_details: "The platform is not configured for GRPO environments (the Gym runtime image, sandbox storage, or image allowlist). Contact your administrator."
 
+  - id: gym_version_mismatch
+    rerunnable: false
+    contains: "Gym version incompatible"
+    exception: TrainingEnvironmentError
+    error_details: "The environment's nemo-gym wheel does not match the Gym in this image. Rebuild the wheelhouse from this image's Gym checkout and replace the environment fileset."
+
   - id: gym_host_failed
     rerunnable: false
     or:

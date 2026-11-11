@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { type FilesetOutput, FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { FilesetDetailRoute } from '@studio/routes/FilesetDetailRoute';
 import { render } from '@studio/tests/util/render';
 import { TestProviders } from '@studio/tests/util/TestProviders';

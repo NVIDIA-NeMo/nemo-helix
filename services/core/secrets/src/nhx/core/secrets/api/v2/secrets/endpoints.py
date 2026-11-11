@@ -201,6 +201,7 @@ async def get_secret(
 
 @router.patch(
     "/v2/workspaces/{workspace}/secrets/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Secret not found"}},
     status_code=status.HTTP_200_OK,
     response_model=schemas.HelixSecretResponse,
 )
@@ -250,7 +251,11 @@ async def update_secret(
         return schemas.HelixSecretResponse.from_entity(updated_secret)
 
 
-@router.delete("/v2/workspaces/{workspace}/secrets/{name}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/v2/workspaces/{workspace}/secrets/{name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: {"model": ErrorResponse, "description": "Secret not found"}},
+)
 async def delete_secret(
     name: str,
     workspace: str,
@@ -266,10 +271,18 @@ async def delete_secret(
                 detail="Cannot delete the default NGC API key secret",
             )
         try:
-            await entity_store.get(HelixSecret, workspace=workspace, name=name)
-        except EntityNotFoundError:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Secret {workspace}/{name} not found")
-        await entity_store.delete(HelixSecret, name, workspace=workspace)
+            _delete_target = await entity_store.get(HelixSecret, workspace=workspace, name=name)
+            await entity_store.delete_by_id(
+                HelixSecret, _delete_target.id, expected_db_version=_delete_target.db_version
+            )
+        except EntityNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Secret {workspace}/{name} not found"
+            ) from exc
+        except EntityConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="Secret changed during deletion; refresh and retry."
+            ) from exc
 
 
 @router.get(

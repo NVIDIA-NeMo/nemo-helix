@@ -9,12 +9,9 @@ import {
   toInferenceModelEntityId,
   toInferenceModelName,
 } from '@nemo/common/src/utils/models';
-import {
-  type Adapter,
-  FinetuningType,
-  ModelDeploymentStatus,
-  type ModelEntity,
-} from '@nemo/sdk/generated/platform/schema';
+import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import { FinetuningType } from '@nemo/sdk/generated/platform/schema/FinetuningType';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 
 const createModel = (overrides: Partial<ModelEntity> = {}): ModelEntity => ({
   id: 'test-id',

@@ -265,7 +265,7 @@ class GymAgentTaskRunner:
         )
         env_pump = asyncio.create_task(pump_stream(env_proc.stdout, env_log, label="gym env start"))
         try:
-            await self._wait_for_servers(env_log, env_proc)
+            await self._wait_for_servers(env_log, env_proc, env_pump)
             await self._collect_rollouts(gym, selection, input_path, output_path, work_dir, subprocess_env)
         finally:
             await terminate(env_proc, grace_s=cfg.shutdown_grace_s)
@@ -350,7 +350,9 @@ class GymAgentTaskRunner:
                 f"--- last {LOG_TAIL_LINES} line(s) ---\n{tail}"
             )
 
-    async def _wait_for_servers(self, env_log: Path, env_proc: asyncio.subprocess.Process) -> None:
+    async def _wait_for_servers(
+        self, env_log: Path, env_proc: asyncio.subprocess.Process, env_pump: asyncio.Task[None]
+    ) -> None:
         """Wait until ``gym env start`` reports every composed server ready.
 
         Keys off Gym's own readiness line (``All N / N servers ready!``), which it prints only after
@@ -364,7 +366,10 @@ class GymAgentTaskRunner:
         text = ""
         while loop.time() < deadline:
             if env_proc.returncode is not None:
-                raise RuntimeError(f"`gym env start` exited early (rc={env_proc.returncode}); see {env_log}")
+                # Let the pump write what Gym printed last, which is usually the reason it exited.
+                await drain_pumps([env_pump], grace_s=cfg.shutdown_grace_s, what="gym env start")
+                text = env_log.read_text(encoding="utf-8", errors="replace") if env_log.exists() else ""
+                raise RuntimeError(self._early_exit_message(text, env_log, env_proc.returncode))
             text = env_log.read_text(encoding="utf-8", errors="replace") if env_log.exists() else ""
             if "required uv version" in text.lower():
                 raise RuntimeError(f"`gym env start` hit the uv required-version gate; see {env_log}")
@@ -408,12 +413,6 @@ class GymAgentTaskRunner:
                 f"Search {env_log.name} for '({names[0]})' — each line is prefixed with the server "
                 "that emitted it."
             )
-        # Readiness polls can fill the tail after the actual startup error. Keep
-        # diagnostics in the task exception because CI may not retain this file.
-        diagnostic_lines = (
-            line for line in env_log_text.splitlines() if "servers ready. Waiting for servers to spin up:" not in line
-        )
-        startup_output = "\n".join(deque(diagnostic_lines, maxlen=LOG_TAIL_LINES))[-16000:]
         return (
             f"Gym servers for resources-server {cfg.resources_server!r} were not ready within "
             f"startup_timeout_s={cfg.startup_timeout_s}s. {detail}\n"
@@ -421,9 +420,131 @@ class GymAgentTaskRunner:
             "If the environment installs heavy dependencies or builds a container image on first run, "
             "this timeout is expected on a cold cache — raise GymRuntimeConfig.startup_timeout_s and "
             "re-run; the second run reuses what the first installed.\n"
-            f"--- startup output (last {LOG_TAIL_LINES} lines excluding readiness polls, at most 16000 characters) ---\n"
-            f"{startup_output}"
+            f"{startup_output_excerpt(env_log_text)}"
         )
+
+    def _early_exit_message(self, env_log_text: str, env_log: Path, returncode: int) -> str:
+        """Explain why ``gym env start`` died before its servers came up.
+
+        The log lives on job storage, which a failed job's reader usually cannot reach, so the
+        exception has to carry the reason itself.
+        """
+        return (
+            f"`gym env start` for resources-server {self._config.resources_server!r} exited early "
+            f"(rc={returncode}) before all servers were ready.\n"
+            f"Full startup output: {env_log}\n"
+            f"{startup_output_excerpt(env_log_text)}"
+        )
+
+
+#: Characters of Gym startup output inlined into an exception.
+STARTUP_OUTPUT_MAX_CHARS = 16000
+#: Lines of the first error report inlined into an exception. A longer report keeps its first line
+#: and its end, which is where a traceback names the exception.
+FIRST_ERROR_CONTEXT_LINES = 12
+#: Characters kept of each line in the first error report, so one long line cannot crowd out the
+#: rest. Twelve such lines stay well within :data:`STARTUP_OUTPUT_MAX_CHARS`.
+FIRST_ERROR_LINE_MAX_CHARS = 1000
+#: The ``(server_name) `` prefix Gym adds to each component's output.
+_SERVER_PREFIX = r"\([^)\s]+\) "
+_SERVER_PREFIX_RE = re.compile(f"^{_SERVER_PREFIX}")
+_TRACEBACK_HEADER = "Traceback (most recent call last)"
+#: A line that starts an error report: uv's ``error:`` or a Python traceback, after the prefix.
+_ERROR_START_RE = re.compile(rf"^(?:{_SERVER_PREFIX}\s*)?(?:error:|{re.escape(_TRACEBACK_HEADER)})")
+
+
+def _first_error_block(lines: Sequence[str], start: int, end: int) -> str:
+    """The error report that begins at ``lines[start]``, read no further than ``lines[end]``.
+
+    A report is its first line plus the indented lines that follow it from the same server: uv's
+    ``cause:`` chain, or a traceback's frames. A traceback also takes the unindented line that ends
+    it, the exception itself. Lines other servers print in between are skipped. A report longer than
+    :data:`FIRST_ERROR_CONTEXT_LINES` keeps its first line and its end, so a deep traceback still
+    names its exception. Each line is cut to :data:`FIRST_ERROR_LINE_MAX_CHARS`, so a long line
+    cannot crowd out that end either.
+    """
+    first = lines[start]
+    prefix_match = _SERVER_PREFIX_RE.match(first)
+    prefix = prefix_match.group(0) if prefix_match else ""
+    is_traceback = first[len(prefix) :].lstrip().startswith(_TRACEBACK_HEADER)
+    # Scan to the end of the report however far other servers' output spreads it, keeping only the
+    # lines that can be shown.
+    # One more than a shortened report shows, so a report that fits keeps every line.
+    rest: deque[str] = deque(maxlen=FIRST_ERROR_CONTEXT_LINES - 1)
+    rest_count = 0
+    for line in lines[start + 1 : end]:
+        if prefix and not line.startswith(prefix):
+            continue
+        if not prefix and _SERVER_PREFIX_RE.match(line):
+            continue
+        content = line[len(prefix) :]
+        ends_report = not content[:1].isspace()
+        if ends_report and not (is_traceback and content):
+            break
+        rest.append(line)
+        rest_count += 1
+        if ends_report:
+            break
+    shown = list(rest)
+    if rest_count + 1 > FIRST_ERROR_CONTEXT_LINES:
+        # The marker takes a line, so show one fewer from the end.
+        shown = shown[-(FIRST_ERROR_CONTEXT_LINES - 2) :]
+        shown.insert(0, f"... {rest_count - len(shown)} line(s) omitted ...")
+    return "\n".join(_clip_line(line) for line in [first, *shown])
+
+
+def _first_whole_line_shown(lines: Sequence[str], tail_start: int) -> int:
+    """Index of the first line the tail shows in full once it is cut to :data:`STARTUP_OUTPUT_MAX_CHARS`.
+
+    Long lines after an error can push it out of the character limit even when it is among the last
+    :data:`LOG_TAIL_LINES` lines, and then it needs the first-error section as much as an older one.
+    """
+    shown = len(lines)
+    length = -1  # no newline before the first line
+    while shown > tail_start and length + 1 + len(lines[shown - 1]) <= STARTUP_OUTPUT_MAX_CHARS:
+        length += 1 + len(lines[shown - 1])
+        shown -= 1
+    return shown
+
+
+def _clip_line(line: str) -> str:
+    """Cut ``line`` to :data:`FIRST_ERROR_LINE_MAX_CHARS`, keeping both ends.
+
+    An exception line often ends with the part that explains it, after a long value, so the end is
+    kept as well as the start.
+    """
+    if len(line) <= FIRST_ERROR_LINE_MAX_CHARS:
+        return line
+    # The marker names the count, so size it for the largest count this line could report.
+    marker_width = len(f" ... ({len(line)} characters omitted) ... ")
+    kept = FIRST_ERROR_LINE_MAX_CHARS - marker_width
+    head = kept - kept // 3
+    tail = kept // 3
+    omitted = len(line) - head - tail
+    return f"{line[:head]} ... ({omitted} characters omitted) ... {line[-tail:]}"
+
+
+def startup_output_excerpt(env_log_text: str) -> str:
+    """The part of ``gym env start``'s output worth inlining into an exception.
+
+    Readiness polls can fill the tail after the actual startup error, so they are dropped. When one
+    component fails, the others keep installing, which can push its error out of the tail; the first
+    error block is then shown as well. It goes last because on Kubernetes the job's task record keeps
+    only the end of the pod log, so the end of this message is the part a reader is sure to see.
+    """
+    lines = [line for line in env_log_text.splitlines() if "servers ready. Waiting for servers to spin up:" not in line]
+    tail_start = max(len(lines) - LOG_TAIL_LINES, 0)
+    tail = "\n".join(lines[tail_start:])[-STARTUP_OUTPUT_MAX_CHARS:]
+    sections = [
+        f"--- startup output (last {LOG_TAIL_LINES} lines excluding readiness polls, at most "
+        f"{STARTUP_OUTPUT_MAX_CHARS} characters) ---\n{tail}"
+    ]
+    shown_start = _first_whole_line_shown(lines, tail_start)
+    first_error = next((index for index, line in enumerate(lines) if _ERROR_START_RE.match(line)), None)
+    if first_error is not None and first_error < shown_start:
+        block = _first_error_block(lines, first_error, shown_start)
+        sections.append(f"--- first error in startup output ---\n{block}")
+    return "\n".join(sections)
 
 
 #: Gym's per-poll readiness line, e.g.

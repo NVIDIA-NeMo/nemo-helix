@@ -11,6 +11,10 @@ workloadTokenTls:
   mountPath: &workloadTokenTlsMountPath /etc/nhx/workload-token-tls
   caBundleMountPath: &workloadTokenTlsCaBundleMountPath /etc/nhx/workload-token-ca
   caBundleFile: &workloadTokenTlsCaBundleFile /etc/nhx/workload-token-ca/ca.crt
+  # The gateway CA appended to the host's public roots. Job pods use it as SSL_CERT_FILE, which
+  # replaces a client's trust store rather than adding to it: with the gateway CA alone, a job
+  # cannot reach PyPI or Hugging Face. run.sh writes it into the same secret.
+  trustBundleFile: &workloadTokenTlsTrustBundleFile /etc/nhx/workload-token-ca/ca-bundle.crt
 
 zitadelSecrets:
   prepared:
@@ -395,8 +399,9 @@ nemo-helix:
       executor_defaults:
         kubernetes_job:
           env:
-            SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
-            REQUESTS_CA_BUNDLE: *workloadTokenTlsCaBundleFile
+            NHX_CLIENT_SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
+            SSL_CERT_FILE: *workloadTokenTlsTrustBundleFile
+            REQUESTS_CA_BUNDLE: *workloadTokenTlsTrustBundleFile
           storage:
             additional_volumes:
               - name: workload-token-tls-ca
@@ -405,6 +410,8 @@ nemo-helix:
                   items:
                     - key: ca.crt
                       path: ca.crt
+                    - key: ca-bundle.crt
+                      path: ca-bundle.crt
             additional_volume_mounts:
               - name: workload-token-tls-ca
                 mount_path: *workloadTokenTlsCaBundleMountPath
@@ -416,9 +423,15 @@ nemo-helix:
           config:
             launcher_image: '{{ include "nhx-core.image" . }}'
             env:
-              SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
-              REQUESTS_CA_BUNDLE: *workloadTokenTlsCaBundleFile
+              NHX_CLIENT_SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
+              SSL_CERT_FILE: *workloadTokenTlsTrustBundleFile
+              REQUESTS_CA_BUNDLE: *workloadTokenTlsTrustBundleFile
+            # executor_defaults only apply to the built-in profiles, not to cpu/workload,
+            # so set the core PVC here. Without it the profile refuses steps that need
+            # persistent storage (agent-evaluate).
             storage:
+              pvc_name: '{{ include "nhx-core.persistentVolumeClaim" . }}'
+              volume_permissions_image: '{{ .Values.core.storage.volumePermissionsImage }}'
               additional_volumes:
                 - name: workload-token-tls-ca
                   secret:
@@ -426,6 +439,8 @@ nemo-helix:
                     items:
                       - key: ca.crt
                         path: ca.crt
+                      - key: ca-bundle.crt
+                        path: ca-bundle.crt
               additional_volume_mounts:
                 - name: workload-token-tls-ca
                   mount_path: *workloadTokenTlsCaBundleMountPath

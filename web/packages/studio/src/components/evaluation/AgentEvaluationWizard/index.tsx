@@ -63,24 +63,24 @@ import {
 } from '@studio/components/evaluation/AgentEvaluationWizard/wizardSteps';
 import { EvalWizard } from '@studio/components/evaluation/EvalWizard';
 import {
+  entityNameField,
+  submitErrorMessage,
+  unsalvageableNameError,
+} from '@studio/components/evaluation/EvalWizard/entityNameField';
+import {
   createRunEvaluation,
   evalConfigFilename,
   evaluationConfigError,
   evaluationFilesetName,
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
-import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
-import {
-  entityNameField,
-  submitErrorMessage,
-  unsalvageableNameError,
-} from '@studio/components/evaluation/shared/entityNameField';
 import {
   EXPERIMENT_SETTINGS_DEFAULTS,
   experimentSettingsPayload,
   experimentSettingsSchemaShape,
-} from '@studio/components/evaluation/shared/experimentSettings';
-import { ExperimentSettingsFields } from '@studio/components/evaluation/shared/ExperimentSettingsFields';
+} from '@studio/components/evaluation/experimentSettings';
+import { ExperimentSettingsFields } from '@studio/components/evaluation/ExperimentSettingsFields';
+import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import {
   bareName,
   buildAgentEvalRequestBody,

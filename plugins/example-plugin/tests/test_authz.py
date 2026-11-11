@@ -24,10 +24,14 @@ def test_example_authz_derivation_has_no_problems() -> None:
     assert contrib.endpoints[f"{items}/{{name}}"]["patch"].permissions == ["example.items.update"]
     assert contrib.endpoints[f"{items}/{{name}}"]["delete"].permissions == ["example.items.delete"]
 
+    assert contrib.endpoints[f"{items}/by-id/{{entity_id}}"]["delete"].permissions == ["example.items.delete"]
+
     # Middleware-config CRUD (hyphenated namespace segment).
     mw = "/apis/example/v2/workspaces/{workspace}/middleware-configs"
     assert contrib.endpoints[mw]["post"].permissions == ["example.middleware-configs.create"]
     assert contrib.endpoints[f"{mw}/{{name}}"]["delete"].permissions == ["example.middleware-configs.delete"]
+
+    assert contrib.endpoints[f"{mw}/by-id/{{entity_id}}"]["delete"].permissions == ["example.middleware-configs.delete"]
 
     # Factory-stamped function routes: the permissions they reference must be declared.
     assert {"example.greet", "example.count"} <= set(contrib.permissions)

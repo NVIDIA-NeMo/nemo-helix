@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Mapping, Sequence
+from itertools import batched
 from threading import Lock
 from typing import Any
 
@@ -26,6 +27,8 @@ from scaled_evals.api.schemas.common import decode_cursor
 from scaled_evals.api.settings import settings
 
 SERVICE_NAME = "scaled-evals"
+# Result pagination does not bound the URL or SQL parameters in an ID filter.
+FILTER_BATCH_SIZE = 100
 
 _client: SyncEntityClient | None = None
 _client_lock = Lock()
@@ -107,6 +110,24 @@ def list_all(
     match = operations[0] if len(operations) == 1 else None
     if len(operations) > 1:
         match = LogicalOperation(operator=FilterOperator.AND, operations=operations)
+    return _list_matching(client, entity_type, match)
+
+
+def list_by_names(client: SyncEntityClient, entity_type: type[EntityT], names: Sequence[str]) -> list[EntityT]:
+    """Read named entities in bounded ID batches, following every result page."""
+    if not names:
+        return []
+    items: list[EntityT] = []
+    for batch in batched(dict.fromkeys(names), FILTER_BATCH_SIZE):
+        match = ComparisonOperation(operator=FilterOperator.IN, field="name", value=list(batch))
+        items.extend(_list_matching(client, entity_type, match))
+    return items
+
+
+def _list_matching(
+    client: SyncEntityClient, entity_type: type[EntityT], match: FilterOperation | None
+) -> list[EntityT]:
+    """Collect a filtered Entity Store query without retaining a page between calls."""
     items: list[EntityT] = []
     page = 1
     while True:

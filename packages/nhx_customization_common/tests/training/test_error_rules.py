@@ -142,6 +142,9 @@ EXAMPLES: dict[str, list[str]] = {
         "ValueError: Sandboxed GRPO requires a Gym runtime image; gym.gym_runtime_image is unset.",
         "ValueError: GRPO jobs require gym configuration on TrainingStepConfig",
     ],
+    "gym_version_mismatch": [
+        'sandboxed_gym.host.models.GymHostBootstrapFailed: job host gym-1 failed to start: {"code": "bootstrap_failed", "message": "RuntimeError: Gym version incompatible: the environment\'s nemo-gym wheel does not match the Gym in this image."}'
+    ],
     "gym_host_failed": [
         "sandboxed_gym.host.models.GymHostBootstrapFailed: job host gym-1 failed to start: image pull error"
     ],

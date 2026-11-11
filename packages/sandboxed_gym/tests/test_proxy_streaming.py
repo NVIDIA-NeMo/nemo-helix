@@ -20,6 +20,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+import sandboxed_gym.proxy_app as proxy_app_module
 from fastapi.testclient import TestClient
 from sandboxed_gym.config import BrokerEndpoint
 from sandboxed_gym.host.models import GymHostHandle
@@ -106,7 +107,7 @@ def test_the_whole_body_still_round_trips_through_the_app(monkeypatch: pytest.Mo
     release = threading.Event()
     release.set()
     payload = json.dumps(ROLLOUT_BODY).encode()
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _DrippingResponse(release, payload))
+    monkeypatch.setattr(proxy_app_module, "urlopen", lambda *a, **k: _DrippingResponse(release, payload))
 
     client = TestClient(build_proxy_app(_session()))
     response = client.post("/rollouts/run", json={"examples": [{"id": 1}]})
@@ -118,7 +119,7 @@ def test_the_whole_body_still_round_trips_through_the_app(monkeypatch: pytest.Mo
 def test_the_upstream_status_still_decides_the_response(monkeypatch: pytest.MonkeyPatch) -> None:
     """Opened before streaming starts, so a refusal is still a refusal and not a 200 with a body."""
     monkeypatch.setattr(
-        urllib.request,
+        proxy_app_module,
         "urlopen",
         _raising(urllib.error.HTTPError("http://host", 503, "nope", {}, None)),  # ty: ignore[invalid-argument-type]
     )
@@ -130,7 +131,7 @@ def test_the_upstream_status_still_decides_the_response(monkeypatch: pytest.Monk
 
 def test_an_upstream_that_never_connects_is_a_502(monkeypatch: pytest.MonkeyPatch) -> None:
     """The exception text stays server-side; it can name the host's internal address."""
-    monkeypatch.setattr(urllib.request, "urlopen", _raising(urllib.error.URLError("refused")))
+    monkeypatch.setattr(proxy_app_module, "urlopen", _raising(urllib.error.URLError("refused")))
 
     client = TestClient(build_proxy_app(_session()))
     response = client.post("/rollouts/run", json={"examples": [{"id": 1}]})
