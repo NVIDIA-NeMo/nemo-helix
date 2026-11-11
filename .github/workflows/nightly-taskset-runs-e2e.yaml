@@ -199,6 +199,7 @@ jobs:
         run: |
           set -euo pipefail
           export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
+          # record_property needs xunit1 to include per-test metadata without schema warnings.
           uv run --frozen pytest \
             e2e/test_taskset_runs.py \
             -v \
@@ -207,6 +208,7 @@ jobs:
             --feature taskset-runs-cancel \
             --run-e2e \
             --no-cov \
+            -o junit_family=xunit1 \
             --junitxml=report-kubernetes-taskset-runs-e2e.xml
           # A skipped step, such as the leftover-sandbox check, is a check that didn't run: fail, as
           # run-taskset-run-controller-integration.sh does.
