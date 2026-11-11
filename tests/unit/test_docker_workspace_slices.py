@@ -201,7 +201,10 @@ def test_rl_virtualenv_patch_precedes_unreferenced_cache_cleanup() -> None:
     text = (ROOT / "docker/rl/Dockerfile.nhx-rl-base").read_text()
     assert 'm.version("virtualenv")' in text
     assert '--directory /tmp --python "${py}" --upgrade-package virtualenv "virtualenv>=21.14.9"' in text
-    assert text.index('"virtualenv>=21.14.9"') < text.index('"${d}virtualenv-*.dist-info"')
+    upgrade = text.index('"virtualenv>=21.14.9"')
+    # The upgrade must happen before the prune in the same layer, so the old
+    # virtualenv archive is unreferenced when prune-unreferenced-uv-archives.sh runs.
+    assert upgrade < text.index("prune-unreferenced-uv-archives.sh", upgrade)
 
 
 def test_automodel_cve_layer_does_not_pin_full_mlflow_with_cryptography() -> None:

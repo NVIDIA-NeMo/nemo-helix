@@ -24,7 +24,7 @@ for root in /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs; do
     fi
 done
 if [[ ${#roots[@]} -gt 0 ]]; then
-    find "${roots[@]}" -type l -printf '%l\n' \
+    find "${roots[@]}" -type l -exec readlink {} + \
         | sed -n 's|.*archive-v0/\([^/]*\).*|\1|p' \
         | sort -u > "${referenced}"
 fi
@@ -38,7 +38,11 @@ for archive in "${archives}"/*/; do
     fi
     for index in "${cache_root}"/wheels-v*/; do
         if [[ -d "${index}" ]]; then
-            find "${index}" -type l -lname "*${name}*" -delete
+            while IFS= read -r -d '' link; do
+                if [[ "$(readlink "${link}")" == *"${name}"* ]]; then
+                    rm -f "${link}"
+                fi
+            done < <(find "${index}" -type l -print0)
         fi
     done
     rm -rf "${archive}"
