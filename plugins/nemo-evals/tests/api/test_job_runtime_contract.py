@@ -10,6 +10,22 @@ from nhx_evals_sdk.values.results import AggregatedMetricResult
 from pydantic import TypeAdapter
 
 
+def test_production_runtime_routes_derive_delegated_contracts() -> None:
+    from nemo_evals.service import EvaluatorPluginService
+    from nemo_helix_plugin.authz_discovery import _derive_service_contribution
+
+    contribution, errors, _ = _derive_service_contribution(EvaluatorPluginService())
+    assert not errors
+    endpoints = contribution.to_dict()["endpoints"]
+    runtime = {path: methods for path, methods in endpoints.items() if "/job-runtime/" in path}
+    assert len(runtime) == 4
+    for methods in runtime.values():
+        for contract in methods.values():
+            assert contract["delegated"] == {"actor_perms": [], "subject_perms": []}
+            assert "service_principal" in contract["callers"]
+            assert contract["scopes"]
+
+
 @pytest.mark.parametrize("kind", ["agent", "row"])
 def test_runtime_result_preserves_producing_job_on_the_wire(kind: str) -> None:
     common = dict(

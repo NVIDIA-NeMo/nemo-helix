@@ -50,6 +50,11 @@ _AGENT_SOURCE = "nemo-evals.agent-evaluate"
 _ROW_SOURCE = "nemo-evals"
 _TASK_SOURCE = "evals.harbor-task"
 
+# Include the principal branch so PathRule derives a delegated contract. The
+# first handler operation below rejects every credential without a verified
+# binding to this exact native Job, before any Job or storage access.
+_RUNTIME_CALLERS = [CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL]
+
 
 async def _job(
     workspace: str, job: str, auth: RuntimeAuthClient, client: AsyncNemoClient, sources: set[str]
@@ -73,7 +78,7 @@ async def _job(
 
 @router.post(_PREFIX + "/task-image-build", response_model=TaskImageBuildEntity)
 @scope.write
-@path_rule(callers=[CallerKind.SERVICE_PRINCIPAL], permissions=[])
+@path_rule(callers=_RUNTIME_CALLERS, permissions=[])
 async def execute_task_build(
     workspace: str,
     job: str,
@@ -111,7 +116,7 @@ async def execute_task_build(
 
 @router.post(_PREFIX + "/result", status_code=204)
 @scope.write
-@path_rule(callers=[CallerKind.SERVICE_PRINCIPAL], permissions=[])
+@path_rule(callers=_RUNTIME_CALLERS, permissions=[])
 async def save_result(
     workspace: str,
     job: str,
@@ -170,7 +175,7 @@ def _trial_policy(current: HelixJobResponse, auth: RuntimeAuthClient, claims: Tr
 
 @router.post(_PREFIX + "/trial-keys", response_model=AccessKeyCreateResponse)
 @scope.write
-@path_rule(callers=[CallerKind.SERVICE_PRINCIPAL], permissions=[])
+@path_rule(callers=_RUNTIME_CALLERS, permissions=[])
 async def issue_trial_key(
     workspace: str,
     job: str,
@@ -203,7 +208,7 @@ async def issue_trial_key(
 
 @router.delete(_PREFIX + "/trial-keys/{jti}", response_model=AccessKeyRevokeResponse)
 @scope.write
-@path_rule(callers=[CallerKind.SERVICE_PRINCIPAL], permissions=[])
+@path_rule(callers=_RUNTIME_CALLERS, permissions=[])
 async def revoke_trial_key(
     workspace: str,
     job: str,
