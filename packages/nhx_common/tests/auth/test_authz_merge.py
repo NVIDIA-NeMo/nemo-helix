@@ -29,7 +29,8 @@ def test_merge_adds_endpoints_and_role_permissions() -> None:
             "endpoints": {
                 "/apis/customization/v2/workspaces/{workspace}/automodel/jobs": {
                     "post": {
-                        "permissions": ["customization.automodel.jobs.create"],
+                        "direct": {"actor_perms": ["customization.automodel.jobs.create"]},
+                        "delegated": {"actor_perms": [], "subject_perms": ["customization.automodel.jobs.create"]},
                         "scopes": ["customization:write", "platform:write"],
                     },
                 },

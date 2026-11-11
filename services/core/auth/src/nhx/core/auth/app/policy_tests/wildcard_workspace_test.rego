@@ -22,13 +22,14 @@ wildcard_workspace_test_data := {
     },
     "endpoints": {
         "/apis/models/v2/workspaces/{workspace}/models": {
-            "get": {"permissions": ["models.list"]},
-            "post": {"permissions": ["models.create"]}
+            "get": {"direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]}},
+            "head": {"direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]}},
+            "post": {"direct": {"actor_perms": ["models.create"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.create"]}}
         },
         "/apis/models/v2/workspaces/{workspace}/models/{name}": {
-            "get": {"permissions": ["models.read"]},
-            "patch": {"permissions": ["models.update"]},
-            "delete": {"permissions": ["models.delete"]}
+            "get": {"direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]}},
+            "patch": {"direct": {"actor_perms": ["models.update"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.update"]}},
+            "delete": {"direct": {"actor_perms": ["models.delete"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.delete"]}}
         }
     },
     "workspaces": {
@@ -57,7 +58,7 @@ wildcard_workspace_test_data := {
 
 test_wildcard_workspace_get_authenticated if {
     # Authenticated user with roles should be allowed to use GET with wildcard workspace
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "viewer@test.com",
             "method": "GET",
@@ -73,7 +74,7 @@ test_wildcard_workspace_get_authenticated if {
 
 test_wildcard_workspace_head_authenticated if {
     # Authenticated user with roles should be allowed to use HEAD with wildcard workspace
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "viewer@test.com",
             "method": "HEAD",
@@ -89,7 +90,7 @@ test_wildcard_workspace_head_authenticated if {
 
 test_wildcard_workspace_get_unauthenticated if {
     # Unauthenticated user should be denied even with wildcard workspace
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "",
             "method": "GET",
@@ -106,7 +107,7 @@ test_wildcard_workspace_get_unauthenticated if {
 test_wildcard_workspace_get_authenticated_no_roles if {
     # User with principal_id but no role bindings CAN still use wildcard workspace
     # This is by design - they'll get an empty result filtered by the service
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "no-access@test.com",
             "method": "GET",
@@ -126,7 +127,7 @@ test_wildcard_workspace_get_authenticated_no_roles if {
 
 test_wildcard_workspace_post_denied if {
     # POST with wildcard workspace should be denied (only GET/HEAD allowed with wildcard)
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "viewer@test.com",
             "method": "POST",
@@ -142,7 +143,7 @@ test_wildcard_workspace_post_denied if {
 
 test_wildcard_workspace_put_denied if {
     # PATCH with wildcard workspace should be denied for non-service principals
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "viewer@test.com",
             "method": "PATCH",
@@ -158,7 +159,7 @@ test_wildcard_workspace_put_denied if {
 
 test_wildcard_workspace_delete_denied if {
     # DELETE with wildcard workspace should be denied
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "viewer@test.com",
             "method": "DELETE",
@@ -178,7 +179,7 @@ test_wildcard_workspace_delete_denied if {
 
 test_normal_workspace_get_authorized if {
     # GET on a specific workspace should work if user has access
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "viewer@test.com",
             "method": "GET",
@@ -194,7 +195,7 @@ test_normal_workspace_get_authorized if {
 
 test_normal_workspace_get_unauthorized if {
     # GET on a workspace user doesn't have access to should be denied
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "viewer@test.com",
             "method": "GET",
@@ -210,7 +211,7 @@ test_normal_workspace_get_unauthorized if {
 
 test_normal_workspace_post_authorized if {
     # POST on a specific workspace should work if user has Editor role
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "editor@test.com",
             "method": "POST",
@@ -234,7 +235,7 @@ test_normal_workspace_post_authorized if {
 
 test_service_principal_wildcard_workspace if {
     # Service principal should be allowed regardless of workspace
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "service:entity-store",
             "method": "GET",
@@ -250,7 +251,7 @@ test_service_principal_wildcard_workspace if {
 
 test_service_principal_wildcard_workspace_post if {
     # Service principal should be allowed for write operations too
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "service:entity-store",
             "method": "POST",
@@ -270,7 +271,7 @@ test_service_principal_wildcard_workspace_post if {
 
 test_platform_admin_wildcard_workspace if {
     # Platform admin should be allowed regardless of workspace
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "admin@test.com",
             "method": "GET",
@@ -290,7 +291,7 @@ test_platform_admin_wildcard_workspace if {
 
 test_platform_admin_wildcard_workspace_post if {
     # Platform admin should be allowed for write operations too
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "admin@test.com",
             "method": "POST",
@@ -314,7 +315,7 @@ test_platform_admin_wildcard_workspace_post if {
 
 test_wildcard_workspace_multiple_workspace_roles if {
     # User with roles in multiple workspaces should be allowed
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "multi-viewer@test.com",
             "method": "GET",
@@ -330,7 +331,7 @@ test_wildcard_workspace_multiple_workspace_roles if {
 
 test_wildcard_not_confused_with_real_workspace if {
     # Ensure "-" is treated as wildcard, not a failure to match workspace
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "viewer@test.com",
             "method": "GET",

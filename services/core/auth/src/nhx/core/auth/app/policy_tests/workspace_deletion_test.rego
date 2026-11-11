@@ -24,7 +24,7 @@ test_workspace_deletion_requires_admin[principal_id] if {
 		"outsider@test.com": false,
 	}
 	some principal_id, expected in cases
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": principal_id,
 		"method": "DELETE",
 		"path": "/apis/entities/v2/workspaces/test-ws",
@@ -41,7 +41,7 @@ test_editor_retains_workspace_update_and_resource_delete[path] if {
 		"/apis/models/v2/workspaces/test-ws/models/test-model": "DELETE",
 	}
 	some path, method in cases
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "editor@test.com",
 		"method": method,
 		"path": path,

@@ -15,7 +15,7 @@ mock_roles := {
 
 mock_endpoints := {
     "/apis/models/v2/workspaces/{workspace}/models/{name}": {
-        "get": {"permissions": ["models.read"], "scopes": []}
+        "get": {"direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]}, "scopes": []}
     }
 }
 
@@ -25,7 +25,7 @@ mock_workspaces := {
 
 # Test 1: Access granted when permissions are on email and principal ID differs
 test_dual_id_email_permissions if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user-uuid-456",
         "principal_email": "alice@company.com",
         "method": "GET",
@@ -47,7 +47,7 @@ test_dual_id_email_permissions if {
 
 # Test 2: Access denied when neither principal ID nor email has permissions
 test_dual_id_no_permissions if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user-uuid-789",
         "principal_email": "bob@company.com",
         "method": "GET",

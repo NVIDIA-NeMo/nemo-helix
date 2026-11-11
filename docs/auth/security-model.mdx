@@ -161,9 +161,67 @@ X-NHX-Principal-On-Behalf-Of-Email: alice@example.com
 X-NHX-Principal-On-Behalf-Of-Groups: team-ml,data-eng
 ```
 
-The downstream service constructs a delegated principal from those headers and
-evaluates the *user's* permissions, including group-based access, while
-accepting the request from the service identity.
+The downstream service keeps actor and represented-user grants separate. Ordinary
+delegated operations require the user's permissions, including group-based access.
+The service's Admin, HelixAdmin, or wildcard grants cannot supply a permission the
+user lacks.
+
+Internal storage operations check the service actor's storage permission. Access
+to control entities such as role bindings and access keys additionally requires
+the represented user's IAM permission. Secret value access requires both actor
+`secrets.access` and represented-user `secrets.read`. Direct callers retain their
+declared actor requirements. Scopes, caller restrictions and mandatory denials
+still apply.
+
+Service code can express independent permission requirements through
+`AuthClient.check_permissions(workspace, actor=[...], subject=[...])`. Both supplied
+lists must pass against their respective identities. Omitting actor or passing
+`actor=[]` requires no actor permission grant. A supplied `subject` list, including
+`subject=[]`, requires a verified nonempty on-behalf-of identity; it never falls
+back to the actor. Omitting both lists is invalid. Existing `has_permissions`
+queries check the represented user under delegation and the actor for direct
+calls.
+
+Cross-workspace control lists use
+`AuthClient.filter_workspaces(workspaces, actor=[...], subject=[...])` to check
+candidate workspace names in one PDP request. It applies the same independent
+permission requirements and returns only the permitted subset. Entity queries
+combine this restriction with membership and user filters before calculating
+rows, totals and grouped counts.
+
+Route policy declares call types separately. The server selects `direct` or
+`delegated` from verified identity context. A missing branch denies that call
+type, including for administrators. For example, an ordinary IAM operation uses:
+
+```yaml
+direct:
+  actor_perms: [iam.create]
+delegated:
+  actor_perms: []
+  subject_perms: [iam.create]
+```
+
+The direct caller must have `iam.create`. Under delegation, only the represented
+user supplies that permission; the actor must still meet authentication and
+caller requirements. Each branch declares its own requirements. Existing
+single-list PathRule authoring is converted once, when its typed contribution is
+serialized. User-facing routes receive direct actor requirements and delegated
+subject requirements; service-only declarations receive only a direct branch.
+
+Every endpoint declaration in `static-authz.yaml` states its direct and delegated
+requirements explicitly. Bundle construction and the embedded policy loader require
+explicit contracts and reject endpoint permission shorthand. They never convert
+legacy declarations or fill in a missing branch.
+
+Cross-workspace GET/HEAD requests using workspace `-` retain the existing route
+admission behavior and required actor permissions. Collection handlers are
+responsible for filtering rows and totals by the represented user's accessible
+workspaces. The route authorization decision does not verify that filtering.
+Mutations retain their permission checks; a service's grants cannot supply the
+user's authority.
+
+Ship the consuming code, evaluator, endpoint declarations and compiled policy
+together. Verify generated policy matches its source and test the matched build.
 
 #### Job Credential Propagation
 
