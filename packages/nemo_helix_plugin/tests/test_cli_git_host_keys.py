@@ -115,6 +115,37 @@ def test_declining_the_prompt_aborts(interactive: None, no_known_hosts: Path, mo
         choose_host_key(SCANNED, REMOTE, host_key=None, known_hosts_file=no_known_hosts)
 
 
+def test_unreadable_known_hosts_is_treated_as_unknown(piped: None, tmp_path: Path) -> None:
+    with pytest.raises(click.UsageError, match="--host-key"):
+        choose_host_key(SCANNED, REMOTE, host_key=None, known_hosts_file=tmp_path)
+
+
+def test_prompt_skips_a_revoked_first_key(
+    interactive: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    known_hosts = _known_hosts(tmp_path, f"@revoked {ED25519.known_hosts_line}")
+    monkeypatch.setattr(cli_git_host_keys, "confirm", lambda *args, **kwargs: True)
+
+    chosen = choose_host_key(SCANNED, REMOTE, host_key=None, known_hosts_file=known_hosts)
+
+    assert chosen == RSA
+    assert "RSA key fingerprint is SHA256:rsafingerprint" in capsys.readouterr().err
+
+
+def test_every_key_revoked_is_refused(interactive: None, tmp_path: Path) -> None:
+    known_hosts = _known_hosts(tmp_path, f"@revoked {ED25519.known_hosts_line}", f"@revoked {RSA.known_hosts_line}")
+
+    with pytest.raises(click.ClickException, match="Every key"):
+        choose_host_key(SCANNED, REMOTE, host_key=None, known_hosts_file=known_hosts)
+
+
+def test_host_key_option_refuses_a_revoked_key(piped: None, tmp_path: Path) -> None:
+    known_hosts = _known_hosts(tmp_path, f"@revoked {RSA.known_hosts_line}")
+
+    with pytest.raises(click.ClickException, match="revoked"):
+        choose_host_key(SCANNED, REMOTE, host_key="SHA256:rsafingerprint", known_hosts_file=known_hosts)
+
+
 def test_no_scanned_keys_is_an_error(piped: None, no_known_hosts: Path) -> None:
     with pytest.raises(click.ClickException, match="returned no SSH host keys"):
         choose_host_key([], REMOTE, host_key=None, known_hosts_file=no_known_hosts)

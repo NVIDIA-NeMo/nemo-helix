@@ -12,9 +12,10 @@ import typer
 from nemo_helix_plugin.cli_input import is_stdin_available
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.known_hosts import (
-    LocalHostKeyCheck,
+    KnownHostEntries,
     LocalVerdict,
     check_against_known_hosts,
+    is_revoked,
     key_with_fingerprint,
     known_host_entries,
     known_hosts_name,
@@ -44,12 +45,12 @@ def _key_list(host_keys: list[SshHostKey]) -> str:
     return "\n".join(f"  {_describe(host_key)}" for host_key in host_keys)
 
 
-def _check_local(host_keys: list[SshHostKey], remote: SshRemote, known_hosts_file: Path) -> LocalHostKeyCheck:
+def _local_entries(remote: SshRemote, known_hosts_file: Path) -> KnownHostEntries:
     try:
         text = known_hosts_file.expanduser().read_text(encoding="utf-8", errors="replace")
-    except FileNotFoundError:
-        return LocalHostKeyCheck(LocalVerdict.UNKNOWN)
-    return check_against_known_hosts(host_keys, known_host_entries(text, known_hosts_name(remote)))
+    except OSError:
+        return KnownHostEntries(trusted=frozenset(), revoked=frozenset())
+    return known_host_entries(text, known_hosts_name(remote))
 
 
 def choose_host_key(
@@ -64,6 +65,9 @@ def choose_host_key(
     if not host_keys:
         raise click.ClickException(f"{authority} returned no SSH host keys.")
 
+    entries = _local_entries(remote, known_hosts_file)
+    usable = [key for key in host_keys if not is_revoked(key, entries)]
+
     if host_key is not None:
         chosen = key_with_fingerprint(host_keys, host_key)
         if chosen is None:
@@ -71,9 +75,16 @@ def choose_host_key(
                 f"{authority} offered no key with fingerprint {normalize_fingerprint(host_key)}. "
                 f"It offered:\n{_key_list(host_keys)}"
             )
+        if chosen not in usable:
+            raise click.ClickException(f"{_describe(chosen)} is marked @revoked in {known_hosts_file}.")
         return chosen
 
-    check = _check_local(host_keys, remote, known_hosts_file)
+    if not usable:
+        raise click.ClickException(
+            f"Every key {authority} offered is marked @revoked in {known_hosts_file}:\n{_key_list(host_keys)}"
+        )
+
+    check = check_against_known_hosts(usable, entries)
     if check.verdict is LocalVerdict.MATCH and check.key is not None:
         typer.echo(f"Host key for {authority} matches {known_hosts_file}: {_describe(check.key)}", err=True)
         return check.key
@@ -90,7 +101,7 @@ def choose_host_key(
             f"{authority} is not in {known_hosts_file}. Check one of its fingerprints against one from a "
             f"trusted source, then pass it with --host-key. It offered:\n{_key_list(host_keys)}"
         )
-    preferred = host_keys[0]
+    preferred = usable[0]
     typer.echo(
         f"The authenticity of host '{authority}' can't be established.\n"
         f"{key_type_label(preferred.key_type)} key fingerprint is {preferred.fingerprint}.",

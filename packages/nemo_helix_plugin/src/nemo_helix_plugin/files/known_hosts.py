@@ -106,6 +106,10 @@ def _key_pair(host_key: SshHostKey) -> tuple[str, str]:
     return fields[1], fields[2]
 
 
+def is_revoked(host_key: SshHostKey, entries: KnownHostEntries) -> bool:
+    return _key_pair(host_key) in entries.revoked
+
+
 def check_against_known_hosts(host_keys: list[SshHostKey], entries: KnownHostEntries) -> LocalHostKeyCheck:
     """Match scanned keys against local entries, as ssh would.
 
