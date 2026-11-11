@@ -466,9 +466,19 @@ USER root
 RUN /opt/nemo_rl_venv/bin/python tools/generate_fingerprint.py \
     > /opt/nemo_rl_container_fingerprint
 
+# Rebuild wandb-core and reinstall the pinned CA bundles here, while these
+# files still belong to the builder. The publish stage copies the merged tree.
+# Running this after that copy rewrites files in a new layer and stores them twice.
+RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
+    --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
+    GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
+
 # Last prune before publish copies this stage. The copy reads the merged view,
-# so archives this hides (including Megatron-Bridge's build-env setuptools)
-# are not in nhx-rl-base. A prune after the copy would only hide them again.
+# so archives this hides (including Megatron-Bridge's build-env setuptools
+# and files-v0 blobs left behind by the trust update) are not in nhx-rl-base.
+# A prune after the copy would only hide them again.
 RUN prune-unreferenced-uv-archives.sh
 
 # ---- publish: one copy of the merged builder tree ----
@@ -559,13 +569,7 @@ EOF
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
-# Update each installed Python environment and rebuild embedded Go TLS clients.
-RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
-    --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
-    --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
-    GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
-
+# wandb-core and the CA bundles were rewritten in the builder, before the COPY above.
 RUN --mount=type=cache,target=/root/.cache/uv <<'EOF' bash -eu
 source_dir=/usr/share/nemo-helix/source-distributions/nhx-rl-base
 bash /usr/local/bin/collect-apt-sources.sh "${source_dir}/apt" \
