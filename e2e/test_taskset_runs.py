@@ -231,7 +231,13 @@ def test_taskset_run_cancel_paths(driver: RunDriver) -> None:
     hold_jobs = [task.task.job for task in held.tasks if task.task and task.task.job]
 
     queued = driver.submit("e1", "--taskset", queue_ref, "--agent", "oracle", cap=120)
-    driver.wait_for("cancel", f"{queued}'s task row", lambda: driver.status(queued), lambda s: bool(s.tasks), cap=60)
+    driver.wait_for(  # status lists the taskset's tasks before their rows exist, as task=None
+        "cancel",
+        f"{queued}'s task row",
+        lambda: driver.status(queued),
+        lambda s: bool(s.tasks) and s.tasks[0].task is not None,
+        cap=60,
+    )
     driver.pause(10)  # two controller cycles (interval_seconds 5): a slot would have been given by now
     still = driver.status(queued)
     row = still.tasks[0].task
