@@ -9,7 +9,6 @@ from pathlib import Path
 
 import click
 import typer
-from typer import confirm
 from nemo_helix_plugin.cli_input import is_stdin_available
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.known_hosts import (
@@ -23,6 +22,7 @@ from nemo_helix_plugin.files.known_hosts import (
 )
 from nemo_helix_plugin.files.storage_config import GitStorageConfig, SshRemote
 from nemo_helix_plugin.files.types import FindGitRepositoryFilesRequest, SshHostKey
+from typer import confirm
 
 DEFAULT_KNOWN_HOSTS_FILE = Path("~/.ssh/known_hosts")
 
