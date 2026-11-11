@@ -86,7 +86,8 @@ async def test_private_upload_is_owned_by_nonroot_agent(tmp_path: Path, mode: in
         await sandbox.start()
         await sandbox.upload_file(source, "/tmp/private-upload.sh")
         observed = await sandbox.exec("stat -c '%u:%g %a' /tmp/private-upload.sh")
-        assert observed.ok and observed.stdout.strip() == f"1000:1000 {mode:o}"
+        assert observed.ok and observed.stdout is not None
+        assert observed.stdout.strip() == f"1000:1000 {mode:o}"
         read = await sandbox.exec("cat /tmp/private-upload.sh")
         assert read.ok and read.stdout == source.read_text(encoding="utf-8")
         if mode & 0o100:

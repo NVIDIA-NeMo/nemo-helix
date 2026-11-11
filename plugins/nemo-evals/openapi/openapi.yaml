@@ -10311,6 +10311,11 @@ components:
           title: Task
           type: string
           maxLength: 256
+        runtime_job:
+          title: Runtime Job
+          description: Issuing Job, set by the runtime API.
+          type: string
+          maxLength: 256
       type: object
       required:
       - model_access
