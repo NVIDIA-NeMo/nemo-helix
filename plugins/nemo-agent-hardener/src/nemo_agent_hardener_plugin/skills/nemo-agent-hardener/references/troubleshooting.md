@@ -36,10 +36,11 @@ Symptom → cause → fix. Every entry here has actually happened.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Fileset name is required` (or the ref is not found) on `--replay-hitlog` | a bare name or file path was passed where a `<workspace>/<fileset>` reference is expected | `nemo files filesets create` first, `nemo files upload` into it, then reference `workspace/name` — upload does **not** auto-create a named fileset |
+| The guardrails defender wrote no rail for an attack: `no execution trace for this attack` | the attack left no Relay trace when it was sent (live, or re-sent by a replay): Relay is not attached to the victim, or the agent never answered it | confirm Relay is attached ([relay-attachment.md](relay-attachment.md)), then run or replay again |
 
 ## Results read wrong
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | Run ends `validation_failed` | some attacks still got through the new guardrails — a result, not a crash | read the scorecard; iterate with `--replay-hitlog` |
-| Scorecard shows blocks but the user expected guardrail hits | many "blocks" are the model refusing on its own, not the guardrail firing | check the ATOF trail — guardrail refusals carry the `agent-hardener[rail]` signature |
+| Scorecard shows blocks but the user expected guardrail hits | many "blocks" are the model refusing on its own, not the guardrail firing | read each item's badge — *Blocked by guardrail* / *Blocked by network* versus *Agent refused* — or check the ATOF trail, where guardrail refusals carry the `agent-hardener[rail]` signature |
