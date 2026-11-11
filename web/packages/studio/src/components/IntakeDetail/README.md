@@ -76,8 +76,6 @@ flowchart TB
 
 ## Trace layouts
 
-`PageLayout` owns page scrolling. Session content grows to its natural height; the trajectory sidebar and bounded payloads retain their own scroll regions.
-
 `TraceViewToolbar` keeps the view control in the same slot for session and trace-selected bodies. Graph is available after selecting a trace. All three views share URL selection and span details.
 
 |               | **Tree** (`SpanTreeView`)                               | **Graph** (`TraceSpanGraphView`)                                                                                       | **List** (`SpanListView`)                |
