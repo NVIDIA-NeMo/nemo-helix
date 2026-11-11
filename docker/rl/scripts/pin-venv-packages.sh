@@ -2,12 +2,24 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 # Optional Gym prefetch, then re-pin packages the upstream locks leave behind.
-# The Dockerfile passes NEMO_GYM_PREFETCH_CONFIGS, TARGETARCH, NEMO_GYM_CUDA,
-# and NEMO_GYM_VLLM_VERSION. Override files are bind-mounted at /tmp.
+#
+# The Dockerfile passes:
+#   NEMO_GYM_PREFETCH_CONFIGS, TARGETARCH, NEMO_GYM_CUDA, NEMO_GYM_VLLM_VERSION
+#   PACKAGE_FLOORS   JSON object mapping package name to its version floor spec.
+# Override files are bind-mounted at /tmp.
 set -euo pipefail
 
 umask 022
 export UV_LINK_MODE=symlink
+
+# Version floors. Each lookup fails the build if the key is missing from PACKAGE_FLOORS.
+MLFLOW_SKINNY_FLOOR=$(jq -er '.["mlflow-skinny"]' <<<"${PACKAGE_FLOORS}")
+SQLPARSE_FLOOR=$(jq -er '.sqlparse' <<<"${PACKAGE_FLOORS}")
+VIRTUALENV_FLOOR=$(jq -er '.virtualenv' <<<"${PACKAGE_FLOORS}")
+HYDRA_CORE_FLOOR=$(jq -er '.["hydra-core"]' <<<"${PACKAGE_FLOORS}")
+GITPYTHON_FLOOR=$(jq -er '.gitpython' <<<"${PACKAGE_FLOORS}")
+WANDB_FLOOR=$(jq -er '.wandb' <<<"${PACKAGE_FLOORS}")
+
 stamp=$(chmod-newer-than.sh mark)
 mapfile -t OTEL_PINS < <(grep -Ev '^[[:space:]]*(#|$)' /tmp/opentelemetry-overrides.txt)
 OTEL_UPGRADE=()
@@ -33,21 +45,20 @@ for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python /opt/gym_venv
     [ -x "${py}" ] || continue
     if "${py}" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("mlflow") else 1)'; then
         uv pip install --python "${py}" --upgrade-package mlflow-skinny --upgrade-package sqlparse \
-            "mlflow-skinny>=3.15.0,<3.16.0" "sqlparse>=0.6.0,<0.7"
+            "${MLFLOW_SKINNY_FLOOR}" "${SQLPARSE_FLOOR}"
     elif "${py}" -c 'import importlib.metadata as m; m.version("sqlparse")' >/dev/null 2>&1; then
-        uv pip install --python "${py}" --no-deps --upgrade-package sqlparse "sqlparse>=0.6.0,<0.7"
+        uv pip install --python "${py}" --no-deps --upgrade-package sqlparse "${SQLPARSE_FLOOR}"
     fi
+
     # Patch the upstream RL/Gym locks without relocking their CUDA dependency stacks.
     if "${py}" -c 'import importlib.metadata as m; m.version("virtualenv")' >/dev/null 2>&1; then
-        uv pip install --directory /tmp --python "${py}" --upgrade-package virtualenv "virtualenv>=21.14.9"
+        uv pip install --directory /tmp --python "${py}" --upgrade-package virtualenv "${VIRTUALENV_FLOOR}"
     fi
     if "${py}" -c 'import importlib.metadata as m; m.version("hydra-core")' >/dev/null 2>&1; then
-        uv pip install --python "${py}" --no-deps --upgrade-package hydra-core "hydra-core>=1.3.7,<1.4"
+        uv pip install --python "${py}" --no-deps --upgrade-package hydra-core "${HYDRA_CORE_FLOOR}"
     fi
-    # GHSA-8mcc-hrx5-hvxc, GHSA-7833-fr7j-v32q, GHSA-284h-m62q-gf8w (Critical). Same floor as the
-    # nhx-gym-tasks lock's gitpython>=3.1.62 constraint (BDSA-2026-{30097,30098,31388}).
     if "${py}" -c 'import importlib.metadata as m; m.version("gitpython")' >/dev/null 2>&1; then
-        uv pip install --python "${py}" --no-deps --upgrade-package gitpython "gitpython>=3.1.62"
+        uv pip install --python "${py}" --no-deps --upgrade-package gitpython "${GITPYTHON_FLOOR}"
     fi
     if "${py}" -c 'import importlib.metadata as m; m.version("transformers")' >/dev/null 2>&1; then
         uv pip install --directory /tmp --python "${py}" \
@@ -59,7 +70,7 @@ for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python /opt/gym_venv
         # Outside the project, or uv keeps opentelemetry-api 1.45.
         args=(--directory /tmp --python "${py}" "${OTEL_UPGRADE[@]}" "${OTEL_PINS[@]}")
         if "${py}" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("wandb") else 1)'; then
-            uv pip install "${args[@]}" --upgrade-package wandb "wandb>=0.31.0"
+            uv pip install "${args[@]}" --upgrade-package wandb "${WANDB_FLOOR}"
         else
             uv pip install "${args[@]}"
         fi

@@ -1,27 +1,21 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-# Prefetch the seven Ray worker venvs. UV_SYNC_MODE is passed by the Dockerfile.
+# Prefetch the seven Ray worker venvs.
+# The Dockerfile passes UV_SYNC_MODE and NO_INSTALL_PACKAGES (a JSON array of package names).
 # CUDA wheels are mounted at /mnt/wheels.
 set -euo pipefail
 
 umask 022
 export UV_LINK_MODE=symlink
 stamp=$(chmod-newer-than.sh mark)
-SKIP=(
-    --no-install-package causal-conv1d
-    --no-install-package mamba-ssm
-    --no-install-package nv-grouped-gemm
-    --no-install-package fast-hadamard-transform
-    --no-install-package flash-mla
-    --no-install-package deep-ep
-    --no-install-package deep-gemm
-    --no-install-package flash-attn
-    --no-install-package transformer-engine-torch
-    --no-install-package mooncake-transfer-engine
-    --no-install-package mooncake-transfer-engine-cuda13
-    --no-install-package nemo-sandboxed-gym
-)
+
+# Turn the JSON array into one --no-install-package flag per package.
+skip_args=()
+while IFS= read -r package; do
+    skip_args+=(--no-install-package "${package}")
+done < <(jq -r '.[]' <<<"${NO_INSTALL_PACKAGES}")
+
 # Same wrapper prefetch_venvs.py writes, into the driver bin (on PATH) rather
 # than /usr/local/bin, which the build user cannot write.
 write_wrapper() {
@@ -45,7 +39,7 @@ sync_venv() {
     local venv="$1"
     shift
     UV_PROJECT_ENVIRONMENT="${venv}" \
-        uv sync ${UV_SYNC_MODE-} --inexact --no-install-project --directory /opt/nemo-rl "$@" "${SKIP[@]}"
+        uv sync ${UV_SYNC_MODE-} --inexact --no-install-project --directory /opt/nemo-rl "$@" "${skip_args[@]}"
     # --python selects the venv. --directory keeps uv from reading the git pins in pyproject.toml.
     uv pip install --directory /tmp --python "${venv}/bin/python" --no-deps /mnt/wheels/*.whl
     write_wrapper "${venv}"

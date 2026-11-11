@@ -168,6 +168,34 @@ USER ${BUILD_UID}:${BUILD_GID}
 # Empty UV_SYNC_MODE relocks. Default is --frozen.
 ARG UV_SYNC_MODE=--frozen
 
+# Version floors as one JSON object, read with jq by pin-venv-packages.sh and the driver-venv step.
+# gitpython floor fixes GHSA-8mcc-hrx5-hvxc, GHSA-7833-fr7j-v32q, GHSA-284h-m62q-gf8w (Critical).
+ARG PACKAGE_FLOORS='{ \
+    "mlflow-skinny": "mlflow-skinny>=3.15.0,<3.16.0", \
+    "sqlparse": "sqlparse>=0.6.0,<0.7", \
+    "virtualenv": "virtualenv>=21.14.9", \
+    "hydra-core": "hydra-core>=1.3.7,<1.4", \
+    "gitpython": "gitpython>=3.1.62", \
+    "wandb": "wandb>=0.31.0" \
+}'
+
+# Packages left out of every uv sync, as a JSON array. Mooncake is unused by RL; its wheel bundles
+# Go/etcd libraries.
+ARG NO_INSTALL_PACKAGES='[ \
+    "causal-conv1d", \
+    "mamba-ssm", \
+    "nv-grouped-gemm", \
+    "fast-hadamard-transform", \
+    "flash-mla", \
+    "deep-ep", \
+    "deep-gemm", \
+    "flash-attn", \
+    "transformer-engine-torch", \
+    "mooncake-transfer-engine", \
+    "mooncake-transfer-engine-cuda13", \
+    "nemo-sandboxed-gym" \
+]'
+
 # Warm the uv cache. Extras conflict, so each sync prunes the last; the cache is what remains.
 # The two combined syncs match the worker venvs: mcore+nemo_gym and vllm+nemo_gym.
 # RL's own pyproject.toml and uv.lock are used as-is. These nine packages are left out of
@@ -186,7 +214,9 @@ ARG UV_SYNC_MODE=--frozen
 # Then drop ray's vendored aiohttp, yarl, and jars, and PyNvVideoCodec's bundled FFmpeg, before prefetch
 # can symlink a venv at them. The package stays cached, so uv does not re-download it.
 RUN --mount=type=bind,source=docker/rl/scripts/warm-uv-cache.sh,target=/tmp/warm-uv-cache.sh,readonly \
-    UV_SYNC_MODE="${UV_SYNC_MODE}" bash /tmp/warm-uv-cache.sh
+    UV_SYNC_MODE="${UV_SYNC_MODE}" \
+    NO_INSTALL_PACKAGES="${NO_INSTALL_PACKAGES}" \
+    bash /tmp/warm-uv-cache.sh
 
 # Own layer so a pin edit does not rebuild the sync above.
 # opensandbox is the Gym client. The driver venv does not keep the nemo_gym extra,
@@ -197,6 +227,10 @@ RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/o
     <<"EOF" bash -eu
 umask 022
 export UV_LINK_MODE=symlink
+# ARG values are in this RUN's environment, so PACKAGE_FLOORS is set here without a prefix.
+MLFLOW_SKINNY_FLOOR=$(jq -er '.["mlflow-skinny"]' <<<"${PACKAGE_FLOORS}")
+SQLPARSE_FLOOR=$(jq -er '.sqlparse' <<<"${PACKAGE_FLOORS}")
+WANDB_FLOOR=$(jq -er '.wandb' <<<"${PACKAGE_FLOORS}")
 stamp=$(chmod-newer-than.sh mark)
 mapfile -t OTEL_PINS < <(grep -Ev '^[[:space:]]*(#|$)' /tmp/opentelemetry-overrides.txt)
 OTEL_UPGRADE=()
@@ -208,9 +242,9 @@ uv pip install --python /opt/nemo_rl_venv/bin/python "opensandbox>=0.1.9" "tenac
 uv pip install --directory /tmp --python /opt/nemo_rl_venv/bin/python \
     --upgrade-package wandb \
     "${OTEL_UPGRADE[@]}" \
-    "mlflow-skinny>=3.15.0,<3.16.0" \
-    "sqlparse>=0.6.0,<0.7" \
-    "wandb>=0.31.0" \
+    "${MLFLOW_SKINNY_FLOOR}" \
+    "${SQLPARSE_FLOOR}" \
+    "${WANDB_FLOOR}" \
     "${OTEL_PINS[@]}"
 uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps \
     -e /opt/nemo-rl/3rdparty/Gym-workspace/Gym
@@ -234,7 +268,9 @@ EOF
 # enough. The editable root install follows the source COPY.
 RUN --mount=from=rl-cuda-ext-wheel,source=/wheels,target=/mnt/wheels,readonly \
     --mount=type=bind,source=docker/rl/scripts/sync-worker-venvs.sh,target=/tmp/sync-worker-venvs.sh,readonly \
-    UV_SYNC_MODE="${UV_SYNC_MODE}" bash /tmp/sync-worker-venvs.sh
+    UV_SYNC_MODE="${UV_SYNC_MODE}" \
+    NO_INSTALL_PACKAGES="${NO_INSTALL_PACKAGES}" \
+    bash /tmp/sync-worker-venvs.sh
 
 # After the worker syncs, so a source-only bump reuses that layer.
 # Exclude submodule .git dirs here; a later rm would still leave them in this layer.
@@ -277,6 +313,7 @@ RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/o
     TARGETARCH="${TARGETARCH}" \
     NEMO_GYM_CUDA="${NEMO_GYM_CUDA}" \
     NEMO_GYM_VLLM_VERSION="${NEMO_GYM_VLLM_VERSION}" \
+    PACKAGE_FLOORS="${PACKAGE_FLOORS}" \
     bash /tmp/pin-venv-packages.sh
 
 # cuDNN dlopens sublibraries as libcudnn_*.so.9.26.0. The wheel only ships .so.9,
