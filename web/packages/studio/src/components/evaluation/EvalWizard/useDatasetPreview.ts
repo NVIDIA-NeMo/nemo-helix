@@ -152,7 +152,9 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
   });
 
   /** Whether the read covers the entire file, i.e. whether a row total is real. */
-  const isComplete = fileBytes !== undefined && fileBytes === fileSize;
+  const isComplete = readsWholeFile
+    ? Boolean(wholeFile.data)
+    : fileBytes !== undefined && fileBytes === fileSize;
 
   const {
     data: preview,

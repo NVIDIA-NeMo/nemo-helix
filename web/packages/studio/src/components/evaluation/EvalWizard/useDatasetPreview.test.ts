@@ -123,4 +123,22 @@ describe('useDatasetPreview', () => {
     expect(result.current.file.data).toBeInstanceOf(File);
     expect(fetchFile).toHaveBeenCalledTimes(1);
   });
+
+  it('counts a whole-file read as complete even when the listing omits the file', async () => {
+    server.use(
+      http.get(mockApiUrl(getFilesRetrieveFilesetQueryKey, ':workspace', ':name'), () =>
+        HttpResponse.json({ name: 'data', workspace: 'ws' })
+      ),
+      http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
+        HttpResponse.json({ data: [] })
+      )
+    );
+    fetchFile.mockImplementation(() => parquetFile(PARQUET.twoRows).arrayBuffer());
+
+    const { result } = renderHook(() => useDatasetPreview('ws/data#rows.parquet'), { wrapper });
+
+    await waitFor(() => expect(result.current.row).not.toBeNull());
+    expect(result.current.rowCount).toBe(2);
+    expect(result.current.isPartial).toBe(false);
+  });
 });
