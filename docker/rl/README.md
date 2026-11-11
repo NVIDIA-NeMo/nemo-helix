@@ -535,7 +535,8 @@ readable by the non-root user. Hence `UV_CACHE_DIR=/opt/uv_cache`:
   training image runs as a configured non-root UID (1000 by default, the same reason
   CPython is copied under `/opt/cpython`).
 - **`/opt/uv_cache` must never be deleted** — pruning it breaks every venv that points into
-  it. `prune-unreferenced-uv-archives.sh` removes archives no venv links to. A later layer
+  it. `prune-unreferenced-uv-archives.sh` removes archives no venv links to, then
+  removes `files-v0` blobs that no longer have an archive name. A later layer
   of the same stage can only hide those files. The publish stage copies the merged builder
   tree onto `base`, so those hidden archives are left behind and are not in the pull.
 
