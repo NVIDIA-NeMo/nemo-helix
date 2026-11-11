@@ -204,6 +204,9 @@ def granted_workload_scope(config: AuthConfig, requested_scope: Any) -> str | No
 
 def _principal_claims(principal: Principal) -> dict[str, Any]:
     claims: dict[str, Any] = {"sub": principal.id}
+    if principal.account_id:
+        claims["nhx_subject_account_id"] = principal.account_id
+        claims["nhx_subject_aliases"] = list(principal.authz_aliases)
     if principal.email:
         claims["email"] = principal.email
     if principal.groups:

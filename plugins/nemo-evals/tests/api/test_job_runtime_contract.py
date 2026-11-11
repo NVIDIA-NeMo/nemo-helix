@@ -10,6 +10,23 @@ from nhx_evals_sdk.values.results import AggregatedMetricResult
 from pydantic import TypeAdapter
 
 
+@pytest.mark.parametrize("case", ["bound", "another_job", "another_workspace", "unbound", "ordinary", "other_service"])
+def test_trial_revocation_requires_issuing_job_binding(case: str) -> None:
+    from nemo_evals.api.v2.job_runtime import _trial_key_belongs_to_job
+
+    claims = {"kind": "trial", "intake_workspace": "team", "runtime_job": "job-one"}
+    if case == "another_job":
+        claims["runtime_job"] = "job-two"
+    elif case == "another_workspace":
+        claims["intake_workspace"] = "another-team"
+    elif case == "unbound":
+        del claims["runtime_job"]
+    elif case == "ordinary":
+        claims["kind"] = "ordinary"
+    attributes = {"another-service" if case == "other_service" else "evals": claims}
+    assert _trial_key_belongs_to_job(attributes, workspace="team", job="job-one") is (case == "bound")
+
+
 def test_production_runtime_routes_derive_delegated_contracts() -> None:
     from nemo_evals.service import EvaluatorPluginService
     from nemo_helix_plugin.authz_discovery import _derive_service_contribution

@@ -1853,3 +1853,15 @@ def test_delegation_retains_creator_credential_scope_ceiling() -> None:
     verified = exchange.VerifiedSubjectToken(subject="system:serviceaccount:qa:jobs", groups=[])
     claims = exchange._build_delegated_claims(delegation, verified)
     assert claims["nhx_credential_scopes"] == creator.credential_scopes
+
+
+def test_delegation_retains_creator_stable_account_identity() -> None:
+    creator = Principal(
+        id="creator@example.com", account_id="account-original", authz_aliases=["creator@example.com", "oidc-subject"]
+    )
+    context = PluginAuthContext.from_principal(creator)
+    delegation = _delegation_entity(workload_kind="job", auth_context=context)
+    verified = exchange.VerifiedSubjectToken(subject="system:serviceaccount:qa:jobs", groups=[])
+    claims = exchange._build_delegated_claims(delegation, verified)
+    assert claims["nhx_subject_account_id"] == creator.account_id
+    assert claims["nhx_subject_aliases"] == creator.authz_aliases

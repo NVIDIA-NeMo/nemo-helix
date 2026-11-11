@@ -15,7 +15,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Response
 from nemo_evals.authz import scope
 from nemo_evals.entities import AgentEvalResultEntity, EvaluateResultEntity, TaskEntity
-from nemo_evals.gateway.tokens import TOKEN_LIFETIME_SEC, TrialClaims
+from nemo_evals.gateway.tokens import EVALS_SERVICE, TOKEN_LIFETIME_SEC, TrialClaims
 from nemo_evals.image_builds.builder import HttpImageBuilder
 from nemo_evals.image_builds.models import TASK_IMAGE_BUILD_JOB_SOURCE, TaskImageBuildEntity, build_entity_name
 from nemo_evals.image_builds.runner import TaskImageBuildSpec, run_task_image_build
@@ -43,6 +43,7 @@ from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.types import HelixJobResponse
+from pydantic import JsonValue
 
 router = APIRouter()
 _PREFIX = "/job-runtime/{job}"
@@ -170,7 +171,16 @@ def _trial_policy(current: HelixJobResponse, auth: RuntimeAuthClient, claims: Tr
         else:
             spec = AgentEvalSpec.model_validate(current.spec)
         policy = _trial_model_policy(spec, client)
-    return claims.model_copy(update={"model_access": policy.model_access, "models": policy.models})
+    return claims.model_copy(
+        update={"model_access": policy.model_access, "models": policy.models, "runtime_job": current.name}
+    )
+
+
+def _trial_key_belongs_to_job(attributes: dict[str, dict[str, JsonValue]], *, workspace: str, job: str) -> bool:
+    trial = attributes.get(EVALS_SERVICE, {})
+    return (
+        trial.get("kind") == "trial" and trial.get("intake_workspace") == workspace and trial.get("runtime_job") == job
+    )
 
 
 @router.post(_PREFIX + "/trial-keys", response_model=AccessKeyCreateResponse)
@@ -220,4 +230,16 @@ async def revoke_trial_key(
     current = await _job(workspace, job, auth, client, {_AGENT_SOURCE, _TASK_SOURCE})
     await _authorize_evaluation(workspace, current.source, authorize)
     async with get_async_nemo_client(as_service="evals", internal=True, on_behalf_of=_creator()) as issuer:
-        return (await AsyncAccessKeysClient.from_client(issuer).revoke_access_key(jti=jti)).data()
+        keys = AsyncAccessKeysClient.from_client(issuer)
+        page = 1
+        while True:
+            records = (await keys.list_access_keys(query_params={"page": page, "page_size": 100})).data()
+            for key in records.data:
+                if key.jti != jti:
+                    continue
+                if not _trial_key_belongs_to_job(key.service_attributes, workspace=workspace, job=job):
+                    raise HTTPException(403, "Trial credential does not belong to this Job")
+                return (await keys.revoke_access_key(jti=jti)).data()
+            if not records.has_more:
+                raise HTTPException(403, "Trial credential does not belong to this Job")
+            page += 1

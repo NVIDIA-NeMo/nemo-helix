@@ -80,6 +80,22 @@ def test_workload_access_token_preserves_signed_account_context() -> None:
     assert principal.authz_aliases == ["user:alice", "alice@example.test"]
 
 
+@pytest.mark.parametrize("kind", ["workload_access_token", "oidc_access_token", "access_key", "workload_subject_token"])
+def test_only_verified_workload_tokens_restore_delegated_account_context(kind: ResolvedTokenKind) -> None:
+    claims = _claims_with_actor()
+    claims.raw_claims.update(
+        nhx_subject_account_id="account-original",
+        nhx_subject_aliases=["user:alice", "alice@example.test"],
+    )
+    principal = ResolvedBearerToken(claims=claims, token_kind=kind).principal
+    if kind == "workload_access_token":
+        assert principal.effective_principal.account_id == "account-original"
+        assert principal.effective_principal.authz_aliases == ["user:alice", "alice@example.test"]
+    else:
+        assert principal.account_id is None
+        assert principal.on_behalf_of_account_id is None
+
+
 @pytest.mark.parametrize("token_kind", ["oidc_access_token", "access_key", "workload_subject_token"])
 def test_non_workload_access_tokens_ignore_actor_claims(token_kind: ResolvedTokenKind) -> None:
     resolved = ResolvedBearerToken(claims=_claims_with_actor(), token_kind=token_kind)

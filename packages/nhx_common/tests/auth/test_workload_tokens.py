@@ -83,6 +83,8 @@ async def test_delegated_service_workload_access_token_preserves_obo_principal(t
     config = _token_exchange_config(tmp_path)
     creator = Principal(
         id="user:alice",
+        account_id="account-original",
+        authz_aliases=["user:alice", "alice@example.test"],
         email="alice@example.test",
         groups=["workspace-editors"],
     )
@@ -95,6 +97,8 @@ async def test_delegated_service_workload_access_token_preserves_obo_principal(t
     assert resolved.principal.on_behalf_of == "user:alice"
     assert resolved.principal.on_behalf_of_email == "alice@example.test"
     assert resolved.principal.on_behalf_of_groups == ["workspace-editors"]
+    assert resolved.principal.effective_principal.account_id == "account-original"
+    assert resolved.principal.effective_principal.authz_aliases == creator.authz_aliases
 
 
 @pytest.mark.asyncio

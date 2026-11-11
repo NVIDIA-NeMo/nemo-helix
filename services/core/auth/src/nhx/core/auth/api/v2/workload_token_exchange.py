@@ -755,6 +755,9 @@ def _build_delegated_claims(
 ) -> dict[str, Any]:
     delegated_principal = delegation.auth_context.to_principal().effective_principal
     claims: dict[str, Any] = {"sub": delegated_principal.id}
+    if delegated_principal.account_id:
+        claims["nhx_subject_account_id"] = delegated_principal.account_id
+        claims["nhx_subject_aliases"] = list(delegated_principal.authz_aliases)
     if delegated_principal.email:
         claims["email"] = delegated_principal.email
     if delegated_principal.groups:
