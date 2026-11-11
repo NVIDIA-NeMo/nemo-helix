@@ -528,6 +528,17 @@ class TestPrincipalFromEnvVar:
 class TestAuthContextPrincipalRoundTrip:
     """AuthContext should preserve delegation fields for persistence and SDK rehydration."""
 
+    @pytest.mark.parametrize("scopes", [None, ["evaluator:write", "inference:read"]])
+    def test_scope_ceiling_survives_core_and_plugin_context_roundtrip(self, scopes: list[str] | None) -> None:
+        from nemo_helix_plugin.auth import AuthContext as PluginAuthContext
+
+        principal = Principal(id="user@example.com", credential_scopes=scopes)
+        core = AuthContext.from_principal(principal)
+        plugin = PluginAuthContext.model_validate(core.model_dump(mode="python"))
+        restored = AuthContext.model_validate(plugin.model_dump(mode="python"))
+        assert plugin == core
+        assert restored.to_principal().credential_scopes == scopes
+
     def test_from_principal_and_to_principal_round_trip(self):
         p = Principal(
             id="service:x",

@@ -87,7 +87,9 @@ class ResolvedBearerToken:
             scopes = self.claims.raw_claims.get("nhx_credential_scopes")
         else:
             principal = _direct_principal_from_claims(self.claims)
-            scopes = self.scopes if self.token_kind == "access_key" else None
+            # An empty scope on a legacy/access key means unrestricted. An
+            # explicitly empty signed delegation ceiling below is invalid.
+            scopes = (self.scopes or None) if self.token_kind == "access_key" else None
         if scopes is not None:
             if not isinstance(scopes, list) or not scopes or not all(isinstance(s, str) for s in scopes):
                 raise ValueError("Invalid delegated credential scopes")

@@ -80,6 +80,21 @@ def test_workload_access_token_preserves_signed_account_context() -> None:
     assert principal.authz_aliases == ["user:alice", "alice@example.test"]
 
 
+@pytest.mark.parametrize("scopes", [[], ["models:read"]])
+def test_access_key_scope_ceiling_retains_legacy_unrestricted_semantics(scopes: list[str]) -> None:
+    claims = _claims()
+    claims.scopes = scopes
+    principal = ResolvedBearerToken(claims=claims, token_kind="access_key").principal
+    assert principal.credential_scopes == (scopes or None)
+
+
+def test_empty_signed_workload_scope_ceiling_is_rejected() -> None:
+    claims = _claims_with_actor()
+    claims.raw_claims["nhx_credential_scopes"] = []
+    with pytest.raises(ValueError, match="Invalid delegated credential scopes"):
+        ResolvedBearerToken(claims=claims, token_kind="workload_access_token").principal
+
+
 @pytest.mark.parametrize("kind", ["workload_access_token", "oidc_access_token", "access_key", "workload_subject_token"])
 def test_only_verified_workload_tokens_restore_delegated_account_context(kind: ResolvedTokenKind) -> None:
     claims = _claims_with_actor()
