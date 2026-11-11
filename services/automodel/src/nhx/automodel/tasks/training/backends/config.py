@@ -172,7 +172,10 @@ def _compile_retrieval_config(
     # Retrieval recipes construct StatefulRNG from the seed internally, so they
     # take a bare seed rather than the LLM recipe's full rng config object.
     cfg["seed"] = seed
-    cfg["temperature"] = 0.02 if is_bi_encoder else 1.0
+    if retrieval_config.temperature is not None:
+        cfg["temperature"] = retrieval_config.temperature
+    else:
+        cfg["temperature"] = 0.02 if is_bi_encoder else 1.0
 
     _build_base_model(cfg, customizer_config)
     cfg["model"].update(
@@ -204,7 +207,14 @@ def _compile_retrieval_config(
     cfg["tokenizer"] = {
         "_target_": "nemo_automodel._transformers.auto_tokenizer.NeMoAutoTokenizer.from_pretrained",
         "pretrained_model_name_or_path": customizer_config.model.path,
+        # Default to the checkpoint's Hugging Face tokenizer, the one Retriever/Ranking NIM and vLLM
+        # serve with. Automodel's own default prefers a tokenizer registered for the model type, which
+        # the checkpoint may not ship: Nemotron 3 Embed is model type ministral3, mapped to Mistral's
+        # tekken.json, but carries only tokenizer.json.
+        "tokenizer_backend": customizer_config.model.tokenizer_backend or "nemo_wrapped_auto",
     }
+    if freeze_config := _module_selector_freeze_config(customizer_config):
+        cfg["freeze_config"] = freeze_config
 
     _build_distributed(
         cfg,
@@ -299,6 +309,13 @@ def _compile_llm_config(
     _build_checkpoint(cfg, customizer_config, workspace_dir)
 
     _configure_datasets(cfg, customizer_config, prepared, effective_seq_length, seed, recipe, None)
+    if customizer_config.model.tokenizer_backend is not None:
+        # Only when asked: without this block Automodel builds its default tokenizer, as it always
+        # has. The recipe builds one tokenizer from it for both the training and validation loaders.
+        cfg["dataset"]["tokenizer"] = {
+            "pretrained_model_name_or_path": customizer_config.model.path,
+            "tokenizer_backend": customizer_config.model.tokenizer_backend,
+        }
 
     cfg["dataloader"] = {
         "_target_": "torchdata.stateful_dataloader.StatefulDataLoader",
@@ -311,6 +328,9 @@ def _compile_llm_config(
     }
 
     _build_peft(cfg, customizer_config)
+    if freeze_config := _module_selector_freeze_config(customizer_config):
+        cfg["freeze_config"] = freeze_config
+    _keep_full_weight_kd_student_in_fp32(cfg, customizer_config)
 
     cfg["loss_fn"] = {
         "_target_": "nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy",
@@ -375,12 +395,14 @@ def _compile_vlm_config(
         "pretrained_model_name_or_path": customizer_config.model.path,
         "trust_remote_code": trust_remote_code,
     }
-    freeze_config: dict[str, bool] = {
+    freeze_config: dict[str, Any] = {
         "freeze_vision_tower": True,
         "freeze_language_model": False,
     }
     if traits.has_audio_tower:
         freeze_config["freeze_audio_tower"] = True
+    # Automodel applies the booleans first, then freeze_modules, then unfreeze_modules, which wins.
+    freeze_config.update(_module_selector_freeze_config(customizer_config))
     cfg["freeze_config"] = freeze_config
 
     _build_distributed(
@@ -1174,6 +1196,9 @@ def _configure_chat_dataset(
         "seq_length": seq_length,
         "padding": "do_not_pad" if not pp_enabled else "max_length",
     }
+    if customizer_config.dataset.mask_generation_prompt:
+        cfg["dataset"]["mask_generation_prompt"] = True
+        cfg["validation_dataset"]["mask_generation_prompt"] = True
 
     # Add chat template if available
     if chat_template:
@@ -1198,6 +1223,10 @@ def _configure_sft_dataset(
     seq_length: int,
 ) -> None:
     """Configure ColumnMappedTextInstructionDataset for SFT/custom format."""
+    if customizer_config.dataset.mask_generation_prompt:
+        raise ValueError(
+            "mask_generation_prompt applies to chat-format (messages) data; this dataset has prompt/completion rows."
+        )
     logger.info(
         f"Configuring SFT dataset with columns: question={question_col}, answer={answer_col}, seq_length={seq_length}"
     )
@@ -1272,7 +1301,20 @@ def _configure_retrieval_dataset(
         retrieval_config.train_n_passages,
     )
 
+    causal_reranker = recipe == TrainingRecipe.CROSS_ENCODER and is_causal_reranker_checkpoint(
+        customizer_config.model.path
+    )
+
     def collator_config(*, validation: bool = False) -> dict[str, Any]:
+        if causal_reranker:
+            # Qwen3-Reranker's own prompt (system message, <Instruct>/<Query>/<Document>, then the empty
+            # think block), so training reads the yes/no logits where the model, Automodel's example
+            # recipe, and vLLM's Qwen3 reranker template all put them.
+            return {
+                "_target_": "nemo_automodel.components.models.qwen3_reranker.collator.Qwen3ContextAwareRerankerCollator",
+                "rerank_max_length": retrieval_config.passage_max_length,
+                "pad_to_multiple_of": 8,
+            }
         if recipe == TrainingRecipe.CROSS_ENCODER:
             return {
                 "_target_": collator_target,
@@ -1365,6 +1407,34 @@ def _verify_tokenizer_compatibility(student_path: str, teacher_path: str, trust_
         # Log but don't fail for other tokenizer loading issues
         # (e.g., network issues, missing files) - the training will fail later with a clearer error
         logger.warning(f"Could not verify tokenizer compatibility: {e}")
+
+
+def _module_selector_freeze_config(customizer_config: TrainingStepConfig) -> dict[str, list[dict[str, str]]]:
+    """The job's freeze_modules / unfreeze_modules in Automodel's freeze_config form."""
+    training = customizer_config.training
+    freeze_config: dict[str, list[dict[str, str]]] = {}
+    for key, selectors in (
+        ("freeze_modules", training.freeze_modules),
+        ("unfreeze_modules", training.unfreeze_modules),
+    ):
+        if selectors:
+            freeze_config[key] = [selector.model_dump(exclude_none=True) for selector in selectors]
+    return freeze_config
+
+
+def _keep_full_weight_kd_student_in_fp32(cfg: dict[str, Any], customizer_config: TrainingStepConfig) -> None:
+    """Store a full-weight distillation student in fp32 when the job sets no precision.
+
+    torch.optim optimizers keep no fp32 master copy, so bf16 parameters mean bf16 updates and
+    Adam state. Automodel r0.6.0's KD recipe stored such a student in fp32; v0.7.0 dropped that.
+    """
+    if (
+        customizer_config.training.training_type == TrainingType.DISTILLATION
+        and "peft" not in cfg
+        and customizer_config.model.precision is None
+        and str(cfg["optimizer"]["_target_"]).startswith("torch.optim.")
+    ):
+        cfg["model"]["torch_dtype"] = "float32"
 
 
 def _configure_kd(cfg: dict[str, Any], customizer_config: TrainingStepConfig, trust_remote_code: bool = False) -> None:

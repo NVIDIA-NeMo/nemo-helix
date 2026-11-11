@@ -122,8 +122,12 @@ Full template:
 | `lora.exclude_modules` | `null` | Patterns to exclude from LoRA, e.g. `["*.out_proj"]` |
 | `lora.use_triton` | `true` | Use the optimized Triton LoRA kernel |
 | `max_seq_length` | `2048` | Truncate/pack to this length; lower if OOM |
-| `precision` | `null` | `bf16` \| `fp16` \| `fp32` \| `fp8`; null auto-detects from the checkpoint |
+| `precision` | `null` | `bf16` \| `fp16` \| `fp32` \| `fp8`; null auto-detects from the checkpoint. Exception: full-weight distillation with `Adam`/`AdamW` keeps the student in fp32, because those optimizers hold no separate fp32 copy of the weights. Set `precision` to override |
 | `attn_implementation` | `sdpa` | `sdpa` (PyTorch native) \| `flash_attention_2` \| `eager` |
+| `tokenizer_backend` | `null` | **Leave unset** unless the tokenizer fails to load. See **Tokenizer backend** below |
+| `mask_generation_prompt` | `false` | Chat (messages) data only. `true` stops training on the role header and empty `<think></think>` the chat template writes before each reply. See below |
+| `freeze_modules` | `null` | List of `{"path": ...}` or `{"glob": ...}` selectors to freeze. See **Module freezing** below |
+| `unfreeze_modules` | `null` | Selectors to make trainable; wins over `freeze_modules`. **`all_weights` only** |
 | `teacher_model` | — | **Model entity ref** (not HF id). Required for distillation; see below |
 | `distillation_ratio` | `0.5` | KD blend (0–1) |
 | `distillation_temperature` | `1.0` | KD temperature |
@@ -131,6 +135,55 @@ Full template:
 | `offload_teacher` | `false` | Offload teacher weights to CPU |
 
 LoRA block is auto-created when `finetuning_type` is `lora` or `lora_merged`.
+
+### Tokenizer backend (`training.tokenizer_backend`)
+
+**Default: leave it unset.** Set it only when a job fails while loading the tokenizer, or when you must match how the model is served.
+
+| Recipe | Unset means |
+|--------|-------------|
+| `bi_encoder`, `cross_encoder` | `nemo_wrapped_auto`: the checkpoint's own Hugging Face tokenizer (`tokenizer.json`), the one Retriever/Ranking NIM and vLLM serve with |
+| `sft`, `distillation` | Automodel's default, `nemo_auto`, exactly as before this field existed. Helix writes no tokenizer setting |
+| Vision-language models | Not supported: VLM jobs load the checkpoint's processor, and setting the field fails the job at submission |
+
+| Value | Loads | Use when |
+|-------|-------|----------|
+| `nemo_auto` | A tokenizer Automodel registers for the checkpoint's `model_type` when there is one (Mistral's `tekken.json` for Mistral-family types, TikToken for Kimi K3), otherwise the Hugging Face tokenizer | Mistral-family LLMs published with `tekken.json` |
+| `nemo_wrapped_auto` | The checkpoint's Hugging Face tokenizer, skipping Automodel's registry, with Automodel's BOS/EOS/pad handling | The checkpoint's `model_type` has a registered tokenizer but the checkpoint ships only `tokenizer.json` |
+| `transformers_auto` | Plain Hugging Face `AutoTokenizer`, without Automodel's wrapper | You need byte-identical behavior to an external Hugging Face pipeline |
+| `tokenizers` | `tokenizer.json` read directly | `AutoTokenizer` cannot resolve the checkpoint's tokenizer class |
+
+What setting it does:
+
+- **`sft` and `distillation`:** Helix adds a `dataset.tokenizer` block. Automodel builds one tokenizer from it and uses it for both the training and validation data. Distillation caveat: Automodel's student/teacher vocabulary check always uses its default tokenizer, so a student that needs a non-default backend can still fail that check.
+- **`bi_encoder` and `cross_encoder`:** it replaces the `nemo_wrapped_auto` default.
+
+**Nemotron models:**
+
+- **Nemotron 3 Embed 1B needs the Hugging Face tokenizer.** Its `config.json` says `model_type: ministral3`, and Automodel v0.7.0 maps that type to Mistral's `tekken.json` tokenizer, but the checkpoint ships only `tokenizer.json`. Under `nemo_auto`, training fails with `No tokenizer file found.`, and mining fails with `Some kwargs ... are not supported by MistralCommonBackend.from_pretrained`. Helix's retrieval default (`nemo_wrapped_auto`) already handles this, so leave the field unset. Never set `nemo_auto` for it.
+- **Leave it unset for the others.** Llama Nemotron Embed/Rerank (`llama_bidirec`), Nemotron LLMs (`nemotron_h`, `llama`), and Qwen models have no registered tokenizer, so every backend loads the same `tokenizer.json`.
+- **Mining** takes its own `tokenizer_backend` on `retrieval-prepare` (`nemo_wrapped_auto` by default, or `nemo_auto`); see `nemo-retrieval-recipes` `references/sdg.md`.
+
+### `mask_generation_prompt` (chat SFT)
+
+At inference, the chat template writes the assistant role header, and for hybrid reasoning models an empty `<think></think>`, before the model generates anything. By default those tokens are part of the training loss, the same as before this field existed.
+
+`true` removes them from the loss for both the training and validation data. Then:
+- **The model learns only the reply.** Supervising an empty think block also teaches Qwen3 and Nemotron hybrid models to close `<think>` immediately, which can hurt their thinking mode after fine-tuning.
+- **Loss and validation loss read lower**, because the hard-to-predict template tokens no longer count.
+
+Chat-format (messages) data only. Prompt/completion data fails the job, and vision-language and retrieval recipes are rejected at submission.
+
+### Module freezing (`freeze_modules` / `unfreeze_modules`)
+
+Each entry is `{"path": "<exact module path>"}` or `{"glob": "<pattern>"}`, where `*` also crosses `.`. A selected module's whole subtree is frozen or unfrozen. Automodel applies Helix's built-in settings first (for VLM jobs, the frozen vision tower), then `freeze_modules`, then `unfreeze_modules`, which wins on overlap. A selector that matches no module fails the job, so check the module names first (for example, the weight names in `model.safetensors.index.json`, minus the trailing `.weight`).
+
+- **`freeze_modules`** works with every `finetuning_type`. Under LoRA it freezes the adapters inside the selected modules.
+- **`unfreeze_modules`** requires `all_weights`. A LoRA adapter holds only low-rank weights, so trained module weights would be dropped when it is merged or served.
+
+Examples:
+- Train a VLM's projector along with the language model: `"unfreeze_modules": [{"path": "model.multi_modal_projector"}]`.
+- Keep the embeddings fixed during full fine-tuning: `"freeze_modules": [{"glob": "*.embed_tokens"}]`.
 
 ### Automodel `schedule`
 
@@ -231,7 +284,14 @@ Use `"recipe": "cross_encoder"` and the rerank model entity for ranking. Leave b
 
 Dataset, collator, and export knobs for `bi_encoder` / `cross_encoder`. Use `training.retrieval` only; `training.embedding` is rejected.
 
-`retrieval.export` writes ONNX plus the HF checkpoint. `primary` (`onnx` by default, or `hf`) selects the fileset root; the other artifact goes under `alternates/`. `precision` defaults to `fp16` to match typical Hugging Face checkpoints. Embeddings emit pooled `embeddings`; cross-encoders emit `logits`. A Qwen3 causal-LM base (e.g. Qwen3-Reranker) has no score head: its `logits` is `logit("yes") - logit("no")` at the last token, and the HF output stays a plain Qwen3 causal LM tagged `text-ranking`. Set `dimensions: true` for Matryoshka truncation. Unmerged LoRA is not exported.
+`retrieval.temperature` is the loss softmax temperature. Unset means `0.02` for `bi_encoder` and `1.0` for `cross_encoder`. Lower values sharpen the contrast between the positive and the negatives. For a Qwen3 causal reranker it is the only temperature setting; Automodel's Qwen3-Reranker example recipe uses `0.3`.
+
+`retrieval.export` writes ONNX plus the HF checkpoint. `primary` (`onnx` by default, or `hf`) selects the fileset root; the other artifact goes under `alternates/`. `precision` defaults to `fp16` to match typical Hugging Face checkpoints. Embeddings emit pooled `embeddings`; cross-encoders emit `logits`. Set `dimensions: true` for Matryoshka truncation. Unmerged LoRA is not exported.
+
+**Qwen3 causal rerankers** (a `cross_encoder` job on a `Qwen3ForCausalLM` base such as Qwen3-Reranker) have no score head:
+- **Training prompt.** Helix trains them on Qwen3-Reranker's own prompt: system message, `<Instruct>`/`<Query>`/`<Document>`, then the empty think block. Classifier rerankers keep `question:{query} \n \n passage:{passage}`.
+- **Score.** `logit("yes") - logit("no")` at the last token. The HF output stays a plain Qwen3 causal LM tagged `text-ranking`, and the ONNX `logits` holds that score.
+- **Serving.** Score the tuned model with the same prompt, for example vLLM's Qwen3 reranker template. Other formatting reads the yes/no logits at the wrong position.
 
 ### `parallelism`
 

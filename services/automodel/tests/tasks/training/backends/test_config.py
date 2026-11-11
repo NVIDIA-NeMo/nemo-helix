@@ -19,6 +19,7 @@ from nhx.automodel.tasks.training.backends.config import (
     _configure_moe_backend,
     _configure_retrieval_dataset,
     _configure_sft_dataset,
+    _keep_full_weight_kd_student_in_fp32,
     _resolve_optimizer_target,
     compile_automodel_config,
     estimate_steps_per_epoch,
@@ -26,7 +27,15 @@ from nhx.automodel.tasks.training.backends.config import (
     resolve_warmup_steps,
 )
 from nhx.automodel.tasks.training.datasets.preparation import PreparedDataset
-from nhx.automodel.tasks.training.schemas import RetrievalConfig, TrainingRecipe, TrainingStepConfig
+from nhx.automodel.tasks.training.schemas import (
+    FinetuningType,
+    ModuleSelectorConfig,
+    Precision,
+    RetrievalConfig,
+    TrainingRecipe,
+    TrainingStepConfig,
+    TrainingType,
+)
 
 
 def _hf_config(**overrides: object) -> SimpleNamespace:
@@ -98,6 +107,10 @@ def mock_customizer_config() -> MagicMock:
     config = MagicMock()
     config.model.path = "/models/test-model"
     config.model.name = "test/model"
+    config.model.tokenizer_backend = None
+    config.dataset.mask_generation_prompt = False
+    config.training.freeze_modules = None
+    config.training.unfreeze_modules = None
     return config
 
 
@@ -132,23 +145,29 @@ class TestConfigureChatDataset:
         assert cfg["dataset"]["split"] == "train"
         assert cfg["validation_dataset"]["split"] == "validation"
 
+    @pytest.mark.parametrize("mask_generation_prompt", [False, True], ids=["default", "masked"])
     def test_chat_dataset_includes_required_fields(
         self,
         mock_customizer_config: MagicMock,
         temp_dataset_files: tuple[Path, Path],
         mocker,
+        mask_generation_prompt: bool,
     ) -> None:
+        """mask_generation_prompt reaches both splits only when asked; unset keeps ChatDataset's default."""
         train_file, val_file = temp_dataset_files
         cfg: dict[str, Any] = {}
 
         mocker.patch(f"{CONFIG_MODULE}.resolve_chat_template", return_value="mock_template")
         mock_customizer_config.parallelism.pipeline_parallel_size = 1
+        mock_customizer_config.dataset.mask_generation_prompt = mask_generation_prompt
         _configure_chat_dataset(cfg, mock_customizer_config, train_file, val_file, seq_length=2048)
 
         assert cfg["dataset"]["_target_"] == "nemo_automodel.components.datasets.llm.chat_dataset.ChatDataset"
         assert cfg["dataset"]["path_or_dataset_id"] == str(train_file)
         assert cfg["dataset"]["seq_length"] == 2048
         assert cfg["dataset"]["chat_template"] == "mock_template"
+        for split in ("dataset", "validation_dataset"):
+            assert cfg[split].get("mask_generation_prompt") is (True if mask_generation_prompt else None)
 
 
 class TestConfigureSftDataset:
@@ -209,6 +228,26 @@ class TestConfigureSftDataset:
         assert cfg["dataset"]["padding"] == "do_not_pad"
         assert cfg["dataset"]["truncation"] == "longest_first"
 
+    def test_sft_dataset_rejects_mask_generation_prompt(
+        self,
+        temp_dataset_files: tuple[Path, Path],
+        mock_customizer_config: MagicMock,
+    ) -> None:
+        """Prompt/completion rows have no chat-template generation prompt to leave out of the loss."""
+        train_file, val_file = temp_dataset_files
+        mock_customizer_config.dataset.mask_generation_prompt = True
+
+        with pytest.raises(ValueError, match="chat-format"):
+            _configure_sft_dataset(
+                {},
+                mock_customizer_config,
+                train_file,
+                val_file,
+                question_col="prompt",
+                answer_col="completion",
+                seq_length=2048,
+            )
+
 
 class TestConfigureRetrievalDataset:
     def test_bi_encoder_uses_bi_encoder_collator(
@@ -235,11 +274,35 @@ class TestConfigureRetrievalDataset:
         assert cfg["dataloader"]["dataset"]["model_type"] == "bi_encoder"
         assert cfg["dataloader"]["collate_fn"]["_target_"].endswith("BiEncoderCollator")
 
-    def test_cross_encoder_uses_cross_encoder_collator(
+    @pytest.mark.parametrize(
+        ("base_config", "collator", "prompt_template"),
+        [
+            (
+                {"model_type": "llama_bidirec", "architectures": ["LlamaBidirectionalModel"]},
+                "nemo_automodel.components.datasets.llm.CrossEncoderCollator",
+                "question:{query} \n \n passage:{passage}",
+            ),
+            (
+                {"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]},
+                "nemo_automodel.components.models.qwen3_reranker.collator.Qwen3ContextAwareRerankerCollator",
+                None,
+            ),
+        ],
+        ids=["classifier-head", "qwen3-causal-reranker"],
+    )
+    def test_cross_encoder_collator_matches_the_scoring_head(
         self,
         tmp_path: Path,
         mock_customizer_config: MagicMock,
+        base_config: dict[str, Any],
+        collator: str,
+        prompt_template: str | None,
     ) -> None:
+        """A Qwen3 causal reranker trains on its own prompt, the one Automodel and vLLM score it with."""
+        base = tmp_path / "base"
+        base.mkdir()
+        (base / "config.json").write_text(json.dumps(base_config))
+        mock_customizer_config.model.path = str(base)
         train_file = tmp_path / "train.jsonl"
         val_file = tmp_path / "validation.jsonl"
         train_file.write_text('{"query":"q","pos_doc":"p","neg_doc":["n"]}\n')
@@ -257,8 +320,10 @@ class TestConfigureRetrievalDataset:
         )
 
         assert cfg["dataloader"]["dataset"]["model_type"] == "cross_encoder"
-        assert cfg["dataloader"]["collate_fn"]["_target_"].endswith("CrossEncoderCollator")
-        assert cfg["dataloader"]["collate_fn"]["rerank_max_length"] == 512
+        for loader in ("dataloader", "validation_dataloader"):
+            assert cfg[loader]["collate_fn"]["_target_"] == collator
+            assert cfg[loader]["collate_fn"]["rerank_max_length"] == 512
+            assert cfg[loader]["collate_fn"].get("prompt_template") == prompt_template
 
     def test_bi_encoder_strips_trailing_space_from_nemotron_prefixes(
         self,
@@ -658,6 +723,109 @@ def test_base_model_forwards_only_the_mtp_fields_that_were_set(
     assert {k: v for k, v in cfg["model"].items() if k in mtp_keys} == expected
 
 
+def _compile_causal_lm(config: TrainingStepConfig, tmp_path: Path) -> dict[str, Any]:
+    prepared = PreparedDataset(
+        merged_dir=tmp_path,
+        train_file=tmp_path / "train.jsonl",
+        validation_file=tmp_path / "validation.jsonl",
+        train_samples=100,
+        validation_samples=10,
+    )
+
+    def chat_datasets(cfg: dict[str, Any], *_: Any) -> None:
+        cfg["dataset"] = {"_target_": "ChatDataset"}
+        cfg["validation_dataset"] = {"_target_": "ChatDataset"}
+
+    with (
+        patch(f"{CONFIG_MODULE}.prepare_dataset", return_value=prepared),
+        patch(f"{CONFIG_MODULE}.DatasetValidator"),
+        patch(f"{CONFIG_MODULE}.estimate_dataset_sequence_lengths", return_value=None),
+        patch(f"{CONFIG_MODULE}._configure_datasets", side_effect=chat_datasets),
+        patch(f"{CONFIG_MODULE}._configure_moe_backend"),
+        patch(f"{CONFIG_MODULE}.build_wandb_config", return_value=None),
+        patch(f"{CONFIG_MODULE}.build_mlflow_config", return_value=None),
+    ):
+        return compile_automodel_config(config, tmp_path, MagicMock())
+
+
+@pytest.mark.parametrize("tokenizer_backend", [None, "nemo_wrapped_auto"], ids=["unset", "requested"])
+def test_causal_lm_writes_a_dataset_tokenizer_only_when_requested(
+    tmp_path: Path, tokenizer_backend: str | None
+) -> None:
+    """Unset leaves Automodel's default tokenizer as before; the recipe reuses one tokenizer for validation."""
+    config = _lora_step_config()
+    config.model.tokenizer_backend = tokenizer_backend
+
+    compiled = _compile_causal_lm(config, tmp_path)
+
+    expected = (
+        None
+        if tokenizer_backend is None
+        else {"pretrained_model_name_or_path": config.model.path, "tokenizer_backend": tokenizer_backend}
+    )
+    assert compiled["dataset"].get("tokenizer") == expected
+    assert "tokenizer" not in compiled["validation_dataset"]
+
+
+@pytest.mark.parametrize(
+    ("freeze_modules", "unfreeze_modules", "expected"),
+    [
+        (None, None, None),
+        (
+            [ModuleSelectorConfig(glob="*.layers.0.*")],
+            [ModuleSelectorConfig(path="lm_head")],
+            {"freeze_modules": [{"glob": "*.layers.0.*"}], "unfreeze_modules": [{"path": "lm_head"}]},
+        ),
+    ],
+    ids=["unset", "selectors"],
+)
+def test_causal_lm_freeze_config_carries_only_requested_selectors(
+    tmp_path: Path,
+    freeze_modules: list[ModuleSelectorConfig] | None,
+    unfreeze_modules: list[ModuleSelectorConfig] | None,
+    expected: dict[str, Any] | None,
+) -> None:
+    config = _lora_step_config()
+    config.training.finetuning_type = FinetuningType.ALL_WEIGHTS
+    config.training.lora = None
+    config.training.freeze_modules = freeze_modules
+    config.training.unfreeze_modules = unfreeze_modules
+
+    compiled = _compile_causal_lm(config, tmp_path)
+
+    assert compiled.get("freeze_config") == expected
+
+
+@pytest.mark.parametrize(
+    ("training_type", "peft", "precision", "optimizer", "expected"),
+    [
+        (TrainingType.DISTILLATION, False, None, "torch.optim.Adam", "float32"),
+        (TrainingType.DISTILLATION, True, None, "torch.optim.Adam", "auto"),
+        (TrainingType.DISTILLATION, False, Precision.BF16, "torch.optim.Adam", "bfloat16"),
+        (TrainingType.DISTILLATION, False, None, "transformer_engine.pytorch.optimizers.fused_adam.FusedAdam", "auto"),
+        (TrainingType.SFT, False, None, "torch.optim.Adam", "auto"),
+    ],
+    ids=["full-weight-kd", "lora-kd", "explicit-precision", "fused-adam", "sft"],
+)
+def test_full_weight_kd_student_keeps_fp32_weights(
+    training_type: TrainingType, peft: bool, precision: Precision | None, optimizer: str, expected: str
+) -> None:
+    """torch.optim keeps no fp32 master copy; Automodel r0.6.0's KD recipe stored such a student in fp32."""
+    config = _lora_step_config()
+    config.training.training_type = training_type
+    config.model.precision = precision
+    cfg: dict[str, Any] = {
+        "model": {"torch_dtype": "auto" if precision is None else "bfloat16"},
+        "optimizer": {"_target_": optimizer},
+    }
+    if peft:
+        cfg["peft"] = {}
+
+    _keep_full_weight_kd_student_in_fp32(cfg, config)
+
+    assert cfg["model"]["torch_dtype"] == expected
+
+
 def test_compile_prepares_training_for_pause_and_resume(tmp_path: Path) -> None:
     """Resume restores the newest checkpoint, and the pause poller's signal makes Automodel checkpoint and stop."""
     fixture = Path(__file__).parents[3] / "contract" / "input_configs" / "llama-3.2-1b" / "llama_3_2_1b_lora.json"
@@ -948,6 +1116,34 @@ def test_bi_encoder_compile_uses_fused_adam_and_job_retrieval_config(tmp_path: P
     assert compiled["_recipe"] == "bi_encoder"
 
 
+@pytest.mark.parametrize(
+    ("recipe", "tokenizer_backend", "temperature", "expected_backend", "expected_temperature"),
+    [
+        (TrainingRecipe.BI_ENCODER, None, None, "nemo_wrapped_auto", 0.02),
+        (TrainingRecipe.CROSS_ENCODER, None, None, "nemo_wrapped_auto", 1.0),
+        (TrainingRecipe.CROSS_ENCODER, "nemo_auto", 0.3, "nemo_auto", 0.3),
+    ],
+    ids=["bi-encoder-defaults", "cross-encoder-defaults", "explicit-values"],
+)
+def test_retrieval_compile_tokenizer_backend_and_temperature(
+    tmp_path: Path,
+    recipe: TrainingRecipe,
+    tokenizer_backend: str | None,
+    temperature: float | None,
+    expected_backend: str,
+    expected_temperature: float,
+) -> None:
+    """Unset, retrieval loads the checkpoint's Hugging Face tokenizer, the one NIM and vLLM serve with."""
+    config, prepared = _embed_training_config(tmp_path, retrieval=RetrievalConfig(temperature=temperature))
+    config.training.recipe = recipe
+    config.model.tokenizer_backend = tokenizer_backend
+
+    compiled = _compile_retrieval(config, tmp_path, prepared)
+
+    assert compiled["tokenizer"]["tokenizer_backend"] == expected_backend
+    assert compiled["temperature"] == expected_temperature
+
+
 @pytest.mark.parametrize("requested", [False, True])
 def test_bi_encoder_compile_forwards_distributed_inbatch_negative(tmp_path: Path, requested: bool) -> None:
     config, prepared = _embed_training_config(
@@ -1171,6 +1367,23 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
     assert "_injected_fake" not in loaded[0]
     assert loaded[1]["_injected_fake"] is True
     assert loaded[1]["conversation"][0]["content"][0]["type"] == "image"
+
+
+def test_vlm_module_selectors_layer_over_the_frozen_vision_tower(tmp_path: Path) -> None:
+    """Automodel applies the booleans, then freeze_modules, then unfreeze_modules, which wins."""
+    rows = [{"messages": [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}]}]
+    config = _vision_training_config(tmp_path, rows)
+    config.training.finetuning_type = FinetuningType.ALL_WEIGHTS
+    config.training.lora = None
+    config.training.unfreeze_modules = [ModuleSelectorConfig(path="model.multi_modal_projector")]
+
+    compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["freeze_config"] == {
+        "freeze_vision_tower": True,
+        "freeze_language_model": False,
+        "unfreeze_modules": [{"path": "model.multi_modal_projector"}],
+    }
 
 
 def test_prompt_completion_on_a_vision_checkpoint_is_still_the_vlm_recipe(tmp_path: Path) -> None:

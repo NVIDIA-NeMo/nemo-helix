@@ -33,6 +33,7 @@ __all__ = [
     "ExportSpec",
     "LoRAParams",
     "MTPSpec",
+    "ModuleSelector",
     "OptimizerSpec",
     "OutputRequest",
     "OutputResponse",
@@ -86,6 +87,25 @@ class LoRAParams(AutomodelSchema):
                 "lora.target_modules and lora.exclude_modules are mutually exclusive; "
                 "name the modules to adapt, or the ones to skip, but not both."
             )
+        return self
+
+
+class ModuleSelector(AutomodelSchema):
+    """One module, and everything under it, picked by exact path or by glob."""
+
+    path: str | None = Field(
+        default=None, min_length=1, description="Exact module path, e.g. 'model.multi_modal_projector'."
+    )
+    glob: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Case-sensitive shell-style pattern over module paths; '*' also crosses '.', e.g. '*.embed_tokens'.",
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> Self:
+        if (self.path is None) == (self.glob is None):
+            raise ValueError("A module selector takes exactly one of 'path' or 'glob'.")
         return self
 
 
@@ -151,6 +171,15 @@ class RetrievalSpec(AutomodelSchema):
         default="passage: ",
         description="Literal prefix prepended to each passage. Empty string disables prefixing.",
     )
+    temperature: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Softmax temperature of the training loss: contrastive for bi_encoder, listwise for cross_encoder. "
+            "Omit for 0.02 (bi_encoder) or 1.0 (cross_encoder). A Qwen3 causal reranker scores with raw yes/no "
+            "logits, so this is its only temperature setting."
+        ),
+    )
     export: ExportSpec | None = Field(
         default=None, description="Artifact layout and ONNX export settings. Defaults are applied when omitted."
     )
@@ -183,9 +212,9 @@ class MTPSpec(AutomodelSchema):
 class BackendSpec(AutomodelSchema):
     """Which implementation Automodel uses for each model component.
 
-    Every field defaults to ``None``, meaning "leave it to Automodel". Its own defaults
-    depend on what the training node has available (Transformer Engine, DeepEP, CUDA), so
-    only explicitly set values are forwarded.
+    Every field except ``rope_fusion`` defaults to ``None``, meaning "leave it to Automodel".
+    Its own defaults depend on what the training node has available (Transformer Engine,
+    DeepEP, CUDA), so only explicitly set values are forwarded.
     """
 
     attn: Literal["te", "sdpa", "flex", "eager", "tilelang"] | None = Field(
@@ -198,7 +227,11 @@ class BackendSpec(AutomodelSchema):
         default=None, description="RMSNorm kernel. 'torch_fp32' normalises in fp32 for numerical stability."
     )
     rope: Literal["torch", "quack"] | None = Field(default=None, description="Rotary position embedding kernel.")
-    rope_fusion: bool | None = Field(default=None, description="Fuse the rotary embedding into the attention kernel.")
+    rope_fusion: bool | None = Field(
+        default=False,
+        description="Fuse the rotary embedding into the attention kernel. Automodel v0.7.0 turns this off for "
+        "every model, so true has no effect.",
+    )
     experts: Literal["torch", "te", "gmm", "torch_mm", "torch_mm_mxfp8"] | None = Field(
         default=None,
         description="MoE expert compute kernel. 'torch_mm' is the grouped-matmul path used by the large MoE "
@@ -295,6 +328,37 @@ class TrainingSpec(AutomodelSchema):
         description="Low-level kernel selection for the model's components. Omit to let Automodel "
         "choose based on the hardware it lands on.",
     )
+    tokenizer_backend: Literal["nemo_auto", "nemo_wrapped_auto", "transformers_auto", "tokenizers"] | None = Field(
+        default=None,
+        description=(
+            "How Automodel loads the tokenizer. Omit unless the default fails or does not match how the model is "
+            "served. Omitted, bi_encoder and cross_encoder use 'nemo_wrapped_auto' (the checkpoint's Hugging Face "
+            "tokenizer) and every other recipe uses Automodel's own default, 'nemo_auto', which prefers a "
+            "model-specific tokenizer such as Mistral's tekken.json when Automodel has one for the model type. "
+            "'transformers_auto' is Hugging Face AutoTokenizer without Automodel's wrapper; 'tokenizers' reads "
+            "tokenizer.json directly. Not supported for vision-language models, which load a processor."
+        ),
+    )
+    mask_generation_prompt: bool = Field(
+        default=False,
+        description=(
+            "Leave out of the loss the tokens the chat template writes before each assistant reply: the role "
+            "header and any empty reasoning block such as '<think></think>'. The model never generates them. "
+            "Chat-format (messages) datasets only."
+        ),
+    )
+    freeze_modules: list[ModuleSelector] | None = Field(
+        default=None,
+        description="Modules to freeze, each with everything under it. A selector that matches no module fails the job.",
+    )
+    unfreeze_modules: list[ModuleSelector] | None = Field(
+        default=None,
+        description=(
+            "Modules to make trainable, each with everything under it. Wins over freeze_modules and over the "
+            "frozen vision tower of vision-language jobs. Requires finetuning_type all_weights, because a LoRA "
+            "adapter cannot carry full module weights."
+        ),
+    )
 
     @model_validator(mode="after")
     def _training_type_fields(self) -> Self:
@@ -304,6 +368,11 @@ class TrainingSpec(AutomodelSchema):
             raise ValueError("distillation only supports the sft recipe")
         if self.finetuning_type.startswith("lora") and self.lora is None:
             self.lora = LoRAParams()
+        if self.unfreeze_modules and self.finetuning_type != "all_weights":
+            raise ValueError(
+                "unfreeze_modules requires finetuning_type all_weights: a LoRA adapter holds only the low-rank "
+                "weights, so trained module weights would be dropped when it is merged or served."
+            )
         return self
 
 

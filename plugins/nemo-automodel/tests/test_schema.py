@@ -9,6 +9,7 @@ from nemo_automodel_plugin.schema import (
     AUTOMODEL_LEARNING_RATE_DEFAULTS,
     AutomodelJobInput,
     AutomodelJobOutput,
+    BackendSpec,
     DeploymentParams,
     ExportSpec,
 )
@@ -445,6 +446,68 @@ def test_backend_rejects_kernels_the_training_image_cannot_run(backend: dict[str
                 "dataset": {"training": "default/train"},
                 "training": {"finetuning_type": "lora", "backend": backend},
             }
+        )
+
+
+def test_backend_rope_fusion_defaults_off_and_accepts_a_stored_null() -> None:
+    """Automodel v0.7.0 forces it off; specs stored before the default changed carry null."""
+    assert BackendSpec().rope_fusion is False
+    assert BackendSpec.model_validate({"rope_fusion": None}).rope_fusion is None
+
+
+@pytest.mark.parametrize(
+    ("training", "error"),
+    [
+        (
+            {
+                "finetuning_type": "all_weights",
+                "freeze_modules": [{"glob": "*.layers.0.*"}],
+                "unfreeze_modules": [{"path": "lm_head"}],
+            },
+            None,
+        ),
+        ({"finetuning_type": "lora", "freeze_modules": [{"glob": "*.layers.0.*"}]}, None),
+        ({"finetuning_type": "lora", "unfreeze_modules": [{"path": "lm_head"}]}, "all_weights"),
+        ({"finetuning_type": "lora_merged", "unfreeze_modules": [{"path": "lm_head"}]}, "all_weights"),
+        (
+            {"finetuning_type": "all_weights", "freeze_modules": [{"path": "lm_head", "glob": "*.lm_head"}]},
+            "exactly one",
+        ),
+        ({"finetuning_type": "all_weights", "freeze_modules": [{}]}, "exactly one"),
+        ({"finetuning_type": "all_weights", "freeze_modules": [{"path": ""}]}, "at least 1"),
+    ],
+    ids=[
+        "full-weights-both",
+        "lora-freeze",
+        "lora-unfreeze",
+        "lora-merged-unfreeze",
+        "path-and-glob",
+        "neither",
+        "empty-path",
+    ],
+)
+def test_module_selectors(training: dict[str, object], error: str | None) -> None:
+    """unfreeze_modules needs full weights: a LoRA adapter cannot carry the module weights it would train."""
+    payload = {"model": "qwen", "dataset": {"training": "default/train"}, "training": training}
+    if error is None:
+        AutomodelJobInput.model_validate(payload)
+    else:
+        with pytest.raises(ValidationError, match=error):
+            AutomodelJobInput.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("training", "match"),
+    [
+        ({"tokenizer_backend": "huggingface"}, "tokenizer_backend"),
+        ({"recipe": "cross_encoder", "finetuning_type": "all_weights", "retrieval": {"temperature": 0}}, "temperature"),
+    ],
+    ids=["unknown-tokenizer-backend", "zero-temperature"],
+)
+def test_new_training_fields_fail_at_submit(training: dict[str, object], match: str) -> None:
+    with pytest.raises(ValidationError, match=match):
+        AutomodelJobInput.model_validate(
+            {"model": "qwen", "dataset": {"training": "default/train"}, "training": training}
         )
 
 

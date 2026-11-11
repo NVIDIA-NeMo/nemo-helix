@@ -23,6 +23,7 @@ Llama Nemotron Embed 1B v2 is supported as an alternate checkpoint.
 | Embedding dimensions | 2048 |
 | Recipe sequence length | 512 (mine, train, and eval) |
 | Export | Set `training.retrieval.export.primary: hf` on the training job. Hugging Face weights land at the fileset root and ONNX under `alternates/onnx`. |
+| Tokenizer | Leave `training.tokenizer_backend` (and the mining spec's `tokenizer_backend`) unset. The checkpoint declares model type `ministral3`, which Automodel maps to Mistral's `tekken.json` tokenizer, but it ships only a Hugging Face `tokenizer.json`. The retrieval default, `nemo_wrapped_auto`, loads that `tokenizer.json`, the same tokenizer Retriever NIM serves with. Setting `nemo_auto` makes mining and training fail to load the tokenizer. |
 | NIM | `nvcr.io/nim/nvidia/nemotron-3-embed-1b:2.2.0` (`/v1/embeddings` with `input_type` query vs document). Use `override_config.nimLegacy: false`. |
 | Finetuning | `all_weights` or `lora_merged` |
 
@@ -140,5 +141,6 @@ An alternate checkpoint for retrieval.
 | Max sequence length | 8192 |
 | Embedding dimensions | 2048 (Matryoshka: 384, 512, 768, 1024, or 2048) |
 | Finetuning | `all_weights` or `lora_merged` |
+| Model entity | Create it with `--trust-remote-code` (`trust_remote_code: true`). The checkpoint ships its own model code (`llama_bidirec`), and without the flag its model spec never populates. |
 
 This checkpoint uses the same Automodel `bi_encoder` contract; set `export.primary` to whichever artifact its NIM loads from the fileset root. New work should start from Nemotron 3 Embed 1B on Retriever NIM 2.2.0.

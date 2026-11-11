@@ -20,6 +20,7 @@ from nhx.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
     DistillationTraining,
     LoRAParams,
+    ModuleSelectorParams,
 )
 from nhx.automodel.app.constants import (
     DEFAULT_DATASET_PATH,
@@ -31,6 +32,7 @@ from nhx.automodel.app.jobs.training.schemas import (
     DistillationConfig,
     LoRAConfig,
     ModelConfig,
+    ModuleSelectorConfig,
     MTPConfig,
     PipelineConfig,
     RetrievalConfig,
@@ -181,6 +183,7 @@ def compile_training_step(
             # An architecture outside the map keeps the Hugging Face path.
             enforce_text_moe_expert_parallel=uses_custom_automodel_impl(traits.checkpoint_model_name),
         )
+        _reject_inapplicable_options(training, training_recipe, has_vision_tower=traits.has_vision_tower)
     except ValueError as exc:
         raise HelixJobCompilationError(str(exc)) from exc
 
@@ -197,6 +200,7 @@ def compile_training_step(
         dataset=TrainingStepConfig.DatasetConfig(
             path=DEFAULT_DATASET_PATH,
             shuffle=training.shuffle,
+            mask_generation_prompt=training.mask_generation_prompt,
         ),
         training=_translate_training_config(training, me, teacher_me=teacher_me, recipe=training_recipe),
         schedule=TrainingStepConfig.ScheduleConfig(
@@ -310,6 +314,7 @@ def _translate_model_config(
         max_seq_length=training.max_seq_length,
         precision=training.precision,
         attn_implementation=training.attn_implementation,
+        tokenizer_backend=training.tokenizer_backend,
         trust_remote_code=trust_remote_code,
         checkpoint_head_type=checkpoint_head_type,
         is_embedding_model=checkpoint_head_type == "embedding",
@@ -362,7 +367,30 @@ def _translate_training_config(
         activation_checkpointing=training.activation_checkpointing,
         mtp=MTPConfig.model_validate(training.mtp.model_dump(mode="python")) if training.mtp else None,
         backend=BackendConfig.model_validate(training.backend.model_dump(mode="python")) if training.backend else None,
+        freeze_modules=_translate_module_selectors(training.freeze_modules),
+        unfreeze_modules=_translate_module_selectors(training.unfreeze_modules),
     )
+
+
+def _reject_inapplicable_options(training: AnyTraining, recipe: TrainingRecipe, *, has_vision_tower: bool) -> None:
+    """Reject settings the resolved recipe would otherwise ignore."""
+    if has_vision_tower and training.tokenizer_backend is not None:
+        raise ValueError(
+            "tokenizer_backend is not supported for vision-language models, which load the checkpoint's processor."
+        )
+    if training.mask_generation_prompt and (
+        has_vision_tower or recipe in (TrainingRecipe.BI_ENCODER, TrainingRecipe.CROSS_ENCODER)
+    ):
+        raise ValueError(
+            "mask_generation_prompt applies only to chat-format data in the text sft recipe, not to "
+            "vision-language models or the bi_encoder and cross_encoder recipes."
+        )
+
+
+def _translate_module_selectors(selectors: list[ModuleSelectorParams] | None) -> list[ModuleSelectorConfig] | None:
+    if not selectors:
+        return None
+    return [ModuleSelectorConfig(path=selector.path, glob=selector.glob) for selector in selectors]
 
 
 def _translate_retrieval_config(training: AnyTraining) -> RetrievalConfig | None:

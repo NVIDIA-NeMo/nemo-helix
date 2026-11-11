@@ -59,6 +59,23 @@ An Automodel job is configured with the following top-level sections: `model`, `
 | `training.finetuning_type` | `lora`, `lora_merged`, `all_weights` | Adapter regime. `lora` trains an adapter; `lora_merged` merges it into the base weights; `all_weights` performs full-weight training | `lora` |
 | `training.lora` | `{ rank, alpha, merge, target_modules }` | LoRA configuration (auto-filled with defaults when `finetuning_type` is a LoRA variant) | *(see below)* |
 | `training.max_seq_length` | integer | Maximum sequence length | `2048` |
+| `training.tokenizer_backend` | `nemo_auto`, `nemo_wrapped_auto`, `transformers_auto`, `tokenizers` | How Automodel loads the tokenizer. Leave it unset unless the tokenizer fails to load. Unset, `bi_encoder` and `cross_encoder` use `nemo_wrapped_auto` (the checkpoint's Hugging Face `tokenizer.json`), and other recipes use Automodel's default, `nemo_auto`, which prefers a tokenizer Automodel registers for the model type (for example Mistral's `tekken.json`). Not supported for vision-language models | `null` |
+| `training.mask_generation_prompt` | boolean | Chat (messages) data only. Leaves out of the loss the tokens the chat template writes before each assistant reply: the role header and any empty reasoning block such as `<think></think>` | `false` |
+| `training.freeze_modules` | list of `{ path }` or `{ glob }` | Modules to freeze, each with everything under it. `glob` uses shell-style patterns where `*` also crosses `.`. A selector that matches nothing fails the job | `null` |
+| `training.unfreeze_modules` | list of `{ path }` or `{ glob }` | Modules to make trainable; wins over `freeze_modules` and over the frozen vision tower of vision-language jobs. Requires `finetuning_type: all_weights` | `null` |
+
+<Note>
+
+When to set `training.tokenizer_backend`:
+
+- **Usually never.** For every Nemotron and Qwen checkpoint Customizer documents, the unset default loads the right tokenizer.
+- **Nemotron 3 Embed 1B** declares model type `ministral3`, which Automodel maps to Mistral's `tekken.json`, but the checkpoint ships only `tokenizer.json`. The retrieval default handles this, so never set `nemo_auto` for it.
+- **SFT or distillation on such a checkpoint:** set `nemo_wrapped_auto`.
+- **Mistral-family LLMs that ship `tekken.json`:** keep the default.
+
+</Note>
+
+When a full-weight distillation job leaves `training.precision` unset and uses `Adam` or `AdamW`, the student is stored in fp32. Those optimizers keep no separate fp32 copy of the weights, so bf16 storage would make every update bf16.
 
 LoRA parameters (`training.lora`):
 

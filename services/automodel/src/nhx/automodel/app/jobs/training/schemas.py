@@ -93,6 +93,13 @@ class PipelineConfig(BaseModel):
     patch_causal_lm_model: Optional[bool] = None
 
 
+class ModuleSelectorConfig(BaseModel):
+    """Exactly one of an exact module path or a glob, matched recursively by Automodel."""
+
+    path: Optional[str] = None
+    glob: Optional[str] = None
+
+
 class MTPConfig(BaseModel):
     """Multi-Token Prediction settings for checkpoints trained with MTP heads."""
 
@@ -122,6 +129,10 @@ class ModelConfig(BaseModel):
     attn_implementation: Optional[str] = Field(
         default="sdpa",
         description="Attention backend: 'sdpa' (PyTorch native), 'flash_attention_2' (requires flash-attn), 'eager' (no optimization)",
+    )
+    tokenizer_backend: Optional[str] = Field(
+        default=None,
+        description="Automodel tokenizer loading route; None keeps the recipe's default",
     )
     trust_remote_code: bool = Field(
         default=False,
@@ -254,6 +265,10 @@ class RetrievalConfig(BaseModel):
         default="query: ",
         description="Literal prefix prepended to each query. Empty string disables prefixing.",
     )
+    temperature: Optional[float] = Field(
+        default=None,
+        description="Loss softmax temperature; None uses 0.02 for bi_encoder and 1.0 for cross_encoder",
+    )
     passage_prefix: str = Field(
         default="passage: ",
         description="Literal prefix prepended to each passage. Empty string disables prefixing.",
@@ -275,6 +290,7 @@ class TrainingStepConfig(BaseModel):
         add_bos: Optional[bool] = None
         add_eos: Optional[bool] = None
         shuffle: bool = True
+        mask_generation_prompt: bool = False
 
     class TrainingConfig(BaseModel):
         training_type: TrainingType
@@ -285,6 +301,8 @@ class TrainingStepConfig(BaseModel):
         activation_checkpointing: bool = False
         mtp: Optional[MTPConfig] = None
         backend: Optional[BackendConfig] = None
+        freeze_modules: Optional[list[ModuleSelectorConfig]] = None
+        unfreeze_modules: Optional[list[ModuleSelectorConfig]] = None
 
     class ScheduleConfig(BaseModel):
         epochs: int = 1

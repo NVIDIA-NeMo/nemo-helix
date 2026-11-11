@@ -199,6 +199,15 @@ class RetrievalParams(BaseModel):
         default="passage: ",
         description="Literal prefix prepended to each passage. Empty string disables prefixing.",
     )
+    temperature: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Softmax temperature of the training loss: contrastive for bi_encoder, listwise for cross_encoder. "
+            "Omit for 0.02 (bi_encoder) or 1.0 (cross_encoder). A Qwen3 causal reranker scores with raw yes/no "
+            "logits, so this is its only temperature setting."
+        ),
+    )
     export: Optional[ExportParams] = Field(
         default=None,
         description="Output artifact layout and ONNX export settings. Defaults are applied when omitted.",
@@ -239,8 +248,8 @@ class ParallelismParams(BaseModel):
 class BackendParams(BaseModel):
     """Which implementation Automodel uses for each model component.
 
-    Fields default to ``None`` meaning "leave it to Automodel", whose own defaults depend
-    on what the training node provides; only explicitly set values are forwarded.
+    Fields other than ``rope_fusion`` default to ``None`` meaning "leave it to Automodel", whose
+    own defaults depend on what the training node provides; only explicitly set values are forwarded.
     """
 
     attn: Optional[Literal["te", "sdpa", "flex", "eager", "tilelang"]] = Field(
@@ -251,7 +260,11 @@ class BackendParams(BaseModel):
         default=None, description="RMSNorm kernel."
     )
     rope: Optional[Literal["torch", "quack"]] = Field(default=None, description="Rotary embedding kernel.")
-    rope_fusion: Optional[bool] = Field(default=None, description="Fuse rotary embedding into attention.")
+    rope_fusion: Optional[bool] = Field(
+        default=False,
+        description="Fuse rotary embedding into attention. Automodel v0.7.0 turns this off for every model, "
+        "so true has no effect.",
+    )
     experts: Optional[Literal["torch", "te", "gmm", "torch_mm", "torch_mm_mxfp8"]] = Field(
         default=None, description="MoE expert compute kernel."
     )
@@ -265,6 +278,25 @@ class BackendParams(BaseModel):
     enable_fsdp_optimizations: Optional[bool] = Field(
         default=None, description="Enable Automodel's additional FSDP2 sharding optimizations."
     )
+
+
+class ModuleSelectorParams(BaseModel):
+    """One module, and everything under it, picked by exact path or by glob."""
+
+    path: Optional[str] = Field(
+        default=None, min_length=1, description="Exact module path, e.g. 'model.multi_modal_projector'."
+    )
+    glob: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        description="Case-sensitive shell-style pattern over module paths; '*' also crosses '.', e.g. '*.embed_tokens'.",
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> Self:
+        if (self.path is None) == (self.glob is None):
+            raise ValueError("A module selector takes exactly one of 'path' or 'glob'.")
+        return self
 
 
 class PipelineParams(BaseModel):
@@ -452,6 +484,24 @@ class _TrainingBase(BaseModel):
         default=True,
         description="Reshuffle training examples each epoch.",
     )
+    mask_generation_prompt: bool = Field(
+        default=False,
+        description=(
+            "Leave out of the loss the tokens the chat template writes before each assistant reply: the role "
+            "header and any empty reasoning block such as '<think></think>'. Chat-format (messages) datasets only."
+        ),
+    )
+    freeze_modules: Optional[list[ModuleSelectorParams]] = Field(
+        default=None,
+        description="Modules to freeze, each with everything under it. A selector that matches no module fails the job.",
+    )
+    unfreeze_modules: Optional[list[ModuleSelectorParams]] = Field(
+        default=None,
+        description=(
+            "Modules to make trainable, each with everything under it. Wins over freeze_modules and over the "
+            "frozen vision tower of vision-language jobs. Requires full-weight training."
+        ),
+    )
 
     # --- Model ---
     max_seq_length: int = Field(
@@ -466,6 +516,14 @@ class _TrainingBase(BaseModel):
     attn_implementation: Literal["sdpa", "flash_attention_2", "eager"] = Field(
         default="sdpa",
         description="Attention backend: 'sdpa' (PyTorch native), 'flash_attention_2', or 'eager'.",
+    )
+    tokenizer_backend: Optional[Literal["nemo_auto", "nemo_wrapped_auto", "transformers_auto", "tokenizers"]] = Field(
+        default=None,
+        description=(
+            "How Automodel loads the tokenizer. Omitted, bi_encoder and cross_encoder use 'nemo_wrapped_auto' (the "
+            "checkpoint's Hugging Face tokenizer) and every other recipe uses Automodel's default, 'nemo_auto'. "
+            "Not supported for vision-language models."
+        ),
     )
     seed: Optional[int] = Field(
         default=None,
@@ -516,6 +574,14 @@ class _TrainingBase(BaseModel):
         # against packing=false is silently ignored -- and the run is slower than asked for.
         if self.packed_sequence_size is not None and not self.sequence_packing:
             raise ValueError("packed_sequence_size requires sequence_packing=true.")
+        return self
+
+    @model_validator(mode="after")
+    def _unfreeze_needs_all_weights(self) -> Self:
+        # A LoRA adapter holds only low-rank weights: unfrozen module weights would be
+        # saved outside it and dropped when the adapter is merged or served.
+        if self.unfreeze_modules and self.peft is not None:
+            raise ValueError("unfreeze_modules requires full-weight training (no peft).")
         return self
 
     @property
