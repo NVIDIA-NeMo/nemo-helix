@@ -60,7 +60,7 @@ const BLOCK_RE = /\{\{([\s\S]*?)\}\}|\{%-?([\s\S]*?)-?%\}/g;
 const COMMENT_RE = /\{#[\s\S]*?#\}/g;
 const STRING_RE = /'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g;
 const ITEM_KEY_RE = /\bitem\s*\[\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\s*\]/g;
-const ITEM_ATTR_RE = /\bitem\s*\.\s*([A-Za-z_]\w*)/g;
+const ITEM_ATTR_RE = /\bitem\s*\.\s*([A-Za-z_]\w*)\b(?!\s*\()/g;
 const FOR_RE = /^\s*for\s+([\w\s,]+?)\s+in\s/;
 const SET_RE = /^\s*set\s+([A-Za-z_]\w*)/;
 const ASSIGN_RE = /(?<![\w.])([A-Za-z_]\w*)\s*=(?!=)/g;

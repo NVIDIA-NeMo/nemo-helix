@@ -132,6 +132,12 @@ describe('templateFields', () => {
       )
     ).toEqual(['a', 'b']);
   });
+
+  it('ignores method calls on item but keeps plain attribute reads', () => {
+    expect(
+      templateFields("{{ item.get('a') }}{{ item.keys() | list }}{{ item.get ('c') }}{{ item.b }}")
+    ).toEqual(['b']);
+  });
 });
 
 describe('default prompts', () => {
