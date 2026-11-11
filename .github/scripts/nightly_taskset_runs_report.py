@@ -8,8 +8,12 @@
 
 """The nightly taskset-runs e2e's report.
 
-One tracking issue: opened or commented on when a scheduled run is red, closed when one is green. A red run
-dispatches one more run of the same commit, which labels the red ``flaky`` or ``regression``.
+Keeps a single GitHub issue for the nightly test and posts each night's result there:
+
+- Test failed -> open the issue, or comment on it if already open. Then rerun the same commit once: the rerun
+  labels the failure ``flaky`` (passed this time) or ``regression`` (failed again).
+- Test passed, but a step was slow -> comment on the issue, opening it if needed.
+- Test passed -> comment "Green again" and close the issue; nothing to do if none is open.
 
 Reads the workflow's environment (``NEEDS_JSON``, ``SOURCE_SHA``, ``CLASSIFY_FOR``, ``ARTIFACTS`` and GitHub's
 defaults) and calls the API through ``gh api``, which authenticates with ``GH_TOKEN``. Exits 1 on a red report.

@@ -266,6 +266,7 @@ runs:
             - 'services/**'
             - 'plugins/**'
           k8s-smoke:
+            - '.github/workflows/build-cpu-smoke-images.yaml'
             - 'e2e/k8s/scripts/**'
             - 'e2e/k8s/values/**'
             - 'e2e/test_evaluator_plugin.py'
