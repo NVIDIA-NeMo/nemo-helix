@@ -175,8 +175,10 @@ layout, so there is no refit conversion). That is why it has no registry entry o
 
 `mcore` also requires `TORCH_CUDA_ARCH_LIST` to be set at **runtime**, not just at build
 (`lm_policy.py` raises without it; mcore's inference unified-memory API calls a torch API
-that reads it). The publish stage is `FROM builder`, so it inherits the builder's
-`TORCH_CUDA_ARCH_LIST="9.0 10.0"` — the same value NeMo-RL's own `docker/Dockerfile` sets.
+that reads it). The publish stage starts from `base` and sets
+`TORCH_CUDA_ARCH_LIST="9.0 10.0"` again — the same value the builder used, and
+the same value NeMo-RL's own `docker/Dockerfile` sets. A new stage does not
+inherit the builder's environment.
 
 **Transformer-Engine is shared between `automodel` and `mcore`.** TE is a
 training-time *transformer layer* library (fused attention / LayerNorm / GEMM kernels,
@@ -211,8 +213,9 @@ so the warmup syncs do not accumulate).
 
 Megatron-Bridge pins `setuptools<80.0.0` for its own build, so uv builds its metadata in a
 PEP 517 environment against an old setuptools and leaves it in the shipped cache. RL's
-`setuptools>=80.10.2` override cannot reach a build environment, so the publish stage drops
-cached setuptools archives that no venv symlinks into.
+`setuptools>=80.10.2` override cannot reach a build environment. The builder
+prunes archives no venv links to before the publish stage copies the cache, so
+that setuptools is not in the image.
 
 ### NeMo-Gym environments: a second, separate venv layer
 
@@ -532,9 +535,9 @@ readable by the non-root user. Hence `UV_CACHE_DIR=/opt/uv_cache`:
   training image runs as a configured non-root UID (1000 by default, the same reason
   CPython is copied under `/opt/cpython`).
 - **`/opt/uv_cache` must never be deleted** — pruning it breaks every venv that points into
-  it. `prune-unreferenced-uv-archives.sh` removes archives no venv links to, in the same
-  build layer that downloaded them. A later layer can only hide those files, which does
-  not shrink the pull.
+  it. `prune-unreferenced-uv-archives.sh` removes archives no venv links to. A later layer
+  of the same stage can only hide those files. The publish stage copies the merged builder
+  tree onto `base`, so those hidden archives are left behind and are not in the pull.
 
 **It does not warm runtime installs in the training image.** `Dockerfile.nhx-rl-training`
 repoints `UV_CACHE_DIR` at a writable per-user path, because `/opt/uv_cache` holds the code

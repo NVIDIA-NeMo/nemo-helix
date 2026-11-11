@@ -7,8 +7,9 @@
 # generate on vllm. sglang and trtllm are not built.
 #
 # `uv sync` only warms the cache. Training uses the prefetched venvs below.
-# Publish inherits the builder filesystem: venv pythons symlink to /opt/cpython,
-# and copying them onto a fresh base would break that.
+# Publish copies the merged builder tree onto `base`. Inheriting the builder
+# would ship every cache layer, including archives a later prune only hid.
+# Venv pythons symlink to /opt/cpython, which `base` already has.
 
 # Match the NCCL the pinned RL lock overrides. Bump with NEMO_RL_REF.
 ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:26.09-cuda13.4-devel-ubuntu24.04
@@ -465,15 +466,47 @@ USER root
 RUN /opt/nemo_rl_venv/bin/python tools/generate_fingerprint.py \
     > /opt/nemo_rl_container_fingerprint
 
-# ---- publish: inherit the builder filesystem so /opt/cpython stays valid ----
-FROM builder AS nhx-rl-base
+# Last prune before publish copies this stage. The copy reads the merged view,
+# so archives this hides (including Megatron-Bridge's build-env setuptools)
+# are not in nhx-rl-base. A prune after the copy would only hide them again.
+RUN prune-unreferenced-uv-archives.sh
+
+# ---- publish: one copy of the merged builder tree ----
+# FROM builder would keep the warm-cache layer and the worker-sync layer, and
+# the worker sync rewrites archives the warm layer already stored. COPY --from
+# takes the merged view: one copy of each live file, no whiteouts.
+FROM base AS nhx-rl-base
 ARG RUNTIME_UID=1000
 ARG RUNTIME_GID=1000
+# Keep these defaults in sync with the builder stage. A new stage does not
+# inherit its environment, and mcore reads TORCH_CUDA_ARCH_LIST at runtime.
+ARG NVTE_BUILD_MAX_JOBS=8
+ARG NVTE_BUILD_THREADS_PER_JOB=2
+ARG NVTE_CUDA_ARCHS=90;100
+ARG NVTE_FRAMEWORK=pytorch
+ARG TORCH_CUDA_ARCH_LIST="9.0 10.0"
+ENV NVTE_BUILD_MAX_JOBS=${NVTE_BUILD_MAX_JOBS} \
+    NVTE_BUILD_THREADS_PER_JOB=${NVTE_BUILD_THREADS_PER_JOB} \
+    NVTE_CUDA_ARCHS=${NVTE_CUDA_ARCHS} \
+    NVTE_FRAMEWORK=${NVTE_FRAMEWORK} \
+    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
+    CUDA_HOME=/usr/local/cuda \
+    CPLUS_INCLUDE_PATH=/usr/local/cuda/include/cccl \
+    HOME=/home/nhx-build \
+    UV_PROJECT_ENVIRONMENT=/opt/nemo_rl_venv \
+    UV_CACHE_DIR=/opt/uv_cache \
+    CUDNN_HOME=/opt/nemo_rl_venv/lib/python3.13/site-packages/nvidia/cudnn \
+    CUDNN_PATH=/opt/nemo_rl_venv/lib/python3.13/site-packages/nvidia/cudnn \
+    LD_LIBRARY_PATH="/opt/nemo_rl_venv/lib/python3.13/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"
 
-# Megatron-Bridge's build env pins setuptools<80, which the project override
-# cannot reach. Unreferenced archives, including that setuptools, are dropped
-# here. A referenced archive stays. This layer only shrinks files it created.
-RUN prune-unreferenced-uv-archives.sh
+# archive-v0 and files-v0 share inodes, so the cache is one COPY. The venv
+# trees are symlinks into it; copying a directory preserves those symlinks.
+COPY --from=builder /opt/uv_cache /opt/uv_cache
+COPY --from=builder /opt/nemo_rl_venv /opt/nemo_rl_venv
+COPY --from=builder /opt/ray_venvs /opt/ray_venvs
+COPY --from=builder /opt/gym_venvs /opt/gym_venvs
+COPY --from=builder /opt/nemo-rl /opt/nemo-rl
+COPY --from=builder /opt/nemo_rl_container_fingerprint /opt/nemo_rl_container_fingerprint
 
 # Keep nvcc, gcc, libibverbs, git, and curl: DeepEP JIT and native env builds need them.
 # Do not prune /opt/uv_cache. Nsight is removed for Go stdlib CVEs; it lives in an
