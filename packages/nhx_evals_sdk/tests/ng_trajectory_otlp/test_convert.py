@@ -15,8 +15,8 @@ from nhx_evals_sdk.ng_trajectory_otlp import rollout_to_resource_spans
 from opentelemetry.proto.trace.v1.trace_pb2 import Span, Status
 
 
-def _spans(record: dict[str, Any], *, rollout_id: str = "trial-1", **kwargs: Any) -> list[Span]:
-    resource_spans = rollout_to_resource_spans(record, rollout_id=rollout_id, **kwargs)
+def _spans(record: dict[str, Any], *, rollout_id: str = "trial-1", run_id: str = "run-1", **kwargs: Any) -> list[Span]:
+    resource_spans = rollout_to_resource_spans(record, run_id=run_id, rollout_id=rollout_id, **kwargs)
     return list(resource_spans[0].scope_spans[0].spans)
 
 
@@ -354,3 +354,30 @@ def test_the_answer_is_the_agent_s_last_message_not_its_first() -> None:
     record = {"response": {"output": [_message("Let me check."), _message("Four.")]}}
 
     assert _attributes(_spans(record)[0])["output.value"] == "Four."
+
+
+@pytest.mark.parametrize("first,second", [(("run-a", "trial"), ("run-b", "trial")), (("a:b", "c"), ("a", "b:c"))])
+@pytest.mark.parametrize("captured", [False, True])
+def test_run_identity_keeps_traces_distinct_and_parents_valid(first, second, captured):
+    record = {
+        "response": {
+            "output": [
+                {"type": "function_call", "call_id": "call", "name": "shell", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call", "output": "done"},
+            ]
+        }
+    }
+    calls = [{"model_call_id": "default-call", "response": {"output_text": "answer"}}] if captured else []
+    runs = [
+        _spans(record, run_id=run, rollout_id=rollout, model_calls=calls) for run, rollout in (first, second, first)
+    ]
+    assert runs[0] == runs[2]
+    assert runs[0][0].trace_id != runs[1][0].trace_id
+    assert {s.span_id for s in runs[0]}.isdisjoint(s.span_id for s in runs[1])
+    for spans in runs:
+        assert all(s.parent_span_id == spans[0].span_id for s in spans[1:])
+
+
+def test_conversion_requires_a_run_identity():
+    with pytest.raises(ValueError, match="run_id must be nonempty"):
+        _spans({}, run_id="")

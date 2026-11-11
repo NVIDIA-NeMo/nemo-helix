@@ -47,6 +47,7 @@ from nhx.core.files.exceptions import (
 from starlette.status import (
     HTTP_400_BAD_REQUEST,
     HTTP_404_NOT_FOUND,
+    HTTP_409_CONFLICT,
     HTTP_416_RANGE_NOT_SATISFIABLE,
     HTTP_502_BAD_GATEWAY,
 )
@@ -98,6 +99,27 @@ def storage_errors_as_http(failure: str) -> Generator[None]:
     except StorageBackendError as exc:
         logger.warning("%s: %s", failure, exc)
         raise HTTPException(HTTP_400_BAD_REQUEST, f"{failure}: {exc}") from exc
+
+
+HTTP_EXCEPTION_DETAIL = {
+    "content": {
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {"detail": {"type": "string"}},
+            }
+        }
+    }
+}
+
+
+def require_writable_storage(storage: StorageConfig) -> None:
+    """Reject unsupported mutations before resolving secrets or consuming a body."""
+    if storage.read_only:
+        raise HTTPException(
+            status_code=HTTP_409_CONFLICT,
+            detail=f"Fileset storage type '{storage.type}' is read-only",
+        )
 
 
 @dataclass

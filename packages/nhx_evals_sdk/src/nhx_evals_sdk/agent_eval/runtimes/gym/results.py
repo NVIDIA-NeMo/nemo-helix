@@ -287,6 +287,7 @@ def _rollout_evidence(
     rollouts_path: Path,
     task_id: str,
     trial_id: str,
+    run_id: str,
     capture_dir: Path | None = None,
 ) -> CandidateEvidence:
     """The rollouts file every trial shares, plus this rollout's own trace.
@@ -315,7 +316,9 @@ def _rollout_evidence(
         descriptors[NG_TRAJECTORY_EVIDENCE] = EvidenceDescriptor(
             kind="filesystem", format="file", ref=str(capture_path)
         )
-    resource_spans = _rollout_resource_spans(record, task_id=task_id, trial_id=trial_id, model_calls=model_calls)
+    resource_spans = _rollout_resource_spans(
+        record, task_id=task_id, trial_id=trial_id, run_id=run_id, model_calls=model_calls
+    )
     if resource_spans is not None:
         # Rendered to JSON here and only here, because an ``EvidenceDescriptor`` holds JSON.
         trace = EvidenceDescriptor(
@@ -329,15 +332,22 @@ def _rollout_evidence(
 
 
 def _rollout_resource_spans(
-    record: Mapping[str, Any], *, task_id: str, trial_id: str, model_calls: Sequence[Mapping[str, Any]] = ()
+    record: Mapping[str, Any],
+    *,
+    task_id: str,
+    trial_id: str,
+    run_id: str,
+    model_calls: Sequence[Mapping[str, Any]] = (),
 ) -> list[ResourceSpans] | None:
     """Project one rollout onto OTLP resource spans, or ``None`` when it will not convert.
 
-    Seeded on the trial id because span identity has to be unique per attempt: Gym does not always
-    record ``_ng_rollout_index``, and ``_rollout_trial_id`` is what already resolves that.
+    Seeded on the run and trial IDs so retries and republication retain identity without
+    colliding with independent runs.
     """
     try:
-        return rollout_to_resource_spans(record, rollout_id=trial_id, task_id=task_id, model_calls=model_calls)
+        return rollout_to_resource_spans(
+            record, run_id=run_id, rollout_id=trial_id, task_id=task_id, model_calls=model_calls
+        )
     except (TypeError, ValueError) as error:
         # A trace is a second view of a result Gym already reported; losing it must not lose the
         # trial, whose reward and output stand on their own.
@@ -633,6 +643,7 @@ def trials_from_rollouts(
     tasks: Sequence[AgentEvalTask],
     index_to_task_id: Mapping[int, str],
     *,
+    run_id: str,
     reward_key: str = DEFAULT_REWARD_KEY,
     capture_dir: Path | None = None,
 ) -> list[AgentEvalTrial]:
@@ -643,6 +654,8 @@ def trials_from_rollouts(
     diagnosed rather than silently dropped). Every record is attributed to its task by
     ``_ng_task_index`` → ``index_to_task_id``, the map we stamped in :func:`materialize_dataset`.
     """
+    if not run_id:
+        raise ValueError("run_id must be nonempty when reading Gym evidence")
     if not rollouts_path.exists():
         # `ensure_fresh_output` removed any stale file before the run, and `_collect_rollouts`
         # already raised on a non-zero exit — so reaching here means Gym reported success and wrote
@@ -702,6 +715,7 @@ def trials_from_rollouts(
             status = AgentEvalTrialStatus.PARTIAL
         metadata: dict[str, Any] = {
             "reward": None if never_ran else reward,
+            "gym_run_id": run_id,
             NG_TASK_INDEX: record.get(NG_TASK_INDEX),
             NG_ROLLOUT_INDEX: raw_rollout_index,
         }
@@ -727,6 +741,7 @@ def trials_from_rollouts(
                     rollouts_path=rollouts_path,
                     task_id=task_id,
                     trial_id=trial_id,
+                    run_id=run_id,
                     capture_dir=capture_dir,
                 ),
                 error=error,
@@ -779,6 +794,7 @@ def trials_from_rollouts(
                     measurements=_usage_measurements(record),
                     metadata={
                         "reward": None,
+                        "gym_run_id": run_id,
                         "gym_failure": next((value for value in map(record.get, _FAILURE_MESSAGE_KEYS) if value), None),
                         GYM_FAILURE_RECORD: {
                             key: value

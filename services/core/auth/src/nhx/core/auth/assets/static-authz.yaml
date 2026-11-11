@@ -435,99 +435,176 @@ authz:
       permissions:
       - "*"
 
-  # Endpoint to permission mappings
+  # Explicit direct/delegated endpoint requirements. Missing branches deny that call type.
   endpoints:
     /apis/auth/discovery:
       get:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes: []
     /apis/auth/authenticate:
       get:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes: []
       post:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes: []
     /apis/auth/jwks:
       get:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes: []
     /apis/auth/token:
       post:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes: []
     # Browser and CLI login broker. Callers have no platform token yet; the
     # handlers manage the authorization state themselves.
     /apis/auth/v2/authorize:
       post:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes: []
     /apis/auth/v2/authorize/{transaction_id}:
       get:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes: []
     /apis/auth/v2/token:
       post:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes: []
     /apis/auth/v2/login:
       get:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes: []
     /apis/auth/v2/login/callback:
       get:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes: []
     /apis/auth/v2/logout:
       post:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes: []
     /apis/auth/v2/session:
       get:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes: []
     # These scopes gate the caller's own access-key token, not RBAC.
-    # `permissions: []` is intentional: these routes are self-service, ownership-checked
+    # Empty permission lists are intentional: these routes are self-service, ownership-checked
     # in the handler, not RBAC-gated.
     /apis/auth/v2/access-keys:
       get:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes:
         - auth:read
         - platform:read
       post:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes:
         - auth:write
         - platform:write
     /apis/auth/v2/access-keys/{jti}:
       delete:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes:
         - auth:write
         - platform:write
     /apis/auth/v2/access-keys/{jti}/suspend:
       post:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes:
         - auth:write
         - platform:write
     /apis/auth/v2/access-keys/{jti}/unsuspend:
       post:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes:
         - auth:write
         - platform:write
     /apis/auth/v2/access-keys/{jti}/rotate:
       post:
-        permissions: []
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
         scopes:
         - auth:write
         - platform:write
     /apis/auth/v2/iam/opa-bundle.tar.gz:
       get:
-        permissions:
-        - iam.bundle.read
+        direct:
+          actor_perms:
+          - iam.bundle.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - iam.bundle.read
         scopes:
         - auth:read
         - platform:read
@@ -536,253 +613,448 @@ authz:
         x-not-in-openapi: true
     /apis/auth/v2/iam/role-bindings:
       get:
-        permissions:
-        - iam.list
+        direct:
+          actor_perms:
+          - iam.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - iam.list
         scopes:
         - auth:read
         - platform:read
       post:
-        permissions:
-        - iam.create
+        direct:
+          actor_perms:
+          - iam.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - iam.create
         scopes:
         - auth:write
         - platform:write
     /apis/auth/v2/iam/role-bindings/{name}:
       delete:
-        permissions:
-        - iam.delete
+        direct:
+          actor_perms:
+          - iam.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - iam.delete
         scopes:
         - auth:write
         - platform:write
       get:
-        permissions:
-        - iam.read
+        direct:
+          actor_perms:
+          - iam.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - iam.read
         scopes:
         - auth:read
         - platform:read
     /apis/entities/v2/entities/{id}:
       get:
-        permissions:
-        - entities.read
+        direct:
+          actor_perms:
+          - entities.read
+        delegated:
+          actor_perms:
+          - entities.read
+          subject_perms: []
         scopes:
         - entities:read
         - platform:read
     /apis/entities/v2/workspace-deletions/{name}:
       get:
-        permissions:
-        - workspaces.deletion.read
+        direct:
+          actor_perms:
+          - workspaces.deletion.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - workspaces.deletion.read
         scopes:
         - entities:read
         - platform:read
     /apis/entities/v2/workspaces:
       get:
-        permissions:
-        - workspaces.list
+        direct:
+          actor_perms:
+          - workspaces.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - workspaces.list
         scopes:
         - entities:read
         - platform:read
       post:
-        permissions:
-        - workspaces.create
+        direct:
+          actor_perms:
+          - workspaces.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - workspaces.create
         scopes:
         - entities:write
         - platform:write
     /apis/entities/v2/workspaces/{name}:
       delete:
-        permissions:
-        - workspaces.delete
+        direct:
+          actor_perms:
+          - workspaces.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - workspaces.delete
         scopes:
         - entities:write
         - platform:write
       get:
-        permissions:
-        - workspaces.read
+        direct:
+          actor_perms:
+          - workspaces.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - workspaces.read
         scopes:
         - entities:read
         - platform:read
       put:
-        permissions:
-        - workspaces.update
+        direct:
+          actor_perms:
+          - workspaces.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - workspaces.update
         scopes:
         - entities:write
         - platform:write
     /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}:
       get:
-        permissions:
-        - entities.read
+        direct:
+          actor_perms:
+          - entities.read
+        delegated:
+          actor_perms:
+          - entities.read
+          subject_perms: []
         scopes:
         - entities:read
         - platform:read
       post:
-        permissions:
-        - entities.create
+        direct:
+          actor_perms:
+          - entities.create
+        delegated:
+          actor_perms:
+          - entities.create
+          subject_perms: []
         scopes:
         - entities:write
         - platform:write
     /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/{name}:
       delete:
-        permissions:
-        - entities.delete
+        direct:
+          actor_perms:
+          - entities.delete
+        delegated:
+          actor_perms:
+          - entities.delete
+          subject_perms: []
         scopes:
         - entities:write
         - platform:write
       get:
-        permissions:
-        - entities.read
+        direct:
+          actor_perms:
+          - entities.read
+        delegated:
+          actor_perms:
+          - entities.read
+          subject_perms: []
         scopes:
         - entities:read
         - platform:read
       put:
-        permissions:
-        - entities.update
+        direct:
+          actor_perms:
+          - entities.update
+        delegated:
+          actor_perms:
+          - entities.update
+          subject_perms: []
         scopes:
         - entities:write
         - platform:write
     /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id}:
       delete:
-        permissions:
-        - entities.delete
+        direct:
+          actor_perms:
+          - entities.delete
+        delegated:
+          actor_perms:
+          - entities.delete
+          subject_perms: []
         scopes:
         - entities:write
         - platform:write
       put:
-        permissions:
-        - entities.update
+        direct:
+          actor_perms:
+          - entities.update
+        delegated:
+          actor_perms:
+          - entities.update
+          subject_perms: []
         scopes:
         - entities:write
         - platform:write
     /apis/entities/v2/workspaces/{workspace}/members:
       get:
-        permissions:
-        - workspaces.members.list
+        direct:
+          actor_perms:
+          - workspaces.members.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - workspaces.members.list
         scopes:
         - entities:read
         - platform:read
       post:
-        permissions:
-        - workspaces.members.create
+        direct:
+          actor_perms:
+          - workspaces.members.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - workspaces.members.create
         scopes:
         - entities:write
         - platform:write
     /apis/entities/v2/workspaces/{workspace}/members/{principal_id}:
       delete:
-        permissions:
-        - workspaces.members.delete
+        direct:
+          actor_perms:
+          - workspaces.members.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - workspaces.members.delete
         scopes:
         - entities:write
         - platform:write
       put:
-        permissions:
-        - workspaces.members.update
+        direct:
+          actor_perms:
+          - workspaces.members.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - workspaces.members.update
         scopes:
         - entities:write
         - platform:write
     /apis/entities/v2/workspaces/{workspace}/projects:
       get:
-        permissions:
-        - projects.list
+        direct:
+          actor_perms:
+          - projects.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - projects.list
         scopes:
         - entities:read
         - platform:read
       post:
-        permissions:
-        - projects.create
+        direct:
+          actor_perms:
+          - projects.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - projects.create
         scopes:
         - entities:write
         - platform:write
     /apis/entities/v2/workspaces/{workspace}/projects/{name}:
       delete:
-        permissions:
-        - projects.delete
+        direct:
+          actor_perms:
+          - projects.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - projects.delete
         scopes:
         - entities:write
         - platform:write
       get:
-        permissions:
-        - projects.read
+        direct:
+          actor_perms:
+          - projects.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - projects.read
         scopes:
         - entities:read
         - platform:read
       put:
-        permissions:
-        - projects.update
+        direct:
+          actor_perms:
+          - projects.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - projects.update
         scopes:
         - entities:write
         - platform:write
     /apis/files/v2/workspaces/{workspace}/filesets:
       get:
-        permissions:
-        - filesets.list
+        direct:
+          actor_perms:
+          - filesets.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.list
         scopes:
         - files:read
         - platform:read
       post:
-        permissions:
-        - filesets.create
+        direct:
+          actor_perms:
+          - filesets.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.create
         scopes:
         - files:write
         - platform:write
     /apis/files/v2/workspaces/{workspace}/filesets/{name}:
       delete:
-        permissions:
-        - filesets.delete
+        direct:
+          actor_perms:
+          - filesets.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.delete
         scopes:
         - files:write
         - platform:write
       get:
-        permissions:
-        - filesets.read
+        direct:
+          actor_perms:
+          - filesets.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.read
         scopes:
         - files:read
         - platform:read
       patch:
-        permissions:
-        - filesets.update
+        direct:
+          actor_perms:
+          - filesets.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.update
         scopes:
         - files:write
         - platform:write
     /apis/files/v2/workspaces/{workspace}/filesets/by-id/{fileset_id}:
       delete:
-        permissions:
-        - filesets.delete
+        direct:
+          actor_perms:
+          - filesets.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.delete
         scopes:
         - files:write
         - platform:write
       get:
-        permissions:
-        - filesets.read
+        direct:
+          actor_perms:
+          - filesets.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.read
         scopes:
         - files:read
         - platform:read
     /apis/files/v2/workspaces/{workspace}/filesets/{name}/-/{path}:
       delete:
-        permissions:
-        - filesets.delete
+        direct:
+          actor_perms:
+          - filesets.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.delete
         scopes:
         - files:write
         - platform:write
       get:
-        permissions:
-        - filesets.read
+        direct:
+          actor_perms:
+          - filesets.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.read
         scopes:
         - files:read
         - platform:read
       head:
-        permissions:
-        - filesets.read
+        direct:
+          actor_perms:
+          - filesets.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.read
         scopes:
         - files:read
         - platform:read
       put:
-        permissions:
-        - filesets.update
+        direct:
+          actor_perms:
+          - filesets.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.update
         scopes:
         - files:write
         - platform:write
     /apis/files/v2/workspaces/{workspace}/filesets/{name}/files:
       get:
-        permissions:
-        - filesets.read
+        direct:
+          actor_perms:
+          - filesets.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.read
         scopes:
         - files:read
         - platform:read
@@ -790,20 +1062,35 @@ authz:
     # permission as PATCH rather than the create permission a POST would default to.
     /apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh:
       post:
-        permissions:
-        - filesets.update
+        direct:
+          actor_perms:
+          - filesets.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.update
         scopes:
         - files:write
         - platform:write
     /apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs:
       post:
-        permissions:
-        - jobs.logs.create
+        direct:
+          actor_perms:
+          - jobs.logs.create
+        delegated:
+          actor_perms:
+          - jobs.logs.create
+          subject_perms: []
         scopes: []
     /apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query:
       post:
-        permissions:
-        - filesets.read
+        direct:
+          actor_perms:
+          - filesets.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.read
         scopes:
         - files:read
         - platform:read
@@ -817,270 +1104,480 @@ authz:
         - platform:write
     /apis/guardrails/v2/workspaces/{workspace}/checks:
       post:
-        permissions:
-        - guardrails.checks.exec
+        direct:
+          actor_perms:
+          - guardrails.checks.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - guardrails.checks.exec
         scopes:
         - guardrails:write
         - platform:write
     /apis/guardrails/v2/workspaces/{workspace}/configs:
       get:
-        permissions:
-        - guardrails.configs.list
+        direct:
+          actor_perms:
+          - guardrails.configs.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - guardrails.configs.list
         scopes:
         - guardrails:read
         - platform:read
       post:
-        permissions:
-        - guardrails.configs.create
+        direct:
+          actor_perms:
+          - guardrails.configs.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - guardrails.configs.create
         scopes:
         - guardrails:write
         - platform:write
     /apis/guardrails/v2/workspaces/{workspace}/configs/{name}:
       delete:
-        permissions:
-        - guardrails.configs.delete
+        direct:
+          actor_perms:
+          - guardrails.configs.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - guardrails.configs.delete
         scopes:
         - guardrails:write
         - platform:write
       get:
-        permissions:
-        - guardrails.configs.read
+        direct:
+          actor_perms:
+          - guardrails.configs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - guardrails.configs.read
         scopes:
         - guardrails:read
         - platform:read
       patch:
-        permissions:
-        - guardrails.configs.update
+        direct:
+          actor_perms:
+          - guardrails.configs.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - guardrails.configs.update
         scopes:
         - guardrails:write
         - platform:write
     /apis/inference-gateway/v2/workspaces/{workspace}/model/{name}/-/{trailing_uri}:
       delete:
-        permissions:
-        - inference.gateway.model.exec
+        direct:
+          actor_perms:
+          - inference.gateway.model.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.model.exec
         scopes:
         - inference:write
         - platform:write
       get:
-        permissions:
-        - inference.gateway.model.exec
+        direct:
+          actor_perms:
+          - inference.gateway.model.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.model.exec
         scopes:
         - inference:read
         - platform:read
       patch:
-        permissions:
-        - inference.gateway.model.exec
+        direct:
+          actor_perms:
+          - inference.gateway.model.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.model.exec
         scopes:
         - inference:write
         - platform:write
       post:
-        permissions:
-        - inference.gateway.model.exec
+        direct:
+          actor_perms:
+          - inference.gateway.model.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.model.exec
         scopes:
         - inference:write
         - platform:write
       put:
-        permissions:
-        - inference.gateway.model.exec
+        direct:
+          actor_perms:
+          - inference.gateway.model.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.model.exec
         scopes:
         - inference:write
         - platform:write
     /apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models:
       get:
-        permissions:
-        - inference.gateway.openai.exec
+        direct:
+          actor_perms:
+          - inference.gateway.openai.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.openai.exec
         scopes:
         - inference:read
         - platform:read
     /apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models/{name}:
       get:
-        permissions:
-        - inference.gateway.openai.exec
+        direct:
+          actor_perms:
+          - inference.gateway.openai.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.openai.exec
         scopes:
         - inference:read
         - platform:read
     /apis/inference-gateway/v2/workspaces/{workspace}/openai/-/{trailing_uri}:
       delete:
-        permissions:
-        - inference.gateway.openai.exec
+        direct:
+          actor_perms:
+          - inference.gateway.openai.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.openai.exec
         scopes:
         - inference:write
         - platform:write
       get:
-        permissions:
-        - inference.gateway.openai.exec
+        direct:
+          actor_perms:
+          - inference.gateway.openai.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.openai.exec
         scopes:
         - inference:read
         - platform:read
       patch:
-        permissions:
-        - inference.gateway.openai.exec
+        direct:
+          actor_perms:
+          - inference.gateway.openai.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.openai.exec
         scopes:
         - inference:write
         - platform:write
       post:
-        permissions:
-        - inference.gateway.openai.exec
+        direct:
+          actor_perms:
+          - inference.gateway.openai.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.openai.exec
         scopes:
         - inference:write
         - platform:write
       put:
-        permissions:
-        - inference.gateway.openai.exec
+        direct:
+          actor_perms:
+          - inference.gateway.openai.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.openai.exec
         scopes:
         - inference:write
         - platform:write
     /apis/inference-gateway/v2/workspaces/{workspace}/provider/{name}/-/{trailing_uri}:
       delete:
-        permissions:
-        - inference.gateway.provider.exec
+        direct:
+          actor_perms:
+          - inference.gateway.provider.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.provider.exec
         scopes:
         - inference:write
         - platform:write
       get:
-        permissions:
-        - inference.gateway.provider.exec
+        direct:
+          actor_perms:
+          - inference.gateway.provider.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.provider.exec
         scopes:
         - inference:read
         - platform:read
       patch:
-        permissions:
-        - inference.gateway.provider.exec
+        direct:
+          actor_perms:
+          - inference.gateway.provider.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.provider.exec
         scopes:
         - inference:write
         - platform:write
       post:
-        permissions:
-        - inference.gateway.provider.exec
+        direct:
+          actor_perms:
+          - inference.gateway.provider.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.provider.exec
         scopes:
         - inference:write
         - platform:write
       put:
-        permissions:
-        - inference.gateway.provider.exec
+        direct:
+          actor_perms:
+          - inference.gateway.provider.exec
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.gateway.provider.exec
         scopes:
         - inference:write
         - platform:write
     /apis/inference-gateway/v2/workspaces/{workspace}/provider/{name}/ready:
       get:
-        permissions:
-        - inference.providers.read
+        direct:
+          actor_perms:
+          - inference.providers.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.providers.read
         scopes:
         - inference:read
         - platform:read
     /apis/inference-gateway/v2/workspaces/{workspace}/virtual-models:
       get:
-        permissions:
-        - inference.virtual-models.list
+        direct:
+          actor_perms:
+          - inference.virtual-models.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.virtual-models.list
         scopes:
         - inference:read
         - platform:read
       post:
-        permissions:
-        - inference.virtual-models.create
+        direct:
+          actor_perms:
+          - inference.virtual-models.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.virtual-models.create
         scopes:
         - inference:write
         - platform:write
     /apis/inference-gateway/v2/workspaces/{workspace}/virtual-models/{name}:
       delete:
-        permissions:
-        - inference.virtual-models.delete
+        direct:
+          actor_perms:
+          - inference.virtual-models.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.virtual-models.delete
         scopes:
         - inference:write
         - platform:write
       get:
-        permissions:
-        - inference.virtual-models.read
+        direct:
+          actor_perms:
+          - inference.virtual-models.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.virtual-models.read
         scopes:
         - inference:read
         - platform:read
       patch:
-        permissions:
-        - inference.virtual-models.update
+        direct:
+          actor_perms:
+          - inference.virtual-models.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.virtual-models.update
         scopes:
         - inference:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/annotations:
       get:
-        permissions:
-        - intake.annotations.list
+        direct:
+          actor_perms:
+          - intake.annotations.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.annotations.list
         scopes:
         - intake:read
         - platform:read
       post:
-        permissions:
-        - intake.annotations.create
+        direct:
+          actor_perms:
+          - intake.annotations.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.annotations.create
         scopes:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/annotations/{annotation_id}:
       delete:
-        permissions:
-        - intake.annotations.delete
+        direct:
+          actor_perms:
+          - intake.annotations.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.annotations.delete
         scopes:
         - intake:write
         - platform:write
       get:
-        permissions:
-        - intake.annotations.read
+        direct:
+          actor_perms:
+          - intake.annotations.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.annotations.read
         scopes:
         - intake:read
         - platform:read
     /apis/intake/v2/workspaces/{workspace}/evaluations:
       get:
-        permissions:
-        - intake.evaluations.read
+        direct:
+          actor_perms:
+          - intake.evaluations.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluations.read
         scopes:
         - intake:read
         - platform:read
       post:
-        permissions:
-        - intake.evaluations.create
+        direct:
+          actor_perms:
+          - intake.evaluations.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluations.create
         scopes:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/evaluations/{name}:
       delete:
-        permissions:
-        - intake.evaluations.delete
+        direct:
+          actor_perms:
+          - intake.evaluations.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluations.delete
         scopes:
         - intake:write
         - platform:write
       get:
-        permissions:
-        - intake.evaluations.read
+        direct:
+          actor_perms:
+          - intake.evaluations.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluations.read
         scopes:
         - intake:read
         - platform:read
       patch:
-        permissions:
-        - intake.evaluations.update
+        direct:
+          actor_perms:
+          - intake.evaluations.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluations.update
         scopes:
         - intake:write
         - platform:write
       put:
-        permissions:
-        - intake.evaluations.update
+        direct:
+          actor_perms:
+          - intake.evaluations.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluations.update
         scopes:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/evaluations/{name}/pin:
       delete:
-        permissions:
-        - intake.evaluations.update
+        direct:
+          actor_perms:
+          - intake.evaluations.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluations.update
         scopes:
         - intake:write
         - platform:write
       post:
-        permissions:
-        - intake.evaluations.update
+        direct:
+          actor_perms:
+          - intake.evaluations.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluations.update
         scopes:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/evaluations/{name}/sessions:
       get:
-        permissions:
-        - intake.evaluations.read
+        direct:
+          actor_perms:
+          - intake.evaluations.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluations.read
         scopes:
         - intake:read
         - platform:read
@@ -1090,53 +1587,93 @@ authz:
     # mark x-not-in-openapi so the orphan check skips them. Remove alongside the router aliases.
     /apis/intake/v2/workspaces/{workspace}/evaluator-results:
       get:
-        permissions:
-        - intake.evaluator-results.list
+        direct:
+          actor_perms:
+          - intake.evaluator-results.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluator-results.list
         scopes:
         - intake:read
         - platform:read
       post:
-        permissions:
-        - intake.evaluator-results.create
+        direct:
+          actor_perms:
+          - intake.evaluator-results.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluator-results.create
         scopes:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/evaluator-results/{evaluator_result_id}:
       get:
-        permissions:
-        - intake.evaluator-results.read
+        direct:
+          actor_perms:
+          - intake.evaluator-results.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluator-results.read
         scopes:
         - intake:read
         - platform:read
     /apis/intake/v2/workspaces/{workspace}/experiments:
       get:
-        permissions:
-        - intake.experiments.read
+        direct:
+          actor_perms:
+          - intake.experiments.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.experiments.read
         scopes:
         - intake:read
         - platform:read
       post:
-        permissions:
-        - intake.experiments.create
+        direct:
+          actor_perms:
+          - intake.experiments.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.experiments.create
         scopes:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/experiments/{name}:
       delete:
-        permissions:
-        - intake.experiments.delete
+        direct:
+          actor_perms:
+          - intake.experiments.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.experiments.delete
         scopes:
         - intake:write
         - platform:write
       get:
-        permissions:
-        - intake.experiments.read
+        direct:
+          actor_perms:
+          - intake.experiments.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.experiments.read
         scopes:
         - intake:read
         - platform:read
       put:
-        permissions:
-        - intake.experiments.update
+        direct:
+          actor_perms:
+          - intake.experiments.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.experiments.update
         scopes:
         - intake:write
         - platform:write
@@ -1147,652 +1684,1138 @@ authz:
     /apis/intake/v2/workspaces/{workspace}/experiment-groups:
       get:
         x-not-in-openapi: true
-        permissions:
-        - intake.experiments.read
+        direct:
+          actor_perms:
+          - intake.experiments.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.experiments.read
         scopes:
         - intake:read
         - platform:read
       post:
         x-not-in-openapi: true
-        permissions:
-        - intake.experiments.create
+        direct:
+          actor_perms:
+          - intake.experiments.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.experiments.create
         scopes:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/experiment-groups/{name}:
       delete:
         x-not-in-openapi: true
-        permissions:
-        - intake.experiments.delete
+        direct:
+          actor_perms:
+          - intake.experiments.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.experiments.delete
         scopes:
         - intake:write
         - platform:write
       get:
         x-not-in-openapi: true
-        permissions:
-        - intake.experiments.read
+        direct:
+          actor_perms:
+          - intake.experiments.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.experiments.read
         scopes:
         - intake:read
         - platform:read
       put:
         x-not-in-openapi: true
-        permissions:
-        - intake.experiments.update
+        direct:
+          actor_perms:
+          - intake.experiments.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.experiments.update
         scopes:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/ingest/atif:
       post:
-        permissions:
-        - intake.ingest.create
+        direct:
+          actor_perms:
+          - intake.ingest.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.ingest.create
         scopes:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/ingest/chat-completions:
       post:
-        permissions:
-        - intake.ingest.create
+        direct:
+          actor_perms:
+          - intake.ingest.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.ingest.create
         scopes:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/traces:
       post:
-        permissions:
-        - intake.ingest.create
+        direct:
+          actor_perms:
+          - intake.ingest.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.ingest.create
         scopes:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/ingest/spans:
       post:
-        permissions:
-        - intake.ingest.create
+        direct:
+          actor_perms:
+          - intake.ingest.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.ingest.create
         scopes:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/sessions/{id}:
       get:
-        permissions:
-        - intake.sessions.read
+        direct:
+          actor_perms:
+          - intake.sessions.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.sessions.read
         scopes:
         - intake:read
         - platform:read
     /apis/intake/v2/workspaces/{workspace}/spans:
       get:
-        permissions:
-        - intake.spans.list
+        direct:
+          actor_perms:
+          - intake.spans.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.spans.list
         scopes:
         - intake:read
         - platform:read
     /apis/intake/v2/workspaces/{workspace}/spans/groups:
       get:
-        permissions:
-        - intake.spans.read
+        direct:
+          actor_perms:
+          - intake.spans.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.spans.read
         scopes:
         - intake:read
         - platform:read
     /apis/intake/v2/workspaces/{workspace}/spans/{span_id}:
       get:
-        permissions:
-        - intake.spans.read
+        direct:
+          actor_perms:
+          - intake.spans.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.spans.read
         scopes:
         - intake:read
         - platform:read
     /apis/intake/v2/workspaces/{workspace}/spans/{span_id}/evaluator-results:
       get:
-        permissions:
-        - intake.evaluator-results.list
+        direct:
+          actor_perms:
+          - intake.evaluator-results.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.evaluator-results.list
         scopes:
         - intake:read
         - platform:read
     /apis/intake/v2/workspaces/{workspace}/traces/metrics:
       get:
-        permissions:
-        - intake.trace-metrics.read
+        direct:
+          actor_perms:
+          - intake.trace-metrics.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.trace-metrics.read
         scopes:
         - intake:read
         - platform:read
     /apis/intake/v2/workspaces/{workspace}/traces:
       get:
-        permissions:
-        - intake.traces.read
+        direct:
+          actor_perms:
+          - intake.traces.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.traces.read
         scopes:
         - intake:read
         - platform:read
     /apis/intake/v2/workspaces/{workspace}/traces/{id}:
       get:
-        permissions:
-        - intake.traces.read
+        direct:
+          actor_perms:
+          - intake.traces.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.traces.read
         scopes:
         - intake:read
         - platform:read
     /apis/jobs/v2/execution-profiles:
       get:
-        permissions:
-        - jobs.list
+        direct:
+          actor_perms:
+          - jobs.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.list
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs:
       get:
-        permissions:
-        - jobs.list
+        direct:
+          actor_perms:
+          - jobs.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.list
         scopes:
         - jobs:read
         - platform:read
       post:
-        permissions:
-        - jobs.create
+        direct:
+          actor_perms:
+          - jobs.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.create
         scopes:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/rerun:
       post:
-        permissions:
-        - jobs.update
+        direct:
+          actor_perms:
+          - jobs.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.update
         scopes:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/status-details:
       patch:
-        permissions:
-        - jobs.update
+        direct:
+          actor_perms:
+          - jobs.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.update
         scopes:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}/status:
       patch:
-        permissions:
-        - jobs.update
+        direct:
+          actor_perms:
+          - jobs.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.update
         scopes:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks/{name}:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
       put:
-        permissions:
-        - jobs.update
+        direct:
+          actor_perms:
+          - jobs.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.update
         scopes:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
       post:
-        permissions:
-        - jobs.create
+        direct:
+          actor_perms:
+          - jobs.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.create
         scopes:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}/download:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/steps/{name}:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/steps/{name}/status:
       patch:
-        permissions:
-        - jobs.update
+        direct:
+          actor_perms:
+          - jobs.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.update
         scopes:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/steps/{name}/tasks:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/steps/{step}/tasks/{name}:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}:
       delete:
-        permissions:
-        - jobs.delete
+        direct:
+          actor_perms:
+          - jobs.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.delete
         scopes:
         - jobs:write
         - platform:write
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
       patch:
-        permissions:
-        - jobs.update
+        direct:
+          actor_perms:
+          - jobs.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.update
         scopes:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/cancel:
       post:
-        permissions:
-        - jobs.cancel
+        direct:
+          actor_perms:
+          - jobs.cancel
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.cancel
         scopes:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/logs:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/pause:
       post:
-        permissions:
-        - jobs.update
+        direct:
+          actor_perms:
+          - jobs.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.update
         scopes:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/control:
       patch:
-        permissions:
-        - jobs.update
+        direct:
+          actor_perms:
+          - jobs.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.update
         scopes:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/results:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/resume:
       post:
-        permissions:
-        - jobs.update
+        direct:
+          actor_perms:
+          - jobs.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.update
         scopes:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/status:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/steps:
       get:
-        permissions:
-        - jobs.read
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
         scopes:
         - jobs:read
         - platform:read
     /apis/models/v2/workspaces/{workspace}/adapters:
       get:
-        permissions:
-        - models.adapters.list
+        direct:
+          actor_perms:
+          - models.adapters.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.adapters.list
         scopes:
         - models:read
         - platform:read
       post:
-        permissions:
-        - models.adapters.create
+        direct:
+          actor_perms:
+          - models.adapters.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.adapters.create
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/adapters/{name}:
       delete:
-        permissions:
-        - models.adapters.delete
+        direct:
+          actor_perms:
+          - models.adapters.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.adapters.delete
         scopes:
         - models:write
         - platform:write
       get:
-        permissions:
-        - models.adapters.read
+        direct:
+          actor_perms:
+          - models.adapters.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.adapters.read
         scopes:
         - models:read
         - platform:read
       patch:
-        permissions:
-        - models.adapters.update
+        direct:
+          actor_perms:
+          - models.adapters.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.adapters.update
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/deployment-configs:
       get:
-        permissions:
-        - inference.deployment-configs.list
+        direct:
+          actor_perms:
+          - inference.deployment-configs.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployment-configs.list
         scopes:
         - models:read
         - platform:read
       post:
-        permissions:
-        - inference.deployment-configs.create
+        direct:
+          actor_perms:
+          - inference.deployment-configs.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployment-configs.create
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/deployment-configs/{config}/versions/{name}:
       delete:
-        permissions:
-        - inference.deployment-configs.delete
+        direct:
+          actor_perms:
+          - inference.deployment-configs.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployment-configs.delete
         scopes:
         - models:write
         - platform:write
       get:
-        permissions:
-        - inference.deployment-configs.read
+        direct:
+          actor_perms:
+          - inference.deployment-configs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployment-configs.read
         scopes:
         - models:read
         - platform:read
     /apis/models/v2/workspaces/{workspace}/deployment-configs/{name}:
       delete:
-        permissions:
-        - inference.deployment-configs.delete
+        direct:
+          actor_perms:
+          - inference.deployment-configs.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployment-configs.delete
         scopes:
         - models:write
         - platform:write
       get:
-        permissions:
-        - inference.deployment-configs.read
+        direct:
+          actor_perms:
+          - inference.deployment-configs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployment-configs.read
         scopes:
         - models:read
         - platform:read
       post:
-        permissions:
-        - inference.deployment-configs.create
+        direct:
+          actor_perms:
+          - inference.deployment-configs.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployment-configs.create
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/deployment-configs/{name}/versions:
       get:
-        permissions:
-        - inference.deployment-configs.read
+        direct:
+          actor_perms:
+          - inference.deployment-configs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployment-configs.read
         scopes:
         - models:read
         - platform:read
     /apis/models/v2/workspaces/{workspace}/deployments:
       get:
-        permissions:
-        - inference.deployments.list
+        direct:
+          actor_perms:
+          - inference.deployments.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployments.list
         scopes:
         - models:read
         - platform:read
       post:
-        permissions:
-        - inference.deployments.create
+        direct:
+          actor_perms:
+          - inference.deployments.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployments.create
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/deployments/{deployment}/versions/{name}:
       delete:
-        permissions:
-        - inference.deployments.delete
+        direct:
+          actor_perms:
+          - inference.deployments.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployments.delete
         scopes:
         - models:write
         - platform:write
       get:
-        permissions:
-        - inference.deployments.read
+        direct:
+          actor_perms:
+          - inference.deployments.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployments.read
         scopes:
         - models:read
         - platform:read
     /apis/models/v2/workspaces/{workspace}/deployments/{name}:
       delete:
-        permissions:
-        - inference.deployments.delete
+        direct:
+          actor_perms:
+          - inference.deployments.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployments.delete
         scopes:
         - models:write
         - platform:write
       get:
-        permissions:
-        - inference.deployments.read
+        direct:
+          actor_perms:
+          - inference.deployments.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployments.read
         scopes:
         - models:read
         - platform:read
       post:
-        permissions:
-        - inference.deployments.create
+        direct:
+          actor_perms:
+          - inference.deployments.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployments.create
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/deployments/{name}/models:
       get:
-        permissions:
-        - inference.deployments.read
+        direct:
+          actor_perms:
+          - inference.deployments.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployments.read
         scopes:
         - models:read
         - platform:read
     /apis/models/v2/workspaces/{workspace}/deployments/{name}/status:
       post:
-        permissions:
-        - inference.deployments.update
+        direct:
+          actor_perms:
+          - inference.deployments.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployments.update
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/deployments/{name}/versions:
       get:
-        permissions:
-        - inference.deployments.read
+        direct:
+          actor_perms:
+          - inference.deployments.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.deployments.read
         scopes:
         - models:read
         - platform:read
     /apis/models/v2/workspaces/{workspace}/models:
       get:
-        permissions:
-        - models.list
+        direct:
+          actor_perms:
+          - models.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.list
         scopes:
         - models:read
         - platform:read
       post:
-        permissions:
-        - models.create
+        direct:
+          actor_perms:
+          - models.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.create
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/models/{model_name}/adapters:
       post:
-        permissions:
-        - models.adapters.create
+        direct:
+          actor_perms:
+          - models.adapters.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.adapters.create
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/models/{model_name}/adapters/{adapter}:
       delete:
-        permissions:
-        - models.adapters.delete
+        direct:
+          actor_perms:
+          - models.adapters.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.adapters.delete
         scopes:
         - models:write
         - platform:write
       patch:
-        permissions:
-        - models.adapters.update
+        direct:
+          actor_perms:
+          - models.adapters.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.adapters.update
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/models/{name}:
       delete:
-        permissions:
-        - models.delete
+        direct:
+          actor_perms:
+          - models.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.delete
         scopes:
         - models:write
         - platform:write
       get:
-        permissions:
-        - models.read
+        direct:
+          actor_perms:
+          - models.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.read
         scopes:
         - models:read
         - platform:read
       patch:
-        permissions:
-        - models.update
+        direct:
+          actor_perms:
+          - models.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.update
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/prompts:
       get:
-        permissions:
-        - models.prompts.read
+        direct:
+          actor_perms:
+          - models.prompts.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.prompts.read
         scopes:
         - models:read
         - platform:read
       post:
-        permissions:
-        - models.prompts.create
+        direct:
+          actor_perms:
+          - models.prompts.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.prompts.create
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/prompts/{name}:
       delete:
-        permissions:
-        - models.prompts.delete
+        direct:
+          actor_perms:
+          - models.prompts.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.prompts.delete
         scopes:
         - models:write
         - platform:write
       get:
-        permissions:
-        - models.prompts.read
+        direct:
+          actor_perms:
+          - models.prompts.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.prompts.read
         scopes:
         - models:read
         - platform:read
       put:
-        permissions:
-        - models.prompts.update
+        direct:
+          actor_perms:
+          - models.prompts.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - models.prompts.update
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/providers:
       get:
-        permissions:
-        - inference.providers.list
+        direct:
+          actor_perms:
+          - inference.providers.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.providers.list
         scopes:
         - models:read
         - platform:read
       post:
-        permissions:
-        - inference.providers.create
+        direct:
+          actor_perms:
+          - inference.providers.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.providers.create
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/providers/{name}:
       delete:
-        permissions:
-        - inference.providers.delete
+        direct:
+          actor_perms:
+          - inference.providers.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.providers.delete
         scopes:
         - models:write
         - platform:write
       get:
-        permissions:
-        - inference.providers.read
+        direct:
+          actor_perms:
+          - inference.providers.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.providers.read
         scopes:
         - models:read
         - platform:read
       put:
-        permissions:
-        - inference.providers.update
+        direct:
+          actor_perms:
+          - inference.providers.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.providers.update
         scopes:
         - models:write
         - platform:write
     /apis/models/v2/workspaces/{workspace}/providers/{name}/status:
       put:
-        permissions:
-        - inference.providers.update
+        direct:
+          actor_perms:
+          - inference.providers.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - inference.providers.update
         scopes:
         - models:write
         - platform:write
     /apis/secrets/v2/rotate-encryption-keys:
       post:
-        permissions:
-        - secrets.rotate
+        direct:
+          actor_perms:
+          - secrets.rotate
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - secrets.rotate
         scopes:
         - platform:write
         - secrets:write
     /apis/secrets/v2/workspaces/{workspace}/secrets:
       get:
-        permissions:
-        - secrets.list
+        direct:
+          actor_perms:
+          - secrets.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - secrets.list
         scopes:
         - platform:read
         - secrets:read
       post:
-        permissions:
-        - secrets.create
+        direct:
+          actor_perms:
+          - secrets.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - secrets.create
         scopes:
         - platform:write
         - secrets:write
     /apis/secrets/v2/workspaces/{workspace}/secrets/{name}:
       delete:
-        permissions:
-        - secrets.delete
+        direct:
+          actor_perms:
+          - secrets.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - secrets.delete
         scopes:
         - platform:write
         - secrets:write
       get:
-        permissions:
-        - secrets.read
+        direct:
+          actor_perms:
+          - secrets.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - secrets.read
         scopes:
         - platform:read
         - secrets:read
       patch:
-        permissions:
-        - secrets.update
+        direct:
+          actor_perms:
+          - secrets.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - secrets.update
         scopes:
         - platform:write
         - secrets:write
     /apis/secrets/v2/workspaces/{workspace}/secrets/{name}/access:
       get:
-        permissions:
-        - secrets.access
+        direct:
+          actor_perms:
+          - secrets.access
+        delegated:
+          actor_perms:
+          - secrets.access
+          subject_perms:
+          - secrets.read
         scopes:
         - platform:read
         - secrets:read

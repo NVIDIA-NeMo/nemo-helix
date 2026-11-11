@@ -11,12 +11,14 @@ import data.authz.extract_method
 import data.authz.extract_path
 import data.authz.scope_check_passed
 import data.common.endpoint_scan
-import data.common.get_applicable_principals
-import data.common.has_permissions
+import data.common.get_route_principals
+import data.common.ordinary_permissions_satisfied
 import data.common.req_callers
 import data.common.req_deny
 import data.common.req_permissions
 import data.common.request_caller_kind
+import data.common.route_permissions_satisfied
+import data.common.selected_route_contract
 import data.common.valid_service_principal
 
 # Main entry point - returns result with X-NHX-Authorized header
@@ -51,7 +53,7 @@ default allow_request := false
 # Platform admin bypass - has access to everything, but must still pass scope_check_passed
 # first so a HelixAdmin's own scoped Access Key stays scoped down.
 allow_request if {
-	applicable_principals := get_applicable_principals
+	applicable_principals := get_route_principals
 	count(applicable_principals) > 0
 
 	scope_check_passed
@@ -66,12 +68,13 @@ allow_request if {
 allow_request if {
 	principal_id := extract_principal_id
 	valid_service_principal(principal_id)
+	extract_on_behalf_of_principal_id == ""
 	endpoint_scan == ""
 }
 
 # Allow if any applicable principal has required permissions and scopes (if provided)
 allow_request if {
-	applicable_principals := get_applicable_principals
+	applicable_principals := get_route_principals
 	count(applicable_principals) > 0
 
 	# Check scopes first (faster)
@@ -89,15 +92,14 @@ allow_request if {
 	workspace != "-"
 
 	# Check if any principal has the required permissions
-	some principal in applicable_principals
-	has_permissions(principal, workspace, required_permissions)
+	route_permissions_satisfied(workspace)
 }
 
 # Wildcard workspace "-" with mutating methods: permission-based authorization.
 # GET/HEAD for "-" use cross-workspace rules above; mutating methods were previously
 # allowed only via unconditional service bypass (service:* defaults to ServiceSystem with "*").
 allow_request if {
-	applicable_principals := get_applicable_principals
+	applicable_principals := get_route_principals
 	count(applicable_principals) > 0
 
 	# Check scopes first (faster)
@@ -115,14 +117,14 @@ allow_request if {
 
 	some principal in applicable_principals
 	valid_service_principal(principal)
-	has_permissions(principal, workspace, required_permissions)
+	route_permissions_satisfied(workspace)
 }
 
 # Workspace-less endpoints with required permissions: check against the system workspace.
 # Covers IAM APIs, workspace creation, and any future workspace-less permission-gated
 # endpoint without needing path-specific rules.
 allow_request if {
-	applicable_principals := get_applicable_principals
+	applicable_principals := get_route_principals
 	count(applicable_principals) > 0
 	scope_check_passed
 	path := extract_path
@@ -130,8 +132,7 @@ allow_request if {
 	required_permissions := req_permissions
 	count(required_permissions) > 0
 	workspace_scan == ""
-	some principal in applicable_principals
-	has_permissions(principal, "system", required_permissions)
+	route_permissions_satisfied("system")
 }
 
 # Allow cross-workspace LIST operations (GET/HEAD without workspace in path) for authenticated
@@ -141,7 +142,7 @@ allow_request if {
 # no-workspace GET must instead satisfy its permission (rule below); otherwise the stamped
 # permission is decorative, which is how the bundle-download endpoint had to be special-cased.
 allow_request if {
-	applicable_principals := get_applicable_principals
+	applicable_principals := get_route_principals
 	count(applicable_principals) > 0
 
 	# Check scopes first (faster)
@@ -167,7 +168,7 @@ allow_request if {
 # workspace (the home for non-workspace-scoped resources, matching the IAM rule above), so the
 # permission is enforced rather than decorative.
 allow_request if {
-	applicable_principals := get_applicable_principals
+	applicable_principals := get_route_principals
 	count(applicable_principals) > 0
 
 	scope_check_passed
@@ -181,8 +182,7 @@ allow_request if {
 	required_permissions := req_permissions
 	count(required_permissions) > 0
 
-	some principal in applicable_principals
-	has_permissions(principal, "system", required_permissions)
+	route_permissions_satisfied("system")
 }
 
 # True when the matched endpoint declares one or more required permissions for this method.
@@ -194,7 +194,7 @@ req_has_permissions if {
 
 # Allow cross-workspace LIST operations with "-" wildcard workspace
 allow_request if {
-	applicable_principals := get_applicable_principals
+	applicable_principals := get_route_principals
 	count(applicable_principals) > 0
 
 	# Check scopes first (faster)
@@ -213,14 +213,13 @@ allow_request if {
 # Allow if endpoint explicitly has no required permissions
 # but still require authentication (at least one principal).
 #
-# SECURITY: We check the endpoint config directly instead of using get_required_permissions,
-# because we need to distinguish between:
-#   - endpoints explicitly configured with `permissions: []` → allow
+# SECURITY: The selected contract must distinguish between:
+#   - endpoints explicitly configured with empty requirements → allow
 #   - endpoints not in the config at all (unknown) → deny (fail-closed)
 # If normalize_endpoint cannot match the path, it is undefined, the rule body fails,
 # and access is denied.
 allow_request if {
-	applicable_principals := get_applicable_principals
+	applicable_principals := get_route_principals
 	count(applicable_principals) > 0
 
 	# Check scopes first (faster)
@@ -234,6 +233,34 @@ allow_request if {
 
 # Default allow (deny_request overrides allow_request when true)
 default deny_request := false
+
+# A selected branch must exist even for admins and permissionless routes.
+# Delegated requirements pass independently; no other branch supplies them.
+deny_request if {
+	endpoint_scan != ""
+	not selected_route_contract
+}
+
+deny_request if {
+	extract_on_behalf_of_principal_id != ""
+	not selected_route_permissions_passed
+}
+
+# Preserve the existing wildcard GET/HEAD admission rule and required actor grants.
+# Subject permissions are not checked against a literal "-" workspace. Handlers
+# remain responsible for filtering; this rule does not verify their behavior.
+selected_route_permissions_passed if {
+	workspace_scan == "-"
+	extract_method in ["GET", "HEAD"]
+	count(data.common.get_subject_principals) > 0
+	data.common.actor_permissions_satisfied("-", selected_route_contract.actor_perms)
+} else if {
+	workspace_scan != ""
+	route_permissions_satisfied(workspace_scan)
+} else if {
+	workspace_scan == ""
+	route_permissions_satisfied("system")
+}
 
 # Explicit deny marker (data.authz.endpoints[...].deny == true) — the fail-closed signal for
 # unruled or invalid plugin routes. As a deny_request it overrides every allow rule, including
@@ -287,11 +314,10 @@ deny_request if {
 default bundle_access_ok := false
 
 bundle_access_ok if {
-	applicable_principals := get_applicable_principals
+	applicable_principals := get_route_principals
 	count(applicable_principals) > 0
 	scope_check_passed
-	some principal in applicable_principals
-	has_permissions(principal, "system", ["iam.bundle.read"])
+	ordinary_permissions_satisfied("system", ["iam.bundle.read"])
 }
 
 deny_request if {
@@ -374,7 +400,7 @@ deny_request if {
 default platform_admin_in_system := false
 
 platform_admin_in_system if {
-	applicable_principals := get_applicable_principals
+	applicable_principals := get_route_principals
 	count(applicable_principals) > 0
 	some principal in applicable_principals
 	"HelixAdmin" in data.authz.principals[principal].workspaces.system

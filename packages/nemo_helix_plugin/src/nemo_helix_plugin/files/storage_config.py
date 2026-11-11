@@ -100,6 +100,15 @@ class BaseStorageConfig(BaseModel):
         return None
 
     @property
+    def read_only(self) -> bool:
+        """Whether file mutations are unsupported by this backend.
+
+        New backends default to read-only; writable backends must opt in by
+        overriding this property. This is independent of data ownership.
+        """
+        return True
+
+    @property
     def owns_storage_data(self) -> bool:
         """Whether the platform owns the underlying source data for this backend.
 
@@ -154,6 +163,11 @@ class LocalStorageConfig(BaseStorageConfig):
         if not v:
             return str(nhx_user_data_dir() / "files")
         return str(Path.cwd() / Path(v).expanduser())
+
+    @property
+    def read_only(self) -> bool:
+        """Local files support uploads and deletions."""
+        return False
 
     @property
     def owns_storage_data(self) -> bool:
@@ -591,6 +605,11 @@ class S3StorageConfig(BaseStorageConfig):
         if self.secret_access_key_secret:
             refs["secret_access_key"] = self.secret_access_key_secret
         return refs
+
+    @property
+    def read_only(self) -> bool:
+        """S3 objects support uploads and deletions."""
+        return False
 
     @property
     def owns_storage_data(self) -> bool:

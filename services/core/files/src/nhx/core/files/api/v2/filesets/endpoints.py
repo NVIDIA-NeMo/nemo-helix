@@ -42,6 +42,7 @@ from nhx.common.service.dependencies import (
     get_nemo_client,
     get_service_config_factory,
 )
+from nhx.core.files.api.endpoint_helpers import HTTP_EXCEPTION_DETAIL as _HTTP_EXCEPTION_DETAIL
 from nhx.core.files.api.endpoint_helpers import (
     HTTP_EXCEPTION_DETAIL,
     UPSTREAM_STORAGE_ACCESS_DETAIL,
@@ -50,6 +51,7 @@ from nhx.core.files.api.endpoint_helpers import (
     get_download_file_info,
     get_fileset,
     list_storage_files,
+    require_writable_storage,
     resolve_storage_secrets_for_user,
     storage_errors_as_http,
     stream_file_download,
@@ -913,6 +915,12 @@ async def download_file(
     "/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}",
     summary="Upload Fileset Content",
     status_code=HTTP_200_OK,
+    responses={
+        HTTP_409_CONFLICT: {
+            "description": "Fileset storage is read-only",
+            **_HTTP_EXCEPTION_DETAIL,
+        }
+    },
     openapi_extra={
         "requestBody": {
             "content": {
@@ -938,9 +946,17 @@ async def upload_file(
     client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> FilesetFileOutput:
-    """Upload file content to a fileset."""
+    """Upload file content to a fileset. Read-only storage returns HTTP 409."""
     logger.info(f"PUT /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
+    # Preserve the immutable-fileset authorization error before capability checks.
+    service_source = fileset.custom_fields.get("service_source")
+    if service_source and not auth_client.principal.id.startswith("service:"):
+        raise HTTPException(
+            status_code=HTTP_403_FORBIDDEN,
+            detail="Access denied: This fileset's files are immutable",
+        )
+    require_writable_storage(fileset.storage)
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
@@ -952,14 +968,6 @@ async def upload_file(
     else:
         # Default to octet-stream for application/octet-stream or any other type
         chunk_processor = OctetStreamChunkProcessor()
-
-    # Temporary fix for making immutable datasets and preserving trust_remote_code
-    service_source = fileset.custom_fields.get("service_source")
-    if service_source and not auth_client.principal.id.startswith("service:"):
-        raise HTTPException(
-            status_code=HTTP_403_FORBIDDEN,
-            detail="Access denied: This fileset's files are immutable",
-        )
 
     # Get content length from request headers for backends that need it (e.g., S3)
     content_length_header = request.headers.get("content-length")
@@ -1025,6 +1033,12 @@ async def upload_file(
     "/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}",
     summary="Delete a specific file from a fileset",
     status_code=HTTP_200_OK,
+    responses={
+        HTTP_409_CONFLICT: {
+            "description": "Fileset storage is read-only",
+            **_HTTP_EXCEPTION_DETAIL,
+        }
+    },
 )
 async def delete_file(
     workspace: str,
@@ -1038,10 +1052,11 @@ async def delete_file(
     Delete a specific file from a fileset.
 
     Permanently deletes the file from the storage backend.
-    Returns metadata about the deleted file.
+    Returns metadata about the deleted file. Read-only storage returns HTTP 409.
     """
     logger.info(f"DELETE /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
+    require_writable_storage(fileset.storage)
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
