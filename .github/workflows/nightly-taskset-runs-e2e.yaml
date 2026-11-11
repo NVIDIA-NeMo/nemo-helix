@@ -7,9 +7,8 @@
 name: Nightly taskset runs e2e
 
 on:
-  # Off until 10 dispatched runs in a row are green; then a one-line commit turns it on.
-  # schedule:
-  #   - cron: "0 12 * * *"  # 12:00 UTC, ahead of the 16:00 America/Los_Angeles RC cut
+  schedule:
+    - cron: "0 10 * * *"  # 10:00 UTC (02:00 PST), ahead of the 16:00 America/Los_Angeles RC cut
   workflow_dispatch:
     inputs:
       repeat:
