@@ -155,17 +155,28 @@ async def test_exec_timeout_maps_to_sentinel(monkeypatch: pytest.MonkeyPatch) ->
     assert result.error_type == "timeout"
 
 
-async def test_upload_file_mkdirs_parent_then_cp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+async def test_upload_file_streams_as_container_user(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     recorder = _Recorder()
     provider, handle = await _created(monkeypatch, recorder, SandboxSpec(image="img"))
     recorder.calls.clear()
+    recorder.stdin.clear()
     src = tmp_path / "f.py"
     src.write_text("x = 1")
+    src.chmod(0o600)
 
     await provider.upload_file(handle, src, "/workspace/pkg/f.py")
-    mkdir_argv, cp_argv = recorder.calls
+    mkdir_argv, upload_argv = recorder.calls
     assert mkdir_argv[:2] == ["docker", "exec"] and "mkdir -p /workspace/pkg" in mkdir_argv[-1]
-    assert cp_argv == ["docker", "cp", str(src), f"{handle.sandbox_id}:/workspace/pkg/f.py"]
+    assert upload_argv == [
+        "docker",
+        "exec",
+        "-i",
+        handle.sandbox_id,
+        "sh",
+        "-c",
+        "umask 077; cat > /workspace/pkg/f.py && chmod 600 /workspace/pkg/f.py",
+    ]
+    assert recorder.stdin[-1] == src
 
 
 async def test_upload_dir_copies_contents(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
