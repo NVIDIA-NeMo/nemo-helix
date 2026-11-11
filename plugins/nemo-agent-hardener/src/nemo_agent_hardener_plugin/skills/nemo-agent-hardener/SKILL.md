@@ -178,7 +178,9 @@ nemo agent-hardener run --manifest-id my-agent --env-file ./secrets.env
 - Fast path for iterating on defenses — replay a previous run's hits instead of re-attacking:
   `--replay-hitlog <workspace>/<fileset>`. That is a **fileset reference, not a file path**; create
   the fileset first (`nemo files filesets create …`) and upload into it (`nemo files upload …` does
-  not auto-create a named fileset).
+  not auto-create a named fileset). A replay still sends each hit to the agent once, before
+  defending, to record its execution trace through Relay: the guardrails defender writes each rail
+  from that trace.
 - One war-game per host: every victim binds port 8000. If a second run is needed, wait or use
   `--port`.
 - Verify: `nemo agent-hardener status --limit 5` shows the run progressing through rounds. A run that
