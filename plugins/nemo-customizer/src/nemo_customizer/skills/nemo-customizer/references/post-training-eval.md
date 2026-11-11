@@ -62,7 +62,7 @@ Give the **nemo-evals** skill these inputs, the same for base and tuned except t
 | Reference | `{{ item.messages[-1].content }}`. The assistant `content` is a string. |
 | Metric | Short answers: `F1Metric`. Exact labels: `ExactMatchMetric`. Tool calls: `ToolCallingMetric`. Open-ended answers: an LLM judge, chosen with nemo-evals' metric selection |
 | Inference | `temperature` 0; `max_tokens` 64 for short labels; for thinking models (Qwen3, Nemotron 3.5 Lightning) turn thinking off with `extra_body={"chat_template_kwargs": {"enable_thinking": false}}` |
-| Execution | A local SDK run, which reaches the gateway at the agent's platform URL. A platform eval job also works, but its container must reach that URL: true for a local Docker platform, not for `localhost` on Kubernetes |
+| Execution | A local SDK run, which reaches the gateway at the agent's platform URL, or a platform eval job. With platform auth on, a job calls a gateway target that has no `api_key_secret` as the submitter, through its own connection to the platform: no key is needed, and the URL's host doesn't matter. With auth off, the job calls the URL as written, so its container must reach it: true for a local Docker platform, not for `localhost` on Kubernetes |
 
 **Models without a chat template.** vLLM rejects chat requests for a model with no chat template, so score it through the completions endpoint, sending the text the model trained on. The SDK sends a completions request when the prompt template has `prompt` instead of `messages`. The rows stay in CHAT shape, and the reference is unchanged.
 
