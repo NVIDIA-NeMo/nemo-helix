@@ -95,6 +95,7 @@ RUN umask 022 && \
 COPY --chmod=755 docker/scripts/collect-apt-sources.sh \
     docker/scripts/collect-python-sdists.py \
     docker/rl/scripts/chmod-newer-than.sh \
+    docker/rl/scripts/prune-unreferenced-uv-archives.sh \
     /usr/local/bin/
 
 # Build as a non-runtime user. umask 022 keeps artifacts readable; the runtime
@@ -222,6 +223,9 @@ find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty
 find "${UV_CACHE_DIR}" -type d -path "*/ray/jars" -exec rm -rf {} + || true
 find "${UV_CACHE_DIR}" -type d \
     \( -name PyNvVideoCodec -o -name 'pynvvideocodec-*.data' \) -exec rm -rf {} + || true
+# Each sync above is exact, so an intermediate resolve (torch 2.15 and its CUDA
+# stack) stays in archive-v0 after the venv has moved on. Delete it in this layer.
+prune-unreferenced-uv-archives.sh
 chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv
 EOF
 
@@ -325,6 +329,8 @@ sync_venv /opt/ray_venvs/nemo_rl.models.generation.vllm.vllm_worker_async.VllmAs
 sync_venv /opt/ray_venvs/nemo_rl.experience.sync_rollout_actor.SyncRolloutActor --extra vllm
 sync_venv /opt/ray_venvs/nemo_rl.environments.nemo_gym.NemoGym --extra nemo_gym
 sync_venv /opt/ray_venvs/nemo_rl.environments.sandbox.nemo_gym_actor.SandboxedGymActor --extra nemo_gym
+# Drop archives no remaining venv links to before this layer is committed.
+prune-unreferenced-uv-archives.sh
 chmod-newer-than.sh "${stamp}" /opt/ray_venvs /opt/nemo_rl_venv
 EOF
 
@@ -434,36 +440,7 @@ find /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs -type d \
        -o -path '*/site-packages/mooncake_transfer_engine_cuda13-*.dist-info' \
        -o -path '*/site-packages/mooncake_transfer_engine_cuda13.libs' \) \
     -prune -exec rm -rf {} + || true
-set +x
-for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
-    if ! compgen -G "${d}wandb-*.dist-info" >/dev/null \
-        && ! compgen -G "${d}mlflow-*.dist-info" >/dev/null \
-        && ! compgen -G "${d}mlflow_skinny-*.dist-info" >/dev/null \
-        && ! compgen -G "${d}hydra_core-*.dist-info" >/dev/null \
-        && ! compgen -G "${d}virtualenv-*.dist-info" >/dev/null \
-        && ! compgen -G "${d}sqlparse-*.dist-info" >/dev/null \
-        && ! compgen -G "${d}gitpython-*.dist-info" >/dev/null \
-        && ! compgen -G "${d}mooncake_transfer_engine_cuda13-*.dist-info" >/dev/null; then
-        continue
-    fi
-    if compgen -G "${d}mooncake_transfer_engine_cuda13-*.dist-info" >/dev/null; then
-        for index in "${UV_CACHE_DIR}"/wheels-v*/; do
-            if [ -d "${index}" ]; then
-                find "${index}" -type l -lname "*$(basename "${d}")*" -delete
-            fi
-        done
-        rm -rf "${d}"
-        continue
-    fi
-    find /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs -lname "*$(basename "${d}")*" -print -quit 2>/dev/null | grep -q . && continue
-    for index in "${UV_CACHE_DIR}"/wheels-v*/; do
-        if [ -d "${index}" ]; then
-            find "${index}" -type l -lname "*$(basename "${d}")*" -delete
-        fi
-    done
-    rm -rf "${d}"
-done
-set -x
+prune-unreferenced-uv-archives.sh
 chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs
 EOF
 
@@ -498,20 +475,9 @@ ARG RUNTIME_UID=1000
 ARG RUNTIME_GID=1000
 
 # Megatron-Bridge's build env pins setuptools<80, which the project override
-# cannot reach. Drop unreferenced setuptools archives (CVE in vendored jaraco).
-# The mcore venv's locked setuptools is referenced, so it stays.
-RUN <<"EOF" bash -eu
-for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
-    ls "${d}"setuptools-*.dist-info >/dev/null 2>&1 || continue
-    find /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs -lname "*$(basename "${d}")*" -print -quit 2>/dev/null | grep -q . && continue
-    for index in "${UV_CACHE_DIR}"/wheels-v*/; do
-        if [ -d "${index}" ]; then
-            find "${index}" -type l -lname "*$(basename "${d}")*" -delete
-        fi
-    done
-    rm -rf "${d}"
-done
-EOF
+# cannot reach. Unreferenced archives, including that setuptools, are dropped
+# here. A referenced archive stays. This layer only shrinks files it created.
+RUN prune-unreferenced-uv-archives.sh
 
 # Keep nvcc, gcc, libibverbs, git, and curl: DeepEP JIT and native env builds need them.
 # Do not prune /opt/uv_cache. Nsight is removed for Go stdlib CVEs; it lives in an
@@ -542,18 +508,21 @@ ENV VIRTUAL_ENV=/opt/nemo_rl_venv \
 RUN chown root:${RUNTIME_GID} /opt/ray_venvs /opt/gym_venvs && \
     chmod 1775 /opt/ray_venvs /opt/gym_venvs
 
-# NeMo-RL patches vllm in place and writes a per-venv py_executable. The shared
-# symlink is read-only and would be one copy for every venv. cp -rL makes each
-# venv's copy private.
+# NeMo-RL patches vllm .py files per venv, so those become private copies.
+# Binaries stay shared in /opt/uv_cache.
 RUN <<"EOF" bash -eu
 set -x
 for sp in /opt/ray_venvs/*/lib/python*/site-packages; do
     [ -d "${sp}/vllm" ] || continue
-    cp -rL --preserve=mode,timestamps "${sp}/vllm" "${sp}/.vllm.private"
-    rm -rf "${sp}/vllm"
-    mv "${sp}/.vllm.private" "${sp}/vllm"
-    chmod -R a+rX "${sp}/vllm"
     chown -R ${RUNTIME_UID}:${RUNTIME_GID} "${sp}/vllm"
+    while IFS= read -r -d '' link; do
+        tmp="${link}.private"
+        cp -L --preserve=mode,timestamps "${link}" "${tmp}"
+        rm -f "${link}"
+        mv "${tmp}" "${link}"
+        chown ${RUNTIME_UID}:${RUNTIME_GID} "${link}"
+        chmod a+r "${link}"
+    done < <(find "${sp}/vllm" -type l -name '*.py' -print0)
 done
 EOF
 
