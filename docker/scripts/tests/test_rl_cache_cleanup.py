@@ -97,13 +97,16 @@ def test_prune_drops_files_v0_blobs_with_no_archive_name(tmp_path: Path) -> None
     assert (cache / "files-v0").is_dir()
 
 
-@pytest.mark.parametrize("stage", [0, 1], ids=["cache-warming", "worker-venvs"])
-def test_rl_syncs_skip_unused_mooncake_wheels(stage: int) -> None:
-    dockerfile = Path(__file__).parents[2] / "rl/Dockerfile.nhx-rl-base"
-    content = dockerfile.read_text()
+@pytest.mark.parametrize(
+    "script_name",
+    ["warm-uv-cache.sh", "sync-worker-venvs.sh"],
+    ids=["cache-warming", "worker-venvs"],
+)
+def test_rl_syncs_skip_unused_mooncake_wheels(script_name: str) -> None:
+    content = (Path(__file__).parents[2] / "rl/scripts" / script_name).read_text()
     blocks = content.split("SKIP=(\n")[1:]
-    assert len(blocks) == 2, "Keep coverage aligned with both RL sync stages"
-    array = "SKIP=(\n" + blocks[stage].split("\n)", 1)[0] + "\n)\n"
+    assert len(blocks) == 1, "Each sync script skips mooncake in one place"
+    array = "SKIP=(\n" + blocks[0].split("\n)", 1)[0] + "\n)\n"
     result = subprocess.run(
         ["bash", "-eu", "-c", array + 'printf "%s\\n" "${SKIP[@]}"'],
         check=True,

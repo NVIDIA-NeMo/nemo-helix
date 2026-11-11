@@ -198,7 +198,7 @@ def test_safe_synthesizer_sentence_transformers_security_pin() -> None:
 
 def test_rl_virtualenv_patch_precedes_unreferenced_cache_cleanup() -> None:
     """Patch runtime environments and remove old archives, not just metadata."""
-    text = (ROOT / "docker/rl/Dockerfile.nhx-rl-base").read_text()
+    text = (ROOT / "docker/rl/scripts/pin-venv-packages.sh").read_text()
     assert 'm.version("virtualenv")' in text
     assert '--directory /tmp --python "${py}" --upgrade-package virtualenv "virtualenv>=21.14.9"' in text
     upgrade = text.index('"virtualenv>=21.14.9"')
