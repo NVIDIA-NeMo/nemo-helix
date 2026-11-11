@@ -365,6 +365,48 @@ async def test_delete_missing_group_returns_false(mock_dispatcher, mock_store):
 
 
 # ---------------------------------------------------------------------------
+# Individual member ops by id: a group member's name is unique only within its
+# parent group, so the terminal-op re-fetch must be by the member's global id.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rerun_member_job_by_id_succeeds(mock_dispatcher, mock_store):
+    """rerun_job reruns a failed group member addressed by its id.
+
+    A member's name is unique only within its parent group, so a re-fetch by
+    workspace-scoped name would miss it. The rerun re-fetches by the member's
+    immutable global id instead, which resolves the parented member exactly.
+    """
+    group = await mock_dispatcher.create_job_group(_create_request(), DEFAULT_WORKSPACE)
+    member = (await _members_of(mock_dispatcher, group.id))[0]
+    await _fail_member_via_rollup(mock_dispatcher, mock_store, member)
+    assert await _member_status(mock_store, member) == HelixJobStatus.ERROR
+
+    result = await mock_dispatcher.rerun_job(member.id, DEFAULT_WORKSPACE)
+
+    assert result is not None
+    # A fresh attempt is created back in CREATED (non-terminal), not a delete-and-recreate.
+    assert await _member_status(mock_store, member) == HelixJobStatus.CREATED
+    attempts = await mock_store.list(HelixJobAttempt, filter_obj={"job": member.id})
+    assert len(attempts.data) == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_member_job_by_id_succeeds(mock_dispatcher, mock_store):
+    """delete_job deletes a terminal group member addressed by its id (parent-scoped name re-fetch not needed)."""
+    group = await mock_dispatcher.create_job_group(_create_request(), DEFAULT_WORKSPACE)
+    member = (await _members_of(mock_dispatcher, group.id))[0]
+    await _set_member_status(mock_store, member, HelixJobStatus.COMPLETED)
+
+    deleted = await mock_dispatcher.delete_job(member.id, DEFAULT_WORKSPACE)
+
+    assert deleted is True
+    with pytest.raises(EntityNotFoundError):
+        await mock_store.get_by_id(HelixJob, member.id)
+
+
+# ---------------------------------------------------------------------------
 # fail_fast roll-up: a member reaching ERROR sweeps its siblings
 # ---------------------------------------------------------------------------
 

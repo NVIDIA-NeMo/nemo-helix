@@ -1229,30 +1229,23 @@ class JobDispatcher:
         if job_entity is None:
             return False
         async with _get_job_mutation_lock(job_entity.name, workspace):
-            return await self._delete_job_locked(
-                job_entity.name, workspace, expected_id=job_entity.id, parent=job_entity.parent
-            )
+            return await self._delete_job_locked(job_entity.id, workspace)
 
-    async def _delete_job_locked(
-        self, job_name: str, workspace: str, expected_id: str | None = None, parent: str | None = None
-    ) -> bool:
+    async def _delete_job_locked(self, job_id: str, workspace: str) -> bool:
         """Delete a terminal job while holding the per-job mutation lock.
 
-        ``expected_id`` guards against a same-name replacement: the identifier was
-        resolved before the lock was taken, so re-verify the re-fetched job is
-        still the one we resolved before deleting anything.
-
-        ``parent`` scopes the name re-fetch to the job's parent (e.g. a job group).
-        A member job is parent-scoped, so a name lookup without it would resolve
-        ``parent IS NULL`` and miss the member entirely.
+        Re-fetches by the job's immutable, globally-unique ID (not its name), so the
+        lookup needs no workspace/parent scoping and cannot resolve a same-name
+        replacement: a parent-scoped member job (unique only within its group) is
+        found exactly, and the race a name re-fetch guarded against -- a different
+        job created with the same name between the pre-lock resolve and the lock --
+        cannot happen, because an ID identifies one entity for all time.
         """
         try:
-            job_entity = await self.store.get(HelixJob, job_name, workspace=workspace, parent=parent)
+            job_entity = await self.store.get_by_id(HelixJob, job_id)
         except EntityNotFoundError:
             return False
-        if expected_id is not None and job_entity.id != expected_id:
-            # A same-name job was recreated between resolve and lock acquisition;
-            # the originally-resolved job is gone. Do not touch the replacement.
+        if job_entity.workspace != workspace:
             return False
 
         extras = {"job": job_entity.name, "workspace": job_entity.workspace}
@@ -2383,44 +2376,52 @@ class JobDispatcher:
         if job_entity is None:
             return None
         async with _get_job_mutation_lock(job_entity.name, workspace):
-            return await self._rerun_job_locked(
-                job_entity.name, workspace, expected_id=job_entity.id, auth_context=auth_context
-            )
+            return await self._rerun_job_locked(job_entity.id, workspace, auth_context=auth_context)
 
     async def _rerun_job_locked(
         self,
-        job_name: str,
+        job_id: str,
         workspace: str,
-        expected_id: str | None = None,
         auth_context: AuthContext | None = None,
     ) -> HelixJobResponse | None:
         """Re-run a terminal job while holding the per-job mutation lock.
 
-        ``expected_id`` guards against a same-name replacement created between the
-        pre-lock resolve and lock acquisition (see ``_delete_job_locked``).
+        Re-fetches by the job's immutable, globally-unique ID (not its name), so the
+        lookup needs no workspace/parent scoping and cannot resolve a same-name
+        replacement: a parent-scoped member job (unique only within its group) is
+        found exactly, and the same-name-swap race a name re-fetch guarded against
+        cannot happen, because an ID identifies one entity for all time.
         """
         try:
-            job_entity = await self.store.get(HelixJob, job_name, workspace=workspace)
+            job_entity = await self.store.get_by_id(HelixJob, job_id)
         except EntityNotFoundError:
             return None
-        if expected_id is not None and job_entity.id != expected_id:
-            # The originally-resolved job was replaced by a same-name job; don't rerun it.
+        if job_entity.workspace != workspace:
             return None
 
-        attempt = await self.get_current_attempt(job_entity.name, workspace=job_entity.workspace)
-        if attempt is None:
+        # Read the current attempt straight off the job entity (already fetched by id): a member
+        # job's name is parent-scoped, so a name-based re-resolve (get_current_attempt) would miss it.
+        attempt = (
+            await self.get_attempt(job_entity.current_attempt_id)
+            if job_entity.current_attempt_id is not None
+            else None
+        )
+        if attempt is None or attempt.job != job_entity.id or attempt.workspace != workspace:
             return None
 
-        # Rerun continues a failed attempt from surviving storage. Other statuses
-        # are a different operation: paused jobs resume, and successful or cancelled
-        # jobs are finished.
-        if attempt.status != HelixJobStatus.ERROR:
+        # Rerun continues an ERROR or CANCELLED attempt from surviving storage as a new attempt.
+        # The "don't resurrect a job a human cancelled" rule governs how a cancel SETTLES, not a
+        # permanent ban: an explicit rerun request is the caller overriding that prior intent, so a
+        # cancelled job is rerunnable just like an errored one (its storage and spec survive the
+        # same way). Other statuses are a different operation: a paused job resumes, and a job that
+        # already succeeded is finished -- make a new job.
+        if attempt.status not in (HelixJobStatus.ERROR, HelixJobStatus.CANCELLED):
             if attempt.status == HelixJobStatus.PAUSED:
                 detail = f"Cannot rerun job '{job_entity.name}': this job is paused, use resume."
             else:
                 detail = (
                     f"Cannot rerun job '{job_entity.name}': rerun applies to a job that ended in error "
-                    f"(current status is '{attempt.status.value}')."
+                    f"or was cancelled (current status is '{attempt.status.value}')."
                 )
             raise JobOperationConflictError(detail)
 
