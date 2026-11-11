@@ -111,6 +111,15 @@ class _JobsMethods:
     rerun_job = method(endpoints.rerun_job)
     update_job_control = method(endpoints.update_job_control)
 
+    # Job groups (bulk create + CRUD + lifecycle)
+    create_job_group = method(endpoints.create_job_group)
+    list_job_groups = method(endpoints.list_job_groups)
+    get_job_group = method(endpoints.get_job_group)
+    update_job_group = method(endpoints.update_job_group)
+    delete_job_group = method(endpoints.delete_job_group)
+    cancel_job_group = method(endpoints.cancel_job_group)
+    retry_job_group = method(endpoints.retry_job_group)
+
     # Job status
     get_job_status = method(endpoints.get_job_status)
 

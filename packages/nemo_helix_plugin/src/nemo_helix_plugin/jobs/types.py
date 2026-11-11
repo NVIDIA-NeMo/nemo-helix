@@ -656,6 +656,12 @@ class ListStepsQueryParams(TypedDict, total=False):
     filter: NotRequired[str | dict[str, Any]]
 
 
+class ListJobGroupsQueryParams(TypedDict, total=False):
+    page: NotRequired[int]
+    page_size: NotRequired[int]
+    sort: NotRequired[str]
+
+
 class ListAttemptsQueryParams(TypedDict, total=False):
     page: NotRequired[int]
     page_size: NotRequired[int]

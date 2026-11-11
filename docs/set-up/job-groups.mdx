@@ -1,0 +1,310 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Job Groups and Bulk Submission"
+description: ""
+---
+<a id="job-groups"></a>
+
+A **job group** is a set of related jobs that you submit and manage as one unit.
+Its reason to exist is bulk submission: you describe one shared job **template**
+plus a list of small per-member entries, and the platform expands that into
+every member job in a single call — submitting thousands of jobs without making
+thousands of requests.
+
+Group members are **independent**. There is no ordering between them, no DAG,
+and no dependency edges — the group is a management handle over a set of jobs
+that happen to share a shape, not a workflow. Membership is expressed only
+through the group: each member job is created already parented to the group, and
+you find a group's members by their parent.
+
+A group is distinct from a single [platform job](/documentation/kubernetes-deployment/setup/jobs).
+Reach for a group when you want to run the same job shape many times over
+varying inputs — a parameter sweep, a per-shard batch, a fan-out over a dataset —
+and manage the whole run (its aggregate status, a group-wide cancel, a retry of
+the failures) as one thing.
+
+## Bulk Create: Template Plus Members
+
+A create request carries one shared `template` and a list of `members`. For each
+member the server builds a full job from the template, applies that member's
+differences, and parents the job to the group:
+
+- **`template`** — a shared job specification (the same `platform_spec` shape a
+  single job uses). It is expanded into every member before any per-member
+  differences are applied.
+- **`spec`** — a shared plugin-defined spec (the opaque per-plugin payload)
+  copied onto every member job.
+- **`members[]`** — the per-member entries. Each entry carries only what differs
+  from the template:
+  - **`name`** — the member job's name. Member names must be unique within the
+    group.
+  - **`config_patch`** — per-member overrides, deep-merged into **every**
+    template step's `config`. Keys present in the patch win over the template;
+    nested dictionaries merge recursively, other values replace. This is how one
+    template becomes N distinct jobs — each member patches in its own input path,
+    parameter value, or shard index.
+  - **`timeout_seconds`** — an optional per-member per-step staleness timeout
+    that overrides the group default for this member (see
+    [Timeouts](#timeout-propagation)).
+
+The whole template is validated once, up front, against the configured execution
+profiles. An invalid template fails the create request before any member job is
+created, so you never get a half-expanded group.
+
+<Tabs>
+
+<Tab title="CLI">
+
+Pass the group body as a JSON file (or stdin). The CLI does not take the
+template and members as individual flags because they are structured — `create`
+reads them from `--input-file` or `--input-data`:
+
+```bash
+nemo jobs groups create my-sweep \
+  --workspace default \
+  --input-file group.json
+```
+
+A minimal `group.json` with a shared template and two members:
+
+```json
+{
+  "source": "api-reference",
+  "template": {
+    "steps": [
+      {
+        "name": "run",
+        "executor": { "provider": "cpu", "container": { "image": "python:3.11" } },
+        "config": { "iterations": 10 }
+      }
+    ]
+  },
+  "spec": {},
+  "fail_fast": false,
+  "default_timeout_seconds": 3600,
+  "members": [
+    { "name": "shard-0", "config_patch": { "shard": 0 } },
+    { "name": "shard-1", "config_patch": { "shard": 1 }, "timeout_seconds": 7200 }
+  ]
+}
+```
+
+Here both members inherit the template's `iterations: 10`; `config_patch` adds a
+distinct `shard` to each, and `shard-1` overrides the group's one-hour default
+timeout with its own two hours.
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.types import CreateJobGroupRequest, JobGroupMember
+
+jobs_client = JobsClient.from_config()
+
+group = jobs_client.create_job_group(
+    workspace="default",
+    body=CreateJobGroupRequest(
+        name="my-sweep",
+        source="api-reference",
+        template={
+            "steps": [
+                {
+                    "name": "run",
+                    "executor": {"provider": "cpu", "container": {"image": "python:3.11"}},
+                    "config": {"iterations": 10},
+                }
+            ]
+        },
+        fail_fast=False,
+        default_timeout_seconds=3600,
+        members=[
+            JobGroupMember(name="shard-0", config_patch={"shard": 0}),
+            JobGroupMember(name="shard-1", config_patch={"shard": 1}, timeout_seconds=7200),
+        ],
+    ),
+).data()
+print(group.name, group.status, group.member_count)
+```
+
+</Tab>
+
+</Tabs>
+
+### Create Request Fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `source` | Yes | Free-form origin label, as on a single job. |
+| `template` | Yes | Shared job `platform_spec` expanded into every member. |
+| `members` | Yes | Per-member entries (at least one). Each expands into one parented job. |
+| `name` | No | Group name. Auto-generated when omitted. |
+| `spec` | No | Shared plugin-defined spec copied onto every member. |
+| `description` | No | Human description of the group. |
+| `project` | No | Project URN. |
+| `fail_fast` | No | Stop the rest of the group when a member fails. Defaults to `false`. See [Fail-fast](#fail-fast). |
+| `default_timeout_seconds` | No | Group-default per-step staleness timeout propagated into each member. See [Timeouts](#timeout-propagation). |
+| `max_concurrent_jobs` | No | Recorded ceiling on concurrently-running members. **Not yet enforced** — see [Not yet available](#not-yet-available). |
+| `custom_fields` | No | Arbitrary metadata stored on the group. |
+
+## Group Status
+
+A group's `status` is an aggregate **derived from its members' statuses** and
+kept current as members change. You do not set it directly — it reflects where
+the members are, plus a top-down `cancelling` intent when you cancel the group
+(see below). A group is terminal only once every member is terminal.
+
+| Status | Meaning |
+| --- | --- |
+| `pending` | Every member is still in `created` (nothing has started), or the group has no members. |
+| `running` | At least one member is active, pending, or otherwise past `created`, and the group is not terminal. |
+| `completed` | Every member completed successfully. |
+| `failed` | Every member is terminal and at least one errored. |
+| `cancelling` | A group-level cancel has been requested and is sweeping the group's members; set when you cancel the group and held until every member is terminal. |
+| `cancelled` | Every member is terminal and at least one was cancelled (and none errored). |
+
+Precedence when every member is terminal: any error makes the group `failed`;
+otherwise any cancellation makes it `cancelled`; otherwise it is `completed`.
+`cancelling` is a group-level intent recorded by a [group cancel](#cancel-and-retry) —
+a single member cancelling on its own does not move the group to `cancelling`.
+
+## Manage a Group
+
+Get, list, update, and delete operate on the group as a whole.
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+# Get a group, including its aggregate status and member count
+nemo jobs groups get my-sweep --workspace default
+
+# List groups (newest first), with aggregate status
+nemo jobs groups list --workspace default
+
+# Update mutable metadata only
+nemo jobs groups update my-sweep --workspace default --fail-fast
+
+# Delete the group and all of its members
+nemo jobs groups delete my-sweep --workspace default
+```
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.types import UpdateJobGroupRequest
+
+jobs_client = JobsClient.from_config()
+
+group = jobs_client.get_job_group(name="my-sweep", workspace="default").data()
+print(group.status, group.member_count)
+
+for group in jobs_client.list_job_groups(workspace="default").items():
+    print(group.name, group.status)
+
+jobs_client.update_job_group(
+    name="my-sweep",
+    workspace="default",
+    body=UpdateJobGroupRequest(fail_fast=True),
+).data()
+
+jobs_client.delete_job_group(name="my-sweep", workspace="default")
+```
+
+</Tab>
+
+</Tabs>
+
+`get` and `list` include the derived aggregate `status` and the group's
+`member_count`. **Update** changes only the group's own mutable metadata —
+`description`, `fail_fast`, `default_timeout_seconds`, `max_concurrent_jobs`, and
+`custom_fields`. You cannot add or remove members through an update, and the
+derived `status` is never writable. **Delete** removes the group and all of its
+member jobs; every member must already be in a terminal state, or the request is
+rejected.
+
+## Fail-fast
+
+When a group is created with `fail_fast: true`, a single member reaching the
+`error` state stops the rest of the group: the platform cancels every
+non-terminal sibling. Only a genuine member **failure** triggers the sweep —
+cancelling one member yourself does not fail-fast the group. The sweep is
+best-effort and runs in the background after the failed member settles, so
+siblings move to `cancelled` shortly after the failure rather than instantly.
+
+`fail_fast` is mutable through [update](#manage-a-group): clearing it before a
+member fails prevents a later failure from sweeping the group.
+
+## Timeout Propagation
+
+A group's `default_timeout_seconds` is propagated into each member as that
+member's per-step staleness timeout. Resolution per member is:
+
+1. The member's own `timeout_seconds`, if set, wins.
+1. Otherwise the group's `default_timeout_seconds` applies.
+1. When neither is set, each template step keeps its own configured value.
+
+This lets you set one group-wide timeout and still give an outlier member more
+(or less) headroom without rewriting the template.
+
+## Cancel and Retry
+
+Cancel and retry act on the whole group in one call, so recovering or stopping a
+thousand-member run is one operation, not a loop over members.
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+# Request cancellation of the whole group
+nemo jobs groups cancel my-sweep --workspace default
+
+# Retry the failed members of the group
+nemo jobs groups retry my-sweep --workspace default
+```
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+from nemo_helix_plugin.jobs.client import JobsClient
+
+jobs_client = JobsClient.from_config()
+
+jobs_client.cancel_job_group(name="my-sweep", workspace="default").data()
+jobs_client.retry_job_group(name="my-sweep", workspace="default").data()
+```
+
+</Tab>
+
+</Tabs>
+
+**Cancel** records the group's `cancelling` intent in one write and returns
+immediately; every non-terminal member is then cancelled in the background. Once
+all members are terminal the group settles to `cancelled`. The background
+teardown is best-effort: if it is lost, members finish naturally and the group
+settles to its real terminal status — re-request cancellation to drive it again.
+
+**Retry** reruns every non-succeeded member as a fresh attempt (not a
+delete-and-recreate), in the background. Both failed (`error`) members and
+`cancelled` members are rerun — in a `fail_fast` group the member that failed and
+the siblings cancelled alongside it are all unfinished work, so all restart. Only
+succeeded members are left untouched. As retried members re-enter `created` the
+group re-opens to a non-terminal status. Retrying a group that is `cancelling` is
+rejected, and retrying a group with no non-succeeded members is a harmless no-op.
+
+## Not Yet Available
+
+The following are visible on the API but **not yet enforced**. Do not rely on
+them as working behavior:
+
+- **Concurrency limiting.** `max_concurrent_jobs` is recorded on the group but is
+  **inert** — it does not gate how many members run at once, and it does not gate
+  creation. Admission enforcement is tracked separately and is not part of this
+  release. All expanded members are schedulable immediately.

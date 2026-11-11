@@ -9,6 +9,8 @@ description: ""
 
 This section describes how to configure jobs in NeMo Helix. The Jobs service is responsible for scheduling batch jobs, collecting telemetry and managing job results.
 
+To submit and manage many related jobs as one unit — one shared template expanded into thousands of member jobs in a single call — see [Job Groups and Bulk Submission](/documentation/kubernetes-deployment/setup/job-groups).
+
 ## Viewing Job Attempts
 
 Each job run creates an attempt. The job response includes `attempt_id` for the current attempt. List the attempt history or retrieve the current attempt without first looking up its ID:
