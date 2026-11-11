@@ -426,7 +426,8 @@ def build_manifest_dict(
         agent["relay_artifacts"] = relay_artifacts
     if egress:
         agent["egress"] = egress
-    return {"agent": agent, "backends": backends or []}
+    # The guardrails defender writes each rail from the attack's execution trace, read from NeMo Relay.
+    return {"agent": agent, "backends": backends or [], "traces": {"provider": "relay"}}
 
 
 # --------------------------------------------------------------------------- #
