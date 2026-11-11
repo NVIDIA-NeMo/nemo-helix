@@ -6,7 +6,7 @@ package authz_test
 import data.authz
 
 workload_secret_roles := {
-	"JobRunner": {"service_only": true, "permissions": ["secrets.access"]},
+	"JobRunner": data.authz.roles.JobRunner,
 	"Reader": {"permissions": ["secrets.read"]},
 }
 
@@ -33,7 +33,7 @@ test_verified_workload_can_use_its_own_jobrunner_secret_grant if {
 	workload_secret_allowed("service_principal", "creator")
 }
 
-test_unverified_actor_cannot_use_service_only_role if {
+test_unverified_actor_cannot_read_secret_with_jobrunner_role if {
 	not workload_secret_allowed("principal", "creator")
 }
 
