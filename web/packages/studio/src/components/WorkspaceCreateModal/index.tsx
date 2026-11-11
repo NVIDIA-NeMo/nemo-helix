@@ -116,6 +116,10 @@ export const WorkspaceCreateModal: FC<WorkspaceCreateModalProps> = ({
 
       if (errorDetail === `Workspace ${data.name} already exists.`) {
         setError('name', { message: errorDetail });
+      } else if (error instanceof AxiosError && error.response?.status === 403) {
+        toast.error(
+          "You don't have permission to create workspaces. Ask an administrator for access."
+        );
       } else {
         // Extract message from errorDetail if it's an array with msg property
         let errorMessage: string;
