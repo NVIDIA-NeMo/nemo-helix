@@ -33,14 +33,7 @@ from nhx.common.entities.client import (
     EntityNotFoundError,
     EntityStoreError,
 )
-from nhx.common.files.storage_config import (
-    GithubStorageConfig,
-    GitStorageConfig,
-    HuggingfaceStorageConfig,
-    LocalStorageConfig,
-    NGCStorageConfig,
-    S3StorageConfig,
-)
+from nhx.common.files.storage_config import LocalStorageConfig, S3StorageConfig
 from nhx.common.observability import BaseContext, scoped_app_ctx
 from nhx.common.secrets.exceptions import SecretAccessDeniedError, SecretNotFoundError
 from nhx.common.service.dependencies import (
@@ -48,12 +41,14 @@ from nhx.common.service.dependencies import (
     get_nemo_client,
     get_service_config_factory,
 )
+from nhx.core.files.api.endpoint_helpers import HTTP_EXCEPTION_DETAIL as _HTTP_EXCEPTION_DETAIL
 from nhx.core.files.api.endpoint_helpers import (
     CacheContext,
     get_cache_status_for_files,
     get_download_file_info,
     get_fileset,
     list_storage_files,
+    require_writable_storage,
     resolve_storage_secrets_for_user,
     stream_file_download,
 )
@@ -142,18 +137,6 @@ _REFERENCE_COUNT_PAGE_SIZE = 1
 def _sanitize_for_log(value: object) -> str:
     """Strip line breaks from a value before logging."""
     return str(value).replace("\r", "").replace("\n", "")
-
-
-_HTTP_EXCEPTION_DETAIL = {
-    "content": {
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {"detail": {"type": "string"}},
-            }
-        }
-    }
-}
 
 
 class _ModelFilesetReference(EntityBase):
@@ -893,20 +876,16 @@ async def download_file(
         )
 
 
-def _require_writable_storage(storage: StorageConfig) -> None:
-    """Reject unsupported mutations before resolving secrets or consuming a body."""
-    if isinstance(storage, (GitStorageConfig, GithubStorageConfig, HuggingfaceStorageConfig, NGCStorageConfig)):
-        raise HTTPException(
-            status_code=HTTP_409_CONFLICT,
-            detail=f"Fileset storage type '{storage.type}' is read-only",
-        )
-
-
 @router.put(
     "/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}",
     summary="Upload Fileset Content",
     status_code=HTTP_200_OK,
-    responses={HTTP_409_CONFLICT: {"description": "Fileset storage is read-only"}},
+    responses={
+        HTTP_409_CONFLICT: {
+            "description": "Fileset storage is read-only",
+            **_HTTP_EXCEPTION_DETAIL,
+        }
+    },
     openapi_extra={
         "requestBody": {
             "content": {
@@ -935,7 +914,14 @@ async def upload_file(
     """Upload file content to a fileset. Read-only storage returns HTTP 409."""
     logger.info(f"PUT /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
-    _require_writable_storage(fileset.storage)
+    # Preserve the immutable-fileset authorization error before capability checks.
+    service_source = fileset.custom_fields.get("service_source")
+    if service_source and not auth_client.principal.id.startswith("service:"):
+        raise HTTPException(
+            status_code=HTTP_403_FORBIDDEN,
+            detail="Access denied: This fileset's files are immutable",
+        )
+    require_writable_storage(fileset.storage)
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
@@ -947,14 +933,6 @@ async def upload_file(
     else:
         # Default to octet-stream for application/octet-stream or any other type
         chunk_processor = OctetStreamChunkProcessor()
-
-    # Temporary fix for making immutable datasets and preserving trust_remote_code
-    service_source = fileset.custom_fields.get("service_source")
-    if service_source and not auth_client.principal.id.startswith("service:"):
-        raise HTTPException(
-            status_code=HTTP_403_FORBIDDEN,
-            detail="Access denied: This fileset's files are immutable",
-        )
 
     # Get content length from request headers for backends that need it (e.g., S3)
     content_length_header = request.headers.get("content-length")
@@ -997,7 +975,12 @@ async def upload_file(
     "/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}",
     summary="Delete a specific file from a fileset",
     status_code=HTTP_200_OK,
-    responses={HTTP_409_CONFLICT: {"description": "Fileset storage is read-only"}},
+    responses={
+        HTTP_409_CONFLICT: {
+            "description": "Fileset storage is read-only",
+            **_HTTP_EXCEPTION_DETAIL,
+        }
+    },
 )
 async def delete_file(
     workspace: str,
@@ -1015,7 +998,7 @@ async def delete_file(
     """
     logger.info(f"DELETE /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
-    _require_writable_storage(fileset.storage)
+    require_writable_storage(fileset.storage)
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 

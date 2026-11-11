@@ -2867,6 +2867,13 @@ paths:
                 $ref: '#/components/schemas/FilesetFileOutput'
         '409':
           description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -2974,6 +2981,13 @@ paths:
                 $ref: '#/components/schemas/FilesetFileOutput'
         '409':
           description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -3058,7 +3072,9 @@ paths:
       description: 'Upload OTLP logs to a specified fileset in JSON or Protobuf format.
 
 
-        Supports both application/json and application/x-protobuf content types.'
+        Supports both application/json and application/x-protobuf content types.
+
+        Read-only storage returns HTTP 409 before reading the request body.'
       operationId: upload_otlp_logs_apis_files_v2_workspaces__workspace__filesets__name__otlp_v1_logs_post
       parameters:
       - name: workspace
@@ -3095,6 +3111,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OtelExportLogsServiceResponse'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
