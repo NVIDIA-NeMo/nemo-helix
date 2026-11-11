@@ -555,9 +555,11 @@ NeMo-RL **patches vLLM in place at worker startup** (`nemo_rl/models/generation/
 rewrites Python files under the package, including `v1/executor/ray_executor.py`, and takes a
 `<file>.patch_lock` beside each). Symlinking those files breaks that in two ways:
 
-1. **Permission** — the prefetched venvs are build-owned for the configured runtime UID
-   (1000 by default), so creating `ray_executor.py.patch_lock` fails with `EACCES` and the
-   `VllmAsyncGenerationWorker` actor dies in its creation task.
+1. **Permission** — the prefetched `.py` files are build-owned, and the patch rewrites them
+   in place. Creating `<file>.patch_lock` is optional: `_locked_file_patch` falls back to a
+   lock in the temp directory when that open raises `OSError`, so the lock failure alone does
+   not stop the actor. The rewrite of the `.py` file still has to succeed for the runtime UID
+   (1000 by default).
 2. **Sharing** — every vLLM-tier venv symlinks `ray_executor.py` to *one* physical copy in
    `/opt/uv_cache`. The patch writes a **per-venv `py_executable`** into it, so two venvs cannot
    share that file.
@@ -566,8 +568,8 @@ The publish stage gives the runtime user the `vllm/` directories and replaces ea
 with a private file. The `.so` files and headers are not patched (about 0.7 GB of the 0.76 GB
 tree) and stay symlinks into the one cache copy. Copying the whole tree made three extra copies.
 
-Running as root would silence the `EACCES` but leaves the shared `py_executable` intact — the first
-venv to patch wins and the next one launches under another venv's interpreter.
+Running as root would make that shared file writable. The first venv to patch still writes its
+`py_executable` into the one copy, and the next venv launches under that interpreter.
 
 Note this is *not* what upstream NeMo-RL does. Its published image symlinks too (74,567 symlinks vs
 925 real files in one vLLM venv, both vLLM venvs sharing one `ray_executor.py`), and it runs as

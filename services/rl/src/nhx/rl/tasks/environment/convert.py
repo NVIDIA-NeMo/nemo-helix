@@ -140,9 +140,27 @@ def rl_dependency_policy(nemo_rl_root: Path) -> tuple[list[str], list[str]]:
             "host applies during the offline install."
         )
     return (
-        _keep_pkg_resources_setuptools(list(uv_config["override-dependencies"])),
-        list(uv_config["constraint-dependencies"]),
+        _keep_pkg_resources_setuptools(_requirement_strings(uv_config["override-dependencies"])),
+        _requirement_strings(uv_config["constraint-dependencies"]),
     )
+
+
+def _requirement_strings(items: list) -> list[str]:
+    """Keep requirement lines and drop package-scoped uv override tables.
+
+    ``override-dependencies`` may name one package and replace only its dependencies.
+    ``uv pip compile --override`` takes requirement strings. A scoped table is not a
+    requirement, and its inner dependencies must not become global overrides.
+    """
+    lines: list[str] = []
+    for item in items:
+        if isinstance(item, str):
+            lines.append(item)
+            continue
+        if isinstance(item, dict) and "package" in item:
+            continue
+        raise ValueError(f"unsupported uv dependency entry: {item!r}")
+    return lines
 
 
 def _keep_pkg_resources_setuptools(overrides: list[str]) -> list[str]:

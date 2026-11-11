@@ -185,7 +185,6 @@ ARG UV_SYNC_MODE=--frozen
 # Then drop ray's vendored aiohttp, yarl, and jars, and PyNvVideoCodec's bundled FFmpeg, before prefetch
 # can symlink a venv at them. The package stays cached, so uv does not re-download it.
 RUN <<"EOF" bash -eu
-set -x
 umask 022
 export UV_LINK_MODE=symlink
 stamp=$(chmod-newer-than.sh mark)
@@ -236,7 +235,6 @@ EOF
 # nemo-sandboxed-gym is not installed in this image.
 RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/opentelemetry-overrides.txt,readonly \
     <<"EOF" bash -eu
-set -x
 umask 022
 export UV_LINK_MODE=symlink
 stamp=$(chmod-newer-than.sh mark)
@@ -276,7 +274,6 @@ EOF
 # enough. The editable root install follows the source COPY.
 RUN --mount=from=rl-cuda-ext-wheel,source=/wheels,target=/mnt/wheels,readonly \
     <<"EOF" bash -eu
-set -x
 umask 022
 export UV_LINK_MODE=symlink
 stamp=$(chmod-newer-than.sh mark)
@@ -371,7 +368,6 @@ ARG TARGETARCH
 RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/opentelemetry-overrides.txt,readonly \
     --mount=type=bind,source=docker/rl/hf-stack-overrides.txt,target=/tmp/hf-stack-overrides.txt,readonly \
     <<"EOF" bash -eu
-set -x
 umask 022
 export UV_LINK_MODE=symlink
 stamp=$(chmod-newer-than.sh mark)
@@ -511,7 +507,7 @@ RUN chown root:${RUNTIME_GID} /opt/ray_venvs /opt/gym_venvs && \
 # NeMo-RL patches vllm .py files per venv, so those become private copies.
 # Binaries stay shared in /opt/uv_cache.
 RUN <<"EOF" bash -eu
-set -x
+copied=0
 for sp in /opt/ray_venvs/*/lib/python*/site-packages; do
     [ -d "${sp}/vllm" ] || continue
     chown -R ${RUNTIME_UID}:${RUNTIME_GID} "${sp}/vllm"
@@ -522,8 +518,10 @@ for sp in /opt/ray_venvs/*/lib/python*/site-packages; do
         mv "${tmp}" "${link}"
         chown ${RUNTIME_UID}:${RUNTIME_GID} "${link}"
         chmod a+r "${link}"
+        copied=$((copied + 1))
     done < <(find "${sp}/vllm" -type l -name '*.py' -print0)
 done
+echo "Materialized ${copied} vllm .py symlinks as private copies"
 EOF
 
 ARG NHX_COLLECT_SOURCES=0

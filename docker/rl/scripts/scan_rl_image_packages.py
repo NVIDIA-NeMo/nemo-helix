@@ -2,11 +2,18 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Inventory downloaded Python packages in an nhx-rl-training image.
+"""Inventory Python packages on the filesystem of an nhx-rl-training container.
 
-Image identity is passed on the command line. The paths under /opt, /app, and
-/usr are the install locations named by the RL Dockerfiles and are searched
-inside the image.
+--registry and --tag are passed to `docker image inspect` for nhx-rl-training
+and nhx-rl-base. They do not select the filesystem that is scanned. Package
+files, dpkg, and /tmp/base-dpkg-packages.txt come from the process that runs
+this script. The CUDA base image name is read from Dockerfile.nhx-rl-base in
+the parent of this script's directory.
+
+Run it from a shell inside the training container. That shell needs the Docker
+CLI, a daemon that already has both images at --tag, and this script sitting
+next to Dockerfile.nhx-rl-base. Running it on the host records the host's
+packages under the inspected image's identity.
 
     python scan_rl_image_packages.py \\
         --registry nvcr.io/ORG/nemo-platform-dev --tag TAG
@@ -740,6 +747,7 @@ def main(argv=None):
             for child in path.iterdir():
                 if not (child / "pyvenv.cfg").is_file():
                     continue
+                known_paths.add(str(child))
                 for site in site_packages_of(child):
                     scan_site(site, str(child), referenced, records)
         elif item["path"] == "/opt/gym-wheels":

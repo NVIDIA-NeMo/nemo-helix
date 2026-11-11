@@ -33,7 +33,7 @@ shopt -s nullglob
 for archive in "${archives}"/*/; do
     [[ -d "${archive}" ]] || continue
     name="$(basename "${archive}")"
-    if grep -qx "${name}" "${referenced}"; then
+    if grep -qxF -e "${name}" "${referenced}"; then
         continue
     fi
     for index in "${cache_root}"/wheels-v*/; do
