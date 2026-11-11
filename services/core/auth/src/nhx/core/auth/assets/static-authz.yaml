@@ -797,14 +797,24 @@ authz:
         - platform:write
     /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id}:
       delete:
-        permissions:
-        - entities.delete
+        direct:
+          actor_perms:
+          - entities.delete
+        delegated:
+          actor_perms:
+          - entities.delete
+          subject_perms: []
         scopes:
         - entities:write
         - platform:write
       put:
-        permissions:
-        - entities.update
+        direct:
+          actor_perms:
+          - entities.update
+        delegated:
+          actor_perms:
+          - entities.update
+          subject_perms: []
         scopes:
         - entities:write
         - platform:write
@@ -970,14 +980,24 @@ authz:
         - platform:write
     /apis/files/v2/workspaces/{workspace}/filesets/by-id/{fileset_id}:
       delete:
-        permissions:
-        - filesets.delete
+        direct:
+          actor_perms:
+          - filesets.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.delete
         scopes:
         - files:write
         - platform:write
       get:
-        permissions:
-        - filesets.read
+        direct:
+          actor_perms:
+          - filesets.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.read
         scopes:
         - files:read
         - platform:read

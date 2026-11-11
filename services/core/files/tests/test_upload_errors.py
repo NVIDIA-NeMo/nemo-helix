@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException, Request
+from nhx.common.files.storage_config import S3StorageConfig
 from nhx.core.files.api.endpoint_helpers import UPSTREAM_STORAGE_ACCESS_DETAIL
 from nhx.core.files.api.v2.filesets import endpoints
 from nhx.core.files.exceptions import StorageAccessError
@@ -24,7 +25,9 @@ from nhx.core.files.exceptions import StorageAccessError
 )
 async def test_storage_authorization_failure_is_not_retryable(monkeypatch, caplog, backend_detail):
     """Keep authorization failures non-retryable and provider diagnostics in server logs."""
-    fileset = SimpleNamespace(name="files", storage=None, custom_fields={})
+    fileset = SimpleNamespace(
+        name="files", storage=S3StorageConfig(bucket="default", use_sdk_auth=True), custom_fields={}
+    )
     error = StorageAccessError(backend_detail)
     caplog.set_level(logging.ERROR, logger=endpoints.__name__)
     monkeypatch.setattr(endpoints, "get_fileset", AsyncMock(return_value=fileset))

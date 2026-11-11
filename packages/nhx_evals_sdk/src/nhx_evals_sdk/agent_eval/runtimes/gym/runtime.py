@@ -18,6 +18,7 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import (
     GymRuntimeConfig,
@@ -138,6 +139,7 @@ class GymAgentTaskRunner:
         tasks: Sequence[AgentEvalTask],
         config: AgentEvalRunConfig | None = None,
     ) -> list[AgentEvalTrial]:
+        run_id = config.run_id if config is not None and config.run_id else str(uuid4())
         cfg = self._config
         self._run_aggregations = None  # reset per run so a reused runner never leaks a prior run's numbers
         # don't cache the resolved env secrets in self because they may change between runs
@@ -178,6 +180,7 @@ class GymAgentTaskRunner:
             rollouts_path,
             tasks,
             index_to_task_id,
+            run_id=run_id,
             reward_key=cfg.reward_key,
             capture_dir=model_call_capture_dir(work_dir),
         )

@@ -797,3 +797,57 @@ async def test_workspace_batch_preserves_service_workspace_overrides(
     client = auth_client(pdp_client, "service:limited", None)
     assert await client.filter_workspaces({"private", "no-binding"}, actor=["iam.list"]) == {"no-binding"}
     assert len(pdp_calls) == 1
+
+
+@pytest.mark.parametrize("method", ["DELETE", "PUT"])
+@pytest.mark.parametrize(
+    ("actor", "subject", "expected"),
+    [
+        ("service:storage", None, True),
+        ("service:storage", "viewer", True),
+        ("service:viewer", None, False),
+        ("service:viewer", "administrator", False),
+    ],
+)
+def test_by_id_entity_mutations_require_actor_storage_grants(
+    policy: OPAPolicy, method: str, actor: str, subject: str | None, expected: bool
+) -> None:
+    """By-ID storage mutations require the service grant even when a user is represented."""
+    result = policy.evaluate(
+        {
+            "principal_id": actor,
+            "on_behalf_of_principal_id": subject or "",
+            "method": method,
+            "path": "/apis/entities/v2/workspaces/private/entities/default/by-id/default-id",
+        },
+        entrypoint=0,
+    )
+    assert result[0]["result"]["allowed"] is expected
+
+
+@pytest.mark.parametrize(
+    ("method", "actor", "subject", "expected"),
+    [
+        ("GET", "service:viewer", None, True),
+        ("DELETE", "service:viewer", None, False),
+        ("DELETE", "service:admin", None, True),
+        ("GET", "service:admin", "non-member", False),
+        ("GET", "service:admin", "viewer", True),
+        ("DELETE", "service:admin", "viewer", False),
+        ("DELETE", "service:viewer", "administrator", True),
+    ],
+)
+def test_by_id_filesets_use_subject_grants_for_delegated_requests(
+    policy: OPAPolicy, method: str, actor: str, subject: str | None, expected: bool
+) -> None:
+    """A privileged actor cannot supply a represented user's fileset permissions."""
+    result = policy.evaluate(
+        {
+            "principal_id": actor,
+            "on_behalf_of_principal_id": subject or "",
+            "method": method,
+            "path": "/apis/files/v2/workspaces/private/filesets/by-id/default-id",
+        },
+        entrypoint=0,
+    )
+    assert result[0]["result"]["allowed"] is expected
