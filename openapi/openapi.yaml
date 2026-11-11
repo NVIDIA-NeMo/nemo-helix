@@ -2836,7 +2836,8 @@ paths:
       tags:
       - Files
       summary: Upload Fileset Content
-      description: Upload file content to a fileset.
+      description: Upload file content to a fileset. Read-only storage returns HTTP
+        409.
       operationId: upload_file_apis_files_v2_workspaces__workspace__filesets__name_____path__put
       parameters:
       - name: workspace
@@ -2864,6 +2865,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetFileOutput'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -2941,7 +2951,7 @@ paths:
 
         Permanently deletes the file from the storage backend.
 
-        Returns metadata about the deleted file.'
+        Returns metadata about the deleted file. Read-only storage returns HTTP 409.'
       operationId: delete_file_apis_files_v2_workspaces__workspace__filesets__name_____path__delete
       parameters:
       - name: workspace
@@ -2969,6 +2979,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetFileOutput'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -3053,7 +3072,9 @@ paths:
       description: 'Upload OTLP logs to a specified fileset in JSON or Protobuf format.
 
 
-        Supports both application/json and application/x-protobuf content types.'
+        Supports both application/json and application/x-protobuf content types.
+
+        Read-only storage returns HTTP 409 before reading the request body.'
       operationId: upload_otlp_logs_apis_files_v2_workspaces__workspace__filesets__name__otlp_v1_logs_post
       parameters:
       - name: workspace
@@ -3090,6 +3111,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OtelExportLogsServiceResponse'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
