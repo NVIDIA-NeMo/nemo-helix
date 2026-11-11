@@ -7,6 +7,8 @@
 name: Nightly taskset runs e2e
 
 on:
+  push:
+    branches: [taskset-runs-ten-validation/ngoncharenko]
   # Off until 10 dispatched runs in a row are green; then a one-line commit turns it on.
   # schedule:
   #   - cron: "0 12 * * *"  # 12:00 UTC, ahead of the 16:00 America/Los_Angeles RC cut
@@ -53,7 +55,7 @@ jobs:
         shell: bash
         env:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
-          REPEAT: ${{ inputs.repeat || 1 }}
+          REPEAT: ${{ inputs.repeat || 10 }}
         run: |
           set -euo pipefail
           [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "source_sha must be a full commit SHA" >&2; exit 1; }
