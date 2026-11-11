@@ -1,11 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { TasksetInput } from '@nemo/sdk/generated/evals/schema';
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
+import { server } from '@studio/mocks/node';
 import { TasksetDetailRoute } from '@studio/routes/evaluation/tasksets/TasksetDetailRoute';
 import { renderRoute } from '@studio/tests/util/render';
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+
+const TASKSET_URL = `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace/tasksets/:name`;
 
 const renderDetail = (path = '/workspaces/default/evaluation/tasksets/sort-suite') =>
   renderRoute(undefined, {
@@ -13,6 +19,7 @@ const renderDetail = (path = '/workspaces/default/evaluation/tasksets/sort-suite
     routes: [
       { path: ROUTES.workspace.tasksetDetail, element: <TasksetDetailRoute /> },
       { path: ROUTES.workspace.tasksetDetailTab, element: <TasksetDetailRoute /> },
+      { path: ROUTES.workspace.tasksets, element: <div>tasksets list</div> },
     ],
   });
 
@@ -22,7 +29,6 @@ describe('TasksetDetailRoute', () => {
     expect(await screen.findByText('Sorting algorithm tasks')).toBeInTheDocument();
     expect(screen.getByText('r2')).toBeInTheDocument();
     expect(screen.getByText('latest, stable')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /edit|delete/i })).not.toBeInTheDocument();
   });
 
   it('lists member tasks by runner, and flags a ref that no longer resolves', async () => {
@@ -73,5 +79,55 @@ describe('TasksetDetailRoute', () => {
   it('shows an error for an unknown taskset', async () => {
     renderDetail('/workspaces/default/evaluation/tasksets/missing');
     expect(await screen.findByText(/not found/i)).toBeInTheDocument();
+  });
+
+  it('edits the taskset, keeping current members on their pinned revisions', async () => {
+    let body: TasksetInput | undefined;
+    server.use(
+      http.put(TASKSET_URL, async ({ request }) => {
+        body = (await request.json()) as TasksetInput;
+        return HttpResponse.json({});
+      })
+    );
+    renderDetail();
+    await userEvent.click(await screen.findByRole('button', { name: 'Open quick actions menu' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Edit' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Taskset: sort-suite' });
+    expect(within(dialog).getByRole('textbox', { name: 'Name' })).toBeDisabled();
+    const save = within(dialog).getByRole('button', { name: 'Save' });
+    expect(save).toBeDisabled();
+
+    const description = within(dialog).getByRole('textbox', { name: 'Description (optional)' });
+    await userEvent.clear(description);
+    await userEvent.type(description, 'Sorting tasks v2');
+    await userEvent.click(save);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(body).toEqual({
+      description: 'Sorting tasks v2',
+      tasks: [
+        'default/sort-ints',
+        `default/sort-strings#${'1'.padStart(64, 'c')}`,
+        'default/sort-stable',
+      ],
+    });
+  });
+
+  it('deletes the taskset and returns to the list', async () => {
+    const deleted = vi.fn();
+    server.use(
+      http.delete(TASKSET_URL, ({ params }) => {
+        deleted(params.name);
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    renderDetail();
+    await userEvent.click(await screen.findByRole('button', { name: 'Open quick actions menu' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    expect(await screen.findByText('tasksets list')).toBeInTheDocument();
+    expect(deleted).toHaveBeenCalledWith('sort-suite');
   });
 });

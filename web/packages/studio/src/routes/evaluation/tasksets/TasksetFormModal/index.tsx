@@ -9,9 +9,14 @@ import { ControlledTextInput } from '@nemo/common/src/components/form/Controlled
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { useEvalsListTasks } from '@nemo/sdk/generated/evals/evals-plugin-tasks-routes';
-import { useEvalsCreateTaskset } from '@nemo/sdk/generated/evals/evals-plugin-tasksets-routes';
+import {
+  useEvalsCreateTaskset,
+  useEvalsReplaceTaskset,
+} from '@nemo/sdk/generated/evals/evals-plugin-tasksets-routes';
+import type { Taskset, TasksetInput } from '@nemo/sdk/generated/evals/schema';
 import { Stack } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { invalidateTasksets, parseTaskRef } from '@studio/routes/evaluation/tasksets/helpers';
 import { getTasksetDetailRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import type { FC } from 'react';
@@ -33,17 +38,22 @@ const schema = z.object({
 type FormInput = z.input<typeof schema>;
 type FormOutput = z.output<typeof schema>;
 
-const DEFAULT_VALUES: FormInput = { name: '', description: '', tasks: [] };
-
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** When set, the modal edits this taskset (publishing a new revision) instead of creating one. */
+  taskset?: Taskset;
 }
 
-export const TasksetFormModal: FC<Props> = ({ open, onClose }) => {
+export const TasksetFormModal: FC<Props> = ({ open, onClose, taskset }) => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const defaultValues: FormInput = {
+    name: taskset?.name ?? '',
+    description: taskset?.description ?? '',
+    tasks: taskset?.tasks ?? [],
+  };
 
   const { data: tasks, isPending: tasksPending } = useEvalsListTasks(
     workspace,
@@ -51,57 +61,66 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose }) => {
     { query: { enabled: open } }
   );
 
+  // Current members keep their stored (digest-pinned) refs so an edit doesn't silently move them
+  // to latest; tasks added here go in bare and the server pins them to their latest revision.
+  const members = taskset?.tasks ?? [];
+  const memberNames = new Set(members.map((ref) => parseTaskRef(ref, workspace).name));
+  const items = [
+    ...members.map((ref) => ({ value: ref, children: parseTaskRef(ref, workspace).name })),
+    ...(tasks?.data ?? []).filter(({ name }) => !memberNames.has(name)).map(({ name }) => name),
+  ];
+
   const {
     control,
     handleSubmit,
     reset,
     watch,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<FormInput, unknown, FormOutput>({
     resolver: zodResolver(schema),
-    defaultValues: DEFAULT_VALUES,
+    defaultValues,
     mode: 'onTouched',
   });
 
   const preview = toValidEntityName(watch('name'), '');
-  const {
-    mutateAsync: createTaskset,
-    isPending,
-    error,
-    reset: resetMutation,
-  } = useEvalsCreateTaskset();
+  const create = useEvalsCreateTaskset();
+  const replace = useEvalsReplaceTaskset();
+  const { isPending, error } = taskset ? replace : create;
 
   const handleClose = () => {
-    reset(DEFAULT_VALUES);
-    resetMutation();
+    reset(defaultValues);
+    create.reset();
+    replace.reset();
     onClose();
   };
 
   const onSubmit = async ({ name, description, tasks }: FormOutput) => {
+    // PUT replaces the whole record, so carry over the fields this form doesn't edit.
+    const data: TasksetInput = {
+      tasks,
+      files_ref: taskset?.files_ref,
+      metadata: taskset?.metadata,
+      ...(description.trim() && { description: description.trim() }),
+    };
     try {
-      await createTaskset({
-        workspace,
-        name,
-        data: { tasks, ...(description.trim() && { description: description.trim() }) },
-      });
+      await (taskset ? replace : create).mutateAsync({ workspace, name, data });
     } catch {
       // Surfaced through `errorText`; the modal stays open.
       return;
     }
-    await queryClient.invalidateQueries({
-      queryKey: [`/apis/evals/v2/workspaces/${workspace}/tasksets`],
-    });
+    await invalidateTasksets(queryClient, workspace);
     handleClose();
-    navigate(getTasksetDetailRoute(workspace, name));
+    if (!taskset) navigate(getTasksetDetailRoute(workspace, name));
   };
 
   return (
     <FormModal
       open={open}
-      title="Create Taskset"
-      submitButtonText="Create"
+      title={taskset ? `Edit Taskset: ${taskset.name}` : 'Create Taskset'}
+      submitButtonText={taskset ? 'Save' : 'Create'}
       disabled={isPending}
       loading={isPending}
+      submitDisabled={!!taskset && !isDirty}
       errorText={error ? getErrorMessage(error) : null}
       onSubmit={handleSubmit(onSubmit)}
       onClose={handleClose}
@@ -109,11 +128,11 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose }) => {
       <Stack gap="density-lg">
         <ControlledTextInput
           label="Name"
-          disabled={isPending}
+          disabled={isPending || !!taskset}
           useControllerProps={{ name: 'name', control }}
           formFieldProps={{
             slotHelp:
-              !errors.name && preview ? (
+              !taskset && !errors.name && preview ? (
                 <>
                   Your taskset will be created as <span className="text-primary">{preview}</span>
                 </>
@@ -134,12 +153,14 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose }) => {
           label="Tasks"
           disabled={isPending}
           loading={tasksPending}
-          items={tasks?.data.map((task) => task.name) ?? []}
+          items={items}
           placeholder="Select tasks..."
           emptyStateMessage={tasksPending ? 'Loading tasks...' : 'No tasks in this workspace.'}
           useControllerProps={{ name: 'tasks', control }}
           formFieldProps={{
-            slotHelp: 'Each member is pinned to its latest revision when the taskset is created.',
+            slotHelp: taskset
+              ? 'Saving publishes a new revision. Current members stay on their pinned revision; added tasks are pinned to their latest.'
+              : 'Each member is pinned to its latest revision when the taskset is created.',
           }}
         />
       </Stack>
