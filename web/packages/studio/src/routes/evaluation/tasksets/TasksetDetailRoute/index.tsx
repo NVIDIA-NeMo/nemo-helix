@@ -22,6 +22,7 @@ import {
   isTasksetDetailTab,
   TASKSET_DETAIL_TABS,
 } from '@studio/routes/evaluation/tasksets/TasksetDetailRoute/tabs';
+import { TasksetDetailActions } from '@studio/routes/evaluation/tasksets/TasksetDetailRoute/TasksetDetailActions';
 import { TaskTable } from '@studio/routes/evaluation/tasksets/TasksetDetailRoute/TaskTable';
 import {
   getFilesetDetailRoute,
@@ -76,6 +77,7 @@ export const TasksetDetailRoute: FC = () => {
             </Flex>
           }
           slotDescription={taskset.description}
+          slotActions={<TasksetDetailActions taskset={taskset} />}
         />
         <KeyValueGrid
           items={[
