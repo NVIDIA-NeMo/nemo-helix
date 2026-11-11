@@ -811,6 +811,54 @@ class JobDispatcher:
                 group, member_count=await self._count_group_members(group.id, workspace)
             )
 
+    async def retry_job_group(
+        self, identifier: str, workspace: str, auth_context: AuthContext | None = None
+    ) -> JobGroupResponse | None:
+        """Retry the non-succeeded members of a job group: a thin fan-out over job-level retry.
+
+        The scaled-evals case is recovering a large run where some members did not
+        succeed without rerunning the ones that passed. Job-level retry already
+        exists (:meth:`rerun_job`, a new attempt via the in-process dispatcher seam),
+        so the group operation is a fan-out over it, NOT a new retry mechanism and NOT
+        a delete-and-recreate: each retried member gets a fresh attempt.
+
+        This resolves the group and returns it immediately; the per-member retry --
+        rerunning every ``ERROR`` and ``CANCELLED`` member through the normal per-job
+        rerun path -- happens asynchronously off the caller's request path (see
+        :meth:`retry_group_members`, which the endpoint fans out as a background task).
+        As retried members re-enter non-terminal ``CREATED``, the group status is
+        re-persisted to a non-terminal status, re-opening the group.
+
+        Scope is non-succeeded members: both ``ERROR`` and ``CANCELLED`` members
+        (including fail-fast-cancelled ones) are rerun -- retry is a group-level
+        operation, so collateral-cancelled siblings are unfinished work that restarts
+        alongside the errored member. Succeeded (``COMPLETED``) members are left
+        untouched, and still-running members are skipped. :meth:`rerun_job` accepts an
+        ``ERROR`` or ``CANCELLED`` attempt (see its companion seam change).
+
+        A group that is mid-cancel is a conflict: retrying members while a cancel
+        sweep drives them toward ``CANCELLED`` would fight that sweep, so a
+        ``CANCELLING`` group is refused (409). A group with no failed members is a
+        no-op -- it returns the group unchanged rather than erroring, so a retry that
+        races a member finishing, or a repeat retry, is harmless and idempotent.
+        """
+        resolved = await self._resolve_job_group(identifier, workspace)
+        if resolved is None:
+            return None
+        if resolved.status == JobGroupStatus.CANCELLING:
+            raise JobOperationConflictError(
+                f"Cannot retry job group '{resolved.name}': it is cancelling. "
+                "Wait for the cancel to settle before retrying."
+            )
+        operations_counter.add(1, attributes={"operation": "retry_job_group"})
+        logger.info(
+            "Requested JobGroup retry of failed members",
+            extra={"group": resolved.name, "workspace": workspace},
+        )
+        return self._build_job_group_response(
+            resolved, member_count=await self._count_group_members(resolved.id, workspace)
+        )
+
     async def _resolve_job_group(self, identifier: str, workspace: str) -> Optional[JobGroup]:
         """Resolve a job group by ID, falling back to its name within the workspace."""
         try:
@@ -1077,6 +1125,78 @@ class JobDispatcher:
                     extra={"job": member.id, "group": group_id, "workspace": workspace},
                 )
         return cancelled
+
+    async def retry_group_members(
+        self, group_id: str, workspace: str, auth_context: AuthContext | None = None
+    ) -> list[str]:
+        """Rerun every non-succeeded member of a group, returning the IDs rerun.
+
+        The fan-out behind group retry (:meth:`retry_job_group`), modeled on
+        :meth:`cancel_group_members`: it walks the members itself and reruns the terminal
+        non-succeeded ones -- both ``ERROR`` members and ``CANCELLED`` members. Retrying the
+        group is a group-level operation: in a ``fail_fast`` group the member that errored
+        AND the siblings that were cancelled as collateral are all unfinished work, so all
+        restart. (The per-member "don't resurrect a cancelled job" rule governs how a cancel
+        settles, not this explicit retry; :meth:`rerun_job` accepts a cancelled job for the
+        same reason.) Only ``COMPLETED`` members -- genuinely finished -- are left untouched,
+        as are non-terminal members (still running; nothing to retry).
+
+        Each rerun reuses :meth:`rerun_job`, which acquires that member's OWN mutation
+        lock. Members are distinct jobs from any lock the caller holds, and this fan-out
+        holds no group lock, so it does not deadlock -- the same per-job-lock discipline
+        as the cancel sweep and the fail-fast sweep.
+
+        Naturally idempotent under concurrent or repeated calls: :meth:`rerun_job` only
+        accepts a terminal non-succeeded member, so if two sweeps race on the same member the
+        loser finds it already non-terminal (``CREATED``) and raises
+        :class:`JobOperationConflictError`, which is swallowed per-member below. Best-
+        effort: an unexpected failure rerunning one member does not abandon its siblings.
+
+        Re-opening the group: :meth:`rerun_job` resets the member to ``CREATED`` with a
+        direct job write, which does NOT ride the member-status roll-up that
+        :meth:`update_job_status_from_step` triggers. So once members have been rerun back
+        to a non-terminal state this re-persists the group status explicitly (via
+        :meth:`_persist_group_status_for_member`, which recomputes the whole group and
+        re-opens the terminal status to a non-terminal one). Rerunning the cancelled members
+        too (not just the errored one) is what makes this clean: no leftover ``CANCELLED``
+        member remains to make the roll-up infer the non-terminal ``CANCELLING`` intent and
+        skip the write, so the group reliably re-opens to ``PENDING``/``RUNNING``. It takes
+        only the short ``group:`` lock, never a member lock, so it keeps the deadlock
+        discipline.
+        """
+        retriable = (HelixJobStatus.ERROR, HelixJobStatus.CANCELLED)
+        rerun: list[str] = []
+        for member in await self._list_group_members(group_id, workspace):
+            if await self._member_current_status(member) not in retriable:
+                continue
+            try:
+                result = await self.rerun_job(member.id, workspace, auth_context=auth_context)
+                if result is not None:
+                    rerun.append(member.id)
+            except JobOperationConflictError:
+                # Either the member advanced out of its terminal state between the status read
+                # and the rerun (e.g. a concurrent retry already reran it -- harmless), or it
+                # genuinely cannot be rerun (storage reclaimed). Surface it at warning so an
+                # un-retryable member is visible rather than silently skipped on every retry.
+                logger.warning(
+                    "Skipped group-member retry; member could not be rerun",
+                    exc_info=True,
+                    extra={"job": member.id, "group": group_id, "workspace": workspace},
+                )
+            except Exception:
+                # Best-effort sweep: an unexpected failure rerunning one member must not
+                # abandon the remaining siblings.
+                logger.warning(
+                    "Failed to rerun group member during retry; continuing",
+                    exc_info=True,
+                    extra={"job": member.id, "group": group_id, "workspace": workspace},
+                )
+        if rerun:
+            # Re-open the group from its terminal status now that members are non-terminal again.
+            # One roll-up recomputes the whole group, so a single call settles the stored status;
+            # rerun[0] is only used to locate the parent group.
+            await self._persist_group_status_for_member(rerun[0], workspace)
+        return rerun
 
     async def _apply_fail_fast_on_member_error(self, member_job_id: str, workspace: str) -> None:
         """Fan a fail-fast cancel across a group when a member reaches ``ERROR``.
