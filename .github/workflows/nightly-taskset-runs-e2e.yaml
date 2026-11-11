@@ -18,7 +18,9 @@ on:
         type: number
         default: 1
       source_sha:
-        description: Commit to build and test; default the dispatched ref's head.
+        description: >-
+          Commit to build and test; default the dispatched ref's head. Use a commit on main: images are tagged with
+          this SHA, which an open PR's builds also use for its head, with different code (its merge commit).
         required: false
         type: string
         default: ""
