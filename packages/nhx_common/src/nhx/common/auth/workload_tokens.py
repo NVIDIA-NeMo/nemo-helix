@@ -221,6 +221,8 @@ def _service_token_claims(service_name: str, on_behalf_of: str | Principal | Non
     else:
         subject_claims = {"sub": on_behalf_of}
     subject_claims["act"] = {"sub": service_subject}
+    if isinstance(on_behalf_of, Principal) and on_behalf_of.credential_scopes is not None:
+        subject_claims["nhx_credential_scopes"] = on_behalf_of.credential_scopes
     return subject_claims
 
 
@@ -243,6 +245,8 @@ def _encode_access_token(
         "nbf": now,
         "exp": now + workload.token_ttl_seconds,
     }
+    if "nhx_credential_scopes" in subject_claims:
+        scope = " ".join(subject_claims["nhx_credential_scopes"])
     if scope:
         claims["scope"] = scope
     return jwt.encode(

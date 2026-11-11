@@ -764,6 +764,17 @@ def _build_delegated_claims(
     if verified_subject.groups:
         actor_claims["groups"] = ",".join(verified_subject.groups)
     claims["act"] = actor_claims
+    if delegation.auth_context.credential_scopes is not None:
+        claims["nhx_credential_scopes"] = delegation.auth_context.credential_scopes
+    # Bind runtime service operations to the exact server-recorded Job, not a
+    # caller-controlled header or an arbitrary Job name supplied by a workload.
+    if delegation.workload_kind == "job" and delegation.job_id:
+        claims["nhx_workload"] = {
+            "workspace": delegation.workload_workspace,
+            "job": delegation.job_id,
+            "attempt": delegation.attempt_id,
+            "step": delegation.step_id,
+        }
     return claims
 
 
@@ -898,6 +909,10 @@ async def token_exchange(
         "nbf": now,
         "exp": token_exp,
     }
+    if "nhx_credential_scopes" in subject_claims:
+        # Workload exchange must not turn a scope-limited creator into an
+        # unrestricted OIDC-style bearer.
+        scope = " ".join(subject_claims["nhx_credential_scopes"])
     if scope:
         exchanged_claims["scope"] = scope
 

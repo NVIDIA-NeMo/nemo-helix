@@ -7,13 +7,9 @@ from __future__ import annotations
 
 import asyncio
 
-from nemo_evals.image_builds.builder import HttpImageBuilder
-from nemo_evals.image_builds.models import TASK_IMAGE_BUILD_JOB_SOURCE
-from nemo_evals.image_builds.runner import TaskImageBuildSpec, run_task_image_build
+from nemo_evals.image_builds.models import TASK_IMAGE_BUILD_JOB_SOURCE, TaskImageBuildEntity
+from nemo_evals.image_builds.runner import TaskImageBuildSpec
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.entities import EntityClient
-from nemo_helix_plugin.entities.client import AsyncEntitiesClient
-from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
@@ -46,15 +42,18 @@ class TaskImageBuildJob(NemoJob):
 
     def run(self, config: dict, *, ctx: JobContext, async_client: AsyncNemoClient) -> dict:
         """Run the build to a ready or failed record."""
-        spec = TaskImageBuildSpec.model_validate(config)
-        build = asyncio.run(
-            run_task_image_build(
-                spec,
-                entities=EntityClient(AsyncEntitiesClient.from_client(async_client)),
-                files=AsyncFilesClient.from_client(async_client),
-                builder=HttpImageBuilder(async_client, workspace=spec.workspace),
-            )
-        )
+        from nemo_evals.jobs.runtime_client import EvalsRuntimeClient
+
+        job_id = ctx.job_id
+        if job_id is None:
+            raise ValueError("Task image builds require a native Job")
+        runtime = EvalsRuntimeClient.from_client(async_client)
+        runtime._timeout = 14460
+
+        async def execute() -> TaskImageBuildEntity:
+            return (await runtime.execute_build(workspace=ctx.workspace, job=job_id)).data()
+
+        build = asyncio.run(execute())
         return {"status": "completed" if build.status == "ready" else "failed", "build_status": build.status}
 
 

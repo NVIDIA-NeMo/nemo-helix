@@ -7,11 +7,12 @@ The jobs-launcher now supports automatic secret injection from the NeMo Helix Se
 
 ## Configuration
 
-The feature uses three environment variables:
+Secret references and routing use these variables:
 
 1. **`NEMO_JOB_SECRETS`** (required) - A comma-separated list of secret references, e.g  `NEMO_JOB_SECRETS='ENV_VAR=workspace/secret_name,OTHER_ENV_VAR=workspace/other_secret_name'`
 2. **`NHX_SECRETS_URL`** (required when NEMO_JOB_SECRETS is set) - The base URL of the NeMo Helix API (e.g., `http://localhost:8080`)
-3. **`NHX_PRINCIPAL`** (optional) - JSON containing auth context for authenticated API calls, e.g. `{"id":"user@example.com","email":"user@example.com","groups":["team-a"]}`
+3. **`NHX_WORKLOAD_IDENTITY_TOKEN_FILE`** - In managed token-exchange mode, a controller-mounted workload proof file. The launcher exchanges it for a short-lived NeMo token.
+4. **`NHX_PRINCIPAL`** - Creator context for the existing trusted-header mode. It is not a credential for token-exchange deployments.
 
 ## Usage Example
 
@@ -19,6 +20,8 @@ The feature uses three environment variables:
 # Set the required environment variables
 export NHX_SECRETS_URL="http://localhost:8080"
 export NEMO_JOB_SECRETS="HF_TOKEN=default/hf-token,WANDB_API_KEY=default/wandb-key"
+# Managed token-exchange workloads receive their proof file from the controller.
+# For a trusted-header local deployment only:
 export NHX_PRINCIPAL='{"id":"user@example.com"}'
 
 # Run your command - secrets will be injected as environment variables
@@ -34,6 +37,11 @@ jobs-launcher run python train.py
    - Retrieves the secret data
    - Creates an environment variable: `HF_TOKEN=<secret-value>`
 3. The subprocess is launched with all inherited environment variables plus the fetched secrets
+
+In token-exchange mode, Secret retrieval uses the same workload credential as
+logs and step-config retrieval. Authorization requires `secrets.access` for the
+workload actor and `secrets.read` for the represented creator in the secret's
+workspace. The token's scopes must also allow the call.
 
 ## Secret Reference Format
 

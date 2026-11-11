@@ -365,17 +365,21 @@ async def test_revisions_with_the_same_contents_share_one_build(entity_store, st
 @pytest.mark.parametrize(("status", "job_status"), [("ready", "completed"), ("failed", "failed")])
 def test_job_fails_when_the_build_fails(monkeypatch, status: str, job_status: str) -> None:
     """The Job's exit status is what Jobs shows, so a failed build must not exit as success."""
+    from nemo_evals.jobs.runtime_client import EvalsRuntimeClient
     from nemo_evals.jobs.task_image_build import TaskImageBuildJob
     from nemo_helix_plugin.client.client import AsyncNemoClient
 
-    async def run(spec, **clients):
-        return Mock(status=status)
+    async def execute(self, **kwargs):
+        assert kwargs == {"workspace": "default", "job": "image-build-job"}
+        return Mock(data=lambda: Mock(status=status))
 
-    monkeypatch.setattr("nemo_evals.jobs.task_image_build.run_task_image_build", run)
+    monkeypatch.setattr(EvalsRuntimeClient, "execute_build", execute)
     config = TaskImageBuildSpec(workspace="default", task="t", revision_digest="a" * 64, attempt=1)
 
     result = TaskImageBuildJob().run(
-        config.model_dump(), ctx=Mock(), async_client=AsyncNemoClient(base_url="http://platform.test")
+        config.model_dump(),
+        ctx=Mock(workspace="default", job_id="image-build-job"),
+        async_client=AsyncNemoClient(base_url="http://platform.test"),
     )
 
     assert result["status"] == job_status

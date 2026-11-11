@@ -1820,6 +1820,151 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/job-runtime/{job}/result:
+    post:
+      tags:
+      - Evals Job Runtime
+      summary: Save Result
+      operationId: save_result_apis_evals_v2_workspaces__workspace__job_runtime__job__result_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/AgentEvalResultEntity'
+              - $ref: '#/components/schemas/EvaluateResultEntity'
+              title: Body
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/job-runtime/{job}/task-image-build:
+    post:
+      tags:
+      - Evals Job Runtime
+      summary: Execute Task Build
+      operationId: execute_task_build_apis_evals_v2_workspaces__workspace__job_runtime__job__task_image_build_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskImageBuildEntity'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/job-runtime/{job}/trial-keys:
+    post:
+      tags:
+      - Evals Job Runtime
+      summary: Issue Trial Key
+      operationId: issue_trial_key_apis_evals_v2_workspaces__workspace__job_runtime__job__trial_keys_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrialClaims'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyCreateResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/job-runtime/{job}/trial-keys/{jti}:
+    delete:
+      tags:
+      - Evals Job Runtime
+      summary: Revoke Trial Key
+      operationId: revoke_trial_key_apis_evals_v2_workspaces__workspace__job_runtime__job__trial_keys__jti__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: jti
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Jti
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyRevokeResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/evals/v2/workspaces/{workspace}/metrics:
     get:
       tags:
@@ -3583,6 +3728,127 @@ paths:
           description: Tag is reserved
 components:
   schemas:
+    AccessKeyCreateResponse:
+      properties:
+        jti:
+          type: string
+          title: Jti
+          description: Stable JWT ID for this Scoped Access Key.
+        name:
+          title: Name
+          description: Optional human-readable Scoped Access Key label.
+          nullable: true
+          type: string
+        description:
+          title: Description
+          description: Human-readable description of the Scoped Access Key.
+          nullable: true
+          type: string
+        principal:
+          type: string
+          title: Principal
+          description: Principal ID stamped into the token.
+        entity_type:
+          type: string
+          enum:
+          - USER
+          - SERVICE_ACCOUNT
+          title: Entity Type
+          description: Whether the key is bound to a user or a non-human service account.
+          default: USER
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - EXPIRED
+          - REVOKED
+          - SUSPENDED
+          - ROTATING
+          title: Status
+        issuer:
+          type: string
+          title: Issuer
+          description: Issuer stamped into the Scoped Access Key JWT.
+        audiences:
+          items:
+            type: string
+          type: array
+          uniqueItems: true
+          title: Audiences
+          description: Audiences accepted for the Scoped Access Key JWT.
+        scope:
+          items:
+            type: string
+          type: array
+          title: Scope
+          description: Services this key is restricted to. An empty list means the
+            key is unscoped.
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        expires_at:
+          title: Expires At
+          nullable: true
+          type: string
+          format: date-time
+        grace_period_expires_at:
+          title: Grace Period Expires At
+          description: Timestamp when the rotated-out key's grace period expires.
+          nullable: true
+          type: string
+          format: date-time
+        last_used_at:
+          title: Last Used At
+          description: Timestamp of the most recent successful authentication with
+            this Scoped Access Key.
+          nullable: true
+          type: string
+          format: date-time
+        service_attributes:
+          additionalProperties:
+            additionalProperties:
+              $ref: '#/components/schemas/JsonValue'
+            type: object
+          type: object
+          title: Service Attributes
+          description: Attributes platform services signed into the key, by service
+            name. Read-only to the key's owner.
+        token:
+          type: string
+          title: Token
+        token_type:
+          type: string
+          const: Bearer
+          title: Token Type
+      type: object
+      required:
+      - jti
+      - principal
+      - status
+      - issuer
+      - audiences
+      - created_at
+      - token
+      - token_type
+      title: AccessKeyCreateResponse
+      description: Create response. The token value is returned only once.
+    AccessKeyRevokeResponse:
+      properties:
+        jti:
+          type: string
+          title: Jti
+          description: Stable JWT ID for this Scoped Access Key.
+        revoked:
+          type: boolean
+          title: Revoked
+          description: True when this request newly recorded the key's revocation.
+      type: object
+      required:
+      - jti
+      - revoked
+      title: AccessKeyRevokeResponse
+      description: Response returned after a Scoped Access Key revoke request.
     AgentEvalInputSpec:
       oneOf:
       - properties:
@@ -3768,6 +4034,72 @@ components:
       - updated_at
       title: AgentEvalResult
       description: API representation of a persisted agent-evaluation result record.
+    AgentEvalResultEntity:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        job_id:
+          type: string
+          title: Job Id
+          description: Identifier of the job run that produced this result (one result
+            per run).
+        target_kind:
+          title: Target Kind
+          description: 'Target discriminator: ''model'', ''agent'', or a runner kind
+            e.g. ''fabric''.'
+          type: string
+        target_name:
+          title: Target Name
+          description: "Model/agent entity name, or the runner's model \u2014 filterable\
+            \ trait."
+          type: string
+        target_url:
+          title: Target Url
+          description: Endpoint URL, when the target is an HTTP model/agent.
+          type: string
+        scores:
+          allOf:
+          - $ref: '#/components/schemas/AggregatedMetricResult'
+          description: Aggregated metric scores for the run (the concise, queryable
+            rollup).
+        bundle_ref:
+          type: string
+          title: Bundle Ref
+          description: Reference to the full result bundle in the Files service (rows/trials),
+            e.g. a 'fileset://...' URL.
+        summary:
+          allOf:
+          - $ref: '#/components/schemas/AgentEvalResultSummary'
+          description: Run rollup from the bundle summary.
+      type: object
+      required:
+      - workspace
+      - job_id
+      - target_kind
+      - target_name
+      - target_url
+      - scores
+      - bundle_ref
+      title: AgentEvalResultEntity
+      description: 'Persisted, queryable record of an ``AgentEvalJob`` run.
+
+
+        The queryable half of the bundle''s ``summary.json``: ``scores`` plus ``summary``.
+        Its tasks are
+
+        inline, so (unlike row-eval) it has no input ref to record yet.'
     AgentEvalResultSummary:
       properties:
         task_count:
@@ -5287,6 +5619,90 @@ components:
       - metric_types
       title: EvaluateResult
       description: API representation of a persisted (row) evaluation result record.
+    EvaluateResultEntity:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        job_id:
+          type: string
+          title: Job Id
+          description: Identifier of the job run that produced this result (one result
+            per run).
+        target_kind:
+          title: Target Kind
+          description: 'Target discriminator: ''model'', ''agent'', or a runner kind
+            e.g. ''fabric''.'
+          type: string
+        target_name:
+          title: Target Name
+          description: "Model/agent entity name, or the runner's model \u2014 filterable\
+            \ trait."
+          type: string
+        target_url:
+          title: Target Url
+          description: Endpoint URL, when the target is an HTTP model/agent.
+          type: string
+        scores:
+          allOf:
+          - $ref: '#/components/schemas/AggregatedMetricResult'
+          description: Aggregated metric scores for the run (the concise, queryable
+            rollup).
+        bundle_ref:
+          type: string
+          title: Bundle Ref
+          description: Reference to the full result bundle in the Files service (rows/trials),
+            e.g. a 'fileset://...' URL.
+        dataset_ref:
+          title: Dataset Ref
+          description: Reference to the dataset evaluated (e.g. 'workspace/fileset');
+            None for an inline dataset.
+          type: string
+        metric_types:
+          items:
+            type: string
+          type: array
+          title: Metric Types
+          description: 'Runtime metric type names applied in the run (e.g. ''exact_match'').
+            Not metric refs: by run time the submitted refs are resolved to inline
+            bundles, so the originals aren''t available.'
+        row_count:
+          title: Row Count
+          description: Dataset rows the run evaluated.
+          type: integer
+          minimum: 0.0
+        error_row_count:
+          title: Error Row Count
+          description: Rows where inference or a metric recorded an error.
+          type: integer
+          minimum: 0.0
+      type: object
+      required:
+      - workspace
+      - job_id
+      - target_kind
+      - target_name
+      - target_url
+      - scores
+      - bundle_ref
+      - dataset_ref
+      - metric_types
+      title: EvaluateResultEntity
+      description: "Persisted, queryable record of an ``EvaluateJob`` (row-eval) run.\n\
+        \nAdds the run's *referenceable inputs* \u2014 the evaluated dataset and the\
+        \ metrics applied \u2014 which the\nshared record can't capture. Row-level\
+        \ detail lives in the bundle."
     EvaluateResultFilter:
       additionalProperties: false
       description: Adds row-eval's referenceable-input trait.
@@ -7377,6 +7793,12 @@ components:
       - name
       title: Model
       description: Model definition for use without persisting to the Models API.
+    ModelAccess:
+      type: string
+      enum:
+      - closed
+      - open
+      title: ModelAccess
     ModelProviderOverride:
       properties:
         base_url:
@@ -8908,6 +9330,138 @@ components:
           description: Filter by update date.
       title: TaskFilter
       type: object
+    TaskImageBuildEntity:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        task:
+          type: string
+          title: Task
+          description: '`<workspace>/<name>` of the task.'
+        revision_digest:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Revision Digest
+        attempt:
+          type: integer
+          minimum: 1.0
+          title: Attempt
+          description: 1-based attempt for these contents. Ends the record's name.
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - ready
+          - failed
+          title: Status
+          default: pending
+        job:
+          type: string
+          title: Job
+          description: Name of the task-builder Job that runs this attempt.
+        allowed_registries:
+          items:
+            type: string
+          type: array
+          title: Allowed Registries
+        platform:
+          title: Platform
+          description: The platform the request asked for, if any.
+          type: string
+        rebuild:
+          type: boolean
+          title: Rebuild
+          description: 'The request asked to rebuild: each image goes to Builder again
+            instead of using a ready build of the same contents, which may be for
+            the default platform before it changed.'
+          default: false
+        images:
+          items:
+            $ref: '#/components/schemas/BuildImage'
+          type: array
+          title: Images
+        error:
+          title: Error
+          type: string
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - workspace
+      - task
+      - revision_digest
+      - attempt
+      - job
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: TaskImageBuildEntity
+      description: 'One attempt at building every container image a task''s contents
+        need.
+
+
+        A child of the task, keyed by the revision digest: revisions with the same
+        contents need the same images, so
+
+        they share builds. Publishing earlier contents again republishes them as a
+        new revision with the same digest.'
     TaskInput:
       properties:
         spec:
@@ -9717,6 +10271,53 @@ components:
       required:
       - data
       title: TasksetsPage
+    TrialClaims:
+      properties:
+        model_access:
+          $ref: '#/components/schemas/ModelAccess'
+        models:
+          title: Models
+          description: The VirtualModels the credential may call, as `workspace/name`;
+            any when unset.
+          items:
+            type: string
+          type: array
+        v:
+          type: integer
+          const: 1
+          title: V
+          default: 1
+        kind:
+          type: string
+          const: trial
+          title: Kind
+          default: trial
+        session:
+          type: string
+          maxLength: 256
+          minLength: 1
+          title: Session
+          description: The trial's Intake session.
+        intake_workspace:
+          type: string
+          maxLength: 256
+          minLength: 1
+          title: Intake Workspace
+        evaluation:
+          title: Evaluation
+          type: string
+          maxLength: 256
+        task:
+          title: Task
+          type: string
+          maxLength: 256
+      type: object
+      required:
+      - model_access
+      - session
+      - intake_workspace
+      title: TrialClaims
+      description: The trial a token was issued to, and the models its agent may call.
     TrialError:
       properties:
         type:

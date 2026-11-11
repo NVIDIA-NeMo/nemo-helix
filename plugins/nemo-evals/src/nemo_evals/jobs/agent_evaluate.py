@@ -786,6 +786,28 @@ def _trial_credential_issuer(
             )
         return None
     publication = spec.publication.intake if spec.publication is not None else None
+    policy = _trial_model_policy(spec, platform_client)
+    return TrialCredentialIssuer(
+        async_client,
+        run_id=run_id,
+        intake_workspace=ctx.workspace,
+        evaluation_name=publication.evaluation_id if publication is not None else None,
+        policy=policy,
+        runtime_job=getattr(ctx, "job_id", None),
+        records_calls=(
+            policy.models is not None
+            and calls_only_gateway_models(spec.target)
+            and all(check_trial_route(platform_client, ModelRef(ref)).records_calls for ref in policy.models)
+        ),
+    )
+
+
+def _trial_model_policy(spec: AgentEvalSpec, platform_client: NemoClient | AsyncNemoClient) -> ModelPolicy:
+    """Derive model restrictions from the persisted spec and authorized route discovery."""
+    gateway = _trial_gateway(spec.target)
+    if gateway is None:
+        raise ValueError("A trial credential requires a gateway-backed target")
+    closed = closed_book_run(spec.target)
     route = check_trial_route(platform_client, gateway[0])
     models = _trial_models(spec.target, gateway[0])
     if models is None:
@@ -803,21 +825,9 @@ def _trial_credential_issuer(
     reachable = _with_routed_models(models, route_of) if models is not None else None
     if closed:
         _require_closed_book_capable(reachable, route_of)
-    records_calls = (
-        reachable is not None
-        and calls_only_gateway_models(spec.target)
-        and all(route_of(model).records_calls for model in reachable)
-    )
-    return TrialCredentialIssuer(
-        async_client,
-        run_id=run_id,
-        intake_workspace=ctx.workspace,
-        evaluation_name=publication.evaluation_id if publication is not None else None,
-        policy=ModelPolicy(
-            model_access=ModelAccess.CLOSED if closed else ModelAccess.OPEN,
-            models=tuple(gateway_model_id(model) for model in reachable) if reachable is not None else None,
-        ),
-        records_calls=records_calls,
+    return ModelPolicy(
+        model_access=ModelAccess.CLOSED if closed else ModelAccess.OPEN,
+        models=tuple(gateway_model_id(model) for model in reachable) if reachable is not None else None,
     )
 
 
