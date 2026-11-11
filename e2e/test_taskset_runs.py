@@ -66,9 +66,11 @@ pytestmark = [
 ]
 
 #: Step caps, in seconds, within BUDGET.
-TEST_1_SUBMIT_CAP = 900  # publish, and build 3 images in a fresh workspace
-RUN_CAP = 900
-TEST_2_CAP = 600  # test_2's submit and wait together
+# Ten kind copies in Actions run 42940499475: nearest-rank p95 was 78/102/95 s, respectively.
+# Use 3x p95, rounded up to whole minutes; test_2's cap covers submit and wait together.
+TEST_1_SUBMIT_CAP = 240  # publish, and build 3 images in a fresh workspace
+RUN_CAP = 360
+TEST_2_CAP = 300
 #: How long a cancel-paths ``slow`` task's oracle sleeps (its ``solve.sh``): its Job stays active while the test
 #: cancels around it.
 SLOW_SECONDS = 180
