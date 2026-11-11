@@ -17,6 +17,8 @@ from nemo_helix_plugin.jobs.schemas import HelixJobStatus as HelixJobStatus
 from nemo_helix_plugin.jobs.schemas import HelixJobStatusResponse as HelixJobStatusResponse
 from nemo_helix_plugin.jobs.schemas import HelixJobStepStatusResponse as HelixJobStepStatusResponse
 from nemo_helix_plugin.jobs.schemas import HelixJobTaskStatusResponse as HelixJobTaskStatusResponse
+from nemo_helix_plugin.jobs.schemas import JobGroupStatus as JobGroupStatus
+from nemo_helix_plugin.jobs.schemas import aggregate_job_group_status as aggregate_job_group_status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 # =============================================================================
