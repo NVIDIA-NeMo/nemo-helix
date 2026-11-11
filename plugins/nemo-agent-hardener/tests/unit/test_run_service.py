@@ -1023,7 +1023,7 @@ def test_selected_defenders_match_agent_hardeners_own_defaults() -> None:
     implementations = {key: entry["implementation"] for key, entry in manifest_mod.DEFENDER_ENTRIES.items()}
 
     assert implementations["openshell"].startswith("agent_hardener.agents.defenders.openshell_defender_v2")
-    assert implementations["guardrails"].startswith("agent_hardener.agents.defenders.guardrails_defender_v2")
+    assert implementations["guardrails"] == "agent_hardener.agents.defenders.guardrails_defender:run"
 
 
 def test_apply_manifest_overrides_applies_explicit_port_only() -> None:

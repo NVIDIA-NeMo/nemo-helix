@@ -402,6 +402,13 @@ def test_the_manifest_carries_the_harness() -> None:
     assert manifest["agent"]["env"] == {"EXAMPLE": "value"}
 
 
+def test_the_manifest_reads_traces_from_relay() -> None:
+    """The guardrails defender writes each rail from the attack's execution trace, which Relay records."""
+    manifest = build_manifest_dict(agent_name="a", project_dir=".", port=8000, secrets=[])
+
+    assert manifest["traces"] == {"provider": "relay"}
+
+
 @pytest.mark.parametrize("install_dir", ["/custom/python", None, "$PYTHON_ROOT"])
 def test_registered_hermes_uses_image_paths_and_agent_overrides(tmp_path, monkeypatch, install_dir):
     dockerfile = (
