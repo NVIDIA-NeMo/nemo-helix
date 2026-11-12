@@ -114,10 +114,6 @@ def _record(account: DBAccount, profile: DBAccountProfile | None) -> AccountProf
     )
 
 
-class AccountProfileNotFoundError(LookupError):
-    """Raised when the account does not exist."""
-
-
 class AccountProfileStore:
     """Read and write account profiles in the entities database."""
 
@@ -141,7 +137,7 @@ class AccountProfileStore:
         async def apply(session: AsyncSession) -> AccountProfileRecord:
             account = await session.get(DBAccount, account_id)
             if account is None:
-                raise AccountProfileNotFoundError(account_id)
+                raise LookupError(account_id)
             profile = await self._get_or_create_profile(session, account_id)
             for key, value in fields.items():
                 setattr(profile, key, value)

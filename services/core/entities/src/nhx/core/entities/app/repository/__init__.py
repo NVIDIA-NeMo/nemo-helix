@@ -36,7 +36,6 @@ from nhx.core.entities.app.repository.account_preference import (
     merge_patch,
 )
 from nhx.core.entities.app.repository.account_profile import (
-    AccountProfileNotFoundError,
     AccountProfileRecord,
     AccountProfileStore,
     IdentityClaims,
@@ -178,7 +177,6 @@ __all__ = [
     "AccountCredentialStore",
     "AccountCredentialType",
     "AccountPreferenceStore",
-    "AccountProfileNotFoundError",
     "AccountProfileRecord",
     "AccountProfileStore",
     "IdentityClaims",
