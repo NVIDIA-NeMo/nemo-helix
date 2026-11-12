@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import {
   getEvaluationBenchmarkDetailsRoute,
@@ -10,7 +11,7 @@ import {
   getEvaluationMetricsRunRoute,
   getEvaluationNewRoute,
   getEvaluationSessionDetailRoute,
-  getFilesetDetailsRoute,
+  getFilesetDetailRoute,
   getFilesetRoute,
   getIntakeSessionRoute,
   getIntakeSessionTraceRoute,
@@ -85,15 +86,15 @@ describe('Evaluation route helpers', () => {
 describe('getFilesetRoute', () => {
   const workspace = 'test-workspace';
 
-  it('routes a bare name to the panel route with a full entity reference', () => {
+  it('routes a bare name to the detail page', () => {
     expect(getFilesetRoute(workspace, 'unchanged-blue')).toBe(
-      '/workspaces/test-workspace/filesets/test-workspace%2Funchanged-blue'
+      '/workspaces/test-workspace/filesets/unchanged-blue'
     );
   });
 
-  it('preserves a namespace already present on the reference', () => {
+  it('drops the namespace from a full entity reference', () => {
     expect(getFilesetRoute(workspace, 'default/unchanged-blue')).toBe(
-      '/workspaces/test-workspace/filesets/default%2Funchanged-blue'
+      '/workspaces/test-workspace/filesets/unchanged-blue'
     );
   });
 });
@@ -199,26 +200,31 @@ describe('intake session detail routes', () => {
   });
 });
 
-describe('getFilesetDetailsRoute', () => {
+describe('getFilesetDetailRoute', () => {
   // Callers must pass raw values: the helper encodes the path param via generatePath and
-  // the folder query param via URLSearchParams. Pre-encoding would double-encode, so a
-  // fileset named `a/b` would arrive at useParams() as `a%2Fb` instead of `a/b`.
+  // query params via URLSearchParams. Pre-encoding would double-encode.
   it.each([
-    ['default/my-fileset', 'default%2Fmy-fileset'],
-    ['default/100% coverage', 'default%2F100%25%20coverage'],
-    ['default/tag#1', 'default%2Ftag%231'],
-    ['default/with spaces', 'default%2Fwith%20spaces'],
-  ])('encodes %j exactly once', (filesetId, encoded) => {
-    expect(getFilesetDetailsRoute('my-workspace', filesetId)).toBe(
+    ['my-fileset', 'my-fileset'],
+    ['100% coverage', '100%25%20coverage'],
+    ['tag#1', 'tag%231'],
+  ])('encodes %j exactly once', (filesetName, encoded) => {
+    expect(getFilesetDetailRoute('my-workspace', filesetName)).toBe(
       `/workspaces/my-workspace/filesets/${encoded}`
     );
-    // The route param round-trips back to the original name.
-    expect(decodeURIComponent(encoded)).toBe(filesetId);
   });
 
-  it('encodes the folder query param without double-encoding', () => {
-    expect(getFilesetDetailsRoute('my-workspace', 'default/set', 'nested/folder 1')).toBe(
-      '/workspaces/my-workspace/filesets/default%2Fset?filesetFolder=nested%2Ffolder+1'
+  it('opens the Files tab when a folder or file is given', () => {
+    expect(getFilesetDetailRoute('my-workspace', 'set', { folder: 'nested/folder 1' })).toBe(
+      '/workspaces/my-workspace/filesets/set/files?filesetFolder=nested%2Ffolder+1'
+    );
+    expect(getFilesetDetailRoute('my-workspace', 'set', { file: 'a/b.jsonl' })).toBe(
+      '/workspaces/my-workspace/filesets/set/files?file=a%2Fb.jsonl'
+    );
+  });
+
+  it('respects an explicit tab', () => {
+    expect(getFilesetDetailRoute('my-workspace', 'set', { tab: FilesetDetailTab.Card })).toBe(
+      '/workspaces/my-workspace/filesets/set/card'
     );
   });
 });

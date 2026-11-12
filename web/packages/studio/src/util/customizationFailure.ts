@@ -5,7 +5,7 @@ import type {
   HelixJobStepStatusResponse,
   HelixJobTaskStatusResponse,
 } from '@nemo/sdk/generated/customizer/schema';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import type { CustomizationJob } from '@studio/util/customizationBackend';
 
 /**

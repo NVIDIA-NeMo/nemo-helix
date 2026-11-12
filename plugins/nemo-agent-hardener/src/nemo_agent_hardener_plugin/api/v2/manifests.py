@@ -33,6 +33,7 @@ from nemo_agent_hardener_plugin.agent_resolver import (
     parse_secret_specs,
     resolve_agent_to_manifest,
 )
+from nemo_agent_hardener_plugin.api.dependencies import get_service_files_client
 from nemo_agent_hardener_plugin.api.v2._filters import make_filter_dep
 from nemo_agent_hardener_plugin.api.v2.schemas import (
     InspectAgentRequest,
@@ -48,15 +49,22 @@ from nemo_agent_hardener_plugin.api.v2.schemas import (
 from nemo_agent_hardener_plugin.authz import scope
 from nemo_agent_hardener_plugin.cli.client import base_url
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
-from nemo_agent_hardener_plugin.filesets import delete_fileset, download_and_extract_project, upload_project_dir
+from nemo_agent_hardener_plugin.filesets import (
+    UploadedFileset,
+    delete_fileset_by_id,
+    download_and_extract_project,
+    upload_project_dir,
+)
 from nemo_agent_hardener_plugin.jobs._common import resolve_model_key
 from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 from nemo_agent_hardener_plugin.jobs.manifest import _apply_agent_port
 from nemo_agent_hardener_plugin.model_config import ModelConfigDefaults, WarGameModels, model_config_defaults
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
 from nemo_agent_hardener_plugin.project_resolver import HERMES_RUNTIME_ENV, build_project_manifest_dict, inspect_project
+from nemo_agent_hardener_plugin.schema_migrations import migrate_schema_manifest
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client.errors import AuthenticationError, PermissionDeniedError
 from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -64,6 +72,7 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityNotFoundError,
     get_entity_client,
 )
+from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from starlette.concurrency import run_in_threadpool
@@ -346,7 +355,7 @@ async def _resolve_and_store_scaffold(
     secrets: list[str] | None,
     backends: list[dict[str, Any]],
     env: dict[str, str] | None = None,
-) -> tuple[ResolvedManifest, str]:
+) -> tuple[ResolvedManifest, UploadedFileset]:
     """Resolve *agent_ref* and persist its scaffold as a fileset; return the resolution and the ref.
 
     Resolution *writes* a runnable agent package (``materialize_agent_package``), so
@@ -358,7 +367,7 @@ async def _resolve_and_store_scaffold(
 
     # resolve_agent_to_manifest is sync + network-bound (AgentsResource(client).get), and so is the upload;
     # keep both off the event loop. The temp dir must outlive the upload, hence one closure.
-    def _resolve_and_upload() -> tuple[ResolvedManifest, str]:
+    def _resolve_and_upload() -> tuple[ResolvedManifest, UploadedFileset]:
         with tempfile.TemporaryDirectory() as tmp:
             resolved = resolve_agent_to_manifest(
                 agent_ref,
@@ -404,7 +413,8 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
         workspace=workspace,
         agent_ref=f"{resolved.workspace}/{resolved.agent_name}",
         manifest_yaml=yaml.safe_dump(resolved.manifest, sort_keys=False),
-        agent_fileset=fileset,
+        agent_fileset=fileset.ref,
+        agent_fileset_id=fileset.fileset_id,
         port=resolved.port,
         secrets=resolved.secrets,
         egress=resolved.egress,  # what was actually written, including hosts derived from the config
@@ -509,6 +519,7 @@ async def update_manifest(
     name: str,
     body: ManifestUpdate,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    files_client: FilesClient = Depends(get_service_files_client),
 ) -> AgentHardenerManifest:
     """Edit a manifest's cached benign suite, victim port, egress, or war-game settings.
 
@@ -516,6 +527,11 @@ async def update_manifest(
     `POST /manifests/{name}/refresh` to re-resolve the one it already targets.
     """
     existing = (await _get_manifest_or_404(entity_client, workspace, name)).model_copy(deep=True)
+    existing = await run_in_threadpool(
+        migrate_schema_manifest,
+        existing,
+        files_client=files_client,
+    )
     if body.benign_suite is not None:
         existing.benign_suite = body.benign_suite
     if body.defenders is not None:
@@ -550,6 +566,7 @@ async def refresh_manifest(
     workspace: str,
     name: str,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    files_client: FilesClient = Depends(get_service_files_client),
 ) -> AgentHardenerManifest:
     """Re-resolve an agent-source manifest against the agent as it is *now*.
 
@@ -567,6 +584,11 @@ async def refresh_manifest(
             detail=f"manifest '{name}' names no agent to refresh from; recreate it against a registered agent.",
         )
 
+    existing = await run_in_threadpool(
+        migrate_schema_manifest,
+        existing,
+        files_client=files_client,
+    )
     # Names that only came from the old deployment are re-derived, so a secret it dropped is not still required.
     kept_secrets = [
         n for n in existing.secrets if n in existing.declared_secrets or n not in existing.deployed_secret_refs
@@ -580,9 +602,10 @@ async def refresh_manifest(
         backends=_stored_user_backends(existing.manifest_yaml),
         env=existing.env,
     )
-    stale = existing.agent_fileset
+    stale_id = existing.agent_fileset_id
 
-    existing.agent_fileset = fileset
+    existing.agent_fileset = fileset.ref
+    existing.agent_fileset_id = fileset.fileset_id
     existing.port = resolved.port
     existing.secrets = resolved.secrets
     existing.deployed_secret_refs = resolved.deployed_secret_refs
@@ -591,8 +614,13 @@ async def refresh_manifest(
     existing.manifest_yaml = _yaml_with_agent_settings(yaml.safe_dump(resolved.manifest, sort_keys=False), existing)
     updated = await entity_client.update(existing)
 
-    if stale and stale != fileset:
-        await run_in_threadpool(delete_fileset, get_nemo_client(as_service="agent-hardener", internal=True), stale)
+    if stale_id is not None and stale_id != fileset.fileset_id:
+        await run_in_threadpool(
+            delete_fileset_by_id,
+            get_nemo_client(as_service="agent-hardener", internal=True),
+            workspace=existing.workspace,
+            fileset_id=stale_id,
+        )
     return updated
 
 
@@ -603,11 +631,20 @@ async def delete_manifest(
     workspace: str,
     name: str,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    files_client: FilesClient = Depends(get_service_files_client),
 ) -> None:
     """Delete a saved manifest by name, along with the victim bundle the service created for it."""
     existing = await _get_manifest_or_404(entity_client, workspace, name)
     try:
-        await entity_client.delete(AgentHardenerManifest, name=name, workspace=workspace)
+        existing = await run_in_threadpool(
+            migrate_schema_manifest,
+            existing,
+            files_client=files_client,
+        )
+    except (AuthenticationError, PermissionDeniedError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail="Fileset lookup access denied") from exc
+    try:
+        await entity_client.delete_by_id(AgentHardenerManifest, existing.id, expected_db_version=existing.db_version)
     except Exception as exc:
         logger.exception("Failed to delete agent-hardener manifest '%s'", sanitize_for_log(name))
         raise HTTPException(status_code=500, detail="Failed to delete agent-hardener manifest.") from exc
@@ -616,6 +653,10 @@ async def delete_manifest(
     # bundle we deleted early would be unrunnable if the delete above had failed.
     #
     # The service uploads `agent_fileset` itself, so it owns it and is safe to remove it here.
-    client = get_nemo_client(as_service="agent-hardener", internal=True)
-    if existing.agent_fileset:
-        await run_in_threadpool(delete_fileset, client, existing.agent_fileset)
+    if existing.agent_fileset_id is not None:
+        await run_in_threadpool(
+            delete_fileset_by_id,
+            get_nemo_client(as_service="agent-hardener", internal=True),
+            workspace=existing.workspace,
+            fileset_id=existing.agent_fileset_id,
+        )

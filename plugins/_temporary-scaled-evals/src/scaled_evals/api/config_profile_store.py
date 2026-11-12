@@ -132,12 +132,7 @@ class ConfigProfileStore:
         if entity is None or (owner_id is not None and entity.owner_id != owner_id):
             return False
         try:
-            self._client.delete(
-                ScaledEvalsConfigProfile,
-                profile_id,
-                workspace=entity_store.private_workspace(),
-                expected_db_version=entity.db_version,
-            )
+            self._client.delete_by_id(ScaledEvalsConfigProfile, entity.id, expected_db_version=entity.db_version)
         except EntityNotFoundError:
             return False
         except EntityConflictError as exc:

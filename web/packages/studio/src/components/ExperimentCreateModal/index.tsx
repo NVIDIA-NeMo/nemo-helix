@@ -24,8 +24,8 @@ import { queryClient } from '@studio/api/queryClient';
 import {
   EXPERIMENT_SETTINGS_NAMES,
   experimentSettingsPayload,
-} from '@studio/components/evaluation/shared/experimentSettings';
-import { ExperimentSettingsFields } from '@studio/components/evaluation/shared/ExperimentSettingsFields';
+} from '@studio/components/evaluation/experimentSettings';
+import { ExperimentSettingsFields } from '@studio/components/evaluation/ExperimentSettingsFields';
 import {
   experimentCreateDefaults,
   experimentCreateSchema,

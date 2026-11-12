@@ -253,7 +253,7 @@ def _make_data_designer_cli_app() -> typer.Typer:
     cli = DataDesignerCLI()
     app = cli.get_cli()
     add_function_commands(app, {"preview": PreviewFunction}, cli=cli)
-    add_job_commands(app, {"create": CreateJob}, cli=cli)
+    add_job_commands(app, {"data-designer.create": CreateJob}, cli=cli)
     return app
 
 

@@ -10,7 +10,7 @@ from typing import Any
 
 from nemo_evals.api.schemas import MetricInline, TasksetRef
 from nemo_evals.filesets import FilesetRef
-from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, GymPlacement
+from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, FilesetTaskSource, GymPlacement
 from nemo_evals.jobs.evaluate import EvaluateInputSpec, SubmitTargetSpec, resolve_submit_params
 from nemo_evals.jobs.runner_targets import runner_to_target
 from nemo_evals.sdk.job_resources import (
@@ -204,13 +204,13 @@ class _SyncEvaluatorPluginExecutor:
     def submit_agent_eval(
         self,
         *,
-        tasks: TasksetRef,
+        tasks: TasksetRef | FilesetTaskSource,
         target: AgentTaskRunner | None = None,
         trials: list[AgentEvalTrial] | None = None,
         placement: GymPlacement | None = None,
         wait_until_done: bool = False,
     ) -> AgentEvaluatorJobResource:
-        """Submit a stored taskset with a live runner or precomputed trials.
+        """Submit a stored taskset (or, with a Gym runner, a FileSet task source) with a live runner or precomputed trials.
 
         ``target`` is a *live* runner — the object someone already ran locally with
         ``AgentEvaluator()``. :func:`runner_to_target` describes it as the spec that reproduces it
@@ -345,13 +345,13 @@ class _AsyncEvaluatorPluginExecutor:
     async def submit_agent_eval(
         self,
         *,
-        tasks: TasksetRef,
+        tasks: TasksetRef | FilesetTaskSource,
         target: AgentTaskRunner | None = None,
         trials: list[AgentEvalTrial] | None = None,
         placement: GymPlacement | None = None,
         wait_until_done: bool = False,
     ) -> AsyncAgentEvaluatorJobResource:
-        """Submit a stored taskset with a live runner or precomputed trials.
+        """Submit a stored taskset (or, with a Gym runner, a FileSet task source) with a live runner or precomputed trials.
 
         The async twin of :meth:`_SyncEvaluatorPluginExecutor.submit_agent_eval`. ``target`` is a
         live runner, described for the wire by :func:`runner_to_target`, which refuses runners

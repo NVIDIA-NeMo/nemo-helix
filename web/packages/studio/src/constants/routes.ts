@@ -17,6 +17,7 @@ export const ROUTE_PARAMS = {
   customizationJobName: 'customizationJobName',
   filesetId: 'filesetId',
   filesetName: 'filesetName',
+  filesetTab: 'filesetTab',
   filePathEncoded: 'filePathEncoded',
   folderPathEncoded: 'folderPathEncoded',
   workspace: 'workspace',
@@ -71,7 +72,7 @@ export const ROUTES = {
      */
     newCustomizationJobScratch: `/workspaces/:${P.workspace}/fine-tune/new/scratch`,
     baseModels: `/workspaces/:${P.workspace}/base-models`,
-    /** Base models list with a specific model panel open (model name in path) */
+    /** Model detail page; with model details off, the catalog with that model's panel open */
     baseModelsModel: `/workspaces/:${P.workspace}/base-models/:${P.modelName}`,
     evaluation: `/workspaces/:${P.workspace}/evaluation`,
     /** Dataset-driven model evaluation builder. */
@@ -98,14 +99,14 @@ export const ROUTES = {
     modelAdapterDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}/adapters/:${P.adapterName}`,
     filesets: `/workspaces/:${P.workspace}/filesets`,
     filesetNew: `/workspaces/:${P.workspace}/filesets/new`,
-    filesetDetails: `/workspaces/:${P.workspace}/filesets/:${P.filesetId}`,
-    filesetFile: `/workspaces/:${P.workspace}/filesets/:${P.filesetId}/file/:${P.filePathEncoded}`,
     /**
-     * Unified fileset detail page (gated by VITE_FF_FILESET_DETAILS_ENABLED).
-     * One route serves all purposes — the page branches on `fileset.purpose`
-     * to render Model/Dataset/Generic card content.
+     * Unified fileset detail page. One route serves all purposes — the page
+     * branches on `fileset.purpose` to render Model/Dataset/Generic card content.
+     * On its own it redirects to the default tab.
      */
-    filesetDetail: `/workspaces/:${P.workspace}/filesets/:${P.filesetName}/detail`,
+    filesetDetail: `/workspaces/:${P.workspace}/filesets/:${P.filesetName}`,
+    /** A tab of the fileset detail page; `filesetTab` is a `FilesetDetailTab`. */
+    filesetDetailTab: `/workspaces/:${P.workspace}/filesets/:${P.filesetName}/:${P.filesetTab}`,
     inferenceProviders: `/workspaces/:${P.workspace}/inference-providers`,
     virtualModels: `/workspaces/:${P.workspace}/virtual-models`,
     virtualModelDetail: `/workspaces/:${P.workspace}/virtual-models/:${P.virtualModelName}`,

@@ -150,6 +150,11 @@ class AuthClient(BaseModel):
         principal: Principal,
         include_identity_resolution: bool,
     ) -> None:
+        if principal.on_behalf_of:
+            if principal.email:
+                auth_input["actor_email"] = principal.email
+            if principal.groups:
+                auth_input["actor_groups"] = list(principal.groups)
         if principal.account_id:
             auth_input["actor_account_id"] = principal.account_id
         if principal.authz_aliases:
@@ -235,7 +240,7 @@ class AuthClient(BaseModel):
         response.raise_for_status()
 
         result = response.json().get("result", {})
-        allowed = result.get("allowed", False)
+        allowed = result.get("allowed") is True
         reason = result.get("reason")
         actor_aliases = result.get("actor_aliases", [])
         if not isinstance(actor_aliases, list):
@@ -261,17 +266,8 @@ class AuthClient(BaseModel):
             subject_aliases=[str(alias) for alias in subject_aliases if isinstance(alias, str)],
         )
 
-    async def _pdp_check(self, pdp_endpoint: str, auth_input: dict, result_key: str, check_name: str) -> bool:
-        """Send a single-shot PDP check and extract a boolean result.
-
-        Shared by has_permissions/has_role: both open/close the PDP http client the
-        same way and map httpx errors to the same HTTPException pair, differing only
-        in the endpoint, request payload, and which result field holds the answer.
-
-        ``check_name`` is a lowercase phrase (e.g. "permission check", "role check")
-        used to build both the log message and the HTTPException detail, matching the
-        wording each caller used before this helper was factored out.
-        """
+    async def _pdp_query(self, pdp_endpoint: str, auth_input: dict[str, Any], check_name: str) -> dict[str, Any]:
+        """Send one PDP request and return its extensible JSON result object."""
         from fastapi import HTTPException
 
         client = self.http_client
@@ -287,7 +283,10 @@ class AuthClient(BaseModel):
                 headers=await self._pdp_request_headers(),
             )
             response.raise_for_status()
-            return bool(response.json().get("result", {}).get(result_key, False))
+            result = response.json().get("result", {})
+            if not isinstance(result, dict):
+                raise ValueError("PDP result must be an object")
+            return result
         except httpx.HTTPError as exc:
             logger.error("Failed to contact auth endpoint for %s: %s", check_name, str(exc))
             raise HTTPException(status_code=503, detail=f"{check_name.capitalize()} service unavailable") from exc
@@ -298,9 +297,16 @@ class AuthClient(BaseModel):
             if should_close:
                 await client.aclose()
 
-    async def has_permissions(self, workspace_id: str, permissions: List[str]) -> bool:
-        """Check if the current principal has specific permissions in a workspace.
+    async def _pdp_check(self, pdp_endpoint: str, auth_input: dict[str, Any], result_key: str, check_name: str) -> bool:
+        """Require a literal true decision from a single-shot PDP query."""
+        result = await self._pdp_query(pdp_endpoint, auth_input, check_name)
+        return result.get(result_key) is True
 
+    async def has_permissions(self, workspace_id: str, permissions: List[str]) -> bool:
+        """Check the OBO subject's permissions, or the actor's for direct calls.
+
+        This compatibility adapter selects the request's explicit direct/delegated
+        permission branch. Use check_permissions to state independent requirements.
         This method calls the auth endpoint to check if the principal has all the required
         permissions in the specified workspace.
 
@@ -338,19 +344,9 @@ class AuthClient(BaseModel):
         if not self.policy_decision_point_base_url:
             raise RuntimeError("Policy Decision Point URL not configured for permission checks")
 
-        # Prepare input with all principal identifiers (acting user when delegating)
-        auth_input = {
-            "principal_id": self.principal.id,
-            "workspace": workspace_id,
-            "permissions": permissions,
-        }
-        if self.principal.effective_email:
-            auth_input["principal_email"] = self.principal.effective_email
-        if self.principal.effective_groups:
-            auth_input["principal_groups"] = self.principal.effective_groups
-        if self.principal.on_behalf_of:
-            auth_input["on_behalf_of_principal_id"] = self.principal.on_behalf_of
-        self._add_principal_context(auth_input, principal=self.principal, include_identity_resolution=False)
+        auth_input = self._permission_input()
+        auth_input["workspace"] = workspace_id
+        auth_input["permissions"] = permissions
 
         allowed = await self._pdp_check("has_permissions", auth_input, "allowed", "permission check")
 
@@ -363,6 +359,93 @@ class AuthClient(BaseModel):
         )
 
         return allowed
+
+    def _permission_input(self) -> dict[str, Any]:
+        """Build permission input from the original verified actor/subject context."""
+        auth_input: dict[str, Any] = {"principal_id": self.principal.id}
+        if self.principal.effective_email:
+            auth_input["principal_email"] = self.principal.effective_email
+        if self.principal.effective_groups:
+            auth_input["principal_groups"] = self.principal.effective_groups
+        if self.principal.on_behalf_of:
+            auth_input["on_behalf_of_principal_id"] = self.principal.on_behalf_of
+        self._add_principal_context(auth_input, principal=self.principal, include_identity_resolution=False)
+        return auth_input
+
+    async def check_permissions(
+        self,
+        workspace: str,
+        *,
+        actor: list[str] | None = None,
+        subject: list[str] | None = None,
+    ) -> bool:
+        """Require independent actor and/or strict OBO subject permission lists.
+
+        Omitted actor and actor=[] impose no actor permission requirement.
+        A supplied subject list, including [], requires verified nonempty OBO.
+        Both omitted is invalid. Existing authentication and caller restrictions
+        still apply; neither side's grants can replace the other's requirements.
+        """
+        auth_input = self._explicit_permission_input(actor=actor, subject=subject)
+        if not self.auth_enabled:
+            return True
+        if not self.policy_decision_point_base_url:
+            raise RuntimeError("Policy Decision Point URL not configured for permission checks")
+        auth_input["workspace"] = workspace
+        return await self._pdp_check("has_permissions", auth_input, "allowed", "permission check")
+
+    def _explicit_permission_input(self, *, actor: list[str] | None, subject: list[str] | None) -> dict[str, Any]:
+        """Validate independent requirements before auth-off and empty-query shortcuts."""
+        if actor is None and subject is None:
+            raise ValueError("At least one actor or subject permission list is required")
+        if subject is not None and not (self.principal.on_behalf_of or "").strip():
+            raise ValueError("Subject permissions require a nonempty on-behalf-of principal")
+        if actor is not None:
+            validate_permission_strings(actor, context="AuthClient.check_permissions actor")
+        if subject is not None:
+            validate_permission_strings(subject, context="AuthClient.check_permissions subject")
+        auth_input = self._permission_input()
+        if actor is not None:
+            auth_input["actor_permissions"] = actor
+        if subject is not None:
+            auth_input["subject_permissions"] = subject
+        return auth_input
+
+    async def filter_workspaces(
+        self,
+        workspaces: set[str],
+        *,
+        actor: list[str] | None = None,
+        subject: list[str] | None = None,
+    ) -> set[str]:
+        """Return workspaces satisfying independent actor/subject grants in one PDP query.
+
+        Requirements have the same omitted/empty and strict OBO semantics as
+        check_permissions. Malformed results and names outside the candidate set
+        fail closed; the PDP must explicitly return the permitted subset.
+        """
+        from fastapi import HTTPException
+
+        auth_input = self._explicit_permission_input(actor=actor, subject=subject)
+        if not self.auth_enabled:
+            return set(workspaces)
+        if not workspaces:
+            return set()
+        if not self.policy_decision_point_base_url:
+            raise RuntimeError("Policy Decision Point URL not configured for permission checks")
+        auth_input["workspaces"] = sorted(workspaces)
+        result = await self._pdp_query("has_permissions", auth_input, "workspace permission check")
+        allowed = result.get("allowed_workspaces")
+        if not isinstance(allowed, list):
+            raise HTTPException(status_code=500, detail="Invalid workspace permission response")
+        permitted: set[str] = set()
+        for workspace in allowed:
+            if not isinstance(workspace, str):
+                raise HTTPException(status_code=500, detail="Invalid workspace permission response")
+            permitted.add(workspace)
+        if not permitted.issubset(workspaces):
+            raise HTTPException(status_code=500, detail="Invalid workspace permission response")
+        return permitted
 
     async def has_role(self, workspace_id: str, role: str) -> bool:
         """Check whether the current effective principal has a role in a workspace."""

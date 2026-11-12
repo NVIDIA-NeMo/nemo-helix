@@ -630,6 +630,16 @@ class OpenShellJobExecutionProfileConfig(JobExecutionProfileConfig):
             "When unset, defaults to `nemo-helix`, resolved on the PATH from the image ENV."
         ),
     )
+    num_gpus: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "GPUs requested for a gpu step of this profile that does not declare its own "
+            "resources.num_gpus; a gpu step with neither asks for one. cpu steps never request "
+            "a GPU, as on the docker and k8s backends. A GPU sandbox keeps the k8s default "
+            "/dev/shm, since OpenShell has no shm sizing; a step's shm_size is ignored."
+        ),
+    )
     egress_proxy: str | None = Field(
         default=None,
         description=(

@@ -348,11 +348,24 @@ class TestReconcileOne:
     async def test_deleting_removes_deployment(self) -> None:
         ctrl = _make_controller()
         dep = _make_deployment(status="deleting")
+        dep._id = "selected-deployment-id"
 
         await ctrl._reconcile_one(dep)
 
         ctrl.backend.delete_deployment.assert_called_once_with("default", "test-dep")
-        ctrl.entities.delete.assert_awaited_once()
+        ctrl.entities.delete_by_id.assert_awaited_once_with(
+            AgentDeployment, "selected-deployment-id", expected_db_version=dep.db_version
+        )
+
+    @pytest.mark.asyncio
+    async def test_deleting_skips_entity_without_persisted_id(self, caplog: pytest.LogCaptureFixture) -> None:
+        ctrl = _make_controller()
+        dep = _make_deployment(status="deleting")
+
+        await ctrl._reconcile_one(dep)
+
+        ctrl.entities.delete_by_id.assert_not_awaited()
+        assert "no persisted ID" in caplog.text
 
     @pytest.mark.asyncio
     async def test_deleting_keeps_entity_when_teardown_incomplete(self) -> None:
@@ -362,7 +375,7 @@ class TestReconcileOne:
 
         await ctrl._reconcile_one(dep)
 
-        ctrl.entities.delete.assert_not_called()
+        ctrl.entities.delete_by_id.assert_not_called()
         assert dep.status == "deleting"
         ctrl.entities.update.assert_awaited()
 
@@ -393,7 +406,7 @@ class TestReconcileOne:
 
         assert dep.status == "failed"
         assert dep.error == "Deployment stuck in DELETING for 300s"
-        ctrl.entities.delete.assert_not_awaited()
+        ctrl.entities.delete_by_id.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_health_timeout_saves_failed_even_if_cleanup_raises(self) -> None:

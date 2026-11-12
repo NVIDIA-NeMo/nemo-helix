@@ -11,6 +11,7 @@ import {
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
@@ -31,9 +32,8 @@ import {
 } from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import { Button, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
-import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
-import { MODEL_COMPARE_ENABLED } from '@studio/constants/environment';
+import { Button, Text } from '@nvidia/foundations-react-core';
+import { hasAgentConfig, NO_CONFIG_DEPLOY_MESSAGE } from '@studio/api/agents/hasAgentConfig';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getModelCompareRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
@@ -78,7 +78,7 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
   onCreateDeployment,
   onCloneAgent,
   onAgentsLoaded,
-  canTestModels = MODEL_COMPARE_ENABLED,
+  canTestModels = true,
 }) => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
@@ -128,7 +128,9 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
   const agentsData = agentsResponse?.data;
 
   useEffect(() => {
-    if (agentsData) onAgentsLoaded?.(agentsData);
+    if (agentsData) {
+      onAgentsLoaded?.(agentsData);
+    }
   }, [agentsData, onAgentsLoaded]);
 
   const totalCount = agentsResponse?.pagination?.total_results ?? agentsData?.length ?? 0;
@@ -175,9 +177,13 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
     for (let page = 1; page <= MAX_PAGES; page += 1) {
       const resp = await agentsListDeployments(workspace, { page, page_size: PAGE_SIZE });
       for (const d of resp.data ?? []) {
-        if (d.agent === agentName && d.name) names.push(d.name);
+        if (d.agent === agentName && d.name) {
+          names.push(d.name);
+        }
       }
-      if (page >= (resp.pagination?.total_pages ?? 1)) break;
+      if (page >= (resp.pagination?.total_pages ?? 1)) {
+        break;
+      }
     }
     return names;
   };
@@ -188,7 +194,9 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
       deploymentNames.map((name) =>
         deleteDeploymentMutation.mutateAsync({ workspace, name }).catch((err) => {
           // A deployment already gone (404) is fine; anything else aborts this agent.
-          if ((err as { response?: { status?: number } })?.response?.status === 404) return;
+          if ((err as { response?: { status?: number } })?.response?.status === 404) {
+            return;
+          }
           throw err;
         })
       )
@@ -197,13 +205,17 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
   };
 
   const handleDelete = async (): Promise<boolean> => {
-    if (!deleteState) return false;
+    if (!deleteState) {
+      return false;
+    }
     const agents = deleteState.kind === 'agent' ? [deleteState.item] : deleteState.items;
     const results = await Promise.allSettled(agents.map((a) => deleteAgentWithDeployments(a.name)));
     const failed = results.filter((r) => r.status === 'rejected').length;
 
     refreshAfterDelete();
-    if (failed < agents.length) dataViewState.rowSelection.set({});
+    if (failed < agents.length) {
+      dataViewState.rowSelection.set({});
+    }
 
     if (failed > 0) {
       toast.error(
@@ -260,36 +272,33 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
     rowActionsColumn({
       size: ROW_ACTIONS_COLUMN_SIZE,
       enableResizing: false,
-      rowActions: (row: AgentTableRow): DropdownEntry[] => [
-        {
-          children: 'Deploy',
-          disabled: !hasAgentConfig(row.config),
-          onSelect: () => onCreateDeployment?.(row.name),
-        },
-        ...(canTestModels
-          ? [
-              {
-                children: 'Test models',
-                onSelect: () => {
-                  const target = getModelCompareRoute(workspace);
-                  const model = row.models[0];
-                  const urn = model ? `${row.workspace}/${model}` : null;
-                  navigate(urn ? `${target}?model=${encodeURIComponent(urn)}` : target);
-                },
-              },
-            ]
-          : []),
-        {
-          children: 'Clone',
-          onSelect: () => onCloneAgent?.(row),
-        },
-        { kind: 'divider' as const },
-        {
-          children: 'Delete',
-          danger: true,
-          onSelect: () => setDeleteState({ kind: 'agent', item: row }),
-        },
-      ],
+      cell: ({ row: { original: row } }) => (
+        <QuickActionsMenuRoot
+          actions={[
+            {
+              label: 'Deploy',
+              disabled: !hasAgentConfig(row.config),
+              disabledReason: NO_CONFIG_DEPLOY_MESSAGE,
+              onSelect: () => onCreateDeployment?.(row.name),
+            },
+            ...(canTestModels
+              ? [
+                  {
+                    label: 'Test models',
+                    onSelect: () => {
+                      const target = getModelCompareRoute(workspace);
+                      const model = row.models[0];
+                      const urn = model ? `${row.workspace}/${model}` : null;
+                      navigate(urn ? `${target}?model=${encodeURIComponent(urn)}` : target);
+                    },
+                  },
+                ]
+              : []),
+            { label: 'Clone', onSelect: () => onCloneAgent?.(row) },
+          ]}
+          deleteAction={{ onSelect: () => setDeleteState({ kind: 'agent', item: row }) }}
+        />
+      ),
     }),
   ];
 

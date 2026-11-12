@@ -4,7 +4,7 @@
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { CJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 
 describe('getJobRefetchInterval', () => {
   it('should return JOB_POLLING_INTERVAL_MS if status is undefined', () => {

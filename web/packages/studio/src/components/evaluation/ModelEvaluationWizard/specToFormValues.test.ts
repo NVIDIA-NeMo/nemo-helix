@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { buildEvaluationSpec } from '@studio/components/evaluation/ModelEvaluationWizard/buildEvaluationSpec';
-import { specToFormValues } from '@studio/components/evaluation/ModelEvaluationWizard/specToFormValues';
+import { buildEvaluationSpec } from '@studio/components/evaluation/EvalWizard/buildEvaluationSpec';
 import {
   type DatasetBindings,
   EVALUATION_FORM_DEFAULTS,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
+import { specToFormValues } from '@studio/components/evaluation/ModelEvaluationWizard/specToFormValues';
 
 const bindings: DatasetBindings = {
   messagesColumn: null,

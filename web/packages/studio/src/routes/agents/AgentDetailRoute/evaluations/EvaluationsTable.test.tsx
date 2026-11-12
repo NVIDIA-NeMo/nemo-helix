@@ -5,9 +5,11 @@ import { type EvalJobRow, toEvalJobRow } from '@studio/api/evaluation/utils';
 import { makeEvaluatorJob } from '@studio/mocks/evaluation/jobs';
 import { EvaluationsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/EvaluationsTable';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
-import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
+import { LG_SELECTOR_TIMEOUT, LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
+import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
+import { menuFor } from '@studio/tests/util/menuFor';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 
@@ -24,6 +26,7 @@ const renderTable = (evaluations: AgentEvaluationRow[], jobs: EvalJobRow[] = [])
     <TestProviders>
       <MemoryRouter>
         <EvaluationsTable workspace="default" evaluations={evaluations} jobs={jobs} />
+        <LocationDisplay />
       </MemoryRouter>
     </TestProviders>
   );
@@ -119,6 +122,38 @@ describe('EvaluationsTable Job column', () => {
     for (const link of links) {
       expect(link).toHaveAttribute('href', '/workspaces/default/jobs/my-eval-job');
     }
+  });
+});
+
+describe('EvaluationsTable row actions', () => {
+  it('offers View job in the quick actions menu and navigates to the job', async () => {
+    const user = userEvent.setup();
+    renderTable([], [toEvalJobRow(makeEvaluatorJob({ name: 'my-eval-job' }))]);
+
+    const [trigger] = await screen.findAllByRole(
+      'button',
+      { name: 'Open quick actions menu' },
+      { timeout: LG_SELECTOR_TIMEOUT }
+    );
+    await user.click(trigger);
+
+    const menu = menuFor(trigger);
+    const items = within(menu).getAllByTestId('quick-actions-menu-item');
+    expect(items.map((item) => item.textContent)).toEqual(['View job']);
+
+    await user.click(within(menu).getByRole('menuitem', { name: 'View job' }));
+    expect(screen.getByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
+      '/workspaces/default/jobs/my-eval-job'
+    );
+  });
+
+  it('renders no quick actions menu for a row without actions', async () => {
+    renderTable([makeEval({ name: 'eval-without-actions' })]);
+
+    await screen.findAllByText('eval-without-actions', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+    expect(
+      screen.queryByRole('button', { name: 'Open quick actions menu' })
+    ).not.toBeInTheDocument();
   });
 });
 

@@ -8,7 +8,8 @@ import type {
   AnalysisRunResponseJob,
   CreateAnalysisRunRequest,
 } from '@nemo/sdk/generated/compass/schema';
-import { type AtifIngestRequest, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { readAgentEthos } from '@studio/api/agents/agentEthos';
 import { AxiosError } from 'axios';
 

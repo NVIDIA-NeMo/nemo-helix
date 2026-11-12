@@ -52,6 +52,7 @@ def _fake_entities_client(platform: Any, _client_cls: Any) -> Any:
     """Build a typed-client-shaped stub that delegates to the fake ``platform.entities`` namespace."""
     entities = platform.entities
     return SimpleNamespace(
+        with_retry=lambda retry: _fake_entities_client(platform, _client_cls),
         create_entity=lambda *, entity_type, workspace, body: _ok(
             entities.create(entity_type, workspace=workspace, data=_data(body))
         ),
@@ -60,6 +61,9 @@ def _fake_entities_client(platform: Any, _client_cls: Any) -> Any:
         ),
         update_entity_by_name=lambda *, name, entity_type, workspace, body: _ok(
             entities.update_entity_by_name(name=name, entity_type=entity_type, workspace=workspace, data=_data(body))
+        ),
+        update_entity_by_id=lambda *, entity_id, workspace, entity_type, body: _ok(
+            entities.update_entity_by_id(entity_id=entity_id, workspace=workspace, entity_type=entity_type, body=body)
         ),
         list_entities=lambda *, entity_type, workspace, query_params=None: _page(
             entities.list(

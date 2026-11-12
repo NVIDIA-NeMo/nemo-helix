@@ -9,11 +9,11 @@ import {
   agentsGetPackageJobStatus,
   agentsListPackageJobs,
 } from '@nemo/sdk/generated/agents/agents';
-import {
-  PackageAgentJobsSortField,
-  type PackageAgentInput,
-  type PackageAgentJobsListFilter,
+import type {
+  PackageAgentInput,
+  PackageAgentJobsListFilter,
 } from '@nemo/sdk/generated/agents/schema';
+import { PackageAgentJobsSortField } from '@nemo/sdk/generated/agents/schema/PackageAgentJobsSortField';
 import {
   isQueuedTooLong,
   isTerminalPackageStatus,

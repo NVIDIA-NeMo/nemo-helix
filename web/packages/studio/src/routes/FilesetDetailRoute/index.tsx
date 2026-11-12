@@ -3,37 +3,25 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
-import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import {
   useFilesListFilesetFiles,
   useFilesRetrieveFileset,
 } from '@nemo/sdk/generated/platform/files';
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
-import {
-  Flex,
-  PageHeader,
-  Stack,
-  TabsContent,
-  TabsList,
-  TabsRoot,
-  TabsTrigger,
-  Text,
-} from '@nvidia/foundations-react-core';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
+import { Flex, PageHeader, Stack, Tabs, Text } from '@nvidia/foundations-react-core';
 import { FilesetActionMenu } from '@studio/components/FilesetActionMenu';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { FilesetDetailTab, isFilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
-import { FilesetCard } from '@studio/routes/FilesetDetailRoute/FilesetCard';
-import { FilesTab } from '@studio/routes/FilesetDetailRoute/FilesTab';
+import type { FilesetDetailOutletContext } from '@studio/routes/FilesetDetailRoute/FilesetDetailTabContent';
 import { getModelSource, isRootReadme } from '@studio/routes/FilesetDetailRoute/utils';
-import { getWorkspaceFilesetsRoute } from '@studio/routes/utils';
+import { getFilesetDetailRoute, getWorkspaceFilesetsRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import type { FC } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, Navigate, Outlet, useNavigate, useParams } from 'react-router';
 
 export const FilesetDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -41,8 +29,7 @@ export const FilesetDetailRoute: FC = () => {
   const { filesetName } = useRequiredPathParams([ROUTE_PARAMS.filesetName]);
   const filesetId = getEntityReference({ namespace: workspace, name: filesetName });
 
-  const { getQueryParam, setQueryParam } = useQueryParams();
-  const tabFromUrl = getQueryParam(QUERY_PARAMETERS.tab) || undefined;
+  const { [ROUTE_PARAMS.filesetTab]: tabFromPath } = useParams();
 
   useBreadcrumbs({
     items: [
@@ -69,12 +56,6 @@ export const FilesetDetailRoute: FC = () => {
   } = useFilesRetrieveFileset(workspace, filesetName, {
     query: { enabled: queryEnabled },
   });
-
-  const handleTabChange = (value: string) => {
-    if (isFilesetDetailTab(value)) {
-      setQueryParam(QUERY_PARAMETERS.tab, value);
-    }
-  };
 
   if (isFilesPending || isFilesetPending) {
     return <Loading description="Loading fileset..." />;
@@ -103,7 +84,11 @@ export const FilesetDetailRoute: FC = () => {
   // README card when present and falls back to Files otherwise.
   const hasReadme = files?.some(isRootReadme) ?? false;
   const defaultTab = isDataset || hasReadme ? FilesetDetailTab.Card : FilesetDetailTab.Files;
-  const currentTab: FilesetDetailTab = isFilesetDetailTab(tabFromUrl) ? tabFromUrl : defaultTab;
+  if (!isFilesetDetailTab(tabFromPath)) {
+    return (
+      <Navigate to={getFilesetDetailRoute(workspace, filesetName, { tab: defaultTab })} replace />
+    );
+  }
 
   // The source line (HF/NGC origin) is meaningful for model/generic filesets;
   // datasets don't surface it.
@@ -138,34 +123,37 @@ export const FilesetDetailRoute: FC = () => {
           }
           slotDescription={description}
         />
-        <TabsRoot className="flex flex-col" value={currentTab} onValueChange={handleTabChange}>
-          <TabsList>
-            <TabsTrigger value={FilesetDetailTab.Card}>{cardLabel}</TabsTrigger>
-            <TabsTrigger value={FilesetDetailTab.Files}>Files</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value={FilesetDetailTab.Card} className="p-0">
-            <FilesetCard
-              workspace={workspace}
-              filesetName={filesetName}
-              fileset={fileset}
-              files={files}
-              isFilesError={isFilesError}
-            />
-          </TabsContent>
-
-          <TabsContent value={FilesetDetailTab.Files} className="p-0">
-            <FilesTab
-              workspace={workspace}
-              filesetName={filesetName}
-              filesetId={filesetId}
-              fileset={fileset}
-              files={files}
-              isFilesError={isFilesError}
-              isFilesFetching={isFilesFetching}
-            />
-          </TabsContent>
-        </TabsRoot>
+        <Tabs
+          // Tabs used purely for navigation (renderLink); override KUI's default overflow:hidden.
+          className="overflow-visible"
+          value={tabFromPath}
+          items={[
+            {
+              value: FilesetDetailTab.Card,
+              children: cardLabel,
+              href: getFilesetDetailRoute(workspace, filesetName, { tab: FilesetDetailTab.Card }),
+            },
+            {
+              value: FilesetDetailTab.Files,
+              children: 'Files',
+              href: getFilesetDetailRoute(workspace, filesetName, { tab: FilesetDetailTab.Files }),
+            },
+          ]}
+          renderLink={(item) => <Link to={item.href!}>{item.children}</Link>}
+        />
+        <Outlet
+          context={
+            {
+              workspace,
+              filesetName,
+              filesetId,
+              fileset,
+              files,
+              isFilesError,
+              isFilesFetching,
+            } satisfies FilesetDetailOutletContext
+          }
+        />
       </Stack>
     </AccessibleTitle>
   );

@@ -9,9 +9,8 @@ import { Button, Flex } from '@nvidia/foundations-react-core';
 import { DeployModelCta } from '@studio/components/ModelChat/DeployModelCta';
 import { LIVE_STATUSES } from '@studio/hooks/useBaseModelDeploymentReadiness';
 import type { DeploymentIndicatorState } from '@studio/hooks/useModelDeploymentStatuses';
-import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
+import { getModelTabLink, ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { DeleteDeploymentButton } from '@studio/routes/ModelDetailRoute/DeploymentTab/DeleteDeploymentButton';
-import { getModelDetailRoute } from '@studio/routes/utils';
 import type { FC } from 'react';
 import { Link } from 'react-router';
 
@@ -38,14 +37,7 @@ export const DeploymentActions: FC<DeploymentActionsProps> = ({ model, adapter, 
       return (
         <Flex gap="density-sm">
           <Button kind="secondary" asChild>
-            <Link
-              to={getModelDetailRoute(model.workspace, model.name, {
-                adapterName: adapter?.name,
-                tab: ModelDetailTab.Chat,
-              })}
-            >
-              Chat
-            </Link>
+            <Link to={getModelTabLink(ModelDetailTab.Chat)}>Chat</Link>
           </Button>
           {servedDeployment && (
             <DeleteDeploymentButton model={model} deployment={servedDeployment} />

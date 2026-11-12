@@ -276,9 +276,17 @@ def memory_entity_client():
         except KeyError as exc:
             raise EntityNotFoundError("Resource not found") from exc
 
+    async def delete_by_id(entity_type, entity_id, *, expected_db_version=None):
+        for entity in entities.values():
+            if entity.id == entity_id:
+                await delete(entity_type, entity.name, workspace=entity.workspace)
+                return
+        raise EntityNotFoundError("Resource not found")
+
     store.get.side_effect = get
     store.create.side_effect = create
     store.delete.side_effect = delete
+    store.delete_by_id.side_effect = delete_by_id
     return store
 
 

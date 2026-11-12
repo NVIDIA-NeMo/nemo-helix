@@ -60,7 +60,7 @@ def test_delete_volume_204(client: TestClient, mock_entity_client: AsyncMock) ->
     mock_entity_client.update.assert_awaited_once()
     updated = mock_entity_client.update.await_args.args[0]
     assert updated.status == "DELETING"
-    mock_entity_client.delete.assert_not_awaited()
+    mock_entity_client.delete_by_id.assert_not_awaited()
 
 
 def test_delete_volume_409_when_referenced(client: TestClient, mock_entity_client: AsyncMock) -> None:
@@ -76,4 +76,4 @@ def test_delete_volume_409_when_referenced(client: TestClient, mock_entity_clien
     resp = client.delete("/apis/deployments/v2/workspaces/default/volumes/vol1")
     assert resp.status_code == 409
     assert "referenced" in resp.json()["detail"].lower()
-    mock_entity_client.delete.assert_not_awaited()
+    mock_entity_client.delete_by_id.assert_not_awaited()

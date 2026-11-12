@@ -17,4 +17,4 @@ fsspec==2026.7.0
 urllib3==2.8.0
 
 # Keep W&B's bundled wandb-core binary on a build with patched Go stdlib/modules.
-wandb>=0.30.0
+wandb>=0.31.0

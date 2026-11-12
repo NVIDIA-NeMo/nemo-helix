@@ -42,6 +42,7 @@ class FakeEntityStore:
     def __init__(self) -> None:
         self.stored: dict[tuple[str, str, str], Any] = {}
         self._ticks = 0
+        self._next_id = 0
 
     def _now(self) -> datetime:
         # Strictly increasing, so ordering by creation time is deterministic.
@@ -63,7 +64,8 @@ class FakeEntityStore:
         if key in self.stored:
             raise EntityConflictError(f"{entity.name} exists")
         stored = self._copy(entity)
-        stored._id = f"entity-{len(self.stored) + 1}"
+        self._next_id += 1
+        stored._id = f"entity-{self._next_id}"
         stored._created_at = stored._updated_at = self._now()
         stored._db_version = 1
         self.stored[key] = stored
@@ -87,6 +89,14 @@ class FakeEntityStore:
         stored._db_version = current.db_version + 1
         self.stored[key] = stored
         return self._copy(stored)
+
+    def delete_by_id(self, entity_type, entity_id, *, expected_db_version=None):
+        for key, entity in self.stored.items():
+            if isinstance(entity, entity_type) and entity.id == entity_id:
+                return self.delete(
+                    entity_type, entity.name, workspace=entity.workspace, expected_db_version=expected_db_version
+                )
+        raise EntityNotFoundError(entity_id)
 
     def delete(
         self,

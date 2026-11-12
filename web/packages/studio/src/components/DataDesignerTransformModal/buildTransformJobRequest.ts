@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { SamplingStrategy, type CreateJobRequest } from '@nemo/sdk/generated/data-designer/schema';
+import type { CreateJobRequest } from '@nemo/sdk/generated/data-designer/schema';
+import { SamplingStrategy } from '@nemo/sdk/generated/data-designer/schema/SamplingStrategy';
 
 export interface TransformJobRequestInput {
   readonly jobName: string;

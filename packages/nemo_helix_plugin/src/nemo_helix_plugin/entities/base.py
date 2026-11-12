@@ -333,6 +333,14 @@ class EntityDeleteClientProtocol(EntityGetterProtocol[EntityT], Protocol[EntityT
         page_size: int = 100,
     ) -> ListResponse[EntityT]: ...
 
+    async def delete_by_id(
+        self,
+        entity_type: Type[EntityT],
+        entity_id: str,
+        *,
+        expected_db_version: int | None = None,
+    ) -> object: ...
+
     async def delete(
         self,
         entity_type: Type[EntityT],
@@ -383,6 +391,14 @@ class AnyEntityDeleteClientProtocol(AnyEntityGetterProtocol, Protocol):
         page: int = 1,
         page_size: int = 100,
     ) -> ListResponse[EntityT]: ...
+
+    async def delete_by_id(
+        self,
+        entity_type: Type[EntityT],
+        entity_id: str,
+        *,
+        expected_db_version: int | None = None,
+    ) -> object: ...
 
     async def delete(
         self,

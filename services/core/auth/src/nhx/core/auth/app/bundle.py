@@ -99,7 +99,7 @@ def _quarantine_contribution(contribution_dict: dict) -> dict:
     return {
         "permissions": {},
         "endpoints": {
-            path: {method: {"permissions": [], "deny": True} for method in methods}
+            path: {method: {"deny": True} for method in methods}
             for path, methods in contribution_dict.get("endpoints", {}).items()
         },
         "role_permissions": {},

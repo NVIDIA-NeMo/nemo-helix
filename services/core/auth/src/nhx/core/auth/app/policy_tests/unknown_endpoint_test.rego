@@ -7,7 +7,7 @@ import data.authz
 import data.common
 
 # Verify that unknown endpoints (not in static-authz.yaml) are denied by default.
-# Previously, get_required_permissions returned [] for unknown endpoints,
+# Previously, selected_route_contract returned [] for unknown endpoints,
 # which triggered the "no permissions required" allow rule — granting access
 # to any authenticated user (fail-open). After the fix, unknown endpoints are
 # denied because normalize_endpoint is undefined for unrecognized paths,
@@ -28,25 +28,25 @@ unknown_endpoint_test_data := {
 	},
 	"endpoints": {
 		"/apis/entities/v2/workspaces": {
-			"get": {"permissions": ["workspaces.list"]},
+			"get": {"direct": {"actor_perms": ["workspaces.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.list"]}},
 			"post": {
-				"permissions": ["workspaces.create"],
+				"direct": {"actor_perms": ["workspaces.create"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.create"]},
 				"scopes": ["entities:write", "platform:write"],
 			},
 		},
 		"/apis/entities/v2/workspaces/{name}": {
-			"get": {"permissions": ["workspaces.read"]},
-			"put": {"permissions": ["workspaces.update"]},
-			"delete": {"permissions": ["workspaces.delete"]},
+			"get": {"direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]}},
+			"put": {"direct": {"actor_perms": ["workspaces.update"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.update"]}},
+			"delete": {"direct": {"actor_perms": ["workspaces.delete"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.delete"]}},
 		},
 		"/apis/entities/v2/workspaces/{workspace}/entities/{entity_type}": {
-			"get": {"permissions": ["entities.read"]},
-			"post": {"permissions": ["entities.create"]},
+			"get": {"direct": {"actor_perms": ["entities.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["entities.read"]}},
+			"post": {"direct": {"actor_perms": ["entities.create"]}, "delegated": {"actor_perms": [], "subject_perms": ["entities.create"]}},
 		},
 		"/apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/{name}": {
-			"get": {"permissions": ["entities.read"]},
-			"put": {"permissions": ["entities.update"]},
-			"delete": {"permissions": ["entities.delete"]},
+			"get": {"direct": {"actor_perms": ["entities.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["entities.read"]}},
+			"put": {"direct": {"actor_perms": ["entities.update"]}, "delegated": {"actor_perms": [], "subject_perms": ["entities.update"]}},
+			"delete": {"direct": {"actor_perms": ["entities.delete"]}, "delegated": {"actor_perms": [], "subject_perms": ["entities.delete"]}},
 		},
 	},
 	"workspaces": {
@@ -70,7 +70,7 @@ unknown_endpoint_test_data := {
 # An authenticated user hitting an endpoint that does not exist in the config
 # must be denied. This is the core regression test for the fail-open bug.
 test_unknown_endpoint_denied_for_authenticated_user if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "user@test.com",
 		"method": "GET",
 		"path": "/apis/entities/v2/workspaces/test-ns/unknown-resource",
@@ -85,7 +85,7 @@ test_unknown_endpoint_denied_for_authenticated_user if {
 
 # POST to an unknown endpoint must also be denied.
 test_unknown_endpoint_denied_post if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "editor@test.com",
 		"method": "POST",
 		"path": "/apis/entities/v2/workspaces/test-ns/unknown-resource",
@@ -100,7 +100,7 @@ test_unknown_endpoint_denied_post if {
 
 # A path that *looks like* a real API but belongs to an unconfigured service must be denied.
 test_unknown_api_group_denied if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "user@test.com",
 		"method": "GET",
 		"path": "/apis/unknown-service/v2/workspaces/test-ns/things",
@@ -117,7 +117,7 @@ test_unknown_api_group_denied if {
 # Previously this would match the cross-workspace LIST rule because
 # extract_workspace_from_path was undefined (same as "no workspace placeholder").
 test_unknown_endpoint_denied_cross_workspace_list if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "user@test.com",
 		"method": "GET",
 		"path": "/apis/entities/v2/unknown-collection",
@@ -132,7 +132,7 @@ test_unknown_endpoint_denied_cross_workspace_list if {
 
 # HEAD must match GET: no bypass when the path is not a known endpoint pattern.
 test_unknown_endpoint_denied_cross_workspace_list_head if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "user@test.com",
 		"method": "HEAD",
 		"path": "/apis/entities/v2/unknown-collection",
@@ -149,7 +149,7 @@ test_unknown_endpoint_denied_cross_workspace_list_head if {
 
 # Workspace creation still works when the caller has a system-scoped creator binding.
 test_workspace_creation_allowed_with_creator_binding if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "user@test.com",
 		"method": "POST",
 		"path": "/apis/entities/v2/workspaces",
@@ -168,7 +168,7 @@ test_workspace_creation_allowed_with_creator_binding if {
 
 # Workspace creation must still enforce the endpoint's write scopes.
 test_workspace_creation_denied_with_wrong_scope if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "user@test.com",
 		"method": "POST",
 		"path": "/apis/entities/v2/workspaces",
@@ -189,7 +189,7 @@ test_workspace_creation_denied_with_wrong_scope if {
 
 # Service principals can still access any endpoint, including unknown ones.
 test_service_principal_bypasses_unknown_endpoint if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "service:entity-store",
 		"method": "POST",
 		"path": "/apis/entities/v2/workspaces/test-ns/unknown-resource",
@@ -200,7 +200,7 @@ test_service_principal_bypasses_unknown_endpoint if {
 
 # Platform admins can still access any endpoint, including unknown ones.
 test_platform_admin_bypasses_unknown_endpoint if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "admin@test.com",
 		"method": "DELETE",
 		"path": "/apis/entities/v2/workspaces/test-ns/unknown-resource",
@@ -218,7 +218,7 @@ test_platform_admin_bypasses_unknown_endpoint if {
 # A known endpoint with required permissions still works for a user with the right role.
 # Use workspace object PUT (not nested .../entities/...) so nested-entities service-only deny does not apply.
 test_known_endpoint_with_permissions_allowed if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "editor@test.com",
 		"method": "PUT",
 		"path": "/apis/entities/v2/workspaces/test-ns",
@@ -233,7 +233,7 @@ test_known_endpoint_with_permissions_allowed if {
 
 # A known endpoint denies a user who lacks the required permission.
 test_known_endpoint_denied_without_permission if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "user@test.com",
 		"method": "PUT",
 		"path": "/apis/entities/v2/workspaces/test-ns/entities/models/my-model",
@@ -251,7 +251,7 @@ test_known_cross_workspace_list_still_allowed if {
 	# Control for the fail-closed unknown-endpoint tests above: a KNOWN no-workspace list
 	# endpoint is still allowed for a user holding the permission. lister@test.com has Viewer
 	# (→ workspaces.list) in the system workspace, which listing now requires.
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "lister@test.com",
 		"method": "GET",
 		"path": "/apis/entities/v2/workspaces",
@@ -269,12 +269,12 @@ test_known_cross_workspace_list_still_allowed if {
 # A permissionless no-workspace GET stays open to any authenticated user (the cross-workspace
 # list path is unchanged for endpoints declaring no permissions).
 test_permissionless_no_workspace_get_allows_any_authenticated_user if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "anyone@test.com",
 		"method": "GET",
 		"path": "/apis/example/v1/ping",
 	}
-		with data.authz.endpoints as {"/apis/example/v1/ping": {"get": {"permissions": []}}}
+		with data.authz.endpoints as {"/apis/example/v1/ping": {"get": {"direct": {"actor_perms": []}, "delegated": {"actor_perms": [], "subject_perms": []}}}}
 		with data.authz.principals as {"anyone@test.com": {"workspaces": {}}}
 		with data.authz.roles as {}
 
@@ -284,12 +284,12 @@ test_permissionless_no_workspace_get_allows_any_authenticated_user if {
 # A permission-stamped no-workspace GET is DENIED without the declared permission in the system
 # workspace — the stamped permission is enforced rather than decorative.
 test_permissioned_no_workspace_get_denied_without_permission if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "nobody@test.com",
 		"method": "GET",
 		"path": "/apis/example/v1/hello/world",
 	}
-		with data.authz.endpoints as {"/apis/example/v1/hello/{name}": {"get": {"permissions": ["example.hello.read"]}}}
+		with data.authz.endpoints as {"/apis/example/v1/hello/{name}": {"get": {"direct": {"actor_perms": ["example.hello.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["example.hello.read"]}}}}
 		with data.authz.principals as {"nobody@test.com": {"workspaces": {}}}
 		with data.authz.roles as {}
 
@@ -298,27 +298,29 @@ test_permissioned_no_workspace_get_denied_without_permission if {
 
 # ...and ALLOWED when the caller holds that permission in the system workspace.
 test_permissioned_no_workspace_get_allowed_with_system_permission if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"principal_id": "reader@test.com",
 		"method": "GET",
 		"path": "/apis/example/v1/hello/world",
 	}
-		with data.authz.endpoints as {"/apis/example/v1/hello/{name}": {"get": {"permissions": ["example.hello.read"]}}}
+		with data.authz.endpoints as {"/apis/example/v1/hello/{name}": {"get": {"direct": {"actor_perms": ["example.hello.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["example.hello.read"]}}}}
 		with data.authz.principals as {"reader@test.com": {"workspaces": {"system": ["HelloReader"]}}}
 		with data.authz.roles as {"HelloReader": {"permissions": ["example.hello.read"]}}
 
 	result.allowed == true
 }
 
-# get_required_permissions is undefined for unknown endpoints (no longer returns []).
-test_get_required_permissions_undefined_for_unknown if {
-	not common.get_required_permissions("/apis/entities/v2/workspaces/test-ns/unknown", "GET")
+# selected_route_contract is undefined for unknown endpoints (no longer returns []).
+test_selected_route_contract_undefined_for_unknown if {
+	not common.selected_route_contract.actor_perms
+        with input as {"principal_id": "viewer@test.com", "path": "/apis/entities/v2/workspaces/test-ns/unknown", "method": "GET"}
 		with data.authz.endpoints as unknown_endpoint_test_data.endpoints
 }
 
-# get_required_permissions still returns the configured permission for known endpoints.
-test_get_required_permissions_for_workspace_creation if {
-	perms := common.get_required_permissions("/apis/entities/v2/workspaces", "POST")
+# selected_route_contract still returns the configured permission for known endpoints.
+test_selected_route_contract_for_workspace_creation if {
+	perms := common.selected_route_contract.actor_perms
+        with input as {"principal_id": "viewer@test.com", "path": "/apis/entities/v2/workspaces", "method": "POST"}
 		with data.authz.endpoints as unknown_endpoint_test_data.endpoints
 	perms == ["workspaces.create"]
 }

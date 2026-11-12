@@ -24,7 +24,10 @@ def test_derive_scope_families_collects_all_endpoints_and_methods():
     authz = {
         "endpoints": {
             "/a": {"get": {"scopes": ["models:read", "platform:read"]}, "post": {"scopes": ["models:write"]}},
-            "/b": {"get": {"scopes": ["intake:read", "not-a-family"]}, "put": {"permissions": []}},
+            "/b": {
+                "get": {"scopes": ["intake:read", "not-a-family"]},
+                "put": {"direct": {"actor_perms": []}, "delegated": {"actor_perms": [], "subject_perms": []}},
+            },
         }
     }
     assert derive_scope_families(authz) == {"intake": True, "models": True, "platform": True}

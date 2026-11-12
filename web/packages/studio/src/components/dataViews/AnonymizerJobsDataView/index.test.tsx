@@ -4,11 +4,8 @@
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { getAnonymizerListRunJobsQueryKey } from '@nemo/sdk/generated/anonymizer/anonymizer';
-import {
-  HelixJobStatus,
-  type RunJob,
-  type RunJobsPage,
-} from '@nemo/sdk/generated/anonymizer/schema';
+import type { RunJob, RunJobsPage } from '@nemo/sdk/generated/anonymizer/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/anonymizer/schema/HelixJobStatus';
 import { AnonymizerJobsDataView } from '@studio/components/dataViews/AnonymizerJobsDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
