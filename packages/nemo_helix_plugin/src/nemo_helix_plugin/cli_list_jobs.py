@@ -5,22 +5,18 @@
 
 Every :class:`~nemo_helix_plugin.job.NemoJob` a plugin mounts with
 :func:`~nemo_helix_plugin.jobs.routes.add_job_routes` gets its own list route, which returns only
-jobs of that type. These commands call that route rather than the core Jobs list, so they don't
-need the job's ``source`` value (set server-side, and not unique per type in every plugin).
+jobs of that type. These commands call that route, not the core Jobs list route.
 
 When several job types are selected, each type's route is queried and the results are merged in
-sort order (newest first by default). A merged list can't be paged by number without fetching
-everything before the page, so ``--page`` needs exactly one job type; ``--page-size`` caps the
-merged list and ``--all-pages`` fetches everything.
+sort order (newest first by default). Selecting multiple job types also affects pagination:
+- ``--page-size`` effectively caps the length of the (merged) list
+- ``--all-pages`` fetches everything
+- ``--page`` is not supported
 
 :func:`add_list_jobs_command` is called by :func:`~nemo_helix_plugin.commands.add_job_commands`
-for every plugin with jobs. A plugin that needs extra listing options registers its own
-``list-jobs`` command in :meth:`~nemo_helix_plugin.cli.NemoCLI.get_cli` and builds it from
-:func:`run_list_jobs` and the option aliases here; the generated command then steps aside.
-
-Note: this module deliberately has no ``from __future__ import annotations``. The generated
-command's ``--type`` help lists the plugin's job types, so its annotations are built at runtime
-from local values, which Typer can only read when they are real objects.
+for every plugin with jobs. A plugin can customize its ``list-jobs`` command by registering its
+own (in its `NemoCLI.get_cli` implementation); it should use :func:`run_list_jobs` and option aliases
+in this module to maintain some consistency with the rest of the CLI.
 """
 
 import json
