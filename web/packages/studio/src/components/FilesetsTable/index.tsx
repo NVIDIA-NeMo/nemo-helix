@@ -70,6 +70,8 @@ export const FilesetsTable: FC<FilesetsTableProps> = ({
   });
 
   const [createModalOpen, openCreateModal, closeCreateModal] = useBoolean(false);
+  // The empty state's create action is labeled "Create Model Fileset", so only offer it when the table can show model filesets.
+  const canCreate = purposeFilter === undefined || purposeFilter === FilesetPurpose.model;
 
   // Column definitions
   const makeColumns = makeFilesetsTableColumns({
@@ -151,7 +153,7 @@ export const FilesetsTable: FC<FilesetsTableProps> = ({
                 <EntityEmptyState
                   entity="filesets"
                   variant="first-use"
-                  onCreate={openCreateModal}
+                  onCreate={canCreate ? openCreateModal : undefined}
                 />
               ),
           },

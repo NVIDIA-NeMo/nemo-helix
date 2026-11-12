@@ -585,6 +585,20 @@ describe('FilesetsTable', () => {
       );
     });
 
+    it('omits the create action when purposeFilter excludes model filesets', async () => {
+      installListHandler([]);
+      renderTable({ purposeFilter: FilesetPurpose.dataset });
+
+      expect(
+        await screen.findByText(ENTITY_EMPTY_STATES.filesets.heading, undefined, {
+          timeout: LG_SELECTOR_TIMEOUT,
+        })
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: ENTITY_EMPTY_STATES.filesets.createAction?.label })
+      ).not.toBeInTheDocument();
+    });
+
     it('still shows the first-use empty state when only the seeded default purposes are set', async () => {
       installListHandler([]);
       renderTable({ enableFilters: true });
