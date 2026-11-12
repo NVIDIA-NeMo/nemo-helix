@@ -19,7 +19,6 @@ from nhx.core.entities.app.repository import (
     AccountIdentityStore,
     AccountPreferenceStore,
     PreferenceRecord,
-    merge_patch,
 )
 from nhx.core.entities.app.repository.sqlalchemy.models import DBWorkspace
 from sqlalchemy import select
@@ -189,8 +188,3 @@ def _api_defaults(record: PreferenceRecord) -> PreferenceDefaults:
     return PreferenceDefaults(
         namespace=record.namespace, value=record.value, managed_by="api", db_version=record.db_version
     )
-
-
-def effective_value(defaults: dict[str, Any], value: dict[str, Any]) -> dict[str, Any]:
-    """User values win key by key; a key the user removed falls back to the default."""
-    return merge_patch(defaults, value)

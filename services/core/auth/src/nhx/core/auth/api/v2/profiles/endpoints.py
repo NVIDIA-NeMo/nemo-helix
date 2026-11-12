@@ -37,7 +37,6 @@ from nhx.core.auth.app.profiles import (
     LOCAL_DISPLAY_NAME,
     Caller,
     PreferenceDefaultsStore,
-    effective_value,
     require_editable,
     require_readable_workspace,
     resolve_caller,
@@ -53,6 +52,7 @@ from nhx.core.entities.app.repository import (
     PreferenceTooLargeError,
     PreferenceVersionConflictError,
     ResolvedPrincipal,
+    merge_patch,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -216,7 +216,8 @@ def _document(
         workspace=workspace,
         value=value,
         defaults=default_value,
-        effective=effective_value(default_value, value),
+        # User values win key by key; a key the user removed falls back to the default.
+        effective=merge_patch(default_value, value),
         db_version=record.db_version if record else 0,
         updated_at=record.updated_at if record else None,
     )
