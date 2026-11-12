@@ -877,6 +877,34 @@ def test_opaque_docker_proof_token_mints_delegated_access_token(
     assert claims[JOB_WORKLOAD_CLAIM] == {"workspace": "default", "job": "job-123"}
 
 
+def test_a_job_a_service_created_names_that_service_on_its_token(
+    client: TestClient,
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    entity_client: _FakeEntityClient,
+) -> None:
+    subject_token, token_hash = create_opaque_docker_proof_token(_docker_delegation_name())
+    creator = Principal(
+        id="service:evals", on_behalf_of="creator@example.com", on_behalf_of_email="creator@example.com"
+    )
+    delegation = _delegation_entity(
+        opaque_subject_token_hash=token_hash,
+        workload_kind="job",
+        auth_context=PluginAuthContext.from_principal(creator),
+    )
+    entity_client.entities[delegation.name] = delegation
+
+    response = client.post(
+        "/token",
+        data=_exchange_form(subject_token, subject_token_type=DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE),
+    )
+
+    assert response.status_code == 200
+    claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
+    assert claims["sub"] == "creator@example.com"
+    assert claims[JOB_WORKLOAD_CLAIM] == {"workspace": "default", "job": "job-123", "service": "evals"}
+
+
 def test_opaque_docker_proof_token_mints_delegated_access_token_for_deployment_row(
     client: TestClient,
     exchange_config: AuthConfig,

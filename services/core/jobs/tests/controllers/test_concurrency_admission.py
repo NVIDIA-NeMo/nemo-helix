@@ -101,6 +101,20 @@ def test_defers_at_user_limit(mock_jobs_client, test_step_created):
     assert admission.check(_step(test_step_created, "other-user", user="bob")).admitted
 
 
+def test_jobs_a_service_submits_count_against_the_user_it_acted_for(mock_jobs_client, test_step_created):
+    def for_user(name: str, user: str, **kwargs) -> HelixJobStepWithContext:
+        step = _step(test_step_created, name, **kwargs)
+        return step.model_copy(
+            update={"auth_context": AuthContext(principal_id="service:evals", principal_on_behalf_of=user)}
+        )
+
+    running = [for_user("r1", "alice", status=HelixJobStatus.ACTIVE)]
+    admission = _admission(mock_jobs_client, running, user=1)
+
+    assert not admission.check(for_user("alice-again", "alice")).admitted
+    assert admission.check(for_user("bob", "bob")).admitted
+
+
 def test_defers_then_admits_as_capacity_frees(mock_jobs_client, test_step_created):
     running = [_step(test_step_created, "r1", status=HelixJobStatus.ACTIVE)]
     admission = _admission(mock_jobs_client, running, user=1)

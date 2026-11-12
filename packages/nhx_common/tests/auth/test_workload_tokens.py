@@ -11,7 +11,12 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from nemo_helix_plugin.auth.workload_delegations import JOB_WORKLOAD_CLAIM, JobWorkloadBinding, current_workload_job
+from nemo_helix_plugin.auth.workload_delegations import (
+    JOB_WORKLOAD_CLAIM,
+    JobWorkloadBinding,
+    bind_job,
+    current_workload_job,
+)
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
@@ -196,3 +201,8 @@ def test_a_job_bound_service_token_must_act_for_the_jobs_creator(tmp_path: Path)
         issue_service_workload_access_token(
             config, service_name="jobs", job=JobWorkloadBinding(workspace="team", job="job-one")
         )
+
+
+@pytest.mark.parametrize(("creator", "service"), [("service:evals", "evals"), ("user:alice", None), (None, None)])
+def test_a_job_binding_names_the_service_that_created_the_job(creator: str | None, service: str | None) -> None:
+    assert bind_job("team", "job-one", creator).service == service

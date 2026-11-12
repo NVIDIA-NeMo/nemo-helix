@@ -19,7 +19,7 @@ from shutil import rmtree
 from sys import executable as python_executable
 from typing import Literal
 
-from nemo_helix_plugin.auth.workload_delegations import JobWorkloadBinding
+from nemo_helix_plugin.auth.workload_delegations import JobWorkloadBinding, bind_job
 from nemo_helix_plugin.client.constants import ACCESS_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext, HelixJobTaskUpdate
 from nhx.common.auth import AuthContext
@@ -801,4 +801,4 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
 
 def _job_binding(step: HelixJobStepWithContext) -> JobWorkloadBinding:
-    return JobWorkloadBinding(workspace=step.workspace, job=step.job)
+    return bind_job(step.workspace, step.job, step.auth_context.principal_id if step.auth_context else None)

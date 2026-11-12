@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import ClassVar
 
-from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth import AuthContext, is_service_principal_id
 from nemo_helix_plugin.entities import SyncEntityClient
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
@@ -66,6 +66,13 @@ class JobWorkloadBinding(BaseModel):
 
     workspace: str = Field(min_length=1)
     job: str = Field(min_length=1, description="Name of the Job.")
+    service: str | None = Field(default=None, min_length=1, description="The service that created the Job, if one did.")
+
+
+def bind_job(workspace: str, job: str, creator: str | None) -> JobWorkloadBinding:
+    """The binding of a Job whose creator principal is ``creator``."""
+    service = creator.removeprefix("service:") if creator and is_service_principal_id(creator) else None
+    return JobWorkloadBinding(workspace=workspace, job=job, service=service)
 
 
 def current_workload_job() -> JobWorkloadBinding | None:
@@ -138,7 +145,7 @@ class WorkloadDelegationEntity(NemoEntity, entity_type=WORKLOAD_DELEGATION_ENTIT
         """The Job this delegation was registered for, or ``None`` for any other workload."""
         if self.workload_kind != "job" or not self.job_id:
             return None
-        return JobWorkloadBinding(workspace=self.workload_workspace, job=self.job_id)
+        return bind_job(self.workload_workspace, self.job_id, self.auth_context.principal_id)
 
     def is_expired(self, *, now: datetime | None = None) -> bool:
         """Return whether this delegation is expired at the supplied time."""

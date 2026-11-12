@@ -15,7 +15,7 @@ from nemo_helix_plugin.client.endpoint import get, put
 from nemo_helix_plugin.client.method import method
 from pydantic import BaseModel, ConfigDict
 
-JOB_BUILD_PATH = "/job-runtime/{job}/tasks/{task}/revisions/{revision_digest}/image-builds/{attempt}"
+JOB_BUILD_PATH = "/job-runtime/tasks/{task}/revisions/{revision_digest}/image-builds/{attempt}"
 _PATH = "/apis/evals/v2/workspaces/{workspace}" + JOB_BUILD_PATH
 
 
@@ -38,13 +38,13 @@ class TaskImageBuildProgress(BaseModel):
 
 @get(_PATH)
 @abstractmethod
-def _load(*, workspace: str, job: str, task: str, revision_digest: str, attempt: str) -> TaskImageBuildState: ...
+def _load(*, workspace: str, task: str, revision_digest: str, attempt: str) -> TaskImageBuildState: ...
 
 
 @put(_PATH)
 @abstractmethod
 def _save(
-    *, workspace: str, job: str, task: str, revision_digest: str, attempt: str, body: TaskImageBuildProgress
+    *, workspace: str, task: str, revision_digest: str, attempt: str, body: TaskImageBuildProgress
 ) -> TaskImageBuildEntity: ...
 
 
@@ -56,11 +56,10 @@ class _RuntimeClient(AsyncNemoClient):
 class RuntimeBuildRecords:
     """The build record of one task-builder Job, through the Evals job-runtime routes."""
 
-    def __init__(self, client: AsyncNemoClient, *, job: str, spec: TaskImageBuildSpec) -> None:
+    def __init__(self, client: AsyncNemoClient, spec: TaskImageBuildSpec) -> None:
         self._client = _RuntimeClient.from_client(client)
         self._path = {
             "workspace": spec.workspace,
-            "job": job,
             "task": spec.task,
             "revision_digest": spec.revision_digest,
             "attempt": str(spec.attempt),

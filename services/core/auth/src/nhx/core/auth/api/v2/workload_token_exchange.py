@@ -766,7 +766,7 @@ def _build_delegated_claims(
         actor_claims["groups"] = ",".join(verified_subject.groups)
     claims["act"] = actor_claims
     if (job := delegation.job_binding()) is not None:
-        claims[JOB_WORKLOAD_CLAIM] = job.model_dump()
+        claims[JOB_WORKLOAD_CLAIM] = job.model_dump(exclude_none=True)
     return claims
 
 

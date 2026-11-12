@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nemo_helix_plugin.auth.workload_delegations import JobWorkloadBinding
+from nemo_helix_plugin.auth.workload_delegations import JobWorkloadBinding, bind_job
 from nhx.common.config import HelixConfig
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.providers import SubprocessExecutionProvider
@@ -1136,7 +1136,7 @@ def test_task_token_file_removal_is_retried_after_a_failure(mock_nemo_client, tm
 def _schedule_with_delegated_token(backend: SubprocessJobBackend, step, token_file_name: str = ".nhx-access-token"):
     def _inject(env: dict[str, str], token_file, job: JobWorkloadBinding) -> dict[str, str]:
         assert token_file.name == token_file_name
-        assert job == JobWorkloadBinding(workspace=step.workspace, job=step.job)
+        assert job == bind_job(step.workspace, step.job, step.auth_context.principal_id if step.auth_context else None)
         token_file.write_text("minted-token", encoding="utf-8")
         env["NHX_ACCESS_TOKEN_FILE"] = str(token_file)
         env["NHX_PRINCIPAL"] = '{"id": "creator"}'
@@ -1161,7 +1161,9 @@ def test_schedule_registers_the_delegated_token_for_rotation(
     assert metadata.task_auth_token_file is not None
     assert metadata.task_auth_token_file.read_text(encoding="utf-8") == "minted-token"
     assert metadata.task_auth_env == {"NHX_PRINCIPAL": '{"id": "creator"}'}
-    assert metadata.task_auth_job == JobWorkloadBinding(workspace=step.workspace, job=step.job)
+    assert metadata.task_auth_job == bind_job(
+        step.workspace, step.job, step.auth_context.principal_id if step.auth_context else None
+    )
 
 
 def test_sync_rotates_the_token_of_a_running_process(

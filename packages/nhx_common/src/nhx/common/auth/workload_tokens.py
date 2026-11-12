@@ -230,7 +230,7 @@ def _service_token_claims(
         subject_claims = {"sub": on_behalf_of}
     subject_claims["act"] = {"sub": service_subject}
     if job is not None:
-        subject_claims[JOB_WORKLOAD_CLAIM] = job.model_dump()
+        subject_claims[JOB_WORKLOAD_CLAIM] = job.model_dump(exclude_none=True)
     return subject_claims
 
 

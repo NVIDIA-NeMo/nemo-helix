@@ -46,11 +46,9 @@ class TaskImageBuildJob(NemoJob):
     def run(self, config: dict, *, ctx: JobContext, async_client: AsyncNemoClient) -> dict:
         """Run the build to a ready or failed record."""
         spec = TaskImageBuildSpec.model_validate(config)
-        if ctx.job_id is None:
-            raise ValueError("A task image build runs only as a platform Job")
         build = asyncio.run(
             run_task_image_build(
-                RuntimeBuildRecords(async_client, job=ctx.job_id, spec=spec),
+                RuntimeBuildRecords(async_client, spec),
                 files=AsyncFilesClient.from_client(async_client),
                 builder=HttpImageBuilder(async_client, workspace=spec.workspace),
             )
