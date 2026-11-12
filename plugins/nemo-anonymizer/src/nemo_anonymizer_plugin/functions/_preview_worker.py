@@ -44,10 +44,6 @@ def _make_preview(
     """Run ``Anonymizer.preview(...)`` and stream the result frames."""
     config: AnonymizerConfig = spec.config
 
-    # Upstream writes intermediate artifacts to ``.anonymizer-artifacts`` in the
-    # working directory unless told otherwise, and the service's working
-    # directory is not writable in a deployed image. Give each preview its own
-    # scratch dir, removed once the preview finishes.
     with tempfile.TemporaryDirectory(prefix="anonymizer-preview-") as artifact_dir:
         anonymizer = _make_anonymizer(
             model_configs_yaml=model_configs_yaml,
