@@ -47,6 +47,7 @@ StepCounts = dict[tuple[str, str], int]
 
 
 def _count_by_workspace_and_user(steps: Iterable[HelixJobStepWithContext]) -> StepCounts:
+    """Count steps per (workspace, user); steps without a principal count under ``unknown``."""
     counts: Counter[tuple[str, str]] = Counter()
     for step in steps:
         counts[(step.workspace, principal_of(step) or UNKNOWN_USER)] += 1
@@ -103,17 +104,21 @@ class JobScheduler(HeartbeatMixin, Controller):
 
     @property
     def is_healthy(self) -> bool:
+        """Whether the last attempt to fetch steps for scheduling succeeded."""
         return self._is_healthy
 
     @staticmethod
     def _observations(counts: StepCounts) -> Iterator[Observation]:
+        """Turn per-(workspace, user) counts into gauge observations."""
         for (workspace, user), count in counts.items():
             yield Observation(count, {"workspace": workspace, "user": user})
 
     def _observe_queued(self, options: CallbackOptions) -> Iterator[Observation]:
+        """Gauge callback for the queued snapshot."""
         return self._observations(self._queued_counts)
 
     def _observe_running(self, options: CallbackOptions) -> Iterator[Observation]:
+        """Gauge callback for the running snapshot."""
         return self._observations(self._running_counts)
 
     def _refresh_running_counts(self) -> None:
@@ -130,6 +135,7 @@ class JobScheduler(HeartbeatMixin, Controller):
         self._running_counts = _count_by_workspace_and_user(steps)
 
     def step(self):
+        """Run one scheduling pass: fetch schedulable steps, refresh gauges, and dispatch each step."""
         # Check stop signal before making any API calls
         if self._stop_signal and self._stop_signal.is_set():
             logger.debug("Stop signal received, skipping scheduling step")
@@ -388,6 +394,7 @@ class JobScheduler(HeartbeatMixin, Controller):
         return steps
 
     def schedule_step(self, step: HelixJobStepWithContext) -> JobUpdate:
+        """Hand the step to its provider/profile backend and return the resulting status update."""
         provider, profile = extract_provider_profile(step)
         backend = self._backend_registry.get_backend(profile=profile, provider=provider)
         self._step_scheduled_total.add(1, attributes={"provider": provider, "profile": profile})

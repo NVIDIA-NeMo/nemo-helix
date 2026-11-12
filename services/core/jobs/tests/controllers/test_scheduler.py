@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import httpx
 from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError
+from nemo_helix_plugin.jobs.types import AuthContext
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
 from nhx.core.jobs.controllers.admission import AdmissionDecision
@@ -438,6 +439,7 @@ def test_admission_deferral_rewrites_when_reason_changes(
 
 
 def _gauge_points(reader) -> dict[str, dict[tuple[str, str], int]]:
+    """Collect gauge data points keyed by metric name, then by (workspace, user)."""
     points: dict[str, dict[tuple[str, str], int]] = {}
     data = reader.get_metrics_data()
     for rm in data.resource_metrics if data else []:
@@ -462,23 +464,39 @@ def test_queued_and_running_gauges_report_counts_by_workspace_and_user(
     reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[reader])
     with patch.object(scheduler_module, "meter", provider.get_meter("test")):
-        scheduler = JobScheduler(backend_registry, mock_nemo_client, admission=_DeferringAdmission({"q1", "q2", "q3"}))
+        scheduler = JobScheduler(
+            backend_registry, mock_nemo_client, admission=_DeferringAdmission({"q1", "q2", "q3", "q4"})
+        )
 
-    def _step(name: str, workspace: str, status: HelixJobStatus) -> HelixJobStepWithContext:
+    def _step(name: str, workspace: str, status: HelixJobStatus, user: str | None) -> HelixJobStepWithContext:
+        auth_context = AuthContext(principal_id=user) if user is not None else None
         return test_step_created.model_copy(
-            update={"id": name, "name": name, "workspace": workspace, "status": status, "auth_context": None}
+            update={"id": name, "name": name, "workspace": workspace, "status": status, "auth_context": auth_context}
         )
 
     waiting = [
-        _step("q1", "ws-a", HelixJobStatus.QUEUED),
-        _step("q2", "ws-a", HelixJobStatus.QUEUED),
-        _step("q3", "ws-b", HelixJobStatus.QUEUED),
+        _step("q1", "ws-a", HelixJobStatus.QUEUED, "alice"),
+        _step("q2", "ws-a", HelixJobStatus.QUEUED, "bob"),
+        _step("q3", "ws-a", HelixJobStatus.QUEUED, "bob"),
+        _step("q4", "ws-b", HelixJobStatus.QUEUED, None),
     ]
-    running = [_step("r1", "ws-a", HelixJobStatus.ACTIVE)]
+    running = [
+        _step("r1", "ws-a", HelixJobStatus.ACTIVE, "alice"),
+        _step("r2", "ws-a", HelixJobStatus.ACTIVE, "bob"),
+        _step("r3", "ws-b", HelixJobStatus.ACTIVE, None),
+    ]
     mock_jobs_client.list_steps.side_effect = [paginated_response(waiting), paginated_response(running)]
 
     scheduler.step()
 
     points = _gauge_points(reader)
-    assert points["nhx.jobs.scheduler.queued"] == {("ws-a", "unknown"): 2, ("ws-b", "unknown"): 1}
-    assert points["nhx.jobs.scheduler.running"] == {("ws-a", "unknown"): 1}
+    assert points["nhx.jobs.scheduler.queued"] == {
+        ("ws-a", "alice"): 1,
+        ("ws-a", "bob"): 2,
+        ("ws-b", "unknown"): 1,
+    }
+    assert points["nhx.jobs.scheduler.running"] == {
+        ("ws-a", "alice"): 1,
+        ("ws-a", "bob"): 1,
+        ("ws-b", "unknown"): 1,
+    }
