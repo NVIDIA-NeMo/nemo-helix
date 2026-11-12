@@ -5,3 +5,4 @@ export * from '@studio/providers/auth/useAuthLogin';
 export * from '@studio/providers/auth/useAuthProfile';
 export * from '@studio/providers/auth/useAuthTokenStatus';
 export * from '@studio/providers/auth/useWebSession';
+export * from '@studio/providers/auth/useMe';

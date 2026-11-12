@@ -12,7 +12,6 @@ import {
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { FormField, Stack, TextInput } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';
-import { trendVisibilityStorageKey } from '@studio/components/charts/ExperimentTrendChart/visibility';
 import {
   EXPERIMENT_SETTINGS_NAMES,
   type ExperimentSettingsValues,
@@ -20,7 +19,8 @@ import {
   experimentSettingsPayload,
 } from '@studio/components/evaluation/experimentSettings';
 import { ExperimentSettingsFields } from '@studio/components/evaluation/ExperimentSettingsFields';
-import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
+import { studioPreferences } from '@studio/providers/preferences/definitions';
+import { usePreference } from '@studio/providers/preferences/usePreference';
 import { AxiosError } from 'axios';
 import { type FC, type FormEvent, useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
@@ -68,7 +68,9 @@ export const ExperimentEditModal: FC<ExperimentEditModalProps> = ({
   // the flag off and back on and the stamp matches again, so a viewer who had hidden the chart would
   // watch the owner's edit do nothing. An explicit edit here is unambiguous, so drop the choice
   // outright. Deleting through the hook notifies the open page, so the chart follows without a reload.
-  const [, , clearTrendChoice] = useLocalStorage(trendVisibilityStorageKey(group.id));
+  const [, , clearTrendChoice] = usePreference(studioPreferences.experimentTrendVisibility, {
+    entry: group.id,
+  });
 
   const { mutateAsync: updateExperiment, isPending } = useUpdateExperiment({
     mutation: {

@@ -1,15 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 
 // Get access to the centralized auth mocks
-const { mockSignOut, mockUseAuthProfile, mockUseAuthSignOut } = vi.hoisted(() => ({
+const { mockSignOut, mockUseAuthProfile, mockUseAuthSignOut, mockUseMe } = vi.hoisted(() => ({
   mockSignOut: vi.fn(),
   mockUseAuthProfile: vi.fn(),
   mockUseAuthSignOut: vi.fn(),
+  mockUseMe: vi.fn(),
 }));
 
 // Mock just the useAuthProfile hook since react-oidc-context is handled centrally
@@ -19,6 +20,12 @@ vi.mock('@studio/providers/auth/useAuthProfile', () => ({
 
 vi.mock('@studio/providers/auth/useWebSession', () => ({
   useAuthSignOut: mockUseAuthSignOut,
+}));
+
+vi.mock('@studio/providers/auth/useMe', () => ({ useMe: mockUseMe }));
+
+vi.mock('@studio/components/UserPopover/EditProfileModal', () => ({
+  EditProfileModal: () => <div data-testid="edit-profile-modal" />,
 }));
 
 vi.mock('@studio/constants/environment', async (importOriginal) => {
@@ -65,6 +72,7 @@ describe('UserPopover', () => {
     // Default mock setup - user is authenticated
     mockUseAuthProfile.mockReturnValue(mockProfile);
     mockUseAuthSignOut.mockReturnValue(mockSignOut);
+    mockUseMe.mockReturnValue({ data: undefined });
   });
 
   afterEach(() => {
@@ -94,6 +102,40 @@ describe('UserPopover', () => {
     const trigger = screen.getByTestId('nv-dropdown-trigger');
     expect(trigger).toBeInTheDocument();
     expect(trigger).toHaveTextContent('N');
+  });
+
+  it('should show the IdP avatar without leaking the referrer', () => {
+    mockUseAuthProfile.mockReturnValue({
+      ...mockProfile,
+      avatarUrl: 'https://idp.example.com/a.png',
+    });
+    renderWithRouter(<UserPopover />);
+
+    const avatar = within(screen.getByTestId('nv-dropdown-trigger')).getByRole('presentation');
+    expect(avatar).toHaveAttribute('src', 'https://idp.example.com/a.png');
+    expect(avatar).toHaveAttribute('referrerpolicy', 'no-referrer');
+  });
+
+  it('should offer Edit profile only when the profile is editable', async () => {
+    mockUseMe.mockReturnValue({ data: { can_edit_profile: true, profile: {} } });
+    renderWithRouter(<UserPopover />);
+    await user.click(screen.getByTestId('nv-dropdown-trigger'));
+    await user.click(screen.getByText('Edit profile'));
+    expect(screen.getByTestId('edit-profile-modal')).toBeInTheDocument();
+  });
+
+  it('should not offer Edit profile to delegated callers', async () => {
+    mockUseMe.mockReturnValue({ data: { can_edit_profile: false, profile: {} } });
+    renderWithRouter(<UserPopover />);
+    await user.click(screen.getByTestId('nv-dropdown-trigger'));
+    expect(screen.queryByText('Edit profile')).not.toBeInTheDocument();
+  });
+
+  it('should not offer Sign Out when auth is disabled', async () => {
+    mockUseAuthProfile.mockReturnValue({ ...mockProfile, authMethod: 'disabled' });
+    renderWithRouter(<UserPopover />);
+    await user.click(screen.getByTestId('nv-dropdown-trigger'));
+    expect(screen.queryByText('Sign Out')).not.toBeInTheDocument();
   });
 
   it('should display email heading when opened', async () => {
