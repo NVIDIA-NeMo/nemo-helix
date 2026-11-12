@@ -74,6 +74,12 @@ _repo_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueD
 # Separate, so a slow remote never holds up reading what is already fetched.
 _REMOTE_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="nhx-git-remote")
 _LOCAL_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="nhx-git-local")
+_KEYSCAN_SLOTS = asyncio.Semaphore(16)
+_KEYSCAN_GRACE_SECONDS = 5.0
+
+
+def _ssh_env() -> dict[str, str]:
+    return {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "/"), "LC_ALL": "C"}
 
 
 class GitBackendError(StorageBackendError):
@@ -345,6 +351,15 @@ class SessionSSHVendor(SSHVendor):
 
 
 async def scan_host_keys(remote: SshRemote, timeout_seconds: int = 10) -> list[SshHostKey]:
+    async with _KEYSCAN_SLOTS:
+        return await _scan_host_keys(remote, timeout_seconds)
+
+
+async def _communicate(proc: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
+    return await proc.communicate()
+
+
+async def _scan_host_keys(remote: SshRemote, timeout_seconds: int) -> list[SshHostKey]:
     port = ["-p", str(remote.port)] if remote.port else []
     subject = remote.authority
     try:
@@ -357,12 +372,13 @@ async def scan_host_keys(remote: SshRemote, timeout_seconds: int = 10) -> list[S
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_ssh_env(),
             start_new_session=True,
         )
     except FileNotFoundError as exc:
         raise GitServerFault("ssh-keyscan is not installed in the files service") from exc
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout_seconds + 5)
+        stdout, stderr = await asyncio.wait_for(_communicate(proc), timeout_seconds + _KEYSCAN_GRACE_SECONDS)
     except (TimeoutError, asyncio.CancelledError) as exc:
         with suppress(ProcessLookupError):
             proc.kill()
@@ -640,9 +656,7 @@ class GitStorageImpl(StorageImpl):
                     "ServerAliveCountMax=3",
                 ]
             )
-            vendor = SessionSSHVendor(
-                {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "/"), "LC_ALL": "C"}
-            )
+            vendor = SessionSSHVendor(_ssh_env())
             remote = self.config.remote
             client = SSHGitClient(
                 remote.host, port=remote.port, username=remote.user, vendor=vendor, ssh_command=ssh_command

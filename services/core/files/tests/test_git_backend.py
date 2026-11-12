@@ -475,30 +475,40 @@ class TestHostKeyScan:
 
     async def test_scan_kills_a_hung_ssh_keyscan(self, tmp_path, monkeypatch):
         self._fake_keyscan(tmp_path, monkeypatch, "exec sleep 30")
-        monkeypatch.setattr(git_backend.asyncio, "wait_for", _wait_for_with_timeout(0.2))
+        monkeypatch.setattr(git_backend, "_KEYSCAN_GRACE_SECONDS", 0.2)
         with pytest.raises(GitUnavailableError, match="Timed out scanning host keys of host"):
-            await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
+            await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"), timeout_seconds=0)
+
+    async def test_scan_runs_without_the_service_environment(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("NHX_SERVICE_SECRET", "leak")
+        self._fake_keyscan(
+            tmp_path, monkeypatch, f"[ -z \"$NHX_SERVICE_SECRET\" ] && echo 'host ssh-ed25519 {GITLAB_KEY}'"
+        )
+        keys = await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
+        assert [key.key_type for key in keys] == ["ssh-ed25519"]
+
+    async def test_scans_beyond_the_limit_wait_for_a_slot(self, tmp_path, monkeypatch):
+        running = tmp_path / "running"
+        self._fake_keyscan(
+            tmp_path,
+            monkeypatch,
+            f"mkdir '{running}' || exit 1; sleep 0.2; rmdir '{running}'; echo 'host ssh-ed25519 {GITLAB_KEY}'",
+        )
+        monkeypatch.setattr(git_backend, "_KEYSCAN_SLOTS", asyncio.Semaphore(1))
+        remote = parse_ssh_remote("git@host:org/repo.git")
+        results = await asyncio.gather(scan_host_keys(remote), scan_host_keys(remote))
+        assert [len(keys) for keys in results] == [1, 1]
 
     async def test_cancelling_a_scan_after_ssh_keyscan_exits_still_cancels(self, tmp_path, monkeypatch):
         self._fake_keyscan(tmp_path, monkeypatch, "exit 0")
-        real_communicate = asyncio.subprocess.Process.communicate
 
-        async def exit_then_cancel(self, *args, **kwargs):
-            await real_communicate(self, *args, **kwargs)
+        async def exit_then_cancel(proc):
+            await proc.communicate()
             raise asyncio.CancelledError
 
-        monkeypatch.setattr(asyncio.subprocess.Process, "communicate", exit_then_cancel)
+        monkeypatch.setattr(git_backend, "_communicate", exit_then_cancel)
         with pytest.raises(asyncio.CancelledError):
             await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
-
-
-def _wait_for_with_timeout(seconds: float):
-    real_wait_for = asyncio.wait_for
-
-    async def wait_for(awaitable, timeout):
-        return await real_wait_for(awaitable, seconds)
-
-    return wait_for
 
 
 class TestProcessGroups:

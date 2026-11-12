@@ -539,7 +539,12 @@ class Service(ABC, Generic[TConfig]):
 
         # Build openapi_tags from RouterConfigs
         router_configs = self.get_routers()
-        openapi_tags: List[Dict[str, str]] = [{"name": rc.tag, "description": rc.description} for rc in router_configs]
+        tag_descriptions: Dict[str, str] = {}
+        for rc in router_configs:
+            tag_descriptions.setdefault(rc.tag, rc.description)
+        openapi_tags: List[Dict[str, str]] = [
+            {"name": tag, "description": description} for tag, description in tag_descriptions.items()
+        ]
 
         app = _ServiceFastAPI(
             service_title=self.title,

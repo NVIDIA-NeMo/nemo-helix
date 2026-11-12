@@ -42,7 +42,6 @@ from nhx.common.service.dependencies import (
     get_nemo_client,
     get_service_config_factory,
 )
-from nhx.core.files.api.endpoint_helpers import HTTP_EXCEPTION_DETAIL as _HTTP_EXCEPTION_DETAIL
 from nhx.core.files.api.endpoint_helpers import (
     HTTP_EXCEPTION_DETAIL,
     UPSTREAM_STORAGE_ACCESS_DETAIL,
@@ -918,7 +917,7 @@ async def download_file(
     responses={
         HTTP_409_CONFLICT: {
             "description": "Fileset storage is read-only",
-            **_HTTP_EXCEPTION_DETAIL,
+            **HTTP_EXCEPTION_DETAIL,
         }
     },
     openapi_extra={
@@ -1036,7 +1035,7 @@ async def upload_file(
     responses={
         HTTP_409_CONFLICT: {
             "description": "Fileset storage is read-only",
-            **_HTTP_EXCEPTION_DETAIL,
+            **HTTP_EXCEPTION_DETAIL,
         }
     },
 )
