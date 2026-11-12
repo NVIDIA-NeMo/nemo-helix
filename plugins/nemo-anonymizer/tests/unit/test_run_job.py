@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
@@ -23,6 +24,7 @@ from data_designer.engine.models.usage_events import TokenUsageEvent, emit_token
 from data_designer.engine.observability import runtime_correlation_provider
 from data_designer_nemo.errors import NDDInvalidConfigError
 from nemo_anonymizer_plugin.app import context as context_module
+from nemo_anonymizer_plugin.app import gliner_detector
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.model_configs import SelectedModelsOverrides
 from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest, AnonymizerStepConfig
@@ -310,6 +312,68 @@ def test_run_step_config_remote_requires_sdk(tmp_path: Path) -> None:
         assert task_run_module.run_step_config(step_config, ctx=ctx) == 1
     finally:
         _restore_task_loggers(logging_snapshot)
+
+
+def test_run_step_config_downloads_gliner_into_job_storage_when_home_is_read_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A hardened job pod cannot write ``$HOME/.cache``; the GLiNER weights and the
+    # detector runtime must land in the job's scratch storage instead.
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    read_only_home = tmp_path / "home"
+    read_only_home.mkdir()
+    read_only_home.chmod(0o555)
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.setenv("HF_HUB_CACHE", str(read_only_home / ".cache" / "huggingface" / "hub"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(read_only_home / ".cache"))
+
+    seen: dict[str, object] = {}
+
+    def fake_ensure_weights(*args: object, **kwargs: object) -> None:
+        seen["weights_cache"] = gliner_detector._hf_hub_cache_dir()
+
+    class FakeAnonymizer:
+        def __init__(self, **kwargs: object) -> None:
+            # The GLiNER child copies the environment when the runtime starts here.
+            seen["runtime_env"] = {name: os.environ.get(name) for name in ("HF_HUB_CACHE", "XDG_CACHE_HOME")}
+
+        def run(self, **kwargs: object) -> object:
+            raise RuntimeError("stop after the detector is built")
+
+    _patch_gliner_build(monkeypatch, FakeAnonymizer)
+    monkeypatch.setattr(task_run_module, "ensure_gliner_weights", fake_ensure_weights)
+    monkeypatch.setattr(
+        task_run_module,
+        "prepare_anonymizer_input",
+        lambda *a, **k: Mock(input=object(), cleanup=lambda: None),
+    )
+    step_config = AnonymizerStepConfig(
+        request=AnonymizerRequest(
+            config=AnonymizerConfig(replace=Redact()),
+            data=AnonymizerInputSpec(source="https://example.com/input.csv", text_column="text"),
+        ),
+        model_configs_yaml="model_configs:\n- alias: detector\n  model: test/model\n  provider: provider\n",
+        dd_model_providers=[],
+    )
+    ctx = _make_job_context(tmp_path)
+    logging_snapshot = _snapshot_task_loggers()
+
+    try:
+        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NemoClient)) == 1
+    finally:
+        _restore_task_loggers(logging_snapshot)
+        read_only_home.chmod(0o755)
+
+    scratch = ctx.storage.ephemeral / "model-cache"
+    assert seen["weights_cache"] == scratch / "huggingface" / "hub"
+    assert seen["runtime_env"] == {
+        "HF_HUB_CACHE": str(scratch / "huggingface" / "hub"),
+        "XDG_CACHE_HOME": str(scratch / "cache"),
+    }
+    # The redirect is scoped to the run; the process environment is restored.
+    assert os.environ["HF_HUB_CACHE"] == str(read_only_home / ".cache" / "huggingface" / "hub")
 
 
 def test_run_step_config_requires_resolved_model_configs(

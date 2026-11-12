@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -201,3 +203,66 @@ class _Overrides:
 )
 def test_caller_supplied_entity_detector(selected_models: object | None, expected: bool) -> None:
     assert gliner_detector.caller_supplied_entity_detector(selected_models) is expected
+
+
+@pytest.fixture
+def read_only_dir(tmp_path: Path) -> Iterator[Path]:
+    """A directory the test process cannot write into, like a hardened pod's ``$HOME``."""
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    path = tmp_path / "read-only-home"
+    path.mkdir()
+    path.chmod(0o555)
+    yield path
+    path.chmod(0o755)
+
+
+_CACHE_ENV_VARS = ("HF_HOME", "HF_HUB_CACHE", "XDG_CACHE_HOME")
+
+
+def test_gliner_caches_under_redirects_unwritable_caches_to_scratch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, read_only_dir: Path
+) -> None:
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.setenv("HF_HUB_CACHE", str(read_only_dir / ".cache" / "huggingface" / "hub"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(read_only_dir / ".cache"))
+    before = {name: os.environ.get(name) for name in _CACHE_ENV_VARS}
+    scratch = tmp_path / "scratch"
+
+    with gliner_detector.gliner_caches_under(scratch):
+        assert os.environ["HF_HOME"] == str(scratch / "huggingface")
+        assert os.environ["HF_HUB_CACHE"] == str(scratch / "huggingface" / "hub")
+        assert os.environ["XDG_CACHE_HOME"] == str(scratch / "cache")
+        # The prewarm and the GLiNER child must agree on the cache location.
+        assert gliner_detector._hf_hub_cache_dir() == scratch / "huggingface" / "hub"
+        assert gliner_detector._upstream_snapshot_dir().is_relative_to(scratch)
+
+    assert {name: os.environ.get(name) for name in _CACHE_ENV_VARS} == before
+
+
+def test_gliner_caches_under_keeps_writable_caches(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    hub = tmp_path / "home" / ".cache" / "huggingface" / "hub"  # not created yet; parent is writable
+    monkeypatch.setenv("HF_HUB_CACHE", str(hub))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "home" / ".cache"))
+    monkeypatch.delenv("HF_HOME", raising=False)
+
+    with gliner_detector.gliner_caches_under(tmp_path / "scratch"):
+        assert os.environ["HF_HUB_CACHE"] == str(hub)
+        assert os.environ["XDG_CACHE_HOME"] == str(tmp_path / "home" / ".cache")
+        assert "HF_HOME" not in os.environ
+
+
+def test_gliner_caches_under_restores_environment_on_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, read_only_dir: Path
+) -> None:
+    monkeypatch.setenv("HF_HUB_CACHE", str(read_only_dir / "hub"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(read_only_dir))
+    monkeypatch.delenv("HF_HOME", raising=False)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with gliner_detector.gliner_caches_under(tmp_path / "scratch"):
+            raise RuntimeError("boom")
+
+    assert os.environ["HF_HUB_CACHE"] == str(read_only_dir / "hub")
+    assert os.environ["XDG_CACHE_HOME"] == str(read_only_dir)
+    assert "HF_HOME" not in os.environ
