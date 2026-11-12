@@ -15,6 +15,7 @@ import { Loading } from '@studio/components/Layouts/Loading';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
+import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { FilesetDetailTab, isFilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import {
   FILESETS_PARENT,
@@ -25,7 +26,7 @@ import type { FilesetDetailOutletContext } from '@studio/routes/FilesetDetailRou
 import { getModelSource, isRootReadme } from '@studio/routes/FilesetDetailRoute/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import type { FC } from 'react';
-import { Link, Navigate, Outlet, useNavigate, useParams } from 'react-router';
+import { Link, Navigate, Outlet, useNavigate, useParams, useSearchParams } from 'react-router';
 
 interface FilesetDetailRouteProps {
   /** The list page this detail page sits under (default: Filesets). */
@@ -39,6 +40,7 @@ export const FilesetDetailRoute: FC<FilesetDetailRouteProps> = ({ parent = FILES
   const filesetId = getEntityReference({ namespace: workspace, name: filesetName });
 
   const { [ROUTE_PARAMS.filesetTab]: tabFromPath } = useParams();
+  const [searchParams] = useSearchParams();
 
   useBreadcrumbs({
     items: [
@@ -87,6 +89,8 @@ export const FilesetDetailRoute: FC<FilesetDetailRouteProps> = ({ parent = FILES
       <Navigate
         to={FILESETS_PARENT.getDetailRoute(workspace, filesetName, {
           tab: isFilesetDetailTab(tabFromPath) ? tabFromPath : undefined,
+          folder: searchParams.get(QUERY_PARAMETERS.filesetFolder) ?? undefined,
+          file: searchParams.get(QUERY_PARAMETERS.file) ?? undefined,
         })}
         replace
       />

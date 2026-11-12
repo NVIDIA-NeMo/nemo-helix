@@ -92,6 +92,20 @@ describe('DatasetDetailRoute', () => {
     expect(router.state.location.pathname).toBe('/workspaces/default/filesets/qa-data/files');
   });
 
+  it('keeps the file and folder selection when sending a non-dataset to Filesets', async () => {
+    fileset = makeFileset(FilesetPurpose.model);
+    const router = openAtUrl(
+      '/workspaces/default/datasets/qa-data?filesetFolder=docs&file=docs/a.md'
+    );
+
+    expect(await screen.findByTestId('fileset-detail')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/workspaces/default/filesets/qa-data/files');
+    expect(Object.fromEntries(new URLSearchParams(router.state.location.search))).toEqual({
+      filesetFolder: 'docs',
+      file: 'docs/a.md',
+    });
+  });
+
   it('puts the fileset detail page under the Datasets breadcrumb', async () => {
     openAtUrl('/workspaces/default/datasets/qa-data/card');
 
