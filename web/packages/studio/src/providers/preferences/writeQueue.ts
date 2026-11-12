@@ -82,6 +82,8 @@ const flush = async (id: string) => {
       queued.patch as PreferenceValue,
       params
     );
+    // A GET already in flight read the document before this write; don't let it land over it.
+    await queryClient.cancelQueries({ queryKey });
     // A slower earlier response must not overwrite a newer one.
     if (request > state.lastApplied) {
       state.lastApplied = request;

@@ -50,6 +50,30 @@ describe('enqueuePreferencePatch', () => {
     expect(queryClient.getQueryData(['studio.ui'])).toEqual(document('system'));
   });
 
+  it('keeps the PATCH result when an earlier GET resolves after it', async () => {
+    mockPatch.mockResolvedValue(document('light'));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
+    let resolveGet: (document: PreferenceDocument) => void = () => {};
+    void queryClient
+      .fetchQuery({
+        queryKey: ['studio.race'],
+        queryFn: () => new Promise<PreferenceDocument>((resolve) => (resolveGet = resolve)),
+      })
+      .catch(() => {});
+
+    enqueuePreferencePatch({
+      accountId: 'a',
+      namespace: 'studio.race',
+      patch: { theme: 'light' },
+      queryClient,
+    });
+    await vi.runAllTimersAsync();
+    resolveGet(document('dark'));
+    await vi.runAllTimersAsync();
+
+    expect(queryClient.getQueryData(['studio.race'])).toEqual(document('light'));
+  });
+
   it('holds edits without an account, showing them in the overlay until sent', async () => {
     mockPatch.mockResolvedValue(document('light'));
     const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
