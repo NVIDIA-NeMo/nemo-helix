@@ -103,6 +103,7 @@ class LocalStorageImpl(StorageImpl):
                     FileInfo(
                         path=relative_path,
                         size=stat.st_size,
+                        modified_at=stat.st_mtime,
                     )
                 )
         return files

@@ -352,7 +352,7 @@ def default_durable_storage() -> StorageImpl:
     return _durable_storage
 
 
-_DURABLE_PREFIX = "cache/git"
+GIT_CACHE_PREFIX = "cache/git"
 _LISTING_VERSION = 1
 _MAX_LISTED_FILES = 100_000
 # GitHub's own per-file limit; storing a fetched pack still holds its largest object in memory.
@@ -361,6 +361,15 @@ _FETCH_REPOSITORY_IDLE_SECONDS = 7 * 24 * 60 * 60
 _LATEST_REF = Ref(b"refs/heads/nhx-latest")
 
 Snapshot = dict[str, tuple[str, int]]
+
+
+def url_digest(url: str) -> str:
+    return hashlib.sha256(url.encode()).hexdigest()[:32]
+
+
+def commit_key(url: str, sha: str, path: str) -> str:
+    scope = hashlib.sha256(path.encode()).hexdigest()[:16]
+    return f"{GIT_CACHE_PREFIX}/{url_digest(url)}/commits/{sha}/{scope}"
 
 
 _BLOB_ID = re.compile(r"[0-9a-f]{40}")
@@ -429,15 +438,15 @@ async def _touch(repo: Path) -> None:
             await asyncio.to_thread(os.utime, repo)
 
 
-async def _prune_fetch_repositories(root: Path, keep: Path) -> None:
-    cutoff = time.time() - _FETCH_REPOSITORY_IDLE_SECONDS
+async def _remove_idle_repositories(root: Path, cutoff: float, keep: Callable[[Path], bool]) -> int:
     try:
         repos = await asyncio.to_thread(lambda: [entry for entry in root.iterdir() if entry.is_dir()])
     except OSError:
-        return
+        return 0
+    removed = 0
     for repo in repos:
         lock = _repo_lock(repo)
-        if repo == keep or lock.locked():
+        if keep(repo) or lock.locked():
             continue
         async with lock:
             with suppress(OSError):
@@ -445,6 +454,20 @@ async def _prune_fetch_repositories(root: Path, keep: Path) -> None:
                     _fetched_commits.pop(str(repo), None)
                     _last_touched.pop(str(repo), None)
                     await asyncio.to_thread(shutil.rmtree, repo, True)
+                    removed += 1
+    return removed
+
+
+async def _prune_fetch_repositories(root: Path, keep: Path) -> None:
+    await _remove_idle_repositories(root, time.time() - _FETCH_REPOSITORY_IDLE_SECONDS, lambda repo: repo == keep)
+
+
+async def prune_unreferenced_fetch_repositories(root: Path, referenced_digests: set[str], cutoff: float) -> int:
+    return await _remove_idle_repositories(root, cutoff, lambda repo: repo.name in referenced_digests)
+
+
+def forget_listing(key: str) -> None:
+    _listings.pop(key, None)
 
 
 def _init_repository(repo: Path) -> None:
@@ -511,16 +534,11 @@ class GitStorageImpl(StorageImpl):
         return self.durable
 
     @property
-    def _url_digest(self) -> str:
-        return hashlib.sha256(self.config.url.encode()).hexdigest()[:32]
-
-    @property
     def _repo_dir(self) -> Path:
-        return self.cache_root / self._url_digest
+        return self.cache_root / url_digest(self.config.url)
 
     def _commit_key(self, sha: str) -> str:
-        scope = hashlib.sha256(self.config.path.encode()).hexdigest()[:16]
-        return f"{_DURABLE_PREFIX}/{self._url_digest}/commits/{sha}/{scope}"
+        return commit_key(self.config.url, sha, self.config.path)
 
     def _listing_key(self, sha: str) -> str:
         return f"{self._commit_key(sha)}.json"

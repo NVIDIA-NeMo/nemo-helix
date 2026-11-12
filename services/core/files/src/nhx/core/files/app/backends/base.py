@@ -4,7 +4,7 @@
 """Base classes for storage backends."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     AsyncIterator,
 )
@@ -24,6 +24,7 @@ class ByteRange:
 class FileInfo:
     path: str
     size: int
+    modified_at: float | None = field(default=None, compare=False)
 
 
 class StorageImpl(ABC):

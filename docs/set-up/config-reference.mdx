@@ -239,6 +239,10 @@ files:
   file_lock_ttl_seconds: 300
   # Maximum concurrent downloads during cache warming | default: 3
   cache_warming_max_concurrent: 3
+  # Seconds between sweeps that remove Git fileset cache entries no fileset uses. 0 disables them. | default: 3600
+  git_cache_cleanup_interval_seconds: 3600
+  # How long an unused Git fileset cache entry is kept after it was last written, so a fileset created soon after a lookup of the same repository still finds it. | default: 86400
+  git_cache_cleanup_grace_seconds: 86400
   # Maximum Hugging Face request attempts for transient failures. | default: 4
   hf_retry_attempts: 4
   # Initial Hugging Face retry delay in seconds before exponential backoff. | default: 0.5
