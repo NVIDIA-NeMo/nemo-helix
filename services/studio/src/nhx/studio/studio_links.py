@@ -193,7 +193,7 @@ STUDIO_LINK_DESTINATIONS: dict[str, StudioLinkDestination] = {
     ),
     "fileset": StudioLinkDestination(
         "Fileset {name}",
-        "/workspaces/{workspace}/filesets/{name}/detail",
+        "/workspaces/{workspace}/filesets/{name}",
         aliases=(
             "fileset_detail",
             "fileset_detail_page",
@@ -207,7 +207,7 @@ STUDIO_LINK_DESTINATIONS: dict[str, StudioLinkDestination] = {
     ),
     "fileset_file": StudioLinkDestination(
         "File {file_path}",
-        "/workspaces/{workspace}/filesets/{name}/detail?tab=files&file={file_path}",
+        "/workspaces/{workspace}/filesets/{name}/files?file={file_path}",
         aliases=("dataset_file", "fileset_file_detail"),
         required_args=("name", "file_path"),
     ),

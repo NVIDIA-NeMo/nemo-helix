@@ -17,6 +17,7 @@ export const ROUTE_PARAMS = {
   customizationJobName: 'customizationJobName',
   filesetId: 'filesetId',
   filesetName: 'filesetName',
+  filesetTab: 'filesetTab',
   filePathEncoded: 'filePathEncoded',
   folderPathEncoded: 'folderPathEncoded',
   workspace: 'workspace',
@@ -101,8 +102,11 @@ export const ROUTES = {
     /**
      * Unified fileset detail page. One route serves all purposes — the page
      * branches on `fileset.purpose` to render Model/Dataset/Generic card content.
+     * On its own it redirects to the default tab.
      */
-    filesetDetail: `/workspaces/:${P.workspace}/filesets/:${P.filesetName}/detail`,
+    filesetDetail: `/workspaces/:${P.workspace}/filesets/:${P.filesetName}`,
+    /** A tab of the fileset detail page; `filesetTab` is a `FilesetDetailTab`. */
+    filesetDetailTab: `/workspaces/:${P.workspace}/filesets/:${P.filesetName}/:${P.filesetTab}`,
     inferenceProviders: `/workspaces/:${P.workspace}/inference-providers`,
     virtualModels: `/workspaces/:${P.workspace}/virtual-models`,
     virtualModelDetail: `/workspaces/:${P.workspace}/virtual-models/:${P.virtualModelName}`,

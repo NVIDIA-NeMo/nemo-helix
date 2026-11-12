@@ -68,7 +68,7 @@ vi.mock('@studio/routes/utils', async (importOriginal) => {
     // Mirrors the real helper: callers pass raw values and the helper encodes
     // path params (generatePath does this in production).
     getFilesetDetailRoute: (project: string, filesetName: string) =>
-      `/projects/${project}/filesets/${encodeURIComponent(filesetName)}/detail`,
+      `/projects/${project}/filesets/${encodeURIComponent(filesetName)}`,
   };
 });
 
@@ -219,7 +219,7 @@ describe('FilesetListRoute', () => {
             ),
           },
           {
-            path: '/projects/:workspace/filesets/:filesetName/detail',
+            path: '/projects/:workspace/filesets/:filesetName',
             element: <div data-testid="dataset-details-route" />,
           },
         ],

@@ -135,6 +135,7 @@ describe('Routes', () => {
         ROUTES.workspace.filesets,
         ROUTES.workspace.filesetNew,
         ROUTES.workspace.filesetDetail,
+        ROUTES.workspace.filesetDetailTab,
         ROUTES.workspace.jobs,
         ROUTES.workspace.jobDetail,
         ROUTES.workspace.modelCompare,
