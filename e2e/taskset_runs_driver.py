@@ -65,6 +65,8 @@ _TASKSET = re.compile(r"^Published taskset (\S+)", re.MULTILINE)
 _UNRESOLVED_POLL_SECONDS = 30.0
 _UNRESOLVED_POLL_INTERVAL = 5.0
 _CLEANUP_RESERVE = 60.0  # of CLEANUP, kept for the cancels however slow the diagnostics are
+#: Failed ``runs status`` polls in a row that ``wait`` rides out, such as a gateway 502 or a dropped port-forward.
+_STATUS_FAILURES = 3
 
 
 Kubectl = Callable[[Sequence[str], float], subprocess.CompletedProcess[str]]
@@ -72,6 +74,10 @@ Kubectl = Callable[[Sequence[str], float], subprocess.CompletedProcess[str]]
 
 class BudgetExhausted(AssertionError):
     """The test's time budget ran out before a call could start."""
+
+
+class CliFailed(AssertionError):
+    """A ``nemo`` call exited non-zero or printed something other than JSON."""
 
 
 def _kubectl(args: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
@@ -310,10 +316,15 @@ class RunDriver:
         return self._run(*args, workspace=self.workspace, timeout=max(1, int(self.sec_left(cap, end))))
 
     def cli_json(self, stage: str, *args: str, cap: float = 60) -> Any:
-        """``nemo <args>``'s JSON; a non-zero exit fails with ``stage`` and its stderr."""
+        """``nemo <args>``'s JSON; a non-zero exit or non-JSON output fails as ``CliFailed``, tagged with ``stage``."""
         out = self.cli(*args, cap=cap)
-        assert out.returncode == 0, f"[{stage}] `nemo {' '.join(args)}` exited {out.returncode}: {out.stderr.strip()}"
-        return json.loads(out.stdout)
+        command = f"`nemo {' '.join(args)}`"
+        if out.returncode != 0:
+            raise CliFailed(f"[{stage}] {command} exited {out.returncode}: {out.stderr.strip()}")
+        try:
+            return json.loads(out.stdout)
+        except ValueError as exc:
+            raise CliFailed(f"[{stage}] {command} printed no JSON ({exc}): {out.stdout[:200]!r}") from exc
 
     def sdk(self, cap: float = 30) -> NemoClient:
         """The client, timed out by the budget, retrying as usual but ignoring ``Retry-After``.
@@ -370,11 +381,26 @@ class RunDriver:
         return parse_results(self.cli_json("verifier", "evals", "runs", "results", run_id, "--json", cap=cap))
 
     def wait(self, step: str, run_id: str, *, cap: float, poll: float = 5.0) -> StatusView:
-        """Poll ``runs status --json`` until the run is terminal; fail with its last state after ``cap``."""
+        """Poll ``runs status --json`` until the run is terminal; fail with its last state after ``cap``.
+
+        A failed or timed-out poll is retried, up to ``_STATUS_FAILURES`` in a row; output that doesn't match
+        ``StatusView`` fails at once, since polling again won't fix it.
+        """
         started = self._clock()
         deadline = min(started + cap, self.end)
+        failures = 0
         while True:
-            status = self.status(run_id, cap=min(30, max(deadline - self._clock(), 1)))
+            try:
+                status = self.status(run_id, cap=min(30, max(deadline - self._clock(), 1)))
+            except (CliFailed, subprocess.TimeoutExpired) as exc:
+                failures += 1
+                if failures == _STATUS_FAILURES:
+                    raise AssertionError(f"[dispatch] `runs status` failed {failures} times in a row: {exc}") from exc
+                if self._clock() + poll >= deadline:
+                    raise
+                self._sleep(poll)
+                continue
+            failures = 0
             phase = _value(status.run.phase)
             if phase in TERMINAL_PHASES:
                 self.settled.add(run_id)

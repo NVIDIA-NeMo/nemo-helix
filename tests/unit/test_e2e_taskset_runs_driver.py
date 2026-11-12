@@ -37,6 +37,7 @@ from e2e.taskset_runs_driver import (
     FORMAT_OK,
     REWARD,
     BuildView,
+    CliFailed,
     Evidence,
     JobView,
     RunDriver,
@@ -478,6 +479,55 @@ def test_wait_fails_with_the_last_state_after_its_cap(tmp_path: Path) -> None:
     with pytest.raises(AssertionError, match=r"\[dispatch\] run run-0123456789abcdef still running after 60 s"):
         driver.wait("test_1", RUN, cap=60)
     assert 1 < len(nemo.calls) <= 13
+
+
+def replies(*items: subprocess.CompletedProcess[str] | Exception) -> Respond:
+    """Answers each call with the next item, raising it when it's an exception."""
+    queue = list(items)
+
+    def respond(args: tuple[str, ...], timeout: int | None) -> subprocess.CompletedProcess[str]:
+        item = queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    return respond
+
+
+def test_wait_rides_out_failed_polls_and_counts_them_afresh_after_a_good_one(tmp_path: Path) -> None:
+    running = status_body(phase="running", result_state="pending", task_phases=("registered", "registered"))
+    blip = done(returncode=1, stderr="502 Bad Gateway")
+    hang = subprocess.TimeoutExpired(["nemo"], 30)
+    driver, nemo = make_driver(
+        tmp_path, replies(blip, hang, done(running), blip, done(""), done(status_body())), Clock()
+    )
+
+    assert driver.wait("test_1", RUN, cap=600).run.phase == "completed"
+    assert len(nemo.calls) == 6
+
+
+def test_wait_fails_on_the_third_failed_poll_in_a_row_with_the_last_error(tmp_path: Path) -> None:
+    hang = subprocess.TimeoutExpired(["nemo"], 30)
+    driver, nemo = make_driver(tmp_path, replies(hang, hang, done(returncode=1, stderr="502 Bad Gateway")), Clock())
+
+    with pytest.raises(AssertionError, match=r"\[dispatch\] `runs status` failed 3 times in a row: .*502 Bad Gateway"):
+        driver.wait("test_1", RUN, cap=600)
+    assert len(nemo.calls) == 3
+
+
+def test_wait_fails_at_once_on_a_status_that_does_not_match_the_model(tmp_path: Path) -> None:
+    driver, nemo = make_driver(tmp_path, lambda args, timeout: done({**status_body(), "extra": 1}), Clock())
+
+    with pytest.raises(AssertionError, match=r"\[dispatch\] `runs status --json` doesn't match StatusView"):
+        driver.wait("test_1", RUN, cap=600)
+    assert len(nemo.calls) == 1
+
+
+def test_cli_json_tags_output_that_is_not_json_with_its_stage(tmp_path: Path) -> None:
+    driver, _ = make_driver(tmp_path, lambda args, timeout: done(""), Clock())
+
+    with pytest.raises(CliFailed, match=rf"\[dispatch\] `nemo evals runs status {RUN} --json` printed no JSON .*: ''"):
+        driver.status(RUN)
 
 
 # --- Checker inputs ----------------------------------------------------------------------------------------------
