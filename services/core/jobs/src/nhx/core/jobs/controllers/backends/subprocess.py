@@ -23,6 +23,7 @@ from nemo_helix_plugin.client.constants import ACCESS_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext, HelixJobTaskUpdate
 from nhx.common.auth import AuthContext
 from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR
+from nhx.common.auth.workload_tokens import JobWorkloadBinding
 from nhx.common.config import get_platform_config
 from nhx.common.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
@@ -136,6 +137,7 @@ class SubprocessProcessMetadata:
     # Set when the child holds a rotatable delegated token: its env (to re-derive the principal) and file.
     task_auth_env: dict[str, str] | None = None
     task_auth_token_file: Path | None = None
+    task_auth_job_binding: JobWorkloadBinding | None = None
     task_auth_refreshed_at: float = field(default_factory=time.monotonic)
 
 
@@ -279,6 +281,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             otel_logger=otel_logger,
             task_auth_env={name: value for name, value in env.items() if name == NHX_PRINCIPAL_ENVVAR},
             task_auth_token_file=Path(env[ACCESS_TOKEN_FILE_ENVVAR]) if ACCESS_TOKEN_FILE_ENVVAR in env else None,
+            task_auth_job_binding=JobWorkloadBinding(step.workspace, step.job, str(step.attempt_id), step.name),
         )
         self._process_registry.set(key, metadata)
 
@@ -422,7 +425,9 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         if time.monotonic() - metadata.task_auth_refreshed_at < task_access_token_refresh_interval():
             return
         try:
-            refreshed = refresh_subprocess_task_auth(metadata.task_auth_env, metadata.task_auth_token_file)
+            refreshed = refresh_subprocess_task_auth(
+                metadata.task_auth_env, metadata.task_auth_token_file, job_binding=metadata.task_auth_job_binding
+            )
         except Exception:
             # Keep the stale token: the old one stays valid until it expires and the next tick retries.
             logger.warning("Failed to refresh subprocess task access token", exc_info=True)
@@ -599,7 +604,11 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
         # The token file goes last: nothing after it can fail and leave it behind on a step that never registers.
         inject_secret_env_vars(env)
-        inject_subprocess_task_auth(env, config_dir / _TASK_ACCESS_TOKEN_FILE_NAME)
+        inject_subprocess_task_auth(
+            env,
+            config_dir / _TASK_ACCESS_TOKEN_FILE_NAME,
+            job_binding=JobWorkloadBinding(step.workspace, step.job, str(step.attempt_id), step.name),
+        )
         return env, task_id, work_dir, log_path, persistent_dir
 
     @staticmethod

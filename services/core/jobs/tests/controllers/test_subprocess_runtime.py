@@ -123,7 +123,7 @@ def test_inject_secret_env_vars_uses_delegated_workload_token_when_enabled(tmp_p
     assert updated_env["NHX_ACCESS_TOKEN_FILE"] == str(token_file)
     assert token_file.read_text(encoding="utf-8") == "jobs-workload-token"
     assert token_file.stat().st_mode & 0o777 == 0o600
-    provider_cls.assert_called_once_with(auth_config, "jobs", principal)
+    provider_cls.assert_called_once_with(auth_config, "jobs", principal, job_binding=None)
     request = mock_urlopen.call_args.args[0]
     assert request.get_header("Authorization") == "Bearer jobs-workload-token"
     assert request.get_header("X-nhx-principal-id") is None

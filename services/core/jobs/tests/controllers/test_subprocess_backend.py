@@ -979,6 +979,7 @@ def _auth_metadata(tmp_path, *, exited: bool = False, refreshed_ago: float = 0.0
         process=process,
         task_auth_env={"NHX_PRINCIPAL": '{"id": "creator"}'},
         task_auth_token_file=tmp_path / ".nhx-access-token",
+        task_auth_job_binding=None,
         task_auth_refreshed_at=time.monotonic() - refreshed_ago,
     )
 
@@ -1007,7 +1008,9 @@ def test_refresh_task_auth_rotates_token_only_for_running_processes_past_half_tt
 
     assert refresh.called is expect_refresh
     if expect_refresh:
-        refresh.assert_called_once_with(metadata.task_auth_env, metadata.task_auth_token_file)
+        refresh.assert_called_once_with(
+            metadata.task_auth_env, metadata.task_auth_token_file, job_binding=metadata.task_auth_job_binding
+        )
         assert time.monotonic() - metadata.task_auth_refreshed_at < 5
 
 
@@ -1132,7 +1135,13 @@ def test_task_token_file_removal_is_retried_after_a_failure(mock_nemo_client, tm
 
 
 def _schedule_with_delegated_token(backend: SubprocessJobBackend, step, token_file_name: str = ".nhx-access-token"):
-    def _inject(env: dict[str, str], token_file) -> dict[str, str]:
+    def _inject(env: dict[str, str], token_file, *, job_binding) -> dict[str, str]:
+        assert (job_binding.workspace, job_binding.job, job_binding.attempt, job_binding.step) == (
+            step.workspace,
+            step.job,
+            str(step.attempt_id),
+            step.name,
+        )
         assert token_file.name == token_file_name
         token_file.write_text("minted-token", encoding="utf-8")
         env["NHX_ACCESS_TOKEN_FILE"] = str(token_file)
@@ -1141,6 +1150,31 @@ def _schedule_with_delegated_token(backend: SubprocessJobBackend, step, token_fi
 
     with patch("nhx.core.jobs.controllers.backends.subprocess.inject_subprocess_task_auth", side_effect=_inject):
         return _schedule_without_otel_export(backend, step)
+
+
+def test_subprocess_binding_uses_server_step_identity_instead_of_child_environment(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "true"])
+    step.step_spec = type(step.step_spec).model_validate(
+        step.step_spec.model_dump()
+        | {
+            "environment": [
+                {"name": "NEMO_JOB_ID", "value": "another-job"},
+                {"name": "NEMO_JOB_WORKSPACE", "value": "another-team"},
+            ]
+        }
+    )
+    with patch("nhx.core.jobs.controllers.backends.subprocess.inject_subprocess_task_auth") as inject:
+        backend._prepare_runtime(step)
+    binding = inject.call_args.kwargs["job_binding"]
+    assert (binding.workspace, binding.job, binding.attempt, binding.step) == (
+        step.workspace,
+        step.job,
+        str(step.attempt_id),
+        step.name,
+    )
 
 
 def test_schedule_registers_the_delegated_token_for_rotation(
@@ -1182,4 +1216,6 @@ def test_sync_rotates_the_token_of_a_running_process(
         metadata.process.kill()
         metadata.process.wait(timeout=5)
 
-    refresh.assert_called_once_with(metadata.task_auth_env, metadata.task_auth_token_file)
+    refresh.assert_called_once_with(
+        metadata.task_auth_env, metadata.task_auth_token_file, job_binding=metadata.task_auth_job_binding
+    )
