@@ -18,5 +18,4 @@ def filter_aggregate_scores(
     """Return aggregate scores shaped by the requested fields."""
     if not aggregate_fields:
         return aggregate_scores
-    fields = frozenset(aggregate_fields)
-    return AggregatedMetricResult(scores=[score.with_fields(fields) for score in aggregate_scores.scores])
+    return aggregate_scores.with_fields(frozenset(aggregate_fields))

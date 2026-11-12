@@ -32,6 +32,13 @@ from typing import Any, Protocol, cast
 import httpx
 from nhx_evals_sdk.agent_inference import AgentInferenceFn, new_agent_inference_client
 from nhx_evals_sdk.execution.config import fail_fast_from_params
+from nhx_evals_sdk.execution.grouping import (
+    aggregate_metric_groups,
+    filter_groups,
+    group_rows,
+    merge_metric_groups,
+    resolve_group_by,
+)
 from nhx_evals_sdk.execution.metric_execution import (
     generate_online_sample,
     generate_online_sample_agent,
@@ -82,6 +89,7 @@ from nhx_evals_sdk.values.multi_metric_results import (
     BenchmarkEvaluationResult,
     namespace_result,
 )
+from nhx_evals_sdk.values.results import AggregateGroup
 from nhx_evals_sdk.values.retrieval import Retrieval
 from nhx_evals_sdk.values.targets import EvalTarget
 from openai import AsyncOpenAI
@@ -612,6 +620,8 @@ async def evaluate_benchmark(
     log = logger or _log
     if not metrics:
         raise ValueError("metrics must contain at least one (metric_ref, metric) tuple")
+    # Before any inference, so a group_by entry that names nothing fails the run up front.
+    group_keys = resolve_group_by(params.group_by, metrics)
 
     queue_capacity = max(1, params.parallelism * 2)
     worker_count = min(len(rows), max(1, params.parallelism)) if rows else max(1, params.parallelism)
@@ -667,6 +677,8 @@ async def evaluate_benchmark(
         metric_refs_in_order=[metric_ref for metric_ref, _ in metrics],
     )
 
+    row_groups = group_rows(group_keys, row_scores)
+    groups_per_metric: list[list[AggregateGroup]] = []
     per_metric: dict[str, EvaluationResult] = {}
     for pipeline in pipelines:
         if any(r is None for r in pipeline.results):
@@ -692,10 +704,21 @@ async def evaluate_benchmark(
             results=pipeline.results,
             row_scores=completed_rows,
         )
-        per_metric[pipeline.metric_ref] = namespace_result(pipeline.metric_ref, raw_result, aggregate_fields)
+        namespaced = namespace_result(pipeline.metric_ref, raw_result, aggregate_fields)
+        if group_keys:
+            metric_groups = aggregate_metric_groups(
+                row_groups, metric_key=pipeline.metric_ref, metric=pipeline.metric, results=pipeline.results
+            )
+            groups_per_metric.append(metric_groups)
+            aggregates = namespaced.aggregate_scores.model_copy(
+                update={"groups": filter_groups(metric_groups, aggregate_fields)}
+            )
+            namespaced = namespaced.model_copy(update={"aggregate_scores": aggregates})
+        per_metric[pipeline.metric_ref] = namespaced
 
     top_aggregate_scores = AggregatedMetricResult(
-        scores=[score for result in per_metric.values() for score in result.aggregate_scores.scores]
+        scores=[score for result in per_metric.values() for score in result.aggregate_scores.scores],
+        groups=filter_groups(merge_metric_groups(groups_per_metric), aggregate_fields) if group_keys else None,
     )
     return BenchmarkEvaluationResult(
         row_scores=row_scores,

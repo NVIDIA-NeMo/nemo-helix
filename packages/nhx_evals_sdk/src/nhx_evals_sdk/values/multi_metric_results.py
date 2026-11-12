@@ -46,8 +46,7 @@ def _filter_aggregate_fields(
     if not aggregate_fields:
         return aggregate_scores
 
-    filtered_scores = [score.with_fields(frozenset(aggregate_fields)) for score in aggregate_scores.scores]
-    return AggregatedMetricResult(scores=filtered_scores)
+    return aggregate_scores.with_fields(frozenset(aggregate_fields))
 
 
 def _extract_metric_outputs(row_score: RowScore, expected_key: str) -> list[MetricOutput]:
