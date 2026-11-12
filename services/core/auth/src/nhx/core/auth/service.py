@@ -16,6 +16,7 @@ from nhx.core.auth.api.v2 import workload_token_exchange
 from nhx.core.auth.api.v2.bundle import endpoints as bundle
 from nhx.core.auth.api.v2.discovery import endpoints as discovery
 from nhx.core.auth.api.v2.iam import endpoints as iam
+from nhx.core.auth.api.v2.profiles import endpoints as profiles
 from nhx.core.auth.app.embedded_pdp.data import apply_embedded_policy_document
 from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm
 from nhx.core.auth.config import AuthServiceConfig
@@ -52,6 +53,11 @@ class AuthService(Service[AuthServiceConfig]):
                 authenticate.router, tag="Authentication", description="Bearer token authentication endpoints"
             ),
             RouterConfig(access_keys.router, tag="Scoped Access Keys", description="Scoped Access Key endpoints"),
+            RouterConfig(
+                profiles.router,
+                tag="Profiles",
+                description="The caller's profile and preferences, preference defaults, and display-name resolution",
+            ),
             RouterConfig(
                 oidc_broker.router,
                 tag="Authentication",

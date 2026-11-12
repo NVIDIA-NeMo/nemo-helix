@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any, Literal, Mapping
 
 from nemo_helix_plugin.discovery import discover_entry_points
@@ -21,6 +22,7 @@ from nhx.core.entities.app.repository import (
     AccountIdentityConflictError,
     AccountIdentityStore,
     AccountIdentityUnavailableError,
+    IdentityClaims,
     get_async_session_maker,
     initialize_async_engine,
 )
@@ -259,7 +261,7 @@ class AccountResolver:
         if not isinstance(principal_descriptor, Mapping):
             principal_descriptor = _descriptor_from_input(auth_input)
         if context.actor_account_id is None and principal_descriptor is not None:
-            account_id, aliases, resolved_caller_kind = await self._resolve_descriptor(principal_descriptor)
+            account_id, aliases, resolved_caller_kind = await self.resolve_descriptor(principal_descriptor)
             context = ResolvedAccountContext(
                 actor_account_id=account_id,
                 actor_aliases=aliases,
@@ -272,7 +274,7 @@ class AccountResolver:
         if not isinstance(on_behalf_descriptor, Mapping):
             on_behalf_descriptor = _on_behalf_descriptor_from_input(auth_input)
         if context.subject_account_id is None and on_behalf_descriptor is not None:
-            account_id, aliases, _ = await self._resolve_descriptor(on_behalf_descriptor)
+            account_id, aliases, _ = await self.resolve_descriptor(on_behalf_descriptor)
             context = ResolvedAccountContext(
                 actor_account_id=context.actor_account_id,
                 actor_aliases=context.actor_aliases,
@@ -283,7 +285,8 @@ class AccountResolver:
 
         return context
 
-    async def _resolve_descriptor(self, descriptor: Mapping[str, Any]) -> tuple[str, list[str], CallerKind]:
+    async def resolve_descriptor(self, descriptor: Mapping[str, Any]) -> tuple[str, list[str], CallerKind]:
+        """Resolve one identity descriptor to (account id, authz aliases, caller kind)."""
         issuer = _string_value(descriptor, "issuer")
         subject = _string_value(descriptor, "subject")
         subject_claim = _string_value(descriptor, "subject_claim") or "sub"
@@ -299,6 +302,17 @@ class AccountResolver:
         if not isinstance(claims_snapshot, dict):
             claims_snapshot = {}
 
+        primary_email = _string_value(descriptor, "primary_email")
+        # Descriptors carry only a subset of claims, so this path never rewrites claims_snapshot.
+        profile_claims = (
+            IdentityClaims(
+                email=primary_email,
+                name=_string_value(descriptor, "name"),
+                picture=_string_value(descriptor, "picture"),
+            )
+            if account_type == "user"
+            else None
+        )
         store = await _account_identity_store()
         try:
             record = await store.resolve_or_materialize(
@@ -307,12 +321,14 @@ class AccountResolver:
                 subject_claim=subject_claim,
                 account_type=account_type,
                 display_name=_string_value(descriptor, "display_name"),
-                primary_email=_string_value(descriptor, "primary_email"),
+                primary_email=primary_email,
                 link_key=_string_value(descriptor, "link_key"),
                 link_key_claim=_string_value(descriptor, "link_key_claim"),
                 claims_snapshot=claims_snapshot,
                 linked_via=_string_value(descriptor, "linked_via") or "resolver_materialization",
                 linked_by=_string_value(descriptor, "linked_by"),
+                profile_claims=profile_claims,
+                profile_sync_interval=timedelta(seconds=self.config.profile_sync_interval_seconds),
             )
         except (AccountIdentityConflictError, AccountIdentityUnavailableError) as exc:
             raise AccountResolutionError(str(exc)) from exc

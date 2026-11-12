@@ -172,6 +172,10 @@ auth:
   on_invalid_plugin: hard_fail
   # Additional service principal names allowed for stable account materialization. Built-in Helix services, plugin services, and inference middleware installed where the auth service runs (and passing the plugin allowlist there) are allowed automatically. When the inference gateway runs separately from auth, add each middleware entry-point name here.
   allowed_service_principals: []
+  # Minimum seconds between profile refreshes (email, name, avatar) from bearer-token claims for the same identity. Bounds writes on the authorization path; browser logins always refresh. | default: 900
+  profile_sync_interval_seconds: 900
+  # Deployment-wide preference defaults keyed by namespace (for example studio.ui: {theme: dark}). Namespaces listed here are read-only through the preference defaults API.
+  preference_defaults: {}
 ```
 
 ### `entities`
