@@ -139,8 +139,7 @@ export function CreateDatasetPanel({
       >
         <TabsList>
           {TAB_ORDER.map((id) => (
-            // The hidden spacing copy of the label (reserves bold width) would double its text.
-            <TabsTrigger key={id} value={id} renderSpacingElement={false}>
+            <TabsTrigger key={id} value={id}>
               {TAB_LABELS[id]}
             </TabsTrigger>
           ))}
