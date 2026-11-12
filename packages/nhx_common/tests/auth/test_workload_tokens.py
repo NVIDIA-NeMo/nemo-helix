@@ -11,12 +11,7 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from nemo_helix_plugin.auth.workload_delegations import (
-    JOB_WORKLOAD_CLAIM,
-    JobWorkloadBinding,
-    bind_job,
-    current_workload_job,
-)
+from nemo_helix_plugin.auth.workload_delegations import SERVICE_ATTRIBUTES_CLAIM, current_workload_service_attributes
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
@@ -164,45 +159,50 @@ async def test_workload_subject_token_resolves_with_configured_subject_issuer(tm
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("token_kind", "claim", "named"),
+    ("token_kind", "attributes", "read"),
     [
-        ("workload_access_token", None, True),
-        ("oidc_access_token", None, False),
-        ("access_key", None, False),
-        ("workload_access_token", {"workspace": "team"}, False),
+        ("workload_access_token", {"evals": {"build": "b-1"}}, {"build": "b-1"}),
+        ("oidc_access_token", {"evals": {"build": "b-1"}}, None),
+        ("access_key", {"evals": {"build": "b-1"}}, None),
+        ("workload_access_token", {"agents": {"build": "b-1"}}, None),
+        ("workload_access_token", {"evals": "b-1"}, None),
     ],
-    ids=["workload-token", "oidc-token", "access-key", "malformed-claim"],
+    ids=["workload-token", "oidc-token", "access-key", "another-service", "malformed"],
 )
-async def test_only_a_workload_access_token_names_its_job(
-    tmp_path: Path, token_kind: ResolvedTokenKind, claim: dict | None, named: bool
+async def test_only_a_workload_access_token_carries_service_attributes(
+    tmp_path: Path, token_kind: ResolvedTokenKind, attributes: dict, read: dict | None
 ) -> None:
     config = _token_exchange_config(tmp_path)
-    job = JobWorkloadBinding(workspace="team", job="job-one")
-    token = await issue_service_workload_access_token_async(
-        config, service_name="jobs", on_behalf_of=Principal(id="user:alice"), job=job
-    )
+    token = await issue_service_workload_access_token_async(config, service_name="jobs", on_behalf_of="user:alice")
     resolved = await resolve_workload_access_token(config, token)
     assert resolved is not None
-    raw_claims = resolved.claims.raw_claims | ({JOB_WORKLOAD_CLAIM: claim} if claim is not None else {})
+    raw_claims = resolved.claims.raw_claims | {SERVICE_ATTRIBUTES_CLAIM: attributes}
     resolved = replace(resolved, token_kind=token_kind, claims=replace(resolved.claims, raw_claims=raw_claims))
     marker = auth_client_context.set(
         AuthClient(principal=resolved.principal, config=config, resolved_bearer_token=resolved)
     )
     try:
-        assert current_workload_job() == (job if named else None)
+        assert current_workload_service_attributes("evals") == read
     finally:
         auth_client_context.reset(marker)
 
 
-def test_a_job_bound_service_token_must_act_for_the_jobs_creator(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_a_delegated_service_token_carries_the_attributes_it_was_minted_with(tmp_path: Path) -> None:
+    config = _token_exchange_config(tmp_path)
+    attributes = {"evals": {"build": "b-1"}}
+
+    token = await issue_service_workload_access_token_async(
+        config, service_name="jobs", on_behalf_of=Principal(id="user:alice"), service_attributes=attributes
+    )
+    resolved = await resolve_workload_access_token(config, token)
+
+    assert resolved is not None
+    assert resolved.claims.raw_claims[SERVICE_ATTRIBUTES_CLAIM] == attributes
+
+
+def test_service_attributes_need_a_principal_to_act_for(tmp_path: Path) -> None:
     config = _token_exchange_config(tmp_path)
 
-    with pytest.raises(ValueError, match="creator"):
-        issue_service_workload_access_token(
-            config, service_name="jobs", job=JobWorkloadBinding(workspace="team", job="job-one")
-        )
-
-
-@pytest.mark.parametrize(("creator", "service"), [("service:evals", "evals"), ("user:alice", None), (None, None)])
-def test_a_job_binding_names_the_service_that_created_the_job(creator: str | None, service: str | None) -> None:
-    assert bind_job("team", "job-one", creator).service == service
+    with pytest.raises(ValueError, match="on behalf of"):
+        issue_service_workload_access_token(config, service_name="jobs", service_attributes={"evals": {"b": "1"}})

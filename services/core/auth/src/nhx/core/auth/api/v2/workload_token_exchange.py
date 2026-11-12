@@ -21,7 +21,7 @@ import jwt
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from httpx import AsyncClient
-from nemo_helix_plugin.auth.workload_delegations import JOB_WORKLOAD_CLAIM
+from nemo_helix_plugin.auth.workload_delegations import SERVICE_ATTRIBUTES_CLAIM
 from nhx.common.auth.access_keys import public_jwk_from_private_key_pem_async
 from nhx.common.auth.signing_keys import RSASigningKey, RSASigningKeyCache
 from nhx.common.auth.token_claims import groups_from_claim
@@ -765,8 +765,8 @@ def _build_delegated_claims(
     if verified_subject.groups:
         actor_claims["groups"] = ",".join(verified_subject.groups)
     claims["act"] = actor_claims
-    if (job := delegation.job_binding()) is not None:
-        claims[JOB_WORKLOAD_CLAIM] = job.model_dump(exclude_none=True)
+    if delegation.auth_context.service_attributes:
+        claims[SERVICE_ATTRIBUTES_CLAIM] = delegation.auth_context.service_attributes
     return claims
 
 

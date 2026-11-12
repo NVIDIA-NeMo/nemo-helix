@@ -3712,6 +3712,15 @@ components:
           type: array
           title: Principal On Behalf Of Authz Aliases
           description: Alternate trusted identifiers for the on-behalf-of principal
+        service_attributes:
+          additionalProperties:
+            additionalProperties:
+              $ref: '#/components/schemas/JsonValue'
+            type: object
+          type: object
+          title: Service Attributes
+          description: Attributes the creating service set, by service name, signed
+            into the workload access tokens of what it created
       type: object
       required:
       - principal_id
@@ -5151,6 +5160,8 @@ components:
         a
 
         control update, an omitted or null value keeps the job''s current value.'
+    JsonValue:
+      title: JsonValue
     LogLine:
       properties:
         timestamp:

@@ -28,6 +28,8 @@ from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 TASK_IMAGE_BUILD_MODULE = "nemo_evals.tasks.task_image_build"
+#: The Evals service attribute granting a task-builder Job its one build, as a ``TaskImageBuildSpec``.
+TASK_IMAGE_BUILD_GRANT = "task_image_build"
 
 TASK_IMAGE_BUILD_RESOURCES = ResourcesSpec(
     requests=ResourcesRequestsSpec(cpu="50m", memory="128Mi"),
@@ -79,6 +81,7 @@ def task_image_build_job_request(
         spec=spec.model_dump(mode="json"),
         platform_spec=HelixJobSpec(steps=[step]),
         custom_fields={"task_image_build": _build_key(spec)},
+        service_attributes={TASK_IMAGE_BUILD_GRANT: spec.model_dump(mode="json")},
     )
 
 

@@ -12390,6 +12390,15 @@ components:
           type: array
           title: Principal On Behalf Of Authz Aliases
           description: Alternate trusted identifiers for the on-behalf-of principal
+        service_attributes:
+          additionalProperties:
+            additionalProperties:
+              $ref: '#/components/schemas/JsonValue'
+            type: object
+          type: object
+          title: Service Attributes
+          description: Attributes the creating service set, by service name, signed
+            into the workload access tokens of what it created
       type: object
       required:
       - principal_id
@@ -13437,6 +13446,15 @@ components:
         output_location:
           title: Output Location
           type: string
+        service_attributes:
+          title: Service Attributes
+          description: Facts the creating platform service vouches for, signed into
+            the Job's workload access tokens under that service's name in the nhx_service_attributes
+            claim. Only a service principal may set them; ignored with auth off. Same
+            limits as a Scoped Access Key's service_attributes.
+          additionalProperties:
+            $ref: '#/components/schemas/JsonValue'
+          type: object
       type: object
       required:
       - spec

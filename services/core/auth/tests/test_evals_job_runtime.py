@@ -21,9 +21,10 @@ from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEnti
 from nemo_evals.image_builds.runner import TaskImageBuildSpec
 from nemo_evals.image_builds.runtime import RuntimeBuildRecords
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
+from nemo_evals.jobs.task_image_build import task_image_build_job_request
 from nemo_evals.revisions import get_revision
 from nemo_evals.service import EvaluatorPluginService
-from nemo_helix_plugin.auth.workload_delegations import JOB_WORKLOAD_CLAIM, JobWorkloadBinding
+from nemo_helix_plugin.auth.workload_delegations import SERVICE_ATTRIBUTES_CLAIM
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
@@ -147,34 +148,46 @@ def _workload_exchange(platform: Platform) -> Generator[AuthConfig]:
         yield auth
 
 
-def _pod_token(auth: AuthConfig, job: JobWorkloadBinding | None) -> str:
+Attributes = dict[str, dict]
+
+
+def _pod_token(auth: AuthConfig, attributes: Attributes | None) -> str:
     """The shape of a token exchanged for a Kubernetes or Docker Job's delegation."""
     claims: dict = {"sub": CREATOR.id, "email": CREATOR.email, "act": {"sub": "system:serviceaccount:jobs:runner"}}
-    if job is not None:
-        claims[JOB_WORKLOAD_CLAIM] = job.model_dump(exclude_none=True)
+    if attributes is not None:
+        claims[SERVICE_ATTRIBUTES_CLAIM] = attributes
     return _encode_access_token(
         auth, workload_signing_key(auth), subject_claims=claims, scope=granted_workload_scope(auth, None)
     )
 
 
-def _subprocess_token(auth: AuthConfig, job: JobWorkloadBinding | None) -> str:
-    return issue_service_workload_access_token(auth, service_name="jobs", on_behalf_of=CREATOR, job=job)
+def _subprocess_token(auth: AuthConfig, attributes: Attributes | None) -> str:
+    return issue_service_workload_access_token(
+        auth, service_name="jobs", on_behalf_of=CREATOR, service_attributes=attributes
+    )
 
 
 def _bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _evals_job(job: str, workspace: str = "default") -> JobWorkloadBinding:
-    return JobWorkloadBinding(workspace=workspace, job=job, service="evals")
+def _spec(platform: Platform) -> TaskImageBuildSpec:
+    build = platform.build
+    return TaskImageBuildSpec(
+        workspace="default", task="sort-task", revision_digest=build.revision_digest, attempt=build.attempt
+    )
+
+
+def _grant(spec: TaskImageBuildSpec, *, service: str = "evals") -> Attributes:
+    """What Evals sets on the build's Job, as auth signs it into the Job's tokens."""
+    attributes = task_image_build_job_request(spec, name="build-job").service_attributes
+    assert attributes is not None
+    return {service: attributes}
 
 
 @pytest.mark.parametrize("mint", [_pod_token, _subprocess_token], ids=["pod", "subprocess"])
 def test_the_build_job_reads_and_records_its_build(platform: Platform, mint) -> None:
-    build = platform.build
-    spec = TaskImageBuildSpec(
-        workspace="default", task="sort-task", revision_digest=build.revision_digest, attempt=build.attempt
-    )
+    spec = _spec(platform)
 
     async def load_and_fail() -> tuple[TaskImageBuildEntity, TaskRevisionEntity, TaskImageBuildEntity]:
         records = RuntimeBuildRecords(platform.ctx.async_client.with_headers(headers), spec)
@@ -183,29 +196,28 @@ def test_the_build_job_reads_and_records_its_build(platform: Platform, mint) -> 
         return loaded, revision, saved
 
     with _workload_exchange(platform) as auth:
-        headers = _bearer(mint(auth, _evals_job(build.job)))
+        headers = _bearer(mint(auth, _grant(spec)))
         loaded, revision, saved = asyncio.run(load_and_fail())
 
-    assert loaded.job == build.job
-    assert revision.content_hash == build.revision_digest
+    assert loaded.job == platform.build.job
+    assert revision.content_hash == platform.build.revision_digest
     assert (saved.status, saved.error) == ("failed", "test")
 
 
-@pytest.mark.parametrize(
-    "bound_to",
-    ["another-job", "another-workspace", "created-by-a-user", "unbound"],
-)
+@pytest.mark.parametrize("granted", ["another-build", "another-workspace", "by-another-service", "nothing"])
 @pytest.mark.parametrize("mint", [_pod_token, _subprocess_token], ids=["pod", "subprocess"])
-def test_any_other_workload_is_refused(platform: Platform, mint, bound_to: str) -> None:
-    """Covers a Job a user created under the build's Job name, which Evals would adopt as the build's Job."""
-    job = {
-        "another-job": _evals_job("another-job"),
-        "another-workspace": _evals_job(platform.build.job, workspace="other"),
-        "created-by-a-user": JobWorkloadBinding(workspace="default", job=platform.build.job),
-        "unbound": None,
-    }[bound_to]
+def test_any_other_workload_is_refused(platform: Platform, mint, granted: str) -> None:
+    """A Job a user created, even one Evals adopts as the build's Job, is granted nothing: only services set
+    attributes on the Jobs they create."""
+    spec = _spec(platform)
+    attributes = {
+        "another-build": _grant(spec.model_copy(update={"attempt": spec.attempt + 1})),
+        "another-workspace": _grant(spec.model_copy(update={"workspace": "other"})),
+        "by-another-service": _grant(spec, service="agents"),
+        "nothing": None,
+    }[granted]
     with _workload_exchange(platform) as auth:
-        headers = _bearer(mint(auth, job))
+        headers = _bearer(mint(auth, attributes))
         assert platform.ctx.test_client.get(platform.path, headers=headers).status_code == 403
         refused = platform.ctx.test_client.put(platform.path, headers=headers, json={"status": "ready", "images": []})
         assert refused.status_code == 403
@@ -214,7 +226,7 @@ def test_any_other_workload_is_refused(platform: Platform, mint, bound_to: str) 
 def test_the_build_job_still_cannot_read_entities_directly(platform: Platform) -> None:
     """The Job reaches its record only through these routes; its credential gains no Entity Store access."""
     with _workload_exchange(platform) as auth:
-        headers = _bearer(_pod_token(auth, _evals_job(platform.build.job)))
+        headers = _bearer(_pod_token(auth, _grant(_spec(platform))))
         raw = platform.ctx.test_client.get(
             "/apis/entities/v2/workspaces/default/entities/task/sort-task", headers=headers
         )
@@ -242,7 +254,7 @@ def test_the_evals_service_identity_is_admitted_without_token_exchange(platform:
 
 def test_a_job_cannot_rewrite_what_its_build_is(platform: Platform) -> None:
     with _workload_exchange(platform) as auth:
-        headers = _bearer(_pod_token(auth, _evals_job(platform.build.job)))
+        headers = _bearer(_pod_token(auth, _grant(_spec(platform))))
         rewritten = platform.ctx.test_client.put(
             platform.path,
             headers=headers,

@@ -4,8 +4,9 @@
 """Routes a task-builder Job uses to read and record its own build, under
 /apis/evals/v2/workspaces/{workspace}/job-runtime.
 
-Only a Job Evals started for a build may use them, and only for that build; the Evals service reads and writes the
-record for it, acting for the Job's creator.
+Only the Job Evals started for a build may use them, and only for that build: Evals grants it the build in the service
+attributes of its workload access tokens. The Evals service reads and writes the record for it, acting for the Job's
+creator.
 """
 
 from __future__ import annotations
@@ -19,9 +20,10 @@ from nemo_evals.entities import MAX_NAME_LENGTH, NAME_PATTERN, TaskRevisionEntit
 from nemo_evals.image_builds.models import TaskImageBuildEntity
 from nemo_evals.image_builds.runner import EntityBuildRecords, TaskImageBuildSpec
 from nemo_evals.image_builds.runtime import JOB_BUILD_PATH, TaskImageBuildProgress, TaskImageBuildState
+from nemo_evals.jobs.task_image_build import TASK_IMAGE_BUILD_GRANT
 from nemo_evals.revisions import RevisionNotFoundError
 from nemo_helix_plugin.auth import RuntimeAuthClient, current_auth_client
-from nemo_helix_plugin.auth.workload_delegations import current_workload_job
+from nemo_helix_plugin.auth.workload_delegations import current_workload_service_attributes
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entities import EntityNotFoundError
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, get_entity_client
@@ -36,29 +38,19 @@ Attempt = Annotated[int, Path(ge=1)]
 
 
 async def _job_build(
-    auth: RuntimeAuthClient,
-    entities: NemoEntitiesClient,
-    workspace: str,
-    task: str,
-    revision_digest: str,
-    attempt: int,
+    auth: RuntimeAuthClient, entities: NemoEntitiesClient, spec: TaskImageBuildSpec
 ) -> tuple[EntityBuildRecords, TaskImageBuildEntity, TaskRevisionEntity]:
-    job = None
     if auth.auth_enabled and auth.principal.id != f"service:{_EVALS_SERVICE}":
-        bound = current_workload_job()
-        if bound is None or bound.service != _EVALS_SERVICE or bound.workspace != workspace:
+        granted = current_workload_service_attributes(_EVALS_SERVICE) or {}
+        if granted.get(TASK_IMAGE_BUILD_GRANT) != spec.model_dump(mode="json"):
             raise HTTPException(
-                status.HTTP_403_FORBIDDEN, "Only a task-builder Job that Evals started may use this route"
+                status.HTTP_403_FORBIDDEN, "Only the task-builder Job Evals started for this build may use this route"
             )
-        job = bound.job
-    spec = TaskImageBuildSpec(workspace=workspace, task=task, revision_digest=revision_digest, attempt=attempt)
     records = EntityBuildRecords(entities, spec)
     try:
         build, revision = await records.load()
     except (EntityNotFoundError, RevisionNotFoundError) as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Image build not found: {e}") from e
-    if job is not None and build.job != job:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, f"The image build is run by Job {build.job}, not {job}")
     return records, build, revision
 
 
@@ -77,7 +69,11 @@ async def load_job_image_build(
     entities: NemoEntitiesClient = Depends(get_entity_client),
 ) -> TaskImageBuildState:
     """The Job's build record and the task revision it builds."""
-    _, build, revision = await _job_build(auth, entities, workspace, task, revision_digest, attempt)
+    _, build, revision = await _job_build(
+        auth,
+        entities,
+        TaskImageBuildSpec(workspace=workspace, task=task, revision_digest=revision_digest, attempt=attempt),
+    )
     return TaskImageBuildState(build=build, revision=revision)
 
 
@@ -94,7 +90,11 @@ async def record_job_image_build(
     entities: NemoEntitiesClient = Depends(get_entity_client),
 ) -> TaskImageBuildEntity:
     """Record the Job's progress on its build."""
-    records, build, _ = await _job_build(auth, entities, workspace, task, revision_digest, attempt)
+    records, build, _ = await _job_build(
+        auth,
+        entities,
+        TaskImageBuildSpec(workspace=workspace, task=task, revision_digest=revision_digest, attempt=attempt),
+    )
     build.status = progress.status
     build.images = progress.images
     build.error = progress.error

@@ -19,7 +19,6 @@ from shutil import rmtree
 from sys import executable as python_executable
 from typing import Literal
 
-from nemo_helix_plugin.auth.workload_delegations import JobWorkloadBinding, bind_job
 from nemo_helix_plugin.client.constants import ACCESS_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext, HelixJobTaskUpdate
 from nhx.common.auth import AuthContext
@@ -52,6 +51,7 @@ from nhx.core.jobs.controllers.backends.base import (
     step_ttl_seconds_active,
 )
 from nhx.core.jobs.controllers.backends.subprocess_runtime import (
+    ServiceAttributes,
     SubprocessOtelLogger,
     create_otel_logger,
     inject_secret_env_vars,
@@ -137,7 +137,7 @@ class SubprocessProcessMetadata:
     # Set when the child holds a rotatable delegated token: its env (to re-derive the principal) and file.
     task_auth_env: dict[str, str] | None = None
     task_auth_token_file: Path | None = None
-    task_auth_job: JobWorkloadBinding | None = None
+    task_auth_service_attributes: ServiceAttributes = field(default_factory=dict)
     task_auth_refreshed_at: float = field(default_factory=time.monotonic)
 
 
@@ -281,7 +281,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             otel_logger=otel_logger,
             task_auth_env={name: value for name, value in env.items() if name == NHX_PRINCIPAL_ENVVAR},
             task_auth_token_file=Path(env[ACCESS_TOKEN_FILE_ENVVAR]) if ACCESS_TOKEN_FILE_ENVVAR in env else None,
-            task_auth_job=_job_binding(step),
+            task_auth_service_attributes=_service_attributes(step),
         )
         self._process_registry.set(key, metadata)
 
@@ -416,7 +416,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             logger.warning("Failed to remove subprocess task access token file", exc_info=True)
 
     def _refresh_task_auth(self, metadata: SubprocessProcessMetadata) -> None:
-        if metadata.task_auth_token_file is None or metadata.task_auth_env is None or metadata.task_auth_job is None:
+        if metadata.task_auth_token_file is None or metadata.task_auth_env is None:
             return
         if metadata.process.poll() is not None:
             # Nothing reads the token any more and it would otherwise sit on disk until job cleanup.
@@ -426,7 +426,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             return
         try:
             refreshed = refresh_subprocess_task_auth(
-                metadata.task_auth_env, metadata.task_auth_token_file, metadata.task_auth_job
+                metadata.task_auth_env, metadata.task_auth_token_file, metadata.task_auth_service_attributes
             )
         except Exception:
             # Keep the stale token: the old one stays valid until it expires and the next tick retries.
@@ -604,7 +604,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
         # The token file goes last: nothing after it can fail and leave it behind on a step that never registers.
         inject_secret_env_vars(env)
-        inject_subprocess_task_auth(env, config_dir / _TASK_ACCESS_TOKEN_FILE_NAME, _job_binding(step))
+        inject_subprocess_task_auth(env, config_dir / _TASK_ACCESS_TOKEN_FILE_NAME, _service_attributes(step))
         return env, task_id, work_dir, log_path, persistent_dir
 
     @staticmethod
@@ -800,5 +800,5 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         return text[-max_chars:]
 
 
-def _job_binding(step: HelixJobStepWithContext) -> JobWorkloadBinding:
-    return bind_job(step.workspace, step.job, step.auth_context.principal_id if step.auth_context else None)
+def _service_attributes(step: HelixJobStepWithContext) -> ServiceAttributes:
+    return step.auth_context.service_attributes if step.auth_context else {}
