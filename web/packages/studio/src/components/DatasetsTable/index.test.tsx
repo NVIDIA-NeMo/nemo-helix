@@ -138,4 +138,26 @@ describe('DatasetsTable', () => {
     ).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search datasets...')).toBeInTheDocument();
   });
+
+  it('opens the dataset creation panel from the first-use empty state', async () => {
+    const user = userEvent.setup();
+    installListHandler([]);
+    renderTable();
+
+    await user.click(
+      await screen.findByRole(
+        'button',
+        { name: 'Create Dataset' },
+        { timeout: LG_SELECTOR_TIMEOUT }
+      )
+    );
+
+    expect(await screen.findByRole('tab', { name: 'HuggingFace' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Upload' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('tab', { name: 'HuggingFace' })).not.toBeInTheDocument()
+    );
+  });
 });
