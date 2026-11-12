@@ -11,7 +11,7 @@ import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import { getDatasetDetailRoute } from '@studio/routes/utils';
 import { mockUseNavigate, mockUseParams } from '@studio/tests/util/mockUseParams';
 import { render, screen } from '@studio/tests/util/render';
-import { fireEvent, waitFor } from '@testing-library/react';
+import { fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -54,6 +54,10 @@ const createEndpoints = () => [
   }),
   http.put(`${FILESETS_URL}/:name/-/*`, () => new HttpResponse(null, { status: 200 })),
 ];
+
+// The panel's submit button shares the trigger's label, so scope to the dialog.
+const panelButton = (name: string) =>
+  within(screen.getByRole('dialog')).getByRole('button', { name });
 
 const renderButton = () =>
   render(
@@ -101,8 +105,7 @@ describe('NewDatasetButton', () => {
       expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('alpaca')
     );
 
-    // The panel's own submit button shares the trigger's label.
-    await user.click(screen.getByRole('button', { name: 'Create Dataset' }));
+    await user.click(panelButton('Create Dataset'));
 
     await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
     expect(navigate).toHaveBeenCalledWith(
@@ -123,7 +126,7 @@ describe('NewDatasetButton', () => {
       expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('train-data')
     );
 
-    await user.click(screen.getByRole('button', { name: 'Create Dataset' }));
+    await user.click(panelButton('Create Dataset'));
 
     await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
     expect(navigate).toHaveBeenCalledWith(
