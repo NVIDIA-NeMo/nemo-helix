@@ -30,6 +30,7 @@
       "agent": {"type": "string", "minLength": 1},
       "target_agent": {"type": "string", "minLength": 1},
       "ethos": {"type": "string", "minLength": 1},
+      "analysis_options": {"type": "object", "additionalProperties": true},
       "base_url": {"type": "string", "minLength": 1},
       "enable_observability": {"type": "boolean", "default": true},
       "default_model": {"type": "string", "minLength": 1},

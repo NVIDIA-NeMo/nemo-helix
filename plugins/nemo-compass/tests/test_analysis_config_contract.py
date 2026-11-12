@@ -81,6 +81,7 @@ def test_enable_sdk_body_contains_both_model_refs() -> None:
     ).model_dump(mode="json") == {
         "default_model": "default/gpt-5",
         "fast_model": "default/gpt-5-mini",
+        "analysis_options": {},
     }
 
 
@@ -113,3 +114,29 @@ def test_update_run_status_sdk_body_omits_unset_fields_and_keeps_explicit_null_t
         "last_attempted_at": None,
         "last_completed_at": None,
     }
+
+
+def test_saved_options_keep_only_overrides_and_patch_can_reset_them() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.side_effect = NemoEntityNotFoundError("missing")
+    entity_client.create.side_effect = lambda config: config
+    client = TestClient(_app(entity_client))
+    path = "/v2/workspaces/default/analysis-configs/target"
+    overrides = {"compass_signals": {"tool_issues": False}}
+    response = client.post(
+        path + "/enable",
+        json={"default_model": "default/model", "fast_model": "default/model", "analysis_options": overrides},
+    )
+    assert response.status_code == 200
+    saved = entity_client.create.await_args.args[0]
+    assert saved.analysis_options == overrides
+    entity_client.get.side_effect = None
+    entity_client.get.return_value = saved
+    entity_client.update.side_effect = lambda config: config
+    for payload in ({"enabled": False}, {"analysis_options": None}):
+        response = client.patch(path, json=payload)
+        assert response.status_code == 200
+        assert response.json()["analysis_options"] == overrides
+    response = client.patch(path, json={"analysis_options": {}})
+    assert response.status_code == 200
+    assert response.json()["analysis_options"] == {}

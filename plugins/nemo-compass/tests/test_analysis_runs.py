@@ -292,7 +292,11 @@ def test_compass_is_submitted_inline_with_the_requested_models() -> None:
 
 
 def test_read_scope_reaches_the_job_context_not_the_compass_settings() -> None:
-    request = _request(since=datetime(2026, 8, 1, tzinfo=timezone.utc), evaluation_id="eval-123")
+    request = _request(
+        since=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        evaluation_id="eval-123",
+        analysis_options={"compass_signals": {"tool_issues": False}},
+    )
 
     config = ExecuteAgentJobConfig.model_validate(
         build_execute_agent_job_config(request, workspace="default", run_name=RUN_NAME)
@@ -445,12 +449,19 @@ async def test_scheduler_submission_preserves_name_profile_and_platform_url() ->
 
 async def test_the_run_captures_the_request_scope() -> None:
     entities = _StubEntities()
-    request = _request(since=datetime(2026, 8, 1, tzinfo=timezone.utc), evaluation_id="eval-123")
+    request = _request(
+        since=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        evaluation_id="eval-123",
+        analysis_options={"compass_signals": {"tool_issues": False}},
+    )
 
     response = await create_analysis_run("default", request, _client(_StubExecuteJobs()), _entities(entities))
 
     assert response.run.since == datetime(2026, 8, 1, tzinfo=timezone.utc)
     assert response.run.evaluation_id == "eval-123"
+    assert response.run.analysis_options == request.analysis_options
+    spec = build_execute_agent_job_config(request, workspace="default", run_name=RUN_NAME)
+    assert spec["agent"]["config"]["harnesses"]["compass"]["settings"]["analysis_options"] == request.analysis_options
     assert response.run.default_model == DEFAULT_MODEL
     assert response.run.fast_model == FAST_MODEL
 

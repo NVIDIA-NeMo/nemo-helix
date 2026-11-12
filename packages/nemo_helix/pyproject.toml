@@ -366,12 +366,12 @@ nemo-builder-plugin = [
 nemo-compass-plugin = [
   "fastapi>=0.115",
   "httpx",
-  "nemo-compass==0.2.0; python_version < '3.14'",
+  "nemo-compass @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@6b45be7f6034ecdb56d96c7ae3608548cd614aa6 ; python_version < '3.14'",
   "nemo-fabric-adapter-contract>=0.6.0,<0.7.0",
   "nemo-fabric-adapters-common>=0.6.0,<0.7.0",
   "nemo-helix-plugin",
   "nemo-relay>=0.11.0,<0.12",
-  "nooa>=0.0.10,<0.0.11",
+  "nooa>=0.0.12,<0.1",
   "opentelemetry-exporter-otlp>=1.42.1",
   "opentelemetry-sdk>=1.42.1",
   "pydantic>=2.12.0",
@@ -980,3 +980,6 @@ module = "nhx/studio"
 deps_group = "studio-service"
 # force_include source paths are relative to this bundle entry's source path.
 force_include."../../../../../web/packages/studio/dist" = "nhx/studio/static"
+
+[tool.hatch.metadata]
+allow-direct-references = true

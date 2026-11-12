@@ -301,6 +301,7 @@ class CompassAnalysisController(NemoController):
             since=status.last_successful_run_at if status is not None else None,
             default_model=config.default_model,
             fast_model=config.fast_model or config.default_model,
+            analysis_options=config.analysis_options,
         )
         job_name = mint_analysis_run_name()
         pending = (

@@ -137,6 +137,7 @@ async def submit_analysis_run(
         evaluation_id=request.evaluation_id or "",
         default_model=request.default_model,
         fast_model=request.fast_model,
+        analysis_options=request.analysis_options,
     )
     try:
         saved = await entity_client.create(run)
@@ -366,6 +367,7 @@ def _inline_compass(request: CreateAnalysisRunRequest, *, base_url: str | None =
                 default_model=request.default_model,
                 fast_model=request.fast_model,
                 ethos=request.ethos,
+                analysis_options=request.analysis_options,
                 # Compass's self-observability builds its own OTLP exporter from
                 # the operator's local CLI config, which does not exist in a task
                 # pod, so on a cluster it exports unauthenticated at best. Telemetry

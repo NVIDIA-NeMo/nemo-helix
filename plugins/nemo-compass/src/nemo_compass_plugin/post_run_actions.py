@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, ClassVar
 
 from nemo_compass_plugin.analysis.backend import make_backend
@@ -16,6 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 REPORT_RESULT_NAME = "analysis-report"
 REPORT_FILE_NAME = "analysis-report.txt"
+ANALYSIS_RESULT_NAME = "compass-analysis"
+ANALYSIS_FILE_NAME = "compass-analysis.json"
 
 
 class CompassAnalysisActionConfig(BaseModel):
@@ -46,6 +49,11 @@ class CompassAnalysisAction:
     def after_invoke(self, context: PostRunActionContext) -> None:
         config = self.config_model.model_validate(context.config)
         result = _compass_result_from_fabric_output(context.fabric_result.output)
+        if result.analysis_result is not None:
+            analysis_path = context.ctx.storage.ephemeral / ANALYSIS_FILE_NAME
+            analysis_path.parent.mkdir(parents=True, exist_ok=True)
+            analysis_path.write_text(json.dumps(result.analysis_result, indent=2) + "\n", encoding="utf-8")
+            context.ctx.results.save(ANALYSIS_RESULT_NAME, analysis_path)
         agent = config.agent or context.agent_name
         workspace = config.workspace or context.ctx.workspace
         report = asyncio.run(

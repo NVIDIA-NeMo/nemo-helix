@@ -3,6 +3,7 @@
 
 """Compass scheduling and AnalysisRun CLI."""
 
+import json
 from collections.abc import Callable
 from datetime import datetime
 from importlib.metadata import entry_points
@@ -95,6 +96,14 @@ class CompassCLI(NemoCLI):
                 "--fast-model",
                 help="Model Entity ref for context summarization. Default: the configured fast model.",
             ),
+            analysis_options: Path | None = typer.Option(
+                None,
+                "--analysis-options",
+                exists=True,
+                dir_okay=False,
+                readable=True,
+                help="JSON file of Compass analysis option overrides.",
+            ),
             output_format: EntityOutputFormatOption = None,
         ) -> None:
             """Enable periodic analysis for an agent."""
@@ -104,7 +113,11 @@ class CompassCLI(NemoCLI):
             kwargs = {
                 "workspace": resolve_cli_workspace(ctx, workspace),
                 "agent": agent,
-                "body": EnableAnalysisConfigRequest(default_model=default_model, fast_model=fast_model),
+                "body": EnableAnalysisConfigRequest(
+                    default_model=default_model,
+                    fast_model=fast_model,
+                    analysis_options=_read_analysis_options(analysis_options) or {},
+                ),
             }
             if handle_code_generation(CompassClient, "enable_analysis_config", kwargs, resolved_output_format, state):
                 return
@@ -234,6 +247,14 @@ class CompassCLI(NemoCLI):
                 "--ethos",
                 help="Path to the agent's Ethos Markdown. Its contents are sent with the run.",
             ),
+            analysis_options: Path | None = typer.Option(
+                None,
+                "--analysis-options",
+                help="JSON file of Compass analysis option overrides. Defaults come from the installed Compass package.",
+                exists=True,
+                dir_okay=False,
+                readable=True,
+            ),
             evaluation_id: str | None = typer.Option(
                 None,
                 "--evaluation-id",
@@ -278,6 +299,7 @@ class CompassCLI(NemoCLI):
                     default_model=resolved_default,
                     fast_model=resolved_fast,
                     ethos=_read_ethos_file(ethos),
+                    analysis_options=_read_analysis_options(analysis_options),
                     since=_parse_since(since),
                     evaluation_id=evaluation_id,
                     timeout_seconds=timeout_seconds,
@@ -533,3 +555,15 @@ def _status_reporter() -> Callable[[str | None], None]:
         typer.echo(f"  status: {status}", err=True)
 
     return report
+
+
+def _read_analysis_options(path: Path | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise click.BadParameter(str(exc), param_hint="'--analysis-options'") from exc
+    if not isinstance(value, dict):
+        raise click.BadParameter("must contain a JSON object", param_hint="'--analysis-options'")
+    return value

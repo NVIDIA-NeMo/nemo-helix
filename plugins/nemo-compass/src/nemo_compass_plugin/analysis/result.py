@@ -9,6 +9,7 @@ through the same backend.
 """
 
 from datetime import datetime
+from typing import Any
 
 from nemo_compass_plugin.entities import InsightRating, InsightStatus
 from nemo_compass_plugin.evidence import EvidenceCompatibility, TraceEvidence
@@ -92,6 +93,10 @@ class CompassResult(BaseModel):
             "the agent. Only evidence can be added to an existing insight — to "
             "record anything else, file a new insight."
         ),
+    )
+    analysis_result: dict[str, Any] | None = Field(
+        default=None,
+        description="Complete Compass result, including effective settings and package version. Kept independently of the Insight entity projection.",
     )
     notes: list[str] = Field(
         default_factory=list,

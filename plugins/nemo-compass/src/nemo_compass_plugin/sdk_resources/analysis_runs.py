@@ -15,7 +15,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import NotRequired, Protocol, TypedDict
+from typing import Any, NotRequired, Protocol, TypedDict
 
 from nemo_compass_plugin.entities import AnalysisRun
 from nemo_compass_plugin.schema import (
@@ -61,6 +61,7 @@ class _CreateAnalysisRunFields(TypedDict):
     agent: str
     default_model: str
     fast_model: str
+    analysis_options: NotRequired[dict[str, Any]]
     ethos: NotRequired[str]
     since: NotRequired[datetime]
     evaluation_id: NotRequired[str]
@@ -108,12 +109,15 @@ def _build_create_body(
     since: datetime | None,
     evaluation_id: str | None,
     timeout_seconds: float | None,
+    analysis_options: dict[str, Any] | None = None,
 ) -> CreateAnalysisRunRequest:
     body: _CreateAnalysisRunFields = {
         "agent": agent,
         "default_model": default_model,
         "fast_model": fast_model,
     }
+    if analysis_options is not None:
+        body["analysis_options"] = analysis_options
     if ethos is not None:
         body["ethos"] = ethos
     if since is not None:
@@ -224,6 +228,7 @@ class _AnalysisRunResource:
         since: datetime | None = None,
         evaluation_id: str | None = None,
         timeout_seconds: float | None = None,
+        analysis_options: dict[str, Any] | None = None,
     ) -> AnalysisRunResponse:
         """Submit an analysis run. The model pair is required — see the route."""
         with httpx_status_errors():
@@ -237,6 +242,7 @@ class _AnalysisRunResource:
                     since=since,
                     evaluation_id=evaluation_id,
                     timeout_seconds=timeout_seconds,
+                    analysis_options=analysis_options,
                 ),
             )
             return _run_response_from_response(response.http_response.json())
@@ -308,6 +314,7 @@ class _AsyncAnalysisRunResource:
         since: datetime | None = None,
         evaluation_id: str | None = None,
         timeout_seconds: float | None = None,
+        analysis_options: dict[str, Any] | None = None,
     ) -> AnalysisRunResponse:
         """Submit an analysis run. The model pair is required — see the route."""
         with httpx_status_errors():
@@ -321,6 +328,7 @@ class _AsyncAnalysisRunResource:
                     since=since,
                     evaluation_id=evaluation_id,
                     timeout_seconds=timeout_seconds,
+                    analysis_options=analysis_options,
                 ),
             )
             return _run_response_from_response(response.http_response.json())

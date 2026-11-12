@@ -9,7 +9,7 @@ import sys
 import pytest
 
 
-@pytest.mark.parametrize("missing_dependency", ["compass", "trace_ingest", "unexpected_dependency"])
+@pytest.mark.parametrize("missing_dependency", ["compass", "unexpected_dependency"])
 def test_missing_compass_dependencies(missing_dependency: str) -> None:
     # A fresh process exercises adapter imports without cached compass dependencies.
     script = """
@@ -41,7 +41,7 @@ async def check():
         else:
             assert error.__cause__.name == missing
             message = str(error)
-            for text in ("nemo-compass==0.2.0", "Python 3.12 or 3.13", "nemo-helix[all]"):
+            for text in ("nemo-compass with the shared analysis API", "Python 3.12 or 3.13", "nemo-helix[all]"):
                 assert text in message
     else:
         raise AssertionError("Missing dependency did not fail compass execution")

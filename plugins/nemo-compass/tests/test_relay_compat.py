@@ -153,3 +153,57 @@ def test_installer_preserves_other_middleware_and_uninstalls_only_its_own():
     assert manager._middleware[MIDDLEWARE_AGENT_CALL] == []
     assert manager._middleware[MIDDLEWARE_LLM_CALL] == []
     assert manager._middleware[MIDDLEWARE_EXECUTE_PYTHON] == [existing]
+
+
+# Exercise Compass's real TaskGroup and hook lifecycle with deterministic agents.
+@pytest.mark.allow_shared_patch("compass.analysis.registered_builtin_signals")
+@pytest.mark.asyncio
+async def test_shared_pipeline_concurrent_agents_keep_separate_relay_stacks(monkeypatch):
+    from types import SimpleNamespace
+
+    import compass.analysis as analysis
+    from compass.analysis_runtime import agent_scope
+    from compass.compass_signals.compass_signals import CompassSignalResult
+    from compass.traces import TraceSnapshot
+    from nooa.unifiedllm import FakeLLMClient
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    managers = [EventManager(), EventManager()]
+    handles = []
+
+    class Registry:
+        names = ("first", "second")
+
+        def configuration(self, name):
+            return analysis.AnalysisOptions().compass_signals.tool_issues
+
+        async def analyze(self, name, snapshot, on_start):
+            on_start()
+            index = self.names.index(name)
+            async with agent_scope(SimpleNamespace(event_manager=managers[index])):
+                handle = nemo_relay.scope.get_handle()
+                handles.append(handle)
+                if index == 0:
+                    entered.set()
+                    await release.wait()
+                else:
+                    await entered.wait()
+                    release.set()
+                    # Force the first scope to exit while this sibling is active.
+                    await asyncio.sleep(0.01)
+                assert nemo_relay.scope.get_handle().uuid == handle.uuid
+            return CompassSignalResult(signal_name=name, problems=())
+
+    monkeypatch.setattr(analysis, "registered_builtin_signals", lambda **kwargs: Registry())
+    with nemo_relay.scope.scope("host", nemo_relay.ScopeType.Agent) as parent:
+        result = await analysis.analyze(
+            TraceSnapshot([]),
+            llm_factory=FakeLLMClient,
+            instrument_agent=lambda manager: relay_compat.relay_scope(manager, "compass-agent"),
+        )
+        assert nemo_relay.scope.get_handle().uuid == parent.uuid
+        assert len(handles) == 2
+        assert all(handle.parent_uuid == parent.uuid for handle in handles)
+    assert len(result.signal_summaries) == 2
+    assert all(not any(manager._middleware.values()) for manager in managers)

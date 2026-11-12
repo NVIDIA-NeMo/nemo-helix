@@ -8,7 +8,7 @@ Discovered by the platform via the ``nemo.services`` entry-point.
 """
 
 import logging
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_compass_plugin._perms import AnalysisConfigPerms, AnalysisRunStatusPerms, InsightPerms
@@ -346,6 +346,7 @@ async def _get_or_create_analysis_config(
     enabled_if_created: bool,
     default_model: str = "",
     fast_model: str = "",
+    analysis_options: dict[str, Any] | None = None,
 ) -> tuple[AnalysisConfig, bool]:
     """Fetch an analysis config, creating a default one if it is absent.
 
@@ -368,6 +369,7 @@ async def _get_or_create_analysis_config(
         enabled=enabled_if_created,
         default_model=default_model,
         fast_model=fast_model,
+        analysis_options=analysis_options or {},
     )
     try:
         return await entity_client.create(config), True
@@ -422,6 +424,7 @@ def _build_analysis_configs_router() -> APIRouter:
             enabled_if_created=True,
             default_model=body.default_model,
             fast_model=body.fast_model,
+            analysis_options=body.analysis_options,
         )
         if created:
             return config
@@ -429,6 +432,7 @@ def _build_analysis_configs_router() -> APIRouter:
         config.enabled = True
         config.default_model = body.default_model
         config.fast_model = body.fast_model
+        config.analysis_options = body.analysis_options
         try:
             return await entity_client.update(config)
         except Exception as exc:
@@ -544,7 +548,7 @@ def _build_analysis_configs_router() -> APIRouter:
             logger.exception("Failed to fetch analysis config")
             raise HTTPException(status_code=500, detail="Failed to fetch analysis config.") from exc
 
-        for field, value in body.model_dump(exclude_unset=True).items():
+        for field, value in body.model_dump(exclude_unset=True, exclude_none=True).items():
             setattr(config, field, value)
 
         try:

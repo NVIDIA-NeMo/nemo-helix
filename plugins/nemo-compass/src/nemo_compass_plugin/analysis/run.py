@@ -8,6 +8,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from nemo_compass_plugin.analysis.backend import CompassBackend, make_backend
 from nemo_compass_plugin.analysis.observability import (
@@ -26,7 +27,8 @@ from nemo_helix_plugin.nooa_model_client import (
     resolve_model_clients,
 )
 from nooa.context_blocks import EventBase
-from nooa.events import LLMComplete, PythonOutput
+from nooa.events import PythonOutput
+from nooa.unifiedllm import LLMResponse
 
 # Truncate long tool inputs/outputs when echoing the verbose trace so a single
 # span dump doesn't flood the terminal.
@@ -48,6 +50,7 @@ async def run_compass(
     compass_evaluation: CompassEvaluationContext | None = None,
     enable_observability: bool = True,
     model_refs: ConfiguredModelRefs | None = None,
+    analysis_options: dict[str, Any] | None = None,
 ) -> str:
     """Build and run Compass agent against an agent's telemetry.
 
@@ -90,6 +93,7 @@ async def run_compass(
             compass_evaluation=compass_evaluation,
             enable_observability=enable_observability,
             model_refs=model_refs,
+            analysis_options=analysis_options,
         )
         return await backend.persist_result(workspace=workspace, agent=agent, result=result)
     finally:
@@ -112,6 +116,7 @@ async def run_compass_change_set(
     enable_observability: bool = True,
     relay_scope_name: str | None = None,
     model_refs: ConfiguredModelRefs | None = None,
+    analysis_options: dict[str, Any] | None = None,
 ) -> tuple[CompassResult, CompassBackend]:
     """Build and run Compass agent without persisting its change-set.
 
@@ -127,10 +132,10 @@ async def run_compass_change_set(
         from nemo_compass_plugin.analysis.pipeline import analyze_snapshot, load_existing_insights
         from nemo_compass_plugin.analysis.trace_snapshot import load_trace_snapshot
     except ModuleNotFoundError as exc:
-        if exc.name not in {"compass", "trace_ingest"}:
+        if exc.name not in {"compass"}:
             raise
         raise RuntimeError(
-            "Compass analysis requires nemo-compass==0.2.0 on Python 3.12 or 3.13. "
+            "Compass analysis requires nemo-compass with the shared analysis API on Python 3.12 or 3.13. "
             "Reinstall nemo-helix[all] in the environment running Compass to restore its dependencies."
         ) from exc
 
@@ -174,6 +179,7 @@ async def run_compass_change_set(
                 existing=existing,
                 model_clients=model_clients,
                 ethos=ethos,
+                analysis_options=analysis_options,
                 relay_scope_name=relay_scope_name,
                 event_handler=_echo_event if verbose else None,
             )
@@ -199,12 +205,13 @@ def _compass_observability_enabled() -> bool:
 
 def _echo_event(event: EventBase) -> None:
     """Print one useful Nooa event in the legacy verbose CLI format."""
-    if isinstance(event, LLMComplete):
-        if event.reasoning_content.strip():
-            print(f"[thought] {_truncate(event.reasoning_content.strip())}", file=sys.stderr)
+    if isinstance(event, LLMResponse):
+        reasoning = (event.reasoning or "").strip()
+        if reasoning:
+            print(f"[thought] {_truncate(reasoning)}", file=sys.stderr)
         for tool_call in event.tool_calls:
-            name = str(tool_call.get("function_name", "tool"))
-            arguments = tool_call.get("arguments", "")
+            name = tool_call.name
+            arguments = tool_call.arguments
             print(f"[tool] {name}({_truncate(str(arguments))})", file=sys.stderr)
         return
 
