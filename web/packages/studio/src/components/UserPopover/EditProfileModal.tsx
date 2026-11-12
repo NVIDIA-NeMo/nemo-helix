@@ -8,6 +8,7 @@ import {
 } from '@nemo/sdk/generated/platform/profiles';
 import type { Me } from '@nemo/sdk/generated/platform/schema';
 import { FormField, TextInput } from '@nvidia/foundations-react-core';
+import { PRINCIPAL_DISPLAY_QUERY_KEY } from '@studio/hooks/usePrincipalDisplay';
 import { useQueryClient } from '@tanstack/react-query';
 import { type FC, type FormEvent, useState } from 'react';
 
@@ -28,6 +29,7 @@ export const EditProfileModal: FC<EditProfileModalProps> = ({ me, onClose }) => 
     // An empty name clears the override, falling back to the identity provider's name.
     const updated = await mutateAsync({ data: { display_name: displayName.trim() || null } });
     queryClient.setQueryData(getAuthGetMeQueryKey(), updated);
+    void queryClient.invalidateQueries({ queryKey: PRINCIPAL_DISPLAY_QUERY_KEY });
     onClose();
   };
 

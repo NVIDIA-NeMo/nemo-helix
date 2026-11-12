@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 
 const MAX_PRINCIPALS_PER_REQUEST = 100;
 const DISPLAY_STALE_TIME_MS = 10 * 60_000;
+export const PRINCIPAL_DISPLAY_QUERY_KEY = ['auth', 'principal-display'] as const;
 
 type Waiter = { resolve: (profile: ResolvedProfile) => void; reject: (error: unknown) => void };
 
@@ -44,7 +45,7 @@ const resolvePrincipal = (principal: string) =>
 /** Public display fields (name, avatar) for a principal string such as a `created_by` value. */
 export const usePrincipalDisplay = (principal: string | null | undefined) =>
   useQuery({
-    queryKey: ['auth', 'principal-display', principal],
+    queryKey: [...PRINCIPAL_DISPLAY_QUERY_KEY, principal],
     queryFn: () => resolvePrincipal(principal ?? ''),
     enabled: Boolean(principal),
     staleTime: DISPLAY_STALE_TIME_MS,
