@@ -85,14 +85,18 @@ async def _list_local_files(local_path: Path) -> list[str]:
     return files
 
 
-def _list_local_files_sync(local_path: Path) -> list[str]:
-    """List files without silently omitting directories that cannot be scanned."""
+def _list_local_files_sync(local_path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
+    """List files from selected directories, propagating traversal errors."""
 
     def raise_error(error: OSError) -> NoReturn:
         raise error
 
+    patterns = [ignore_patterns] if isinstance(ignore_patterns, str) else ignore_patterns or []
+    ignored_directories = {pattern.rstrip("/") for pattern in patterns if pattern.endswith("/")}
     files: list[str] = []
-    for directory, _, names in walk(local_path, onerror=raise_error, followlinks=False):
+    for directory, directories, names in walk(local_path, onerror=raise_error, followlinks=False):
+        if ignored_directories:
+            directories[:] = [name for name in directories if name not in ignored_directories]
         for name in names:
             path = Path(directory) / name
             if path.is_file():
@@ -122,7 +126,9 @@ def _stage_local_files(
         try:
             if not local_path.is_dir():
                 raise FileNotFoundError(f"Result directory no longer exists: {local_path}")
-            files = _filter_files_by_patterns(_list_local_files_sync(local_path), ignore_patterns)
+            files = _filter_files_by_patterns(
+                _list_local_files_sync(local_path, ignore_patterns=ignore_patterns), ignore_patterns
+            )
             if not local_path.is_dir():
                 raise FileNotFoundError(f"Result directory no longer exists: {local_path}")
             for rel_path in files:

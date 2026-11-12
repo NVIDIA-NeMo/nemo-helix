@@ -5,9 +5,11 @@
 
 import asyncio
 import errno
+import logging
 import os
 import shutil
 import tempfile
+from collections.abc import Callable, Iterator
 from functools import partial
 from pathlib import Path
 from threading import Event
@@ -107,9 +109,9 @@ def test_disappearing_clone_lock_restarts_complete_acquisition(tmp_path: Path, m
     list_files = file_manager._list_local_files_sync
     listings = 0
 
-    def list_then_finish_clone(path: Path) -> list[str]:
+    def list_then_finish_clone(path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
         nonlocal listings
-        files = list_files(path)
+        files = list_files(path, ignore_patterns=ignore_patterns)
         listings += 1
         if listings == 1:
             lock.unlink()
@@ -137,10 +139,10 @@ def test_persistently_disappearing_required_file_fails_instead_of_being_omitted(
     list_files = file_manager._list_local_files_sync
     listings = 0
 
-    def list_then_remove_required(path: Path) -> list[str]:
+    def list_then_remove_required(path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
         nonlocal listings
         required.write_text("required trial")
-        files = list_files(path)
+        files = list_files(path, ignore_patterns=ignore_patterns)
         listings += 1
         required.unlink()
         return files
@@ -207,9 +209,9 @@ async def test_directory_upload_retries_disappearing_lock_and_cleans_staging(
     list_files = file_manager._list_local_files_sync
     listings = 0
 
-    def finish_clone_after_listing(path: Path) -> list[str]:
+    def finish_clone_after_listing(path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
         nonlocal listings
-        listed = list_files(path)
+        listed = list_files(path, ignore_patterns=ignore_patterns)
         listings += 1
         if listings == 1:
             lock.unlink()
@@ -262,7 +264,7 @@ async def test_source_root_removed_during_listing_cannot_publish_an_empty_result
     source = tmp_path / "source"
     source.mkdir()
 
-    def remove_during_listing(path: Path) -> list[str]:
+    def remove_during_listing(path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
         path.rmdir()
         return []
 
@@ -276,11 +278,14 @@ async def test_source_root_removed_during_listing_cannot_publish_an_empty_result
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
 @pytest.mark.skipif(os.geteuid() == 0, reason="Root bypasses ordinary directory permissions")
+@pytest.mark.parametrize(
+    ("directory", "ignore_patterns"), [("nested", None), ("cache", "cache"), ("cache.tmp", "*.tmp")]
+)
 async def test_unreadable_subdirectory_fails_before_upload(
-    tmp_path: Path, upload_temporary_root: Path, asynchronous: bool
+    tmp_path: Path, upload_temporary_root: Path, asynchronous: bool, directory: str, ignore_patterns: str | None
 ) -> None:
     source = tmp_path / "source"
-    blocked = source / "nested"
+    blocked = source / directory
     blocked.mkdir(parents=True)
     (blocked / "evidence").write_bytes(b"must not silently disappear")
     (source / "summary.json").write_bytes(b"summary")
@@ -288,7 +293,7 @@ async def test_unreadable_subdirectory_fails_before_upload(
     fs = _RecordingFileSystem()
     try:
         with pytest.raises(PermissionError):
-            await _upload(_manager(asynchronous, fs), source)
+            await _upload(_manager(asynchronous, fs), source, ignore_patterns)
     finally:
         blocked.chmod(0o700)
     assert not fs.local_paths
@@ -411,10 +416,10 @@ async def test_upload_error_preserves_origin_without_reacquiring(
     list_files = file_manager._list_local_files_sync
     listings = 0
 
-    def count_listing(path: Path) -> list[str]:
+    def count_listing(path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
         nonlocal listings
         listings += 1
-        return list_files(path)
+        return list_files(path, ignore_patterns=ignore_patterns)
 
     def fail_upload(local: str, remote: str) -> None:
         fs.local_paths.append(Path(local))
@@ -514,7 +519,7 @@ async def test_directory_upload_stops_at_first_remote_failure(
     source.mkdir()
     for name in ("first", "second"):
         (source / name).write_text(name)
-    monkeypatch.setattr(file_manager, "_list_local_files_sync", lambda _path: ["first", "second"])
+    monkeypatch.setattr(file_manager, "_list_local_files_sync", lambda _path, ignore_patterns=None: ["first", "second"])
     fs = _RecordingFileSystem()
     error = OSError("first upload failed")
     attempts: list[str] = []
@@ -531,4 +536,161 @@ async def test_directory_upload_stops_at_first_remote_failure(
         await _upload(_manager(asynchronous, fs), source)
     assert raised.value is error
     assert attempts == ["default/results#bundle/first"]
+    assert not list(upload_temporary_root.iterdir())
+
+
+@pytest.fixture
+def visited_directories(monkeypatch: pytest.MonkeyPatch) -> set[Path]:
+    visited: set[Path] = set()
+    walk = file_manager.walk
+
+    def record_walk(
+        path: Path, *, onerror: Callable[[OSError], object], followlinks: bool
+    ) -> Iterator[tuple[str, list[str], list[str]]]:
+        for entry in walk(path, onerror=onerror, followlinks=followlinks):
+            visited.add(Path(entry[0]))
+            # Stream the original entry, retaining the directory list the real walk consults.
+            yield entry
+
+    monkeypatch.setattr(file_manager, "walk", record_walk)
+    return visited
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize("directory", ["cache", "nested/cache"], ids=["root", "nested"])
+@pytest.mark.parametrize("ignore_patterns", ["cache/", ["cache/"]], ids=["string", "list"])
+@pytest.mark.skipif(os.geteuid() == 0, reason="Root bypasses ordinary directory permissions")
+async def test_ignored_unreadable_directory_does_not_block_upload(
+    tmp_path: Path,
+    upload_temporary_root: Path,
+    asynchronous: bool,
+    directory: str,
+    ignore_patterns: list[str] | str,
+) -> None:
+    source = tmp_path / "source"
+    blocked = source / directory
+    blocked.mkdir(parents=True)
+    (blocked / "scratch").write_bytes(b"excluded")
+    (source / "summary.json").write_bytes(b"summary")
+    fs = _RecordingFileSystem()
+    blocked.chmod(0)
+    try:
+        await _upload(_manager(asynchronous, fs), source, ignore_patterns)
+    finally:
+        blocked.chmod(0o700)
+
+    assert fs.uploads == {"default/results#bundle/summary.json": b"summary"}
+    assert not list(upload_temporary_root.iterdir())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize(("pattern", "directory"), [("cache", "cache"), ("*.tmp", "cache.tmp")])
+async def test_file_patterns_do_not_prune_directories(
+    tmp_path: Path, upload_temporary_root: Path, asynchronous: bool, pattern: str, directory: str
+) -> None:
+    source = tmp_path / "source"
+    (source / directory).mkdir(parents=True)
+    (source / directory / "keep.txt").write_bytes(b"selected")
+    (source / "summary.json").write_bytes(b"summary")
+    (source / "excluded").mkdir()
+    (source / "excluded" / directory).write_bytes(b"file-pattern match")
+    fs = _RecordingFileSystem()
+
+    await _upload(_manager(asynchronous, fs), source, pattern)
+
+    assert fs.uploads == {
+        "default/results#bundle/summary.json": b"summary",
+        f"default/results#bundle/{directory}/keep.txt": b"selected",
+    }
+    assert not list(upload_temporary_root.iterdir())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+async def test_directory_pattern_does_not_exclude_upload_root(
+    tmp_path: Path, upload_temporary_root: Path, asynchronous: bool
+) -> None:
+    source = tmp_path / "cache"
+    (source / "cache").mkdir(parents=True)
+    (source / "cache/scratch").write_bytes(b"excluded child")
+    (source / "summary.json").write_bytes(b"selected root")
+    fs = _RecordingFileSystem()
+
+    await _upload(_manager(asynchronous, fs), source, "cache/")
+
+    assert fs.uploads == {"default/results#bundle/summary.json": b"selected root"}
+    assert not list(upload_temporary_root.iterdir())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+async def test_directory_upload_does_not_visit_excluded_subtrees(
+    tmp_path: Path, upload_temporary_root: Path, visited_directories: set[Path], asynchronous: bool
+) -> None:
+    source = tmp_path / "source"
+    for directory in ("cache", "nested/cache", "selected"):
+        (source / directory).mkdir(parents=True)
+        (source / directory / "keep.txt").write_bytes(b"payload")
+    fs = _RecordingFileSystem()
+
+    await _upload(_manager(asynchronous, fs), source, ["cache/"])
+
+    assert fs.uploads == {"default/results#bundle/selected/keep.txt": b"payload"}
+    assert source / "selected" in visited_directories
+    assert visited_directories.isdisjoint({source / "cache", source / "nested/cache"})
+    assert not list(upload_temporary_root.iterdir())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+async def test_ignored_directory_removed_during_walk_does_not_retry(
+    tmp_path: Path,
+    upload_temporary_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    asynchronous: bool,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "summary.json").write_bytes(b"summary")
+    walk = file_manager.walk
+    acquisitions = 0
+
+    def remove_after_parent_listing(
+        path: Path, *, onerror: Callable[[OSError], object], followlinks: bool
+    ) -> Iterator[tuple[str, list[str], list[str]]]:
+        nonlocal acquisitions
+        acquisitions += 1
+        cache = path / "cache"
+        cache.mkdir()
+        for entry in walk(path, onerror=onerror, followlinks=followlinks):
+            yield entry
+            if Path(entry[0]) == path:
+                # External cleanup still happens if the caller pruned cache from entry[1].
+                cache.rmdir()
+
+    monkeypatch.setattr(file_manager, "walk", remove_after_parent_listing)
+    caplog.set_level(logging.WARNING, logger=file_manager.__name__)
+    fs = _RecordingFileSystem()
+
+    await _upload(_manager(asynchronous, fs), source, ["cache/"])
+
+    assert fs.uploads == {"default/results#bundle/summary.json": b"summary"}
+    assert acquisitions == 1
+    assert not [record for record in caplog.records if record.name == file_manager.__name__]
+    assert not list(upload_temporary_root.iterdir())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize(
+    ("pattern", "directory"), [("cache*/", "cache"), ("nested/cache/", "nested/cache"), ("/cache/", "cache")]
+)
+async def test_release_directory_patterns_retain_literal_matching(
+    tmp_path: Path, upload_temporary_root: Path, asynchronous: bool, pattern: str, directory: str
+) -> None:
+    source = tmp_path / "source"
+    (source / directory).mkdir(parents=True)
+    (source / directory / "keep.txt").write_bytes(b"selected")
+    fs = _RecordingFileSystem()
+
+    await _upload(_manager(asynchronous, fs), source, [pattern])
+
+    assert fs.uploads == {f"default/results#bundle/{directory}/keep.txt": b"selected"}
     assert not list(upload_temporary_root.iterdir())
