@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from google.protobuf.json_format import MessageToDict
+from nhx_evals_sdk.agent_eval.reward_keys import GYM_REWARD_COMPONENTS_KEY, reward_key_rejection
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import DEFAULT_REWARD_KEY, model_call_capture_dir
 from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
     ENV_LOG_NAME,
@@ -47,6 +48,7 @@ from nhx_evals_sdk.agent_eval.usage_keys import (
     _first_nonnegative_int,
     _first_usage_details,
 )
+from nhx_evals_sdk.metrics.protocol import Metric
 from nhx_evals_sdk.ng_trajectory_otlp import rollout_to_resource_spans
 from nhx_evals_sdk.values.evidence import (
     EVIDENCE_FORMAT_OTLP,
@@ -459,8 +461,13 @@ _GYM_STAT_FAMILY = ("mean", "max", "min", "median", "std")
 _GYM_REDUNDANT_METRICS = frozenset({"reward"})
 
 
-def aggregate_scores_from_gym(aggregations: Mapping[str, Any] | None) -> list[AggregateScore]:
+def aggregate_scores_from_gym(
+    aggregations: Mapping[str, Any] | None, *, scored_natively: frozenset[str] = frozenset()
+) -> list[AggregateScore]:
     """Map Gym's run-level ``agent_metrics`` onto typed aggregate scores named ``runner.gym.<metric>``.
+
+    ``scored_natively`` names further metrics to skip, like ``reward``: reward components the SDK scores
+    per trial as ``gym_reward.<component>`` and so already aggregates itself.
 
     Reads ``agent_metrics``, not ``key_metrics``: ``key_metrics`` is a *subset* of it chosen by the
     resources-server, and the default selection (``get_key_metrics``) keeps only the ``mean/*`` entries —
@@ -477,6 +484,7 @@ def aggregate_scores_from_gym(aggregations: Mapping[str, Any] | None) -> list[Ag
     if not aggregations:
         return []
     multi_agent = len(aggregations) > 1
+    redundant = _GYM_REDUNDANT_METRICS | scored_natively
     scores: list[AggregateScore] = []
     for agent_name, payload in sorted(aggregations.items()):
         agent_metrics = payload.get("agent_metrics") if isinstance(payload, Mapping) else None
@@ -485,11 +493,13 @@ def aggregate_scores_from_gym(aggregations: Mapping[str, Any] | None) -> list[Ag
         # One agent per run is the norm, so `runner.gym.<metric>` reads cleanly; qualify by agent only
         # when a run really did produce several, where the unqualified names would collide.
         prefix = f"runner.gym.{agent_name}." if multi_agent else "runner.gym."
-        scores.extend(_scores_from_agent_metrics(agent_metrics, prefix=prefix))
+        scores.extend(_scores_from_agent_metrics(agent_metrics, prefix=prefix, redundant=redundant))
     return scores
 
 
-def _scores_from_agent_metrics(agent_metrics: Mapping[str, Any], *, prefix: str) -> list[AggregateScore]:
+def _scores_from_agent_metrics(
+    agent_metrics: Mapping[str, Any], *, prefix: str, redundant: frozenset[str]
+) -> list[AggregateScore]:
     families: dict[str, dict[str, float]] = {}
     scalars: dict[str, float] = {}
     for key, value in agent_metrics.items():
@@ -508,7 +518,7 @@ def _scores_from_agent_metrics(agent_metrics: Mapping[str, Any], *, prefix: str)
         # fallback below would let a partial `reward` family survive as `mean/reward` scalars, since the
         # scalar filter matches the bare name -- reintroducing the duplicate of `gym_reward.reward` that
         # skipping reward exists to prevent.
-        if metric in _GYM_REDUNDANT_METRICS:
+        if metric in redundant:
             continue
         if set(stats) < set(_GYM_STAT_FAMILY):
             # Not a distribution we can vouch for; keep each key as the standalone number it may well be.
@@ -533,7 +543,7 @@ def _scores_from_agent_metrics(agent_metrics: Mapping[str, Any], *, prefix: str)
     scores.extend(
         AggregateScalarScore(name=f"{prefix}{key}", count=None, nan_count=0, value=value)
         for key, value in sorted(scalars.items())
-        if key not in _GYM_REDUNDANT_METRICS
+        if key not in redundant
     )
     return scores
 
@@ -580,6 +590,60 @@ def _coerce_reward(value: Any) -> float | None:
     except (TypeError, ValueError):
         logger.warning("Gym rollout carried a non-numeric reward %r; recording the trial as unscored.", value)
         return None
+
+
+def _reward_components(record: Mapping[str, Any]) -> dict[str, float]:
+    """A multi-reward rollout's ``reward_components``, kept where the name is usable and the value a finite number.
+
+    A component that can't be kept is logged and left out, so its score is missing on that trial rather than
+    the whole trial failing; booleans are not read as 1/0, matching Gym's own metrics.
+    """
+    components = record.get(GYM_REWARD_COMPONENTS_KEY)
+    if components is None:
+        return {}
+    if not isinstance(components, Mapping):
+        logger.warning("Gym rollout carried reward_components that are not a mapping; ignoring them.")
+        return {}
+    kept: dict[str, float] = {}
+    for name, value in components.items():
+        number = _as_float(value)
+        if not isinstance(name, str) or reward_key_rejection(name) is not None or number is None:
+            logger.warning("Gym rollout carried an unusable reward component %r=%r; leaving it out.", name, value)
+            continue
+        kept[name] = number
+    return kept
+
+
+def reward_component_names(trials: Sequence[AgentEvalTrial]) -> frozenset[str]:
+    """The reward components any of ``trials`` reported."""
+    names: set[str] = set()
+    for trial in trials:
+        components = trial.metadata.get(GYM_REWARD_COMPONENTS_KEY)
+        if isinstance(components, Mapping):
+            names.update(name for name in components if isinstance(name, str))
+    return frozenset(names)
+
+
+def gym_scoring_metrics(task: AgentEvalTask, trials: Sequence[AgentEvalTrial]) -> list[Metric]:
+    """``task``'s metrics, with its Gym reward metric extended to the reward components ``trials`` reported.
+
+    The Gym runners' :class:`~nhx_evals_sdk.agent_eval.trials.TrialAwareMetricsProvider` hook: a
+    multi-reward resources-server's components are known only once rollouts exist, so they are added here,
+    as optional outputs, and each is scored per trial as ``gym_reward.<component>``. A task with no
+    component in its trials, or with no Gym reward metric, keeps its metrics unchanged.
+    """
+    from nhx_evals_sdk.metrics.runner_rewards import GymRewardMetric
+
+    found = reward_component_names(trials)
+    if not found:
+        return list(task.metrics)
+    metrics: list[Metric] = []
+    for metric in task.metrics:
+        if isinstance(metric, GymRewardMetric):
+            names = tuple(sorted((set(metric.reward_components) | found) - {metric.output_name}))
+            metric = GymRewardMetric.model_validate({**metric.model_dump(), "reward_components": names})
+        metrics.append(metric)
+    return metrics
 
 
 def _resolve_task_id(
@@ -719,6 +783,11 @@ def trials_from_rollouts(
             NG_TASK_INDEX: record.get(NG_TASK_INDEX),
             NG_ROLLOUT_INDEX: raw_rollout_index,
         }
+        # Per-objective scores from a multi-reward resources-server. Like the reward, they don't count for
+        # an agent that never ran.
+        components = {} if never_ran else _reward_components(record)
+        if components:
+            metadata[GYM_REWARD_COMPONENTS_KEY] = components
         error: TrialError | None = None
         if never_ran:
             # Kept alongside the reward Gym reported, so the discarded value is still auditable.
