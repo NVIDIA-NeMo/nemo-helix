@@ -5,9 +5,11 @@ import logging
 import shutil
 import tempfile
 from abc import abstractmethod
+from asyncio import CancelledError, create_task, shield
 from dataclasses import dataclass, field
+from os import walk
 from pathlib import Path
-from typing import Protocol
+from typing import NoReturn, Protocol
 
 import anyio
 from anyio.to_thread import run_sync
@@ -84,8 +86,18 @@ async def _list_local_files(local_path: Path) -> list[str]:
 
 
 def _list_local_files_sync(local_path: Path) -> list[str]:
-    """List all files in a local directory recursively."""
-    return [str(file_path.relative_to(local_path)) for file_path in local_path.rglob("*") if file_path.is_file()]
+    """List files without silently omitting directories that cannot be scanned."""
+
+    def raise_error(error: OSError) -> NoReturn:
+        raise error
+
+    files: list[str] = []
+    for directory, _, names in walk(local_path, onerror=raise_error, followlinks=False):
+        for name in names:
+            path = Path(directory) / name
+            if path.is_file():
+                files.append(str(path.relative_to(local_path)))
+    return files
 
 
 def _stage_local_files(
@@ -111,6 +123,8 @@ def _stage_local_files(
             if not local_path.is_dir():
                 raise FileNotFoundError(f"Result directory no longer exists: {local_path}")
             files = _filter_files_by_patterns(_list_local_files_sync(local_path), ignore_patterns)
+            if not local_path.is_dir():
+                raise FileNotFoundError(f"Result directory no longer exists: {local_path}")
             for rel_path in files:
                 destination = snapshot / rel_path
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -123,6 +137,33 @@ def _stage_local_files(
         else:
             return snapshot, files
     raise AssertionError("Unreachable: staging either returns or raises")
+
+
+async def _stage_local_files_async(
+    local_path: Path, staging_root: Path, ignore_patterns: list[str] | str | None
+) -> tuple[Path, list[str]]:
+    """Keep the acquisition worker alive until it releases its temporary directory.
+
+    Native asyncio cancellation can interrupt ``run_sync`` before its worker
+    stops. Drain the owned task through repeated cancellation before the caller
+    cleans up staging, consuming any later worker error without masking the
+    first cancellation.
+    """
+    acquisition = create_task(run_sync(_stage_local_files, local_path, staging_root, ignore_patterns))
+    cancellation: CancelledError | None = None
+    while not acquisition.done():
+        try:
+            await shield(acquisition)
+        except CancelledError as error:
+            cancellation = cancellation or error
+        except Exception:
+            if cancellation is None:
+                raise
+    if cancellation is not None:
+        if not acquisition.cancelled():
+            acquisition.exception()
+        raise cancellation
+    return acquisition.result()
 
 
 class FileManager(Protocol):
@@ -226,7 +267,11 @@ class FilesetFileManager(BaseFilesetFileManager):
             with tempfile.TemporaryDirectory(prefix="nemo-result-upload-") as staging_dir:
                 snapshot, files_to_upload = _stage_local_files(local_path, Path(staging_dir), ignore_patterns)
                 for rel_path in files_to_upload:
-                    self._fs.put_file(str(snapshot / rel_path), f"{full_remote_path}/{rel_path}")
+                    try:
+                        self._fs.put_file(str(snapshot / rel_path), f"{full_remote_path}/{rel_path}")
+                    except Exception as error:
+                        error.add_note(f"Failed to upload {local_path / rel_path} to {full_remote_path}/{rel_path}")
+                        raise
         else:
             self._fs.put_file(str(local_path), full_remote_path)
         return self.url(remote_path)
@@ -290,11 +335,15 @@ class AsyncFilesetFileManager(BaseFilesetFileManager):
         full_remote_path = self._fileset_path(remote_path)
         if local_path.is_dir():
             with tempfile.TemporaryDirectory(prefix="nemo-result-upload-") as staging_dir:
-                snapshot, files_to_upload = await run_sync(
-                    _stage_local_files, local_path, Path(staging_dir), ignore_patterns
+                snapshot, files_to_upload = await _stage_local_files_async(
+                    local_path, Path(staging_dir), ignore_patterns
                 )
                 for rel_path in files_to_upload:
-                    await self._fs._put_file(str(snapshot / rel_path), f"{full_remote_path}/{rel_path}")
+                    try:
+                        await self._fs._put_file(str(snapshot / rel_path), f"{full_remote_path}/{rel_path}")
+                    except Exception as error:
+                        error.add_note(f"Failed to upload {local_path / rel_path} to {full_remote_path}/{rel_path}")
+                        raise
         else:
             await self._fs._put_file(str(local_path), full_remote_path)
         return self.url(remote_path)
