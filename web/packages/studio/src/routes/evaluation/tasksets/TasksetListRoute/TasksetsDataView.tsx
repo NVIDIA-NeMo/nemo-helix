@@ -4,7 +4,10 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
-import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
+import {
+  ROW_ACTIONS_COLUMN_SIZE,
+  StudioDataView,
+} from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
@@ -15,6 +18,8 @@ import type { Taskset, TasksetFilter, TasksetSort } from '@nemo/sdk/generated/ev
 import { Flex, Tag, Text } from '@nvidia/foundations-react-core';
 import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
 import { requestStatus, tagNames } from '@studio/routes/evaluation/tasksets/helpers';
+import { TasksetActionsMenu } from '@studio/routes/evaluation/tasksets/TasksetActions';
+import type { TasksetActionRequest } from '@studio/routes/evaluation/tasksets/types';
 import { getTasksetDetailRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
 import type { ComponentProps, FC } from 'react';
@@ -23,9 +28,10 @@ import { useNavigate } from 'react-router';
 interface Props {
   workspace: string;
   onCreate: () => void;
+  onRequestAction: (request: TasksetActionRequest) => void;
 }
 
-export const TasksetsDataView: FC<Props> = ({ workspace, onCreate }) => {
+export const TasksetsDataView: FC<Props> = ({ workspace, onCreate, onRequestAction }) => {
   const navigate = useNavigate();
   const dataViewState = useStudioDataViewState<TasksetFilter>({
     defaultSort: [{ id: 'updated_at', desc: true }],
@@ -49,9 +55,10 @@ export const TasksetsDataView: FC<Props> = ({ workspace, onCreate }) => {
     { query: { placeholderData: keepPreviousData } }
   );
 
-  const makeColumns: ComponentProps<typeof StudioDataView<Taskset>>['makeColumns'] = ({
-    accessor,
-  }) => [
+  const makeColumns: ComponentProps<typeof StudioDataView<Taskset>>['makeColumns'] = (
+    { accessor },
+    { rowActionsColumn }
+  ) => [
     accessor('name', { header: 'Name', size: 200 }),
     accessor('description', {
       header: 'Description',
@@ -96,6 +103,11 @@ export const TasksetsDataView: FC<Props> = ({ workspace, onCreate }) => {
       size: 140,
       meta: { filter: dateTimeFilter('Updated At') },
       cell: ({ row }) => <RelativeTime datetime={row.original.updated_at} />,
+    }),
+    rowActionsColumn({
+      size: ROW_ACTIONS_COLUMN_SIZE,
+      enableResizing: false,
+      cell: ({ row }) => <TasksetActionsMenu taskset={row.original} onRequest={onRequestAction} />,
     }),
   ];
 

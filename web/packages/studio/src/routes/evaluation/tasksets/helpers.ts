@@ -9,6 +9,7 @@ import type {
   TasksetTaskRow,
 } from '@studio/routes/evaluation/tasksets/types';
 import { getFilesetDetailRoute } from '@studio/routes/utils';
+import type { QueryClient } from '@tanstack/react-query';
 
 export const RUNNER_LABELS = {
   harbor: 'Harbor',
@@ -86,4 +87,12 @@ export const matchesTaskFilters = (
     if (!pairs.some((pair) => includesText(pair, metadata))) return false;
   }
   return true;
+};
+
+/** Refetches every taskset query in the workspace: lists, records, and revisions. */
+export const invalidateTasksets = (queryClient: QueryClient, workspace: string) => {
+  const prefix = `/apis/evals/v2/workspaces/${workspace}/tasksets`;
+  return queryClient.invalidateQueries({
+    predicate: ({ queryKey: [url] }) => typeof url === 'string' && url.startsWith(prefix),
+  });
 };

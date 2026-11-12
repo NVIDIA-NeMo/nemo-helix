@@ -21,16 +21,19 @@ import {
   tagNames,
 } from '@studio/routes/evaluation/tasksets/helpers';
 import { TaskDetailDrawer } from '@studio/routes/evaluation/tasksets/TaskDetailDrawer';
+import { TasksetActionsMenu } from '@studio/routes/evaluation/tasksets/TasksetActions';
+import { TasksetActionModals } from '@studio/routes/evaluation/tasksets/TasksetActions/TasksetActionModals';
 import { RevisionHistory } from '@studio/routes/evaluation/tasksets/TasksetDetailRoute/RevisionHistory';
 import {
   isTasksetDetailTab,
   TASKSET_DETAIL_TABS,
 } from '@studio/routes/evaluation/tasksets/TasksetDetailRoute/tabs';
 import { TaskTable } from '@studio/routes/evaluation/tasksets/TasksetDetailRoute/TaskTable';
+import type { TasksetActionRequest } from '@studio/routes/evaluation/tasksets/types';
 import { getTasksetDetailRoute, getTasksetsRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import type { FC } from 'react';
-import { Link, Navigate, useParams } from 'react-router';
+import { type FC, useState } from 'react';
+import { Link, Navigate, useNavigate, useParams } from 'react-router';
 
 export const TasksetDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -38,6 +41,8 @@ export const TasksetDetailRoute: FC = () => {
   const { [ROUTE_PARAMS.tasksetTab]: tabParam } = useParams();
   const tab = tabParam ?? TASKSET_DETAIL_TABS[0].value;
   const { getQueryParam, setQueryParam } = useQueryParams();
+  const navigate = useNavigate();
+  const [actionRequest, setActionRequest] = useState<TasksetActionRequest>();
 
   useBreadcrumbs({
     items: [
@@ -76,6 +81,7 @@ export const TasksetDetailRoute: FC = () => {
             </Flex>
           }
           slotDescription={taskset.description}
+          slotActions={<TasksetActionsMenu taskset={taskset} onRequest={setActionRequest} />}
         />
         <KeyValueGrid
           items={[
@@ -128,6 +134,11 @@ export const TasksetDetailRoute: FC = () => {
         taskRef={getQueryParam(QUERY_PARAMETERS.task) || undefined}
         workspace={taskset.workspace}
         onClose={() => setQueryParam(QUERY_PARAMETERS.task, '')}
+      />
+      <TasksetActionModals
+        request={actionRequest}
+        onClose={() => setActionRequest(undefined)}
+        onDeleted={() => navigate(getTasksetsRoute(workspace))}
       />
     </AccessibleTitle>
   );

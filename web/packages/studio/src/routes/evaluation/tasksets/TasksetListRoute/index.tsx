@@ -6,14 +6,17 @@ import { Button, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core'
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
+import { TasksetActionModals } from '@studio/routes/evaluation/tasksets/TasksetActions/TasksetActionModals';
 import { TasksetFormModal } from '@studio/routes/evaluation/tasksets/TasksetFormModal';
 import { TasksetsDataView } from '@studio/routes/evaluation/tasksets/TasksetListRoute/TasksetsDataView';
+import type { TasksetActionRequest } from '@studio/routes/evaluation/tasksets/types';
 import { getTasksetsRoute } from '@studio/routes/utils';
 import { type FC, useState } from 'react';
 
 export const TasksetListRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [actionRequest, setActionRequest] = useState<TasksetActionRequest>();
   useBreadcrumbs({ items: [{ href: getTasksetsRoute(workspace), slotLabel: 'Tasksets' }] });
 
   return (
@@ -34,9 +37,14 @@ export const TasksetListRoute: FC = () => {
           }
           slotDescription="A taskset is a versioned group of stored tasks that an agent evaluation runs against. Each change publishes a new revision, and tags such as latest point at one."
         />
-        <TasksetsDataView workspace={workspace} onCreate={() => setIsCreateOpen(true)} />
+        <TasksetsDataView
+          workspace={workspace}
+          onCreate={() => setIsCreateOpen(true)}
+          onRequestAction={setActionRequest}
+        />
       </Stack>
       <TasksetFormModal open={isCreateOpen} onClose={() => setIsCreateOpen(false)} />
+      <TasksetActionModals request={actionRequest} onClose={() => setActionRequest(undefined)} />
     </AccessibleTitle>
   );
 };

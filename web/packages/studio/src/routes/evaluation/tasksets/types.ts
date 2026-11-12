@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Task } from '@nemo/sdk/generated/evals/schema';
+import type { Task, Taskset } from '@nemo/sdk/generated/evals/schema';
 
 /** A task reference split into its parts: `[workspace/]name[#revision]`. */
 export interface TaskRefParts {
@@ -31,4 +31,10 @@ export interface TaskFilters {
   /** Multi-select state: the selected runner kinds. */
   runner?: Record<string, true>;
   metadata?: string;
+}
+
+/** A taskset action the user picked from its actions menu, awaiting its modal. */
+export interface TasksetActionRequest {
+  action: 'edit' | 'delete';
+  taskset: Taskset;
 }
