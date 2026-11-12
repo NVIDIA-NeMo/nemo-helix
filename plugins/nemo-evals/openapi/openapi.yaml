@@ -4434,6 +4434,42 @@ components:
         is no
 
         separate prompt template here.'
+    AggregateGroup:
+      properties:
+        by:
+          type: string
+          title: By
+          description: 'The `group_by` entry that formed the group: a label output
+            such as ''finance-qa.task'', or a row field such as ''item.category''.'
+        value:
+          type: string
+          title: Value
+          description: The value the group's rows share for that entry.
+        row_count:
+          type: integer
+          minimum: 0.0
+          title: Row Count
+          description: Rows in the group, including rows whose scores are NaN.
+        scores:
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/AggregateRangeScore'
+            - $ref: '#/components/schemas/AggregateRubricScore'
+            - $ref: '#/components/schemas/AggregateScalarScore'
+          type: array
+          title: Scores
+          description: Aggregates over the group's rows, named and computed as the
+            overall scores are.
+      additionalProperties: false
+      type: object
+      required:
+      - by
+      - value
+      - row_count
+      - scores
+      title: AggregateGroup
+      description: Aggregate scores over the rows that share one value of a ``group_by``
+        entry.
     AggregateRangeScore:
       properties:
         name:
@@ -4706,6 +4742,14 @@ components:
           type: array
           title: Scores
           description: The list of aggregated scores.
+        groups:
+          title: Groups
+          description: 'Aggregates per group, when the run config sets `group_by`:
+            one entry per value of each `group_by` entry, in `group_by` order and
+            then by value.'
+          items:
+            $ref: '#/components/schemas/AggregateGroup'
+          type: array
       additionalProperties: false
       type: object
       required:
@@ -8730,6 +8774,15 @@ components:
             samples from the dataset.
           type: integer
           minimum: 1.0
+        group_by:
+          title: Group By
+          description: Also aggregate the scores per group of rows. Each entry is
+            a label output of a metric in the run, named as aggregate scores are (for
+            example `finance-qa.task`), or a row field, `item.<path>` (for example
+            `item.category`). The result lists the groups next to the overall scores.
+          items:
+            type: string
+          type: array
       additionalProperties: false
       type: object
       title: RunConfig
@@ -8749,6 +8802,15 @@ components:
             samples from the dataset.
           type: integer
           minimum: 1.0
+        group_by:
+          title: Group By
+          description: Also aggregate the scores per group of rows. Each entry is
+            a label output of a metric in the run, named as aggregate scores are (for
+            example `finance-qa.task`), or a row field, `item.<path>` (for example
+            `item.category`). The result lists the groups next to the overall scores.
+          items:
+            type: string
+          type: array
         ignore_request_failure:
           type: boolean
           title: Ignore Request Failure
@@ -8784,6 +8846,15 @@ components:
             samples from the dataset.
           type: integer
           minimum: 1.0
+        group_by:
+          title: Group By
+          description: Also aggregate the scores per group of rows. Each entry is
+            a label output of a metric in the run, named as aggregate scores are (for
+            example `finance-qa.task`), or a row field, `item.<path>` (for example
+            `item.category`). The result lists the groups next to the overall scores.
+          items:
+            type: string
+          type: array
         ignore_request_failure:
           type: boolean
           title: Ignore Request Failure

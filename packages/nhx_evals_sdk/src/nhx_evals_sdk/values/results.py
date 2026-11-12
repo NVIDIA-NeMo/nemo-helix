@@ -441,6 +441,25 @@ class AggregateScalarScore(AggregateScoreBase):
 AggregateScore = AggregateRangeScore | AggregateRubricScore | AggregateScalarScore
 
 
+class AggregateGroup(BaseModel):
+    """Aggregate scores over the rows that share one value of a ``group_by`` entry."""
+
+    model_config = ConfigDict(extra="forbid")
+    by: str = Field(
+        description="The `group_by` entry that formed the group: a label output such as 'finance-qa.task', "
+        "or a row field such as 'item.category'."
+    )
+    value: str = Field(description="The value the group's rows share for that entry.")
+    row_count: int = Field(ge=0, description="Rows in the group, including rows whose scores are NaN.")
+    scores: list[AggregateScore] = Field(
+        description="Aggregates over the group's rows, named and computed as the overall scores are."
+    )
+
+    def with_fields(self, fields: frozenset[AggregateFieldName]) -> AggregateGroup:
+        """Return a copy whose scores serialize only ``fields``."""
+        return self.model_copy(update={"scores": [score.with_fields(fields) for score in self.scores]})
+
+
 #: How many names a lookup-miss message lists when nothing resembles what was asked for. A judgement
 #: call rather than a measured optimum -- enough to show the naming convention, few enough to stay
 #: readable, since a run with several metrics times pass@k can carry dozens. Only this fallback is
@@ -454,6 +473,20 @@ class AggregatedMetricResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     scores: list[AggregateScore] = Field(description="The list of aggregated scores.")
+    groups: list[AggregateGroup] | None = Field(
+        default=None,
+        # Omitted rather than null, so results without `group_by` serialize exactly as before.
+        exclude_if=lambda groups: groups is None,
+        description="Aggregates per group, when the run config sets `group_by`: one entry per value of each "
+        "`group_by` entry, in `group_by` order and then by value.",
+    )
+
+    def with_fields(self, fields: frozenset[AggregateFieldName]) -> AggregatedMetricResult:
+        """Return a copy whose scores, and its groups' scores, serialize only ``fields``."""
+        return AggregatedMetricResult(
+            scores=[score.with_fields(fields) for score in self.scores],
+            groups=None if self.groups is None else [group.with_fields(fields) for group in self.groups],
+        )
 
     @property
     def scores_by_name(self) -> Mapping[str, AggregateScore]:

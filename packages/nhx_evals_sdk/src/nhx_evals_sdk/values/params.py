@@ -62,6 +62,27 @@ class RunConfig(BaseModel):
         ge=1,
         description="Limit number of evaluation samples, taking the first `limit` samples from the dataset.",
     )
+    group_by: list[str] | None = Field(
+        default=None,
+        description="Also aggregate the scores per group of rows. Each entry is a label output of a metric in "
+        "the run, named as aggregate scores are (for example `finance-qa.task`), or a row field, `item.<path>` "
+        "(for example `item.category`). The result lists the groups next to the overall scores.",
+    )
+
+    @field_validator("group_by")
+    @classmethod
+    def _check_group_by(cls, entries: list[str] | None) -> list[str] | None:
+        """Reject empty, repeated, or path-less entries; whether each names something is checked at run start."""
+        if entries is None:
+            return None
+        if len(set(entries)) != len(entries):
+            raise ValueError("group_by entries must be unique")
+        for entry in entries:
+            if not entry.strip():
+                raise ValueError("group_by entries must not be empty")
+            if entry.startswith("item.") and not all(entry.removeprefix("item.").split(".")):
+                raise ValueError(f"group_by entry {entry!r} needs a field path after 'item.', such as 'item.category'")
+        return entries
 
 
 class RunConfigOnline(RunConfig):

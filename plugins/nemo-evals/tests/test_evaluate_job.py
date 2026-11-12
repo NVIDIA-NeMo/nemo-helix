@@ -357,6 +357,27 @@ def test_evaluate_job_runs_inline_exact_match_metric(tmp_path: Path) -> None:
     assert aggregate_scores[0]["mean"] == 0.5
 
 
+def test_evaluate_job_groups_aggregate_scores_by_a_row_field(tmp_path: Path) -> None:
+    spec = _exact_match_spec()
+    spec["dataset"] = [
+        {"expected": "blue", "model_output": "Blue", "category": "colors"},
+        {"expected": "red", "model_output": "green", "category": "colors"},
+        {"expected": "Jupiter", "model_output": "Saturn", "category": "planets"},
+    ]
+    spec["params"] = {"parallelism": 2, "group_by": ["item.category"]}
+
+    result = _run_evaluate_job(spec, tmp_path)
+
+    assert result["status"] == "completed"
+    aggregate_scores = _load_artifact_payload(result)["aggregate_scores"]
+    assert [
+        (group["value"], group["row_count"], group["scores"][0]["mean"]) for group in aggregate_scores["groups"]
+    ] == [
+        ("colors", 2, 0.5),
+        ("planets", 1, 0.0),
+    ]
+
+
 def test_evaluate_job_survives_result_persistence_failure(tmp_path: Path, mocker: MockerFixture) -> None:
     # Mirror of the agent-eval job: the queryable result record is a best-effort convenience index;
     # a persistence failure must not fail an otherwise-successful eval (its artifacts are already saved).
