@@ -103,7 +103,11 @@ export const ROUTES = {
     datasetDetail: `/workspaces/:${P.workspace}/datasets/:${P.filesetName}`,
     datasetDetailTab: `/workspaces/:${P.workspace}/datasets/:${P.filesetName}/:${P.filesetTab}`,
     filesets: `/workspaces/:${P.workspace}/filesets`,
-    filesetNew: `/workspaces/:${P.workspace}/filesets/new`,
+    /**
+     * Create Fileset form. `~new`, not `new`, so it can't shadow a fileset named
+     * `new` at `filesetDetail` (same reasoning as `deploymentsNew`).
+     */
+    filesetNew: `/workspaces/:${P.workspace}/filesets/~new`,
     /**
      * Unified fileset detail page. One route serves all purposes — the page
      * branches on `fileset.purpose` to render Model/Dataset/Generic card content.

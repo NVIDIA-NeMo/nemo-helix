@@ -188,7 +188,7 @@ STUDIO_LINK_DESTINATIONS: dict[str, StudioLinkDestination] = {
     "filesets": StudioLinkDestination("Filesets", "/workspaces/{workspace}/filesets"),
     "fileset_new": StudioLinkDestination(
         "Create fileset",
-        "/workspaces/{workspace}/filesets/new",
+        "/workspaces/{workspace}/filesets/~new",
         aliases=("new_fileset", "create_fileset", "new_dataset", "create_dataset"),
     ),
     "fileset": StudioLinkDestination(

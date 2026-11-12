@@ -20,6 +20,7 @@ import {
   getWorkspaceBaseModelsRoute,
   getWorkspaceInferenceProvidersRoute,
   getModelDetailRoute,
+  getNewFilesetRoute,
 } from '@studio/routes/utils';
 
 describe('Evaluation route helpers', () => {
@@ -197,6 +198,15 @@ describe('intake session detail routes', () => {
       )
     ).toBe(
       '/workspaces/my-workspace/experiment/experiment-group/evaluation/sessions/session%20%2F%201'
+    );
+  });
+});
+
+describe('getNewFilesetRoute', () => {
+  it('uses a segment no fileset name can take, so a fileset named "new" stays reachable', () => {
+    expect(getNewFilesetRoute('my-workspace')).toBe('/workspaces/my-workspace/filesets/~new');
+    expect(getFilesetDetailRoute('my-workspace', 'new')).toBe(
+      '/workspaces/my-workspace/filesets/new'
     );
   });
 });
