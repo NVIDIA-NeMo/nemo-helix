@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// Source: Linear ASTD-896 'Create Dataset — Form Validation and Behavior' handoff; section numbers in
+// comments refer to it.
+//
 // Pure parser for the Create Dataset source URL input (spec 4-8). Classifies the input by host
 // (so a URL pasted into the wrong tab is detected), then extracts the tab's inferred fields.
 // Parsing never checks that the remote source exists.
@@ -40,10 +43,14 @@ export type ParseResult =
 
 const HF_HOSTS = new Set(['huggingface.co', 'www.huggingface.co', 'hf.co', 'www.hf.co']);
 const GITHUB_HOSTS = new Set(['github.com', 'www.github.com']);
-// Regional, dualstack, legacy dash-region and .com.cn endpoints; optionally prefixed by a bucket label.
-const S3_ENDPOINT = /(^|\.)s3[a-z0-9.-]*\.amazonaws\.com(\.cn)?$/;
-const S3_VIRTUAL_HOSTED = /^(.+)\.s3[a-z0-9.-]*\.amazonaws\.com(\.cn)?$/;
+// AWS S3 service label: s3, s3-<region>, s3.<region>, s3.dualstack.<region>; optionally .com.cn (spec 4.1).
+const S3_SERVICE = String.raw`s3(?:[.-](?:dualstack\.)?[a-z0-9-]+)?\.amazonaws\.com(?:\.cn)?$`;
+const S3_ENDPOINT = new RegExp(String.raw`(?:^|\.)${S3_SERVICE}`);
+const S3_VIRTUAL_HOSTED = new RegExp(String.raw`^(.+)\.${S3_SERVICE}`);
 const S3_CONSOLE_HOST = /(^|\.)console\.aws\.amazon\.com$/;
+
+// Matches an authority that contains `@`, including the empty userinfo forms `@host` and `:@host`.
+const HAS_USERINFO = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i;
 
 const INVALID: ParseResult = { status: 'invalid' };
 const INCOMPLETE: ParseResult = { status: 'incomplete' };
@@ -73,7 +80,7 @@ function classify(url: URL): SourceTab | undefined {
 
 function parseHuggingFace(url: URL): ParseResult {
   let segs = segmentsOf(url.pathname);
-  let repo_type: HuggingFaceFieldsType = 'model';
+  let repo_type: HuggingFaceFields['repo_type'] = 'model';
   if (segs[0] === 'datasets') repo_type = 'dataset';
   else if (segs[0] === 'spaces') repo_type = 'space';
   if (['datasets', 'spaces', 'models'].includes(segs[0])) segs = segs.slice(1);
@@ -88,7 +95,6 @@ function parseHuggingFace(url: URL): ParseResult {
     nameSeed: repo,
   };
 }
-type HuggingFaceFieldsType = HuggingFaceFields['repo_type'];
 
 function parseNgc(url: URL): ParseResult {
   const segs = segmentsOf(url.pathname);
@@ -100,8 +106,9 @@ function parseNgc(url: URL): ParseResult {
   const kindIndex = hasTeamsLiteral ? 4 : 3;
   const kind = segs[kindIndex];
   const target = segs[kindIndex + 1];
-  // A path like /orgs/o/teams/resources/x lands here with kind = 'x' and is rejected.
-  if (!org || !team || !target || (kind !== 'resources' && kind !== 'models')) return INCOMPLETE;
+  // `resources`/`models` are never teams: this rejects /orgs/o/teams/resources/x and /orgs/o/teams/resources/models/x.
+  if (!org || !team || !target || team === 'resources' || team === 'models') return INCOMPLETE;
+  if (kind !== 'resources' && kind !== 'models') return INCOMPLETE;
 
   const version = ['version', 'versions'].includes(segs[kindIndex + 2])
     ? segs[kindIndex + 3]
@@ -141,10 +148,12 @@ function parseS3(url: URL): ParseResult {
     bucket = decode(url.hostname);
     prefixSegs = segs;
   } else if (S3_CONSOLE_HOST.test(host)) {
-    // Console URLs: bucket from /buckets/{bucket}; only the `prefix` query param supplies a prefix (spec 8).
+    // Console URLs: bucket from /buckets/{bucket}; the path after it is the prefix, overridden by a nonempty
+    // `prefix` query param (spec 8). searchParams is already decoded once, so it is not decoded again.
     const bucketIndex = segs.indexOf('buckets');
     bucket = bucketIndex === -1 ? undefined : segs[bucketIndex + 1];
-    prefixSegs = segmentsOf(url.searchParams.get('prefix') ?? '');
+    const queryPrefix = (url.searchParams.get('prefix') ?? '').split('/').filter(Boolean);
+    prefixSegs = queryPrefix.length ? queryPrefix : segs.slice(bucketIndex + 2);
   } else {
     const virtualHosted = S3_VIRTUAL_HOSTED.exec(host);
     bucket = virtualHosted ? virtualHosted[1] : segs[0];
@@ -178,7 +187,7 @@ export function parseSource(tab: SourceTab, raw: string): ParseResult {
   } catch {
     return INVALID; // bare ids and scheme-less strings have no valid scheme
   }
-  if (!['http:', 'https:', 's3:'].includes(url.protocol) || url.username || url.password)
+  if (!['http:', 'https:', 's3:'].includes(url.protocol) || HAS_USERINFO.test(input))
     return INVALID;
 
   const actual = classify(url);

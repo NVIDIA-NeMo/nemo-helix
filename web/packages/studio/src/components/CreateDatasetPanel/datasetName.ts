@@ -3,6 +3,8 @@
 
 // Name validation (spec 3.1, 3.2) and name inference (spec 3.3) for the Create Dataset panel.
 
+import { ENTITY_NAME_MAX_LENGTH, ENTITY_NAME_MIN_LENGTH } from '@nemo/common/src/utils/entityName';
+
 /**
  * Returns the first applicable error message for `name`, or undefined when valid.
  * A duplicate takes precedence over every format error; the rest follow spec 3.2 table order.
@@ -14,8 +16,10 @@ export function getDatasetNameError(
   if (opts.taken) return `A Dataset named ${name} already exists in ${opts.workspace}`;
   if (name === '') return 'Enter a name for this Dataset';
   if (!/^[a-z]/.test(name)) return 'Names must start with a lowercase letter';
-  if (name.length < 2) return 'Names must be at least 2 characters';
-  if (name.length > 63) return 'Names must be 63 characters or fewer';
+  if (name.length < ENTITY_NAME_MIN_LENGTH)
+    return `Names must be at least ${ENTITY_NAME_MIN_LENGTH} characters`;
+  if (name.length > ENTITY_NAME_MAX_LENGTH)
+    return `Names must be ${ENTITY_NAME_MAX_LENGTH} characters or fewer`;
   if (name.includes('--')) return "Names can't contain two hyphens in a row";
   if (name.endsWith('-')) return "Names can't end with a hyphen";
   if (!/^[a-z0-9.-]+$/.test(name)) return 'Use lowercase letters, digits, hyphens, and dots only';
@@ -29,6 +33,6 @@ export function inferDatasetName(seed: string): string {
     .replace(/[^a-z0-9.]+/g, '-') // each run of other characters becomes one hyphen
     .replace(/-{2,}/g, '-')
     .replace(/^[-.]+|[-.]+$/g, '')
-    .slice(0, 63)
+    .slice(0, ENTITY_NAME_MAX_LENGTH)
     .replace(/[-.]+$/, ''); // truncation can expose a new trailing hyphen/dot
 }
