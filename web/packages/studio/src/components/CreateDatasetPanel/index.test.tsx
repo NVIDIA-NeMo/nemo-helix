@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { CreateDatasetPanel } from '@studio/components/CreateDatasetPanel';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
@@ -577,11 +578,14 @@ describe('CreateDatasetPanel', () => {
 
     // Cancel while the request is in flight; the request is allowed to finish
     await user.click(screen.getByRole('button', { name: 'Open host panel' }));
-    const gate = Promise.withResolvers<void>();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     server.use(
       http.post(FILESETS_URL, async ({ request }) => {
         const body = (await request.json()) as Body;
-        await gate.promise;
+        await gate;
         return HttpResponse.json(filesetRecord(body.name as string));
       })
     );
@@ -592,7 +596,7 @@ describe('CreateDatasetPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('tab', { name: 'HuggingFace' })).toBeNull());
 
-    gate.resolve();
+    release();
     const toast = await screen.findByTestId('mock-toast-success');
     expect(toast).toHaveTextContent('other');
     expect(within(toast).getByRole('link')).toHaveAttribute(
