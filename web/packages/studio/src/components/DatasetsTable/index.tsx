@@ -50,7 +50,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({ getDatasetRoute, renderR
     getDatasetRoute,
     purposeFilter: FilesetPurpose.dataset,
   });
-  const [createModalOpen, openCreateModal, closeCreateModal] = useBoolean(false);
+  const [createPanelOpen, openCreatePanel, closeCreatePanel] = useBoolean(false);
 
   const makeColumns = makeDatasetsTableColumns({
     renderRowActions:
@@ -116,15 +116,15 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({ getDatasetRoute, renderR
                 <EntityEmptyState
                   entity="datasets"
                   variant="first-use"
-                  onCreate={openCreateModal}
+                  onCreate={openCreatePanel}
                 />
               ),
           },
         }}
       />
 
-      {/* Same create flow as NewDatasetButton in the page header. */}
-      {createModalOpen && <NewDatasetPanel open={createModalOpen} onClose={closeCreateModal} />}
+      {/* Shares NewDatasetPanel with NewDatasetButton; stays mounted so a creation finishing after Cancel is still reported. */}
+      <NewDatasetPanel open={createPanelOpen} onClose={closeCreatePanel} />
     </>
   );
 };
