@@ -350,12 +350,13 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 	// Function to tail output
 	tailOutput := func(reader io.Reader, level slog.Level) {
 		defer wg.Done()
-		scanner := bufio.NewScanner(reader)
-		for scanner.Scan() {
-			line := scanner.Text()
+		// Keep reading until EOF. A bufio.Scanner stops at its 64KB token limit,
+		// and then the child blocks writing to a pipe nobody drains. Progress bars
+		// use \r without \n, so they hit that limit.
+		forEachLogLine(reader, func(line string) {
 			fmt.Println(line)                                           // Print to console without any extra formatting, so it can be captured by stdout logging collectors
 			slog.Log(context.Background(), logLevel(line, level), line) // Submit structured log to OTEL pipeline within the platform
-		}
+		})
 	}
 
 	// Stream stdout and stderr concurrently
@@ -395,6 +396,23 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 
 	logger.Printf("Process completed successfully.")
 	return exitCode, nil
+}
+
+// maxLogLineBytes caps one emitted log line. Longer output (for example a
+// carriage-return progress bar) is split into chunks instead of stopping the reader.
+const maxLogLineBytes = 64 * 1024
+
+// forEachLogLine calls fn for each line from r until EOF or a read error.
+// It never stops early, so the child process cannot block on a full pipe.
+func forEachLogLine(r io.Reader, fn func(line string)) {
+	br := bufio.NewReaderSize(r, maxLogLineBytes)
+	for {
+		chunk, _, err := br.ReadLine()
+		if err != nil {
+			return
+		}
+		fn(string(chunk))
+	}
 }
 
 // logLevel preserves an application's explicit textual level even when the
