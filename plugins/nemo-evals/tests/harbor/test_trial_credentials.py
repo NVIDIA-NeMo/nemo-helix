@@ -43,6 +43,8 @@ class Platform:
     def __init__(self, *, auth_enabled: bool) -> None:
         self.auth_enabled = auth_enabled
         self.refuse_mint_number: int | None = None
+        self.refuse_mint_status = 503
+        self.refuse_mint_detail = "unavailable"
         self.hold_mint_number: int | None = None
         self.mint_held = asyncio.Event()
         self.revocations_to_refuse = 0
@@ -57,7 +59,7 @@ class Platform:
         if request.method == "POST" and request.url.path == ACCESS_KEYS:
             number = len(self.minted()) - 1
             if number == self.refuse_mint_number:
-                return httpx.Response(503, json={"detail": "unavailable"})
+                return httpx.Response(self.refuse_mint_status, json={"detail": self.refuse_mint_detail})
             if number == self.hold_mint_number:
                 self.mint_held.set()
                 await asyncio.Event().wait()
@@ -277,6 +279,21 @@ async def test_a_key_that_cant_be_minted_fails_the_job_before_any_trial_runs(aut
         async with _issuer(auth_on).job_scope([KEY_ENV])(job):
             pytest.fail("the job ran")
 
+    assert auth_on.revoked() == [_jti(0)]
+
+
+@pytest.mark.parametrize("prefix", ["", "Trial credential issuance was refused: "])
+async def test_lifetime_limit_survives_the_terminal_error_tail(auth_on: Platform, job: Job, prefix: str) -> None:
+    limit = "expires_in_seconds must be less than or equal to auth.access_keys.max_expires_in_seconds (3600)"
+    auth_on.refuse_mint_number = 1
+    auth_on.refuse_mint_status = 400
+    auth_on.refuse_mint_detail = prefix + limit
+
+    with pytest.raises(RuntimeError, match="could not issue 1 of 2 trials") as failure:
+        async with _issuer(auth_on).job_scope([KEY_ENV])(job):
+            pytest.fail("the job ran")
+
+    assert str(failure.value).endswith(limit)
     assert auth_on.revoked() == [_jti(0)]
 
 

@@ -10,13 +10,13 @@ represent the Job creator and retain that creator's authorization checks.
 """
 
 import asyncio
-import re
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from nemo_evals.authz import scope
 from nemo_evals.entities import AgentEvalResultEntity, EvaluateResultEntity, TaskEntity
 from nemo_evals.gateway.tokens import EVALS_SERVICE, TOKEN_LIFETIME_SEC, TrialClaims
+from nemo_evals.harbor.credential_errors import public_lifetime_limit
 from nemo_evals.image_builds.builder import HttpImageBuilder
 from nemo_evals.image_builds.models import TASK_IMAGE_BUILD_JOB_SOURCE, TaskImageBuildEntity, build_entity_name
 from nemo_evals.image_builds.runner import TaskImageBuildSpec, run_task_image_build
@@ -221,12 +221,8 @@ def _trial_issuance_error(error: NemoHTTPError) -> HTTPException:
     detail = "Trial credential issuance was refused"
     # Preserve the actionable, public lifetime-policy limit while keeping
     # unrelated issuer failures and arbitrary response bodies private.
-    if error.status_code == 400 and re.fullmatch(
-        r"expires_in_seconds must be less than or equal to "
-        r"auth\.access_keys\.max_expires_in_seconds \([0-9]+\)",
-        error.detail,
-    ):
-        detail += ": " + error.detail
+    if limit := public_lifetime_limit(error):
+        detail += ": " + limit
     return HTTPException(error.status_code, detail)
 
 

@@ -31,6 +31,7 @@ from harbor.trial.hooks import TrialHookEvent
 from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
 from nemo_evals.gateway.spans import export_request, trial_root_span
 from nemo_evals.gateway.tokens import TOKEN_LIFETIME_SEC, TrialClaims, unsigned_token
+from nemo_evals.harbor.credential_errors import public_lifetime_limit
 from nemo_evals.intake.mapping import session_id_for
 from nemo_helix_plugin.auth.access_keys.client import AsyncAccessKeysClient
 from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateRequest
@@ -181,9 +182,12 @@ class _JobTrials:
         results = await asyncio.gather(*(issue_one(config) for config in configs), return_exceptions=True)
         failures = [result for result in results if isinstance(result, BaseException)]
         if failures:
-            raise RuntimeError(
-                f"could not issue {len(failures)} of {len(configs)} trials their own Inference Gateway key"
-            ) from failures[0]
+            message = f"could not issue {len(failures)} of {len(configs)} trials their own Inference Gateway key"
+            if limit := public_lifetime_limit(failures[0]):
+                # Kubernetes termination diagnostics retain only the traceback
+                # tail, so the final error must carry the public policy limit.
+                message += ": " + limit
+            raise RuntimeError(message) from failures[0]
         for config, token in zip(configs, results, strict=True):
             assert isinstance(token, str)
             variable = f"NEMO_TRIAL_KEY_{uuid.uuid4().hex.upper()}"
