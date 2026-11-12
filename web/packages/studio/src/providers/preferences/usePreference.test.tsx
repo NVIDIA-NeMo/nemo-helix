@@ -139,6 +139,27 @@ describe('usePreference with server preferences', () => {
     expect(result.current[0]).toBe(false);
   });
 
+  it('falls back to the account mirror once the read fails', async () => {
+    window.localStorage.setItem(
+      `${MIRROR_PREFIX}account-1:studio.onboarding:`,
+      JSON.stringify(document('studio.onboarding', { tourSeen: true }))
+    );
+    let served = false;
+    server.use(
+      http.get(`${PLATFORM_BASE_URL}/apis/auth/v2/me/preferences/studio.onboarding`, () => {
+        served = true;
+        return HttpResponse.json({ detail: 'unavailable' }, { status: 503 });
+      })
+    );
+    const { result } = renderHook(() => usePreference(studioPreferences.tourSeen), { wrapper });
+
+    await waitFor(() => expect(served).toBe(true));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(result.current[0]).toBe(true);
+    expect(result.current[3]).toBe(true);
+    expect(result.current[4]).toBe(false);
+  });
+
   it('keeps writes made before /me resolves and sends them once the account is known', async () => {
     const patches: unknown[] = [];
     server.use(

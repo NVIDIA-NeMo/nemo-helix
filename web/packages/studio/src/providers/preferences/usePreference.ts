@@ -111,13 +111,23 @@ const useServerPreference = <T>(
   // GET that lands mid-edit (or before /me) can't revert them.
   const id = preferenceDocumentId(definition.namespace, workspace);
   const overlay = useSyncExternalStore(subscribePreferenceOverlays, () => getPreferenceOverlay(id));
+  // Placeholder data is dropped once the read errors, so fall back to the mirror explicitly.
+  const document = useMemo(
+    () =>
+      data ??
+      (isError && accountId ? readMirror(accountId, definition.namespace, workspace) : undefined),
+    [accountId, data, definition.namespace, isError, workspace]
+  );
   const userValue = useMemo(
-    () => (overlay ? (mergePatch(data?.value ?? {}, overlay) as JsonObject) : data?.value),
-    [data?.value, overlay]
+    () => (overlay ? (mergePatch(document?.value ?? {}, overlay) as JsonObject) : document?.value),
+    [document?.value, overlay]
   );
   const effective = useMemo(
-    () => (overlay ? (mergePatch(data?.defaults ?? {}, userValue) as JsonObject) : data?.effective),
-    [data?.defaults, data?.effective, overlay, userValue]
+    () =>
+      overlay
+        ? (mergePatch(document?.defaults ?? {}, userValue) as JsonObject)
+        : document?.effective,
+    [document?.defaults, document?.effective, overlay, userValue]
   );
 
   const value = useMemo(
@@ -125,8 +135,8 @@ const useServerPreference = <T>(
     [effective, definition, entry]
   );
 
-  const storedValue = useRef(data?.value);
-  storedValue.current = data?.value;
+  const storedValue = useRef(document?.value);
+  storedValue.current = document?.value;
   const write = useCallback(
     (next: T | undefined) => {
       // Read the overlay now, not from the render, so several writes in one tick compose.
@@ -146,7 +156,7 @@ const useServerPreference = <T>(
 
   const setValue = useCallback((next: T) => write(next), [write]);
   const clearValue = useCallback(() => write(undefined), [write]);
-  // Settled with an error (or no account to read for): the default is the best value we'll get.
+  // Settled with an error (or no account to read for): the mirror or default is the best we'll get.
   const ready = data !== undefined || isError || (!me.isPending && !accountId);
   const loaded = data !== undefined && !isPlaceholderData;
   return [value, setValue, clearValue, ready, loaded] as const;
