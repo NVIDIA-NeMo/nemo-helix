@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { logger } from '@nemo/common/src/utils/logger';
-import { authGetMyPreference, authPatchMyPreference } from '@nemo/sdk/generated/platform/profiles';
-import type { PreferenceValue } from '@nemo/sdk/generated/platform/schema';
+import { customFetch } from '@nemo/sdk/generated/fetchers/platform';
+import { authGetMyPreference } from '@nemo/sdk/generated/platform/profiles';
 import type { Theme } from '@nvidia/foundations-react-core';
 import { featureFlags } from '@studio/constants/featureFlags';
 import { useMe } from '@studio/providers/auth/useMe';
@@ -13,6 +13,7 @@ import { usePreference } from '@studio/providers/preferences/usePreference';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { UI_THEME_BOOT } from '@studio/util/localStorage';
 import { useQueryClient } from '@tanstack/react-query';
+import { isAxiosError } from 'axios';
 import { useEffect, useState } from 'react';
 
 const PREFERENCES_QUERY_PREFIX = '/apis/auth/v2/me/preferences/';
@@ -36,9 +37,15 @@ const migrateLegacyPreferences = async () => {
     if (!legacy.success) continue;
     const document = await authGetMyPreference(definition.namespace);
     if (document.value[definition.key] !== undefined) continue;
-    await authPatchMyPreference(definition.namespace, {
-      [definition.key]: legacy.data,
-    } as PreferenceValue);
+    // Conditional, so a value set since the read (e.g. a theme picked right away) is never replaced.
+    await customFetch({
+      url: `${PREFERENCES_QUERY_PREFIX}${encodeURIComponent(definition.namespace)}`,
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'If-Match': String(document.db_version) },
+      data: { [definition.key]: legacy.data },
+    }).catch((error: unknown) => {
+      if (!isAxiosError(error) || error.response?.status !== 412) throw error;
+    });
   }
 };
 
