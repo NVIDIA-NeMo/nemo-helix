@@ -21,7 +21,15 @@ from nhx.core.files.app.backends.s3 import (
     S3UnavailableError,
     _raise_for_s3_error,
 )
+from nhx.core.files.config import FilesConfig
 from nhx.core.files.exceptions import NotFoundError
+
+
+@pytest.fixture(autouse=True)
+def strict_s3_metadata(monkeypatch):
+    """Keep backend transport unit tests independent of process-local TTL state."""
+    config = FilesConfig(s3_metadata_cache_ttl_seconds=0)
+    monkeypatch.setattr("nhx.core.files.config.files_config", lambda: config)
 
 
 def _make_client_error(code: str, message: str = "Test error") -> ClientError:
