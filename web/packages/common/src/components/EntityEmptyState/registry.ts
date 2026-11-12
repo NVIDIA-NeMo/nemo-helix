@@ -195,6 +195,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No tasksets yet',
     subheading:
       'A taskset groups stored tasks into a versioned suite you can run an agent evaluation against.',
+    createAction: { label: 'Create Taskset' },
     cliCommand: 'nemo evals tasksets create --harbor-dir <path> --workspace <workspace>',
     skillPrompt: 'Help me create my first taskset with the nemo-nemo-evals-plugin skill',
   },
