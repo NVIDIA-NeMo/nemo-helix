@@ -9,11 +9,10 @@ import type { FilesetOutput as Dataset } from '@nemo/sdk/generated/platform/sche
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { Button } from '@nvidia/foundations-react-core';
 import { makeDatasetsTableColumns } from '@studio/components/DatasetsTable/columns';
-import { FilesetCreateModal } from '@studio/components/FilesetCreateModal';
 import { useFilesetsTable } from '@studio/components/FilesetsTable/useFilesetsTable';
 import { Loading } from '@studio/components/Layouts/Loading';
+import { NewDatasetPanel } from '@studio/components/NewDatasetButton/NewDatasetPanel';
 import { DatasetBulkDeleteModal } from '@studio/routes/FilesetListRoute/DatasetBulkDeleteModal';
-import { getDatasetDetailRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
 import type { FC, ReactNode } from 'react';
 
@@ -32,7 +31,6 @@ export interface DatasetsTableProps {
  */
 export const DatasetsTable: FC<DatasetsTableProps> = ({ getDatasetRoute, renderRowActions }) => {
   const {
-    workspace,
     hasSearchOrFilters,
     dataViewState,
     datasetsResponse,
@@ -126,15 +124,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({ getDatasetRoute, renderR
       />
 
       {/* Same create flow as NewDatasetButton in the page header. */}
-      {createModalOpen && (
-        <FilesetCreateModal
-          open={createModalOpen}
-          onClose={closeCreateModal}
-          workspace={workspace}
-          purpose={FilesetPurpose.dataset}
-          getDetailRoute={getDatasetDetailRoute}
-        />
-      )}
+      {createModalOpen && <NewDatasetPanel open={createModalOpen} onClose={closeCreateModal} />}
     </>
   );
 };
