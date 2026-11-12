@@ -1,16 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getEntityReference } from '@nemo/common/src/namedEntity';
 import type { Task, TasksetTags } from '@nemo/sdk/generated/evals/schema';
-import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
 import type {
   FilesRefParts,
   TaskFilters,
   TaskRefParts,
   TasksetTaskRow,
 } from '@studio/routes/evaluation/tasksets/types';
-import { getFilesetDetailRoute, getFilesetDetailsRoute } from '@studio/routes/utils';
+import { getFilesetDetailRoute } from '@studio/routes/utils';
 
 export const RUNNER_LABELS = {
   harbor: 'Harbor',
@@ -37,12 +35,7 @@ export const parseFilesRef = (ref: string): FilesRefParts => {
 };
 
 export const getFilesetRoute = ({ workspace, fileset }: FilesRefParts): string =>
-  FILESET_DETAILS_ENABLED
-    ? getFilesetDetailRoute(workspace, fileset)
-    : getFilesetDetailsRoute(
-        workspace,
-        getEntityReference({ namespace: workspace, name: fileset })
-      );
+  getFilesetDetailRoute(workspace, fileset);
 
 /** Tag names, `latest` first then alphabetical. */
 export const tagNames = (tags: TasksetTags | undefined): string[] =>
