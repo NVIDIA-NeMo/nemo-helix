@@ -27,8 +27,7 @@ async def test_directory_upload_attempts_remaining_files(
         local.parent.mkdir(parents=True, exist_ok=True)
         local.write_text(path)
     # Fix traversal order so failures demonstrably precede successful nested uploads.
-    listing = "_list_local_files" if asynchronous else "_list_local_files_sync"
-    mocker.patch(f"nemo_helix_plugin.jobs.file_manager.{listing}", return_value=paths)
+    mocker.patch("nemo_helix_plugin.jobs.file_manager._list_local_files_sync", return_value=paths)
     errors = [OSError(f"upload {index} failed") for index in range(failure_count)]
     effects = [*errors, *([None] * (3 - failure_count))]
     if asynchronous:
@@ -59,9 +58,11 @@ async def test_directory_upload_attempts_remaining_files(
     else:
         assert await run_upload() == manager.url("bundle")
 
-    assert [call.args for call in upload.call_args_list] == [
-        (str(tmp_path / path), f"default/results#bundle/{path}") for path in paths[:3]
-    ]
+    calls = upload.call_args_list
+    assert [call.args[1] for call in calls] == [f"default/results#bundle/{path}" for path in paths[:3]]
+    for call, relative in zip(calls, paths[:3], strict=True):
+        assert Path(call.args[0]) != tmp_path / relative
+        assert Path(call.args[0]).parts[-len(Path(relative).parts) :] == Path(relative).parts
 
 
 @pytest.mark.asyncio
@@ -71,8 +72,11 @@ async def test_directory_upload_stops_immediately_on_interruption(
     tmp_path: Path, mocker: MockerFixture, asynchronous: bool, interruption: type[BaseException]
 ) -> None:
     """An interruption stops uploads even after an earlier ordinary upload failure."""
-    listing = "_list_local_files" if asynchronous else "_list_local_files_sync"
-    mocker.patch(f"nemo_helix_plugin.jobs.file_manager.{listing}", return_value=["first", "second", "third"])
+    for name in ("first", "second", "third"):
+        (tmp_path / name).write_text(name)
+    mocker.patch(
+        "nemo_helix_plugin.jobs.file_manager._list_local_files_sync", return_value=["first", "second", "third"]
+    )
     stop = interruption()
     if asynchronous:
         fs = Mock(spec=AsyncFilesetFileSystem)
