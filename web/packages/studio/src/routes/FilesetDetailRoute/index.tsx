@@ -81,6 +81,18 @@ export const FilesetDetailRoute: FC<FilesetDetailRouteProps> = ({ parent = FILES
     );
   }
 
+  // A section scoped to one purpose hands any other fileset back to Filesets.
+  if (parent.purpose && fileset.purpose !== parent.purpose) {
+    return (
+      <Navigate
+        to={FILESETS_PARENT.getDetailRoute(workspace, filesetName, {
+          tab: isFilesetDetailTab(tabFromPath) ? tabFromPath : undefined,
+        })}
+        replace
+      />
+    );
+  }
+
   const isDataset = fileset.purpose === FilesetPurpose.dataset;
   const isModel = fileset.purpose === FilesetPurpose.model;
 

@@ -11,13 +11,16 @@ import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render as rtlRender, screen } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 
-const fileset = {
-  name: 'qa-data',
-  workspace: 'default',
-  purpose: FilesetPurpose.dataset,
-  storage: { type: 'internal' },
-  metadata: {},
-} as unknown as FilesetOutput;
+const makeFileset = (purpose: FilesetPurpose) =>
+  ({
+    name: 'qa-data',
+    workspace: 'default',
+    purpose,
+    storage: { type: 'internal' },
+    metadata: {},
+  }) as unknown as FilesetOutput;
+
+let fileset = makeFileset(FilesetPurpose.dataset);
 
 vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>()),
@@ -64,6 +67,7 @@ const openAtUrl = (url: string) => {
           { path: ROUTES.workspace.datasetDetailTab, element: <FilesetDetailTabContent /> },
         ],
       },
+      { path: ROUTES.workspace.filesetDetailTab, element: <div data-testid="fileset-detail" /> },
     ],
     { initialEntries: [url] }
   );
@@ -76,6 +80,18 @@ const openAtUrl = (url: string) => {
 };
 
 describe('DatasetDetailRoute', () => {
+  beforeEach(() => {
+    fileset = makeFileset(FilesetPurpose.dataset);
+  });
+
+  it('sends a fileset that is not a dataset to its Filesets page', async () => {
+    fileset = makeFileset(FilesetPurpose.model);
+    const router = openAtUrl('/workspaces/default/datasets/qa-data/files');
+
+    expect(await screen.findByTestId('fileset-detail')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/workspaces/default/filesets/qa-data/files');
+  });
+
   it('puts the fileset detail page under the Datasets breadcrumb', async () => {
     openAtUrl('/workspaces/default/datasets/qa-data/card');
 

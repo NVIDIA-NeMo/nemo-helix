@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import {
   getFilesetDetailRoute,
   getWorkspaceFilesetsRoute,
@@ -14,6 +15,8 @@ import { createContext, useContext } from 'react';
  */
 export interface FilesetDetailParent {
   label: string;
+  /** Only filesets of this purpose belong here; the page sends others to Filesets. */
+  purpose?: FilesetPurpose;
   getListRoute: (workspace: string) => string;
   getDetailRoute: (
     workspace: string,
