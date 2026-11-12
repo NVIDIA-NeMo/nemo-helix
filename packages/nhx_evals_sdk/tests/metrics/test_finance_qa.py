@@ -104,6 +104,38 @@ class TestTaskScoring:
                 assert expected["hit_max_new_tokens"] is False
             assert scores["task"] == task
 
+    @pytest.mark.parametrize(
+        ("task", "reference", "response"),
+        [
+            # A second think block in the content: the cookbook keeps it in the answer, with or without a parser.
+            ("TAT-DQA/count", "3", _response("<think>\nThree rows.\n</think>\n3", 120, reasoning_content="Count.")),
+            ("TAT-DQA/count", "3", _response("<think>a</think>\n<think>b</think>\n3", 120)),
+            # Full-width separators: the cookbook splits spans before NFKC turns them into ASCII.
+            ("TAT-DQA/multi-span", "2019 | 2018", _response("2018\uff1b2019", 50, reasoning_content="r")),
+            ("TAT-DQA/multi-span", "2018\uff1b2019", _response("2018\uff1b2019", 50, reasoning_content="r")),
+            ("TAT-DQA/multi-span", "2018 ; 2019", _response("2019 \uff5c 2018", 50, reasoning_content="r")),
+            # A zero reference: the tolerance has a 1e-6 floor.
+            ("TAT-DQA/arithmetic", "0", _response("0.0000005", 50, reasoning_content="r")),
+            ("TAT-DQA/arithmetic", "0", _response("0.00001", 50, reasoning_content="r")),
+            ("CodeFinQA", "0.0", _response("-0.0000009", 50, reasoning_content="answer = 0")),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_matches_the_cookbook_on_edge_rows(self, task, reference, response):
+        """Rows the generator doesn't produce, where a wrong step order or constant would score differently."""
+        expected = cookbook.cookbook_row(
+            task=task,
+            task_family=TASKS[task],
+            answer=reference,
+            response=response,
+            task_limit=_task_limit(task),
+            tolerance=0.05,
+        )
+        scores = await _scores(
+            _metric(max_new_tokens=_task_limit(task)), {"answer": reference, "task": task}, {"response": response}
+        )
+        assert {name: scores.get(name) for name in expected} == expected
+
 
 class TestCompletionParsing:
     @pytest.mark.parametrize(
