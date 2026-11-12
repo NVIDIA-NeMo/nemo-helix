@@ -16,7 +16,6 @@
     "@types/react-dom": "catalog:",
     "happy-dom": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "vitest-fail-on-console": "catalog:"
+    "vitest": "catalog:"
   }
 }
