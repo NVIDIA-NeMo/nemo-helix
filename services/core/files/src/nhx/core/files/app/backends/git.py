@@ -351,12 +351,16 @@ class SessionSSHVendor(SSHVendor):
 
 
 async def scan_host_keys(remote: SshRemote, timeout_seconds: int = 10) -> list[SshHostKey]:
-    async with _KEYSCAN_SLOTS:
+    try:
+        await asyncio.wait_for(_KEYSCAN_SLOTS.acquire(), timeout_seconds + _KEYSCAN_GRACE_SECONDS)
+    except TimeoutError:
+        raise GitUnavailableError(
+            f"Too many host key scans are running to scan {remote.authority}; try again shortly"
+        ) from None
+    try:
         return await _scan_host_keys(remote, timeout_seconds)
-
-
-async def _communicate(proc: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
-    return await proc.communicate()
+    finally:
+        _KEYSCAN_SLOTS.release()
 
 
 async def _scan_host_keys(remote: SshRemote, timeout_seconds: int) -> list[SshHostKey]:
@@ -391,6 +395,10 @@ async def _scan_host_keys(remote: SshRemote, timeout_seconds: int) -> list[SshHo
     if not keys:
         raise _keyscan_failure(stderr.decode(errors="replace"), subject)
     return keys
+
+
+async def _communicate(proc: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
+    return await proc.communicate()
 
 
 def _keyscan_failure(stderr: str, subject: str) -> GitUnavailableError:

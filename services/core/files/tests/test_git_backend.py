@@ -499,6 +499,12 @@ class TestHostKeyScan:
         results = await asyncio.gather(scan_host_keys(remote), scan_host_keys(remote))
         assert [len(keys) for keys in results] == [1, 1]
 
+    async def test_scan_gives_up_when_no_slot_frees_in_time(self, monkeypatch):
+        monkeypatch.setattr(git_backend, "_KEYSCAN_SLOTS", asyncio.Semaphore(0))
+        monkeypatch.setattr(git_backend, "_KEYSCAN_GRACE_SECONDS", 0.1)
+        with pytest.raises(GitUnavailableError, match="Too many host key scans"):
+            await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"), timeout_seconds=0)
+
     async def test_cancelling_a_scan_after_ssh_keyscan_exits_still_cancels(self, tmp_path, monkeypatch):
         self._fake_keyscan(tmp_path, monkeypatch, "exit 0")
 

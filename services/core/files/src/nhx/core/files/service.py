@@ -36,7 +36,7 @@ class FilesService(Service[FilesConfig]):
         """Return routers for the files service."""
         return [
             RouterConfig(filesets.router, tag="Files", description="File management endpoints"),
-            RouterConfig(git_repositories.router, tag="Files", description="Lookups for setting up git filesets"),
+            RouterConfig(git_repositories.router, tag="Files", description="File management endpoints"),
             RouterConfig(
                 hf.router,
                 tag="HuggingFace",
