@@ -133,4 +133,54 @@ describe('NewDatasetButton', () => {
       getDatasetDetailRoute(WS, 'train-data', { tab: FilesetDetailTab.Files })
     );
   });
+
+  it('lets an in-flight creation finish after Cancel: a toast link replaces navigation', async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(FILESETS_URL, async ({ request }) => {
+        const body = (await request.json()) as Pick<FilesetOutput, 'name'>;
+        await gate;
+        return HttpResponse.json({
+          id: `fs-${body.name}`,
+          name: body.name,
+          workspace: WS,
+          description: '',
+          purpose: 'dataset',
+          storage: { type: 'local' },
+          metadata: {},
+          custom_fields: {},
+          project: WS,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        });
+      })
+    );
+    renderButton();
+
+    await user.click(screen.getByRole('button', { name: 'Create Dataset' }));
+    await user.click(await screen.findByRole('tab', { name: 'Upload' }));
+    fireEvent.change(screen.getByTestId('create-dataset-files-input'), {
+      target: { files: [new File(['x'], 'train-data.jsonl')] },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('train-data')
+    );
+    await user.click(panelButton('Create Dataset'));
+    expect(await screen.findByRole('button', { name: 'Creating…' })).toBeDisabled();
+
+    await user.click(panelButton('Cancel'));
+    await waitFor(() => expect(screen.queryByRole('tab', { name: 'Upload' })).toBeNull());
+
+    release();
+    const toast = await screen.findByTestId('mock-toast-success');
+    expect(within(toast).getByRole('link')).toHaveAttribute(
+      'href',
+      getDatasetDetailRoute(WS, 'train-data')
+    );
+    expect(navigate).not.toHaveBeenCalled();
+  });
 });
