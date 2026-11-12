@@ -10,6 +10,7 @@ represent the Job creator and retain that creator's authorization checks.
 """
 
 import asyncio
+import re
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -213,7 +214,20 @@ async def issue_trial_key(
                 )
             ).data()
         except NemoHTTPError as exc:
-            raise HTTPException(exc.status_code, "Trial credential issuance was refused") from exc
+            raise _trial_issuance_error(exc) from exc
+
+
+def _trial_issuance_error(error: NemoHTTPError) -> HTTPException:
+    detail = "Trial credential issuance was refused"
+    # Preserve the actionable, public lifetime-policy limit while keeping
+    # unrelated issuer failures and arbitrary response bodies private.
+    if error.status_code == 400 and re.fullmatch(
+        r"expires_in_seconds must be less than or equal to "
+        r"auth\.access_keys\.max_expires_in_seconds \([0-9]+\)",
+        error.detail,
+    ):
+        detail += ": " + error.detail
+    return HTTPException(error.status_code, detail)
 
 
 @router.delete(_PREFIX + "/trial-keys/{jti}", response_model=AccessKeyRevokeResponse)

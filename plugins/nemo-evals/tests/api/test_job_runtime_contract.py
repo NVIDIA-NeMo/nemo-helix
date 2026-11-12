@@ -3,11 +3,39 @@
 
 """The producing Job's identity survives the runtime client's wire format."""
 
+import httpx
 import pytest
 from nemo_evals.entities import AgentEvalResultEntity, EvaluateResultEntity
 from nemo_evals.jobs.runtime_client import save_result
 from nhx_evals_sdk.values.results import AggregatedMetricResult
 from pydantic import JsonValue, TypeAdapter
+
+
+@pytest.mark.parametrize(
+    ("status", "issuer_detail", "expose_limit"),
+    [
+        (400, "expires_in_seconds must be less than or equal to auth.access_keys.max_expires_in_seconds (3600)", True),
+        (403, "private permission diagnostic", False),
+        (400, "arbitrary issuer response", False),
+        (
+            400,
+            "expires_in_seconds must be less than or equal to auth.access_keys.max_expires_in_seconds (3600) private",
+            False,
+        ),
+        (500, "expires_in_seconds must be less than or equal to auth.access_keys.max_expires_in_seconds (3600)", False),
+    ],
+)
+def test_trial_issuance_preserves_only_public_lifetime_limit(
+    status: int, issuer_detail: str, expose_limit: bool
+) -> None:
+    from nemo_evals.api.v2.job_runtime import _trial_issuance_error
+    from nemo_helix_plugin.client.errors import NemoHTTPError
+
+    error = NemoHTTPError(httpx.Response(status, json={"detail": issuer_detail}))
+    response = _trial_issuance_error(error)
+    assert response.status_code == status
+    expected = "Trial credential issuance was refused" + (": " + issuer_detail if expose_limit else "")
+    assert response.detail == expected
 
 
 @pytest.mark.parametrize("case", ["bound", "another_job", "another_workspace", "unbound", "ordinary", "other_service"])
