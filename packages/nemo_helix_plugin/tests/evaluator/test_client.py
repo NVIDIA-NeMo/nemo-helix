@@ -12,7 +12,9 @@ from nemo_helix_plugin.evals.types import (
     BundledMetricOutputSpec,
     CreateMetricRequest,
     InlineMetricPayload,
+    RetrieveEvalInputSpec,
     SubmitEvaluateJobRequest,
+    SubmitRetrieveEvalJobRequest,
 )
 from pydantic import JsonValue
 
@@ -49,6 +51,50 @@ def test_sync_submit_evaluate_job_uses_typed_transport() -> None:
     response = client.submit_evaluate_job(body=SubmitEvaluateJobRequest(spec={"metrics": [], "dataset": []}))
 
     assert response.data().name == "job-1"
+
+
+def test_retrieve_eval_submit_and_get_parse_resolved_server_fields() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.startswith("/apis/evals/v2/workspaces/default/retrieve-eval/jobs")
+        if request.method == "POST":
+            assert json.loads(request.read())["spec"]["target"] == "default/embedder"
+        return httpx.Response(
+            201 if request.method == "POST" else 200,
+            request=request,
+            json={
+                "name": "retrieval",
+                "spec": {
+                    "dataset": "default/beir",
+                    "target": {
+                        "embeddings": {
+                            "url": "http://gateway/v1",
+                            "name": "embedder",
+                            "served_model_name": "default/embedder",
+                            "inference": None,
+                        },
+                        "embedding_in_flight": 2,
+                        "query_prefix": "query: ",
+                        "passage_prefix": "passage: ",
+                    },
+                },
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = EvaluatorClient(base_url=BASE, workspace="default", http_client=http_client)
+        submitted = client.submit_retrieve_eval_job(
+            body=SubmitRetrieveEvalJobRequest(
+                spec=RetrieveEvalInputSpec.model_validate({"dataset": "default/beir", "target": "default/embedder"})
+            )
+        ).data()
+        fetched = client.get_retrieve_eval_job(name=submitted.name).data()
+
+    for job in (submitted, fetched):
+        assert job.spec.target.embeddings.served_model_name == "default/embedder"
+        assert job.spec.target.embeddings.inference is None
+        assert job.spec.target.embedding_in_flight == 2
+        assert job.spec.target.query_prefix == "query: "
+        assert job.spec.target.passage_prefix == "passage: "
 
 
 @pytest.mark.asyncio
