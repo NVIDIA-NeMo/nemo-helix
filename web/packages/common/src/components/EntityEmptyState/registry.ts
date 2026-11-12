@@ -184,6 +184,13 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     cliCommand: 'nemo evals evaluate --spec-file <spec>.json --workspace <workspace>',
     skillPrompt: 'Help me create my first evaluation with the nemo-nemo-evals-plugin skill',
   },
+  tasks: {
+    heading: 'No tasks yet',
+    subheading:
+      'A task is one unit of agent work with its grading: a Harbor task or an inline instruction scored by metrics.',
+    cliCommand: 'nemo evals tasksets create --harbor-dir <path> --workspace <workspace>',
+    skillPrompt: 'Help me publish my first tasks with the nemo-nemo-evals-plugin skill',
+  },
   tasksets: {
     heading: 'No tasksets yet',
     subheading:

@@ -8,6 +8,7 @@ import {
   ChartBar,
   Collection,
   Db,
+  DocumentCheckmark,
   Beaker,
   FolderOpen,
   LayoutList,
@@ -85,6 +86,8 @@ export const ENTITY_ICONS = {
   evalComparison: ScmCompare,
   // A taskset is the stored group of tasks an evaluation run scores.
   tasksets: Collection,
+  // A task is one scored unit of work: an instruction plus how it is graded.
+  tasks: DocumentCheckmark,
 
   // Observability
   optimizerInsights: Lightbulb,

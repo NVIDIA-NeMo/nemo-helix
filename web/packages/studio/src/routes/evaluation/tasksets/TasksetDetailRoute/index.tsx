@@ -7,18 +7,8 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { KeyValueGrid } from '@nemo/common/src/components/KeyValueGrid';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
-import { FILTERS_SEARCH_PARAM } from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
 import { useEvalsGetTaskset } from '@nemo/sdk/generated/evals/evals-plugin-tasksets-routes';
-import {
-  Anchor,
-  Flex,
-  PageHeader,
-  Stack,
-  TabsContent,
-  TabsList,
-  TabsRoot,
-  TabsTrigger,
-} from '@nvidia/foundations-react-core';
+import { Anchor, Block, Flex, PageHeader, Stack, Tabs } from '@nvidia/foundations-react-core';
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
@@ -32,25 +22,22 @@ import {
 } from '@studio/routes/evaluation/tasksets/helpers';
 import { TaskDetailDrawer } from '@studio/routes/evaluation/tasksets/TaskDetailDrawer';
 import { RevisionHistory } from '@studio/routes/evaluation/tasksets/TasksetDetailRoute/RevisionHistory';
+import {
+  isTasksetDetailTab,
+  TASKSET_DETAIL_TABS,
+} from '@studio/routes/evaluation/tasksets/TasksetDetailRoute/tabs';
 import { TaskTable } from '@studio/routes/evaluation/tasksets/TasksetDetailRoute/TaskTable';
-import { getTasksetsRoute } from '@studio/routes/utils';
+import { getTasksetDetailRoute, getTasksetsRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import type { FC } from 'react';
-import { Link } from 'react-router';
-
-/** Both tabs' tables keep their state in the same URL params; clear it when switching tabs. */
-const TABLE_STATE_RESET = {
-  page: undefined,
-  page_size: undefined,
-  sort: undefined,
-  s: undefined,
-  [FILTERS_SEARCH_PARAM]: undefined,
-};
+import { Link, Navigate, useParams } from 'react-router';
 
 export const TasksetDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { tasksetName } = useRequiredPathParams([ROUTE_PARAMS.tasksetName]);
-  const { getQueryParam, setQueryParam, setQueryParams } = useQueryParams();
+  const { [ROUTE_PARAMS.tasksetTab]: tabParam } = useParams();
+  const tab = tabParam ?? TASKSET_DETAIL_TABS[0].value;
+  const { getQueryParam, setQueryParam } = useQueryParams();
 
   useBreadcrumbs({
     items: [
@@ -61,6 +48,9 @@ export const TasksetDetailRoute: FC = () => {
 
   const { data: taskset, isPending, error } = useEvalsGetTaskset(workspace, tasksetName);
 
+  if (!isTasksetDetailTab(tab)) {
+    return <Navigate to={getTasksetDetailRoute(workspace, tasksetName)} replace />;
+  }
   if (isPending) return <Loading description="Loading taskset..." />;
   if (error || !taskset) {
     return (
@@ -109,27 +99,30 @@ export const TasksetDetailRoute: FC = () => {
             },
           ]}
         />
-        <TabsRoot
-          value={getQueryParam(QUERY_PARAMETERS.tab) || 'tasks'}
-          onValueChange={(tab) =>
-            setQueryParams({ ...TABLE_STATE_RESET, [QUERY_PARAMETERS.tab]: tab })
-          }
-          className="flex min-h-0 flex-1 flex-col"
-        >
-          <TabsList>
-            <TabsTrigger value="tasks">Tasks</TabsTrigger>
-            <TabsTrigger value="revisions">Revisions</TabsTrigger>
-          </TabsList>
-          <TabsContent value="tasks" className="flex min-h-0 flex-1 flex-col p-0 pt-density-lg">
+        <Tabs
+          // Tabs used purely for navigation (renderLink); override KUI's default overflow:hidden.
+          className="overflow-visible"
+          value={tab}
+          items={TASKSET_DETAIL_TABS.map(({ value, label }) => ({
+            value,
+            children: label,
+            href: getTasksetDetailRoute(workspace, tasksetName, { tab: value }),
+          }))}
+          renderLink={(item) => <Link to={item.href ?? ''}>{item.children}</Link>}
+        />
+        {tab === 'tasks' && (
+          <Block className="flex min-h-0 flex-1 flex-col">
             <TaskTable
               taskset={taskset}
               onTaskClick={(row) => setQueryParam(QUERY_PARAMETERS.task, row.ref)}
             />
-          </TabsContent>
-          <TabsContent value="revisions" className="flex min-h-0 flex-1 flex-col p-0 pt-density-lg">
+          </Block>
+        )}
+        {tab === 'revisions' && (
+          <Block className="flex min-h-0 flex-1 flex-col">
             <RevisionHistory taskset={taskset} />
-          </TabsContent>
-        </TabsRoot>
+          </Block>
+        )}
       </Stack>
       <TaskDetailDrawer
         taskRef={getQueryParam(QUERY_PARAMETERS.task) || undefined}
