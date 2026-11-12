@@ -42,6 +42,7 @@ if TYPE_CHECKING:
         EvaluationError,
         EvaluationPhase,
     )
+    from nhx_evals_sdk.metrics.answer_match import AnswerMatchMetric
     from nhx_evals_sdk.metrics.bleu import BLEUMetric
     from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
     from nhx_evals_sdk.metrics.f1 import F1Metric
@@ -148,6 +149,7 @@ _LAZY_ATTRS: dict[str, str] = {
     "Evaluator": ".execution.evaluator",
     "EvaluationError": ".execution.values",
     "EvaluationPhase": ".execution.values",
+    "AnswerMatchMetric": ".metrics.answer_match",
     "BLEUMetric": ".metrics.bleu",
     "ExactMatchMetric": ".metrics.exact_match",
     "F1Metric": ".metrics.f1",
@@ -232,6 +234,7 @@ __all__ = [
     "BenchmarkEvaluationResult",
     "EvaluationResult",
     "Evaluator",
+    "AnswerMatchMetric",
     "ExactMatchMetric",
     "F1Metric",
     "FinanceQAMetric",

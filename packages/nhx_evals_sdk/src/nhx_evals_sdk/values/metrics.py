@@ -10,6 +10,7 @@ directly for inline metric definitions in API requests.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import Annotated, Any, ClassVar, Literal
 
@@ -475,6 +476,269 @@ class SequenceSimilarity(MetricBase):
         return _input_schema_from_templates(templates)
 
 
+class AnswerExtract(BaseModel):
+    """Where the answer, and the reasoning trace before it, are found in the candidate text."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    after: str | None = Field(
+        default=None,
+        min_length=1,
+        description="A delimiter. The answer is the text after it, and the trace is the text before it. "
+        "Set this or `regex`.",
+        examples=["</think>"],
+    )
+    regex: str | None = Field(
+        default=None,
+        min_length=1,
+        description="A regular expression. The answer is `group` of a match, and the trace is the text before the "
+        "match. Set this or `after`.",
+        examples=[r"Answer:\s*(.+)"],
+    )
+    group: int | str = Field(default=1, description="The `regex` group that holds the answer: a number or a name.")
+    occurrence: Literal["first", "last"] = Field(
+        default="first", description="Use the first or the last delimiter or match."
+    )
+    trace_starts_after: str | None = Field(
+        default=None,
+        min_length=1,
+        description="An opening tag. The trace keeps only the text after its first occurrence.",
+        examples=["<think>"],
+    )
+    source: Literal["output", "raw"] = Field(
+        default="output",
+        description=(
+            "Where the text comes from when there is no `candidate` template. `output`: the sample's output text. "
+            "`raw`: the response's reasoning (`reasoning_content`, or `reasoning`) wrapped in `trace_starts_after` "
+            "and `after`, followed by the content; that is, what the model wrote before a reasoning parser split "
+            "it. Without separate reasoning, `raw` is the content."
+        ),
+    )
+    found_as: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Emit a boolean output with this name: whether the delimiter or a match was found.",
+    )
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if (self.after is None) == (self.regex is None):
+            raise ValueError("extract needs exactly one of `after` or `regex`")
+        if self.regex is not None:
+            try:
+                pattern = re.compile(self.regex)
+            except re.error as error:
+                raise ValueError(f"extract.regex {self.regex!r} does not compile: {error}") from error
+            if isinstance(self.group, int):
+                if not 0 <= self.group <= pattern.groups:
+                    raise ValueError(
+                        f"extract.regex has {pattern.groups} group(s), so group {self.group} doesn't exist"
+                    )
+            elif self.group not in pattern.groupindex:
+                raise ValueError(f"extract.regex has no group named {self.group!r}")
+        if self.source == "raw" and self.after is None:
+            raise ValueError("extract.source 'raw' wraps the reasoning in the `after` delimiter, so it needs `after`")
+        return self
+
+
+class AnswerNormalize(BaseModel):
+    """How text is normalized before it is compared. The steps run in the order of the fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unicode: Literal["NFC", "NFD", "NFKC", "NFKD"] | None = Field(
+        default=None, description="A Unicode normalization form."
+    )
+    casefold: bool = Field(default=False, description="Fold case.")
+    collapse_whitespace: bool = Field(
+        default=False, description="Trim, then replace each run of whitespace with one space."
+    )
+    strip: str | None = Field(
+        default=None, min_length=1, description="Characters removed from both ends.", examples=[" .,;:!?"]
+    )
+
+
+class _AnswerComparisonBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    report: bool = Field(
+        default=True,
+        description="Emit the comparison as an output. With false, it is computed only for `select`.",
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        """Mark ``type`` as set so it is kept when exclude_unset=True; it is the union's discriminator."""
+        self.__pydantic_fields_set__.add("type")
+
+
+class AnswerEquals(_AnswerComparisonBase):
+    """The normalized answer equals the normalized reference."""
+
+    type: Literal["equals"] = "equals"
+
+
+class AnswerNumber(_AnswerComparisonBase):
+    """Both texts parse as numbers within a tolerance; optionally with a matching scale word."""
+
+    type: Literal["number"] = "number"
+    relative_tolerance: float = Field(default=0.0, ge=0, description="Allowed error relative to the reference.")
+    absolute_tolerance: float = Field(
+        default=0.0,
+        ge=0,
+        description="Allowed absolute error. The tolerance is the larger of the two.",
+    )
+    ignore: str = Field(
+        default="",
+        description="Characters removed before parsing, such as thousands separators and currency symbols.",
+        examples=[",$€£"],
+    )
+    scales: dict[str, str] = Field(
+        default_factory=dict,
+        description="Scale words allowed after the number, matched after normalization, each mapped to a scale name. "
+        "Words with the same meaning map to the same name.",
+        examples=[{"%": "percent", "percent": "percent", "million": "million"}],
+    )
+    require_reference_scale: bool = Field(
+        default=False, description="When the reference has a scale, the answer must have the same one."
+    )
+    otherwise: Literal["equals", "false"] = Field(
+        default="false",
+        description="The result when either text doesn't parse: an `equals` comparison, or false.",
+    )
+
+
+class AnswerSpanSet(_AnswerComparisonBase):
+    """The same spans in any order: each text is split on the separators, then each span is normalized."""
+
+    type: Literal["span-set"] = "span-set"
+    separators: list[str] = Field(min_length=1, description="Span separators.", examples=[["|", "##", ";"]])
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if not all(self.separators):
+            raise ValueError("span-set separators must not be empty")
+        return self
+
+
+class AnswerTokenF1(_AnswerComparisonBase):
+    """F1 between the token counts of the normalized answer and reference."""
+
+    type: Literal["token-f1"] = "token-f1"
+    pattern: str = Field(default=r"\w+", description="The regular expression that finds tokens.")
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        try:
+            re.compile(self.pattern)
+        except re.error as error:
+            raise ValueError(f"token-f1 pattern {self.pattern!r} does not compile: {error}") from error
+        return self
+
+
+class AnswerParses(_AnswerComparisonBase):
+    """The answer, or the trace, parses as Python or JSON. It is parsed, never run."""
+
+    type: Literal["parses"] = "parses"
+    language: Literal["python", "json"] = Field(description="The language to parse.")
+    input: Literal["answer", "trace"] = Field(default="answer", description="What to parse.")
+
+
+AnswerComparison = Annotated[
+    AnswerEquals | AnswerNumber | AnswerSpanSet | AnswerTokenF1 | AnswerParses,
+    Field(discriminator="type"),
+]
+
+
+class AnswerSelect(BaseModel):
+    """Pick one comparison per row from a label output's value."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    on: str = Field(description="The label output whose value picks the comparison.")
+    cases: dict[str, str] = Field(
+        min_length=1,
+        description="Pattern to comparison name, in order. The first pattern equal to the label's value, or matching "
+        "it as a glob such as `*span`, wins.",
+    )
+    default: str | None = Field(default=None, description="The comparison used when no case matches.")
+    unmatched: Literal["omit", "error"] = Field(
+        default="omit",
+        description="When no case matches and there is no default: leave the output out of the row, or fail the row.",
+    )
+
+
+class AnswerMatch(MetricBase):
+    """Answer matching metric configuration: extract the answer, normalize it, compare it with the reference.
+
+    Per row: render `label_outputs`; take the candidate text and `extract` the answer and trace; run each of
+    `comparisons`; then each `select` picks one comparison by a label's value. Outputs, in order: the reported
+    comparisons, `extract.found_as`, the selects, and the label outputs.
+    """
+
+    type: Literal[MetricType.ANSWER_MATCH] = MetricType.ANSWER_MATCH
+    reference: str = Field(description="The template for the reference answer.", examples=["{{item.answer}}"])
+    candidate: str | None = Field(
+        default=None,
+        description="The template for the candidate text. If not provided, `extract.source` decides.",
+    )
+    extract: AnswerExtract | None = Field(
+        default=None, description="Where the answer and the trace are in the text. Without it, the answer is the text."
+    )
+    normalize: AnswerNormalize = Field(default_factory=AnswerNormalize, description="How text is normalized.")
+    comparisons: dict[str, AnswerComparison] = Field(
+        min_length=1, description="Named comparisons between the answer and the reference."
+    )
+    label_outputs: dict[str, str] = Field(
+        default_factory=dict,
+        description="Templates rendered per row and emitted as label outputs, for `select` and for grouping rows.",
+        examples=[{"task": "{{item.task}}"}],
+    )
+    select: dict[str, AnswerSelect] = Field(
+        default_factory=dict, description="Outputs that pick one comparison per row by a label output's value."
+    )
+
+    @model_validator(mode="after")
+    def _check_references(self) -> Self:
+        found_as = [self.extract.found_as] if self.extract and self.extract.found_as else []
+        names = [*self.comparisons, *found_as, *self.select, *self.label_outputs]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ValueError(
+                "answer-match names must be unique across comparisons, extract.found_as, select and label_outputs: "
+                f"{duplicates}"
+            )
+        for name, select in self.select.items():
+            if select.on not in self.label_outputs:
+                raise ValueError(
+                    f"select {name!r} is on {select.on!r}, which is not a label output ({sorted(self.label_outputs)})"
+                )
+            targets = [*select.cases.values(), *([select.default] if select.default else [])]
+            unknown = [target for target in targets if target not in self.comparisons]
+            if unknown:
+                raise ValueError(
+                    f"select {name!r} names comparisons that don't exist: {unknown}. "
+                    f"Comparisons: {list(self.comparisons)}"
+                )
+        if self.extract is None and any(
+            isinstance(comparison, AnswerParses) and comparison.input == "trace"
+            for comparison in self.comparisons.values()
+        ):
+            raise ValueError("a parses comparison on the trace needs `extract`")
+        if not (any(c.report for c in self.comparisons.values()) or found_as or self.select):
+            raise ValueError("answer-match emits no scores: report a comparison, set extract.found_as, or add a select")
+        return self
+
+    def input_schema(self) -> InputSchema:
+        """Return the dataset fields the reference, candidate and label templates read."""
+        templates = [self.reference, *self.label_outputs.values()]
+        if self.candidate is not None:
+            templates.append(self.candidate)
+        return _input_schema_from_templates(templates)
+
+
+FINANCE_QA_TAT_DQA_TASKS = ("TAT-DQA/span", "TAT-DQA/multi-span", "TAT-DQA/arithmetic", "TAT-DQA/count")
+
+
 class FinanceQA(MetricBase):
     """Finance question answering metric configuration: the per-row scores of the Nemotron finance LoRA cookbook.
 
@@ -533,6 +797,57 @@ class FinanceQA(MetricBase):
         if self.candidate is not None:
             templates.append(self.candidate)
         return _input_schema_from_templates(templates)
+
+    def to_answer_match(self) -> AnswerMatch:
+        """The answer-match configuration that scores as this metric does: the finance cookbook as a preset.
+
+        It covers every score except `hit_max_new_tokens`, which reads the response's token usage, not the answer.
+        """
+        tasks = dict.fromkeys([*FINANCE_QA_TAT_DQA_TASKS, *self.program_synthesis_tasks])
+
+        def rule(task: str) -> str:
+            if task.endswith("multi-span"):
+                return "spans"
+            return "exact" if task.endswith("span") else "relaxed"
+
+        select = {
+            "task_correct": AnswerSelect(on="task", cases={task: rule(task) for task in tasks}, unmatched="error"),
+            "answer_f1": AnswerSelect(on="task", cases={"*span": "token_f1"}, default="relaxed"),
+        }
+        if self.program_synthesis_tasks:
+            select["program_syntax_valid"] = AnswerSelect(
+                on="task", cases=dict.fromkeys(self.program_synthesis_tasks, "python")
+            )
+        return AnswerMatch(
+            reference=self.reference,
+            candidate=self.candidate,
+            extract=AnswerExtract(
+                after="</think>", trace_starts_after="<think>", source="raw", found_as="trace_closed"
+            ),
+            normalize=AnswerNormalize(unicode="NFKC", casefold=True, collapse_whitespace=True, strip=" \t\r\n.,;:!?"),
+            comparisons={
+                "exact": AnswerEquals(),
+                "relaxed": AnswerNumber(
+                    relative_tolerance=self.tolerance,
+                    absolute_tolerance=1e-6,
+                    ignore=",$€£",
+                    scales={
+                        "%": "percent",
+                        "percent": "percent",
+                        "thousand": "thousand",
+                        "million": "million",
+                        "billion": "billion",
+                    },
+                    require_reference_scale=True,
+                    otherwise="equals",
+                ),
+                "spans": AnswerSpanSet(separators=["|", "##", ";"], report=False),
+                "token_f1": AnswerTokenF1(pattern="[a-z0-9]+", report=False),
+                "python": AnswerParses(language="python", input="trace", report=False),
+            },
+            label_outputs={"task": self.task},
+            select=select,
+        )
 
 
 StringCheckOperation = Literal[

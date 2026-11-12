@@ -22,6 +22,7 @@ from nemo_evals.shared.metric_bundles.inline import (
     inline_bundle_supported,
 )
 from nhx_evals_sdk.enums import ModelFormat
+from nhx_evals_sdk.metrics.answer_match import AnswerMatchMetric
 from nhx_evals_sdk.metrics.bleu import BLEUMetric
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.f1 import F1Metric
@@ -85,6 +86,16 @@ def _builtin_metric_cases() -> Sequence[tuple[str, Metric]]:
         (
             "finance_qa",
             FinanceQAMetric(reference="{{item.expected}}", task="{{item.task}}", max_new_tokens=512),
+        ),
+        (
+            "answer_match",
+            AnswerMatchMetric(
+                reference="{{item.expected}}",
+                extract={"after": "</think>", "source": "raw", "found_as": "closed"},
+                comparisons={"exact": {"type": "equals"}, "close": {"type": "number", "relative_tolerance": 0.05}},
+                label_outputs={"task": "{{item.task}}"},
+                select={"correct": {"on": "task", "cases": {"*span": "exact"}, "default": "close"}},
+            ),
         ),
         ("bleu", BLEUMetric(references=["{{item.expected}}"], candidate="{{item.output}}")),
         ("rouge", ROUGEMetric(reference="{{item.expected}}", candidate="{{item.output}}")),

@@ -12,6 +12,7 @@ from nhx_evals_sdk.agent_eval.metrics import (
     ToolArgumentMatchesInputMetric,
     ToolCallCountMetric,
 )
+from nhx_evals_sdk.metrics.answer_match import AnswerMatchMetric
 from nhx_evals_sdk.metrics.bleu import BLEUMetric
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.f1 import F1Metric
@@ -52,6 +53,7 @@ MetricVariants: TypeAlias = (
     | ExactMatchMetric
     | F1Metric
     | FinanceQAMetric
+    | AnswerMatchMetric
     | LLMJudgeMetric
     | NumberCheckMetric
     | RemoteMetric

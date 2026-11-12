@@ -14,6 +14,7 @@ class MetricType(str, Enum):
     F1 = "f1"
     SEQUENCE_SIMILARITY = "sequence-similarity"
     FINANCE_QA = "finance-qa"
+    ANSWER_MATCH = "answer-match"
     EXACT_MATCH = "exact-match"
     STRING_CHECK = "string-check"
     NUMBER_CHECK = "number-check"

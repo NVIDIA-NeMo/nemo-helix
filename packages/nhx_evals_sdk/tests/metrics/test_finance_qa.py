@@ -9,7 +9,8 @@ import pytest
 from metrics import finance_qa_cookbook as cookbook
 from metrics.helpers import compute_scores, output_names
 from nhx_evals_sdk.execution.evaluator import Evaluator
-from nhx_evals_sdk.metrics import finance_qa
+from nhx_evals_sdk.metrics import answer_match
+from nhx_evals_sdk.metrics.answer_match import AnswerMatchMetric
 from nhx_evals_sdk.metrics.finance_qa import FinanceQAMetric
 from nhx_evals_sdk.metrics.types import MetricsUnion
 from pydantic import TypeAdapter
@@ -228,7 +229,7 @@ class TestOptionalScores:
         def parse(source: str) -> None:
             raise error
 
-        monkeypatch.setattr(finance_qa, "parse", parse)
+        monkeypatch.setattr(answer_match, "parse", parse)
         response = _response("40", reasoning_content="answer = " + "(" * 50 + "40" + ")" * 50)
         scores = await _scores(_metric(), {"answer": "40", "task": "CodeFinQA"}, {"response": response})
         assert (scores["program_syntax_valid"], scores["task_correct"]) == (False, True)
@@ -374,6 +375,35 @@ class TestConfig:
         assert (syntax.mean, syntax.count, syntax.nan_count) == (0.5, 2, 1)
         assert "finance-qa.task" not in aggregates
         assert "finance-qa.hit_max_new_tokens" not in aggregates
+
+
+class TestPreset:
+    """finance-qa is a preset of answer-match: its configuration, saved as JSON, scores the same on its own."""
+
+    @pytest.mark.asyncio
+    async def test_the_preset_scores_alone_as_answer_match(self):
+        metric = _metric(program_synthesis_tasks=["CodeFinQA", "CodeTAT-QA", "FinCode"])
+        preset = TypeAdapter(MetricsUnion).validate_json(metric.to_answer_match().model_dump_json())
+        assert isinstance(preset, AnswerMatchMetric)
+        rng = random.Random(1087)
+        for _ in range(600):
+            task = rng.choice([*TASKS, "FinCode"])
+            reference, prediction = _answer_pair(rng, task)
+            item, sample = {"answer": reference, "task": task}, {"response": _random_response(rng, prediction)}
+            assert await _scores(preset, item, sample) == await _scores(metric, item, sample), f"{item} {sample}"
+
+    def test_the_preset_is_plain_configuration(self):
+        preset = _metric(tolerance=0.01).to_answer_match().model_dump(mode="json", exclude_defaults=True)
+        assert preset["comparisons"]["relaxed"]["relative_tolerance"] == 0.01
+        assert preset["select"]["task_correct"]["cases"] == {
+            "TAT-DQA/span": "exact",
+            "TAT-DQA/multi-span": "spans",
+            "TAT-DQA/arithmetic": "relaxed",
+            "TAT-DQA/count": "relaxed",
+            "CodeFinQA": "relaxed",
+            "CodeTAT-QA": "relaxed",
+        }
+        assert "program_syntax_valid" not in _metric(program_synthesis_tasks=[]).to_answer_match().select
 
 
 def _task_limit(task: str) -> int:

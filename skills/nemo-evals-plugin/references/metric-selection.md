@@ -9,7 +9,7 @@ CLI metric names are lowercase (`exact-match`, `bleu`); class names are not
 derivable from them by string substitution. Run
 `nemo evals metric-types <name>` for the schema.
 
-The supported set is exactly: `bleu`, `exact-match`, `f1`, `finance-qa`,
+The supported set is exactly: `answer-match`, `bleu`, `exact-match`, `f1`, `finance-qa`,
 `llm-judge`, `nemo-agent-toolkit-remote`, `number-check`, `remote`, `rouge`,
 `retrieval-map`, `retrieval-ndcg`, `retrieval-precision`,
 `retrieval-recall`, `sequence-similarity`, `string-check`, and
@@ -22,6 +22,7 @@ The supported set is exactly: `bleu`, `exact-match`, `f1`, `finance-qa`,
 | Numeric value or threshold | `NumberCheckMetric` |
 | Text overlap | `F1Metric`, `BLEUMetric`, or `ROUGEMetric` |
 | Partial credit for long structured text, or a `difflib` ratio | `SequenceSimilarityMetric` |
+| An answer extracted from the output (after `</think>`, or by a regex), then compared normalized, as a number within a tolerance, as a set of spans, or by token F1, with a rule picked per row | `AnswerMatchMetric` |
 | Financial document answers scored like the Nemotron finance LoRA cookbook | `FinanceQAMetric` |
 | Semantic quality or a written rubric | `LLMJudgeMetric` |
 | BEIR retrieval quality | `RetrievalNDCGMetric`, `RetrievalRecallMetric`, `RetrievalPrecisionMetric`, and `RetrievalMAPMetric` |
