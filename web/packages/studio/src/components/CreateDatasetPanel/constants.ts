@@ -124,8 +124,10 @@ export const NO_SECRETS_REQUIRED_MESSAGE =
 export const NO_SECRETS_PLACEHOLDER = 'No secrets available';
 export const NO_SECRETS_HELP =
   'No secrets in this workspace. Create one with `nemo secrets create <name>`, then return here.';
+/** Shown instead of the empty-workspace copy when the lookup failed: that says nothing about the secrets. */
+export const SECRETS_LOAD_ERROR_MESSAGE = "Couldn't load secrets.";
 
 export const NO_FILES_MESSAGE = 'Choose at least one file or a folder to upload.';
 export const NAME_HELP = 'Lowercase letters, digits, hyphens, and dots.';
-export const INVALID_URL_MESSAGE = (tab: SourceTab) =>
+export const getInvalidUrlMessage = (tab: SourceTab) =>
   `Invalid URL source. Please enter a valid ${TAB_LABELS[tab]} URL`;

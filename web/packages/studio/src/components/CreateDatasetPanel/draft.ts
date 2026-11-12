@@ -73,13 +73,8 @@ const emptyDraft = (): Draft => ({
 
 export const createInitialState = (): PanelState => ({
   tab: TAB_ORDER[0],
-  drafts: {
-    huggingface: emptyDraft(),
-    ngc: emptyDraft(),
-    github: emptyDraft(),
-    s3: emptyDraft(),
-    upload: emptyDraft(),
-  },
+  // `fromEntries` types its keys as `string`; TAB_ORDER lists every TabId, so the record is complete.
+  drafts: Object.fromEntries(TAB_ORDER.map((id) => [id, emptyDraft()])) as Record<TabId, Draft>,
   submitErrors: false,
   takenNames: [],
 });
@@ -141,6 +136,15 @@ function reduceDraft(tab: TabId, draft: Draft, action: PanelAction): Draft {
   }
 }
 
+/** `state` with the active tab's draft run through `action`. */
+const updateActive = (state: PanelState, action: PanelAction): PanelState => ({
+  ...state,
+  drafts: {
+    ...state.drafts,
+    [state.tab]: reduceDraft(state.tab, state.drafts[state.tab], action),
+  },
+});
+
 export function panelReducer(state: PanelState, action: PanelAction): PanelState {
   switch (action.type) {
     case 'reset':
@@ -150,25 +154,11 @@ export function panelReducer(state: PanelState, action: PanelAction): PanelState
     case 'submit-rejected':
       return { ...state, submitErrors: true };
     case 'name-taken':
-      return {
-        ...state,
-        takenNames: [...state.takenNames, action.name],
-        drafts: {
-          ...state.drafts,
-          [state.tab]: reduceDraft(state.tab, state.drafts[state.tab], action),
-        },
-      };
+      return updateActive({ ...state, takenNames: [...state.takenNames, action.name] }, action);
     default: {
       // Blurs only reveal errors; every other action is a draft edit and clears the submit flag.
       const isEdit = action.type !== 'source-blurred' && action.type !== 'name-blurred';
-      return {
-        ...state,
-        submitErrors: isEdit ? false : state.submitErrors,
-        drafts: {
-          ...state.drafts,
-          [state.tab]: reduceDraft(state.tab, state.drafts[state.tab], action),
-        },
-      };
+      return updateActive({ ...state, submitErrors: isEdit ? false : state.submitErrors }, action);
     }
   }
 }

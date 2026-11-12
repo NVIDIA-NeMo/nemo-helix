@@ -10,14 +10,12 @@ import {
   Text,
 } from '@nvidia/foundations-react-core';
 import { SOURCE_TABS, TAB_LABELS } from '@studio/components/CreateDatasetPanel/constants';
+import { DescriptionField } from '@studio/components/CreateDatasetPanel/DescriptionField';
 import type { Draft, PanelAction } from '@studio/components/CreateDatasetPanel/draft';
-import {
-  DescriptionField,
-  NameField,
-  SecretSelect,
-  TextField,
-} from '@studio/components/CreateDatasetPanel/fields';
+import { NameField } from '@studio/components/CreateDatasetPanel/NameField';
 import type { SourceTab } from '@studio/components/CreateDatasetPanel/parseSource';
+import { SecretSelect } from '@studio/components/CreateDatasetPanel/SecretSelect';
+import { TextField } from '@studio/components/CreateDatasetPanel/TextField';
 import type { WorkspaceSecrets } from '@studio/components/CreateDatasetPanel/useWorkspaceSecrets';
 import type { DraftErrors, SourceError } from '@studio/components/CreateDatasetPanel/validateDraft';
 import { type Dispatch, type ReactNode, useRef, useState } from 'react';
@@ -50,11 +48,6 @@ function renderSourceError(
         {label}
       </button>{' '}
       tab.
-      {/* The links above split the sentence across elements; this unbroken copy keeps it findable as
-          text. Assistive tech reads the live message above, so the copy is hidden from it. */}
-      <span className="sr-only" aria-hidden="true">
-        Trying to import from {label}? Switch to {label} tab.
-      </span>
     </>
   );
 }
