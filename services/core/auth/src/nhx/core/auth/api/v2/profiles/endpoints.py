@@ -158,7 +158,7 @@ async def _me(caller: Caller, auth_client: AuthClient, session_maker: async_sess
     fallback = email or caller.principal_id or LOCAL_DISPLAY_NAME
     profile = (
         Profile(
-            display_name=record.display_name(fallback) or fallback,
+            display_name=record.display_name() or fallback,
             display_name_override=record.display_name_override,
             idp_display_name=record.idp_display_name,
             avatar_url=record.avatar_url,

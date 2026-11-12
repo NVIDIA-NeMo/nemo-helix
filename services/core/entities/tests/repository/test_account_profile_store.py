@@ -8,6 +8,7 @@ from nhx.core.entities.app.repository import AccountProfileStore, IdentityClaims
 from nhx.core.entities.app.repository.account_identity import AccountIdentityStore
 from nhx.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountIdentity, DBAccountProfile
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 
 ISSUER = "https://idp.example.com"
 OTHER_ISSUER = "https://other-idp.example.com"
@@ -125,6 +126,30 @@ async def test_update_sets_and_clears_override(session_maker):
     cleared = await profiles.update(record.account_id, {"display_name": None})
     assert cleared.display_name() == "IdP"
     assert cleared.timezone == "Europe/Paris"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("conflicts", "succeeds"), [(2, True), (3, False)])
+async def test_update_retries_concurrent_first_writes_twice(session_maker, monkeypatch, conflicts, succeeds):
+    record = await _materialize(AccountIdentityStore(session_maker), "sub-1")
+    profiles = AccountProfileStore(session_maker)
+    real = profiles._get_or_create_profile
+    calls = 0
+
+    async def flaky(session, account_id):
+        nonlocal calls
+        calls += 1
+        if calls <= conflicts:
+            raise IntegrityError("insert", {}, Exception("duplicate key"))
+        return await real(session, account_id)
+
+    monkeypatch.setattr(profiles, "_get_or_create_profile", flaky)
+    if succeeds:
+        assert (await profiles.update(record.account_id, {"timezone": "UTC"})).timezone == "UTC"
+    else:
+        with pytest.raises(IntegrityError):
+            await profiles.update(record.account_id, {"timezone": "UTC"})
+    assert calls == 3
 
 
 @pytest.mark.asyncio

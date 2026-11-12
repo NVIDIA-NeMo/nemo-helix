@@ -7,16 +7,19 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from nhx.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountIdentity, DBAccountProfile
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm.exc import StaleDataError
+
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 audit_logger = logging.getLogger("nhx.audit.accounts")
@@ -73,14 +76,8 @@ class AccountProfileRecord:
     locale: str | None
     last_login_at: datetime | None
 
-    def display_name(self, fallback: str | None = None) -> str | None:
-        return (
-            self.display_name_override
-            or self.idp_display_name
-            or self.primary_email
-            or self.account_display_name
-            or fallback
-        )
+    def display_name(self) -> str | None:
+        return self.display_name_override or self.idp_display_name or self.primary_email or self.account_display_name
 
     def public_display_name(self, principal: str) -> str | None:
         """Display name for other users: never reveals an email the caller didn't send.
@@ -143,32 +140,33 @@ class AccountProfileStore:
 
     async def update(self, account_id: str, fields: dict[ProfileField, str | None]) -> AccountProfileRecord:
         """Set user-editable fields; a None value clears the field."""
-        for attempt in range(3):
-            try:
-                async with self.session_maker() as session, session.begin():
-                    account = await session.get(DBAccount, account_id)
-                    if account is None:
-                        raise AccountProfileNotFoundError(account_id)
-                    profile = await self._get_or_create_profile(session, account_id)
-                    for key, value in fields.items():
-                        setattr(profile, key, value)
-                    return _record(account, profile)
-            except (IntegrityError, StaleDataError):
-                if attempt == 2:
-                    raise
-        raise AssertionError("unreachable")
+
+        async def apply(session: AsyncSession) -> AccountProfileRecord:
+            account = await session.get(DBAccount, account_id)
+            if account is None:
+                raise AccountProfileNotFoundError(account_id)
+            profile = await self._get_or_create_profile(session, account_id)
+            for key, value in fields.items():
+                setattr(profile, key, value)
+            return _record(account, profile)
+
+        return await self._in_transaction(apply)
 
     async def sync_identity(self, identity_id: str, claims: IdentityClaims) -> None:
         """Record a sighting of ``identity_id`` and copy its claims onto the profile if it is primary."""
-        for attempt in range(3):
-            try:
-                async with self.session_maker() as session, session.begin():
-                    await self._sync_identity(session, identity_id, claims)
-                return
-            except (IntegrityError, StaleDataError):
-                # A concurrent first sync created the profile or bumped its version; reread and retry.
-                if attempt == 2:
-                    raise
+        await self._in_transaction(lambda session: self._sync_identity(session, identity_id, claims))
+
+    async def _in_transaction(self, fn: Callable[[AsyncSession], Awaitable[T]]) -> T:
+        """Run ``fn`` in a transaction, retried when a concurrent first write created the profile or bumped its version."""
+
+        async def attempt() -> T:
+            async with self.session_maker() as session, session.begin():
+                return await fn(session)
+
+        for _ in range(2):
+            with suppress(IntegrityError, StaleDataError):
+                return await attempt()
+        return await attempt()
 
     async def _sync_identity(self, session: AsyncSession, identity_id: str, claims: IdentityClaims) -> None:
         row = (
