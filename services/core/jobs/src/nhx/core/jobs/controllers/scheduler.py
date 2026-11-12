@@ -91,7 +91,7 @@ class JobScheduler(HeartbeatMixin, Controller):
             meter,
             subsystem="jobs.scheduler",
             name="queued",
-            description="Number of job steps queued waiting for capacity, by workspace and user",
+            description="Number of job steps queued or resuming, waiting for capacity, by workspace and user",
             callbacks=[self._observe_queued],
         )
         create_observable_gauge(
@@ -154,7 +154,11 @@ class JobScheduler(HeartbeatMixin, Controller):
                 return
 
         self._queued_counts = _count_by_workspace_and_user(
-            s for s in steps if HelixJobStatus(s.status) == HelixJobStatus.QUEUED
+            # Resumed steps deferred by admission stay RESUMING (they cannot move to QUEUED),
+            # so count them as waiting too or they would be invisible to both gauges.
+            s
+            for s in steps
+            if HelixJobStatus(s.status) in (HelixJobStatus.QUEUED, HelixJobStatus.RESUMING)
         )
         self._refresh_running_counts()
 

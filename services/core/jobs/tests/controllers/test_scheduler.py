@@ -465,7 +465,7 @@ def test_queued_and_running_gauges_report_counts_by_workspace_and_user(
     provider = MeterProvider(metric_readers=[reader])
     with patch.object(scheduler_module, "meter", provider.get_meter("test")):
         scheduler = JobScheduler(
-            backend_registry, mock_nemo_client, admission=_DeferringAdmission({"q1", "q2", "q3", "q4"})
+            backend_registry, mock_nemo_client, admission=_DeferringAdmission({"q1", "q2", "q3", "q4", "q5"})
         )
 
     def _step(name: str, workspace: str, status: HelixJobStatus, user: str | None) -> HelixJobStepWithContext:
@@ -479,6 +479,7 @@ def test_queued_and_running_gauges_report_counts_by_workspace_and_user(
         _step("q2", "ws-a", HelixJobStatus.QUEUED, "bob"),
         _step("q3", "ws-a", HelixJobStatus.QUEUED, "bob"),
         _step("q4", "ws-b", HelixJobStatus.QUEUED, None),
+        _step("q5", "ws-a", HelixJobStatus.RESUMING, "alice"),
     ]
     running = [
         _step("r1", "ws-a", HelixJobStatus.ACTIVE, "alice"),
@@ -491,7 +492,7 @@ def test_queued_and_running_gauges_report_counts_by_workspace_and_user(
 
     points = _gauge_points(reader)
     assert points["nhx.jobs.scheduler.queued"] == {
-        ("ws-a", "alice"): 1,
+        ("ws-a", "alice"): 2,
         ("ws-a", "bob"): 2,
         ("ws-b", "unknown"): 1,
     }
