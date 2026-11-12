@@ -171,7 +171,7 @@ def test_api_health_wait_allows_cold_start_over_one_minute(monkeypatch, tmp_path
         return httpx.Response(503, json={"status": "not_ready"})
 
     request = Mock(side_effect=health_response)
-    monkeypatch.setattr(docker_backend.httpx, "get", request)
+    monkeypatch.setattr(docker_backend, "httpx", SimpleNamespace(get=request, RequestError=httpx.RequestError))
 
     backend._wait_for_healthy(container)
 
@@ -182,9 +182,12 @@ def test_api_health_wait_allows_cold_start_over_one_minute(monkeypatch, tmp_path
 def test_api_health_timeout_includes_last_readiness_response(monkeypatch, tmp_path: Path) -> None:
     backend, container, elapsed = _health_check_backend(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        docker_backend.httpx,
-        "get",
-        Mock(return_value=httpx.Response(503, text='{"not_ready": ["builder-queue"]}')),
+        docker_backend,
+        "httpx",
+        SimpleNamespace(
+            get=Mock(return_value=httpx.Response(503, text='{"not_ready": ["builder-queue"]}')),
+            RequestError=httpx.RequestError,
+        ),
     )
 
     with pytest.raises(RuntimeError, match="Health check returned status 503.*builder-queue"):
