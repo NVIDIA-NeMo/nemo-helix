@@ -45,7 +45,6 @@ from nhx.core.entities.app.repository import (
     AccountCredentialRecord,
     AccountCredentialStore,
     AccountIdentityStore,
-    AccountProfileStore,
     IdentityClaims,
 )
 from nhx.core.entities.app.repository.account_identity import AccountIdentityRecord
@@ -95,7 +94,6 @@ class WebSessionResponse(BaseModel):
     groups: list[str]
     account_id: str
     authz_aliases: list[str]
-    display_name: str | None = None
 
 
 async def get_login_store() -> OidcLoginStore:
@@ -121,17 +119,9 @@ async def get_identity_store() -> AccountIdentityStore:
         raise HTTPException(status_code=503, detail="OIDC server-side login is not available") from exc
 
 
-async def get_profile_store() -> AccountProfileStore:
-    try:
-        return AccountProfileStore(await get_account_session_maker())
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail="OIDC server-side login is not available") from exc
-
-
 LoginStore = Annotated[OidcLoginStore, Depends(get_login_store)]
 CredentialStore = Annotated[AccountCredentialStore, Depends(get_credential_store)]
 IdentityStore = Annotated[AccountIdentityStore, Depends(get_identity_store)]
-ProfileStore = Annotated[AccountProfileStore, Depends(get_profile_store)]
 BrokerClientName = Literal["public", "confidential"]
 
 
@@ -598,20 +588,16 @@ async def logout(request: Request, credential_store: CredentialStore) -> Respons
     response_model=WebSessionResponse,
     responses={401: {"model": ErrorResponse, "description": "Missing or invalid web session"}},
 )
-async def web_session(
-    request: Request, credential_store: CredentialStore, profile_store: ProfileStore
-) -> WebSessionResponse:
+async def web_session(request: Request, credential_store: CredentialStore) -> WebSessionResponse:
     principal = await resolve_web_session(request, credential_store)
     if principal is None or principal.account_id is None:
         raise HTTPException(status_code=401, detail="Missing session")
-    profile = await profile_store.get(principal.account_id)
     return WebSessionResponse(
         id=principal.id,
         email=principal.email,
         groups=principal.groups,
         account_id=principal.account_id,
         authz_aliases=principal.authz_aliases,
-        display_name=profile.display_name(principal.email or principal.id) if profile else None,
     )
 
 

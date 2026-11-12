@@ -24,14 +24,9 @@ from nhx.common.config.base import (
     OIDCServerSessionsConfig,
 )
 from nhx.core.auth.oidc_broker.crypto import client_secret_basic_header, pkce_challenge
-from nhx.core.auth.oidc_broker.routes import (
-    get_credential_store,
-    get_identity_store,
-    get_login_store,
-    get_profile_store,
-)
+from nhx.core.auth.oidc_broker.routes import get_credential_store, get_identity_store, get_login_store
 from nhx.core.auth.oidc_broker.store import DBAuthLoginTransaction, LoginRecord, OidcLoginStore
-from nhx.core.entities.app.repository import AccountCredentialRecord, AccountCredentialType, AccountProfileRecord
+from nhx.core.entities.app.repository import AccountCredentialRecord, AccountCredentialType
 from nhx.core.entities.app.repository.account_identity import AccountIdentityRecord
 from nhx.core.entities.app.repository.sqlalchemy.base import Base
 from sqlalchemy import select
@@ -152,23 +147,6 @@ class MemoryIdentityStore:
             identity_id="identity-1",
             issuer=kwargs["issuer"],
             subject=kwargs["subject"],
-        )
-
-
-class MemoryProfileStore:
-    async def get(self, account_id: str) -> AccountProfileRecord | None:
-        return AccountProfileRecord(
-            account_id=account_id,
-            account_type="user",
-            status="active",
-            primary_email="user@example.com",
-            account_display_name=None,
-            display_name_override=None,
-            idp_display_name="User One",
-            avatar_url=None,
-            timezone=None,
-            locale=None,
-            last_login_at=None,
         )
 
 
@@ -334,7 +312,6 @@ def broker_app(monkeypatch: pytest.MonkeyPatch):
     app.dependency_overrides[get_login_store] = lambda: transactions
     app.dependency_overrides[get_credential_store] = lambda: credentials
     app.dependency_overrides[get_identity_store] = lambda: identities
-    app.dependency_overrides[get_profile_store] = MemoryProfileStore
     app.include_router(router, prefix="/apis/auth")
     app.state.identities = identities
     yield TestClient(app, base_url="https://nemo.example.com"), transactions, credentials
@@ -484,7 +461,6 @@ def test_web_session_login_sets_account_bound_cookie_and_supports_logout(broker_
         "groups": ["nemo-users"],
         "account_id": "account-1",
         "authz_aliases": ["user-1", "user@example.com"],
-        "display_name": "User One",
     }
     assert "provider-access" not in session.text
 

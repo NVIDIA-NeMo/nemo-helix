@@ -26175,9 +26175,6 @@ components:
             type: string
           type: array
           title: Authz Aliases
-        display_name:
-          title: Display Name
-          type: string
       type: object
       required:
       - id
