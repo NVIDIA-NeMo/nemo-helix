@@ -527,14 +527,19 @@ async def resolve_profiles(
     profiles = AccountProfileStore(session_maker)
     resolved = await profiles.resolve(body.principals)
     account_ids = {item.account_id for item in resolved if item.account_id and item.account_id != caller.account_id}
-    if account_ids and auth_client.auth_enabled and not await _is_platform_admin(auth_client, caller):
-        caller_keys = [key for key in (caller.principal_id, caller.email, *caller.groups) if key]
-        visible = await accounts_sharing_a_workspace(
-            entities_client.as_service("auth", internal=True), caller_keys, await profiles.principal_keys(account_ids)
-        )
-        # Hidden accounts look exactly like principals with no account.
+    filterable = account_ids or any(item.ambiguous for item in resolved)
+    if filterable and auth_client.auth_enabled and not await _is_platform_admin(auth_client, caller):
+        hidden: set[str] = set()
+        if account_ids:
+            caller_keys = [key for key in (caller.principal_id, caller.email, *caller.groups) if key]
+            hidden = account_ids - await accounts_sharing_a_workspace(
+                entities_client.as_service("auth", internal=True),
+                caller_keys,
+                await profiles.principal_keys(account_ids),
+            )
+        # Hidden accounts, and ambiguous matches (which reveal that accounts exist), look like principals with no account.
         resolved = [
-            item if item.account_id not in account_ids - visible else ResolvedPrincipal(principal=item.principal)
+            item if item.account_id and item.account_id not in hidden else ResolvedPrincipal(principal=item.principal)
             for item in resolved
         ]
     return ProfileResolveResponse(data=[ResolvedProfile(**asdict(item)) for item in resolved])

@@ -265,3 +265,14 @@ def test_resolve_hides_accounts_outside_the_callers_explicit_workspaces(http_cli
     assert _resolve(http_client, stranger, alice["X-NHX-Principal-Id"])[0]["account_id"] is None
     admin_view = _resolve(http_client, _user(TEST_ADMIN_EMAIL), stranger["X-NHX-Principal-Id"])
     assert admin_view[0]["display_name"] == "Named"
+
+
+def test_resolve_hides_ambiguity_from_callers_outside_the_workspace(http_client: TestClient) -> None:
+    email = f"shared-{uuid.uuid4().hex[:8]}@example.com"
+    for _ in range(2):
+        http_client.get(
+            ME, headers={"X-NHX-Principal-Id": f"sub-{uuid.uuid4().hex[:8]}", "X-NHX-Principal-Email": email}
+        )
+
+    assert _resolve(http_client, _user(), email)[0]["ambiguous"] is False
+    assert _resolve(http_client, _user(TEST_ADMIN_EMAIL), email)[0]["ambiguous"] is True
