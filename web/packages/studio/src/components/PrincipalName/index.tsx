@@ -45,9 +45,13 @@ export const PrincipalName: FC<PrincipalNameProps> = ({ principal, layout = 'inl
       : principal;
 
   if (layout === 'inline') {
+    // A self-chosen name could imitate anyone, so it never appears without the principal.
     return (
       <Text kind={kind} className="truncate" title={identity}>
         {name}
+        {resolved.display_name_is_override && (
+          <span className="text-secondary"> ({principal})</span>
+        )}
       </Text>
     );
   }

@@ -4,7 +4,10 @@
 import type { PreferenceDocument } from '@nemo/sdk/generated/platform/schema';
 import {
   enqueuePreferencePatch,
+  getPreferenceOverlay,
   PREFERENCE_WRITE_DEBOUNCE_MS,
+  preferenceDocumentId,
+  releasePreferencePatches,
 } from '@studio/providers/preferences/writeQueue';
 import { QueryClient } from '@tanstack/react-query';
 
@@ -45,5 +48,21 @@ describe('enqueuePreferencePatch', () => {
     await vi.runAllTimersAsync();
 
     expect(queryClient.getQueryData(['studio.ui'])).toEqual(document('system'));
+  });
+
+  it('holds edits without an account, showing them in the overlay until sent', async () => {
+    mockPatch.mockResolvedValue(document('light'));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
+    const id = preferenceDocumentId('studio.held');
+
+    enqueuePreferencePatch({ namespace: 'studio.held', patch: { theme: 'light' }, queryClient });
+    await vi.advanceTimersByTimeAsync(PREFERENCE_WRITE_DEBOUNCE_MS * 2);
+    expect(mockPatch).not.toHaveBeenCalledWith('studio.held', expect.anything(), undefined);
+    expect(getPreferenceOverlay(id)).toEqual({ theme: 'light' });
+
+    releasePreferencePatches('a');
+    await vi.runAllTimersAsync();
+    expect(mockPatch).toHaveBeenCalledWith('studio.held', { theme: 'light' }, undefined);
+    expect(getPreferenceOverlay(id)).toBeUndefined();
   });
 });

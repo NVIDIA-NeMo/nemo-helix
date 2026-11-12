@@ -126,3 +126,9 @@ async def test_workspace_and_account_deletes_cascade(
         await session.execute(delete(DBAccount).where(DBAccount.id == account_id))
     async with session_maker() as session:
         assert (await session.scalars(select(DBAccountPreference))).all() == []
+
+
+@pytest.mark.asyncio
+async def test_put_drops_nulls_so_defaults_still_apply(store: AccountPreferenceStore, account_id: str) -> None:
+    record = await store.put(account_id, "studio.ui", None, {"theme": None, "nested": {"a": None, "b": 1}})
+    assert record.value == {"nested": {"b": 1}}

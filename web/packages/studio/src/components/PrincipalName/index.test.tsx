@@ -46,10 +46,15 @@ describe('PrincipalName', () => {
       })
     );
     render(<PrincipalName principal="alice@example.com" />);
-    expect(screen.getByText('Admin')).toHaveAttribute(
-      'title',
-      'alice@example.com · Alice Anderson'
+    expect(screen.getByTitle('alice@example.com · Alice Anderson')).toHaveTextContent(
+      'Admin (alice@example.com)'
     );
+  });
+
+  it('shows an IdP-provided name inline without the principal', () => {
+    mockDisplay.mockReturnValue(resolved({ display_name: 'Alice Anderson' }));
+    render(<PrincipalName principal="alice@example.com" />);
+    expect(screen.getByTitle('alice@example.com')).toHaveTextContent(/^Alice Anderson$/);
   });
 
   it('attributes creator-less resources to the local account when auth is off', () => {

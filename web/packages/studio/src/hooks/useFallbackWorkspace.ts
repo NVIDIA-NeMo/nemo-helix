@@ -19,14 +19,15 @@ const NO_EXCLUSIONS: readonly string[] = [];
  * can't fall back to itself or cycle between forbidden ones. Undefined while that can't be decided.
  */
 export const useFallbackWorkspace = (
-  exclude: readonly string[] = NO_EXCLUSIONS
+  exclude: readonly string[] = NO_EXCLUSIONS,
+  { enabled = true }: { enabled?: boolean } = {}
 ): string | undefined => {
   const [recentWorkspaces, , , recentKnown] = usePreference(studioPreferences.recentWorkspaces);
   const personal = useAuthProfile()?.workspace || undefined;
   const me = useMe();
   const { data, isSuccess, isError } = useEntitiesListWorkspaces(
     { page: 1, page_size: DEFAULT_LARGE_PAGE_SIZE },
-    { query: { enabled: me.isSuccess || me.isError } }
+    { query: { enabled: enabled && (me.isSuccess || me.isError) } }
   );
 
   return useMemo(() => {
@@ -36,15 +37,16 @@ export const useFallbackWorkspace = (
       // Optimistic until the list loads; the workspace access check still guards the choice.
       return recentKnown ? (recentWorkspaces.find(usable) ?? personalWorkspace) : undefined;
     }
-    // Without the list, trust only names we know: excluding forbidden ones stops any cycling.
+    // Without the full list, trust names we know: excluding forbidden ones stops any cycling.
     const accessible = isError ? undefined : (data?.data ?? []).map(({ name }) => name);
+    const complete = (data?.pagination?.total_pages ?? 1) <= 1;
     const reachable = (name: string | undefined) =>
-      usable(name) && (!accessible || accessible.includes(name));
+      usable(name) && (!accessible || !complete || accessible.includes(name));
     return (
       recentWorkspaces.find(reachable) ??
       (reachable(personal) ? personal : undefined) ??
       accessible?.find(usable) ??
       (usable(DEFAULT_WORKSPACE) ? DEFAULT_WORKSPACE : undefined)
     );
-  }, [data?.data, exclude, isError, isSuccess, personal, recentKnown, recentWorkspaces]);
+  }, [data, exclude, isError, isSuccess, personal, recentKnown, recentWorkspaces]);
 };

@@ -16,6 +16,16 @@ interface WorkspaceProviderProps {
 
 export const WorkspaceProvider: FC<WorkspaceProviderProps> = ({ children }) => {
   const { isTokenActive } = useAuthTokenStatus();
+  const accessCheck = (workspace: string | undefined) => ({
+    query: {
+      enabled: !!workspace && isTokenActive,
+      retry: (failureCount: number, err: { response?: { status?: number } }) => {
+        const status = err.response?.status;
+        if (status === 401 || status === 403) return false;
+        return failureCount < 3;
+      },
+    },
+  });
   // Per browser, not roaming: devices on different workspaces must not overwrite each other.
   const [storedWorkspace, setStoredWorkspace] = useLocalStorage<string>(SELECTED_WORKSPACE_KEY);
   const { workspace: workspaceParam } = useParams();
@@ -25,10 +35,16 @@ export const WorkspaceProvider: FC<WorkspaceProviderProps> = ({ children }) => {
     () => (storedWorkspace ? [...forbidden, storedWorkspace] : forbidden),
     [forbidden, storedWorkspace]
   );
-  const fallbackWorkspace = useFallbackWorkspace(excluded);
+  const directWorkspace = workspaceParam || storedWorkspace;
+  const directCheck = useEntitiesGetWorkspace(directWorkspace ?? '', accessCheck(directWorkspace));
+  const directForbidden = !directCheck.isPending && directCheck.error?.response?.status === 403;
+  // Only list workspaces when a fallback is actually needed.
+  const fallbackWorkspace = useFallbackWorkspace(excluded, {
+    enabled: !workspaceParam && (!storedWorkspace || directForbidden),
+  });
 
   // Priority: URL route param → stored selection → fallback.
-  const selectedWorkspace = workspaceParam || storedWorkspace || fallbackWorkspace;
+  const selectedWorkspace = directWorkspace || fallbackWorkspace;
 
   // Persist route changes, but do not react to storedWorkspace changes. Otherwise, tabs on
   // different workspace routes continuously overwrite each other's stored value.
@@ -38,18 +54,10 @@ export const WorkspaceProvider: FC<WorkspaceProviderProps> = ({ children }) => {
     }
   }, [workspaceParam, setStoredWorkspace]);
 
+  // Shares its cache with the direct check whenever the selection is the direct workspace.
   const { isPending: isWorkspaceLoading, error: workspaceError } = useEntitiesGetWorkspace(
     selectedWorkspace ?? '',
-    {
-      query: {
-        enabled: !!selectedWorkspace && isTokenActive,
-        retry: (failureCount, err) => {
-          const status = err.response?.status;
-          if (status === 401 || status === 403) return false;
-          return failureCount < 3;
-        },
-      },
-    }
+    accessCheck(selectedWorkspace)
   );
 
   const hasUnauthorizedError = !isWorkspaceLoading && workspaceError?.response?.status === 403;

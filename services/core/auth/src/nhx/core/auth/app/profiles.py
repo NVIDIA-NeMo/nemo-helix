@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import weakref
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -137,6 +138,10 @@ async def _local_account_id(session_maker: async_sessionmaker[AsyncSession]) -> 
     )
 
 
+# The defaults account never changes, so resolve it once per database rather than per request.
+_defaults_account_ids: weakref.WeakKeyDictionary[async_sessionmaker[AsyncSession], str] = weakref.WeakKeyDictionary()
+
+
 class PreferenceDefaultsStore:
     """Config-managed defaults (read-only) layered over admin-managed defaults stored in the database."""
 
@@ -149,9 +154,13 @@ class PreferenceDefaultsStore:
         return namespace in self.config.preference_defaults
 
     async def account_id(self) -> str:
-        return await _system_account_id(
+        if (cached := _defaults_account_ids.get(self.session_maker)) is not None:
+            return cached
+        account_id = await _system_account_id(
             self.session_maker, issuer=DEFAULTS_ISSUER, subject=DEFAULTS_SUBJECT, account_type="service"
         )
+        _defaults_account_ids[self.session_maker] = account_id
+        return account_id
 
     async def get(self, namespace: str) -> PreferenceDefaults | None:
         if self.is_config_managed(namespace):

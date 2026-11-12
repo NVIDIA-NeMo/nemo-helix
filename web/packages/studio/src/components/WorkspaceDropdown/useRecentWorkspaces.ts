@@ -5,11 +5,13 @@ import { WORKSPACE_DROPDOWN_RECENT_LIMIT } from '@studio/components/WorkspaceDro
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
 import { studioPreferences } from '@studio/providers/preferences/definitions';
 import { usePreference } from '@studio/providers/preferences/usePreference';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 export const useRecentWorkspaces = () => {
   // The preference schema guarantees an array, even if the stored value is invalid.
-  const [recentWorkspaces, setRecentWorkspaces] = usePreference(studioPreferences.recentWorkspaces);
+  const [recentWorkspaces, setRecentWorkspaces, , , loaded] = usePreference(
+    studioPreferences.recentWorkspaces
+  );
   const workspace = useWorkspaceFromPathIfExists();
 
   const addRecentWorkspace = (name: string) => {
@@ -30,13 +32,17 @@ export const useRecentWorkspaces = () => {
     }
   };
 
-  // We should always use the current workspace in the recent workspaces list
+  // We should always use the current workspace in the recent workspaces list. Wait for the stored
+  // list: the write replaces the whole array, so writing over the default would wipe it.
+  const added = useRef(false);
   useEffect(() => {
+    if (!loaded || added.current) return;
+    added.current = true;
     if (workspace && recentWorkspaces[0] !== workspace) {
       addRecentWorkspace(workspace);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loaded]);
 
   return {
     recentWorkspaces,

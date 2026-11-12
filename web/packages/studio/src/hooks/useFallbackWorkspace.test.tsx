@@ -66,4 +66,22 @@ describe('useFallbackWorkspace', () => {
       renderHook(() => useFallbackWorkspace(['a', 'b', 'default'])).result.current
     ).toBeUndefined();
   });
+
+  it('accepts recents missing from an incomplete list', () => {
+    mockRecent.mockReturnValue(['page-two']);
+    mockList.mockReturnValue({
+      ...listed('alpha'),
+      data: { data: [{ name: 'alpha' }], pagination: { total_pages: 2 } },
+    });
+    expect(renderHook(() => useFallbackWorkspace()).result.current).toBe('page-two');
+  });
+
+  it('does not list workspaces when disabled', () => {
+    mockRecent.mockReturnValue([]);
+    mockList.mockReturnValue({ data: undefined, isSuccess: false, isError: false });
+    renderHook(() => useFallbackWorkspace([], { enabled: false }));
+    expect(mockList).toHaveBeenLastCalledWith(expect.anything(), {
+      query: { enabled: false },
+    });
+  });
 });

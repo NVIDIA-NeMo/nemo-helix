@@ -133,3 +133,28 @@ async def test_resolve_or_materialize_reuses_account_with_same_link_key(session_
         identity_count = await session.scalar(select(func.count()).select_from(DBAccountIdentity))
     assert account_count == 1
     assert identity_count == 2
+
+
+@pytest.mark.asyncio
+async def test_claims_snapshot_allowlist_applies_only_to_users(session_maker):
+    store = AccountIdentityStore(session_maker)
+    await store.resolve_or_materialize(
+        issuer="nemo:access-key",
+        subject="key-1",
+        subject_claim="access_key",
+        account_type="service",
+        claims_snapshot={"principal_id": "service-account:foo"},
+    )
+    await store.resolve_or_materialize(
+        issuer="https://idp.example.com",
+        subject="sub-9",
+        subject_claim="sub",
+        account_type="user",
+        claims_snapshot={"sub": "sub-9", "phone_number": "555"},
+    )
+
+    async with session_maker() as session:
+        rows = await session.execute(select(DBAccountIdentity.subject, DBAccountIdentity.claims_snapshot))
+        snapshots = {subject: snapshot for subject, snapshot in rows}
+    assert snapshots["key-1"] == {"principal_id": "service-account:foo"}
+    assert snapshots["sub-9"] == {"sub": "sub-9"}

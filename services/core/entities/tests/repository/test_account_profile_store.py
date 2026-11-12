@@ -163,6 +163,11 @@ async def test_resolve_never_reveals_email_for_other_principals(session_maker):
     await _materialize(
         AccountIdentityStore(session_maker), "bob-sub", primary_email="bob@example.com", display_name="bob@example.com"
     )
+    # An IdP email change leaves the account's sign-in name holding the old address.
+    async with session_maker() as session, session.begin():
+        await session.execute(
+            update(DBAccount).where(DBAccount.primary_email == "bob@example.com").values(display_name="old@example.com")
+        )
 
     results = await AccountProfileStore(session_maker).resolve(["bob-sub", "bob@example.com"])
 

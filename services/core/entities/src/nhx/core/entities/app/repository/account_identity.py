@@ -97,7 +97,8 @@ class AccountIdentityStore:
             primary_email=primary_email,
             link_key=link_key,
             link_key_claim=link_key_claim,
-            claims_snapshot=trim_claims_snapshot(claims_snapshot),
+            # Only people's claims are PII to trim; service identities record which principal they are.
+            claims_snapshot=trim_claims_snapshot(claims_snapshot) if account_type == "user" else claims_snapshot or {},
             linked_via=linked_via,
             linked_by=linked_by,
         )

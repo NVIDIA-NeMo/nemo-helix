@@ -116,7 +116,8 @@ class AccountPreferenceStore:
         *,
         if_match: int | None = None,
     ) -> PreferenceRecord:
-        return await self._write(account_id, namespace, workspace, lambda _current: value, if_match)
+        # Applied as a patch onto nothing so nulls are dropped: a stored null would hide the default.
+        return await self._write(account_id, namespace, workspace, lambda _current: merge_patch({}, value), if_match)
 
     async def patch(
         self,

@@ -1,11 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  getAuthGetMyPreferenceQueryKey,
-  useAuthGetMyPreference,
-} from '@nemo/sdk/generated/platform/profiles';
-import type { PreferenceDocument } from '@nemo/sdk/generated/platform/schema';
+import { useAuthGetMyPreference } from '@nemo/sdk/generated/platform/profiles';
 import { featureFlags } from '@studio/constants/featureFlags';
 import { useMe } from '@studio/providers/auth/useMe';
 import { isJsonObject, mergePatch } from '@studio/providers/preferences/mergePatch';
@@ -17,16 +13,22 @@ import type {
   PreferenceScope,
 } from '@studio/providers/preferences/types';
 import {
-  deferPreferencePatch,
   enqueuePreferencePatch,
-  releaseDeferredPreferencePatches,
+  getPreferenceOverlay,
+  preferenceDocumentId,
+  releasePreferencePatches,
+  subscribePreferenceOverlays,
 } from '@studio/providers/preferences/writeQueue';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 
-/** [value, set, clear, ready]: `ready` is false until the stored value is known or its read has failed. */
-type PreferenceState<T> = readonly [T, (value: T) => void, () => void, boolean];
+/**
+ * [value, set, clear, ready, loaded]: `ready` is false until the stored value is known or its read
+ * has failed; `loaded` only once the server document itself has loaded. Read-modify-write updates
+ * of whole values (arrays) should wait for `loaded`, or they replace what the server holds.
+ */
+type PreferenceState<T> = readonly [T, (value: T) => void, () => void, boolean, boolean];
 
 const PREFERENCE_STALE_TIME_MS = 5 * 60_000;
 
@@ -76,15 +78,6 @@ const buildPatch = <T>(
   return { [definition.key]: entries };
 };
 
-const emptyDocument = (namespace: string, workspace?: string): PreferenceDocument => ({
-  namespace,
-  workspace,
-  value: {},
-  defaults: {},
-  effective: {},
-  db_version: 0,
-});
-
 const useServerPreference = <T>(
   definition: PreferenceDefinition<T>,
   { workspace, entry }: PreferenceScope = {}
@@ -107,51 +100,56 @@ const useServerPreference = <T>(
   );
 
   useEffect(() => {
-    if (accountId) releaseDeferredPreferencePatches(accountId);
+    if (accountId) releasePreferencePatches(accountId);
   }, [accountId]);
 
   useEffect(() => {
     if (accountId && data && !isPlaceholderData) writeMirror(accountId, data);
   }, [accountId, data, isPlaceholderData]);
 
-  const value = useMemo(
-    () =>
-      parse(
-        definition,
-        readRaw(data?.effective, definition as PreferenceDefinition<unknown>, entry)
-      ),
-    [data?.effective, definition, entry]
+  // Edits not yet in the cached document, applied over whatever the server last returned, so a
+  // GET that lands mid-edit (or before /me) can't revert them.
+  const id = preferenceDocumentId(definition.namespace, workspace);
+  const overlay = useSyncExternalStore(subscribePreferenceOverlays, () => getPreferenceOverlay(id));
+  const userValue = useMemo(
+    () => (overlay ? (mergePatch(data?.value ?? {}, overlay) as JsonObject) : data?.value),
+    [data?.value, overlay]
+  );
+  const effective = useMemo(
+    () => (overlay ? (mergePatch(data?.defaults ?? {}, userValue) as JsonObject) : data?.effective),
+    [data?.defaults, data?.effective, overlay, userValue]
   );
 
+  const value = useMemo(
+    () => parse(definition, readRaw(effective, definition as PreferenceDefinition<unknown>, entry)),
+    [effective, definition, entry]
+  );
+
+  const storedValue = useRef(data?.value);
+  storedValue.current = data?.value;
   const write = useCallback(
     (next: T | undefined) => {
-      const queryKey = getAuthGetMyPreferenceQueryKey(definition.namespace, params);
-      const current =
-        queryClient.getQueryData<PreferenceDocument>(queryKey) ??
-        emptyDocument(definition.namespace, workspace);
-      const patch = buildPatch(definition, current.value, next, entry);
-      const userValue = mergePatch(current.value, patch) as JsonObject;
-      queryClient.setQueryData<PreferenceDocument>(queryKey, {
-        ...current,
-        value: userValue,
-        effective: mergePatch(current.defaults ?? {}, userValue) as JsonObject,
+      // Read the overlay now, not from the render, so several writes in one tick compose.
+      const pending = getPreferenceOverlay(id);
+      const base = storedValue.current ?? {};
+      const current = pending ? (mergePatch(base, pending) as JsonObject) : base;
+      enqueuePreferencePatch({
+        accountId,
+        namespace: definition.namespace,
+        workspace,
+        patch: buildPatch(definition, current, next, entry),
+        queryClient,
       });
-      // Before /me resolves the optimistic document stays fresh, so the GET won't revert it, and
-      // the patch is sent once the account is known.
-      const write = { namespace: definition.namespace, workspace, patch, queryClient };
-      if (accountId) enqueuePreferencePatch({ ...write, accountId });
-      else deferPreferencePatch(write);
     },
-    // `params` is derived from `workspace`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [accountId, definition, entry, queryClient, workspace]
+    [accountId, definition, entry, id, queryClient, workspace]
   );
 
   const setValue = useCallback((next: T) => write(next), [write]);
   const clearValue = useCallback(() => write(undefined), [write]);
   // Settled with an error (or no account to read for): the default is the best value we'll get.
   const ready = data !== undefined || isError || (!me.isPending && !accountId);
-  return [value, setValue, clearValue, ready] as const;
+  const loaded = data !== undefined && !isPlaceholderData;
+  return [value, setValue, clearValue, ready, loaded] as const;
 };
 
 const useLocalPreference = <T>(
@@ -169,7 +167,7 @@ const useLocalPreference = <T>(
     (next: T) => setStored(definition.cap ? definition.cap(next) : next),
     [definition, setStored]
   );
-  return [value, setValue, clearStored, true] as const;
+  return [value, setValue, clearStored, true, true] as const;
 };
 
 /**

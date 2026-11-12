@@ -179,3 +179,18 @@ def test_unset_without_key_deletes_document(preferences: MagicMock) -> None:
     preferences.delete_my_preference.assert_called_once_with(
         namespace="studio.onboarding", query_params={"workspace": "default"}
     )
+
+
+def test_tables_render_user_text_literally(profiles: MagicMock, preferences: MagicMock) -> None:
+    profiles.get_me.return_value.data.return_value = ME.model_copy(
+        update={"profile": Profile(display_name="Bob [x]"), "groups": ["[/]"]}
+    )
+    preferences.get_my_preference.return_value.data.return_value = _document({"label": "[/]", "[b]k": 1})
+
+    whoami = _invoke_tty("auth", "whoami")
+    get = _invoke_tty("preferences", "get", "studio.ui")
+
+    assert_exit_code(whoami, 0)
+    assert_exit_code(get, 0)
+    assert "Bob [x]" in whoami.output and "[/]" in whoami.output
+    assert "[/]" in get.output and "[b]k" in get.output

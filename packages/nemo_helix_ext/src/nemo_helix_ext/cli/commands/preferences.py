@@ -14,6 +14,7 @@ import yaml
 from nemo_helix_plugin.auth.profiles.types import PreferenceDocument, PreferenceQueryParams, PreferenceValue
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from nemo_helix_ext.cli.commands.profile import profiles_client
 from nemo_helix_ext.cli.core.context import CLIContext
@@ -82,10 +83,11 @@ def _print_document(document: PreferenceDocument, state: CLIContext, *, raw: boo
     table = Table(title=document.namespace, show_header=False)
     table.add_column("Key", style="cyan")
     table.add_column("Value", overflow="fold")
-    table.add_row("[dim]workspace[/]", document.workspace or "[dim]global[/]")
+    # Keys and values are user text: render them as-is, never as Rich markup.
+    table.add_row("[dim]workspace[/]", Text(document.workspace) if document.workspace else "[dim]global[/]")
     table.add_row("[dim]db_version[/]", str(document.db_version))
     for key, value in (document.value if raw else document.effective).items():
-        table.add_row(key, value if isinstance(value, str) else json.dumps(value))
+        table.add_row(Text(key), Text(value if isinstance(value, str) else json.dumps(value)))
     Console().print(table)
 
 

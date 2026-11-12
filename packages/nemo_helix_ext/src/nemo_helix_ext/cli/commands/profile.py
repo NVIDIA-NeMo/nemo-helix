@@ -13,6 +13,7 @@ from nemo_helix_plugin.auth.profiles.types import Me, ProfileUpdate
 from nemo_helix_plugin.client.adapter import client_from_platform
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_ext.cli.core.errors import handle_errors
@@ -38,7 +39,7 @@ def print_me(me: Me, state: CLIContext) -> None:
     table.add_column("Value", overflow="fold")
     rows = [
         ("Account ID", me.account_id),
-        ("Principal", me.principal_id or "[dim]none[/]"),
+        ("Principal", me.principal_id or Text("none", style="dim")),
         ("Display Name", profile.display_name),
         ("IdP Name", profile.idp_display_name if profile.idp_display_name != profile.display_name else None),
         ("Name Override", profile.display_name_override),
@@ -53,7 +54,8 @@ def print_me(me: Me, state: CLIContext) -> None:
     ]
     for label, value in rows:
         if value is not None:
-            table.add_row(label, value)
+            # Names and groups are user text: render them as-is, never as Rich markup.
+            table.add_row(label, value if isinstance(value, Text) else Text(value))
     Console().print(table)
 
 

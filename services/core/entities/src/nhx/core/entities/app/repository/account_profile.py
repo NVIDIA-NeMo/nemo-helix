@@ -83,10 +83,13 @@ class AccountProfileRecord:
         )
 
     def public_display_name(self, principal: str) -> str | None:
-        """Display name for other users: never reveals primary_email unless the caller already sent it."""
-        account_name = self.account_display_name if self.account_display_name != self.primary_email else None
+        """Display name for other users: never reveals an email the caller didn't send.
+
+        ``account_display_name`` is skipped: sign-in often sets it to the email at the time, which stays
+        stale after an IdP email change.
+        """
         email = self.primary_email if principal == self.primary_email else None
-        return self.display_name_override or self.idp_display_name or account_name or email
+        return self.display_name_override or self.idp_display_name or email
 
 
 @dataclass(frozen=True)
