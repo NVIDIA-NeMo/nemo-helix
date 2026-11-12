@@ -353,8 +353,7 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 		defer wg.Done()
 		// Keep reading until EOF. A bufio.Scanner stops at its 64KB token limit,
 		// and then the child blocks writing to a pipe nobody drains. Progress bars
-		// redraw with \r and no \n, so they hit that limit and, once forwarded as
-		// one buffer, show up in log viewers as a single concatenated line.
+		// redraw with \r and no \n, so they hit that limit.
 		forEachLogLine(reader, func(line string) {
 			fmt.Println(line)                                           // Print to console without any extra formatting, so it can be captured by stdout logging collectors
 			slog.Log(context.Background(), logLevel(line, level), line) // Submit structured log to OTEL pipeline within the platform
@@ -408,16 +407,19 @@ const maxLogLineBytes = 64 * 1024
 // forEachLogLine calls fn for each line from r until EOF or a read error.
 // It never stops early, so the child process cannot block on a full pipe.
 //
-// A bare carriage return ends the current line. Progress bars redraw by
-// writing \r and then a new snapshot; log viewers do not move the cursor
-// back, so keeping those snapshots in one buffer prints them concatenated.
-// \r\n is one break, matching a newline. Trailing spaces on a \r-terminated
-// line are padding the bar writes to cover the previous snapshot.
+// A bare \r discards the text before it, as a progress bar redraw does.
+// Only the text left on the line at the next \n is logged. \r\n is one break.
 func forEachLogLine(r io.Reader, fn func(line string)) {
 	br := bufio.NewReaderSize(r, 32*1024)
 	pending := make([]byte, 0, 256)
+	replaced := false
 	emit := func(line []byte) {
+		if replaced {
+			line = trimRightSpace(line)
+		}
 		fn(string(line))
+		pending = pending[:0]
+		replaced = false
 	}
 	for {
 		b, err := br.ReadByte()
@@ -430,28 +432,27 @@ func forEachLogLine(r io.Reader, fn func(line string)) {
 		switch b {
 		case '\n':
 			emit(pending)
-			pending = pending[:0]
 		case '\r':
 			next, readErr := br.ReadByte()
-			crlf := readErr == nil && next == '\n'
-			if readErr == nil && !crlf {
+			if readErr == nil && next == '\n' {
+				emit(pending)
+				continue
+			}
+			if readErr == nil {
 				_ = br.UnreadByte()
 			}
-			line := pending
-			if !crlf {
-				line = trimRightSpace(line)
-			}
-			if crlf || len(line) > 0 {
-				emit(line)
-			}
+			// The following snapshot overwrites this one. Keep reading so the
+			// pipe drains, and log whichever snapshot a newline leaves in place.
 			pending = pending[:0]
+			replaced = true
 		default:
 			pending = append(pending, b)
 			if len(pending) >= maxLogLineBytes {
 				cut := splitAtRuneBoundary(pending)
-				emit(pending[:cut])
+				fn(string(pending[:cut]))
 				rest := append([]byte(nil), pending[cut:]...)
 				pending = append(pending[:0], rest...)
+				replaced = false
 			}
 		}
 	}
