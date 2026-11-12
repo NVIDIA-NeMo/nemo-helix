@@ -11,6 +11,8 @@ import {
   INTAKE_ENABLED,
   OPTIMIZER_ENABLED,
 } from '@studio/constants/environment';
+import { studioPreferences } from '@studio/providers/preferences/definitions';
+import { usePreference } from '@studio/providers/preferences/usePreference';
 import {
   getAgentsListRoute,
   getEvaluationResultsRoute,
@@ -22,14 +24,12 @@ import {
   getWorkspaceNewDeploymentRoute,
 } from '@studio/routes/utils';
 import { CreateSampleAgentModal } from '@studio/routes/WorkspaceDashboardHomeRoute/CreateSampleAgentModal';
-import { getQuickstartDismissedKey } from '@studio/routes/WorkspaceDashboardHomeRoute/quickstartDismissedStorage';
 import { useHasSampleWorkspace } from '@studio/routes/WorkspaceDashboardHomeRoute/useHasSampleWorkspace';
 import { isSampleWorkspace } from '@studio/routes/WorkspaceDashboardHomeRoute/useSampleQuickstartAgent';
 import {
   DashboardPanel,
   type DashboardPanelAction,
 } from '@studio/routes/WorkspaceDashboardRoute/DashboardPanel';
-import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { useState, type FC, type ReactNode } from 'react';
 
 export interface QuickstartSectionProps {
@@ -79,7 +79,12 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
   datasetsEnabled = true,
   deploymentsEnabled = true,
 }) => {
-  const [dismissed, setDismissed] = useLocalStorage<boolean>(getQuickstartDismissedKey(workspace));
+  const [dismissedChoice, setDismissed, , dismissedKnown] = usePreference(
+    studioPreferences.quickstartDismissed,
+    { workspace }
+  );
+  // Stay hidden until the stored choice is known, so a dismissed section never flashes back.
+  const dismissed = dismissedChoice || !dismissedKnown;
   const [sampleModalOpen, setSampleModalOpen] = useState(false);
   // Only offer a sample outside sample workspaces, once we know none is visible.
   const sampleEligible = agentsEnabled && !isSampleWorkspace(workspace);

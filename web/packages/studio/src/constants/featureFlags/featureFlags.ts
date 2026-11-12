@@ -87,6 +87,8 @@ export const flagDefinitions = {
   modelEvaluationFormEnabled: previewFlag('VITE_FF_MODEL_EVALUATION_FORM_ENABLED', true),
   monitorEnabled: previewFlag('VITE_FF_MONITOR_ENABLED'),
   optimizerEnabled: previewFlag('VITE_FF_OPTIMIZER_ENABLED', true),
+  // Roam UI preferences through the account's server-side preference store instead of localStorage.
+  serverPreferencesEnabled: booleanFlag('VITE_FF_SERVER_PREFERENCES_ENABLED', false),
 } as const;
 
 // --- Types ---

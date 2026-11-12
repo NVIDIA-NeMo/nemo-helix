@@ -21,7 +21,7 @@ import type {
   DatasetsTableProps,
   ModalOpenState,
 } from '@studio/components/DatasetsTable/types';
-import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
+import { PrincipalName } from '@studio/components/PrincipalName';
 import { formatStorageBackendLabel } from '@studio/util/storageBackend';
 import type { ComponentProps, Dispatch, SetStateAction } from 'react';
 
@@ -165,11 +165,7 @@ export function makeDatasetsTableColumns({
         header: 'Created By',
         size: 150,
         cell({ row }) {
-          return (
-            <Text className="truncate" title={row.original?.created_by ?? undefined}>
-              {row.original?.created_by ?? EMPTY_FIELD_VALUE}
-            </Text>
-          );
+          return <PrincipalName principal={row.original?.created_by} />;
         },
       }),
       accessor('created_at', {

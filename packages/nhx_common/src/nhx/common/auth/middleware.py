@@ -186,8 +186,16 @@ def _token_subject_claim(resolved: ResolvedBearerToken, config: AuthConfig) -> s
     return "sub"
 
 
+def _profile_claims(resolved: ResolvedBearerToken) -> dict[str, str]:
+    """Display claims from the token, for refreshing the profile of the user the token describes."""
+    raw_claims = resolved.claims.raw_claims
+    return {claim: value for claim in ("name", "picture") if isinstance(value := raw_claims.get(claim), str)}
+
+
 def _identity_resolution_from_resolved_token(resolved: ResolvedBearerToken, config: AuthConfig) -> dict[str, Any]:
     principal = resolved.principal
+    # Token claims describe the subject: the principal for direct tokens, the on-behalf-of user for actor tokens.
+    actor_token = resolved.claims.actor is not None
     service_descriptor = _service_identity_descriptor(principal.id)
     if service_descriptor is not None:
         descriptor = service_descriptor
@@ -202,6 +210,7 @@ def _identity_resolution_from_resolved_token(resolved: ResolvedBearerToken, conf
             "primary_email": principal.email,
             "authz_aliases": _dedupe_non_empty([principal.id, principal.email]),
             "claims_snapshot": {},
+            **({} if actor_token else _profile_claims(resolved)),
         }
 
     resolution: dict[str, Any] = {"principal": descriptor}
@@ -216,6 +225,7 @@ def _identity_resolution_from_resolved_token(resolved: ResolvedBearerToken, conf
             "primary_email": principal.on_behalf_of_email,
             "authz_aliases": _dedupe_non_empty([principal.on_behalf_of, principal.on_behalf_of_email]),
             "claims_snapshot": {},
+            **(_profile_claims(resolved) if actor_token else {}),
         }
     return resolution
 

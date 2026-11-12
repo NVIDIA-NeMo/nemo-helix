@@ -596,6 +596,134 @@ authz:
         scopes:
         - auth:write
         - platform:write
+    # Self-service profile and preferences: the handler always acts on the caller's own account, refuses
+    # service accounts, and refuses writes from delegated callers. Scopes gate access keys only.
+    /apis/auth/v2/me:
+      get:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:read
+        - platform:read
+    /apis/auth/v2/me/profile:
+      patch:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:write
+        - platform:write
+    /apis/auth/v2/me/preferences:
+      get:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:read
+        - platform:read
+    /apis/auth/v2/me/preferences/{namespace}:
+      delete:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:write
+        - platform:write
+      get:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:read
+        - platform:read
+      patch:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:write
+        - platform:write
+      put:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:write
+        - platform:write
+    # Any authenticated caller may read defaults; the handler restricts writes to HelixAdmin.
+    /apis/auth/v2/preferences/defaults:
+      get:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:read
+        - platform:read
+    /apis/auth/v2/preferences/defaults/{namespace}:
+      delete:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:write
+        - platform:write
+      get:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:read
+        - platform:read
+      patch:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:write
+        - platform:write
+      put:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:write
+        - platform:write
+    # Directory lookup: any authenticated caller may resolve display names. Read-only despite POST.
+    /apis/auth/v2/profiles/resolve:
+      post:
+        direct:
+          actor_perms: []
+        delegated:
+          actor_perms: []
+          subject_perms: []
+        scopes:
+        - auth:read
+        - platform:read
     /apis/auth/v2/iam/opa-bundle.tar.gz:
       get:
         direct:

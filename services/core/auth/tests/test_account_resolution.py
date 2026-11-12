@@ -374,3 +374,35 @@ async def test_delegated_fallback_does_not_assign_subject_email_to_actor(fake_st
     assert fake_store.calls[0]["display_name"] == "actor-subject"
     assert fake_store.calls[1]["subject"] == "delegated-subject"
     assert fake_store.calls[1]["primary_email"] == "delegated@example.com"
+
+
+@pytest.mark.asyncio
+async def test_user_descriptor_passes_throttled_profile_claims(fake_store: _FakeStore):
+    resolver = AccountResolver(AuthServiceConfig(profile_sync_interval_seconds=60))
+
+    await resolver.resolve_descriptor(
+        {
+            "issuer": "https://idp.example.com",
+            "subject": "alice-subject",
+            "account_type": "user",
+            "primary_email": "alice@example.com",
+            "name": "Alice Anderson",
+            "picture": "https://cdn.example.com/a.png",
+        }
+    )
+
+    call = fake_store.calls[0]
+    assert call["profile_claims"].name == "Alice Anderson"
+    assert call["profile_claims"].picture == "https://cdn.example.com/a.png"
+    assert call["profile_claims"].email == "alice@example.com"
+    assert call["profile_claims"].snapshot is None
+    assert call["profile_sync_interval"].total_seconds() == 60
+
+
+@pytest.mark.asyncio
+async def test_service_descriptor_has_no_profile_claims(fake_store: _FakeStore):
+    await AccountResolver(AuthServiceConfig()).resolve_descriptor(
+        {"issuer": "nemo:service", "subject": "jobs", "subject_claim": "service", "account_type": "service"}
+    )
+
+    assert fake_store.calls[0]["profile_claims"] is None

@@ -5,9 +5,16 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
+from nhx.core.entities.app.repository.account_profile import (
+    AccountProfileStore,
+    IdentityClaims,
+    trim_claims_snapshot,
+)
 from nhx.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountIdentity
 from nhx.core.entities.utils.identifiers import generate_entity_id
 from sqlalchemy import select
@@ -15,6 +22,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 AccountType = Literal["user", "service"]
+
+logger = logging.getLogger(__name__)
 
 
 class AccountIdentityUnavailableError(RuntimeError):
@@ -34,6 +43,16 @@ class AccountIdentityRecord:
     identity_id: str
     issuer: str
     subject: str
+    last_seen_at: datetime | None = None
+
+
+def _sync_due(record: AccountIdentityRecord, interval: timedelta | None) -> bool:
+    if interval is None or record.last_seen_at is None:
+        return True
+    last_seen = record.last_seen_at
+    if last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - last_seen >= interval
 
 
 class AccountIdentityStore:
@@ -61,8 +80,51 @@ class AccountIdentityStore:
         claims_snapshot: dict[str, Any] | None = None,
         linked_via: str = "resolver_materialization",
         linked_by: str | None = None,
+        profile_claims: IdentityClaims | None = None,
+        profile_sync_interval: timedelta | None = None,
     ) -> AccountIdentityRecord:
-        """Resolve an identity, materializing account and identity rows on miss."""
+        """Resolve an identity, materializing account and identity rows on miss.
+
+        With ``profile_claims``, the identity's profile fields are refreshed from them, at most once per
+        ``profile_sync_interval`` for an existing identity (always when the interval is None).
+        """
+        record = await self._resolve_or_materialize(
+            issuer=issuer,
+            subject=subject,
+            subject_claim=subject_claim,
+            account_type=account_type,
+            display_name=display_name,
+            primary_email=primary_email,
+            link_key=link_key,
+            link_key_claim=link_key_claim,
+            # Only people's claims are PII to trim; service identities record which principal they are.
+            claims_snapshot=trim_claims_snapshot(claims_snapshot) if account_type == "user" else claims_snapshot or {},
+            linked_via=linked_via,
+            linked_by=linked_by,
+        )
+        if profile_claims is not None and _sync_due(record, profile_sync_interval):
+            try:
+                await AccountProfileStore(self.session_maker).sync_identity(record.identity_id, profile_claims)
+            except Exception:
+                # Profile freshness must never fail authentication or authorization.
+                logger.warning("Failed to sync profile for identity %s", record.identity_id, exc_info=True)
+        return record
+
+    async def _resolve_or_materialize(
+        self,
+        *,
+        issuer: str,
+        subject: str,
+        subject_claim: str,
+        account_type: AccountType,
+        display_name: str | None,
+        primary_email: str | None,
+        link_key: str | None,
+        link_key_claim: str | None,
+        claims_snapshot: dict[str, Any],
+        linked_via: str,
+        linked_by: str | None,
+    ) -> AccountIdentityRecord:
         existing = await self.get_active_identity(issuer=issuer, subject=subject)
         if existing is not None:
             return existing
@@ -197,6 +259,7 @@ class AccountIdentityStore:
             identity_id=identity.id,
             issuer=identity.issuer,
             subject=identity.subject,
+            last_seen_at=identity.last_seen_at,
         )
 
     async def _get_active_account_by_link_key(self, session: AsyncSession, *, link_key: str | None) -> DBAccount | None:

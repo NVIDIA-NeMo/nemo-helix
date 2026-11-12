@@ -170,6 +170,28 @@ import { AssistantChat, StudioDataView, useStudioDataViewState } from '@nemo/com
 `src/index.ts` must export `Root` (a `ComponentType<PluginRootProps>`) and
 `navItems(workspaceId) => PluginNavGroup[]`. See `src/Root.tsx` and `src/Nav.tsx`.
 
+## User preferences
+
+Persist per-user UI state (collapsed panels, chosen views, dismissed hints) in
+the caller's server-side preferences through `host.sdk.platform`
+(`authGetMyPreference` / `authPatchMyPreference`), not `localStorage`, so it
+follows the user across browsers and devices.
+
+- **Namespace:** `plugin.<plugin-name>` or `plugin.<plugin-name>.<sub>`.
+  `studio.*`, `cli.*` and `helix.*` are reserved for core. The server only
+  checks the pattern `^[a-z0-9][a-z0-9._-]{0,127}$`; staying in your own
+  namespace is a convention.
+- **One document per namespace:** read it once, write with a JSON merge patch
+  (a `null` value deletes a key). Render `effective` (admin defaults merged with
+  the user's own `value`).
+- **Validate on read:** the server stores opaque JSON, and users run different
+  plugin versions against one account. Parse with a schema and fall back to
+  defaults for anything invalid.
+- **Bound growth:** cap lists and maps keyed by user activity before writing.
+  Documents are limited to 64 KB (`413`, code `preference_too_large`).
+- Pass `?workspace=<name>` for workspace-scoped state; the caller must be able
+  to read the workspace.
+
 ## Externals & versions
 
 The `external` list in `vite.config.ts` **must match the keys of** Studio's

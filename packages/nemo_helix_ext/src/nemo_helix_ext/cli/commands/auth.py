@@ -1094,6 +1094,23 @@ def rotate_access_key(
         )
 
 
+@app.command("whoami")
+@handle_errors
+def whoami(ctx: typer.Context) -> None:
+    """Show who the platform thinks you are: account, profile, groups, and how you authenticated.
+
+    Unlike `nemo auth status`, which decodes the local token, this asks the platform.
+
+    Examples:
+      nemo auth whoami
+      nemo -f json auth whoami
+    """
+    from nemo_helix_ext.cli.commands.profile import print_me, profiles_client
+
+    state: CLIContext = ctx.obj
+    print_me(profiles_client(state).get_me().data(), state)
+
+
 @app.command("status")
 @handle_errors
 def status(ctx: typer.Context) -> None:

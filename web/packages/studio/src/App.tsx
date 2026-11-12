@@ -17,9 +17,10 @@ import {
   OTEL_SERVICE_NAME,
 } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
+import { PreferencesSync } from '@studio/providers/preferences/PreferencesSync';
 import { routes } from '@studio/routes';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
-import { UI_THEME } from '@studio/util/localStorage';
+import { UI_THEME, UI_THEME_BOOT } from '@studio/util/localStorage';
 import { logVersion } from '@studio/util/logVersion';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { WebStorageStateStore } from 'oidc-client-ts';
@@ -74,14 +75,15 @@ const redirectUri = [
 const userStore = new WebStorageStateStore({ store: window.localStorage });
 
 export const App = () => {
-  const [savedTheme] = useLocalStorage<Theme>(UI_THEME, 'dark');
+  const [bootTheme] = useLocalStorage<Theme>(UI_THEME_BOOT);
+  const [legacyTheme] = useLocalStorage<Theme>(UI_THEME, 'dark');
 
   return (
     <StrictMode>
       <KaizenThemeProvider
         global
         density="standard"
-        theme={savedTheme}
+        theme={bootTheme ?? legacyTheme}
         // eslint-disable-next-line no-restricted-syntax
         style={{ height: '100%' }}
       >
@@ -94,6 +96,7 @@ export const App = () => {
             userStore={userStore}
             automaticSilentRenew
           >
+            <PreferencesSync />
             <TooltipProvider>
               <RouterProvider router={router} />
             </TooltipProvider>

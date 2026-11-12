@@ -12,7 +12,7 @@ import { Loading } from '@studio/components/Layouts/Loading';
 import { useAuthProfile } from '@studio/providers/auth';
 import { useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
-import { type FC, useCallback, useEffect } from 'react';
+import { type FC, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 
 async function createWorkspaceIfNotExists(workspace: string, name: string) {
@@ -42,6 +42,8 @@ export const AuthSuccessRoute: FC = () => {
   const navigate = useNavigate();
   const toast = useToast();
   const queryClient = useQueryClient();
+  // `profile` changes identity when /me loads; provisioning and navigation must run only once.
+  const started = useRef(false);
 
   const handleAuthenticated = useCallback(async () => {
     if (profile) {
@@ -72,8 +74,10 @@ export const AuthSuccessRoute: FC = () => {
   }, [toast, navigate, profile, queryClient]);
 
   useEffect(() => {
+    if (!profile || started.current) return;
+    started.current = true;
     handleAuthenticated();
-  }, [handleAuthenticated]);
+  }, [handleAuthenticated, profile]);
 
   return <Loading />;
 };

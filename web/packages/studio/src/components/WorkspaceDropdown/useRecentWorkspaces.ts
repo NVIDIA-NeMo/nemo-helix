@@ -3,19 +3,16 @@
 
 import { WORKSPACE_DROPDOWN_RECENT_LIMIT } from '@studio/components/WorkspaceDropdown/constants';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
-import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
-import { WORKSPACE_DROPDOWN_RECENT_KEY } from '@studio/util/localStorage';
-import { useEffect } from 'react';
+import { studioPreferences } from '@studio/providers/preferences/definitions';
+import { usePreference } from '@studio/providers/preferences/usePreference';
+import { useEffect, useRef } from 'react';
 
 export const useRecentWorkspaces = () => {
-  const [storedWorkspaces = [], setRecentWorkspaces] = useLocalStorage<string[]>(
-    WORKSPACE_DROPDOWN_RECENT_KEY,
-    []
+  // The preference schema guarantees an array, even if the stored value is invalid.
+  const [recentWorkspaces, setRecentWorkspaces, , , loaded] = usePreference(
+    studioPreferences.recentWorkspaces
   );
   const workspace = useWorkspaceFromPathIfExists();
-
-  // Ensure recentWorkspaces is always an array, even if localStorage contains invalid data
-  const recentWorkspaces = Array.isArray(storedWorkspaces) ? storedWorkspaces : [];
 
   const addRecentWorkspace = (name: string) => {
     const existingIndex = recentWorkspaces.findIndex((w) => w === name);
@@ -35,13 +32,17 @@ export const useRecentWorkspaces = () => {
     }
   };
 
-  // We should always use the current workspace in the recent workspaces list
+  // We should always use the current workspace in the recent workspaces list. Wait for the stored
+  // list: the write replaces the whole array, so writing over the default would wipe it.
+  const added = useRef(false);
   useEffect(() => {
+    if (!loaded || added.current) return;
+    added.current = true;
     if (workspace && recentWorkspaces[0] !== workspace) {
       addRecentWorkspace(workspace);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loaded]);
 
   return {
     recentWorkspaces,

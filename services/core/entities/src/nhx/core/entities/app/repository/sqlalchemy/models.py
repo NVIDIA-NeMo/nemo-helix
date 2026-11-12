@@ -254,6 +254,80 @@ class DBAccountIdentity(Base):
     )
 
 
+class DBAccountProfile(Base):
+    """User-facing profile for an account; IdP-synced fields plus user overrides."""
+
+    __tablename__ = "account_profiles"
+
+    account_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True
+    )
+    display_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, comment="User override")
+    idp_display_name: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    idp_avatar_url: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True)
+    primary_identity_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("account_identities.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Identity whose claims feed idp_* fields and accounts.primary_email",
+    )
+    timezone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    locale: Mapped[Optional[str]] = mapped_column(String(35), nullable=True)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, server_default=func.now(), onupdate=_utcnow, nullable=False
+    )
+    db_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
+    __mapper_args__ = {"version_id_col": db_version}
+
+
+class DBAccountPreference(Base):
+    """One JSON preference document per (account, namespace, workspace)."""
+
+    __tablename__ = "account_preferences"
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(255), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False)
+    namespace: Mapped[str] = mapped_column(String(128), nullable=False)
+    workspace: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("workspaces.name", ondelete="CASCADE"),
+        nullable=True,
+        comment="Null for global preferences",
+    )
+    value: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, server_default=func.now(), onupdate=_utcnow, nullable=False
+    )
+    db_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
+    __mapper_args__ = {"version_id_col": db_version}
+    __table_args__ = (
+        # NULLs are distinct in unique constraints, so global and workspace-scoped rows need separate indexes.
+        Index(
+            "uq_account_preferences_global",
+            "account_id",
+            "namespace",
+            unique=True,
+            sqlite_where=workspace.is_(None),
+            postgresql_where=workspace.is_(None),
+        ),
+        Index(
+            "uq_account_preferences_workspace",
+            "account_id",
+            "namespace",
+            "workspace",
+            unique=True,
+            sqlite_where=workspace.isnot(None),
+            postgresql_where=workspace.isnot(None),
+        ),
+        Index("idx_account_preferences_workspace", "workspace"),
+    )
+
+
 class DBAccountCredential(Base):
     """Account-bound credential lifecycle and encrypted provider state."""
 

@@ -25,6 +25,22 @@ from nhx.core.entities.app.repository.account_identity import (
     AccountIdentityStore,
     AccountIdentityUnavailableError,
 )
+from nhx.core.entities.app.repository.account_preference import (
+    PREFERENCE_MAX_BYTES,
+    PREFERENCE_MAX_DOCUMENTS,
+    AccountPreferenceStore,
+    PreferenceLimitError,
+    PreferenceRecord,
+    PreferenceTooLargeError,
+    PreferenceVersionConflictError,
+    merge_patch,
+)
+from nhx.core.entities.app.repository.account_profile import (
+    AccountProfileRecord,
+    AccountProfileStore,
+    IdentityClaims,
+    ResolvedPrincipal,
+)
 from nhx.core.entities.app.repository.entity import EntityRepositoryInterface
 from nhx.core.entities.app.repository.policy import NO_OP_ENTITY_FIELD_POLICY, EntityFieldPolicy
 from nhx.core.entities.app.repository.sqlalchemy.entity import SQLAlchemyEntityRepository
@@ -160,6 +176,18 @@ __all__ = [
     "AccountCredentialStatus",
     "AccountCredentialStore",
     "AccountCredentialType",
+    "AccountPreferenceStore",
+    "AccountProfileRecord",
+    "AccountProfileStore",
+    "IdentityClaims",
+    "PREFERENCE_MAX_BYTES",
+    "PREFERENCE_MAX_DOCUMENTS",
+    "PreferenceLimitError",
+    "PreferenceRecord",
+    "PreferenceTooLargeError",
+    "PreferenceVersionConflictError",
+    "ResolvedPrincipal",
+    "merge_patch",
     "EntityRepositoryInterface",
     "SQLAlchemyWorkspaceRepository",
     "SQLAlchemyEntityRepository",

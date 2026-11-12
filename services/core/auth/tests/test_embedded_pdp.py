@@ -941,6 +941,7 @@ class TestPerAreaScopes:
     # These correctly use :read scopes despite being POST methods.
     READ_POST_ENDPOINTS: ClassVar[set[str]] = {
         "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query",
+        "/apis/auth/v2/profiles/resolve",
     }
 
     def _get_area(self, endpoint_path: str) -> str:
