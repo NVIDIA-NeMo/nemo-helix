@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ROUTES } from '@studio/constants/routes';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
@@ -23,10 +24,6 @@ vi.mock('@studio/providers/auth/useWebSession', () => ({
 }));
 
 vi.mock('@studio/providers/auth/useMe', () => ({ useMe: mockUseMe }));
-
-vi.mock('@studio/components/UserPopover/EditProfileModal', () => ({
-  EditProfileModal: () => <div data-testid="edit-profile-modal" />,
-}));
 
 vi.mock('@studio/constants/environment', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@studio/constants/environment')>();
@@ -80,7 +77,13 @@ describe('UserPopover', () => {
   });
 
   const renderWithRouter = (ui: React.ReactElement) => {
-    const router = createMemoryRouter([{ path: '/', element: ui }], { initialEntries: ['/'] });
+    const router = createMemoryRouter(
+      [
+        { path: '/', element: ui },
+        { path: ROUTES.profile, element: <div data-testid="profile-route" /> },
+      ],
+      { initialEntries: ['/'] }
+    );
     return render(<RouterProvider router={router} />);
   };
 
@@ -116,12 +119,12 @@ describe('UserPopover', () => {
     expect(avatar).toHaveAttribute('referrerpolicy', 'no-referrer');
   });
 
-  it('should offer Edit profile only when the profile is editable', async () => {
+  it('should open the profile page from Edit profile', async () => {
     mockUseMe.mockReturnValue({ data: { can_edit_profile: true, profile: {} } });
     renderWithRouter(<UserPopover />);
     await user.click(screen.getByTestId('nv-dropdown-trigger'));
     await user.click(screen.getByText('Edit profile'));
-    expect(screen.getByTestId('edit-profile-modal')).toBeInTheDocument();
+    expect(await screen.findByTestId('profile-route')).toBeInTheDocument();
   });
 
   it('should not offer Edit profile to delegated callers', async () => {

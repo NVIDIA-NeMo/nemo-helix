@@ -16,15 +16,17 @@ import {
   Text,
 } from '@nvidia/foundations-react-core';
 import { ReportTraceModal } from '@studio/components/ReportTraceModal';
-import { EditProfileModal } from '@studio/components/UserPopover/EditProfileModal';
 import { TELEMETRY_ENABLED } from '@studio/constants/environment';
+import { ROUTES } from '@studio/constants/routes';
 import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
 import { useMe } from '@studio/providers/auth/useMe';
 import { useAuthSignOut } from '@studio/providers/auth/useWebSession';
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 
 export const UserPopover = () => {
-  const [openModal, setOpenModal] = useState<'trace' | 'profile' | undefined>(undefined);
+  const [openModal, setOpenModal] = useState<'trace' | undefined>(undefined);
+  const navigate = useNavigate();
   const profile = useAuthProfile();
   const { data: me } = useMe();
   const signOut = useAuthSignOut();
@@ -68,7 +70,7 @@ export const UserPopover = () => {
             </DropdownHeading>
           )}
           {me?.can_edit_profile && (
-            <DropdownItem onClick={() => setOpenModal('profile')} slotStart={<Pencil />}>
+            <DropdownItem onClick={() => navigate(ROUTES.profile)} slotStart={<Pencil />}>
               Edit profile
             </DropdownItem>
           )}
@@ -90,9 +92,6 @@ export const UserPopover = () => {
           )}
         </DropdownContent>
       </DropdownRoot>
-      {openModal === 'profile' && me && (
-        <EditProfileModal me={me} onClose={() => setOpenModal(undefined)} />
-      )}
       {openModal === 'trace' && (
         <ReportTraceModal open={openModal === 'trace'} onClose={() => setOpenModal(undefined)} />
       )}
