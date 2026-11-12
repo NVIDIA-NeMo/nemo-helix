@@ -15,11 +15,8 @@ export type AuthProfile = {
   email: string;
   /** Personal workspace name derived from the email; only used to provision it on first login. */
   workspace: string;
-  accountId?: string;
   avatarUrl?: string | null;
-  groups?: string[];
   authMethod?: MeAuthMethod;
-  canEditProfile?: boolean;
   state?: {
     path: string;
     search: string;
@@ -49,11 +46,8 @@ const withMe = (profile: AuthProfile | undefined, me: Me | undefined): AuthProfi
     name: me.profile.display_name,
     email: profile?.email || me.email || '',
     workspace: profile?.workspace ?? '',
-    accountId: me.account_id,
     avatarUrl: me.profile.avatar_url,
-    groups: me.groups,
     authMethod: me.auth_method,
-    canEditProfile: me.can_edit_profile,
   };
 };
 
