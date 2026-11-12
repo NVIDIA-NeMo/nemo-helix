@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { getMetricsAsList, targetNameForEvalJob, toEvalJobRow } from '@studio/api/evaluation/utils';
 import { makeEvaluatorJob } from '@studio/mocks/evaluation/jobs';
 
@@ -22,6 +23,30 @@ describe('registered runner jobs', () => {
       });
     }
   );
+});
+
+describe('publication agent identity', () => {
+  const datasetJob = (agentName: string, target: unknown = { format: 'generic', name: 'x' }) =>
+    makeEvaluatorJob({
+      spec: {
+        target,
+        publication: { intake: { evaluation_id: 'eval-1', agent_name: agentName } },
+      },
+    });
+
+  it('matches a kind-less dataset target by its publication agent name', () => {
+    expect(targetNameForEvalJob(datasetJob('my-agent'))).toBe('my-agent');
+  });
+
+  it('strips only the local workspace prefix', () => {
+    expect(targetNameForEvalJob(datasetJob(`${DEFAULT_WORKSPACE}/my-agent`))).toBe('my-agent');
+    expect(targetNameForEvalJob(datasetJob('other-ws/my-agent'))).toBe('other-ws/my-agent');
+  });
+
+  it('prefers the publication agent over the target, as the evaluator does', () => {
+    const job = datasetJob('published-agent', { kind: 'agent', agent: { name: 'target-agent' } });
+    expect(targetNameForEvalJob(job)).toBe('published-agent');
+  });
 });
 
 describe('getMetricsAsList', () => {
