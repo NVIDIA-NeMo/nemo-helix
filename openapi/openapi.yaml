@@ -1079,10 +1079,10 @@ paths:
         in: query
         required: false
         schema:
-          description: Namespace, or a prefix such as studio.
+          description: Namespace, or a prefix such as studio
           title: Namespace
           type: string
-        description: Namespace, or a prefix such as studio.
+        description: Namespace, or a prefix such as studio
       - name: workspace
         in: query
         required: false

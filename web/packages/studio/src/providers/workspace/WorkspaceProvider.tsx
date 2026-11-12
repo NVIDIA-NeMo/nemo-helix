@@ -4,10 +4,10 @@
 import { useEntitiesGetWorkspace } from '@nemo/sdk/generated/platform/entity-store';
 import { useFallbackWorkspace } from '@studio/hooks/useFallbackWorkspace';
 import { useAuthTokenStatus } from '@studio/providers/auth/useAuthTokenStatus';
-import { studioPreferences } from '@studio/providers/preferences/definitions';
-import { usePreference } from '@studio/providers/preferences/usePreference';
 import { WorkspaceContext } from '@studio/providers/workspace/WorkspaceContext';
-import { type FC, type ReactNode, useCallback, useEffect, useMemo } from 'react';
+import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
+import { SELECTED_WORKSPACE_KEY } from '@studio/util/localStorage';
+import { type FC, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router';
 
 interface WorkspaceProviderProps {
@@ -16,18 +16,19 @@ interface WorkspaceProviderProps {
 
 export const WorkspaceProvider: FC<WorkspaceProviderProps> = ({ children }) => {
   const { isTokenActive } = useAuthTokenStatus();
-  const [storedWorkspace, setStoredWorkspace, , storedKnown] = usePreference(
-    studioPreferences.selectedWorkspace
-  );
+  // Per browser, not roaming: devices on different workspaces must not overwrite each other.
+  const [storedWorkspace, setStoredWorkspace] = useLocalStorage<string>(SELECTED_WORKSPACE_KEY);
   const { workspace: workspaceParam } = useParams();
-  // Never the stored workspace, so it is also a valid destination when that one is forbidden.
-  const fallbackWorkspace = useFallbackWorkspace(storedWorkspace);
+  // Workspaces that returned 403 in this session, so auto-fallback can't cycle between them.
+  const [forbidden, setForbidden] = useState<readonly string[]>([]);
+  const excluded = useMemo(
+    () => (storedWorkspace ? [...forbidden, storedWorkspace] : forbidden),
+    [forbidden, storedWorkspace]
+  );
+  const fallbackWorkspace = useFallbackWorkspace(excluded);
 
-  // Priority: URL route param → stored selection → fallback. Wait for the stored selection rather
-  // than briefly selecting the fallback.
-  const selectedWorkspace = storedKnown
-    ? workspaceParam || storedWorkspace || fallbackWorkspace
-    : workspaceParam;
+  // Priority: URL route param → stored selection → fallback.
+  const selectedWorkspace = workspaceParam || storedWorkspace || fallbackWorkspace;
 
   // Persist route changes, but do not react to storedWorkspace changes. Otherwise, tabs on
   // different workspace routes continuously overwrite each other's stored value.
@@ -58,10 +59,11 @@ export const WorkspaceProvider: FC<WorkspaceProviderProps> = ({ children }) => {
     hasUnauthorizedError && !workspaceParam && !!storedWorkspace && !!fallbackWorkspace;
 
   useEffect(() => {
-    if (willAutoFallback && fallbackWorkspace) {
+    if (willAutoFallback && storedWorkspace && fallbackWorkspace) {
+      setForbidden((previous) => [...previous, storedWorkspace]);
       setStoredWorkspace(fallbackWorkspace);
     }
-  }, [willAutoFallback, fallbackWorkspace, setStoredWorkspace]);
+  }, [willAutoFallback, storedWorkspace, fallbackWorkspace, setStoredWorkspace]);
 
   // Suppress during fallback to avoid a flash of the unauthorized screen.
   const isWorkspaceUnauthorized = hasUnauthorizedError && !willAutoFallback;

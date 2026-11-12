@@ -7,7 +7,10 @@ import { act, render, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 
 const { mockGetWorkspace } = vi.hoisted(() => ({
-  mockGetWorkspace: vi.fn(() => ({ error: undefined as unknown, isPending: false })),
+  mockGetWorkspace: vi.fn<(workspace: string) => { error: unknown; isPending: boolean }>(() => ({
+    error: undefined,
+    isPending: false,
+  })),
 }));
 
 vi.mock('@nemo/sdk/generated/platform/entity-store', () => ({
@@ -15,8 +18,8 @@ vi.mock('@nemo/sdk/generated/platform/entity-store', () => ({
 }));
 
 vi.mock('@studio/hooks/useFallbackWorkspace', () => ({
-  useFallbackWorkspace: (exclude?: string) =>
-    exclude === 'fallback-workspace' ? undefined : 'fallback-workspace',
+  useFallbackWorkspace: (exclude: readonly string[] = []) =>
+    ['fallback-a', 'fallback-b'].find((name) => !exclude.includes(name)),
 }));
 
 vi.mock('@studio/providers/auth/useAuthTokenStatus', () => ({
@@ -63,17 +66,37 @@ describe('WorkspaceProvider', () => {
 
   it('falls back to another workspace when the stored one is forbidden', async () => {
     window.localStorage.setItem(SELECTED_WORKSPACE_KEY, JSON.stringify('forbidden-workspace'));
-    mockGetWorkspace.mockImplementation(() => ({
-      error: { response: { status: 403 } },
+    mockGetWorkspace.mockImplementation((workspace) => ({
+      error: workspace === 'forbidden-workspace' ? { response: { status: 403 } } : undefined,
       isPending: false,
     }));
     renderWorkspaceProvider();
 
     await waitFor(() => {
       expect(window.localStorage.getItem(SELECTED_WORKSPACE_KEY)).toBe(
-        JSON.stringify('fallback-workspace')
+        JSON.stringify('fallback-a')
       );
     });
+    mockGetWorkspace.mockImplementation(() => ({ error: undefined, isPending: false }));
+  });
+
+  it('stops falling back once every candidate is forbidden instead of cycling', async () => {
+    window.localStorage.setItem(SELECTED_WORKSPACE_KEY, JSON.stringify('forbidden-workspace'));
+    mockGetWorkspace.mockImplementation(() => ({
+      error: { response: { status: 403 } },
+      isPending: false,
+    }));
+    mockGetWorkspace.mockClear();
+    renderWorkspaceProvider();
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem(SELECTED_WORKSPACE_KEY)).toBe(
+        JSON.stringify('fallback-b')
+      );
+    });
+    expect(new Set(mockGetWorkspace.mock.calls.map(([workspace]) => workspace))).toEqual(
+      new Set(['forbidden-workspace', 'fallback-a', 'fallback-b'])
+    );
     mockGetWorkspace.mockImplementation(() => ({ error: undefined, isPending: false }));
   });
 

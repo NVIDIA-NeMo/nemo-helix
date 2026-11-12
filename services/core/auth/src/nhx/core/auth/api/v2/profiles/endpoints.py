@@ -41,6 +41,8 @@ from nhx.core.auth.app.profiles import (
 )
 from nhx.core.auth.config import AuthServiceConfig
 from nhx.core.entities.app.repository import (
+    PREFERENCE_MAX_BYTES,
+    PREFERENCE_MAX_DOCUMENTS,
     AccountPreferenceStore,
     AccountProfileStore,
     PreferenceLimitError,
@@ -126,14 +128,16 @@ def _parse_if_match(value: str | None) -> int | None:
 async def _store_call(awaitable: Awaitable[T], *, if_match: int | None) -> T | JSONResponse:
     try:
         return await awaitable
-    except PreferenceTooLargeError as exc:
-        return _coded(413, "preference_too_large", str(exc))
-    except PreferenceLimitError as exc:
-        return _coded(409, "preference_limit_exceeded", str(exc))
-    except PreferenceVersionConflictError as exc:
+    # Static details: exception text never reaches the response.
+    except PreferenceTooLargeError:
+        return _coded(413, "preference_too_large", f"Preference documents are limited to {PREFERENCE_MAX_BYTES} bytes")
+    except PreferenceLimitError:
+        detail = f"Accounts are limited to {PREFERENCE_MAX_DOCUMENTS} preference documents"
+        return _coded(409, "preference_limit_exceeded", detail)
+    except PreferenceVersionConflictError:
         if if_match is not None:
-            return _coded(412, "preference_version_conflict", str(exc))
-        return _coded(409, "preference_write_conflict", str(exc))
+            return _coded(412, "preference_version_conflict", "Preference version does not match If-Match")
+        return _coded(409, "preference_write_conflict", "Preference was modified concurrently; retry")
 
 
 def _coded(status_code: int, code: str, detail: str, **extra: str) -> JSONResponse:
@@ -222,11 +226,12 @@ async def list_my_preferences(
     auth_client: Auth,
     session_maker: SessionMaker,
     defaults_store: DefaultsStore,
-    namespace: Annotated[str | None, Query(description="Namespace, or a prefix such as studio.")] = None,
+    namespace: Annotated[str | None, Query(description="Namespace, or a prefix such as studio")] = None,
     workspace: _Workspace = None,
 ) -> PreferenceDocumentList:
     """List the caller's preference documents in one scope, including namespaces that only have defaults."""
     await _preference_scope(caller, auth_client, session_maker, workspace)
+    namespace = namespace.rstrip(".") if namespace else None
     records = await AccountPreferenceStore(session_maker).list_documents(
         caller.account_id, namespace_prefix=namespace, workspace=workspace
     )

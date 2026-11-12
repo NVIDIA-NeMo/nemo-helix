@@ -159,6 +159,20 @@ async def test_resolve_matches_subject_or_email_and_flags_ambiguity(session_make
 
 
 @pytest.mark.asyncio
+async def test_resolve_never_reveals_email_for_other_principals(session_maker):
+    await _materialize(
+        AccountIdentityStore(session_maker), "bob-sub", primary_email="bob@example.com", display_name="bob@example.com"
+    )
+
+    results = await AccountProfileStore(session_maker).resolve(["bob-sub", "bob@example.com"])
+
+    by_principal = {result.principal: result for result in results}
+    assert by_principal["bob-sub"].account_id is not None
+    assert by_principal["bob-sub"].display_name is None
+    assert by_principal["bob@example.com"].display_name == "bob@example.com"
+
+
+@pytest.mark.asyncio
 async def test_account_delete_cascades_to_profile(session_maker):
     record = await _materialize(AccountIdentityStore(session_maker), "sub-1", profile_claims=IdentityClaims(name="A"))
     async with session_maker() as session, session.begin():

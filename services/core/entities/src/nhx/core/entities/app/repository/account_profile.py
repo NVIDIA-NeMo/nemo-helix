@@ -82,6 +82,12 @@ class AccountProfileRecord:
             or fallback
         )
 
+    def public_display_name(self, principal: str) -> str | None:
+        """Display name for other users: never reveals primary_email unless the caller already sent it."""
+        account_name = self.account_display_name if self.account_display_name != self.primary_email else None
+        email = self.primary_email if principal == self.primary_email else None
+        return self.display_name_override or self.idp_display_name or account_name or email
+
 
 @dataclass(frozen=True)
 class ResolvedPrincipal:
@@ -253,7 +259,7 @@ class AccountProfileStore:
                 ResolvedPrincipal(
                     principal=principal,
                     account_id=record.account_id,
-                    display_name=record.display_name(),
+                    display_name=record.public_display_name(principal),
                     idp_display_name=record.idp_display_name,
                     display_name_is_override=record.display_name_override is not None,
                     avatar_url=record.avatar_url,

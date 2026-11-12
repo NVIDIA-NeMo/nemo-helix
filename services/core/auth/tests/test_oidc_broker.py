@@ -1054,3 +1054,31 @@ def test_login_syncs_profile_claims_from_matching_id_token(
     assert profile_claims.email == "user@example.com"
     assert profile_claims.name == expected_name
     assert profile_claims.picture == expected_picture
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("userinfo", "accepted"),
+    [
+        # Entra-style: subject_claim=oid, UserInfo carries the pairwise sub from the ID token.
+        ({"sub": "pairwise-sub", "picture": "https://cdn.example.com/u.png"}, True),
+        ({"oid": "object-id", "sub": "other"}, True),
+        ({"sub": "someone-else", "picture": "https://cdn.example.com/x.png"}, False),
+    ],
+)
+async def test_userinfo_claims_match_token_sub_when_subject_claim_differs(userinfo: dict, accepted: bool) -> None:
+    from nhx.core.auth.oidc_broker.routes import _userinfo_claims
+
+    base = _confidential_auth_config()
+    oidc = base.oidc.model_copy(
+        update={"subject_claim": "oid", "userinfo_endpoint": "https://idp.example.com/userinfo"}
+    )
+    Configuration.set_override(base.model_copy(update={"oidc": oidc}))
+    try:
+        with respx.mock:
+            respx.get("https://idp.example.com/userinfo").respond(200, json=userinfo)
+            claims = await _userinfo_claims("access", subject="object-id", token_subs={"pairwise-sub"})
+    finally:
+        Configuration.clear_overrides()
+
+    assert claims == (userinfo if accepted else {})

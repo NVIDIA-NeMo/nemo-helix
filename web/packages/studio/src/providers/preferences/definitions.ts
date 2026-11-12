@@ -9,12 +9,7 @@ import {
 import { WORKSPACE_DROPDOWN_RECENT_LIMIT } from '@studio/components/WorkspaceDropdown/constants';
 import type { PreferenceDefinition } from '@studio/providers/preferences/types';
 import { getQuickstartDismissedKey } from '@studio/routes/WorkspaceDashboardHomeRoute/quickstartDismissedStorage';
-import {
-  SELECTED_WORKSPACE_KEY,
-  TOUR_SEEN_KEY,
-  UI_THEME,
-  WORKSPACE_DROPDOWN_RECENT_KEY,
-} from '@studio/util/localStorage';
+import { TOUR_SEEN_KEY, UI_THEME, WORKSPACE_DROPDOWN_RECENT_KEY } from '@studio/util/localStorage';
 import { z } from 'zod';
 
 /**
@@ -29,13 +24,6 @@ export const studioPreferences = {
     defaultValue: 'dark',
     legacyKey: () => UI_THEME,
   } satisfies PreferenceDefinition<Theme>,
-  selectedWorkspace: {
-    namespace: 'studio.ui',
-    key: 'selectedWorkspace',
-    schema: z.string().optional(),
-    defaultValue: undefined,
-    legacyKey: () => SELECTED_WORKSPACE_KEY,
-  } satisfies PreferenceDefinition<string | undefined>,
   recentWorkspaces: {
     namespace: 'studio.ui',
     key: 'recentWorkspaces',

@@ -16,9 +16,9 @@ vi.mock('@studio/constants/featureFlags', async (importOriginal) => {
   return { ...actual, featureFlags: { ...actual.featureFlags, serverPreferencesEnabled: true } };
 });
 
-vi.mock('@studio/providers/auth/useMe', () => ({
-  useMe: () => ({ data: { account_id: 'account-1' } }),
-}));
+const SIGNED_IN = { data: { account_id: 'account-1' }, isPending: false };
+const { mockMe } = vi.hoisted(() => ({ mockMe: vi.fn() }));
+vi.mock('@studio/providers/auth/useMe', () => ({ useMe: mockMe }));
 
 const document = (namespace: string, value: Record<string, unknown>, defaults = {}) =>
   ({
@@ -30,7 +30,10 @@ const document = (namespace: string, value: Record<string, unknown>, defaults = 
   }) satisfies PreferenceDocument;
 
 describe('usePreference with server preferences', () => {
-  beforeEach(() => window.localStorage.clear());
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockMe.mockReturnValue(SIGNED_IN);
+  });
 
   it('reads the effective value and falls back to the default when it is invalid', async () => {
     server.use(
@@ -122,5 +125,47 @@ describe('usePreference with server preferences', () => {
     expect(written['group-0']).toBeNull();
     expect(written['group-1']).toBeUndefined();
     expect(written['group-new']).toMatchObject({ v: { visible: false, flag: true } });
+  });
+
+  it('is ready with the default once the read fails', async () => {
+    server.use(
+      http.get(`${PLATFORM_BASE_URL}/apis/auth/v2/me/preferences/studio.onboarding`, () =>
+        HttpResponse.json({ detail: 'unavailable' }, { status: 503 })
+      )
+    );
+    const { result } = renderHook(() => usePreference(studioPreferences.tourSeen), { wrapper });
+
+    await waitFor(() => expect(result.current[3]).toBe(true));
+    expect(result.current[0]).toBe(false);
+  });
+
+  it('keeps writes made before /me resolves and sends them once the account is known', async () => {
+    const patches: unknown[] = [];
+    server.use(
+      http.get(`${PLATFORM_BASE_URL}/apis/auth/v2/me/preferences/studio.ui`, () =>
+        HttpResponse.json(document('studio.ui', { theme: 'dark' }))
+      ),
+      http.patch(
+        `${PLATFORM_BASE_URL}/apis/auth/v2/me/preferences/studio.ui`,
+        async ({ request }) => {
+          const patch = (await request.json()) as Record<string, unknown>;
+          patches.push(patch);
+          return HttpResponse.json(document('studio.ui', patch));
+        }
+      )
+    );
+    mockMe.mockReturnValue({ data: undefined, isPending: true });
+    const { result, rerender } = renderHook(() => usePreference(studioPreferences.theme), {
+      wrapper,
+    });
+
+    act(() => result.current[1]('light'));
+    await waitFor(() => expect(result.current[0]).toBe('light'));
+
+    mockMe.mockReturnValue(SIGNED_IN);
+    rerender();
+
+    await waitFor(() => expect(patches).toEqual([{ theme: 'light' }]));
+    expect(result.current[0]).toBe('light');
   });
 });

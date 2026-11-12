@@ -19,6 +19,8 @@ interface PendingWrite {
 }
 
 const pending = new Map<string, PendingWrite>();
+// Latest request per document, so a slower earlier response can't overwrite a newer one.
+const latestRequest = new Map<string, number>();
 
 interface PreferenceWrite {
   readonly accountId: string;
@@ -32,6 +34,9 @@ const flush = async (id: string, write: Omit<PreferenceWrite, 'patch'>) => {
   const entry = pending.get(id);
   if (!entry) return;
   pending.delete(id);
+  const request = (latestRequest.get(id) ?? 0) + 1;
+  latestRequest.set(id, request);
+  const isLatest = () => latestRequest.get(id) === request && !pending.has(id);
   const params = write.workspace ? { workspace: write.workspace } : undefined;
   const queryKey = getAuthGetMyPreferenceQueryKey(write.namespace, params);
   try {
@@ -40,11 +45,12 @@ const flush = async (id: string, write: Omit<PreferenceWrite, 'patch'>) => {
       entry.patch as PreferenceValue,
       params
     );
+    // Newer edits are queued or in flight; their response will reconcile the cache.
+    if (!isLatest()) return;
     writeMirror(write.accountId, document);
-    // Newer optimistic edits are still queued; the next response will reconcile them.
-    if (!pending.has(id)) write.queryClient.setQueryData<PreferenceDocument>(queryKey, document);
+    write.queryClient.setQueryData<PreferenceDocument>(queryKey, document);
   } catch {
-    await write.queryClient.invalidateQueries({ queryKey });
+    if (isLatest()) await write.queryClient.invalidateQueries({ queryKey });
   }
 };
 
@@ -57,4 +63,17 @@ export const enqueuePreferencePatch = ({ patch, ...write }: PreferenceWrite) => 
     patch: previous ? composePatches(previous.patch, patch) : patch,
     timer: setTimeout(() => void flush(id, write), PREFERENCE_WRITE_DEBOUNCE_MS),
   });
+};
+
+type DeferredWrite = Omit<PreferenceWrite, 'accountId'>;
+
+const deferred: DeferredWrite[] = [];
+
+/** Holds a write made before the account is known; `releaseDeferredPreferencePatches` sends it. */
+export const deferPreferencePatch = (write: DeferredWrite) => {
+  deferred.push(write);
+};
+
+export const releaseDeferredPreferencePatches = (accountId: string) => {
+  for (const write of deferred.splice(0)) enqueuePreferencePatch({ ...write, accountId });
 };

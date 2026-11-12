@@ -16,12 +16,16 @@ import type {
   PreferenceMapEntry,
   PreferenceScope,
 } from '@studio/providers/preferences/types';
-import { enqueuePreferencePatch } from '@studio/providers/preferences/writeQueue';
+import {
+  deferPreferencePatch,
+  enqueuePreferencePatch,
+  releaseDeferredPreferencePatches,
+} from '@studio/providers/preferences/writeQueue';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo } from 'react';
 
-/** [value, set, clear, ready]: `ready` is false until the stored value (not the default) is known. */
+/** [value, set, clear, ready]: `ready` is false until the stored value is known or its read has failed. */
 type PreferenceState<T> = readonly [T, (value: T) => void, () => void, boolean];
 
 const PREFERENCE_STALE_TIME_MS = 5 * 60_000;
@@ -86,16 +90,25 @@ const useServerPreference = <T>(
   { workspace, entry }: PreferenceScope = {}
 ): PreferenceState<T> => {
   const queryClient = useQueryClient();
-  const accountId = useMe().data?.account_id;
+  const me = useMe();
+  const accountId = me.data?.account_id;
   const params = workspace ? { workspace } : undefined;
-  const { data, isPlaceholderData } = useAuthGetMyPreference(definition.namespace, params, {
-    query: {
-      enabled: Boolean(accountId),
-      staleTime: PREFERENCE_STALE_TIME_MS,
-      placeholderData: () =>
-        accountId ? readMirror(accountId, definition.namespace, workspace) : undefined,
-    },
-  });
+  const { data, isPlaceholderData, isError } = useAuthGetMyPreference(
+    definition.namespace,
+    params,
+    {
+      query: {
+        enabled: Boolean(accountId),
+        staleTime: PREFERENCE_STALE_TIME_MS,
+        placeholderData: () =>
+          accountId ? readMirror(accountId, definition.namespace, workspace) : undefined,
+      },
+    }
+  );
+
+  useEffect(() => {
+    if (accountId) releaseDeferredPreferencePatches(accountId);
+  }, [accountId]);
 
   useEffect(() => {
     if (accountId && data && !isPlaceholderData) writeMirror(accountId, data);
@@ -112,7 +125,6 @@ const useServerPreference = <T>(
 
   const write = useCallback(
     (next: T | undefined) => {
-      if (!accountId) return;
       const queryKey = getAuthGetMyPreferenceQueryKey(definition.namespace, params);
       const current =
         queryClient.getQueryData<PreferenceDocument>(queryKey) ??
@@ -124,13 +136,11 @@ const useServerPreference = <T>(
         value: userValue,
         effective: mergePatch(current.defaults ?? {}, userValue) as JsonObject,
       });
-      enqueuePreferencePatch({
-        accountId,
-        namespace: definition.namespace,
-        workspace,
-        patch,
-        queryClient,
-      });
+      // Before /me resolves the optimistic document stays fresh, so the GET won't revert it, and
+      // the patch is sent once the account is known.
+      const write = { namespace: definition.namespace, workspace, patch, queryClient };
+      if (accountId) enqueuePreferencePatch({ ...write, accountId });
+      else deferPreferencePatch(write);
     },
     // `params` is derived from `workspace`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -139,7 +149,9 @@ const useServerPreference = <T>(
 
   const setValue = useCallback((next: T) => write(next), [write]);
   const clearValue = useCallback(() => write(undefined), [write]);
-  return [value, setValue, clearValue, data !== undefined] as const;
+  // Settled with an error (or no account to read for): the default is the best value we'll get.
+  const ready = data !== undefined || isError || (!me.isPending && !accountId);
+  return [value, setValue, clearValue, ready] as const;
 };
 
 const useLocalPreference = <T>(

@@ -253,8 +253,12 @@ def _id_token_claims(tokens: dict[str, object], *, client: BrokerClient, subject
     return claims
 
 
-async def _userinfo_claims(access_token: str, *, subject: str) -> dict[str, Any]:
-    """UserInfo claims, used only to fill display fields the ID token left out."""
+async def _userinfo_claims(access_token: str, *, subject: str, token_subs: set[str]) -> dict[str, Any]:
+    """UserInfo claims, used only to fill display fields the ID token left out.
+
+    UserInfo always identifies the user by ``sub``, which differs from ``subject`` when ``oidc.subject_claim`` is
+    another claim (e.g. Entra ``oid``), so it is matched against the ``sub`` of the tokens we already trust.
+    """
     endpoint = get_auth_config().oidc.userinfo_endpoint
     if not endpoint:
         return {}
@@ -264,7 +268,10 @@ async def _userinfo_claims(access_token: str, *, subject: str) -> dict[str, Any]
         claims = response.json() if response.is_success else {}
     except (httpx.HTTPError, ValueError):
         return {}
-    return claims if isinstance(claims, dict) and claims.get("sub") == subject else {}
+    if not isinstance(claims, dict):
+        return {}
+    subject_claim = get_auth_config().oidc.subject_claim
+    return claims if claims.get(subject_claim) == subject or claims.get("sub") in token_subs else {}
 
 
 def _claim(*sources: dict[str, Any], name: str) -> str | None:
@@ -289,7 +296,8 @@ async def _resolve_identity(
     id_claims = _id_token_claims(tokens, client=client, subject=claims.subject)
     sources = [id_claims, raw_claims]
     if not (_claim(*sources, name="name") and _claim(*sources, name="picture")):
-        sources.append(await _userinfo_claims(bearer_token, subject=claims.subject))
+        token_subs = {sub for source in sources if isinstance(sub := source.get("sub"), str) and sub}
+        sources.append(await _userinfo_claims(bearer_token, subject=claims.subject, token_subs=token_subs))
     name = _claim(*sources, name="name")
     identity = await identity_store.resolve_or_materialize(
         issuer=get_auth_config().oidc.issuer,
