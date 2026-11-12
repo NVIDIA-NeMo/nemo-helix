@@ -266,3 +266,57 @@ def test_gliner_caches_under_restores_environment_on_error(
     assert os.environ["HF_HUB_CACHE"] == str(read_only_dir / "hub")
     assert os.environ["XDG_CACHE_HOME"] == str(read_only_dir)
     assert "HF_HOME" not in os.environ
+
+
+def test_gliner_caches_under_redirects_when_cache_parent_is_not_traversable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Another uid's mode-0700 $HOME: exists() on paths beneath it raises PermissionError.
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    private_home = tmp_path / "private-home"
+    private_home.mkdir()
+    private_home.chmod(0o000)
+    monkeypatch.setenv("HF_HUB_CACHE", str(private_home / ".cache" / "huggingface" / "hub"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(private_home / ".cache"))
+    monkeypatch.delenv("HF_HOME", raising=False)
+    scratch = tmp_path / "scratch"
+
+    try:
+        with gliner_detector.gliner_caches_under(scratch):
+            assert os.environ["HF_HUB_CACHE"] == str(scratch / "huggingface" / "hub")
+            assert os.environ["XDG_CACHE_HOME"] == str(scratch / "cache")
+    finally:
+        private_home.chmod(0o755)
+
+
+def test_gliner_caches_under_keeps_read_only_cache_with_complete_weights(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, read_only_dir: Path
+) -> None:
+    # A pre-populated read-only hub cache can be loaded without writes, so it is reused.
+    read_only_dir.chmod(0o755)
+    hub = read_only_dir / "hub"
+    snapshot = (
+        hub
+        / repo_folder_name(repo_id=gliner_detector.GLINER_MODEL_ID, repo_type="model")
+        / "snapshots"
+        / gliner_detector.GLINER_MODEL_REVISION
+    )
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}")
+    (snapshot / "model.safetensors").write_text("weights")
+    hub.chmod(0o555)
+    read_only_dir.chmod(0o555)
+    monkeypatch.setenv("HF_HUB_CACHE", str(hub))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(read_only_dir / ".cache"))
+    monkeypatch.delenv("HF_HOME", raising=False)
+    scratch = tmp_path / "scratch"
+
+    try:
+        with gliner_detector.gliner_caches_under(scratch):
+            assert os.environ["HF_HUB_CACHE"] == str(hub)
+            assert "HF_HOME" not in os.environ
+            # The XDG decision is independent: the runtime env still needs a writable dir.
+            assert os.environ["XDG_CACHE_HOME"] == str(scratch / "cache")
+    finally:
+        hub.chmod(0o755)

@@ -202,14 +202,27 @@ def _is_writable_dir(path: Path) -> bool:
 
     A missing path is checked against its nearest existing ancestor, since that
     is the directory ``mkdir(parents=True)`` would have to write into.
-    ``os.access`` also reports a read-only filesystem as not writable.
+    ``os.access`` also reports a read-only filesystem as not writable. A path we
+    cannot even inspect (e.g. under another uid's mode-0700 ``$HOME``) raises
+    ``PermissionError`` from ``exists()`` and counts as not writable.
     """
-    candidate = path
-    while not candidate.exists():
-        if candidate.parent == candidate:
-            return False
-        candidate = candidate.parent
-    return candidate.is_dir() and os.access(candidate, os.W_OK | os.X_OK)
+    try:
+        candidate = path
+        while not candidate.exists():
+            if candidate.parent == candidate:
+                return False
+            candidate = candidate.parent
+        return candidate.is_dir() and os.access(candidate, os.W_OK | os.X_OK)
+    except OSError:
+        return False
+
+
+def _is_gliner_cached_safely() -> bool:
+    """:func:`is_gliner_cached`, treating a cache we cannot read as not cached."""
+    try:
+        return is_gliner_cached()
+    except OSError:
+        return False
 
 
 @contextmanager
@@ -222,12 +235,14 @@ def gliner_caches_under(scratch_dir: Path) -> Generator[None, None, None]:
     or a uid that does not own ``$HOME``) cannot write there.
 
     A cache that is already writable is left alone, so operator-configured
-    locations and warm caches from earlier runs are still used. Overrides apply
-    only inside the block, which must include the GLiNER runtime start: the child
-    process copies the environment when it is spawned.
+    locations and warm caches from earlier runs are still used. So is a read-only
+    hub cache that already holds the complete pinned weights (e.g. a pre-populated
+    volume), since loading them needs no writes. Overrides apply only inside the
+    block, which must include the GLiNER runtime start: the child process copies
+    the environment when it is spawned.
     """
     overrides: dict[str, str] = {}
-    if not _is_writable_dir(_hf_hub_cache_dir()):
+    if not _is_writable_dir(_hf_hub_cache_dir()) and not _is_gliner_cached_safely():
         hf_home = scratch_dir / "huggingface"
         overrides["HF_HOME"] = str(hf_home)
         overrides["HF_HUB_CACHE"] = str(hf_home / "hub")
