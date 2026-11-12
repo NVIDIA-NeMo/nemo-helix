@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -103,20 +104,14 @@ def test_prune_drops_files_v0_blobs_with_no_archive_name(tmp_path: Path) -> None
     ids=["cache-warming", "worker-venvs"],
 )
 def test_rl_syncs_skip_unused_mooncake_wheels(script_name: str) -> None:
+    """Mooncake stays out of every uv sync. The names live in the Dockerfile."""
+    dockerfile = (Path(__file__).parents[2] / "rl/Dockerfile.nhx-rl-base").read_text()
+    marker = "ARG NO_INSTALL_PACKAGES='"
+    start = dockerfile.index(marker) + len(marker)
+    packages = json.loads(dockerfile[start : dockerfile.index("'", start)].replace("\\\n", "\n"))
+    assert {"mooncake-transfer-engine", "mooncake-transfer-engine-cuda13"} <= set(packages)
+
     content = (Path(__file__).parents[2] / "rl/scripts" / script_name).read_text()
-    blocks = content.split("SKIP=(\n")[1:]
-    assert len(blocks) == 1, "Each sync script skips mooncake in one place"
-    array = "SKIP=(\n" + blocks[0].split("\n)", 1)[0] + "\n)\n"
-    result = subprocess.run(
-        ["bash", "-eu", "-c", array + 'printf "%s\\n" "${SKIP[@]}"'],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    arguments = result.stdout.splitlines()
-    skipped = {arguments[index + 1] for index, arg in enumerate(arguments) if arg == "--no-install-package"}
-    assert {"mooncake-transfer-engine", "mooncake-transfer-engine-cuda13"} <= skipped
-    # An array that is never passed to uv would not prevent wheel installation.
     syncs = [line for line in content.splitlines() if line.strip().startswith("uv sync ")]
     assert syncs
-    assert all('"${SKIP[@]}"' in line for line in syncs)
+    assert all('"${skip_args[@]}"' in line for line in syncs)
