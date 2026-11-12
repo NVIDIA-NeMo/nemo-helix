@@ -21,6 +21,7 @@ import { filesetsHandlers } from '@studio/mocks/handlers/filesets';
 import { guardrailsHandlers } from '@studio/mocks/handlers/guardrails';
 import { insightsHandlers } from '@studio/mocks/handlers/insights';
 import { modelsHandlers } from '@studio/mocks/handlers/models';
+import { profilesHandlers } from '@studio/mocks/handlers/profiles';
 import { secretsHandlers } from '@studio/mocks/handlers/secrets';
 import { workspacesHandlers } from '@studio/mocks/handlers/workspaces';
 import {
@@ -784,6 +785,7 @@ export const handlers = [
   ...evaluatorHandlers,
   ...modelsHandlers,
   ...secretsHandlers,
+  ...profilesHandlers,
   ...filesetsHandlers,
   ...guardrailsHandlers,
   ...insightsHandlers,

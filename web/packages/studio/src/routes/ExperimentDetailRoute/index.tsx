@@ -10,8 +10,6 @@ import { Button, Card, Flex, PageHeader, Stack, Text } from '@nvidia/foundations
 import {
   isTrendChoiceCurrent,
   resolveTrendVisible,
-  type TrendVisibilityChoice,
-  trendVisibilityStorageKey,
 } from '@studio/components/charts/ExperimentTrendChart/visibility';
 import { ExperimentDataView } from '@studio/components/dataViews/ExperimentDataView';
 import { ExperimentDeleteButton } from '@studio/components/ExperimentDeleteButton';
@@ -21,6 +19,8 @@ import { OPTIMIZER_ENABLED } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
+import { studioPreferences } from '@studio/providers/preferences/definitions';
+import { usePreference } from '@studio/providers/preferences/usePreference';
 import { ExperimentMetrics } from '@studio/routes/ExperimentDetailRoute/ExperimentMetrics';
 import { getExperimentRoute } from '@studio/routes/utils';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
@@ -56,8 +56,10 @@ export const ExperimentDetailRoute: FC = () => {
   // flag — a flagged experiment is one whose owner has said its evaluations are comparable, so the
   // chart is worth showing unasked. A viewer's own toggle wins, but only until the flag changes;
   // `resolveTrendVisible` retires the stored choice at that point so the owner's edit takes effect.
-  const [storedTrendChoice, setTrendChoice, clearTrendChoice] =
-    useLocalStorage<TrendVisibilityChoice>(trendVisibilityStorageKey(group?.id));
+  const [storedTrendChoice, setTrendChoice, clearTrendChoice] = usePreference(
+    studioPreferences.experimentTrendVisibility,
+    { entry: group?.id ?? '' }
+  );
   const trendFlag = Boolean(group?.show_evaluations_over_time);
   const trendVisible = resolveTrendVisible(storedTrendChoice, trendFlag);
 

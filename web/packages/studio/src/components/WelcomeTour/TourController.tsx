@@ -4,13 +4,13 @@
 import { HelpCircle } from '@nemo/icons/icons';
 import { Button, Tooltip } from '@nvidia/foundations-react-core';
 import { TourTooltip } from '@studio/components/WelcomeTour/TourTooltip';
-import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
-import { TOUR_SEEN_KEY } from '@studio/util/localStorage';
+import { studioPreferences } from '@studio/providers/preferences/definitions';
+import { usePreference } from '@studio/providers/preferences/usePreference';
 import { useTour } from 'modern-tour';
 import { type FC, useCallback, useEffect } from 'react';
 
 export const TourController: FC = () => {
-  const [tourSeen, setTourSeen] = useLocalStorage<boolean>(TOUR_SEEN_KEY);
+  const [tourSeen, setTourSeen, , tourSeenKnown] = usePreference(studioPreferences.tourSeen);
   const { start, stop, isOpen } = useTour();
 
   const startTour = useCallback(() => {
@@ -24,12 +24,12 @@ export const TourController: FC = () => {
 
   // Auto-start on first visit
   useEffect(() => {
-    if (tourSeen) return;
+    if (tourSeen || !tourSeenKnown) return;
     const timer = setTimeout(() => {
       start(0);
     }, 800);
     return () => clearTimeout(timer);
-  }, [tourSeen, start]);
+  }, [tourSeen, tourSeenKnown, start]);
 
   return (
     <>
