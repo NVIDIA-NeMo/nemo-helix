@@ -21,7 +21,6 @@ from sqlalchemy.orm.exc import StaleDataError
 
 T = TypeVar("T")
 
-logger = logging.getLogger(__name__)
 audit_logger = logging.getLogger("nhx.audit.accounts")
 
 # Claims kept in account_identities.claims_snapshot; everything else may be PII we have no use for.
@@ -64,7 +63,6 @@ class IdentityClaims:
 @dataclass(frozen=True)
 class AccountProfileRecord:
     account_id: str
-    account_type: str
     status: str
     primary_email: str | None
     # Name recorded when the account was materialized; predates profiles.
@@ -104,7 +102,6 @@ class ResolvedPrincipal:
 def _record(account: DBAccount, profile: DBAccountProfile | None) -> AccountProfileRecord:
     return AccountProfileRecord(
         account_id=account.id,
-        account_type=account.type,
         status=account.status,
         primary_email=account.primary_email,
         account_display_name=account.display_name,
