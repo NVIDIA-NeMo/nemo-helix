@@ -15,6 +15,20 @@ TOP_LEVEL_ENTRIES = (
         kind="group",
     ),
     TopLevelEntry(
+        import_path="nemo_helix_ext.cli.commands.profile:app",
+        help="Manage your NeMo Helix user profile.",
+        name="profile",
+        panel="Setup",
+        kind="group",
+    ),
+    TopLevelEntry(
+        import_path="nemo_helix_ext.cli.commands.preferences:app",
+        help="Read and edit your preferences.",
+        name="preferences",
+        panel="Setup",
+        kind="group",
+    ),
+    TopLevelEntry(
         import_path="nemo_helix_ext.cli.commands.config:app",
         help=CONFIG_APP_HELP,
         name="config",
