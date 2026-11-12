@@ -6,7 +6,7 @@
 
 import type { BuildCreateRequestInput } from '@studio/components/CreateDatasetPanel/buildCreateRequest';
 import {
-  INVALID_URL_MESSAGE,
+  getInvalidUrlMessage,
   NO_FILES_MESSAGE,
   NO_SECRETS_REQUIRED_MESSAGE,
   type SecretFieldKey,
@@ -53,7 +53,7 @@ function getSourceError(tab: SourceTab, parsed: ParseResult): SourceError | unde
     case 'incomplete':
       return { kind: 'message', message: SOURCE_TABS[tab].urlError };
     case 'invalid':
-      return { kind: 'message', message: INVALID_URL_MESSAGE(tab) };
+      return { kind: 'message', message: getInvalidUrlMessage(tab) };
     case 'wrong-tab':
       return { kind: 'wrong-tab', actual: parsed.actual };
   }

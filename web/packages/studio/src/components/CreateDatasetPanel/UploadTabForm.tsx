@@ -3,10 +3,12 @@
 
 import { Block, Button, Flex, FormField, Stack, Text } from '@nvidia/foundations-react-core';
 import type { FilesetEntry } from '@studio/api/files/types';
+import { DescriptionField } from '@studio/components/CreateDatasetPanel/DescriptionField';
 import type { Draft, PanelAction } from '@studio/components/CreateDatasetPanel/draft';
-import { DescriptionField, NameField } from '@studio/components/CreateDatasetPanel/fields';
+import { FileRow } from '@studio/components/CreateDatasetPanel/FileRow';
+import { NameField } from '@studio/components/CreateDatasetPanel/NameField';
 import type { DraftErrors } from '@studio/components/CreateDatasetPanel/validateDraft';
-import { type ChangeEvent, type Dispatch, type DragEvent, useRef } from 'react';
+import { type ChangeEvent, type Dispatch, type DragEvent, useCallback, useRef } from 'react';
 
 const FOLDER_PREVIEW_COUNT = 5;
 
@@ -27,29 +29,16 @@ const droppedFiles = (data: DataTransfer): File[] =>
     .filter((item) => item.kind === 'file' && item.webkitGetAsEntry()?.isDirectory !== true)
     .flatMap((item) => item.getAsFile() ?? []);
 
-function FileRow({ path, onRemove }: { path: string; onRemove: () => void }) {
-  return (
-    <Flex align="center" justify="between" gap="density-md">
-      <Text kind="body/regular/md" className="min-w-0 break-all">
-        {path}
-      </Text>
-      <Button
-        type="button"
-        kind="tertiary"
-        size="small"
-        aria-label={`Remove ${path}`}
-        onClick={onRemove}
-      >
-        Remove
-      </Button>
-    </Flex>
-  );
-}
-
 /** The Upload tab: stage files or a folder, name the dataset, describe it. Nothing uploads until Create. */
 export function UploadTabForm({ draft, errors, dispatch }: UploadTabFormProps) {
   const filesInput = useRef<HTMLInputElement>(null);
-  const folderInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement | null>(null);
+  // A stable ref callback, so React does not detach and re-run it on every render.
+  const setFolderInput = useCallback((node: HTMLInputElement | null) => {
+    folderInput.current = node;
+    // webkitdirectory is absent from React's input attribute types.
+    node?.setAttribute('webkitdirectory', '');
+  }, []);
 
   const { looseFiles, folderFiles } = draft;
   const folderName = folderFiles[0]?.path.split('/')[0];
@@ -155,10 +144,7 @@ export function UploadTabForm({ draft, errors, dispatch }: UploadTabFormProps) {
         onChange={(event) => pick(event, 'files-picked')}
       />
       <input
-        ref={(el) => {
-          folderInput.current = el;
-          if (el) el.webkitdirectory = true; // not in React's input typings
-        }}
+        ref={setFolderInput}
         type="file"
         aria-label="Folder to upload"
         hidden

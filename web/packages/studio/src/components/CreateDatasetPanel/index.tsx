@@ -55,15 +55,13 @@ export function CreateDatasetPanel({
   const draft = state.drafts[tab];
 
   const secrets = useWorkspaceSecrets(workspace, open);
-  const { submit, isPending, createdName, forgetCreated } = useCreateDataset(workspace);
+  const { submit, isPending, createdName } = useCreateDataset(workspace, open);
 
   // Closing by any route (Cancel, the header X, the host) discards every tab's draft (spec 2).
+  // Also runs on mount when the panel starts closed, resetting an already-initial state.
   useEffect(() => {
-    if (!open) {
-      dispatch({ type: 'reset' });
-      forgetCreated();
-    }
-  }, [open, forgetCreated]);
+    if (!open) dispatch({ type: 'reset' });
+  }, [open]);
 
   // The spec's own rules decide validity; the server is asked only about names that pass them.
   const formatError = getDatasetNameError(draft.name, { taken: false, workspace });
@@ -75,7 +73,8 @@ export function CreateDatasetPanel({
   const errors = validateDraft(tab, draft, {
     workspace,
     nameTaken,
-    noSecrets: !secrets.isLoading && secrets.names.length === 0,
+    // A failed lookup is not an empty workspace.
+    noSecrets: !secrets.isLoading && !secrets.isError && secrets.names.length === 0,
   });
   const shownErrors = visibleErrors(errors, draft, submitErrors);
 
@@ -95,9 +94,10 @@ export function CreateDatasetPanel({
     } else if (outcome.status === 'created') {
       onCreated(outcome.fileset);
       dispatch({ type: 'reset' });
-      forgetCreated();
       onClose();
     }
+    // 'failed' was reported by toast, and a creation that finished after close was announced by
+    // one; neither touches the panel, so a failure leaves the input to correct and retry.
   };
 
   return (

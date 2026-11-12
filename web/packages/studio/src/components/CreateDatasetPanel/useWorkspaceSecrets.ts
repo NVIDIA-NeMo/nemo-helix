@@ -1,44 +1,35 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  getSecretsListSecretsQueryKey,
-  secretsListSecrets,
-} from '@nemo/sdk/generated/platform/secrets';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useWorkspaceSecretPages } from '@studio/routes/SecretsListRoute/useWorkspaceSecretPages';
 import { useEffect } from 'react';
-
-const SECRETS_PAGE_SIZE = 20;
 
 export interface WorkspaceSecrets {
   names: string[];
+  /** The first page, or a later one the panel is still fetching, has not arrived. */
   isLoading: boolean;
+  /** A page failed. `names` then holds only what loaded, which says nothing about what exists. */
+  isError: boolean;
 }
 
 /**
- * Every secret name in `workspace`, for the panel's selectors. Shares its query key and page shape
- * with `SecretSearchableSelect`, so both read one cache entry. Pages are fetched until none remain:
- * a plain select has no scroll-to-load, and a missing name would read as an unselectable secret.
+ * Every secret name in `workspace`, for the panel's selectors. Pages are fetched until none
+ * remain: a plain select has no scroll-to-load, and a missing name would read as an unselectable
+ * secret.
  */
 export function useWorkspaceSecrets(workspace: string, enabled: boolean): WorkspaceSecrets {
-  const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery({
-    queryKey: [...getSecretsListSecretsQueryKey(workspace), 'infinite'] as const,
-    queryFn: ({ signal, pageParam }) =>
-      secretsListSecrets(workspace, { page: pageParam, page_size: SECRETS_PAGE_SIZE }, signal),
-    initialPageParam: 1,
-    getNextPageParam: (lastPage) => {
-      const p = lastPage.pagination;
-      return p && p.page < p.total_pages ? p.page + 1 : undefined;
-    },
-    enabled: enabled && !!workspace,
-  });
+  const { data, isLoading, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
+    useWorkspaceSecretPages(workspace, enabled);
 
   useEffect(() => {
-    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+    // After a failed page `hasNextPage` stays true, so without the `isError` guard this would
+    // retry in a tight loop.
+    if (hasNextPage && !isFetchingNextPage && !isError) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage]);
 
   return {
     names: data?.pages.flatMap((page) => page.data.map((secret) => secret.name)) ?? [],
-    isLoading: isLoading || hasNextPage,
+    isLoading: !isError && (isLoading || hasNextPage),
+    isError,
   };
 }
