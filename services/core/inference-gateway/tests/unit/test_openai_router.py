@@ -243,6 +243,27 @@ def test_get_model_entity_exists_without_providers(app: FastAPI, client: TestCli
     assert data["owned_by"] == "ns1"
 
 
+def _model_cache_serving(model_entity_id: str) -> ModelCache:
+    """A ModelCache whose routing table holds one provider serving ``model_entity_id``."""
+    cache = ModelCache()
+    cache.update_model_info(
+        ModelProviderInfo(
+            model_provider=ModelProvider(
+                workspace="ws",
+                name="nim-provider",
+                host_url="http://nim.example.com",
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                served_models=[
+                    ServedModelMapping(model_entity_id=model_entity_id, served_model_name="adder-backend-id"),
+                ],
+            )
+        )
+    )
+    cache.rebuild_model_entity_map()
+    return cache
+
+
 def test_get_model_lora_compound_name_in_path(app: FastAPI, client: TestClient):
     """LoRA-style composite names (base&adapters/ws/adapter) resolve via GET /v1/models/{name:path}.
 
@@ -256,11 +277,32 @@ def test_get_model_lora_compound_name_in_path(app: FastAPI, client: TestClient):
     vm_cache.rebuild([_custom_vm("ws", "base", default_model_entity="ws/base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws/base&adapters/ws/adder")
+
     response = client.get("/v2/workspaces/ws/openai/-/v1/models/ws/base&adapters/ws/adder")
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == "ws/base&adapters/ws/adder"
     assert data["owned_by"] == "ws"
+
+
+def test_get_model_lora_composite_404_until_adapter_is_routable(app: FastAPI, client: TestClient):
+    """A composite is not ready while the base VM exists but the adapter's routing entry does not.
+
+    This is the state the report observed: GET returned 200 while chat completions 404'd with
+    ``Model entity not found``. The GET must return the same 404 chat would, so it can gate
+    inference.
+    """
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_custom_vm("ws", "base", default_model_entity="ws/base")])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: ModelCache()
+
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 404
+    assert response.json()["detail"] == (
+        "Routing table lookup failed: Model entity not found for base model ws/base with adapter ws/adder"
+    )
 
 
 def test_get_model_lora_compound_bare_name_in_path(app: FastAPI, client: TestClient):
@@ -271,6 +313,8 @@ def test_get_model_lora_compound_bare_name_in_path(app: FastAPI, client: TestCli
     vm_cache = VirtualModelCache()
     vm_cache.rebuild([_custom_vm("ws", "base", default_model_entity="ws/base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws/base&adapters/ws/adder")
 
     response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
     assert response.status_code == 200
@@ -813,6 +857,8 @@ def test_get_model_cross_workspace_lora(app: FastAPI, client: TestClient):
     vm_cache = VirtualModelCache()
     vm_cache.rebuild([_custom_vm("ws-a", "base", default_model_entity="ws-a/base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws-a/base&adapters/ws-b/adapter")
 
     response = client.get("/v2/workspaces/ws-a/openai/-/v1/models/ws-a/base&adapters/ws-b/adapter")
     assert response.status_code == 200

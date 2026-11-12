@@ -11,6 +11,9 @@ description: ""
   </a>
 </div>
 
+<!-- Temporarily disabled in E2E: training exceeds the 1800-second cell timeout. -->
+# LoRA Model Customization Job
+
 Learn how to use NeMo Helix to create a LoRA (Low-Rank Adaptation) customization job using a custom dataset. In this tutorial we use LoRA to fine-tune [NVIDIA Nemotron 3.5 Lightning 30B-A3B](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16) into a **question-answering model** with the SQuAD dataset.
 
 LoRA is a parameter-efficient fine-tuning method that requires fewer computational resources than full fine-tuning. If you need full model fine-tuning instead, see the [Full SFT Customization Job](/documentation/customizer-reference/tutorials/sft-customization-job) tutorial.
@@ -387,6 +390,11 @@ if not client.models.wait_for_deployment_status(deployment_name, "READY", worksp
     raise RuntimeError(f"Deployment {deployment_name} did not become ready")
 if not client.models.wait_for_gateway(deployment_name, workspace="default", timeout=60):
     raise RuntimeError("Inference gateway did not become ready")
+# An adapter's entity ID names its base model; the gateway routes it through that deployment.
+INFERENCE_MODEL_NAME = f"default/{MODEL_NAME}&adapters/default/{OUTPUT_NAME}"
+# Provider readiness can precede the adapter's route; wait for the exact model id to be routable.
+if not client.models.wait_for_model(INFERENCE_MODEL_NAME, workspace="default", timeout=300):
+    raise RuntimeError(f"Model route for {INFERENCE_MODEL_NAME} did not become ready")
 
 ```
 
@@ -400,8 +408,6 @@ question = "Who was the first person to walk on the Moon?"
 messages = [
     {"role": "user", "content": f"Based on the following context, answer the question.\n\nContext: {context}\n\nQuestion: {question}"}
 ]
-# An adapter's entity ID names its base model; the gateway routes it through that deployment.
-INFERENCE_MODEL_NAME = f"default/{MODEL_NAME}&adapters/default/{OUTPUT_NAME}"
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 

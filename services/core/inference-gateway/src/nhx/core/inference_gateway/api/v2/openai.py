@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, 
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nhx.common.api.common import ErrorResponse
-from nhx.common.entities.utils import parse_adapters_suffix
+from nhx.common.entities.utils import format_adapter_composite, parse_adapters_suffix, parse_model_entity_ref
 from nhx.common.service.dependencies import get_nemo_client
 from nhx.core.inference_gateway.api.authz import (
     OPENAI_EXEC_PERMISSION,
@@ -23,6 +23,8 @@ from nhx.core.inference_gateway.api.dependencies import (
     global_virtual_model_cache,
 )
 from nhx.core.inference_gateway.api.errors import (
+    raise_model_entity_not_found,
+    raise_no_providers_for_model_entity,
     raise_virtual_model_not_found,
 )
 from nhx.core.inference_gateway.api.middleware_registry import (
@@ -144,6 +146,7 @@ async def openai_get_model(
     workspace: str,
     name: str,
     virtual_model_cache: Annotated[VirtualModelCache, Depends(global_virtual_model_cache)],
+    model_cache: Annotated[ModelCache, Depends(global_model_cache)],
 ) -> OpenAIModelResp:
     """
     Retrieve information about a specific OpenAI-compatible model.
@@ -157,13 +160,40 @@ async def openai_get_model(
     validate_entity_name(workspace, field_name="workspace")
     validate_model_entity_name(model_name, field_name="model")
     await enforce_delegated_workspace_access(workspace, OPENAI_EXEC_PERMISSION)
-    if resolve_vm_for_model(virtual_model_cache, workspace, model_name) is None:
+    virtual_model = resolve_vm_for_model(virtual_model_cache, workspace, model_name)
+    if virtual_model is None:
         raise_virtual_model_not_found(workspace, model_name)
+
+    # A LoRA composite also needs its adapter in the routing table.
+    if "&adapters/" in model_name:
+        _raise_unless_adapter_route_ready(model_cache, virtual_model, workspace, model_name)
 
     return OpenAIModelResp(
         id=f"{workspace}/{model_name}",
         owned_by=workspace,
     )
+
+
+def _raise_unless_adapter_route_ready(
+    model_cache: ModelCache, virtual_model: VirtualModel, workspace: str, model_name: str
+) -> None:
+    """Raise the same 404 chat completions would for a LoRA composite with no routable entity."""
+    default_entity = virtual_model.default_model_entity
+    adapter_parts = parse_adapters_suffix(model_name)
+    if adapter_parts is None:
+        raise_model_entity_not_found(workspace, model_name)
+    _, adapter_workspace, adapter_name = adapter_parts
+    entity_id = (
+        format_adapter_composite(default_entity, adapter_workspace, adapter_name)
+        if default_entity
+        else f"{workspace}/{model_name}"
+    )
+    ref = parse_model_entity_ref(entity_id)
+    entity = model_cache.get_from_model_entity(ref.workspace, ref.name)
+    if entity is None:
+        raise_model_entity_not_found(ref.workspace, ref.name)
+    if not entity.model_providers:
+        raise_no_providers_for_model_entity(ref.workspace, ref.name)
 
 
 # Use individual decorators with explicit ordering to ensure deterministic OpenAPI generation
