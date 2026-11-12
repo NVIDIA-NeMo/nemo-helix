@@ -314,3 +314,51 @@ describe('S3 (spec 8)', () => {
     expect(parseSource('s3', 'https://console.aws.amazon.com/s3/home').status).toBe('incomplete');
   });
 });
+
+describe('parseSource review regressions', () => {
+  const s3Ok = (raw: string) => {
+    const r = parseSource('s3', raw);
+    expect(r.status, raw).toBe('ok');
+    return r.status === 'ok' ? r : undefined;
+  };
+
+  it('S3 console: path-derived prefix, query override, and single percent-decoding (spec 8)', () => {
+    const fromPath = s3Ok('https://s3.console.aws.amazon.com/s3/buckets/my-bucket/data/train/');
+    expect(fromPath?.fields).toEqual({ bucket: 'my-bucket', prefix: 'data/train' });
+    expect(fromPath?.nameSeed).toBe('train');
+
+    expect(
+      s3Ok('https://s3.console.aws.amazon.com/s3/buckets/my-bucket/data/train/?prefix=other/')
+        ?.fields
+    ).toEqual({
+      bucket: 'my-bucket',
+      prefix: 'other',
+    });
+
+    expect(s3Ok('https://s3.console.aws.amazon.com/s3/buckets/b?prefix=a%2520b/')?.fields).toEqual({
+      bucket: 'b',
+      prefix: 'a%20b',
+    });
+  });
+
+  it('empty userinfo (`@`, `:@`) is still userinfo and invalid (spec 4.1)', () => {
+    expect(parseSource('huggingface', 'https://@huggingface.co/datasets/a/b').status).toBe(
+      'invalid'
+    );
+    expect(parseSource('huggingface', 'https://:@huggingface.co/datasets/a/b').status).toBe(
+      'invalid'
+    );
+  });
+
+  it('NGC: `resources` must not be treated as a team, even with models/target after it (spec 6, 4.2)', () => {
+    expect(
+      parseSource('ngc', 'https://catalog.ngc.nvidia.com/orgs/nvidia/teams/resources/models/x')
+        .status
+    ).toBe('incomplete');
+  });
+
+  it('S3: a host merely starting with `s3` is not an AWS S3 endpoint (spec 4.1)', () => {
+    expect(parseSource('s3', 'https://bucket.s3evil.amazonaws.com/key').status).toBe('invalid');
+    expect(parseSource('s3', 'https://s3evil.amazonaws.com/bucket/key').status).toBe('invalid');
+  });
+});
