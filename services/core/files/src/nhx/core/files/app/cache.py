@@ -8,7 +8,10 @@ import logging
 import anyio
 from nemo_helix_plugin.files.types import CacheStatus as CacheStatus
 from nhx.core.files.app.backends.base import StorageImpl
+from nhx.core.files.app.backends.local import LocalStorageImpl
+from nhx.core.files.app.backends.s3 import S3StorageImpl
 from nhx.core.files.app.file_lock import FileLockManager
+from nhx.core.files.config import files_config
 from nhx.core.files.exceptions import NotFoundError
 
 logger = logging.getLogger(__name__)
@@ -26,8 +29,6 @@ def _get_background_cache_limiter() -> anyio.CapacityLimiter:
     global _background_cache_limiter
 
     if _background_cache_limiter is None:
-        from nhx.core.files.config import files_config
-
         config = files_config()
         _background_cache_limiter = anyio.CapacityLimiter(config.cache_warming_max_concurrent)
         logger.info(
@@ -41,6 +42,13 @@ def reset_background_cache_limiter() -> None:
     """Reset the background cache limiter for testing purposes."""
     global _background_cache_limiter
     _background_cache_limiter = None
+
+
+def cache_write_lock_key(storage: StorageImpl, cache_path_key: str) -> str:
+    """Serialize S3 version writes and eviction per object, not per version."""
+    if isinstance(storage, S3StorageImpl):
+        return cache_path_key.rsplit("/", 1)[0]
+    return cache_path_key
 
 
 async def cache_file_directly(
@@ -86,7 +94,7 @@ async def cache_file_directly(
             pass  # Not cached, proceed
 
         # Acquire lock and cache
-        async with lock_manager.acquire(cache_path_key) as acquired:
+        async with lock_manager.acquire(cache_write_lock_key(source_storage, cache_path_key)) as acquired:
             if not acquired:
                 logger.debug("Lock not acquired, skipping cache", extra={"path": path})
                 return False
@@ -106,6 +114,10 @@ async def cache_file_directly(
             )
             source_stream = await source_storage.download(path, None)
             await cache_storage.upload(cache_path_key, source_stream, content_length=file_info.size)
+            if isinstance(source_storage, S3StorageImpl) and isinstance(cache_storage, LocalStorageImpl):
+                await cache_storage.prune_cache_versions(
+                    cache_path_key, files_config().s3_cache_max_versions_per_object
+                )
             logger.info(
                 "File cached successfully",
                 extra={"path": path, "size_bytes": file_info.size},

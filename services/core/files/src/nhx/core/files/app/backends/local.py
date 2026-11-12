@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -111,26 +112,52 @@ class LocalStorageImpl(StorageImpl):
         file_path = await self._validate_local_path(path)
         await self._validate_file_exists(path, file_path)
 
-        if byte_range is not None:
-
-            async def _gen() -> AsyncIterator[bytes]:
+        async def _gen() -> AsyncIterator[bytes]:
+            try:
                 async with await open_file(file_path, mode="rb") as file:
-                    start = byte_range.start
-                    await file.seek(byte_range.start)
-                    while start <= byte_range.end:
-                        chunk = await file.read(min(self.config.read_chunk_size, byte_range.end - start + 1))
-                        if not chunk:
-                            break
-                        start += len(chunk)
-                        yield chunk
-        else:
-
-            async def _gen() -> AsyncIterator[bytes]:
-                async with await open_file(file_path, mode="rb") as file:
-                    while chunk := await file.read(self.config.read_chunk_size):
-                        yield chunk
+                    if byte_range is not None:
+                        start = byte_range.start
+                        await file.seek(start)
+                        while start <= byte_range.end:
+                            chunk = await file.read(min(self.config.read_chunk_size, byte_range.end - start + 1))
+                            if not chunk:
+                                break
+                            start += len(chunk)
+                            yield chunk
+                    else:
+                        while chunk := await file.read(self.config.read_chunk_size):
+                            yield chunk
+            except FileNotFoundError as exc:
+                # Eviction between validation and opening is a cache miss, not
+                # a broken stream. An already-open POSIX reader survives unlink.
+                raise NotFoundError(f"File {path} no longer exists in local storage") from exc
 
         return _gen()
+
+    async def prune_cache_versions(self, current_path: str, max_versions: int) -> None:
+        """Retain the current S3 cache entry and the newest completed siblings.
+
+        The caller holds the object-wide writer lock. Only hash-named completed
+        entries are candidates; uploads' temporary files are never removed.
+        POSIX unlink leaves already-open readers' file descriptors intact.
+        """
+        current = await self._validate_local_path(current_path)
+        siblings: list[tuple[int, str, anyio.Path]] = []
+        async for candidate in current.parent.iterdir():
+            if candidate == current or re.fullmatch(r"[0-9a-f]{64}", candidate.name) is None:
+                continue
+            try:
+                stat = await candidate.stat()
+            except FileNotFoundError:
+                continue
+            if self._is_file(stat):
+                siblings.append((stat.st_mtime_ns, candidate.name, candidate))
+        siblings.sort(reverse=True)
+        for _, _, candidate in siblings[max_versions - 1 :]:
+            try:
+                await candidate.unlink()
+            except FileNotFoundError:
+                pass
 
     async def upload(
         self,

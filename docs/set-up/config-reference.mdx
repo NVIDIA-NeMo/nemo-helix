@@ -241,6 +241,8 @@ files:
   cache_warming_max_concurrent: 3
   # Seconds to reuse S3 object metadata before checking freshness with HEAD. 0 checks every request. API mutations invalidate this process's metadata immediately; direct bucket changes and writes through other processes may remain stale until expiry. | default: 10.0
   s3_metadata_cache_ttl_seconds: 10.0
+  # Maximum completed versions retained per S3 object in the local content cache. Superseded versions are pruned after a successful cache write. | default: 2
+  s3_cache_max_versions_per_object: 2
   # Maximum Hugging Face request attempts for transient failures. | default: 4
   hf_retry_attempts: 4
   # Initial Hugging Face retry delay in seconds before exponential backoff. | default: 0.5

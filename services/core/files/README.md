@@ -54,9 +54,18 @@ Cache-status listings use at most eight concurrent metadata lookups, with one
 HEAD per object in a cold listing. Use `include_cache_status` only when needed;
 upstream lookup failures return the standard HTTP 502 error rather than 500.
 
+Local S3 cache writes retain at most **two completed versions per object** by
+default. Configure `files.s3_cache_max_versions_per_object` or
+`NHX_FILES_S3_CACHE_MAX_VERSIONS_PER_OBJECT` (minimum 1). After a successful cache
+write, older siblings are pruned under an object-wide writer lock. Temporary
+uploads and other objects are excluded; already-open POSIX readers continue
+reading their file descriptors. An eviction before opening is handled as a cache
+miss. This bounds growth from repeated rewrites, not total storage across all
+objects or bytes held by active readers.
+
 Legacy entries under `cache/s3/` are ignored in favor of `cache/s3-v2/`; no manual
-cleanup is needed to restore fresh reads after upgrading. Legacy and superseded
-files are not automatically removed by the freshness/TTL fixes.
+cleanup is needed to restore fresh reads after upgrading. Legacy files are not
+automatically removed.
 
 ## scripts
 `services/core/files/script` has a few e2e scripts for testing functionality.

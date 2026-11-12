@@ -21,7 +21,7 @@ from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
 from nhx.common.secrets.exceptions import SecretAccessDeniedError, SecretNotFoundError
 from nhx.core.files.app.backends import FileInfo, StorageConfig
 from nhx.core.files.app.backends.base import ByteRange, StorageImpl
-from nhx.core.files.app.cache import CacheStatus, cache_file_directly
+from nhx.core.files.app.cache import CacheStatus, cache_file_directly, cache_write_lock_key
 from nhx.core.files.app.file_lock import FileLockManager
 from nhx.core.files.app.range_requests import (
     download_response_status_and_headers,
@@ -444,14 +444,15 @@ async def get_cache_status_for_files(
 
     # Only query locks for files that aren't cached
     uncached_keys = [ck for ck in cache_paths.values() if ck not in cached_keys]
-    active_locks = await lock_manager.get_active_locks(uncached_keys) if uncached_keys else set()
+    lock_keys = list(dict.fromkeys(cache_write_lock_key(source_storage, key) for key in uncached_keys))
+    active_locks = await lock_manager.get_active_locks(lock_keys) if lock_keys else set()
 
     # Determine status for each file
     result: dict[str, CacheStatus] = {}
     for file_path, cache_key in cache_paths.items():
         if cache_key in cached_keys:
             result[file_path] = CacheStatus.CACHED
-        elif cache_key in active_locks:
+        elif cache_write_lock_key(source_storage, cache_key) in active_locks:
             result[file_path] = CacheStatus.CACHING
         else:
             result[file_path] = CacheStatus.NOT_CACHED
