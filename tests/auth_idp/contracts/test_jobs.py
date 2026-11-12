@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
+from nemo_helix_plugin.auth.workload_identity import docker_job_workload_group
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
@@ -15,6 +16,18 @@ pytestmark = [
     pytest.mark.auth_idp_runtime,
     pytest.mark.e2e,
 ]
+
+
+@pytest.fixture(autouse=True)
+def grant_docker_job_actor_role(auth_idp_case, auth_idp_runtime, auth_idp_workspace):
+    if auth_idp_case.backend == "compose":
+        # Docker jobs have a distinct actor, not the submitting provider identity.
+        grant_workspace_role(
+            auth_idp_runtime.e2e_setup_client(),
+            workspace=auth_idp_workspace,
+            principal=docker_job_workload_group(auth_idp_workspace),
+            roles=["JobRunner"],
+        )
 
 
 def test_provider_workload_job_runs_via_workload_profile(
