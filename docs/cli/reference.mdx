@@ -6297,7 +6297,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 *Agent Resources:*
 
-* `register`: Register an agent on the platform.
+* `register`: Register an agent on the platform, from a local agent...
 * `list`: List agents on the platform.
 * `get`: Get an agent by name.
 * `delete`: Delete an agent from the platform.
@@ -6511,7 +6511,7 @@ nemo agents optimize run-strategy explain [OPTIONS]
 
 #### nemo agents register
 
-Register an agent on the platform.
+Register an agent on the platform, from a local agent config or a git repository.
 
 **Usage:**
 
@@ -6530,6 +6530,15 @@ nemo agents register [OPTIONS]
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Register from a git repository:**
+
+* `--from-git`: Register from a git repository over SSH, e.g. git@gitlab.example.com:org/repo.git. The agent's spec fileset tracks the repository instead of an upload.
+* `--revision`: Branch, tag, or commit SHA. Defaults to the remote's HEAD.
+* `--path`: Directory in the repository holding agent.yaml. Defaults to the root.
+* `--ssh-key-secret`: Secret holding an unencrypted SSH private key that can read the repository.
+* `--host-key`: SHA256 fingerprint of the git host's key to trust. Without it, the key must be in `--known-hosts-file`, or you confirm it at a prompt.
+* `--known-hosts-file <PATH>`: known_hosts file to recognize the git host from. A host listed under another key is refused. [default: ~/.ssh/known_hosts]
 
 #### nemo agents list
 

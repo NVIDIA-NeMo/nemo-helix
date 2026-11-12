@@ -63,6 +63,7 @@ import yaml
 from nemo_agents_plugin.agent_config import AgentRegistration
 from nemo_agents_plugin.deployment_routing import is_deployment_routable
 from nemo_agents_plugin.entities import (
+    AGENT_CONFIG_FILENAME,
     AGENT_SPEC_FILENAME,
     CONTAINER_DEPLOYMENT_MODES,
     ETHOS_FILENAME,
@@ -82,7 +83,7 @@ from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
 from nemo_helix_ext.cli.chat_tui import ExitAction, StreamingResponse, run_chat_tui
 from nemo_helix_ext.cli.core.help_formatter import NhxGroup
-from nemo_helix_ext.ui.prompts import is_interactive
+from nemo_helix_ext.ui.prompts import UserCancelled, is_interactive, prompt_select
 from nemo_helix_plugin.agents.client import AgentsClient
 from nemo_helix_plugin.agents.types import (
     AgentDeployment as ClientAgentDeployment,
@@ -104,6 +105,7 @@ from nemo_helix_plugin.cli_codegen import handle_code_generation
 from nemo_helix_plugin.cli_confirm import confirm_destructive
 from nemo_helix_plugin.cli_error_handling import handle_errors
 from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
+from nemo_helix_plugin.cli_git_host_keys import DEFAULT_KNOWN_HOSTS_FILE, trust_git_host
 from nemo_helix_plugin.cli_list_jobs import (
     LIST_JOBS_COMMAND,
     JobFilterNameOption,
@@ -154,6 +156,8 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
 from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.storage_config import GitStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FindGitRepositoryFilesRequest
 from nemo_helix_plugin.refs import FilesetRef, parse_entity_ref
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from typer.main import get_command as _typer_get_command
@@ -217,6 +221,7 @@ _COMPUTE_SPEC_LIST_COLUMNS = [
 
 
 _AGENT_CLI_PANEL = "Additional commands from plugins"
+_FROM_GIT_PANEL = "Register from a git repository"
 
 
 @dataclass(frozen=True)
@@ -1101,13 +1106,71 @@ def _register_platform_commands(app: typer.Typer) -> None:
             "-l",
             help="Agent label as KEY=VALUE, e.g. team=search. Repeatable.",
         ),
+        from_git: str | None = typer.Option(
+            None,
+            "--from-git",
+            help="Register from a git repository over SSH, e.g. git@gitlab.example.com:org/repo.git. "
+            "The agent's spec fileset tracks the repository instead of an upload.",
+            rich_help_panel=_FROM_GIT_PANEL,
+        ),
+        revision: str | None = typer.Option(
+            None,
+            "--revision",
+            help="Branch, tag, or commit SHA. Defaults to the remote's HEAD.",
+            rich_help_panel=_FROM_GIT_PANEL,
+        ),
+        path: str | None = typer.Option(
+            None,
+            "--path",
+            help=f"Directory in the repository holding {AGENT_CONFIG_FILENAME}. Defaults to the root.",
+            rich_help_panel=_FROM_GIT_PANEL,
+        ),
+        ssh_key_secret: str | None = typer.Option(
+            None,
+            "--ssh-key-secret",
+            help="Secret holding an unencrypted SSH private key that can read the repository.",
+            rich_help_panel=_FROM_GIT_PANEL,
+        ),
+        host_key: str | None = typer.Option(
+            None,
+            "--host-key",
+            help="SHA256 fingerprint of the git host's key to trust. Without it, the key must be in "
+            "--known-hosts-file, or you confirm it at a prompt.",
+            rich_help_panel=_FROM_GIT_PANEL,
+        ),
+        known_hosts_file: Path = typer.Option(
+            DEFAULT_KNOWN_HOSTS_FILE,
+            "--known-hosts-file",
+            help="known_hosts file to recognize the git host from. A host listed under another key is refused.",
+            rich_help_panel=_FROM_GIT_PANEL,
+        ),
         workspace: WorkspaceOption = None,
     ) -> None:
-        """Register an agent on the platform."""
+        """Register an agent on the platform, from a local agent config or a git repository."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url()
-        config_dict, config_format, registration = _validate_agent_config_for_register(agent_config, name=name)
         labels = _parse_labels(label)
+        if from_git is not None:
+            resp = _register_agent_from_git(
+                name=name,
+                description=description,
+                labels=labels,
+                agent_config=agent_config,
+                url=from_git,
+                revision=revision,
+                path=path,
+                ssh_key_secret=ssh_key_secret,
+                host_key=host_key,
+                known_hosts_file=known_hosts_file,
+                workspace=workspace,
+                base_url=base_url,
+            )
+            typer.echo(json.dumps(resp, indent=2))
+            return
+        if (revision, path, ssh_key_secret, host_key) != (None, None, None, None):
+            typer.echo("Error: --revision, --path, --ssh-key-secret and --host-key need --from-git.", err=True)
+            raise typer.Exit(code=2)
+        config_dict, config_format, registration = _validate_agent_config_for_register(agent_config, name=name)
         resp = _register_agent_from_validated_config(
             name=name,
             description=description,
@@ -3347,6 +3410,7 @@ def _register_agent_from_validated_config(
     agent_config: Path | None,
     workspace: str,
     base_url: str,
+    upload_ethos: bool = True,
 ) -> Any:
     """Register the agent entity and (for spec agents) upload its Ethos fileset.
 
@@ -3369,7 +3433,7 @@ def _register_agent_from_validated_config(
             client.register_agent(workspace=workspace, body=RegisterAgentRequest.model_validate(payload))
         ),
     )
-    if agent_config is not None and config_dict and config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
+    if upload_ethos and agent_config is not None and config_dict and config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
         try:
             _upload_ethos_fileset(
                 agent_name=name,
@@ -3401,6 +3465,182 @@ def _register_agent_from_validated_config(
                 )
             raise typer.Exit(code=1) from exc
     return resp
+
+
+def _register_agent_from_git(
+    *,
+    name: str,
+    description: str,
+    labels: dict[str, str],
+    agent_config: Path | None,
+    url: str,
+    revision: str | None,
+    path: str | None,
+    ssh_key_secret: str | None,
+    host_key: str | None,
+    known_hosts_file: Path,
+    workspace: str,
+    base_url: str,
+) -> Any:
+    """Register an agent whose spec fileset tracks a git repository, as Studio's git flow does."""
+    if agent_config is not None:
+        typer.echo(
+            f"Error: --agent-config and --from-git cannot be combined; the repository supplies {AGENT_CONFIG_FILENAME}.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    if ssh_key_secret is None:
+        typer.echo("Error: --from-git needs --ssh-key-secret.", err=True)
+        raise typer.Exit(code=2)
+
+    storage_fields: dict[str, Any] = {"type": "git", "url": url, "ssh_key_secret": ssh_key_secret}
+    if revision is not None:
+        storage_fields["revision"] = revision
+    if path is not None:
+        storage_fields["path"] = path
+    storage = _run_sdk("validate git repository", lambda: GitStorageConfig.model_validate(storage_fields))
+
+    files_client = shared_cli_client(FilesClient)
+    storage = _locate_git_agent(
+        files_client, workspace=workspace, storage=storage, host_key=host_key, known_hosts_file=known_hosts_file
+    )
+    fileset = ethos_fileset_name(name)
+    _run_sdk(
+        "POST files API",
+        lambda: files_client.create_fileset(
+            workspace=workspace,
+            body=CreateFilesetRequest(
+                name=fileset, description=f"Agent spec for {name}, from {storage.url}", storage=storage
+            ),
+        ).data(),
+    )
+    try:
+        with tempfile.TemporaryDirectory(prefix=f".{name}-git-agent-") as directory:
+            local_config = _stage_git_agent(
+                files_client, workspace=workspace, fileset=fileset, destination=Path(directory)
+            )
+            config_dict, config_format, registration = _validate_agent_config_for_register(local_config, name=name)
+            return _register_agent_from_validated_config(
+                name=name,
+                description=description,
+                labels=labels,
+                config_dict=config_dict,
+                config_format=config_format,
+                registration=registration,
+                agent_config=local_config,
+                workspace=workspace,
+                base_url=base_url,
+                upload_ethos=False,
+            )
+    except BaseException:
+        _delete_git_agent_fileset(files_client, workspace=workspace, fileset=fileset)
+        raise
+
+
+def _locate_git_agent(
+    files_client: FilesClient,
+    *,
+    workspace: str,
+    storage: GitStorageConfig,
+    host_key: str | None,
+    known_hosts_file: Path,
+) -> GitStorageConfig:
+    """Trust the host's key, then point *storage* at the directory holding agent.yaml."""
+    trusted = _run_sdk(
+        "POST files API",
+        lambda: trust_git_host(
+            files_client,
+            workspace=workspace,
+            storage=storage,
+            file_name=AGENT_CONFIG_FILENAME,
+            host_key=host_key,
+            known_hosts_file=known_hosts_file,
+        ),
+    )
+    found = _run_sdk(
+        "POST files API",
+        lambda: files_client.find_git_repository_files(
+            workspace=workspace,
+            body=FindGitRepositoryFilesRequest(storage=trusted, file_name=AGENT_CONFIG_FILENAME),
+        ).data(),
+    )
+    if AGENT_CONFIG_FILENAME in found.paths:
+        return trusted
+
+    source = f"{trusted.url} at {trusted.path}" if trusted.path else trusted.url
+    directories = [_join_repo_path(trusted.path, directory) for directory in _agent_directories(found.paths)]
+    if not directories:
+        typer.echo(
+            f"Error: there is no {AGENT_CONFIG_FILENAME} anywhere in {source} at {found.revision}. "
+            "Check --revision and --path.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not is_interactive():
+        listing = "\n".join(f"  {directory}" for directory in directories)
+        typer.echo(
+            f"Error: there is no {AGENT_CONFIG_FILENAME} at the root of {source}. "
+            f"Pass --path with one of these directories:\n{listing}",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    try:
+        chosen = prompt_select(
+            f"There is no {AGENT_CONFIG_FILENAME} at the root of {source}. Choose the agent:", directories
+        )
+    except UserCancelled:
+        raise typer.Abort() from None
+    return trusted.model_copy(update={"path": chosen})
+
+
+def _agent_directories(paths: list[str]) -> list[str]:
+    suffix = f"/{AGENT_CONFIG_FILENAME}"
+    return sorted(path.removesuffix(suffix) for path in paths if path.endswith(suffix))
+
+
+def _join_repo_path(base: str, directory: str) -> str:
+    return "/".join(part for part in (base.strip("/"), directory) if part)
+
+
+def _stage_git_agent(files_client: FilesClient, *, workspace: str, fileset: str, destination: Path) -> Path:
+    """Download the git-backed spec fileset so the agent config validates against its own files."""
+    files = _run_sdk("GET files API", lambda: files_client.list_files(workspace=workspace, name=fileset).data().data)
+    total_bytes = sum(file.size for file in files)
+    if len(files) > MAX_ETHOS_STAGED_FILES or total_bytes > MAX_ETHOS_STAGED_BYTES:
+        typer.echo(
+            f"Error: the agent directory holds {len(files)} files and {total_bytes} bytes, over the limit of "
+            f"{MAX_ETHOS_STAGED_FILES} files and {MAX_ETHOS_STAGED_BYTES} bytes for an agent. "
+            "Point --path at a directory holding only the agent's own files.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    root = destination.resolve()
+    for file in files:
+        target = (root / file.path).resolve()
+        if not target.is_relative_to(root):
+            typer.echo(f"Error: repository path {file.path!r} escapes the agent directory.", err=True)
+            raise typer.Exit(code=1)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        content = _run_sdk(
+            "GET files API",
+            lambda remote_path=file.path: files_client.download_file(
+                workspace=workspace, name=fileset, path=remote_path
+            ).read(),
+        )
+        target.write_bytes(content)
+    return root / AGENT_CONFIG_FILENAME
+
+
+def _delete_git_agent_fileset(files_client: FilesClient, *, workspace: str, fileset: str) -> None:
+    try:
+        files_client.delete_fileset(workspace=workspace, name=fileset).data()
+    except Exception:
+        logger.exception("Failed to roll back fileset %r after git registration failed", fileset)
+        typer.echo(
+            f"Error: failed to remove fileset {fileset!r}; remove it with `nemo files filesets delete {fileset}`.",
+            err=True,
+        )
 
 
 def _spec_package_warning(agent: str, agent_config: Path) -> tuple[str, ...]:
