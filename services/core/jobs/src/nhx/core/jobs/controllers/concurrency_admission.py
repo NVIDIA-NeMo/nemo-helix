@@ -9,6 +9,7 @@ from typing import cast
 from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext, ListStepsQueryParams
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.controllers.admission import AdmissionDecision
 from nhx.core.jobs.controllers.backends import extract_provider_profile
@@ -63,23 +64,34 @@ class ConcurrencyAdmission:
     def __init__(
         self,
         jobs_client: JobsClient,
+        workspaces_client: WorkspacesClient,
         *,
         executor_limits: Mapping[ExecutorKey, int],
         max_active_jobs_per_workspace: int,
         max_active_jobs_per_user: int,
     ) -> None:
         self._jobs = jobs_client
+        self._workspaces = workspaces_client
         self._executor_limits = dict(executor_limits)
         self._workspace_default = max_active_jobs_per_workspace
         self._user_limit = max_active_jobs_per_user
         self._by_executor: Counter[ExecutorKey] = Counter()
         self._by_workspace: Counter[str] = Counter()
         self._by_user: Counter[str] = Counter()
+        self._workspace_limits: dict[str, int] = {}
         self._snapshot_ok = False
 
     def workspace_limit(self, workspace: str) -> int:
-        """Limit for a workspace. A per-workspace value will take precedence here once it exists."""
-        return self._workspace_default
+        """Limit for a workspace: its configured ``max_concurrent_jobs``, else the Jobs default.
+
+        Looked up once per scheduling pass. Raises ``NemoClientError`` if the workspace cannot be read,
+        so the caller can defer rather than admit past a cap it could not see.
+        """
+        if workspace not in self._workspace_limits:
+            limits = self._workspaces.get_workspace(name=workspace).data().limits
+            configured = limits.max_concurrent_jobs if limits is not None else None
+            self._workspace_limits[workspace] = configured if configured is not None else self._workspace_default
+        return self._workspace_limits[workspace]
 
     def executor_limit(self, executor: ExecutorKey) -> int | None:
         """Limit for an executor, or ``None`` when the executor is not a configured profile."""
@@ -107,6 +119,7 @@ class ConcurrencyAdmission:
             self._snapshot_ok = False
             return
         self._by_executor, self._by_workspace, self._by_user = by_executor, by_workspace, by_user
+        self._workspace_limits = {}
         self._snapshot_ok = True
 
     def check(self, step: HelixJobStepWithContext) -> AdmissionDecision:
@@ -123,7 +136,13 @@ class ConcurrencyAdmission:
                 f"Waiting for capacity: executor {executor[0]}/{executor[1]} is at its limit "
                 f"({self._by_executor[executor]}/{executor_limit} active jobs)"
             )
-        workspace_limit = self.workspace_limit(step.workspace)
+        try:
+            workspace_limit = self.workspace_limit(step.workspace)
+        except NemoClientError:
+            logger.exception("Could not read limits for workspace '%s'; deferring admission", step.workspace)
+            return AdmissionDecision.defer(
+                f"Waiting for capacity: could not determine limits for workspace '{step.workspace}'"
+            )
         if self._by_workspace[step.workspace] >= workspace_limit:
             return AdmissionDecision.defer(
                 f"Waiting for capacity: workspace '{step.workspace}' is at its limit "
