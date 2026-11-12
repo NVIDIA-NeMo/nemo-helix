@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
 import { CreateDatasetPanel } from '@studio/components/CreateDatasetPanel';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
+import { getDatasetDetailRoute } from '@studio/routes/utils';
 import { render, screen } from '@studio/tests/util/render';
 import { fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
@@ -108,8 +109,9 @@ function Host({
   onCreated: (f: FilesetOutput) => void;
 }) {
   const [open, setOpen] = useState(true);
+  // Its own toast provider sits inside the router, so a toast may hold a router link.
   return (
-    <>
+    <MockToastProvider>
       <button onClick={() => setOpen(true)}>Open host panel</button>
       <CreateDatasetPanel
         open={open}
@@ -120,7 +122,7 @@ function Host({
         }}
         onCreated={onCreated}
       />
-    </>
+    </MockToastProvider>
   );
 }
 
@@ -235,10 +237,25 @@ describe('CreateDatasetPanel', () => {
 
     // GitHub URL pasted into HuggingFace: link switches tabs without copying the URL
     await paste(user, 'HuggingFace URL', GITHUB_URL);
+    // The link is found by role; the sentence is read from the element containing it, so a hidden
+    // duplicate of the message (which would double its text) is not tolerated.
+    const switchLink = await waitFor(() => {
+      const [match] = [
+        ...screen.queryAllByRole('link', { name: 'GitHub' }),
+        ...screen.queryAllByRole('button', { name: 'GitHub' }),
+      ];
+      expect(match).toBeDefined();
+      return match;
+    });
+    const sentence = 'Trying to import from GitHub? Switch to GitHub tab.';
     expect(
-      await screen.findByText(/Trying to import from GitHub\? Switch to GitHub tab\./)
-    ).toBeInTheDocument();
-    await user.click(screen.getByText('GitHub', { selector: 'a, button' }));
+      screen.queryAllByText(
+        (_, element) =>
+          Boolean(element?.contains(switchLink)) &&
+          element?.textContent?.replace(/\s+/g, ' ').trim() === sentence
+      ).length
+    ).toBeGreaterThan(0);
+    await user.click(switchLink);
     expect(screen.getByRole('tab', { name: 'GitHub' })).toHaveAttribute('aria-selected', 'true');
     expect(field('GitHub URL')).toHaveValue('');
 
@@ -543,5 +560,194 @@ describe('CreateDatasetPanel', () => {
     expect(onCreated).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(within(document.body).getByRole('tab', { name: 'HuggingFace' })).toBeInTheDocument();
+  });
+
+  it('lets Create finish after the panel closes: a toast link replaces onCreated', async () => {
+    recordRequests();
+    const { user, onCreated } = setup();
+    await screen.findByRole('tab', { name: 'HuggingFace' });
+
+    // Finishing while the panel is open: onCreated runs and no toast link is shown
+    await paste(user, 'HuggingFace URL', HF_URL);
+    await waitFor(() => expect(field('Name')).toHaveValue('alpaca'));
+    await user.click(createButton());
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('mock-toast-success')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+
+    // Cancel while the request is in flight; the request is allowed to finish
+    await user.click(screen.getByRole('button', { name: 'Open host panel' }));
+    const gate = Promise.withResolvers<void>();
+    server.use(
+      http.post(FILESETS_URL, async ({ request }) => {
+        const body = (await request.json()) as Body;
+        await gate.promise;
+        return HttpResponse.json(filesetRecord(body.name as string));
+      })
+    );
+    await paste(user, 'HuggingFace URL', 'https://huggingface.co/datasets/tatsu-lab/other');
+    await waitFor(() => expect(field('Name')).toHaveValue('other'));
+    await user.click(createButton());
+    expect(await screen.findByRole('button', { name: 'Creating…' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('tab', { name: 'HuggingFace' })).toBeNull());
+
+    gate.resolve();
+    const toast = await screen.findByTestId('mock-toast-success');
+    expect(toast).toHaveTextContent('other');
+    expect(within(toast).getByRole('link')).toHaveAttribute(
+      'href',
+      getDatasetDetailRoute(WS, 'other')
+    );
+    expect(onCreated).toHaveBeenCalledTimes(1); // the closed panel's creation is not reported
+  });
+
+  it('keeps the panel and input after a failed upload, then retries without creating twice', async () => {
+    const posts: Body[] = [];
+    const puts: string[] = [];
+    let failUploads = true;
+    server.use(
+      http.get(FILESETS_URL, ({ request }) => {
+        const name = new URL(request.url).searchParams.get('filter[name]');
+        const data = posts.some((p) => p.name === name) ? [filesetRecord(name as string)] : [];
+        return HttpResponse.json({
+          data,
+          pagination: {
+            page: 1,
+            page_size: 1,
+            current_page_size: data.length,
+            total_pages: 1,
+            total_results: data.length,
+          },
+        });
+      }),
+      http.post(FILESETS_URL, async ({ request }) => {
+        const body = (await request.json()) as Body;
+        posts.push(body);
+        return HttpResponse.json(filesetRecord(body.name as string));
+      }),
+      http.put(`${FILESETS_URL}/:name/-/*`, ({ request }) => {
+        if (failUploads) return HttpResponse.json({ detail: 'boom' }, { status: 500 });
+        puts.push(decodeURIComponent(new URL(request.url).pathname.split('/-/')[1]));
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+    const { user, onCreated, onClose } = setup();
+    await openTab(user, 'Upload');
+    selectFiles('create-dataset-folder-input', 'my-data/a.jsonl', 'my-data/b.jsonl');
+    await waitFor(() => expect(field('Name')).toHaveValue('my-data'));
+
+    await user.click(createButton());
+    expect(await screen.findByTestId('mock-toast-error')).toBeInTheDocument();
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(field('Name')).toHaveValue('my-data');
+    expect(screen.getByText(/my-data\/a\.jsonl/)).toBeInTheDocument();
+    expect(posts).toHaveLength(1);
+
+    failUploads = false;
+    await waitFor(() => expect(createButton()).toBeEnabled());
+    await user.click(createButton());
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    expect(posts).toHaveLength(1); // the fileset already exists: resume, do not create again
+    expect([...puts].sort()).toEqual(['my-data/a.jsonl', 'my-data/b.jsonl']);
+  });
+
+  it('keeps rejected-submit errors and per-tab interaction flags across tab switches', async () => {
+    const { user } = setup();
+    await screen.findByRole('tab', { name: 'HuggingFace' });
+
+    // HuggingFace: a blurred invalid URL sets that draft's own flag
+    await user.type(field('HuggingFace URL'), 'tatsu-lab/alpaca');
+    await user.tab();
+    expect(await screen.findByText(URL_ERRORS.invalidHf)).toBeInTheDocument();
+
+    // S3 is an independent draft: it shows nothing, and HuggingFace is unchanged on return
+    await openTab(user, 'S3');
+    expect(screen.queryByText('Enter an s3:// URI or an S3 console URL')).not.toBeInTheDocument();
+    expect(screen.queryByText(URL_ERRORS.invalidHf)).not.toBeInTheDocument();
+    await openTab(user, 'HuggingFace');
+    expect(screen.getByText(URL_ERRORS.invalidHf)).toBeInTheDocument();
+
+    // A rejected submit shows all errors; the shared flag survives leaving and returning
+    await user.clear(field('HuggingFace URL'));
+    await user.click(createButton());
+    expect(await screen.findByText(NAME_REQUIRED)).toBeInTheDocument();
+    expect(screen.getByText(URL_ERRORS.hf)).toBeInTheDocument();
+    await openTab(user, 'NGC');
+    await openTab(user, 'HuggingFace');
+    expect(screen.getByText(NAME_REQUIRED)).toBeInTheDocument();
+    expect(screen.getByText(URL_ERRORS.hf)).toBeInTheDocument();
+  });
+
+  it('resets derived fields on a URL edit but keeps secret, description and a manual name', async () => {
+    const { posts } = recordRequests();
+    const { user, onCreated } = setup();
+    await openTab(user, 'GitHub');
+    await user.type(field('Description'), 'keep me');
+    await paste(user, 'GitHub URL', `${GITHUB_URL}/tree/dev/data/train`);
+    await waitFor(() => expect(field('Name')).toHaveValue('stanford-alpaca'));
+    await user.clear(field('Name'));
+    await user.type(field('Name'), 'my-set');
+    await pickSecret(user, 'Token secret', 'huggingface-token');
+
+    // Replace the whole URL in one paste, so no empty intermediate value resets anything
+    await user.tripleClick(field('GitHub URL'));
+    await user.paste(GITHUB_URL);
+    expect(field('GitHub URL')).toHaveValue(GITHUB_URL);
+
+    await user.click(createButton());
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    expect(posts[0]).toMatchObject({
+      name: 'my-set',
+      description: 'keep me',
+      storage: {
+        type: 'github',
+        owner: 'tatsu-lab',
+        repo: 'stanford_alpaca',
+        revision: 'HEAD',
+        token_secret: 'huggingface-token',
+      },
+    });
+    expect(posts[0].storage).not.toHaveProperty('path');
+  });
+
+  it('keeps the name after every file is removed and then requires a file', async () => {
+    const { posts } = recordRequests();
+    const { user } = setup();
+    await openTab(user, 'Upload');
+    selectFiles('create-dataset-files-input', 'data.final.jsonl');
+    await waitFor(() => expect(field('Name')).toHaveValue('data.final'));
+
+    await user.click(screen.getByRole('button', { name: 'Remove data.final.jsonl' }));
+    expect(field('Name')).toHaveValue('data.final');
+    await user.click(createButton());
+    expect(
+      await screen.findByText('Choose at least one file or a folder to upload.')
+    ).toBeInTheDocument();
+    expect(posts).toHaveLength(0);
+  });
+
+  it('reports a failed secrets lookup as a load error, not as an empty workspace', async () => {
+    server.use(http.get(SECRETS_URL, () => HttpResponse.json({ detail: 'boom' }, { status: 500 })));
+    const { posts } = recordRequests();
+    const { user } = setup();
+    await openTab(user, 'NGC');
+    await paste(user, 'NGC Catalog URL', NGC_URL);
+
+    // Contract: the message matches this regex
+    expect(
+      await screen.findByText(/couldn't load|failed to load|unable to load/i)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'API key secret' })).toBeDisabled();
+    expect(screen.queryByText('No secrets available')).not.toBeInTheDocument();
+    expect(screen.queryByText(/nemo secrets create/)).not.toBeInTheDocument();
+
+    await user.click(createButton());
+    expect(await screen.findByText('Select api key secret to continue.')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Create a secret in this workspace, then select it to continue.')
+    ).not.toBeInTheDocument();
+    expect(posts).toHaveLength(0);
   });
 });
