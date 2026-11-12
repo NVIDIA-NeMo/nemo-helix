@@ -11,7 +11,7 @@ from typing import TypeGuard, cast
 
 from nhx_evals_sdk.execution._protocols import JobParamsConfigurableMetric
 from nhx_evals_sdk.metrics.protocol import Metric, MetricWithModels, MetricWithPreflight, MetricWithSecrets
-from nhx_evals_sdk.metrics.utils import metric_type_name
+from nhx_evals_sdk.metrics.utils import metric_key_name
 from nhx_evals_sdk.resolver_protocols import ModelResolver, SecretResolver
 from nhx_evals_sdk.values.params import RunConfig, RunConfigOnline, RunConfigOnlineModel
 from pydantic import BaseModel
@@ -20,6 +20,9 @@ from pydantic import BaseModel
 def unique_metric_keys(metrics: Sequence[Metric]) -> list[str]:
     """Assign stable unique keys to a sequence of metrics.
 
+    Each key is the metric's configured name if it has one (``metric_key_name``), else its type name. A key
+    already taken gets ``_2``, ``_3`` and so on.
+
     Args:
         metrics: Metrics submitted in one evaluator call.
 
@@ -27,12 +30,12 @@ def unique_metric_keys(metrics: Sequence[Metric]) -> list[str]:
         Unique metric keys in the same order as the input metrics.
     """
 
-    # A type name ending in ``_<n>`` can equal another type's suffixed key, so bump past collisions.
+    # A name ending in ``_<n>`` can equal another metric's suffixed key, so bump past collisions.
     seen: dict[str, int] = {}
     used: set[str] = set()
     keys: list[str] = []
     for metric in metrics:
-        base = metric_type_name(metric)
+        base = metric_key_name(metric)
         suffix = seen.get(base, 0) + 1
         key = base if suffix == 1 else f"{base}_{suffix}"
         while key in used:

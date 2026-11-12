@@ -676,6 +676,15 @@ class AnswerMatch(MetricBase):
     """
 
     type: Literal[MetricType.ANSWER_MATCH] = MetricType.ANSWER_MATCH
+    name: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
+        max_length=64,
+        description="The name the scores are reported under, as `<name>.<output>`, and that `group_by` entries "
+        "use. Defaults to the type, `answer-match`. Letters, digits, `-` and `_`; no dots, which separate the "
+        "name from the output. Two metrics with the same name in one run get `_2`, `_3` and so on.",
+        examples=["finance-qa"],
+    )
     reference: str = Field(description="The template for the reference answer.", examples=["{{item.answer}}"])
     candidate: str | None = Field(
         default=None,
@@ -727,6 +736,10 @@ class AnswerMatch(MetricBase):
         if not (any(c.report for c in self.comparisons.values()) or found_as or self.select):
             raise ValueError("answer-match emits no scores: report a comparison, set extract.found_as, or add a select")
         return self
+
+    def metric_key(self) -> str | None:
+        """Return the name the scores are reported under, or None for the type name."""
+        return self.name
 
     def input_schema(self) -> InputSchema:
         """Return the dataset fields the reference, candidate and label templates read."""
@@ -802,6 +815,7 @@ class FinanceQA(MetricBase):
         """The answer-match configuration that scores as this metric does: the finance cookbook as a preset.
 
         It covers every score except `hit_max_new_tokens`, which reads the response's token usage, not the answer.
+        It is named `finance-qa`, so its scores have this metric's names.
         """
         tasks = dict.fromkeys([*FINANCE_QA_TAT_DQA_TASKS, *self.program_synthesis_tasks])
 
@@ -819,6 +833,7 @@ class FinanceQA(MetricBase):
                 on="task", cases=dict.fromkeys(self.program_synthesis_tasks, "python")
             )
         return AnswerMatch(
+            name="finance-qa",
             reference=self.reference,
             candidate=self.candidate,
             extract=AnswerExtract(

@@ -9,7 +9,7 @@ import string
 from typing import Any
 
 from nhx_evals_sdk.enums import MetricType
-from nhx_evals_sdk.metrics.protocol import Metric
+from nhx_evals_sdk.metrics.protocol import Metric, MetricWithKey
 
 
 def as_finite_float(value: Any) -> float | None:
@@ -70,3 +70,16 @@ def metric_type_name(metric: Metric) -> str:
     if isinstance(metric_type, str):
         return metric_type
     return metric.__class__.__name__
+
+
+def metric_key_name(metric: Metric) -> str:
+    """Resolve the name a metric's scores are reported under, as ``<name>.<output>``.
+
+    A metric configured with a name (``MetricWithKey``, such as ``answer-match`` with ``name`` set) uses it;
+    any other metric uses its type name. A run still makes keys unique: see ``unique_metric_keys``.
+    """
+    if isinstance(metric, MetricWithKey):
+        key = metric.metric_key()
+        if key:
+            return key
+    return metric_type_name(metric)

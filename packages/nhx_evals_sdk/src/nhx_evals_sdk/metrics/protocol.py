@@ -69,6 +69,15 @@ class Metric(Protocol):
 
 
 @runtime_checkable
+class MetricWithKey(Protocol):
+    """Protocol for metrics configured with the name their scores are reported under."""
+
+    def metric_key(self) -> str | None:
+        """Return the configured name, or None to report the scores under the metric type."""
+        ...
+
+
+@runtime_checkable
 class CorpusMetric(Protocol):
     """Protocol for metrics that also emit corpus-level scores."""
 

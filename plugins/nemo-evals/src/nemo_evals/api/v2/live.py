@@ -54,7 +54,7 @@ from nhx_evals_sdk.execution.config import resolve_params
 from nhx_evals_sdk.execution.evaluator import Evaluator
 from nhx_evals_sdk.execution.utils import unique_metric_keys
 from nhx_evals_sdk.metrics.protocol import Metric, MetricWithModels
-from nhx_evals_sdk.metrics.utils import metric_type_name
+from nhx_evals_sdk.metrics.utils import metric_key_name
 from nhx_evals_sdk.resolver_protocols import SecretResolver
 from nhx_evals_sdk.values import FieldMapping, Model, ModelRef
 from nhx_evals_sdk.values.multi_metric_results import BenchmarkEvaluationResult
@@ -450,11 +450,11 @@ async def _score(
         try:
             result = await _run([metric], request=request, params=params, secret_resolver=secret_resolver)
         except Exception as exc:
-            results.append(LiveMetricResult(metric=metric_type_name(metric), error=str(exc)))
+            results.append(LiveMetricResult(metric=metric_key_name(metric), error=str(exc)))
             continue
         if output is None:
             output = _output_of(result)
-        results.append(LiveMetricResult(metric=metric_type_name(metric), scores=list(result.aggregate_scores.scores)))
+        results.append(LiveMetricResult(metric=metric_key_name(metric), scores=list(result.aggregate_scores.scores)))
     return output, results
 
 

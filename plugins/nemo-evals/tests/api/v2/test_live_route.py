@@ -41,6 +41,7 @@ from nhx.testing.files import InMemoryFilesService
 from nhx.testing.secrets import InMemorySecretsService
 from nhx_evals_sdk import inference as sdk_inference
 from nhx_evals_sdk.execution import benchmark_execution
+from nhx_evals_sdk.metrics.answer_match import AnswerMatchMetric
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
@@ -554,6 +555,29 @@ def test_one_failing_metric_does_not_hide_the_others(client: TestClient) -> None
     assert by_metric["exact-match"]["scores"][0]["mean"] == pytest.approx(1.0)
     assert by_metric["tool-calling"]["scores"] == []
     assert "tool call" in by_metric["tool-calling"]["error"].lower()
+
+
+def test_offline_results_are_labelled_by_the_metric_name(client: TestClient) -> None:
+    """A metric configured with a name reports under it, in the label and in its score names."""
+    named = AnswerMatchMetric(name="capital", reference="{{item.expected}}", comparisons={"exact": {"type": "equals"}})
+    named_inline = MetricInline.model_validate_json(
+        bundle_metric(named, InlineMetricBundlePackager()).model_dump_json()
+    ).model_dump(mode="json")
+
+    resp = client.post(
+        _BASE,
+        json={
+            "dataset": [{"expected": "Paris", "output": "Paris"}],
+            "metrics": [_exact_match_metric(), named_inline],
+            "field_mapping": {"output": "output"},
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    by_metric = {m["metric"]: m for m in resp.json()["metrics"]}
+    assert set(by_metric) == {"exact-match", "capital"}
+    assert [score["name"] for score in by_metric["capital"]["scores"]] == ["capital.exact"]
+    assert by_metric["capital"]["scores"][0]["mean"] == pytest.approx(1.0)
 
 
 def test_too_many_model_backed_metrics_is_rejected(client: TestClient) -> None:

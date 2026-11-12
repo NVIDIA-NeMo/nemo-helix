@@ -284,8 +284,14 @@ class TestConfig:
         with pytest.raises(ValidationError, match=message):
             _metric(**change)
 
+    @pytest.mark.parametrize("name", ["", "finance.qa", "-qa", "a b", "x" * 65])
+    def test_rejects_names_that_cannot_key_scores(self, name):
+        with pytest.raises(ValidationError, match="name"):
+            _metric(name=name)
+
     def test_round_trips_through_metrics_union(self):
         metric = _metric(
+            name="qa",
             extract={**THINK, "source": "raw"},
             comparisons={"exact": {"type": "equals"}, "close": {"type": "number", "relative_tolerance": 0.05}},
             label_outputs={"task": "{{item.task}}"},
@@ -299,6 +305,16 @@ class TestConfig:
     def test_input_schema_lists_template_fields(self):
         metric = _metric(candidate="{{item.completion}}", label_outputs={"task": "{{item.task}}"})
         assert set(metric.input_schema().schema_["required"]) == {"answer", "task", "completion"}
+
+    def test_the_name_keys_the_scores(self):
+        dataset = [{"answer": "Paris", "output": "paris"}]
+        named = _metric(name="capital", candidate="{{item.output}}", normalize={"casefold": True})
+        unnamed = _metric(candidate="{{item.output}}")
+
+        benchmark = Evaluator().run_sync(metrics=[named, unnamed, named], dataset=dataset)
+        assert list(benchmark.row_scores[0].metrics) == ["capital", "answer-match", "capital_2"]
+        means = {score.name: score.mean for score in benchmark.aggregate_scores.scores}
+        assert means == {"capital.exact": 1.0, "answer-match.exact": 0.0, "capital_2.exact": 1.0}
 
     def test_run_sync_aggregates_and_keeps_labels_out(self):
         metric = _routed(correct={"on": "kind", "cases": {"number": "close"}})

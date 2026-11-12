@@ -405,6 +405,18 @@ class TestPreset:
         }
         assert "program_syntax_valid" not in _metric(program_synthesis_tasks=[]).to_answer_match().select
 
+    def test_the_preset_reports_finance_qa_score_names(self):
+        metric = _metric(candidate="{{item.completion}}")
+        preset = AnswerMatchMetric.model_validate(metric.to_answer_match().model_dump())
+        dataset = [{"task": "CodeFinQA", "answer": "40", "completion": "<think>a = 120 - 80</think>40"}]
+        alone = Evaluator().run_sync(metrics=[preset], dataset=dataset)
+        assert {score.name for score in alone.aggregate_scores.scores} == {
+            f"finance-qa.{name}"
+            for name in ("exact", "relaxed", "task_correct", "answer_f1", "trace_closed", "program_syntax_valid")
+        }
+        together = Evaluator().run_sync(metrics=[metric, preset], dataset=dataset)
+        assert list(together.row_scores[0].metrics) == ["finance-qa", "finance-qa_2"]
+
 
 def _task_limit(task: str) -> int:
     """The cookbook's per-task completion limit (evaluation.py lines 428-431, with its default 768)."""

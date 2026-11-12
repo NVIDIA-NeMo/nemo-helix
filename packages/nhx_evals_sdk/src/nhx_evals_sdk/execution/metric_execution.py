@@ -47,7 +47,7 @@ from nhx_evals_sdk.metrics.protocol import (
     Metric,
     MetricResult,
 )
-from nhx_evals_sdk.metrics.utils import metric_type_name
+from nhx_evals_sdk.metrics.utils import metric_key_name
 from nhx_evals_sdk.resilience.api import run_indexed_tasks, use_resilience_session
 from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime, timed_target_call, untimed
 from nhx_evals_sdk.resilience.errors import get_evaluation_error
@@ -926,7 +926,7 @@ async def _evaluate_metric_in_session(
             parallelism=params.parallelism,
             metric=metric,
             target=target,
-            metric_key=metric_type_name(metric),
+            metric_key=metric_key_name(metric),
             params=params,
             preprocess_hooks=preprocess_hooks,
             postprocess_hooks=postprocess_hooks,
@@ -957,7 +957,7 @@ async def _evaluate_metric_in_session(
                 parallelism=params.parallelism,
                 metric=metric,
                 target=target,
-                metric_key=metric_type_name(metric),
+                metric_key=metric_key_name(metric),
                 prompt_template=resolved_prompt_template,
                 params=params,
                 inference_fn=inference_fn,
@@ -979,7 +979,7 @@ async def _evaluate_metric_in_session(
                 parallelism=params.parallelism,
                 metric=metric,
                 target=target,
-                metric_key=metric_type_name(metric),
+                metric_key=metric_key_name(metric),
                 prompt_template=prompt_template,
                 params=params,
                 inference_fn=make_agent_inference_request,
@@ -993,7 +993,7 @@ async def _evaluate_metric_in_session(
                 parallelism=params.parallelism,
                 metric=metric,
                 target=None,
-                metric_key=metric_type_name(metric),
+                metric_key=metric_key_name(metric),
                 params=params,
                 preprocess_hooks=merged_preprocess_hooks,
                 postprocess_hooks=merged_postprocess_hooks,
