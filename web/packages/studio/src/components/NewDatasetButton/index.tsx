@@ -29,7 +29,7 @@ export const NewDatasetButton: FC<Props> = ({ ...buttonProps }) => {
       <CreateButton onClick={() => setOpen()} {...buttonProps}>
         Create Dataset
       </CreateButton>
-      {isOpen && <NewDatasetPanel open={isOpen} onClose={setClosed} />}
+      <NewDatasetPanel open={isOpen} onClose={setClosed} />
     </>
   );
 };

@@ -20,7 +20,12 @@ const EXTERNAL_BACKENDS: ReadonlySet<StorageBackend | null | undefined> = new Se
  * The dataset creation panel for the current workspace. After creating, opens the dataset:
  * the Card tab for external-source datasets, the Files tab otherwise.
  */
-export const NewDatasetPanel: FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
+interface NewDatasetPanelProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+export const NewDatasetPanel: FC<NewDatasetPanelProps> = ({ open, onClose }) => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
 
