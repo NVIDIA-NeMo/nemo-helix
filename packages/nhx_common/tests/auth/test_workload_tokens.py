@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,8 +11,13 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from nemo_helix_plugin.auth.workload_delegations import JOB_WORKLOAD_CLAIM, JobWorkloadBinding, current_workload_job
+from nhx.common.auth.client import AuthClient
+from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
+from nhx.common.auth.token_resolver import ResolvedTokenKind
 from nhx.common.auth.workload_tokens import (
+    issue_service_workload_access_token,
     issue_service_workload_access_token_async,
     resolve_workload_access_token,
     resolve_workload_subject_token,
@@ -149,3 +155,44 @@ async def test_workload_subject_token_resolves_with_configured_subject_issuer(tm
     assert resolved.principal.email == "svc-nemo@example.test"
     assert resolved.principal.groups == ["nemo-workloads"]
     assert resolved.scopes == ["openid", "email", "groups"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("token_kind", "claim", "named"),
+    [
+        ("workload_access_token", None, True),
+        ("oidc_access_token", None, False),
+        ("access_key", None, False),
+        ("workload_access_token", {"workspace": "team"}, False),
+    ],
+    ids=["workload-token", "oidc-token", "access-key", "malformed-claim"],
+)
+async def test_only_a_workload_access_token_names_its_job(
+    tmp_path: Path, token_kind: ResolvedTokenKind, claim: dict | None, named: bool
+) -> None:
+    config = _token_exchange_config(tmp_path)
+    job = JobWorkloadBinding(workspace="team", job="job-one")
+    token = await issue_service_workload_access_token_async(
+        config, service_name="jobs", on_behalf_of=Principal(id="user:alice"), job=job
+    )
+    resolved = await resolve_workload_access_token(config, token)
+    assert resolved is not None
+    raw_claims = resolved.claims.raw_claims | ({JOB_WORKLOAD_CLAIM: claim} if claim is not None else {})
+    resolved = replace(resolved, token_kind=token_kind, claims=replace(resolved.claims, raw_claims=raw_claims))
+    marker = auth_client_context.set(
+        AuthClient(principal=resolved.principal, config=config, resolved_bearer_token=resolved)
+    )
+    try:
+        assert current_workload_job() == (job if named else None)
+    finally:
+        auth_client_context.reset(marker)
+
+
+def test_a_job_bound_service_token_must_act_for_the_jobs_creator(tmp_path: Path) -> None:
+    config = _token_exchange_config(tmp_path)
+
+    with pytest.raises(ValueError, match="creator"):
+        issue_service_workload_access_token(
+            config, service_name="jobs", job=JobWorkloadBinding(workspace="team", job="job-one")
+        )

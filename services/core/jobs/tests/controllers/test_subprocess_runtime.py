@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from nemo_helix_plugin.auth.workload_delegations import JobWorkloadBinding
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nhx.common.auth import Principal
 from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR
@@ -34,6 +35,8 @@ from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     write_task_access_token,
 )
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+
+JOB = JobWorkloadBinding(workspace="default", job="job-one")
 
 
 def test_parse_secret_references():
@@ -115,7 +118,7 @@ def test_inject_secret_env_vars_uses_delegated_workload_token_when_enabled(tmp_p
         patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen,
     ):
         provider_cls.return_value.get_access_token.return_value = "jobs-workload-token"
-        inject_subprocess_task_auth(env, token_file)
+        inject_subprocess_task_auth(env, token_file, JOB)
         updated_env = inject_secret_env_vars(env.copy())
 
     assert updated_env["HF_TOKEN"] == "secret-value"
@@ -123,7 +126,7 @@ def test_inject_secret_env_vars_uses_delegated_workload_token_when_enabled(tmp_p
     assert updated_env["NHX_ACCESS_TOKEN_FILE"] == str(token_file)
     assert token_file.read_text(encoding="utf-8") == "jobs-workload-token"
     assert token_file.stat().st_mode & 0o777 == 0o600
-    provider_cls.assert_called_once_with(auth_config, "jobs", principal)
+    provider_cls.assert_called_once_with(auth_config, "jobs", principal, JOB)
     request = mock_urlopen.call_args.args[0]
     assert request.get_header("Authorization") == "Bearer jobs-workload-token"
     assert request.get_header("X-nhx-principal-id") is None
@@ -157,7 +160,7 @@ def test_inject_subprocess_task_auth_withholds_token_without_delegable_principal
             "nhx.core.jobs.controllers.backends.subprocess_runtime.ServiceWorkloadAccessTokenProvider"
         ) as provider_cls,
     ):
-        inject_subprocess_task_auth(env, token_file)
+        inject_subprocess_task_auth(env, token_file, JOB)
 
     provider_cls.assert_not_called()
     assert "NHX_ACCESS_TOKEN" not in env
@@ -191,9 +194,10 @@ def test_refresh_subprocess_task_auth_rotates_token_file(tmp_path):
         ) as provider_cls,
     ):
         provider_cls.return_value.get_access_token.return_value = "new-token"
-        assert refresh_subprocess_task_auth(env, token_file) is True
+        assert refresh_subprocess_task_auth(env, token_file, JOB) is True
 
     assert token_file.read_text(encoding="utf-8") == "new-token"
+    assert provider_cls.call_args.args[3] == JOB
 
 
 def test_refresh_subprocess_task_auth_reports_when_nothing_could_be_minted(tmp_path):
@@ -202,7 +206,7 @@ def test_refresh_subprocess_task_auth_reports_when_nothing_could_be_minted(tmp_p
     env = {NHX_PRINCIPAL_ENVVAR: Principal(id="creator@example.com").model_dump_json(exclude_none=True)}
 
     with patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config):
-        assert refresh_subprocess_task_auth(env, token_file) is False
+        assert refresh_subprocess_task_auth(env, token_file, JOB) is False
 
     assert not token_file.exists()
 

@@ -25,7 +25,12 @@ from nemo_evals.image_builds.models import (
     build_entity_name,
     build_job_name,
 )
-from nemo_evals.image_builds.runner import TaskImageBuildSpec, read_task_archive, run_task_image_build
+from nemo_evals.image_builds.runner import (
+    EntityBuildRecords,
+    TaskImageBuildSpec,
+    read_task_archive,
+    run_task_image_build,
+)
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
 from nemo_evals.jobs.task_image_build import is_job_for, task_image_build_job_request
 from nemo_evals.revisions import apply_tag, get_revision, publish_revision
@@ -181,7 +186,7 @@ async def _stored_task_definition(entity_store, spec: TaskImageBuildSpec) -> Har
 
 async def _run(entity_store, spec: TaskImageBuildSpec, builder: _Builder, **kwargs) -> TaskImageBuildEntity:
     return await run_task_image_build(
-        spec, entities=entity_store, files=Mock(), builder=builder, sleep=_no_sleep, **kwargs
+        EntityBuildRecords(entity_store, spec), files=Mock(), builder=builder, sleep=_no_sleep, **kwargs
     )
 
 
@@ -368,7 +373,7 @@ def test_job_fails_when_the_build_fails(monkeypatch, status: str, job_status: st
     from nemo_evals.jobs.task_image_build import TaskImageBuildJob
     from nemo_helix_plugin.client.client import AsyncNemoClient
 
-    async def run(spec, **clients):
+    async def run(records, **clients):
         return Mock(status=status)
 
     monkeypatch.setattr("nemo_evals.jobs.task_image_build.run_task_image_build", run)

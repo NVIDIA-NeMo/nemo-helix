@@ -9,6 +9,7 @@ from typing import ClassVar
 
 from fastapi import APIRouter
 from nemo_evals.api.v2 import image_builds as image_builds_routes
+from nemo_evals.api.v2 import job_runtime as job_runtime_routes
 from nemo_evals.api.v2 import live as live_routes
 from nemo_evals.api.v2 import metrics as metrics_routes
 from nemo_evals.api.v2 import results as results_routes
@@ -145,6 +146,13 @@ class EvaluatorPluginService(NemoService):
                 router=image_builds_routes.router,
                 tag="Evals Plugin Task Image Build Routes",
                 description="Container image builds of stored Harbor task revisions.",
+                prefix="/v2/workspaces/{workspace}",
+            ),
+            RouterSpec(
+                # /apis/evals/v2/workspaces/{workspace}/job-runtime/{job}.
+                router=job_runtime_routes.router,
+                tag="Evals Plugin Job Runtime Routes",
+                description="Build-record reads and writes for the task-builder Job that runs the build.",
                 prefix="/v2/workspaces/{workspace}",
             ),
             RouterSpec(

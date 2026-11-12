@@ -10,9 +10,8 @@ import asyncio
 from nemo_evals.image_builds.builder import HttpImageBuilder
 from nemo_evals.image_builds.models import TASK_IMAGE_BUILD_JOB_SOURCE
 from nemo_evals.image_builds.runner import TaskImageBuildSpec, run_task_image_build
+from nemo_evals.image_builds.runtime import RuntimeBuildRecords
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.entities import EntityClient
-from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
@@ -47,10 +46,11 @@ class TaskImageBuildJob(NemoJob):
     def run(self, config: dict, *, ctx: JobContext, async_client: AsyncNemoClient) -> dict:
         """Run the build to a ready or failed record."""
         spec = TaskImageBuildSpec.model_validate(config)
+        if ctx.job_id is None:
+            raise ValueError("A task image build runs only as a platform Job")
         build = asyncio.run(
             run_task_image_build(
-                spec,
-                entities=EntityClient(AsyncEntitiesClient.from_client(async_client)),
+                RuntimeBuildRecords(async_client, job=ctx.job_id, spec=spec),
                 files=AsyncFilesClient.from_client(async_client),
                 builder=HttpImageBuilder(async_client, workspace=spec.workspace),
             )

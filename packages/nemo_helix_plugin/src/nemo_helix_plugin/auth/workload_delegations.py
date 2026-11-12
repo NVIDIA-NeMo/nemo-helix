@@ -19,7 +19,7 @@ from nemo_helix_plugin.entities import SyncEntityClient
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 SYSTEM_WORKSPACE = "system"
 WORKLOAD_DELEGATION_ENTITY_TYPE = "workload_delegation"
@@ -27,6 +27,8 @@ JWT_WORKLOAD_SUBJECT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt"
 DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE = "urn:nvidia:nemo:params:oauth:token-type:docker-opaque-workload-proof"
 OPAQUE_DOCKER_PROOF_PREFIX = "nhx_obo_v1"
 KUBERNETES_POD_UID_REFERENCE_NAME = "authentication.kubernetes.io/pod-uid"
+#: Workload access token claim naming the Job the token was issued to.
+JOB_WORKLOAD_CLAIM = "nhx_job"
 
 _OPAQUE_DOCKER_PROOF_SECRET_BYTES = 32
 _OPAQUE_DOCKER_PROOF_HASH_PREFIX = "v1:sha256:"
@@ -55,6 +57,38 @@ class ParsedOpaqueDockerProofToken:
 
     delegation_name: str
     secret: bytes
+
+
+class JobWorkloadBinding(BaseModel):
+    """The Job a workload access token was issued to, as recorded by the Jobs controller."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    workspace: str = Field(min_length=1)
+    job: str = Field(min_length=1, description="Name of the Job.")
+
+
+def current_workload_job() -> JobWorkloadBinding | None:
+    """The Job bound to the current request's verified workload access token.
+
+    ``None`` for any other credential, for a workload token issued to something other than a Job, and outside the
+    platform process.
+    """
+    try:
+        from nhx.common.auth.dependencies import auth_client_context
+    except ImportError:
+        return None
+    auth_client = auth_client_context.get()
+    resolved = None if auth_client is None else auth_client.resolved_bearer_token
+    if resolved is None or resolved.token_kind != "workload_access_token":
+        return None
+    claim = resolved.claims.raw_claims.get(JOB_WORKLOAD_CLAIM)
+    if claim is None:
+        return None
+    try:
+        return JobWorkloadBinding.model_validate(claim)
+    except ValidationError:
+        return None
 
 
 class WorkloadDelegationLookupScope(BaseModel):
@@ -99,6 +133,12 @@ class WorkloadDelegationEntity(NemoEntity, entity_type=WORKLOAD_DELEGATION_ENTIT
     opaque_subject_token_hash: str | None = None
     expires_at: datetime
     revoked_at: datetime | None = None
+
+    def job_binding(self) -> JobWorkloadBinding | None:
+        """The Job this delegation was registered for, or ``None`` for any other workload."""
+        if self.workload_kind != "job" or not self.job_id:
+            return None
+        return JobWorkloadBinding(workspace=self.workload_workspace, job=self.job_id)
 
     def is_expired(self, *, now: datetime | None = None) -> bool:
         """Return whether this delegation is expired at the supplied time."""
