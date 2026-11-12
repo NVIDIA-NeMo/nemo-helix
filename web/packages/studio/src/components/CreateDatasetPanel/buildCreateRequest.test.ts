@@ -221,3 +221,27 @@ describe('buildCreateRequest (spec 11.4, 5-8)', () => {
     expect('cache' in req).toBe(false);
   });
 });
+
+describe('buildCreateRequest missing required secrets (spec 11.4)', () => {
+  it('NGC without apiKey omits api_key_secret rather than sending an empty string', () => {
+    const req = buildCreateRequest({
+      tab: 'ngc',
+      name: 'ab',
+      description: 'd',
+      fields: { org: 'o', team: 't', target: 'x', target_type: 'resource' },
+    });
+    expect(req.storage).not.toHaveProperty('api_key_secret');
+  });
+
+  it('S3 without access secrets omits both keys but still sends use_sdk_auth false', () => {
+    const req = buildCreateRequest({
+      tab: 's3',
+      name: 'ab',
+      description: 'd',
+      fields: { bucket: 'b' },
+    });
+    expect(req.storage).not.toHaveProperty('access_key_id_secret');
+    expect(req.storage).not.toHaveProperty('secret_access_key_secret');
+    expect(req.storage).toMatchObject({ type: 's3', bucket: 'b', use_sdk_auth: false });
+  });
+});
