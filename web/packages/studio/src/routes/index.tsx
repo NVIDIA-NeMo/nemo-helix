@@ -44,6 +44,9 @@ const AuthSuccessRoute = lazy(() =>
     default: m.AuthSuccessRoute,
   }))
 );
+const ProfileRoute = lazy(() =>
+  import('@studio/routes/ProfileRoute').then((m) => ({ default: m.ProfileRoute }))
+);
 const WorkspaceIndexRoute = lazy(() =>
   import('@studio/routes/WorkspaceIndexRoute').then((module) => ({
     default: module.WorkspaceIndexRoute,
@@ -78,6 +81,11 @@ export const routes: RouteObject[] = [
           {
             path: '/workspaces',
             element: <RootRedirect />,
+          },
+          {
+            path: ROUTES.profile,
+            element: <SuspenseOutlet />,
+            children: [{ index: true, element: <ProfileRoute /> }],
           },
           {
             path: '*',

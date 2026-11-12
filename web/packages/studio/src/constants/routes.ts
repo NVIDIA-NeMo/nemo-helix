@@ -56,6 +56,7 @@ export const ROUTES = {
   auth: {
     success: '/auth/success',
   },
+  profile: '/profile',
   workspace: {
     /**  Just redirects to the workspace dashboard route */
     index: `/workspaces/:${P.workspace}`,
