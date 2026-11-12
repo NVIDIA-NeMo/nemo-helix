@@ -237,6 +237,70 @@ does not require GPUs or OpenSandbox.
 | `S3_BUCKET` / `S3_ENDPOINT_URL` | Override the asset bucket or S3 endpoint | manifest bucket |
 | `HF_TOKEN` | Hugging Face token for models pulled at runtime | (optional for public repos) |
 
+### Sandboxed Gym evaluation
+
+The `gym_sandbox_e2e` tests in `e2e/test_evaluator_plugin.py` run a FileSet-backed `wheels-v1` Gym
+environment in an OpenSandbox Gym host, the path described in
+[Configure Sandboxed Gym for Evaluator](../docs/evals/agent-eval/gym-sandbox-configuration.mdx).
+They check that:
+
+- `stage-environment` and `agent-evaluate` both succeed, and the downloaded bundle has one completed
+  trial per task, a reward of 1.0 for each, and a `summary.json` that agrees.
+- From inside the Gym host, the staged package is mounted read-only, the workspace is writable, the
+  allowed model endpoint is reachable, and two unlisted destinations are blocked: the Kubernetes
+  API's in-cluster address and a public address. The environment's own verifier makes these checks
+  and folds each into the reward of a task of its own, so a failed check names itself.
+- The Gym host pod mounts the environment and workspace from one PVC.
+- The Gym host is removed after a run that completes, and after a run that fails once the host is
+  up (its verifier never answers, so collection overruns `collection_timeout_s`).
+
+The tests skip unless `NHX_E2E_SANDBOXED_GYM=1`, and fail rather than skip when `NHX_E2E_KUBE_CONTEXT`
+is missing: they watch the cluster for the Gym host with `kubectl`, which is the only place its
+removal shows.
+
+**What the deployment needs:**
+
+- OpenSandbox, and the platform installed with `sandboxClusterCapable: true` and the Evaluator sandbox
+  settings from the page above. `e2e/k8s/values/gym-sandbox.yaml` is the set CI uses.
+- `sandbox_policy_base_urls` listing the URL the tests reach the model by (`NHX_E2E_INTERNAL_BASE_URL`,
+  or `NHX_E2E_GYM_POLICY_ROUTE`), and nothing in `sandbox_egress_allow` that covers the Kubernetes
+  API or `1.1.1.1`.
+- The `nhx-gym-host` image for the platform's image tag, pullable by sandbox pods.
+- A mock inference provider (`platformConfig.inference_gateway.mock_provider_prefix`, as in
+  `e2e/k8s/values/kind.yaml`), or a real model through the two `NHX_E2E_GYM_POLICY_*` variables.
+- For whoever runs the tests: `kubectl` access to list pods and BatchSandboxes in the release
+  namespace and to read the `kubernetes` Service in `default`.
+
+| Variable | Description | Default |
+|---|---|---|
+| `NHX_E2E_SANDBOXED_GYM` | Set to `1` to run the tests | unset (skipped) |
+| `NHX_E2E_KUBE_CONTEXT` | kubectl context of the cluster the platform runs on. Required: the tests never use the current context | (none) |
+| `NHX_E2E_KUBE_NAMESPACE` | Release namespace, which is also where OpenSandbox runs sandboxes | `nemo-helix` |
+| `NHX_E2E_INTERNAL_BASE_URL` | Platform API URL as the Gym host reaches it. Use the name `sandbox_policy_base_urls` allows, which is the Service's full DNS name in the example values | `http://nemo-helix-api:8080` |
+| `NHX_E2E_GYM_POLICY_ROUTE` / `NHX_E2E_GYM_POLICY_MODEL` | A real model's base URL and name, used instead of the mock. Set both | unset (mock model) |
+
+```bash
+# Against a deployed cluster. Add --config e2e/quickstart/auth.yaml when it runs with auth.
+NHX_E2E_SANDBOXED_GYM=1 \
+NHX_E2E_KUBE_CONTEXT=my-cluster-context \
+NHX_E2E_KUBE_NAMESPACE=nemo-helix \
+NHX_E2E_INTERNAL_BASE_URL=http://nemo-helix-api.nemo-helix.svc.cluster.local:8080 \
+uv run --frozen pytest e2e/test_evaluator_plugin.py \
+    --kubernetes --cluster-url=https://my-cluster.example.com \
+    -m gym_sandbox_e2e -v -rs --no-cov
+```
+
+On a cluster with no route to the internet the public-address check passes without proving
+anything; the Kubernetes API check is the one that holds everywhere.
+
+**CI.** The `kind-gym-sandbox-e2e` job in `.github/workflows/e2e.yaml` runs these tests on a kind
+cluster of its own, and fails if any of them skips. Its `setup-kind-cluster` step creates the cluster
+(`setup_local_kind_cpu.sh`), installs OpenSandbox (`install_opensandbox_kind.sh`, which ends by
+creating and deleting a sandbox), and installs the platform with `kind.yaml` and `gym-sandbox.yaml`.
+The job then pulls `nhx-gym-host` onto the node. That image is built by the `docker-cpu-e2e` bake
+group, which only the E2E workflow uses. The colocated Gym tests stay in `kind-gym-e2e`: turning on
+`sandboxed_gym_default` sandboxes every Gym target on a cluster.
+
 ### Custom Registry and Tag (Docker)
 
 ```bash

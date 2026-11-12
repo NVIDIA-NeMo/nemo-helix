@@ -45,6 +45,12 @@ inputs:
     description: Install Gateway API, run cloud-provider-kind, and create the test Gateway
     required: false
     default: "true"
+  install-opensandbox:
+    description: >
+      Install shared-kernel OpenSandbox before NeMo Helix, for lanes whose jobs run in sandboxes.
+      Pass the matching Helm values (such as e2e/k8s/values/gym-sandbox.yaml) in helm-extra-args.
+    required: false
+    default: "false"
   wait-for-api:
     description: Wait for the Gateway-routed API endpoint after installing NeMo Helix
     required: false
@@ -157,6 +163,16 @@ runs:
         kubectl wait --for=condition=Established crd/httproutes.gateway.networking.k8s.io --timeout=2m
         kubectl get gatewayclass cloud-provider-kind
         kubectl -n "${NAMESPACE}" get gateway "${KUBE_GATEWAY_NAME}"
+
+    # Before NeMo Helix, so the API-key Secret is in the release namespace when the first job starts.
+    # The script ends by creating and deleting a sandbox, so a cluster that cannot run one fails here.
+    - name: Install OpenSandbox
+      if: ${{ inputs['install-opensandbox'] == 'true' }}
+      shell: bash
+      env:
+        KIND_CLUSTER_NAME: ${{ inputs['kind-cluster-name'] }}
+        KUBE_NAMESPACE: ${{ inputs['kube-namespace'] }}
+      run: e2e/k8s/scripts/install_opensandbox_kind.sh
 
     - name: Pre-pull GHCR images into kind
       if: ${{ inputs['install-nemo-helix'] == 'true' }}

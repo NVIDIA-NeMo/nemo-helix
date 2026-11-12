@@ -388,7 +388,8 @@ group "docker-cpu" {
 }
 
 # CI extension that adds the colocated Gym task smoke-test stage to docker-cpu.
-# The larger sandbox-host image has a dedicated Platform-Deploy build job.
+# The larger sandbox-host image has a dedicated Platform-Deploy build job, and
+# docker-cpu-e2e builds it for the E2E workflow.
 group "docker-cpu-ci" {
   targets = [
     "docker-cpu",
@@ -403,6 +404,17 @@ group "docker-cpu-ci" {
     "nhx-kaniko-smoke-test",
     "nhx-agent-installer-docker",
     "nhx-agent-installer-smoke-test",
+  ]
+}
+
+# E2E extension of docker-cpu-ci that adds the sandboxed Gym host, which the Kind
+# sandboxed Gym e2e provisions through OpenSandbox. It stays out of docker-cpu-ci
+# so pull request CI does not build the larger image.
+group "docker-cpu-e2e" {
+  targets = [
+    "docker-cpu-ci",
+    "nhx-gym-host-docker",
+    "nhx-gym-host-smoke-test",
   ]
 }
 

@@ -217,6 +217,13 @@ Before accepting custom environment jobs, verify:
 4. The Gym host can reach each configured model URL but cannot reach an unlisted destination.
 5. A completed and a failed run both destroy their Gym hosts.
 
+The repository's sandboxed Gym end-to-end tests check items 4 and 5 against a running deployment:
+they submit a small custom environment whose verifier probes the network and storage from inside
+the Gym host, then watch the cluster for the host's removal after a run that completes and one that
+fails. They need a source checkout and `kubectl` access to the cluster. See
+[Sandboxed Gym evaluation](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/e2e/README.md#sandboxed-gym-evaluation)
+for the settings and the command.
+
 ## Related
 
 <Cards>

@@ -257,7 +257,7 @@ jobs:
         run: |
           target=docker-cpu
           if [ "${PUBLISH_IMAGES}" = "true" ]; then
-            target=docker-cpu-ci
+            target=docker-cpu-e2e
           fi
           make docker-print TARGET="${target}"
 
@@ -266,10 +266,11 @@ jobs:
         shell: bash
         run: make docker-load TARGET=docker-cpu
 
+      # docker-cpu-e2e is docker-cpu-ci plus nhx-gym-host, which kind-gym-sandbox-e2e runs in a sandbox.
       - name: Build and publish CPU images
         if: env.PUBLISH_IMAGES == 'true'
         shell: bash
-        run: make docker-push TARGET=docker-cpu-ci
+        run: make docker-push TARGET=docker-cpu-e2e
 
       - name: Save fastembed model cache
         if: steps.fastembed-cache.outputs.cache-hit != 'true'
@@ -406,10 +407,11 @@ jobs:
         run: |
           test -n "${NHX_E2E_CLUSTER_URL}"
           export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
+          # The sandboxed Gym tests need OpenSandbox, which only kind-gym-sandbox-e2e's cluster has.
           uv run --frozen pytest \
             e2e/test_evaluator_plugin.py \
             -v \
-            -m gym_e2e \
+            -m "gym_e2e and not gym_sandbox_e2e" \
             --run-e2e \
             --no-cov \
             --junitxml=report-kubernetes-gym-e2e.xml
@@ -421,6 +423,91 @@ jobs:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
           artifact-name: kind-gym-e2e-kubernetes-artifacts
           junit-report: report-kubernetes-gym-*.xml
+          services-log-dir: ${{ runner.temp }}/e2e-services-logs
+
+  # Its own cluster: e2e/k8s/values/gym-sandbox.yaml sandboxes every Gym target, so the colocated
+  # tests in kind-gym-e2e cannot share it.
+  kind-gym-sandbox-e2e:
+    name: Kind sandboxed Gym agent-evaluate e2e
+    needs: [eligibility, build-cpu-smoke-images]
+    if: needs.build-cpu-smoke-images.outputs.publish_images == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+    env:
+      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-kind-gym-sandbox
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Kind cluster with OpenSandbox for sandboxed Gym evaluation
+        uses: ./.github/actions/setup-kind-cluster
+        with:
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          kind-image-pull-token: ${{ github.token }}
+          kind-image-pull-user: ${{ github.actor }}
+          install-opensandbox: "true"
+          helm-extra-args: -f e2e/k8s/values/gym-sandbox.yaml
+
+      # OpenSandbox starts the Gym host with IfNotPresent. Pulling the image here keeps that pull
+      # out of the sandbox create wait, where a slow one would fail the job.
+      - name: Pre-pull Gym host image
+        shell: bash
+        env:
+          KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
+          KIND_IMAGE_PULL_USER: ${{ github.actor }}
+          IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+        run: e2e/k8s/scripts/prepull_kind_images.sh "${IMAGE_REGISTRY}/nhx-gym-host:${IMAGE_TAG}"
+
+      - name: Run sandboxed Gym agent-evaluate e2e tests
+        shell: bash
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
+          NHX_E2E_SANDBOXED_GYM: "1"
+          NHX_E2E_KUBE_CONTEXT: kind-${{ env.KIND_CLUSTER_NAME }}
+          NHX_E2E_KUBE_NAMESPACE: nemo-helix
+          # The one model endpoint e2e/k8s/values/gym-sandbox.yaml lets a Gym host reach, by the name it allows.
+          NHX_E2E_INTERNAL_BASE_URL: http://nemo-helix-api.nemo-helix.svc.cluster.local:8080
+        run: |
+          set -euo pipefail
+          test -n "${NHX_E2E_CLUSTER_URL}"
+          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
+          uv run --frozen pytest \
+            e2e/test_evaluator_plugin.py \
+            -v -rs \
+            -m gym_sandbox_e2e \
+            --run-e2e \
+            --no-cov \
+            --junitxml=report-kubernetes-gym-sandbox-e2e.xml
+
+          # This lane exists to run these tests, so one that skips fails the job rather than passing as green.
+          python3 - <<'EOF'
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("report-kubernetes-gym-sandbox-e2e.xml").getroot()
+          suites = [root] if root.tag == "testsuite" else list(root)
+          tests = sum(int(suite.get("tests", 0)) for suite in suites)
+          skipped = sum(int(suite.get("skipped", 0)) for suite in suites)
+          if tests == 0 or skipped:
+              raise SystemExit(f"sandboxed Gym e2e ran {tests} tests and skipped {skipped}: expected none skipped")
+          print(f"sandboxed Gym e2e: {tests} tests, none skipped")
+          EOF
+
+      - name: Finalize Kind sandboxed Gym e2e
+        if: always()
+        uses: ./.github/actions/finalize-kind-e2e
+        with:
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          artifact-name: kind-gym-sandbox-e2e-kubernetes-artifacts
+          junit-report: report-kubernetes-gym-sandbox-e2e.xml
           services-log-dir: ${{ runner.temp }}/e2e-services-logs
 
   kind-customizer-auth-e2e:
@@ -927,6 +1014,7 @@ jobs:
       - build-cpu-smoke-images
       - kind-cpu-e2e
       - kind-gym-e2e
+      - kind-gym-sandbox-e2e
       - kind-customizer-auth-e2e
       - kind-builder-e2e
       - kind-network-policy-smoke

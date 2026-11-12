@@ -13,13 +13,17 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tarfile
+import threading
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
+from urllib.parse import urlparse
 
 import httpx
 import pytest
@@ -56,6 +60,7 @@ from nhx_evals_sdk import (
     RunConfig,
     RunConfigOnlineModel,
 )
+from nhx_evals_sdk.agent_eval.results import AgentEvalSummary
 from nhx_evals_sdk.agent_eval.runtimes.gym import GymRewardMetric, discover_gym_tasks
 from nhx_evals_sdk.enums import ModelFormat
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
@@ -872,6 +877,147 @@ def test_gym_agent_evaluate_job_completes(
         _cleanup_evaluator_job(evaluator_client, job_name)
 
 
+# --- Sandboxed Gym: a FileSet environment in an OpenSandbox Gym host -----------------------------
+#
+# The path docs/evals/agent-eval/gym-sandbox-configuration.mdx describes: stage-environment copies
+# the FileSet onto the Jobs PVC, then agent-evaluate asks OpenSandbox for a Gym host, which mounts
+# that storage and runs the environment's own code with egress denied by default. These tests need a
+# deployment configured for it, and kubectl access to its cluster: whether a host was removed is
+# visible only there. The kind-gym-sandbox-e2e CI job provides both, and e2e/README.md has the
+# settings and the manual invocation.
+
+requires_sandboxed_gym = pytest.mark.skipif(
+    os.environ.get("NHX_E2E_SANDBOXED_GYM") != "1",
+    reason="needs a sandbox-capable deployment (sandboxed_gym_default + OpenSandbox); set NHX_E2E_SANDBOXED_GYM=1",
+)
+
+#: The label the OpenSandbox server puts on every sandbox pod it creates.
+SANDBOX_POD_LABEL = "opensandbox.io/id"
+#: Where a Gym host mounts the staged environment (read-only) and its workspace (read-write).
+GYM_HOST_ENVIRONMENT_PATH = "/job/environment"
+GYM_HOST_WORK_PATH = "/job/work"
+GYM_HOST_POLL_INTERVAL_SECONDS = 2.0
+#: A run destroys its host as it ends, and the host's pod then has a 30s termination grace period.
+GYM_HOST_GONE_TIMEOUT_SECONDS = 180.0
+#: A public address that no egress allowlist names and no allowed name resolves to.
+UNLISTED_PUBLIC_ADDRESS = "1.1.1.1:443"
+#: Long enough for a host to start on a small CI node, where the default 240s is tight.
+GYM_HOST_STARTUP_TIMEOUT_SECONDS = 600
+SANDBOXED_GYM_JOB_TIMEOUT_SECONDS = 1200.0
+
+# The environment's resources server, which runs inside the Gym host. Besides scoring the greeting,
+# it checks one fact about the sandbox it runs in when a row's ``probe`` names one. The reward is
+# 1.0 only when the greeting matches and that fact holds, so each probe is a row and a task of its
+# own, and a failing one is named by its task. ``hang`` never answers, for a run that must fail.
+_GREETING_VERIFIER_SOURCE = """\
+import asyncio
+import os
+import socket
+from pathlib import Path
+
+from greeting_extra import normalize
+from nemo_gym.base_resources_server import (
+    BaseResourcesServerConfig,
+    BaseVerifyRequest,
+    BaseVerifyResponse,
+    SimpleResourcesServer,
+)
+
+ENVIRONMENT = Path(os.environ.get("NHX_ENVIRONMENT_PATH") or "/job/environment")
+WORK = Path(os.environ.get("NHX_WORK_PATH") or "/job/work")
+
+
+class GreetingConfig(BaseResourcesServerConfig):
+    pass
+
+
+class GreetingVerifyRequest(BaseVerifyRequest):
+    expected_greeting: str
+    probe: str = ""
+    probe_target: str = ""
+
+
+class GreetingVerifyResponse(BaseVerifyResponse):
+    expected_greeting: str
+    probe: str = ""
+    probe_target: str = ""
+    observed_text: str
+
+
+def _assistant_text(response):
+    parts = []
+    for item in response.output:
+        if getattr(item, "type", None) != "message":
+            continue
+        for content in getattr(item, "content", []):
+            if getattr(content, "type", None) == "output_text":
+                parts.append(content.text)
+    return "".join(parts)
+
+
+def _environment_staged(_target):
+    # The manifest this package was uploaded with, read from where the host mounted it.
+    return "name: e2e-greeting" in (ENVIRONMENT / "nemo-environment.yaml").read_text()
+
+
+def _environment_read_only(_target):
+    try:
+        (ENVIRONMENT / "written-by-the-environment").write_text("refused")
+    except OSError:
+        return True
+    return False
+
+
+def _workspace_writable(_target):
+    marker = WORK / "written-by-the-environment"
+    marker.write_text("kept")
+    return marker.read_text() == "kept"
+
+
+def _connects(target):
+    host, _, port = target.rpartition(":")
+    try:
+        socket.create_connection((host, int(port)), timeout=5).close()
+    except OSError:
+        return False
+    return True
+
+
+def _does_not_connect(target):
+    return not _connects(target)
+
+
+PROBES = {
+    "": lambda _target: True,
+    "environment_staged": _environment_staged,
+    "environment_read_only": _environment_read_only,
+    "workspace_writable": _workspace_writable,
+    "egress_allowed": _connects,
+    "egress_denied": _does_not_connect,
+}
+
+
+class GreetingVerifier(SimpleResourcesServer):
+    config: GreetingConfig
+
+    async def verify(self, body: GreetingVerifyRequest) -> GreetingVerifyResponse:
+        if body.probe == "hang":
+            await asyncio.sleep(3600)
+        observed = _assistant_text(body.response)
+        greeted = normalize(body.expected_greeting) in normalize(observed)
+        try:
+            # Off the event loop: a denied connection takes its whole timeout to fail.
+            held = await asyncio.to_thread(PROBES[body.probe], body.probe_target)
+        except (KeyError, OSError, ValueError):
+            held = False
+        return GreetingVerifyResponse(**body.model_dump(), reward=float(greeted and held), observed_text=observed)
+
+
+if __name__ == "__main__":
+    GreetingVerifier.run_webserver()
+"""
+
+
 def _greeting_wheels_v1_package(root: Path) -> dict[str, bytes]:
     """A wheels-v1 environment: one custom resources server whose only extra dependency is a vendored wheel.
 
@@ -894,41 +1040,19 @@ def _greeting_wheels_v1_package(root: Path) -> dict[str, bytes]:
             "Wheel-Version: 1.0\nGenerator: e2e\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
         )
         archive.writestr(f"{package_name}-1.0.dist-info/RECORD", "")
-    app = (
-        "from greeting_extra import normalize\n"
-        "from nemo_gym.base_resources_server import (\n"
-        "    BaseResourcesServerConfig, BaseVerifyRequest, BaseVerifyResponse, SimpleResourcesServer,\n"
-        ")\n\n"
-        "class GreetingConfig(BaseResourcesServerConfig):\n    pass\n\n"
-        "class GreetingVerifyRequest(BaseVerifyRequest):\n    expected_greeting: str\n\n"
-        "class GreetingVerifyResponse(BaseVerifyResponse):\n    expected_greeting: str\n    observed_text: str\n\n"
-        "def _assistant_text(response):\n"
-        "    parts = []\n"
-        "    for item in response.output:\n"
-        "        if getattr(item, 'type', None) != 'message':\n            continue\n"
-        "        for content in getattr(item, 'content', []):\n"
-        "            if getattr(content, 'type', None) == 'output_text':\n                parts.append(content.text)\n"
-        "    return ''.join(parts)\n\n"
-        "class GreetingVerifier(SimpleResourcesServer):\n"
-        "    config: GreetingConfig\n\n"
-        "    async def verify(self, body: GreetingVerifyRequest) -> GreetingVerifyResponse:\n"
-        "        observed = _assistant_text(body.response)\n"
-        "        reward = float(normalize(body.expected_greeting) in normalize(observed))\n"
-        "        return GreetingVerifyResponse(**body.model_dump(), reward=reward, observed_text=observed)\n\n"
-        "if __name__ == '__main__':\n    GreetingVerifier.run_webserver()\n"
-    )
     config = (
         "greeting_verifier:\n  resources_servers:\n    greeting_verifier:\n      entrypoint: app.py\n"
         "      domain: instruction_following\n      verified: false\n"
         "      description: e2e greeting verifier\n      value: Verify the expected greeting\n"
     )
+    # The verifier's environment_staged probe looks for this name.
     manifest = (
         "format: wheels-v1\nconfig_paths:\n  - resources_servers/greeting_verifier/configs/greeting_verifier.yaml\n"
         "metadata:\n  name: e2e-greeting\n"
     )
     files = {
         "nemo-environment.yaml": manifest.encode(),
-        "resources_servers/greeting_verifier/app.py": app.encode(),
+        "resources_servers/greeting_verifier/app.py": _GREETING_VERIFIER_SOURCE.encode(),
         "resources_servers/greeting_verifier/requirements.txt": b"greeting-extra==1.0\n",
         "resources_servers/greeting_verifier/configs/greeting_verifier.yaml": config.encode(),
         f"wheels/{package_name}-1.0-py3-none-any.whl": wheel.getvalue(),
@@ -940,32 +1064,33 @@ def _greeting_wheels_v1_package(root: Path) -> dict[str, bytes]:
     return files
 
 
-def _greeting_task_payloads(greeting: str, count: int) -> list[dict[str, object]]:
-    # Each row needs distinct content: the Gym runner treats row content as task identity and collapses
-    # identical rows into one task, so `count` copies of the same row would yield a single trial.
+def _greeting_row(greeting: str, probe: str = "", probe_target: str = "") -> dict[str, object]:
+    """One dataset row: the prompt, the greeting to expect, and optionally a fact about the sandbox to check."""
+    row: dict[str, object] = {
+        "responses_create_params": {
+            "input": [{"role": "user", "content": f"Reply with exactly this greeting and nothing else: {greeting}"}]
+        },
+        "expected_greeting": greeting,
+    }
+    if probe:
+        row.update(probe=probe, probe_target=probe_target)
+    return row
+
+
+def _greeting_task_payloads(
+    rows: Sequence[Mapping[str, object]], rows_path: Path
+) -> tuple[list[dict[str, object]], dict[str, str]]:
+    """Task payloads for ``rows``, and each task id's label: its probe and target, or ``greeting``."""
     bundled_reward = bundle_metric(GymRewardMetric(), InlineMetricBundlePackager()).model_dump(mode="json")
-    rows_path = Path(os.environ.get("TMPDIR", "/tmp")) / f"greeting-rows-{short_unique_name('e2e')}.jsonl"
-    rows_path.write_text(
-        "".join(
-            json.dumps(
-                {
-                    "responses_create_params": {
-                        "input": [
-                            {
-                                "role": "user",
-                                "content": f"Request {index}: reply with exactly this greeting and nothing else: {greeting}",
-                            }
-                        ]
-                    },
-                    "expected_greeting": greeting,
-                }
-            )
-            + "\n"
-            for index in range(count)
-        ),
-        encoding="utf-8",
-    )
-    return [
+    rows_path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    tasks = discover_gym_tasks(rows_path)
+    # One distinct row is one task, so repeating a row would quietly run fewer trials than asked for.
+    assert len(tasks) == len(rows), f"{len(rows)} rows made {len(tasks)} tasks; every row must differ"
+    labels: dict[str, str] = {}
+    for task in tasks:
+        extras = (task.metadata or {}).get("gym_row_extras") or {}
+        labels[task.id] = " ".join(filter(None, (extras.get("probe") or "greeting", extras.get("probe_target"))))
+    payloads: list[dict[str, object]] = [
         {
             "id": task.id,
             "intent": task.intent,
@@ -974,83 +1099,364 @@ def _greeting_task_payloads(greeting: str, count: int) -> list[dict[str, object]
             "metrics": [bundled_reward],
             "metadata": [{"key": key, "value": value} for key, value in (task.metadata or {}).items()],
         }
-        for task in discover_gym_tasks(rows_path)
+        for task in tasks
     ]
+    return payloads, labels
 
 
-@pytest.mark.gym_e2e
-@pytest.mark.gym_sandbox_e2e
-@pytest.mark.skipif(
-    os.environ.get("NHX_E2E_SANDBOXED_GYM") != "1",
-    reason="needs a sandbox-capable deployment (sandboxed_gym_default + OpenSandbox); set NHX_E2E_SANDBOXED_GYM=1",
-)
-def test_gym_wheels_v1_environment_runs_with_only_its_extras_vendored(
-    client: NemoClient,
-    evaluator_client: NemoClient,
-    evaluator_workspace: str,
-    tmp_path: Path,
-) -> None:
-    """A wheels-v1 FileSet vendors only what its server adds; Gym and Gym's dependencies come from the image.
+@dataclass(frozen=True)
+class _SandboxCluster:
+    """The cluster the platform runs on, read with kubectl on the named context only."""
 
-    The job must complete and score with the package's one vendored wheel and no package index. Run it
-    against a deployment whose sandbox egress allows only the policy endpoint to prove the strict case.
-    Set NHX_E2E_GYM_POLICY_ROUTE and NHX_E2E_GYM_POLICY_MODEL to use a real model instead of the mock.
+    context: str
+    namespace: str
+
+    def _get(self, *resource: str, namespace: str | None = None) -> dict[str, Any]:
+        cmd = ["kubectl", "--context", self.context, "--namespace", namespace or self.namespace, "get", *resource]
+        result = subprocess.run(
+            [*cmd, "-o", "json"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"`{' '.join(cmd)}` failed: {result.stderr.strip()}")
+        return json.loads(result.stdout)
+
+    def api_server_address(self) -> str:
+        """The Kubernetes API's in-cluster ``address:port``, which any pod reaches unless something stops it."""
+        spec = self._get("service", "kubernetes", namespace="default")["spec"]
+        return f"{spec['clusterIP']}:{spec['ports'][0]['port']}"
+
+    def gym_hosts(self, markers: frozenset[str]) -> dict[str, dict[str, Any]]:
+        """A job's Gym host: the BatchSandboxes that name the job and their pods, by ``kind/name``.
+
+        A sandbox carries its job's id in its metadata and its bootstrap environment, which is also how
+        k8s/helm/examples/opensandbox/verify/lib.sh finds one. A pod is the host's when it has the
+        label OpenSandbox gives the pods it creates and either belongs to one of those BatchSandboxes
+        or names the job itself. The label matters: the job's own step pods name the job too.
+        """
+
+        def names_job(item: Mapping[str, Any]) -> bool:
+            manifest = json.dumps(item)
+            return any(marker in manifest for marker in markers)
+
+        found: dict[str, dict[str, Any]] = {}
+        sandboxes: set[str] = set()
+        for sandbox in self._get("batchsandboxes").get("items") or []:
+            if names_job(sandbox):
+                sandboxes.add(sandbox["metadata"]["name"])
+                found[f"batchsandboxes/{sandbox['metadata']['name']}"] = sandbox
+        for pod in self._get("pods").get("items") or []:
+            metadata = pod.get("metadata") or {}
+            sandbox_id = (metadata.get("labels") or {}).get(SANDBOX_POD_LABEL)
+            if sandbox_id is None:
+                continue
+            owners = {owner.get("name") for owner in metadata.get("ownerReferences") or []}
+            if sandbox_id in sandboxes or owners & sandboxes or names_job(pod):
+                found[f"pods/{metadata.get('name')}"] = pod
+        return found
+
+
+class _GymHostWatch:
+    """Records a job's Gym host while the job runs, because the host is meant to be gone when it ends."""
+
+    def __init__(self, cluster: _SandboxCluster, markers: frozenset[str]) -> None:
+        self.markers = markers
+        #: Every host object seen, and the sandbox pods seen running, each as last seen.
+        self.seen: dict[str, dict[str, Any]] = {}
+        self.running_pods: dict[str, dict[str, Any]] = {}
+        self.failed_polls: list[str] = []
+        self._cluster = cluster
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._poll, name="gym-host-watch", daemon=True)
+
+    def _poll(self) -> None:
+        while not self._stop.is_set():
+            try:
+                hosts = self._cluster.gym_hosts(self.markers)
+            except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+                # One failed read must not end the watch: the next may still see the host.
+                self.failed_polls.append(str(error))
+            else:
+                self.seen.update(hosts)
+                self.running_pods.update(
+                    {
+                        name: host
+                        for name, host in hosts.items()
+                        if name.startswith("pods/") and (host.get("status") or {}).get("phase") == "Running"
+                    }
+                )
+            self._stop.wait(GYM_HOST_POLL_INTERVAL_SECONDS)
+
+    def __enter__(self) -> Self:
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._stop.set()
+        self._thread.join(timeout=120)
+
+
+@pytest.fixture(scope="module")
+def sandbox_cluster() -> _SandboxCluster:
+    """kubectl access to the cluster under test, on a context named for the purpose.
+
+    Required, not skipped: without it these tests could not tell a removed Gym host from a leaked one.
     """
-    greeting = "hello there"
-    fileset_name = short_unique_name("gym-greeting-env")
-    files = FilesClient.from_client(evaluator_client)
-    files.create_fileset(
-        body=CreateFilesetRequest(name=fileset_name, purpose=FilesetPurpose.ENVIRONMENT),
-        workspace=evaluator_workspace,
-    )
-    for relative, content in _greeting_wheels_v1_package(tmp_path / "package").items():
-        files.upload_file(content=content, path=relative, name=fileset_name, workspace=evaluator_workspace)
+    context = os.environ.get("NHX_E2E_KUBE_CONTEXT")
+    if not context:
+        pytest.fail(
+            "NHX_E2E_KUBE_CONTEXT is required by the sandboxed Gym tests: name the kubectl context of the "
+            "cluster the platform runs on (they never use the current context); see e2e/README.md"
+        )
+    return _SandboxCluster(context=context, namespace=os.environ.get("NHX_E2E_KUBE_NAMESPACE") or "nemo-helix")
 
+
+def _host_port(url: str) -> str:
+    parsed = urlparse(url)
+    return f"{parsed.hostname}:{parsed.port or (443 if parsed.scheme == 'https' else 80)}"
+
+
+def _upload_greeting_environment(client: NemoClient, workspace: str, root: Path) -> str:
+    """Upload the greeting package as an environment FileSet and return the FileSet's name."""
+    fileset_name = short_unique_name("gym-greeting-env")
+    files = FilesClient.from_client(client)
+    files.create_fileset(
+        body=CreateFilesetRequest(name=fileset_name, purpose=FilesetPurpose.ENVIRONMENT), workspace=workspace
+    )
+    for relative, content in _greeting_wheels_v1_package(root).items():
+        files.upload_file(content=content, path=relative, name=fileset_name, workspace=workspace)
+    return fileset_name
+
+
+def _greeting_policy(client: NemoClient, workspace: str, greeting: str) -> tuple[str, str]:
+    """The model route and name the agent calls: a mock that replies with ``greeting``, unless one is configured."""
     policy_route = os.environ.get("NHX_E2E_GYM_POLICY_ROUTE")
     policy_model = os.environ.get("NHX_E2E_GYM_POLICY_MODEL")
-    if not policy_route or not policy_model:
-        policy_model = short_unique_name("gym-greeting")
-        _create_ready_mock_model(
-            client, workspace=evaluator_workspace, name=policy_model, mock_response_body=_chat_completion(greeting)
-        )
-        policy_route = _internal_model_route(evaluator_workspace, policy_model)
+    if policy_route and policy_model:
+        return policy_route, policy_model
+    policy_model = short_unique_name("gym-greeting")
+    _create_ready_mock_model(
+        client, workspace=workspace, name=policy_model, mock_response_body=_chat_completion(greeting)
+    )
+    return _internal_model_route(workspace, policy_model), policy_model
 
-    target = GymRunnerTarget(
+
+def _greeting_target(
+    workspace: str, fileset_name: str, policy: tuple[str, str], *, collection_timeout_s: float | None = None
+) -> GymRunnerTarget:
+    policy_route, policy_model = policy
+    return GymRunnerTarget(
         source=GymAgentSource(
             component="simple_agent",
             config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
         ),
         resources_server="greeting_verifier",
-        environment=FilesetRef(root=f"{evaluator_workspace}/{fileset_name}"),
+        environment=FilesetRef(root=f"{workspace}/{fileset_name}"),
         num_repeats=1,
         concurrency=2,
+        startup_timeout_s=GYM_HOST_STARTUP_TIMEOUT_SECONDS,
+        collection_timeout_s=collection_timeout_s,
         hydra_params={
             "policy_base_url": policy_route,
             "policy_api_key": "not-used",
             "policy_model_name": policy_model,
         },
     )
+
+
+def _run_sandboxed_gym_job(
+    client: NemoClient, workspace: str, job_name: str, cluster: _SandboxCluster
+) -> tuple[Any, _GymHostWatch]:
+    """Wait for the job to end, watching the cluster for its Gym host meanwhile."""
+    submitted = JobsClient.from_client(client).get_job(name=job_name, workspace=workspace).data()
+    markers = frozenset(marker for marker in (submitted.id, submitted.name) if marker)
+    with _GymHostWatch(cluster, markers) as watch:
+        job = wait_for_platform_job(client, job_name, workspace, timeout=SANDBOXED_GYM_JOB_TIMEOUT_SECONDS)
+    return job, watch
+
+
+def _job_steps(client: NemoClient, workspace: str, job_name: str) -> dict[str, str]:
+    """Each step's status, by step name."""
+    status = JobsClient.from_client(client).get_job_status(workspace=workspace, name=job_name).data()
+    return {step.name: step.status.value for step in status.steps}
+
+
+def _describe_job(client: NemoClient, workspace: str, job_name: str) -> str:
+    """The job's and its steps' statuses and error details, for a failed assertion's message."""
+    status = JobsClient.from_client(client).get_job_status(workspace=workspace, name=job_name).data()
+    return json.dumps(
+        {
+            "status": status.status.value,
+            "error_details": status.error_details,
+            "steps": [
+                {"name": step.name, "status": step.status.value, "error_details": step.error_details}
+                for step in status.steps
+            ],
+        },
+        default=str,
+    )
+
+
+def _assert_gym_host_removed(cluster: _SandboxCluster, watch: _GymHostWatch, job_name: str) -> None:
+    """Fail unless the job's Gym host ran and is now gone.
+
+    Call it while the job still exists, so the removal is the run's own doing and not a side effect
+    of this test deleting the job.
+    """
+    assert watch.running_pods, (
+        f"no Gym host pod was seen running for job {job_name!r}, so its removal cannot be checked; "
+        f"host objects seen: {sorted(watch.seen)}; failed polls: {watch.failed_polls[-3:]}"
+    )
+    deadline = time.monotonic() + GYM_HOST_GONE_TIMEOUT_SECONDS
+    while left := cluster.gym_hosts(watch.markers):
+        if time.monotonic() >= deadline:
+            pytest.fail(
+                f"job {job_name!r} ended, but its Gym host was still on the cluster "
+                f"{GYM_HOST_GONE_TIMEOUT_SECONDS:g}s later: {sorted(left)}"
+            )
+        time.sleep(GYM_HOST_POLL_INTERVAL_SECONDS)
+
+
+def _assert_host_mounts_job_storage(pod: Mapping[str, Any]) -> None:
+    """The host's environment and workspace are two directories of one PVC, the environment read-only."""
+    spec = pod["spec"]
+    volumes = {volume["name"]: volume for volume in spec.get("volumes") or []}
+    mounts = {
+        mount["mountPath"]: mount
+        for container in spec.get("containers") or []
+        for mount in container.get("volumeMounts") or []
+    }
+    environment, work = mounts.get(GYM_HOST_ENVIRONMENT_PATH), mounts.get(GYM_HOST_WORK_PATH)
+    assert environment and work, (
+        f"the Gym host mounts {sorted(mounts)}, not both {GYM_HOST_ENVIRONMENT_PATH} and {GYM_HOST_WORK_PATH}"
+    )
+    assert environment.get("readOnly") is True, f"the environment mount is not read-only: {environment}"
+    assert not work.get("readOnly"), f"the workspace mount is read-only: {work}"
+    claims = [
+        ((volumes.get(mount["name"]) or {}).get("persistentVolumeClaim") or {}).get("claimName")
+        for mount in (environment, work)
+    ]
+    assert claims[0] and claims[0] == claims[1], f"environment and workspace are not one PVC: claims {claims}"
+    assert environment.get("subPath") != work.get("subPath"), (
+        f"environment and workspace mount the same directory of the PVC: {environment.get('subPath')!r}"
+    )
+
+
+def _download_agent_eval_bundle(client: NemoClient, workspace: str, job_name: str, tmp_path: Path) -> Path:
+    """Download and unpack the job's ``agent-eval-results`` archive, returning the directory its files are in."""
+    archive_path = tmp_path / "agent-eval-results.tar.gz"
+    archive = JobsClient.from_client(client).download_job_result(
+        name="agent-eval-results", job=job_name, workspace=workspace
+    )
+    archive_path.write_bytes(archive.read())
+    extract_dir = tmp_path / "agent-eval-results"
+    with tarfile.open(archive_path) as bundle:
+        bundle.extractall(extract_dir, filter="data")
+    trials_files = list(extract_dir.rglob("trials.jsonl"))
+    assert trials_files, f"trials.jsonl missing under {extract_dir}"
+    return trials_files[0].parent
+
+
+@pytest.mark.gym_e2e
+@pytest.mark.gym_sandbox_e2e
+@requires_sandboxed_gym
+def test_gym_wheels_v1_environment_runs_with_only_its_extras_vendored(
+    client: NemoClient,
+    evaluator_client: NemoClient,
+    evaluator_workspace: str,
+    sandbox_cluster: _SandboxCluster,
+    tmp_path: Path,
+) -> None:
+    """A wheels-v1 FileSet vendors only what its server adds; Gym and Gym's dependencies come from the image.
+
+    The job must complete and score with the package's one vendored wheel and no package index, on a
+    deployment whose sandbox egress allows only the policy endpoint. Its verifier reports from inside
+    the Gym host: the staged package is mounted read-only from the Jobs PVC, the workspace is
+    writable, the policy endpoint is reachable, and the Kubernetes API and a public address are not.
+    The host must be gone once the job has ended. Set NHX_E2E_GYM_POLICY_ROUTE and
+    NHX_E2E_GYM_POLICY_MODEL to use a real model instead of the mock.
+    """
+    greeting = "hello there"
+    fileset_name = _upload_greeting_environment(evaluator_client, evaluator_workspace, tmp_path / "package")
+    policy = _greeting_policy(client, evaluator_workspace, greeting)
+    rows = [
+        _greeting_row(greeting),
+        _greeting_row(greeting, "environment_staged"),
+        _greeting_row(greeting, "environment_read_only"),
+        _greeting_row(greeting, "workspace_writable"),
+        _greeting_row(greeting, "egress_allowed", _host_port(policy[0])),
+        _greeting_row(greeting, "egress_denied", sandbox_cluster.api_server_address()),
+        _greeting_row(greeting, "egress_denied", UNLISTED_PUBLIC_ADDRESS),
+    ]
+    payloads, labels = _greeting_task_payloads(rows, tmp_path / "greeting-rows.jsonl")
+    target = _greeting_target(evaluator_workspace, fileset_name, policy)
     job_name = _submit_agent_eval_job(
-        evaluator_client,
-        evaluator_workspace,
-        {"tasks": _greeting_task_payloads(greeting, 2), "target": target.model_dump(mode="json")},
+        evaluator_client, evaluator_workspace, {"tasks": payloads, "target": target.model_dump(mode="json")}
     )
     try:
-        job = wait_for_platform_job(evaluator_client, job_name, evaluator_workspace, timeout=900)
-        assert job.status.lower() == "completed", f"job {job_name!r} ended {job.status!r}"
-        archive_path = tmp_path / "agent-eval-results.tar.gz"
-        archive = JobsClient.from_client(evaluator_client).download_job_result(
-            name="agent-eval-results", job=job_name, workspace=evaluator_workspace
-        )
-        archive_path.write_bytes(archive.read())
-        extract_dir = tmp_path / "agent-eval-results"
-        with tarfile.open(archive_path) as archive:
-            archive.extractall(extract_dir, filter="data")
-        trials_files = list(extract_dir.rglob("trials.jsonl"))
-        assert trials_files, f"trials.jsonl missing under {extract_dir}"
-        trials = [json.loads(line) for line in trials_files[0].read_text(encoding="utf-8").splitlines() if line.strip()]
-        assert [trial.get("status") for trial in trials] == ["completed", "completed"]
-        assert [float(trial["metadata"]["reward"]) for trial in trials] == [1.0, 1.0]
+        job, watch = _run_sandboxed_gym_job(evaluator_client, evaluator_workspace, job_name, sandbox_cluster)
+        report = _describe_job(evaluator_client, evaluator_workspace, job_name)
+        assert job.status.lower() == "completed", f"job {job_name!r} ended {job.status!r}: {report}"
+        steps = _job_steps(evaluator_client, evaluator_workspace, job_name)
+        assert (steps.get("stage-environment"), steps.get("agent-evaluate")) == ("completed", "completed"), report
+
+        _assert_gym_host_removed(sandbox_cluster, watch, job_name)
+        _assert_host_mounts_job_storage(next(iter(watch.running_pods.values())))
+
+        bundle = _download_agent_eval_bundle(evaluator_client, evaluator_workspace, job_name, tmp_path)
+        trials = [
+            json.loads(line)
+            for line in (bundle / "trials.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert sorted(trial["task_id"] for trial in trials) == sorted(labels), trials
+        assert {trial.get("status") for trial in trials} == {"completed"}, trials
+        # A reward below 1.0 names the fact that did not hold; `greeting` alone means the agent's reply was wrong.
+        rewards = {labels[trial["task_id"]]: trial["metadata"]["reward"] for trial in trials}
+        assert rewards == dict.fromkeys(labels.values(), 1.0)
+
+        summary_path = bundle / "summary.json"
+        assert summary_path.is_file(), f"summary.json missing from {bundle}"
+        summary = AgentEvalSummary.model_validate_json(summary_path.read_text(encoding="utf-8"))
+        assert (summary.task_count, summary.trial_count, summary.error_count) == (len(rows), len(rows), 0), summary
+        reward_scores = [score for score in summary.scores.scores if score.name.endswith(".reward")]
+        assert reward_scores, f"summary.json aggregates no reward: {summary.scores}"
+        assert all(score.mean == 1.0 and score.nan_count == 0 for score in reward_scores), reward_scores
+    finally:
+        _cleanup_evaluator_job(evaluator_client, job_name)
+
+
+@pytest.mark.gym_e2e
+@pytest.mark.gym_sandbox_e2e
+@requires_sandboxed_gym
+def test_gym_host_is_removed_when_a_sandboxed_evaluation_fails_after_provisioning(
+    client: NemoClient,
+    evaluator_client: NemoClient,
+    evaluator_workspace: str,
+    sandbox_cluster: _SandboxCluster,
+    tmp_path: Path,
+) -> None:
+    """A run that fails with its Gym host already up still removes the host.
+
+    The environment stages and the host starts as they do for the passing run, then its verifier
+    never answers, so collection overruns ``collection_timeout_s`` and agent-evaluate fails.
+    """
+    greeting = "hello there"
+    fileset_name = _upload_greeting_environment(evaluator_client, evaluator_workspace, tmp_path / "package")
+    policy = _greeting_policy(client, evaluator_workspace, greeting)
+    payloads, _ = _greeting_task_payloads([_greeting_row(greeting, "hang")], tmp_path / "greeting-rows.jsonl")
+    target = _greeting_target(evaluator_workspace, fileset_name, policy, collection_timeout_s=30)
+    job_name = _submit_agent_eval_job(
+        evaluator_client, evaluator_workspace, {"tasks": payloads, "target": target.model_dump(mode="json")}
+    )
+    try:
+        job, watch = _run_sandboxed_gym_job(evaluator_client, evaluator_workspace, job_name, sandbox_cluster)
+        report = _describe_job(evaluator_client, evaluator_workspace, job_name)
+        assert job.status.lower() == "error", f"job {job_name!r} ended {job.status!r}: {report}"
+        steps = _job_steps(evaluator_client, evaluator_workspace, job_name)
+        assert (steps.get("stage-environment"), steps.get("agent-evaluate")) == ("completed", "error"), report
+
+        # Also what shows the failure came after provisioning: it needs the host's pod seen running.
+        _assert_gym_host_removed(sandbox_cluster, watch, job_name)
     finally:
         _cleanup_evaluator_job(evaluator_client, job_name)
 
