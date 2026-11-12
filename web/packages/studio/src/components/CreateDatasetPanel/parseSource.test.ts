@@ -45,9 +45,18 @@ describe('parseSource precedence and classification (spec 4.1, 4.2)', () => {
       actual: 'huggingface',
     });
     expect(parseSource('github', NGC_EXAMPLE)).toEqual({ status: 'wrong-tab', actual: 'ngc' });
-    expect(parseSource('ngc', 's3://my-bucket/data')).toEqual({ status: 'wrong-tab', actual: 's3' });
-    expect(parseSource('huggingface', 's3://my-bucket/data')).toEqual({ status: 'wrong-tab', actual: 's3' });
-    expect(parseSource('s3', 'https://github.com/a/b')).toEqual({ status: 'wrong-tab', actual: 'github' });
+    expect(parseSource('ngc', 's3://my-bucket/data')).toEqual({
+      status: 'wrong-tab',
+      actual: 's3',
+    });
+    expect(parseSource('huggingface', 's3://my-bucket/data')).toEqual({
+      status: 'wrong-tab',
+      actual: 's3',
+    });
+    expect(parseSource('s3', 'https://github.com/a/b')).toEqual({
+      status: 'wrong-tab',
+      actual: 'github',
+    });
     expect(parseSource('s3', 'https://huggingface.co/datasets/a/b')).toEqual({
       status: 'wrong-tab',
       actual: 'huggingface',
@@ -114,14 +123,22 @@ describe('HuggingFace (spec 5, 14, 15)', () => {
     });
     // root URL of the same repo carries no stale revision
     const root = parseSource('huggingface', 'https://huggingface.co/datasets/own/d');
-    expect(root.status === 'ok' && root.fields).toEqual({ repo_id: 'own/d', repo_type: 'dataset', revision: 'main' });
+    expect(root.status === 'ok' && root.fields).toEqual({
+      repo_id: 'own/d',
+      repo_type: 'dataset',
+      revision: 'main',
+    });
   });
 
   it('is incomplete when owner or repo segment is missing', () => {
     expect(parseSource('huggingface', 'https://huggingface.co').status).toBe('incomplete');
     expect(parseSource('huggingface', 'https://huggingface.co/').status).toBe('incomplete');
-    expect(parseSource('huggingface', 'https://huggingface.co/tatsu-lab').status).toBe('incomplete');
-    expect(parseSource('huggingface', 'https://huggingface.co/datasets/tatsu-lab').status).toBe('incomplete');
+    expect(parseSource('huggingface', 'https://huggingface.co/tatsu-lab').status).toBe(
+      'incomplete'
+    );
+    expect(parseSource('huggingface', 'https://huggingface.co/datasets/tatsu-lab').status).toBe(
+      'incomplete'
+    );
   });
 });
 
@@ -171,8 +188,12 @@ describe('NGC (spec 6, 15)', () => {
       target_type: 'model',
       version: '1.5',
     });
-    expect(ok('https://ngc.nvidia.com/orgs/o/teams/t/resources/x')?.fields).not.toHaveProperty('version');
-    expect(ok('https://ngc.nvidia.com/orgs/o/teams/t/resources/x/versions/2')?.fields).toMatchObject({ version: '2' });
+    expect(ok('https://ngc.nvidia.com/orgs/o/teams/t/resources/x')?.fields).not.toHaveProperty(
+      'version'
+    );
+    expect(
+      ok('https://ngc.nvidia.com/orgs/o/teams/t/resources/x/versions/2')?.fields
+    ).toMatchObject({ version: '2' });
   });
 
   it('replacing a versioned URL with an unversioned one drops the version (spec 14)', () => {
@@ -221,7 +242,11 @@ describe('GitHub (spec 7, 15)', () => {
       nameSeed: 'repo',
     });
     const noPath = parseSource('github', 'https://github.com/own/repo/tree/v1');
-    expect(noPath.status === 'ok' && noPath.fields).toEqual({ owner: 'own', repo: 'repo', revision: 'v1' });
+    expect(noPath.status === 'ok' && noPath.fields).toEqual({
+      owner: 'own',
+      repo: 'repo',
+      revision: 'v1',
+    });
     expect(noPath.status === 'ok' && 'path' in noPath.fields).toBe(false);
   });
 
@@ -255,7 +280,10 @@ describe('S3 (spec 8)', () => {
     const r = ok('https://my-bucket.s3.us-west-2.amazonaws.com/data/train');
     expect(r?.fields).toEqual({ bucket: 'my-bucket', prefix: 'data/train' });
     expect(r?.fields).not.toHaveProperty('region');
-    expect(ok('https://my-bucket.s3.amazonaws.com/x/')?.fields).toEqual({ bucket: 'my-bucket', prefix: 'x' });
+    expect(ok('https://my-bucket.s3.amazonaws.com/x/')?.fields).toEqual({
+      bucket: 'my-bucket',
+      prefix: 'x',
+    });
     expect(ok('https://my-bucket.s3.cn-north-1.amazonaws.com.cn/x')?.fields).toEqual({
       bucket: 'my-bucket',
       prefix: 'x',
@@ -272,7 +300,10 @@ describe('S3 (spec 8)', () => {
 
   it('console URLs take bucket from /buckets/{bucket}; nonempty prefix query wins, empty is omitted', () => {
     const base = 'https://s3.console.aws.amazon.com/s3/buckets/my-bucket';
-    expect(ok(`${base}?region=us-east-1&prefix=foo/bar/`)?.fields).toEqual({ bucket: 'my-bucket', prefix: 'foo/bar' });
+    expect(ok(`${base}?region=us-east-1&prefix=foo/bar/`)?.fields).toEqual({
+      bucket: 'my-bucket',
+      prefix: 'foo/bar',
+    });
     expect(ok(`${base}?region=us-east-1`)?.fields).toEqual({ bucket: 'my-bucket' });
     expect(ok(`${base}?prefix=`)?.fields).toEqual({ bucket: 'my-bucket' });
     expect(ok(`${base}?region=us-east-1&prefix=foo/bar/`)?.fields).not.toHaveProperty('region');

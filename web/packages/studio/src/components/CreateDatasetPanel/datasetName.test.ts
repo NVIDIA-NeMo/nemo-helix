@@ -1,9 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getDatasetNameError, inferDatasetName } from '@studio/components/CreateDatasetPanel/datasetName';
+import {
+  getDatasetNameError,
+  inferDatasetName,
+} from '@studio/components/CreateDatasetPanel/datasetName';
 
-const err = (name: string, taken = false) => getDatasetNameError(name, { taken, workspace: 'default' });
+const err = (name: string, taken = false) =>
+  getDatasetNameError(name, { taken, workspace: 'default' });
 
 describe('getDatasetNameError (spec 3.1, 3.2)', () => {
   it('returns undefined for valid names, including dots and trailing/repeated dots the predicate permits', () => {
@@ -35,10 +39,10 @@ describe('getDatasetNameError (spec 3.1, 3.2)', () => {
 
   it('duplicate message wins over format errors and names workspace', () => {
     expect(getDatasetNameError('taken-name', { taken: true, workspace: 'team-a' })).toBe(
-      'A Dataset named taken-name already exists in team-a',
+      'A Dataset named taken-name already exists in team-a'
     );
     expect(getDatasetNameError('Bad Name', { taken: true, workspace: 'team-a' })).toBe(
-      'A Dataset named Bad Name already exists in team-a',
+      'A Dataset named Bad Name already exists in team-a'
     );
   });
 });
@@ -50,7 +54,9 @@ describe('inferDatasetName (spec 3.3)', () => {
     expect(inferDatasetName('a_-_b')).toBe('a-b');
     expect(inferDatasetName('a--b')).toBe('a-b');
     expect(inferDatasetName('v1.2-Final')).toBe('v1.2-final');
-    expect(inferDatasetName('nemotron-personas-dataset-en_us')).toBe('nemotron-personas-dataset-en-us');
+    expect(inferDatasetName('nemotron-personas-dataset-en_us')).toBe(
+      'nemotron-personas-dataset-en-us'
+    );
   });
 
   it('strips leading and trailing hyphens and dots', () => {
@@ -63,11 +69,11 @@ describe('inferDatasetName (spec 3.3)', () => {
   it('does not guarantee validity: digit-start and single-char seeds stay invalid', () => {
     expect(inferDatasetName('1data')).toBe('1data');
     expect(getDatasetNameError(inferDatasetName('1data'), { taken: false, workspace: 'w' })).toBe(
-      'Names must start with a lowercase letter',
+      'Names must start with a lowercase letter'
     );
     expect(inferDatasetName('A')).toBe('a');
     expect(getDatasetNameError(inferDatasetName('A'), { taken: false, workspace: 'w' })).toBe(
-      'Names must be at least 2 characters',
+      'Names must be at least 2 characters'
     );
   });
 

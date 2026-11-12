@@ -52,7 +52,13 @@ describe('buildCreateRequest (spec 11.4, 5-8)', () => {
       tab: 'ngc',
       name: 'personas',
       description: 'd',
-      fields: { org: 'nvidia', team: 'nemotron-personas', target: 'x', target_type: 'resource', version: '0.0.2' },
+      fields: {
+        org: 'nvidia',
+        team: 'nemotron-personas',
+        target: 'x',
+        target_type: 'resource',
+        version: '0.0.2',
+      },
       secrets: { apiKey: 'ngc-key' },
     });
     expect(withVersion).toStrictEqual({
