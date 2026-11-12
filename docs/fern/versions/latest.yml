@@ -1,31 +1,49 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Organizational groups use skip-slug to preserve existing public URLs.
 navigation:
   - section: Documentation
     contents:
-      - page: Overview
+      - page: Home
         path: ../../index.mdx
-        slug: home
       - section: Get Started
         contents:
           - page: Setup
             path: ../../get-started/setup.mdx
+          - page: Local Docker and Executors
+            slug: local-docker-and-executors
+            path: ../../get-started/local-docker-and-executors.mdx
+          - section: Core Concepts
+            path: ../../get-started/concepts/index.mdx
+            contents:
+              - page: Entities
+                path: ../../get-started/concepts/entities.mdx
+              - page: Entity References
+                path: ../../get-started/concepts/entity-references.mdx
+              - page: Filtering
+                path: ../../get-started/concepts/filtering.mdx
+              - page: Manage Files
+                path: ../../get-started/concepts/manage-files.mdx
+              - page: Manage Secrets
+                path: ../../get-started/concepts/manage-secrets.mdx
+              - page: Projects
+                path: ../../get-started/concepts/projects.mdx
+              - page: Workspaces
+                path: ../../get-started/concepts/workspaces.mdx
+      - section: Models and Inference
+        path: ../../run-inference/about.mdx
+        contents:
+          - page: Run Inference
+            path: ../../run-inference/tutorials/run-inference.mdx
+          - page: Deploy Models
+            path: ../../run-inference/tutorials/deploy-models.mdx
+          - page: Virtual Models
+            path: ../../run-inference/virtual-models.mdx
       - section: Agents
         path: ../../agents/index.mdx
         contents:
           - page: Register Agents
             path: ../../agents/register-agents.mdx
-          - page: Fabric 0.6 Upgrade and Adapter Support
-            slug: fabric-upgrade
-            path: ../../agents/fabric-upgrade.mdx
-          - page: Run Mini-SWE-Agent
-            slug: mini-swe-agent
-            path: ../../agents/mini-swe-agent.mdx
-          - page: Web Search with Tavily
-            slug: web-search-tavily
-            path: ../../agents/web-search-tavily.mdx
           - section: Deploy Agents
             path: ../../agents/deploy-agents.mdx
             contents:
@@ -39,14 +57,50 @@ navigation:
                 path: ../../agents/traces-and-insights/collect-agent-traces.mdx
               - page: Insights from Traces
                 path: ../../agents/traces-and-insights/insights-from-traces.mdx
+          - section: Evaluation and Optimization
+            skip-slug: true
+            contents:
               - page: Evaluate Agent Candidates
                 path: ../../agents/traces-and-insights/evaluate-agent-candidates.mdx
-          - page: Optimize Agents
-            path: ../../agents/optimize-agents.mdx
-      - section: Evaluation
+                slug: traces-and-insights/evaluate-agent-candidates
+              - page: Optimize Agents
+                path: ../../agents/optimize-agents.mdx
+          - section: Agent Governance
+            slug: governance
+            path: ../../agents/governance/index.mdx
+            contents:
+              - page: Run a War-Game
+                path: ../../agents/governance/run-a-war-game.mdx
+              - page: Review and Apply Mitigations
+                path: ../../agents/governance/apply-mitigations.mdx
+                slug: apply-mitigations
+              - page: Agent Hardening CLI Reference
+                path: ../../agents/governance/cli-reference.mdx
+                slug: cli-reference
+              - page: Troubleshooting
+                path: ../../agents/governance/troubleshooting.mdx
+          - section: Examples and Integrations
+            skip-slug: true
+            contents:
+              - page: Run Mini-SWE-Agent
+                slug: mini-swe-agent
+                path: ../../agents/mini-swe-agent.mdx
+              - page: Web Search with Tavily
+                slug: web-search-tavily
+                path: ../../agents/web-search-tavily.mdx
+          - section: Migration and Compatibility
+            skip-slug: true
+            contents:
+              - page: Fabric 0.6 Upgrade and Adapter Support
+                slug: fabric-upgrade
+                path: ../../agents/fabric-upgrade.mdx
+      - section: Evaluate Agents & Models
         slug: evaluate-models
         path: ../../evals/index.mdx
         contents:
+          - page: Upgrade guidance
+            slug: upgrading-from-evaluator
+            path: ../../evals/upgrading-from-evaluator.mdx
           - page: Evaluation Approaches
             slug: dataset-driven-vs-task-driven-evaluation
             path: ../../evals/evaluation-approaches.mdx
@@ -57,48 +111,42 @@ navigation:
               - page: Quickstart
                 slug: quickstart
                 path: ../../evals/agent-eval/quickstart.mdx
-              - page: Reading Results
-                slug: reading-results
-                path: ../../evals/agent-eval/reading-results.mdx
-              - section: Runners and Integrations
-                skip-slug: true
-                contents:
-                  - page: Evaluate a Deployed Agent over HTTP
-                    slug: evaluate-deployed-agent
-                    path: ../../evals/agent-eval/evaluate-deployed-agent.mdx
-                  - page: Evaluate a Harbor Task Suite
-                    slug: harbor-runner
-                    path: ../../evals/agent-eval/harbor-runner.mdx
-                  - page: Run a Harbor Task Suite on Kubernetes
-                    slug: harbor-kubernetes
-                    path: ../../evals/agent-eval/harbor-kubernetes.mdx
-                  - page: Run a NeMo Fabric Agent inside Harbor
-                    slug: harbor-fabric-agent
-                    path: ../../evals/agent-eval/harbor-fabric-agent.mdx
-                  - page: Evaluate a NeMo Gym Environment
-                    slug: gym-runner
-                    path: ../../evals/agent-eval/gym-runner.mdx
-                  - page: Run a Custom NeMo Gym Environment
-                    slug: gym-custom-environment
-                    path: ../../evals/agent-eval/gym-custom-environment.mdx
-                  - page: Evaluate with a NeMo Fabric Harness
-                    slug: fabric-runner
-                    path: ../../evals/agent-eval/fabric-runner.mdx
-                  - page: Configure Sandboxed Gym for Evaluator
-                    slug: gym-sandbox-configuration
-                    path: ../../evals/agent-eval/gym-sandbox-configuration.mdx
-              - section: Scoring
-                skip-slug: true
-                contents:
-                  - page: Score by Component
-                    slug: score-by-component
-                    path: ../../evals/agent-eval/score-by-component.mdx
-                  - page: Writing Metrics
-                    slug: writing-metrics
-                    path: ../../evals/agent-eval/writing-metrics.mdx
+              - page: Evaluate a Deployed Agent over HTTP
+                slug: evaluate-deployed-agent
+                path: ../../evals/agent-eval/evaluate-deployed-agent.mdx
+              - page: Evaluate a Harbor Task Suite
+                slug: harbor-runner
+                path: ../../evals/agent-eval/harbor-runner.mdx
+              - page: Run a Harbor Task Suite on Kubernetes
+                slug: harbor-kubernetes
+                path: ../../evals/agent-eval/harbor-kubernetes.mdx
+              - page: Run a NeMo Fabric Agent inside Harbor
+                slug: harbor-fabric-agent
+                path: ../../evals/agent-eval/harbor-fabric-agent.mdx
+              - page: Evaluate a NeMo Gym Environment
+                slug: gym-runner
+                path: ../../evals/agent-eval/gym-runner.mdx
+              - page: Run a Custom NeMo Gym Environment
+                slug: gym-custom-environment
+                path: ../../evals/agent-eval/gym-custom-environment.mdx
+              - page: Configure Sandboxed Gym for Evaluator
+                slug: gym-sandbox-configuration
+                path: ../../evals/agent-eval/gym-sandbox-configuration.mdx
+              - page: Evaluate with a NeMo Fabric Harness
+                slug: fabric-runner
+                path: ../../evals/agent-eval/fabric-runner.mdx
+              - page: Score by Component
+                slug: score-by-component
+                path: ../../evals/agent-eval/score-by-component.mdx
               - page: Targets and Runners
                 slug: targets-and-runners
                 path: ../../evals/agent-eval/targets-and-runners.mdx
+              - page: Writing Metrics
+                slug: writing-metrics
+                path: ../../evals/agent-eval/writing-metrics.mdx
+              - page: Reading Results
+                slug: reading-results
+                path: ../../evals/agent-eval/reading-results.mdx
           - section: Tutorials
             path: ../../evals/tutorials/index.mdx
             contents:
@@ -111,6 +159,8 @@ navigation:
           - page: Experiments
             slug: experiments
             path: ../../evals/experiments.mdx
+          - page: SDK Resources
+            path: ../../evals/sdk-resources.mdx
           - page: Manage Tasks & Tasksets
             slug: manage-tasks-tasksets
             path: ../../evals/manage-tasks-tasksets.mdx
@@ -133,163 +183,6 @@ navigation:
                 path: ../../evals/metrics/agent-configuration.mdx
               - page: Model Configuration
                 path: ../../evals/metrics/model-configuration.mdx
-          - page: SDK Resources
-            path: ../../evals/sdk-resources.mdx
-          - page: Upgrade guidance
-            slug: upgrading-from-evaluator
-            path: ../../evals/upgrading-from-evaluator.mdx
-      - section: Safety and Hardening
-        skip-slug: true
-        contents:
-          - section: Agent Governance
-            slug: agents/governance
-            path: ../../agents/governance/index.mdx
-            contents:
-              - page: Run a War-Game
-                path: ../../agents/governance/run-a-war-game.mdx
-              - page: Review and Apply Mitigations
-                path: ../../agents/governance/apply-mitigations.mdx
-                slug: apply-mitigations
-              - page: Agent Hardening CLI Reference
-                path: ../../agents/governance/cli-reference.mdx
-                slug: cli-reference
-              - page: Troubleshooting
-                path: ../../agents/governance/troubleshooting.mdx
-          - section: Guardrails
-            path: ../../guardrails/index.mdx
-            contents:
-              - section: Tutorials
-                path: ../../guardrails/tutorials/index.mdx
-                contents:
-                  - page: Content Safety
-                    path: ../../guardrails/tutorials/content-safety.mdx
-                  - page: Deploy NemoGuard NIMs
-                    path: ../../guardrails/tutorials/deploy-nemoguard-nims.mdx
-                  - page: Injection Detection
-                    path: ../../guardrails/tutorials/injection-detection.mdx
-                  - page: Multimodal Data
-                    path: ../../guardrails/tutorials/multimodal-data.mdx
-                  - page: Parallel Rails
-                    path: ../../guardrails/tutorials/parallel-rails.mdx
-              - section: Core Concepts
-                path: ../../guardrails/concepts/index.mdx
-                contents:
-                  - page: Architecture
-                    path: ../../guardrails/concepts/architecture.mdx
-                  - section: Configurations
-                    path: ../../guardrails/concepts/configurations/index.mdx
-                    contents:
-                      - page: Configuration Structure
-                        path: ../../guardrails/concepts/configurations/configuration-structure.mdx
-                      - page: Default Configurations
-                        path: ../../guardrails/concepts/configurations/default-configs.mdx
-                      - page: Manage Configurations
-                        path: ../../guardrails/concepts/configurations/manage-configs.mdx
-                  - page: Running Inference
-                    path: ../../guardrails/concepts/inference.mdx
-                  - page: Running Checks
-                    path: ../../guardrails/concepts/checks.mdx
-              - page: Observability
-                path: ../../guardrails/observability.mdx
-              - page: Terminology
-                path: ../../guardrails/terminology.mdx
-            slug: guardrail-models
-          - section: Vulnerability Scanning
-            path: ../../garak/index.mdx
-            contents:
-              - section: Tutorials
-                path: ../../garak/tutorials/index.mdx
-                contents:
-                  - page: Run an Audit Locally
-                    path: ../../garak/tutorials/run-audit-locally.mdx
-              - section: Targets
-                path: ../../garak/targets/index.mdx
-                contents:
-                  - page: Inference Gateway
-                    path: ../../garak/targets/inference-gateway.mdx
-                  - page: Schema
-                    path: ../../garak/targets/schema.mdx
-              - section: Configurations
-                path: ../../garak/configs/index.mdx
-                contents:
-                  - page: Selecting Probes
-                    path: ../../garak/configs/probes.mdx
-                  - page: Schema
-                    path: ../../garak/configs/schema.mdx
-              - page: SDK Resources
-                path: ../../garak/sdk-resources.mdx
-      - section: Models and Inference
-        path: ../../run-inference/about.mdx
-        contents:
-          - page: Run Inference
-            path: ../../run-inference/tutorials/run-inference.mdx
-          - page: Deploy Models
-            path: ../../run-inference/tutorials/deploy-models.mdx
-          - page: Virtual Models
-            path: ../../run-inference/virtual-models.mdx
-      - section: Data Preparation
-        skip-slug: true
-        contents:
-          - section: Design Synthetic Data
-            path: ../../data-designer/index.mdx
-            contents:
-              - section: Tutorials
-                path: ../../data-designer/tutorials/index.mdx
-                contents:
-                  - page: The Basics
-                    path: ../../data-designer/tutorials/basics.mdx
-                  - page: Seeding with External Datasets
-                    path: ../../data-designer/tutorials/seeding.mdx
-                  - page: Generate Retrieval Training Data
-                    path: ../../data-designer/tutorials/retrieval-generate.mdx
-                    slug: retrieval-generate
-              - page: Retrieval SDG
-                path: ../../data-designer/retrieval-sdg.mdx
-              - page: CLI
-                path: ../../data-designer/cli.mdx
-              - page: SDK Resources
-                path: ../../data-designer/sdk-resources.mdx
-              - page: Migrating from Standalone Library
-                path: ../../data-designer/migration.mdx
-          - section: Synthesize Safe Data
-            path: ../../safe-synthesizer/getting-started.mdx
-            contents:
-              - section: Tutorials
-                path: ../../safe-synthesizer/tutorials/index.mdx
-                contents:
-                  - page: Safe Synthesizer 101
-                    path: ../../safe-synthesizer/tutorials/safe-synthesizer-101.mdx
-                  - page: Differential Privacy
-                    path: ../../safe-synthesizer/tutorials/differential-privacy.mdx
-              - section: About
-                path: ../../safe-synthesizer/about/index.mdx
-                contents:
-                  - page: Data Synthesis
-                    path: ../../safe-synthesizer/about/data-synthesis.mdx
-                  - page: PII Replacement
-                    path: ../../safe-synthesizer/about/pii-replacement.mdx
-                  - page: Evaluation
-                    path: ../../safe-synthesizer/about/evaluation.mdx
-                  - page: Jobs
-                    path: ../../safe-synthesizer/about/jobs.mdx
-                  - page: Parameters Reference
-                    path: ../../safe-synthesizer/about/reference.mdx
-              - page: SDK Resources
-                path: ../../safe-synthesizer/sdk-resources.mdx
-          - section: Anonymize Data
-            path: ../../anonymizer/index.mdx
-            contents:
-              - section: Tutorials
-                path: ../../anonymizer/tutorials/index.mdx
-                contents:
-                  - page: Preview a Config
-                    path: ../../anonymizer/tutorials/preview.mdx
-                  - page: Run an Anonymizer Job
-                    path: ../../anonymizer/tutorials/run.mdx
-              - page: SDK Resources
-                path: ../../anonymizer/sdk-resources.mdx
-              - page: CLI Reference
-                path: ../../anonymizer/cli.mdx
       - section: Fine-tune Models
         slug: customizer-reference
         path: ../../customizer/index.mdx
@@ -297,46 +190,6 @@ navigation:
           - page: Customization Concepts
             path: ../../customizer/about.mdx
             slug: customization-concepts
-          - section: Tutorials
-            slug: tutorials
-            path: ../../customizer/tutorials/index.mdx
-            contents:
-              - page: Understanding Models and Training
-                path: ../../customizer/tutorials/understand-configurations-and-models.mdx
-                slug: understanding-models-and-training
-              - page: Format Training Dataset
-                path: ../../customizer/tutorials/format-training-dataset.mdx
-                slug: format-training-dataset
-              - page: GRPO Environment Packages
-                path: ../../customizer/tutorials/grpo-environment-packages.mdx
-                slug: grpo-environment-packages
-              - page: Import HuggingFace Models
-                path: ../../customizer/tutorials/import-hf-model.mdx
-                slug: import-hugging-face-models
-              - page: SFT Customization Job
-                path: ../../customizer/tutorials/sft-customization-job.mdx
-                slug: sft-customization-job
-              - page: DPO Customization Job
-                path: ../../customizer/tutorials/dpo-customization-job.mdx
-                slug: dpo-customization-job
-              - page: LoRA Customization Job
-                path: ../../customizer/tutorials/lora-customization-job.mdx
-                slug: lora-customization-job
-              - page: Distillation Customization Job
-                path: ../../customizer/tutorials/distillation-customization-job.mdx
-                slug: distillation-customization-job
-              - page: Embedding Customization Job
-                path: ../../customizer/tutorials/embedding-customization-job.mdx
-                slug: embedding-customization-job
-              - page: Train on SPECTER or Triplet JSONL
-                path: ../../customizer/tutorials/embedding-triplet-dataset.mdx
-                slug: embedding-triplet-dataset
-              - page: Job Metrics
-                path: ../../customizer/tutorials/metrics.mdx
-                slug: metrics
-              - page: Optimize Throughput
-                path: ../../customizer/tutorials/optimize-throughput.mdx
-                slug: optimize-throughput
           - page: GRPO and Reward Environments
             path: ../../customizer/grpo-training.mdx
             slug: grpo-and-reward-environments
@@ -377,7 +230,7 @@ navigation:
               - page: Create a Model FileSet
                 path: ../../customizer/manage-model-entities/create-fileset.mdx
                 slug: create-a-model-file-set
-          - section: Supported Models
+          - section: Models
             slug: models
             contents:
               - page: Model Catalog
@@ -407,203 +260,390 @@ navigation:
               - page: Qwen
                 path: ../../customizer/models/qwen.mdx
                 slug: qwen
-      - section: Platform Fundamentals
-        path: ../../get-started/concepts/index.mdx
+          - section: Tutorials
+            slug: tutorials
+            path: ../../customizer/tutorials/index.mdx
+            contents:
+              - page: Understanding Models and Training
+                path: ../../customizer/tutorials/understand-configurations-and-models.mdx
+                slug: understanding-models-and-training
+              - page: Format Training Dataset
+                path: ../../customizer/tutorials/format-training-dataset.mdx
+                slug: format-training-dataset
+              - page: GRPO Environment Packages
+                path: ../../customizer/tutorials/grpo-environment-packages.mdx
+                slug: grpo-environment-packages
+              - page: Import HuggingFace Models
+                path: ../../customizer/tutorials/import-hf-model.mdx
+                slug: import-hugging-face-models
+              - page: SFT Customization Job
+                path: ../../customizer/tutorials/sft-customization-job.mdx
+                slug: sft-customization-job
+              - page: DPO Customization Job
+                path: ../../customizer/tutorials/dpo-customization-job.mdx
+                slug: dpo-customization-job
+              - page: LoRA Customization Job
+                path: ../../customizer/tutorials/lora-customization-job.mdx
+                slug: lora-customization-job
+              - page: Distillation Customization Job
+                path: ../../customizer/tutorials/distillation-customization-job.mdx
+                slug: distillation-customization-job
+              - page: Embedding Customization Job
+                path: ../../customizer/tutorials/embedding-customization-job.mdx
+                slug: embedding-customization-job
+              - page: Train on SPECTER or Triplet JSONL
+                path: ../../customizer/tutorials/embedding-triplet-dataset.mdx
+                slug: embedding-triplet-dataset
+              - page: Job Metrics
+                path: ../../customizer/tutorials/metrics.mdx
+                slug: metrics
+              - page: Optimize Throughput
+                path: ../../customizer/tutorials/optimize-throughput.mdx
+                slug: optimize-throughput
+      - section: Design Synthetic Data
+        path: ../../data-designer/index.mdx
         contents:
-          - page: Workspaces
-            path: ../../get-started/concepts/workspaces.mdx
-          - page: Projects
-            path: ../../get-started/concepts/projects.mdx
-          - page: Manage Files
-            path: ../../get-started/concepts/manage-files.mdx
-          - page: Manage Secrets
-            path: ../../get-started/concepts/manage-secrets.mdx
-          - page: Entities
-            path: ../../get-started/concepts/entities.mdx
-          - page: Entity References
-            path: ../../get-started/concepts/entity-references.mdx
-          - page: Filtering
-            path: ../../get-started/concepts/filtering.mdx
-        slug: get-started/core-concepts
+          - page: CLI
+            path: ../../data-designer/cli.mdx
+          - page: Retrieval SDG
+            path: ../../data-designer/retrieval-sdg.mdx
+          - section: Tutorials
+            path: ../../data-designer/tutorials/index.mdx
+            contents:
+              - page: The Basics
+                path: ../../data-designer/tutorials/basics.mdx
+              - page: Seeding with External Datasets
+                path: ../../data-designer/tutorials/seeding.mdx
+              - page: Generate Retrieval Training Data
+                path: ../../data-designer/tutorials/retrieval-generate.mdx
+                slug: retrieval-generate
+          - page: SDK Resources
+            path: ../../data-designer/sdk-resources.mdx
+          - page: Migrating from Standalone Library
+            path: ../../data-designer/migration.mdx
+      - section: Synthesize Safe Data
+        path: ../../safe-synthesizer/getting-started.mdx
+        contents:
+          - section: About
+            path: ../../safe-synthesizer/about/index.mdx
+            contents:
+              - page: Data Synthesis
+                path: ../../safe-synthesizer/about/data-synthesis.mdx
+              - page: PII Replacement
+                path: ../../safe-synthesizer/about/pii-replacement.mdx
+              - page: Evaluation
+                path: ../../safe-synthesizer/about/evaluation.mdx
+              - page: Jobs
+                path: ../../safe-synthesizer/about/jobs.mdx
+              - page: Parameters Reference
+                path: ../../safe-synthesizer/about/reference.mdx
+          - section: Tutorials
+            path: ../../safe-synthesizer/tutorials/index.mdx
+            contents:
+              - page: Safe Synthesizer 101
+                path: ../../safe-synthesizer/tutorials/safe-synthesizer-101.mdx
+              - page: Differential Privacy
+                path: ../../safe-synthesizer/tutorials/differential-privacy.mdx
+          - page: SDK Resources
+            path: ../../safe-synthesizer/sdk-resources.mdx
+      - section: Anonymize Data
+        path: ../../anonymizer/index.mdx
+        contents:
+          - section: Tutorials
+            path: ../../anonymizer/tutorials/index.mdx
+            contents:
+              - page: Preview a Config
+                path: ../../anonymizer/tutorials/preview.mdx
+              - page: Run an Anonymizer Job
+                path: ../../anonymizer/tutorials/run.mdx
+          - page: SDK Resources
+            path: ../../anonymizer/sdk-resources.mdx
+          - page: CLI Reference
+            path: ../../anonymizer/cli.mdx
+      - section: Guardrail Models
+        path: ../../guardrails/index.mdx
+        contents:
+          - section: Core Concepts
+            path: ../../guardrails/concepts/index.mdx
+            contents:
+              - page: Architecture
+                path: ../../guardrails/concepts/architecture.mdx
+              - section: Configurations
+                path: ../../guardrails/concepts/configurations/index.mdx
+                contents:
+                  - page: Configuration Structure
+                    path: ../../guardrails/concepts/configurations/configuration-structure.mdx
+                  - page: Default Configurations
+                    path: ../../guardrails/concepts/configurations/default-configs.mdx
+                  - page: Manage Configurations
+                    path: ../../guardrails/concepts/configurations/manage-configs.mdx
+              - page: Running Inference
+                path: ../../guardrails/concepts/inference.mdx
+              - page: Running Checks
+                path: ../../guardrails/concepts/checks.mdx
+          - section: Tutorials
+            path: ../../guardrails/tutorials/index.mdx
+            contents:
+              - page: Content Safety
+                path: ../../guardrails/tutorials/content-safety.mdx
+              - page: Deploy NemoGuard NIMs
+                path: ../../guardrails/tutorials/deploy-nemoguard-nims.mdx
+              - page: Injection Detection
+                path: ../../guardrails/tutorials/injection-detection.mdx
+              - page: Multimodal Data
+                path: ../../guardrails/tutorials/multimodal-data.mdx
+              - page: Parallel Rails
+                path: ../../guardrails/tutorials/parallel-rails.mdx
+          - page: Terminology
+            path: ../../guardrails/terminology.mdx
+          - page: Observability
+            path: ../../guardrails/observability.mdx
+      - section: Vulnerability Scanning
+        path: ../../garak/index.mdx
+        contents:
+          - section: Tutorials
+            path: ../../garak/tutorials/index.mdx
+            contents:
+              - page: Run an Audit Locally
+                path: ../../garak/tutorials/run-audit-locally.mdx
+          - page: SDK Resources
+            path: ../../garak/sdk-resources.mdx
+          - section: Configurations
+            path: ../../garak/configs/index.mdx
+            contents:
+              - page: Selecting Probes
+                path: ../../garak/configs/probes.mdx
+              - page: Schema
+                path: ../../garak/configs/schema.mdx
+          - section: Targets
+            path: ../../garak/targets/index.mdx
+            contents:
+              - page: Inference Gateway
+                path: ../../garak/targets/inference-gateway.mdx
+              - page: Schema
+                path: ../../garak/targets/schema.mdx
       - section: Studio
         path: ../../studio/index.mdx
         contents:
           - page: Agents
             path: ../../studio/agents.mdx
-          - page: Traces
-            path: ../../studio/traces.mdx
-          - page: Insights
-            path: ../../studio/insights.mdx
-          - page: Experiments
-            path: ../../studio/experiments.mdx
-          - page: Model Evaluations
-            path: ../../studio/model-evaluations.mdx
-          - page: Virtual Models
-            path: ../../studio/virtual-models.mdx
-          - page: Guardrail Configs
-            path: ../../studio/guardrails.mdx
+          - page: Anonymizer
+            path: ../../studio/anonymizer.mdx
           - page: Custom Models
             slug: customization
             path: ../../studio/customization.mdx
           - page: Data Designer
             path: ../../studio/data-designer-build.mdx
-          - page: Anonymizer
-            path: ../../studio/anonymizer.mdx
+          - page: Experiments
+            path: ../../studio/experiments.mdx
+          - page: Insights
+            path: ../../studio/insights.mdx
+          - page: Model Evaluations
+            path: ../../studio/model-evaluations.mdx
           - page: Plugin UIs
             slug: plugins
             path: ../../studio/plugins.mdx
-      - section: Deploy and Operate
-        skip-slug: true
+          - page: Guardrail Configs
+            path: ../../studio/guardrails.mdx
+          - page: Traces
+            path: ../../studio/traces.mdx
+          - page: Virtual Models
+            path: ../../studio/virtual-models.mdx
+      - section: Kubernetes Deployment
+        slug: kubernetes-deployment
         contents:
-          - page: Local Docker and Executors
-            slug: get-started/local-docker-and-executors
-            path: ../../get-started/local-docker-and-executors.mdx
-          - section: Kubernetes Deployment
-            slug: kubernetes-deployment
+          - section: Setup
+            slug: setup
+            path: ../../set-up/index.mdx
             contents:
-              - page: Deployment Overview
-                slug: setup
-                path: ../../set-up/index.mdx
-              - section: Installation
-                slug: setup/helm
+              - section: Helm
+                slug: helm
                 path: ../../set-up/helm/index.mdx
                 contents:
                   - page: Prerequisites
                     path: ../../set-up/helm/prerequisites.mdx
                   - page: Install
                     path: ../../set-up/helm/install.mdx
+                  - page: NetworkPolicy Smoke Test
+                    path: ../../set-up/helm/network-policy-smoke-test.mdx
+                  - page: Database Setup
+                    path: ../../set-up/helm/database-setup.mdx
+                  - page: Persistent Volumes
+                    path: ../../set-up/helm/persistent-volumes.mdx
+                  - page: File Storage
+                    path: ../../set-up/helm/file-storage.mdx
+                  - page: Ingress
+                    path: ../../set-up/helm/ingress.mdx
+                  - page: Multinode Networking
+                    path: ../../set-up/helm/multinode-networking.mdx
+                  - page: Volcano
+                    path: ../../set-up/helm/volcano.mdx
+                  - page: OpenSandbox
+                    slug: open-sandbox
+                    path: ../../set-up/helm/opensandbox.mdx
+                  - page: Configure Harbor Taskset Runs
+                    slug: harbor-sandbox-profiles
+                    path: ../../set-up/helm/harbor-sandbox-profiles.mdx
+                  - page: Secure Sandboxed GRPO
+                    slug: sandboxed-grpo
+                    path: ../../set-up/helm/sandboxed-grpo.mdx
+                  - page: OpenShell
+                    slug: openshell
+                    path: ../../set-up/helm/openshell.mdx
+                  - page: OpenSandbox with Kata
+                    slug: opensandbox-kata
+                    path: ../../set-up/helm/opensandbox-kata.mdx
                   - page: OpenShift
                     slug: openshift
                     path: ../../set-up/helm/openshift.mdx
-              - section: Storage and Databases
-                skip-slug: true
-                contents:
-                  - page: Database Setup
-                    path: ../../set-up/helm/database-setup.mdx
-                    slug: setup/helm/database-setup
-                  - page: Persistent Volumes
-                    path: ../../set-up/helm/persistent-volumes.mdx
-                    slug: setup/helm/persistent-volumes
-                  - page: File Storage
-                    path: ../../set-up/helm/file-storage.mdx
-                    slug: setup/helm/file-storage
-                  - page: Milvus
-                    path: ../../set-up/milvus.mdx
-                    slug: setup/milvus
-              - section: Networking
-                skip-slug: true
-                contents:
-                  - page: Ingress
-                    path: ../../set-up/helm/ingress.mdx
-                    slug: setup/helm/ingress
-                  - page: Multinode Networking
-                    path: ../../set-up/helm/multinode-networking.mdx
-                    slug: setup/helm/multinode-networking
-                  - page: NetworkPolicy Smoke Test
-                    path: ../../set-up/helm/network-policy-smoke-test.mdx
-                    slug: setup/helm/network-policy-smoke-test
-              - section: Execution and Sandboxing
-                skip-slug: true
-                contents:
-                  - page: Jobs
-                    slug: setup/jobs
-                    path: ../../set-up/manage-jobs.mdx
-                  - page: Volcano
-                    path: ../../set-up/helm/volcano.mdx
-                    slug: setup/helm/volcano
-                  - page: OpenSandbox
-                    slug: setup/helm/open-sandbox
-                    path: ../../set-up/helm/opensandbox.mdx
-                  - page: Configure Harbor Taskset Runs
-                    slug: setup/helm/harbor-sandbox-profiles
-                    path: ../../set-up/helm/harbor-sandbox-profiles.mdx
-                  - page: OpenShell
-                    slug: setup/helm/openshell
-                    path: ../../set-up/helm/openshell.mdx
-                  - page: OpenSandbox with Kata
-                    slug: setup/helm/opensandbox-kata
-                    path: ../../set-up/helm/opensandbox-kata.mdx
-                  - page: Secure Sandboxed GRPO
-                    slug: setup/helm/sandboxed-grpo
-                    path: ../../set-up/helm/sandboxed-grpo.mdx
+                  - page: Backup and Restore
+                    path: ../../set-up/helm/backup-and-restore.mdx
+              - page: Jobs
+                slug: jobs
+                path: ../../set-up/manage-jobs.mdx
+              - page: Milvus
+                path: ../../set-up/milvus.mdx
+              - page: Observability
+                slug: observability
+                path: ../../set-up/opentelemetry.mdx
               - page: Security
                 path: ../../set-up/security.mdx
-                slug: setup/security
-              - page: Observability
-                slug: setup/observability
-                path: ../../set-up/opentelemetry.mdx
-              - page: Backup and Restore
-                path: ../../set-up/helm/backup-and-restore.mdx
-                slug: setup/helm/backup-and-restore
-              - page: Helm Reference
-                slug: helm/helm-reference
-                path: ../../helm/index.mdx
-              - page: Config Reference
-                slug: config-reference
-                path: ../../set-up/config-reference.mdx
-          - section: Access Control
-            slug: access-control
-            path: ../../auth/index.mdx
+          - section: Helm
+            slug: helm
             contents:
-              - page: Overview
-                path: ../../auth/index.mdx
-              - page: Concepts
-                path: ../../auth/concepts.mdx
-              - section: Authentication
-                slug: authentication
-                path: ../../auth/authentication/index.mdx
+              - page: Helm Reference
+                slug: helm-reference
+                path: ../../helm/index.mdx
+          - page: Config Reference
+            slug: config-reference
+            path: ../../set-up/config-reference.mdx
+      - section: Access Control
+        slug: access-control
+        path: ../../auth/index.mdx
+        contents:
+          - page: Overview
+            path: ../../auth/index.mdx
+          - page: Concepts
+            path: ../../auth/concepts.mdx
+          - section: Authentication
+            slug: authentication
+            path: ../../auth/authentication/index.mdx
+            contents:
+              - page: OIDC Setup
+                path: ../../auth/authentication/oidc.mdx
+              - page: Confidential OIDC Client
+                slug: confidential-client
+                path: ../../auth/authentication/confidential-client.mdx
+              - page: Using Authentication
+                path: ../../auth/authentication/using-authentication.mdx
+              - section: Providers
+                slug: providers
+                path: ../../auth/authentication/providers/index.mdx
                 contents:
-                  - page: OIDC Setup
-                    path: ../../auth/authentication/oidc.mdx
-                  - page: Confidential OIDC Client
-                    slug: confidential-client
-                    path: ../../auth/authentication/confidential-client.mdx
-                  - page: Using Authentication
-                    path: ../../auth/authentication/using-authentication.mdx
-                  - section: Providers
-                    slug: providers
-                    path: ../../auth/authentication/providers/index.mdx
-                    contents:
-                      - page: Azure AD (Entra ID)
-                        path: ../../auth/authentication/providers/azure-ad.mdx
-                      - page: Generic OIDC
-                        path: ../../auth/authentication/providers/generic.mdx
-              - section: Authorization
-                slug: authorization
-                path: ../../auth/authorization/index.mdx
-                contents:
-                  - page: Roles and Permissions
-                    path: ../../auth/authorization/roles-and-permissions.mdx
-                  - page: Managing Access
-                    path: ../../auth/authorization/managing-access.mdx
-                  - page: API Scopes
-                    path: ../../auth/authorization/api-scopes.mdx
-                  - page: Permissions Reference
-                    path: ../../auth/authorization/permissions-reference.mdx
-                  - page: Policy Engine
-                    path: ../../auth/authorization/policy-engine.mdx
-              - section: Deployment
-                slug: deployment
+                  - page: Azure AD (Entra ID)
+                    path: ../../auth/authentication/providers/azure-ad.mdx
+                  - page: Generic OIDC
+                    path: ../../auth/authentication/providers/generic.mdx
+          - section: Authorization
+            slug: authorization
+            path: ../../auth/authorization/index.mdx
+            contents:
+              - page: API Scopes
+                path: ../../auth/authorization/api-scopes.mdx
+              - page: Managing Access
+                path: ../../auth/authorization/managing-access.mdx
+              - page: Permissions Reference
+                path: ../../auth/authorization/permissions-reference.mdx
+              - page: Plugin Authorization
+                path: ../../auth/authorization/plugin-authorization.mdx
+              - page: Policy Engine
+                path: ../../auth/authorization/policy-engine.mdx
+              - page: Roles and Permissions
+                path: ../../auth/authorization/roles-and-permissions.mdx
+          - section: Deployment
+            slug: deployment
+            path: ../../auth/deployment/configuration.mdx
+            contents:
+              - page: Configuration
                 path: ../../auth/deployment/configuration.mdx
-                contents:
-                  - page: Configuration
-                    path: ../../auth/deployment/configuration.mdx
-                  - page: Deployment Secrets
-                    path: ../../auth/deployment/deployment-secrets.mdx
-                  - page: Credential Propagation
-                    path: ../../auth/deployment/credential-propagation.mdx
-                  - page: Gateway Integration
-                    path: ../../auth/deployment/gateway.mdx
-                  - page: Scoped Intake Tokens
-                    path: ../../auth/deployment/scoped-intake-tokens.mdx
-                  - page: Production Hardening
-                    path: ../../auth/deployment/hardening.mdx
-              - page: Security Model
-                path: ../../auth/security-model.mdx
-              - page: Troubleshooting
-                path: ../../auth/troubleshooting.mdx
+              - page: Deployment Secrets
+                path: ../../auth/deployment/deployment-secrets.mdx
+              - page: Credential Propagation
+                path: ../../auth/deployment/credential-propagation.mdx
+              - page: Gateway Integration
+                path: ../../auth/deployment/gateway.mdx
+              - page: Scoped Intake Tokens
+                path: ../../auth/deployment/scoped-intake-tokens.mdx
+              - page: Production Hardening
+                path: ../../auth/deployment/hardening.mdx
+          - page: Security Model
+            path: ../../auth/security-model.mdx
+          - page: Troubleshooting
+            path: ../../auth/troubleshooting.mdx  
       - section: Reference
         contents:
+          - section: Release Notes
+            path: ../../about/release-notes/index.mdx
+            contents:
+              - page: v0.10.0
+                slug: release-0-10-0
+                path: ../../about/release-notes/release-0-10-0.mdx
+              - page: v0.9.0
+                slug: release-0-9-0
+                path: ../../about/release-notes/release-0-9-0.mdx
+              - page: v0.8.1
+                slug: release-0-8-1
+                path: ../../about/release-notes/release-0-8-1.mdx
+              - page: v0.8.0
+                slug: release-0-8-0
+                path: ../../about/release-notes/release-0-8-0.mdx
+              - page: v0.7.3
+                slug: release-0-7-3
+                path: ../../about/release-notes/release-0-7-3.mdx
+              - page: v0.7.2
+                slug: release-0-7-2
+                path: ../../about/release-notes/release-0-7-2.mdx
+              - page: v0.7.1
+                slug: release-0-7-1
+                path: ../../about/release-notes/release-0-7-1.mdx
+              - page: v0.7.0
+                slug: release-0-7-0
+                path: ../../about/release-notes/release-0-7-0.mdx
+              - page: v0.6.0
+                slug: release-0-6-0
+                path: ../../about/release-notes/release-0-6-0.mdx
+              - page: v0.5.1
+                slug: release-0-5-1
+                path: ../../about/release-notes/release-0-5-1.mdx
+              - page: v0.5.0
+                slug: release-0-5-0
+                path: ../../about/release-notes/release-0-5-0.mdx
+              - page: v0.4.0
+                slug: release-0-4-0
+                path: ../../about/release-notes/release-0-4-0.mdx
+              - page: v0.3.0
+                slug: release-0-3-0
+                path: ../../about/release-notes/release-0-3-0.mdx
+              - page: v0.2.0
+                slug: release-0-2-0
+                path: ../../about/release-notes/release-0-2-0.mdx
+              - page: v0.1.0
+                slug: release-0-1-0
+                path: ../../about/release-notes/release-0-1-0.mdx
+          - page: System Requirements
+            path: ../../requirements.mdx
+          - page: Support Matrix
+            path: ../../support-matrix.mdx
+          - page: Telemetry and Privacy
+            path: ../../telemetry-and-privacy.mdx
+          - page: Plugin Architecture
+            path: ../../plugin-architecture.mdx
+          - api: API Reference
+          - section: Python SDK
+            path: ../../pysdk/index.mdx
+            contents:
+              - page: Client APIs
+                path: ../../pysdk/client/index.mdx
           - section: CLI Reference
             path: ../../cli/index.mdx
             contents:
@@ -618,102 +658,25 @@ navigation:
                 path: ../../cli/reference.mdx
               - page: Troubleshooting
                 path: ../../cli/troubleshooting.mdx
-          - section: Python SDK
-            path: ../../pysdk/index.mdx
+          - section: Troubleshooting
+            path: ../../troubleshooting/index.mdx
             contents:
-              - page: Client APIs
-                path: ../../pysdk/client/index.mdx
-          - api: API Reference
-          - page: System Requirements
-            path: ../../requirements.mdx
-          - page: Support Matrix
-            path: ../../support-matrix.mdx
-          - page: Telemetry and Privacy
-            path: ../../telemetry-and-privacy.mdx
-      - section: Troubleshooting
-        path: ../../troubleshooting/index.mdx
-        contents:
-          - page: Customizer
-            path: ../../troubleshooting/customizer.mdx
-          - page: Data Designer
-            path: ../../troubleshooting/data-designer.mdx
-          - page: Evals
-            slug: evals
-            path: ../../troubleshooting/evals.mdx
-          - page: Guardrails
-            path: ../../troubleshooting/guardrails.mdx
-          - page: Studio
-            path: ../../troubleshooting/studio.mdx
-        slug: reference/troubleshooting
-      - section: Extend Helix
-        skip-slug: true
-        contents:
-          - page: Plugin Architecture
-            path: ../../plugin-architecture.mdx
-            slug: reference/plugin-architecture
-          - page: Plugin Authorization
-            path: ../../auth/authorization/plugin-authorization.mdx
-            slug: access-control/authorization/plugin-authorization
+              - page: Customizer
+                path: ../../troubleshooting/customizer.mdx
+              - page: Data Designer
+                path: ../../troubleshooting/data-designer.mdx
+              - page: Evals
+                slug: evals
+                path: ../../troubleshooting/evals.mdx
+              - page: Guardrails
+                path: ../../troubleshooting/guardrails.mdx
+              - page: Studio
+                path: ../../troubleshooting/studio.mdx
           - section: Contributing
             contents:
               - page: Skills Spec
                 path: ../../contributing/skills-spec.mdx
-            slug: reference/contributing
-      - section: Release Notes
-        path: ../../about/release-notes/index.mdx
-        contents:
-          - page: v0.10.0
-            slug: release-0-10-0
-            path: ../../about/release-notes/release-0-10-0.mdx
-          - page: v0.9.0
-            slug: release-0-9-0
-            path: ../../about/release-notes/release-0-9-0.mdx
-          - page: v0.8.1
-            slug: release-0-8-1
-            path: ../../about/release-notes/release-0-8-1.mdx
-          - page: v0.8.0
-            slug: release-0-8-0
-            path: ../../about/release-notes/release-0-8-0.mdx
-          - page: v0.7.3
-            slug: release-0-7-3
-            path: ../../about/release-notes/release-0-7-3.mdx
-          - page: v0.7.2
-            slug: release-0-7-2
-            path: ../../about/release-notes/release-0-7-2.mdx
-          - page: v0.7.1
-            slug: release-0-7-1
-            path: ../../about/release-notes/release-0-7-1.mdx
-          - page: v0.7.0
-            slug: release-0-7-0
-            path: ../../about/release-notes/release-0-7-0.mdx
-          - page: v0.6.0
-            slug: release-0-6-0
-            path: ../../about/release-notes/release-0-6-0.mdx
-          - page: v0.5.1
-            slug: release-0-5-1
-            path: ../../about/release-notes/release-0-5-1.mdx
-          - page: v0.5.0
-            slug: release-0-5-0
-            path: ../../about/release-notes/release-0-5-0.mdx
-          - page: v0.4.0
-            slug: release-0-4-0
-            path: ../../about/release-notes/release-0-4-0.mdx
-          - page: v0.3.0
-            slug: release-0-3-0
-            path: ../../about/release-notes/release-0-3-0.mdx
-          - page: v0.2.0
-            slug: release-0-2-0
-            path: ../../about/release-notes/release-0-2-0.mdx
-          - page: v0.1.0
-            slug: release-0-1-0
-            path: ../../about/release-notes/release-0-1-0.mdx
-        slug: reference/release-notes
-      - section: About
-        skip-slug: true
-        contents:
           - page: EULA
             path: ../../eula.mdx
-            slug: reference/eula
           - page: Acknowledgements
             path: ../../acknowledgements/index.mdx
-            slug: reference/acknowledgements
