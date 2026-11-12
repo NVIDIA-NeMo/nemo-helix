@@ -114,11 +114,12 @@ export const FilesetsTable: FC<FilesetsTableProps> = ({
           enableBulkDelete
             ? ({ selectedRows }) => (
                 <DatasetBulkDeleteModal
+                  entityLabel="Fileset"
                   selectedDatasets={selectedRows}
                   onConfirmSuccess={handleBulkDeleteSuccess}
                   onSettled={handleBulkDeleteSettled}
                   slotTrigger={
-                    <Button kind="tertiary" aria-label="Delete selected datasets">
+                    <Button kind="tertiary" aria-label="Delete selected filesets">
                       <Trash />
                       Delete
                     </Button>
@@ -162,7 +163,7 @@ export const FilesetsTable: FC<FilesetsTableProps> = ({
           open
           simpleConfirm
           onDelete={handleDeleteDataset}
-          title={`Delete Dataset: ${modalDataset.name}`}
+          title={`Delete Fileset: ${modalDataset.name}`}
           confirmationText={modalDataset.name ?? getEntityReference(modalDataset)}
           onClose={handleModalClose}
         />
@@ -182,7 +183,7 @@ export const FilesetsTable: FC<FilesetsTableProps> = ({
           open={createModalOpen}
           onClose={closeCreateModal}
           workspace={workspace}
-          purpose={FilesetPurpose.dataset}
+          purpose={FilesetPurpose.model}
         />
       )}
     </>

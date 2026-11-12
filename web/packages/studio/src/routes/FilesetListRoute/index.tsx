@@ -49,6 +49,7 @@ export const FilesetListRoute: FC = () => {
           getDatasetRoute={getDatasetRoute}
           renderRowActions={(dataset, { onDatasetDeleted }) => (
             <ActionMenu
+              entityLabel="Fileset"
               dataset={dataset}
               onNavigateToDetails={handleDatasetNav}
               onDatasetDeleted={onDatasetDeleted}

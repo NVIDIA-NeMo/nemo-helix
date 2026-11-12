@@ -581,7 +581,7 @@ describe('FilesetsTable', () => {
 
       const modal = await screen.findByTestId('fileset-create-modal');
       expect(within(modal).getByTestId('fileset-modal-purpose')).toHaveTextContent(
-        FilesetPurpose.dataset
+        FilesetPurpose.model
       );
     });
 
@@ -749,7 +749,7 @@ describe('FilesetsTable', () => {
 
       await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
       expect(await screen.findByTestId('delete-title')).toHaveTextContent(
-        'Delete Dataset: dataset-1'
+        'Delete Fileset: dataset-1'
       );
     });
 
@@ -835,7 +835,7 @@ describe('FilesetsTable', () => {
 
       const modal = await screen.findByTestId('delete-confirmation-modal');
       expect(within(modal).getByTestId('delete-title')).toHaveTextContent(
-        'Delete Dataset: dataset-1'
+        'Delete Fileset: dataset-1'
       );
       expect(within(modal).getByTestId('delete-confirmation-text')).toHaveTextContent('dataset-1');
     });
@@ -859,7 +859,7 @@ describe('FilesetsTable', () => {
 
   describe('Bulk delete', () => {
     const clickBulkDeleteTrigger = async () => {
-      const trigger = await screen.findByRole('button', { name: /delete selected datasets/i });
+      const trigger = await screen.findByRole('button', { name: /delete selected filesets/i });
       await user.click(trigger);
     };
 

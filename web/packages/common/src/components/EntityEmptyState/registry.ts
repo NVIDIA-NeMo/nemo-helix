@@ -79,7 +79,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No filesets yet',
     subheading:
       'Filesets group the files your agents and jobs read from — training data, models, or other artifacts.',
-    createAction: { label: 'Create Fileset' },
+    createAction: { label: 'Create Model Fileset' },
     cliCommand: 'nemo files filesets create <fileset-name> --workspace <workspace>',
     skillPrompt: 'Help me create my first fileset with the nemo-files skill',
   },
