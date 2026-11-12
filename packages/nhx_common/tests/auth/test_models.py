@@ -7,6 +7,7 @@ import json
 import os
 
 import pytest
+from nemo_helix_plugin.jobs.types import AuthContext as JobAuthContext
 from nhx.common.auth.exceptions import InvalidPrincipalHeader
 from nhx.common.auth.models import (
     MAX_EMAIL_LENGTH,
@@ -17,6 +18,15 @@ from nhx.common.auth.models import (
     AuthContext,
     Principal,
 )
+
+
+@pytest.mark.parametrize("scopes", [None, [], ["evaluator:write", "inference:write"]])
+def test_job_wire_context_preserves_credential_scope_ceiling(scopes):
+    original = Principal(id="creator", credential_scopes=scopes)
+    server = AuthContext.from_principal(original)
+    wire = JobAuthContext.model_validate_json(server.model_dump_json())
+    restored = AuthContext.model_validate_json(wire.model_dump_json()).to_principal()
+    assert restored.credential_scopes == scopes
 
 
 class TestPrincipalFromHeaders:

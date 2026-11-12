@@ -92,6 +92,11 @@ def _expected_name(bound_reference_value: str = "pod-uid-123") -> str:
 @pytest.mark.parametrize("scopes", [None, ["evaluator:write", "inference:read"]])
 def test_manager_registers_pod_uid_bound_delegation(test_step_pending_with_auth_context, scopes):
     test_step_pending_with_auth_context.auth_context.credential_scopes = scopes
+    # The controller consumes the HTTP DTO, not the server model assigned by
+    # the fixture. Exercise its real serialization boundary before delegation.
+    test_step_pending_with_auth_context = type(test_step_pending_with_auth_context).model_validate_json(
+        test_step_pending_with_auth_context.model_dump_json()
+    )
     core_v1 = MagicMock()
     core_v1.list_namespaced_pod.return_value = client.V1PodList(items=[_pod("pod-uid-123")])
     register = MagicMock()
