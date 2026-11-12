@@ -9,7 +9,7 @@ them; the checker tests prove each assertion can still fail.
 The checker inputs are built by the factories below, as the CLI prints them, and parsed through the same boundary as
 the e2e (``parse_status``, ``parse_results``, ``read_bundle``). A test can't build an input the platform's models
 reject, and a model change breaks the factories on the PR that makes it. Their values follow a green run on a
-deployed namespace (run-238e586d56bcfd4b, in AALGO-1034's evidence).
+deployed namespace.
 """
 
 import json
