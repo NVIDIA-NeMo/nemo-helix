@@ -17,8 +17,8 @@ export interface StorageConfigInput {
   secretKey?: string;
 }
 
-const HF_DEFAULT_ENDPOINT = 'https://huggingface.co';
-const NGC_DEFAULT_HOST = 'https://api.ngc.nvidia.com';
+export const HF_DEFAULT_ENDPOINT = 'https://huggingface.co';
+export const NGC_DEFAULT_HOST = 'https://api.ngc.nvidia.com';
 
 /**
  * NGC catalog URL pattern: /orgs/{org}/teams/{team}/resources/{target}
