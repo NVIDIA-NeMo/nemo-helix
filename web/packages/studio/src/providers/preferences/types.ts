@@ -31,5 +31,3 @@ export interface PreferenceMapEntry {
   readonly v: unknown;
   readonly at: number;
 }
-
-export type PreferenceSetter<T> = (value: T | undefined) => void;

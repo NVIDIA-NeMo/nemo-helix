@@ -1105,12 +1105,10 @@ def whoami(ctx: typer.Context) -> None:
       nemo auth whoami
       nemo -f json auth whoami
     """
-    from nemo_helix_plugin.auth.profiles.client import ProfilesClient
-
-    from nemo_helix_ext.cli.commands.profile import print_me
+    from nemo_helix_ext.cli.commands.profile import print_me, profiles_client
 
     state: CLIContext = ctx.obj
-    print_me(client_from_platform(state.get_client(), ProfilesClient).get_me().data(), state)
+    print_me(profiles_client(state).get_me().data(), state)
 
 
 @app.command("status")
