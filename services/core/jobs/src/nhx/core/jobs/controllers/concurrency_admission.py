@@ -79,6 +79,7 @@ class ConcurrencyAdmission:
         self._by_workspace: Counter[str] = Counter()
         self._by_user: Counter[str] = Counter()
         self._workspace_limits: dict[str, int] = {}
+        self._unreadable_workspaces: set[str] = set()
         self._snapshot_ok = False
 
     def workspace_limit(self, workspace: str) -> int:
@@ -99,6 +100,8 @@ class ConcurrencyAdmission:
 
     def begin_pass(self) -> None:
         """Snapshot current in-flight work. On failure, ``check`` defers until the next pass."""
+        self._workspace_limits = {}
+        self._unreadable_workspaces = set()
         by_executor: Counter[ExecutorKey] = Counter()
         by_workspace: Counter[str] = Counter()
         by_user: Counter[str] = Counter()
@@ -119,7 +122,6 @@ class ConcurrencyAdmission:
             self._snapshot_ok = False
             return
         self._by_executor, self._by_workspace, self._by_user = by_executor, by_workspace, by_user
-        self._workspace_limits = {}
         self._snapshot_ok = True
 
     def check(self, step: HelixJobStepWithContext) -> AdmissionDecision:
@@ -136,13 +138,17 @@ class ConcurrencyAdmission:
                 f"Waiting for capacity: executor {executor[0]}/{executor[1]} is at its limit "
                 f"({self._by_executor[executor]}/{executor_limit} active jobs)"
             )
+        unreadable = AdmissionDecision.defer(
+            f"Waiting for capacity: could not determine limits for workspace '{step.workspace}'"
+        )
+        if step.workspace in self._unreadable_workspaces:
+            return unreadable
         try:
             workspace_limit = self.workspace_limit(step.workspace)
         except NemoClientError:
             logger.exception("Could not read limits for workspace '%s'; deferring admission", step.workspace)
-            return AdmissionDecision.defer(
-                f"Waiting for capacity: could not determine limits for workspace '{step.workspace}'"
-            )
+            self._unreadable_workspaces.add(step.workspace)
+            return unreadable
         if self._by_workspace[step.workspace] >= workspace_limit:
             return AdmissionDecision.defer(
                 f"Waiting for capacity: workspace '{step.workspace}' is at its limit "

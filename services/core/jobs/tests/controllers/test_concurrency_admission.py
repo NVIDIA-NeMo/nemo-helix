@@ -190,6 +190,26 @@ def test_defers_when_workspace_limits_cannot_be_read(mock_jobs_client, test_step
     assert not admission.check(_step(test_step_created, "new")).admitted
 
 
+def test_failed_workspace_lookup_is_not_repeated_within_a_pass_but_retried_next_pass(
+    mock_jobs_client, test_step_created
+):
+    request = httpx.Request("GET", "http://localhost/apis/entities/v2/workspaces/default")
+    admission = _admission(mock_jobs_client, [])
+    get_workspace = admission._workspaces.get_workspace
+    healthy = get_workspace.side_effect
+    get_workspace.side_effect = NemoTransportError(httpx.ConnectError("refused", request=request))
+
+    assert not admission.check(_step(test_step_created, "n1")).admitted
+    assert not admission.check(_step(test_step_created, "n2")).admitted
+    assert get_workspace.call_count == 1
+
+    get_workspace.side_effect = healthy
+    admission.begin_pass()
+
+    assert admission.check(_step(test_step_created, "n3")).admitted
+    assert get_workspace.call_count == 2
+
+
 def test_defers_when_load_cannot_be_counted(mock_jobs_client, test_step_created):
     request = httpx.Request("GET", "http://localhost/apis/jobs/v2/workspaces/-/jobs/-/steps")
     mock_jobs_client.list_steps.side_effect = NemoTransportError(httpx.ConnectError("refused", request=request))
