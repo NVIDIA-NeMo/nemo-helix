@@ -1030,6 +1030,9 @@ def test_login_syncs_profile_claims_from_matching_id_token(
     assert profile_claims.email == "user@example.com"
     assert profile_claims.name == expected_name
     assert profile_claims.picture == expected_picture
+    # The fixture's groups come from TokenClaims, not a raw `groups` claim.
+    assert profile_claims.snapshot["groups"] == ["nemo-users"]
+    assert identities.calls[-1]["claims_snapshot"]["groups"] == ["nemo-users"]
 
 
 @pytest.mark.asyncio

@@ -289,6 +289,8 @@ async def _resolve_identity(
         token_subs = {sub for source in sources if isinstance(sub := source.get("sub"), str) and sub}
         sources.append(await _userinfo_claims(bearer_token, subject=claims.subject, token_subs=token_subs))
     name = _claim(*sources, name="name")
+    # Groups normalized from the configured claim, so workspace sharing matches what authz sees.
+    snapshot = {**raw_claims, **id_claims, "groups": list(claims.groups)}
     identity = await identity_store.resolve_or_materialize(
         issuer=get_auth_config().oidc.issuer,
         subject=claims.subject,
@@ -296,13 +298,13 @@ async def _resolve_identity(
         account_type="user",
         display_name=name or claims.email or claims.subject,
         primary_email=claims.email,
-        claims_snapshot=raw_claims,
+        claims_snapshot=snapshot,
         linked_via="oidc_broker_login",
         profile_claims=IdentityClaims(
             email=claims.email,
             name=name,
             picture=_claim(*sources, name="picture"),
-            snapshot={**raw_claims, **id_claims},
+            snapshot=snapshot,
             login=True,
         ),
     )
