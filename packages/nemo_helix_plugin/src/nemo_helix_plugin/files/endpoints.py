@@ -17,6 +17,8 @@ from nemo_helix_plugin.files.types import (
     CreateFilesetRequest,
     FilesetFileOutput,
     FilesetOutput,
+    FindGitRepositoryFilesRequest,
+    FindGitRepositoryFilesResponse,
     ListFilesetFilesResponse,
     ListFilesetsQueryParams,
     ListFilesQueryParams,
@@ -100,6 +102,20 @@ def download_file(*, workspace: str | None = None, name: str, path: str) -> Bina
 @delete("/apis/files/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}")
 @abstractmethod
 def delete_file(*, workspace: str | None = None, name: str, path: str) -> FilesetFileOutput: ...
+
+
+# ---------------------------------------------------------------------------
+# Git repository lookups
+# ---------------------------------------------------------------------------
+
+
+@post("/apis/files/v2/workspaces/{workspace}/git-repositories/find-files")
+@abstractmethod
+def find_git_repository_files(
+    *, workspace: str | None = None, body: FindGitRepositoryFilesRequest
+) -> FindGitRepositoryFilesResponse:
+    """Return the host's SSH keys when ``known_hosts`` is empty, else every path with ``file_name``."""
+    ...
 
 
 # ---------------------------------------------------------------------------

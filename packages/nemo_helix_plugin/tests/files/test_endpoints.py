@@ -10,10 +10,13 @@ from typing import get_origin
 
 from nemo_helix_plugin.client.types import BinaryContent, Paginated, PreparedRequest
 from nemo_helix_plugin.files import endpoints
+from nemo_helix_plugin.files.storage_config import GitStorageConfig
 from nemo_helix_plugin.files.types import (
     CreateFilesetRequest,
     FilesetFileOutput,
     FilesetOutput,
+    FindGitRepositoryFilesRequest,
+    FindGitRepositoryFilesResponse,
     ListFilesetFilesResponse,
     OtlpExportLogsResponse,
     OtlpLogQueryRequest,
@@ -200,3 +203,18 @@ def test_query_otlp_logs() -> None:
     assert isinstance(prepared.content, bytes)
     assert json.loads(prepared.content) == {"limit": 10, "artifact_base_path": "logs/run-1"}
     assert prepared.content_type == "application/json"
+
+
+def test_find_git_repository_files() -> None:
+    body = FindGitRepositoryFilesRequest(
+        storage=GitStorageConfig(url="git@gitlab.example.com:org/repo.git", ssh_key_secret="deploy-key"),
+        file_name="agent.yaml",
+    )
+    prepared = endpoints.find_git_repository_files(workspace="default", body=body)
+
+    assert prepared.method == "POST"
+    assert prepared.path_template == "/apis/files/v2/workspaces/{workspace}/git-repositories/find-files"
+    assert prepared.path_params == {"workspace": "default"}
+    assert isinstance(prepared.content, bytes)
+    assert json.loads(prepared.content)["file_name"] == "agent.yaml"
+    assert prepared.response_type is FindGitRepositoryFilesResponse

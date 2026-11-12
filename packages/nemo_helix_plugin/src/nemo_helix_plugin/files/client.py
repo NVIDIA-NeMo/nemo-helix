@@ -33,6 +33,7 @@ class _FilesMethods:
     upload_file = method(endpoints.upload_file)
     download_file = method(endpoints.download_file)
     delete_file = method(endpoints.delete_file)
+    find_git_repository_files = method(endpoints.find_git_repository_files)
     upload_otlp_logs = method(endpoints.upload_otlp_logs)
     query_otlp_logs = method(endpoints.query_otlp_logs)
 
