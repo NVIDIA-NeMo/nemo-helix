@@ -45,7 +45,7 @@ SOUNDFILE_FILE_REMOVALS = {
     "/opt/uv_cache/archive-v0/*/soundfile.py",
 }
 BASE_VENV_MINIMUM_PYTHON_PACKAGE_VERSIONS = {
-    "wandb": "0.30.0",
+    "wandb": "0.31.0",
 }
 
 # Actor FQN -> packages that must import inside that actor's venv.
@@ -270,7 +270,7 @@ def test_worker_venv_wandb_opentelemetry_compat(actor_fqn):
             "-c",
             "from opentelemetry.util.types import _ExtendedAttributes; import wandb; "
             "from importlib.metadata import version; from packaging.version import Version; "
-            "assert Version(version('wandb')) >= Version('0.30.0'), version('wandb')",
+            "assert Version(version('wandb')) >= Version('0.31.0'), version('wandb')",
         ],
         capture_output=True,
         text=True,

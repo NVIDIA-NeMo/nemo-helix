@@ -38,7 +38,11 @@ def test_access_key_lifecycle_routes_are_available_to_authenticated_owners(
     for action in ["suspend", "unsuspend"]:
         rule = endpoints[f"/apis/auth/v2/access-keys/{{jti}}/{action}"]["post"]
         # No RBAC permission needed (self-service), but scope still gates self-escalation.
-        assert rule == {"permissions": [], "scopes": ["auth:write", "platform:write"]}
+        assert rule == {
+            "direct": {"actor_perms": []},
+            "delegated": {"actor_perms": [], "subject_perms": []},
+            "scopes": ["auth:write", "platform:write"],
+        }
 
 
 @pytest.fixture
@@ -67,8 +71,14 @@ def minimal_authz_data():
             },
             "endpoints": {
                 "/apis/models/v2/workspaces/{workspace_id}/models": {
-                    "get": {"permissions": ["models.read"]},
-                    "post": {"permissions": ["models.create"]},
+                    "get": {
+                        "direct": {"actor_perms": ["models.read"]},
+                        "delegated": {"actor_perms": [], "subject_perms": ["models.read"]},
+                    },
+                    "post": {
+                        "direct": {"actor_perms": ["models.create"]},
+                        "delegated": {"actor_perms": [], "subject_perms": ["models.create"]},
+                    },
                 },
             },
             "workspaces": {
@@ -620,7 +630,11 @@ class TestWithStaticAuthzData:
             "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs"
         ]["post"]
 
-        assert post_config == {"permissions": ["jobs.logs.create"], "scopes": []}
+        assert post_config == {
+            "direct": {"actor_perms": ["jobs.logs.create"]},
+            "delegated": {"actor_perms": ["jobs.logs.create"], "subject_perms": []},
+            "scopes": [],
+        }
 
 
 class TestIntakeAuthorization:
@@ -1028,7 +1042,8 @@ class TestPerAreaScopes:
         ws_endpoint = static_authz_data["authz"]["endpoints"].get("/apis/entities/v2/workspaces", {})
         post_config = ws_endpoint.get("post", {})
         assert post_config.get("scopes") == ["entities:write", "platform:write"]
-        assert post_config.get("permissions") == ["workspaces.create"]
+        assert post_config["direct"]["actor_perms"] == ["workspaces.create"]
+        assert post_config["delegated"] == {"actor_perms": [], "subject_perms": ["workspaces.create"]}
 
     def test_audit_workspace_endpoints_have_audit_scopes(self, static_authz_data):
         """All workspace-scoped audit endpoints should have audit:read/audit:write scopes."""
@@ -1096,7 +1111,11 @@ async def test_taskset_task_read_authorizer_preserves_caller_access(static_authz
     data["principals"] = {"member@test.com": {"workspaces": {"source": ["TaskReader"]}}}
     data["roles"]["TaskReader"] = {"permissions": ["evaluator.tasks.read"]}
     data["endpoints"]["/apis/evals/v2/workspaces/{workspace}/tasks/{name}"] = {
-        "get": {"permissions": ["evaluator.tasks.read"], "scopes": ["evaluator:read", "platform:read"]}
+        "get": {
+            "direct": {"actor_perms": ["evaluator.tasks.read"]},
+            "delegated": {"actor_perms": [], "subject_perms": ["evaluator.tasks.read"]},
+            "scopes": ["evaluator:read", "platform:read"],
+        }
     }
     set_policy_data(static_authz_data)
 
@@ -1120,3 +1139,8 @@ async def test_taskset_task_read_authorizer_preserves_caller_access(static_authz
             assert denied.value.status_code == 403
     finally:
         auth_client_context.reset(token)
+
+
+def test_policy_snapshot_rejects_shorthand_before_publication() -> None:
+    with pytest.raises(ValueError, match="shorthand"):
+        set_policy_data({"authz": {"endpoints": {"/api/x": {"get": {"permissions": []}}}}})

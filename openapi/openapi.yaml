@@ -871,6 +871,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoleBinding'
+        '404':
+          description: Role binding not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -908,6 +914,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Role binding not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1138,6 +1150,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entity'
+        '404':
+          description: Entity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1187,6 +1205,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDeletionStatus'
+        '404':
+          description: Workspace deletion not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1373,6 +1397,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Workspace'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1406,6 +1436,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Workspace'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1451,6 +1487,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1714,6 +1756,12 @@ paths:
                 $ref: '#/components/schemas/Entity'
         '403':
           description: Not allowed to read entities in the requested workspace.
+        '404':
+          description: Entity or workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1779,6 +1827,12 @@ paths:
                 $ref: '#/components/schemas/Entity'
         '403':
           description: Not allowed to update entities in the requested workspace.
+        '404':
+          description: Entity not found or workspace being deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Request validation error, or a referenced resource such as
             the workspace does not exist
@@ -1847,6 +1901,12 @@ paths:
                 $ref: '#/components/schemas/DeleteResponse'
         '403':
           description: Not allowed to delete entities in the requested workspace.
+        '404':
+          description: Entity or workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1989,6 +2049,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceMember'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2048,6 +2114,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Workspace or member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2272,6 +2344,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Project'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2313,6 +2391,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2506,6 +2590,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Fileset is referenced by a model or adapter entity
           content:
@@ -2562,6 +2652,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2740,7 +2836,8 @@ paths:
       tags:
       - Files
       summary: Upload Fileset Content
-      description: Upload file content to a fileset.
+      description: Upload file content to a fileset. Read-only storage returns HTTP
+        409.
       operationId: upload_file_apis_files_v2_workspaces__workspace__filesets__name_____path__put
       parameters:
       - name: workspace
@@ -2768,6 +2865,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetFileOutput'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -2845,7 +2951,7 @@ paths:
 
         Permanently deletes the file from the storage backend.
 
-        Returns metadata about the deleted file.'
+        Returns metadata about the deleted file. Read-only storage returns HTTP 409.'
       operationId: delete_file_apis_files_v2_workspaces__workspace__filesets__name_____path__delete
       parameters:
       - name: workspace
@@ -2873,6 +2979,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetFileOutput'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -2957,7 +3072,9 @@ paths:
       description: 'Upload OTLP logs to a specified fileset in JSON or Protobuf format.
 
 
-        Supports both application/json and application/x-protobuf content types.'
+        Supports both application/json and application/x-protobuf content types.
+
+        Read-only storage returns HTTP 409 before reading the request body.'
       operationId: upload_otlp_logs_apis_files_v2_workspaces__workspace__filesets__name__otlp_v1_logs_post
       parameters:
       - name: workspace
@@ -2994,6 +3111,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OtelExportLogsServiceResponse'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -5597,6 +5723,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EvaluatorResult'
+        '404':
+          description: Evaluator result not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -6428,6 +6560,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Span'
+        '404':
+          description: Span not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -6671,6 +6809,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Trace'
+        '404':
+          description: Trace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -7126,6 +7270,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobStep'
+        '404':
+          description: Attempt step not found
         '422':
           description: Validation Error
           content:
@@ -7279,6 +7425,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobTask'
+        '404':
+          description: Attempt or step not found
         '422':
           description: Validation Error
           content:
@@ -7329,6 +7477,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobTask'
+        '404':
+          description: Attempt step or task not found
         '422':
           description: Validation Error
           content:
@@ -8439,6 +8589,12 @@ paths:
         '204':
           description: Delete adapter by name. The entity store delete uses the adapter's
             stored parent (entity `parent` field).
+        '404':
+          description: Adapter not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -8519,6 +8675,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Adapter'
+        '404':
+          description: Adapter not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -8671,6 +8833,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelDeploymentConfig'
+        '404':
+          description: Deployment configuration version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -9117,6 +9285,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelDeployment'
+        '404':
+          description: Deployment version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -9847,6 +10021,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
+        '404':
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       tags:
       - Models
@@ -9872,6 +10052,12 @@ paths:
       responses:
         '204':
           description: Delete model entity
+        '404':
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10095,6 +10281,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Prompt'
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10127,6 +10319,12 @@ paths:
       responses:
         '204':
           description: Delete a prompt
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10418,6 +10616,12 @@ paths:
       responses:
         '204':
           description: Delete a model provider
+        '404':
+          description: Model provider not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10694,6 +10898,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixSecretResponse'
+        '404':
+          description: Secret not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10722,6 +10932,12 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '404':
+          description: Secret not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -24892,8 +25108,9 @@ components:
     HelixBearer:
       type: http
       scheme: bearer
-      description: Supply a raw Helix access token. The Authorization header's Bearer
-        prefix is added automatically.
+      description: 'Send `Authorization: Bearer <token>` when setting the HTTP header
+        directly (for example, with curl). In a bearer-auth token field, supply only
+        the raw Helix access token; the client adds the Bearer prefix.'
       x-fern-bearer:
         name: accessToken
         env: NHX_ACCESS_TOKEN

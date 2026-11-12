@@ -9,6 +9,7 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from nemo_agents_plugin.fabric.runtime import StreamingMethod
 from nemo_fabric import Runtime
@@ -25,6 +26,7 @@ class FabricRuntimeSession:
     streaming_method: StreamingMethod = StreamingMethod.RELAY
     closing: bool = False
     invocation_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    workspace_dir: Path | None = None
 
 
 class FabricSessionNotFoundError(LookupError):
