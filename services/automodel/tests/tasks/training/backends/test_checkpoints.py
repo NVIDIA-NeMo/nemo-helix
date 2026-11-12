@@ -4,6 +4,8 @@
 """process_checkpoint merge, ONNX dispatch, and fileset layout."""
 
 import json
+import sys
+from functools import partial
 from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock
@@ -11,16 +13,20 @@ from unittest.mock import MagicMock
 import pytest
 from nhx.automodel.entities.values import FinetuningType
 from nhx.automodel.tasks.training.backends.checkpoints import (
+    _ONNX_TOLERANCES,
     ModelType,
     _build_export_module,
     _probe_bidirectional_mask,
     _restructure_encoder_output,
+    auto_torch_dtype,
     find_selected_checkpoints,
     mark_text_ranking,
     merge_lora_cross_encoder_adapter,
     process_checkpoint,
     process_selected_checkpoints,
     sanitize_encoder_hf,
+    verify_onnx_matches_reference,
+    write_sentence_transformer_modules,
 )
 from nhx.automodel.tasks.training.schemas import (
     CheckpointFormat,
@@ -66,6 +72,9 @@ def patched_checkpoint_io(mocker: MockerFixture) -> dict:
         "export_onnx": mocker.patch(f"{CHECKPOINTS}.export_onnx", side_effect=_record("export")),
         "sanitize": mocker.patch(f"{CHECKPOINTS}.sanitize_encoder_hf", side_effect=_record("sanitize")),
         "restructure": mocker.patch(f"{CHECKPOINTS}._restructure_encoder_output", side_effect=_record("restructure")),
+        "st_modules": mocker.patch(
+            f"{CHECKPOINTS}.write_sentence_transformer_modules", side_effect=_record("st_modules")
+        ),
         "copytree": mocker.patch(f"{CHECKPOINTS}.copytree"),
     }
 
@@ -540,7 +549,7 @@ class TestProcessCheckpointSanitize:
         assert export_call.call_args.kwargs["load_trust_remote_code"] is True
         assert export_call.call_args.kwargs["trust_remote_code"] is False
         assert sanitize_call.call_args.args == (output_path, tmp_path / "base")
-        assert patched_checkpoint_io["order"] == ["export", "sanitize", "restructure"]
+        assert patched_checkpoint_io["order"] == ["export", "sanitize", "st_modules", "restructure"]
 
     def test_full_sft_trusted_skips_sanitize(self, patched_checkpoint_io: dict, tmp_path: Path) -> None:
         config = self._full_sft_config(tmp_path, trust_remote_code=True)
@@ -579,4 +588,96 @@ class TestProcessCheckpointSanitize:
         assert call["load_trust_remote_code"] is False
         assert call["trust_remote_code"] is False
         patched_checkpoint_io["sanitize"].assert_called_once()
-        assert patched_checkpoint_io["order"] == ["export", "sanitize", "restructure"]
+        # The merged LoRA has no Sentence Transformers files; serving needs its pooling declared.
+        patched_checkpoint_io["st_modules"].assert_called_once_with(tmp_path / "output", tmp_path / "base")
+        assert patched_checkpoint_io["order"] == ["export", "sanitize", "st_modules", "restructure"]
+
+
+@pytest.mark.parametrize(
+    ("config", "weights_dtype", "expected"),
+    [
+        ({"dtype": "bfloat16"}, None, "bfloat16"),
+        ({"torch_dtype": "float16"}, None, "float16"),
+        ({}, "F16", "float16"),
+        ({}, None, "float32"),
+    ],
+    ids=["transformers-v5-dtype", "transformers-v4-torch-dtype", "stored-weights", "nothing-declared"],
+)
+def test_auto_torch_dtype_follows_transformers(
+    tmp_path: Path, config: dict[str, str], weights_dtype: str | None, expected: str
+) -> None:
+    """The config's declared dtype, else the stored weights' dtype, as transformers resolves "auto"."""
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    if weights_dtype is not None:
+        header = json.dumps({"w": {"dtype": weights_dtype, "shape": [1], "data_offsets": [0, 2]}}).encode()
+        (tmp_path / "model.safetensors").write_bytes(len(header).to_bytes(8, "little") + header + b"\0\0")
+
+    assert auto_torch_dtype(tmp_path) == expected
+
+
+@pytest.mark.parametrize(
+    ("reference", "onnx_output", "passes"),
+    [
+        ([[-1.8398], [-0.2305]], [[-1.8281], [-0.2314]], True),
+        ([[-1.8398], [-0.2305]], [[-0.2305], [-1.8398]], False),
+        ([[0.1, -0.05]], [[0.12, -0.05]], False),
+    ],
+    ids=["fp16-qwen3-reranker-drift", "rows-swapped", "embedding-off-by-2e-2"],
+)
+def test_onnx_tolerance_scales_with_reference_magnitude(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reference: list, onnx_output: list, passes: bool
+) -> None:
+    """fp16 drift measured on Qwen3-Reranker-0.6B passes; tracing bugs and drifted embeddings do not."""
+    import types
+
+    import numpy as np
+
+    session = MagicMock()
+    session.get_inputs.return_value = [types.SimpleNamespace(name="input_ids")]
+    session.get_outputs.return_value = [types.SimpleNamespace(name="logits")]
+    session.run.return_value = [np.array(onnx_output, dtype=np.float16)]
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(InferenceSession=lambda *_, **__: session))
+    atol, rtol = _ONNX_TOLERANCES["fp16"]
+    verify = partial(
+        verify_onnx_matches_reference,
+        tmp_path / "model.onnx",
+        {"input_ids": np.zeros((1, 1))},
+        np.array(reference, dtype=np.float32),
+        atol=atol,
+        rtol=rtol,
+    )
+
+    if passes:
+        verify()
+    else:
+        with pytest.raises(ValueError, match="ONNX output diverges"):
+            verify()
+
+
+@pytest.mark.parametrize("automodel_wrote_modules", [False, True], ids=["merged-lora", "automodel-full-weights"])
+def test_embedder_declares_its_trained_pooling(tmp_path: Path, automodel_wrote_modules: bool) -> None:
+    """vLLM pools by modules.json; without it a merged LoRA was served with last-token pooling."""
+    base, output = tmp_path / "base", tmp_path / "output"
+    base.mkdir()
+    output.mkdir()
+    (base / "config_sentence_transformers.json").write_text('{"prompts": {"query": "query: "}}')
+    (base / "sentence_bert_config.json").write_text('{"max_seq_length": 32768}')
+    (output / "config.json").write_text('{"model_type": "ministral3", "hidden_size": 2048}')
+    if automodel_wrote_modules:
+        (output / "modules.json").write_text("automodel")
+
+    write_sentence_transformer_modules(output, base)
+
+    if automodel_wrote_modules:
+        assert (output / "modules.json").read_text() == "automodel"
+        assert not (output / "1_Pooling").exists()
+        return
+    modules = json.loads((output / "modules.json").read_text())
+    assert [module["type"].rsplit(".", 1)[-1] for module in modules] == ["Transformer", "Pooling", "Normalize"]
+    pooling = json.loads((output / "1_Pooling" / "config.json").read_text())
+    assert pooling["word_embedding_dimension"] == 2048
+    assert [mode for mode, on in pooling.items() if mode.startswith("pooling_mode_") and on] == [
+        "pooling_mode_mean_tokens"
+    ]
+    for name in ("config_sentence_transformers.json", "sentence_bert_config.json"):
+        assert (output / name).read_text() == (base / name).read_text()

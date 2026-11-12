@@ -17,6 +17,7 @@ from typing import Any
 
 from nemo_automodel._transformers.registry import ModelRegistry
 from nhx.automodel.app.constants import PAUSE_SENTINEL_FILE_NAME, PAUSE_SIGNAL
+from nhx.automodel.tasks.training.backends.checkpoints import auto_torch_dtype
 from nhx.automodel.tasks.training.backends.registry import is_causal_reranker_checkpoint
 from nhx.automodel.tasks.training.backends.vlm import CONVERSATION_DATASET_TARGET, rewrite_fileset_rows
 from nhx.automodel.tasks.training.chat_templates import resolve_chat_template
@@ -199,6 +200,11 @@ def _compile_retrieval_config(
             # Automodel scores a Qwen3 causal LM by its yes/no next-token logits. That reranker
             # has no classifier head to pool for, and takes the recipe's temperature (above).
             del cfg["model"]["pooling"]
+            if customizer_config.model.precision is None:
+                # Its from_pretrained passes every kwarg through the config loader, which stores
+                # "auto" as the config dtype; transformers then fails to resolve it. Send the dtype
+                # "auto" would have resolved to instead.
+                cfg["model"]["torch_dtype"] = auto_torch_dtype(customizer_config.model.path)
         else:
             cfg["model"]["temperature"] = 1.0
     if customizer_config.model.attn_implementation:

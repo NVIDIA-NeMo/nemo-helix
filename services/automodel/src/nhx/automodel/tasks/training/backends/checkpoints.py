@@ -62,8 +62,9 @@ def extract_precision_from_model_config(model_path: str | Path) -> Precision | N
     """
     Extract precision from a HuggingFace model's config.json.
 
-    HuggingFace models store their torch_dtype in config.json (e.g., "bfloat16").
-    This function reads that value and maps it to our Precision enum.
+    HuggingFace models store their dtype in config.json (e.g., "bfloat16"): transformers v5
+    writes it as ``dtype``, v4 as ``torch_dtype``. This function reads that value and maps it
+    to our Precision enum.
 
     This is used to determine the actual training precision when "auto" was used
     for torch_dtype. The precision comes from the base model's config, not from
@@ -84,9 +85,9 @@ def extract_precision_from_model_config(model_path: str | Path) -> Precision | N
         with open(config_path, "r") as f:
             config = json.load(f)
 
-        torch_dtype = config.get("torch_dtype")
+        torch_dtype = config.get("dtype") or config.get("torch_dtype")
         if torch_dtype is None:
-            logger.warning("torch_dtype not found in config.json")
+            logger.warning("Neither dtype nor torch_dtype is set in config.json")
             return None
 
         try:
@@ -100,6 +101,26 @@ def extract_precision_from_model_config(model_path: str | Path) -> Precision | N
     except (json.JSONDecodeError, IOError) as e:
         logger.warning(f"Failed to read config.json: {e}")
         return None
+
+
+_SAFETENSORS_FLOAT_DTYPES = {"BF16": "bfloat16", "F16": "float16", "F32": "float32"}
+
+
+def auto_torch_dtype(model_path: str | Path) -> str:
+    """The dtype that ``torch_dtype: "auto"`` resolves to for a checkpoint.
+
+    Like transformers: the dtype config.json declares, else that of the stored weights.
+    """
+    declared = extract_precision_from_model_config(model_path)
+    if declared is not None and declared != Precision.FP8:
+        return declared.to_torch_dtype()
+    for shard in sorted(Path(model_path).glob("*.safetensors")):
+        with shard.open("rb") as f:
+            header = json.loads(f.read(int.from_bytes(f.read(8), "little")))
+        for entry in header.values():
+            if isinstance(entry, dict) and entry.get("dtype") in _SAFETENSORS_FLOAT_DTYPES:
+                return _SAFETENSORS_FLOAT_DTYPES[entry["dtype"]]
+    return "float32"
 
 
 def trained_automodel_model_class(customizer_config: TrainingStepConfig) -> bool:
@@ -300,6 +321,52 @@ def sanitize_encoder_hf(output_path: Path, base_model_path: Path) -> None:
     )
 
 
+# Helix trains embedders with mean pooling and L2 normalization (config.py: pooling "avg", l2_normalize).
+_SENTENCE_TRANSFORMER_MODULES = [
+    {"idx": 0, "name": "0", "path": "", "type": "sentence_transformers.models.Transformer"},
+    {"idx": 1, "name": "1", "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+    {"idx": 2, "name": "2", "path": "2_Normalize", "type": "sentence_transformers.models.Normalize"},
+]
+_SENTENCE_TRANSFORMER_BASE_FILES = ("config_sentence_transformers.json", "sentence_bert_config.json")
+
+
+def write_sentence_transformer_modules(output_path: Path, base_model_path: Path) -> None:
+    """Declare an embedder's trained pooling (mean, then L2 normalize) when its HF tree lacks it.
+
+    vLLM, Sentence Transformers, and TEI read pooling from ``modules.json`` and ``1_Pooling/``.
+    Without them vLLM pools a decoder's last token, which the model was not trained for.
+    Automodel writes these for full-weight saves; a merged LoRA has none. The base's prompts
+    and ``max_seq_length`` files are kept.
+    """
+    output_path = Path(output_path)
+    base_model_path = Path(base_model_path)
+    if (output_path / "modules.json").exists():
+        return
+    config = json.loads((output_path / "config.json").read_text())
+    hidden_size = config.get("hidden_size") or (config.get("text_config") or {}).get("hidden_size")
+    if not isinstance(hidden_size, int):
+        logger.warning("Not writing Sentence Transformers modules: no hidden_size in %s", output_path / "config.json")
+        return
+
+    pooling = {
+        "word_embedding_dimension": hidden_size,
+        "pooling_mode_cls_token": False,
+        "pooling_mode_mean_tokens": True,
+        "pooling_mode_max_tokens": False,
+        "pooling_mode_mean_sqrt_len_tokens": False,
+        "pooling_mode_weightedmean_tokens": False,
+        "pooling_mode_lasttoken": False,
+        "include_prompt": True,
+    }
+    (output_path / "1_Pooling").mkdir(exist_ok=True)
+    (output_path / "1_Pooling" / "config.json").write_text(json.dumps(pooling, indent=2) + "\n")
+    (output_path / "modules.json").write_text(json.dumps(_SENTENCE_TRANSFORMER_MODULES, indent=2) + "\n")
+    for name in _SENTENCE_TRANSFORMER_BASE_FILES:
+        if (base_model_path / name).is_file():
+            shutil.copy2(base_model_path / name, output_path / name)
+    logger.info("Wrote Sentence Transformers modules (mean pooling, L2 normalize) to %s", output_path)
+
+
 def merge_lora_embedding_adapter(
     adapter_path: Path,
     base_model_path: str,
@@ -447,6 +514,15 @@ _EXPORT_SAMPLES = {
 _TORCH_DTYPES = {
     "fp32": "float32",
     "fp16": "float16",
+}
+
+# Allowed ONNX-vs-PyTorch drift as (atol, rtol); rtol scales with the largest reference value.
+# Drift tracks activation size, so a score near zero carries the error of the larger logits it is
+# computed from: fp16 Qwen3 rerankers drift 1-2e-2 on scores of 2-10. A tracing bug (mask, pooling,
+# last token) is off by the order of the score itself.
+_ONNX_TOLERANCES = {
+    "fp32": (1e-3, 1e-3),
+    "fp16": (1e-2, 1e-2),
 }
 
 
@@ -688,11 +764,13 @@ def export_onnx(
     with torch.no_grad():
         reference = export_model.eval()(*args)
     feed_args = [tensor.detach().cpu() for tensor in args]
+    atol, rtol = _ONNX_TOLERANCES[cfg.precision]
     verify_onnx_matches_reference(
         onnx_path=onnx_path,
         feed={name: tensor.numpy() for name, tensor in zip(input_names, feed_args)},
         reference=reference.float().cpu().numpy(),
-        atol=1e-2 if cfg.precision == "fp16" else 1e-3,
+        atol=atol,
+        rtol=rtol,
     )
 
     logger.info("ONNX %s exported to %s", model_type.value, onnx_path)
@@ -704,9 +782,10 @@ def verify_onnx_matches_reference(
     feed: dict,
     reference,
     atol: float,
+    rtol: float = 0.0,
     providers: list[str] | None = None,
 ) -> float:
-    """Return max abs diff. Raise ``ValueError`` on shape mismatch or diff > *atol*."""
+    """Return max abs diff. Raise ``ValueError`` on shape mismatch or diff > ``atol + rtol * max|reference|``."""
     import numpy as np
     import onnxruntime
 
@@ -727,11 +806,14 @@ def verify_onnx_matches_reference(
         raise ValueError(f"ONNX output shape {actual.shape} does not match HuggingFace output shape {expected.shape}.")
 
     max_diff = float(np.max(np.abs(actual.astype("float64") - expected.astype("float64"))))
-    if max_diff > atol:
+    scale = float(np.max(np.abs(expected)))
+    tolerance = atol + rtol * scale
+    if max_diff > tolerance:
         raise ValueError(
-            f"ONNX output diverges from the HuggingFace checkpoint: max abs diff {max_diff:.3e} > atol {atol:.3e}."
+            f"ONNX output diverges from the HuggingFace checkpoint: max abs diff {max_diff:.3e} > tolerance "
+            f"{tolerance:.3e} (atol {atol:.0e} + rtol {rtol:.0e} x max |reference| {scale:.3e})."
         )
-    logger.info("ONNX verification passed (max abs diff %.3e <= atol %.3e)", max_diff, atol)
+    logger.info("ONNX verification passed (max abs diff %.3e <= tolerance %.3e)", max_diff, tolerance)
     return max_diff
 
 
@@ -920,6 +1002,8 @@ def process_checkpoint(
         )
         if not job_trust_remote_code:
             sanitize_encoder_hf(output_path, Path(base_model_path))
+        if is_embedding:
+            write_sentence_transformer_modules(output_path, Path(base_model_path))
         if causal_reranker:
             mark_text_ranking(output_path)
         _restructure_encoder_output(output_path, export_cfg.primary)

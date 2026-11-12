@@ -988,18 +988,29 @@ def test_the_reporting_block_reaches_the_recipe_config(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("base_config", "classifier_head"),
+    ("base_config", "classifier_head", "torch_dtype"),
     [
-        ({"model_type": "llama_bidirec", "architectures": ["LlamaBidirectionalModel"]}, True),
-        ({"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]}, False),
-        ({"model_type": "qwen3", "architectures": ["Qwen3ForSequenceClassification"]}, True),
+        ({"model_type": "llama_bidirec", "architectures": ["LlamaBidirectionalModel"]}, True, "auto"),
+        (
+            {"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"], "torch_dtype": "bfloat16"},
+            False,
+            "bfloat16",
+        ),
+        (
+            {"model_type": "qwen3", "architectures": ["Qwen3ForSequenceClassification"], "torch_dtype": "bfloat16"},
+            True,
+            "auto",
+        ),
     ],
     ids=["classifier-head", "qwen3-causal-reranker", "qwen3-converted-classifier"],
 )
 def test_compile_cross_encoder_recipe_selects_cross_encoder_model(
-    tmp_path: Path, base_config: dict[str, Any], classifier_head: bool
+    tmp_path: Path, base_config: dict[str, Any], classifier_head: bool, torch_dtype: str
 ) -> None:
-    """A Qwen3 causal LM scores by its yes/no logits; Automodel rejects classifier options for it."""
+    """A Qwen3 causal LM scores by its yes/no logits; Automodel rejects classifier options for it.
+
+    Its loader also cannot resolve torch_dtype "auto", so it gets the checkpoint's own dtype.
+    """
     fixture = Path(__file__).parents[3] / "contract" / "input_configs" / "embed-1b" / "embed_1b_full_sft.json"
     raw = json.loads(fixture.read_text())
     raw.pop("backend")
@@ -1031,6 +1042,7 @@ def test_compile_cross_encoder_recipe_selects_cross_encoder_model(
     assert compiled["model"]["num_labels"] == 1
     assert ("pooling" in compiled["model"]) is classifier_head
     assert ("temperature" in compiled["model"]) is classifier_head
+    assert compiled["model"]["torch_dtype"] == torch_dtype
     assert compiled["temperature"] == 1.0
     assert compiled["_recipe"] == "cross_encoder"
     assert "loss_fn" not in compiled

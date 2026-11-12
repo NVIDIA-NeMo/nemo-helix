@@ -107,9 +107,9 @@ def _parity_config(**overrides) -> ExportConfig:
     """Export config for HF-parity checks.
 
     The references below run in float32 on CPU, so these tests pin the graph to
-    fp32 rather than taking the fp16 job default; fp16 only agrees to the 1e-2
-    that ``export_onnx`` itself applies, which is too loose to catch a pooling
-    or layout regression.
+    fp32 rather than taking the fp16 job default; fp16 only agrees to the
+    tolerance ``export_onnx`` itself applies, which is too loose to catch a
+    pooling or layout regression.
     """
     return ExportConfig(precision="fp32", **overrides)
 
