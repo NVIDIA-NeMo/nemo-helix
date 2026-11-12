@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEntitiesGetWorkspace } from '@nemo/sdk/generated/platform/entity-store';
-import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
+import { useFallbackWorkspace } from '@studio/hooks/useFallbackWorkspace';
 import { useAuthTokenStatus } from '@studio/providers/auth/useAuthTokenStatus';
+import { studioPreferences } from '@studio/providers/preferences/definitions';
+import { usePreference } from '@studio/providers/preferences/usePreference';
 import { WorkspaceContext } from '@studio/providers/workspace/WorkspaceContext';
-import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
-import { SELECTED_WORKSPACE_KEY } from '@studio/util/localStorage';
 import { type FC, type ReactNode, useCallback, useEffect, useMemo } from 'react';
 import { useParams } from 'react-router';
 
@@ -15,23 +15,22 @@ interface WorkspaceProviderProps {
 }
 
 export const WorkspaceProvider: FC<WorkspaceProviderProps> = ({ children }) => {
-  const profile = useAuthProfile();
   const { isTokenActive } = useAuthTokenStatus();
-  const [storedWorkspace, setStoredWorkspace] = useLocalStorage<string>(SELECTED_WORKSPACE_KEY);
+  const [storedWorkspace, setStoredWorkspace, , storedKnown] = usePreference(
+    studioPreferences.selectedWorkspace
+  );
   const { workspace: workspaceParam } = useParams();
+  // Never the stored workspace, so it is also a valid destination when that one is forbidden.
+  const fallbackWorkspace = useFallbackWorkspace(storedWorkspace);
 
-  // Priority: URL route param → localStorage → profile namespace (default)
-  const selectedWorkspace = workspaceParam || storedWorkspace || profile?.workspace;
-
-  // Sync localStorage with profile namespace on first load if nothing is stored
-  useEffect(() => {
-    if (!storedWorkspace && profile?.workspace) {
-      setStoredWorkspace(profile.workspace);
-    }
-  }, [profile?.workspace, storedWorkspace, setStoredWorkspace]);
+  // Priority: URL route param → stored selection → fallback. Wait for the stored selection rather
+  // than briefly selecting the fallback.
+  const selectedWorkspace = storedKnown
+    ? workspaceParam || storedWorkspace || fallbackWorkspace
+    : workspaceParam;
 
   // Persist route changes, but do not react to storedWorkspace changes. Otherwise, tabs on
-  // different workspace routes continuously overwrite each other's shared localStorage value.
+  // different workspace routes continuously overwrite each other's stored value.
   useEffect(() => {
     if (workspaceParam) {
       setStoredWorkspace(workspaceParam);
@@ -56,17 +55,13 @@ export const WorkspaceProvider: FC<WorkspaceProviderProps> = ({ children }) => {
 
   // Auto-fall-back when a forbidden stored workspace is used implicitly (no URL param).
   const willAutoFallback =
-    hasUnauthorizedError &&
-    !workspaceParam &&
-    !!storedWorkspace &&
-    !!profile?.workspace &&
-    storedWorkspace !== profile.workspace;
+    hasUnauthorizedError && !workspaceParam && !!storedWorkspace && !!fallbackWorkspace;
 
   useEffect(() => {
-    if (willAutoFallback && profile?.workspace) {
-      setStoredWorkspace(profile.workspace);
+    if (willAutoFallback && fallbackWorkspace) {
+      setStoredWorkspace(fallbackWorkspace);
     }
-  }, [willAutoFallback, profile?.workspace, setStoredWorkspace]);
+  }, [willAutoFallback, fallbackWorkspace, setStoredWorkspace]);
 
   // Suppress during fallback to avoid a flash of the unauthorized screen.
   const isWorkspaceUnauthorized = hasUnauthorizedError && !willAutoFallback;

@@ -3,10 +3,12 @@
 
 """Configuration for the Auth service (v2)."""
 
-from typing import Literal, Optional
+import re
+from typing import Any, Literal, Optional
 
+from nemo_helix_plugin.auth.profiles.types import PREFERENCE_NAMESPACE_PATTERN
 from nhx.common.config import AuthConfig as SharedAuthConfig
-from pydantic import Field
+from pydantic import Field, field_validator
 
 
 class AuthServiceConfig(SharedAuthConfig):
@@ -83,6 +85,31 @@ class AuthServiceConfig(SharedAuthConfig):
             "inference gateway runs separately from auth, add each middleware entry-point name here."
         ),
     )
+
+    profile_sync_interval_seconds: int = Field(
+        default=900,
+        ge=0,
+        description=(
+            "Minimum seconds between profile refreshes (email, name, avatar) from bearer-token claims for the "
+            "same identity. Bounds writes on the authorization path; browser logins always refresh."
+        ),
+    )
+
+    preference_defaults: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Deployment-wide preference defaults keyed by namespace (for example studio.ui: {theme: dark}). "
+            "Namespaces listed here are read-only through the preference defaults API."
+        ),
+    )
+
+    @field_validator("preference_defaults")
+    @classmethod
+    def _valid_preference_namespaces(cls, value: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        invalid = [namespace for namespace in value if not re.fullmatch(PREFERENCE_NAMESPACE_PATTERN, namespace)]
+        if invalid:
+            raise ValueError(f"Invalid preference namespaces: {', '.join(invalid)}")
+        return value
 
 
 # Backward compatibility alias

@@ -3,19 +3,14 @@
 
 import { WORKSPACE_DROPDOWN_RECENT_LIMIT } from '@studio/components/WorkspaceDropdown/constants';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
-import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
-import { WORKSPACE_DROPDOWN_RECENT_KEY } from '@studio/util/localStorage';
+import { studioPreferences } from '@studio/providers/preferences/definitions';
+import { usePreference } from '@studio/providers/preferences/usePreference';
 import { useEffect } from 'react';
 
 export const useRecentWorkspaces = () => {
-  const [storedWorkspaces = [], setRecentWorkspaces] = useLocalStorage<string[]>(
-    WORKSPACE_DROPDOWN_RECENT_KEY,
-    []
-  );
+  // The preference schema guarantees an array, even if the stored value is invalid.
+  const [recentWorkspaces, setRecentWorkspaces] = usePreference(studioPreferences.recentWorkspaces);
   const workspace = useWorkspaceFromPathIfExists();
-
-  // Ensure recentWorkspaces is always an array, even if localStorage contains invalid data
-  const recentWorkspaces = Array.isArray(storedWorkspaces) ? storedWorkspaces : [];
 
   const addRecentWorkspace = (name: string) => {
     const existingIndex = recentWorkspaces.findIndex((w) => w === name);

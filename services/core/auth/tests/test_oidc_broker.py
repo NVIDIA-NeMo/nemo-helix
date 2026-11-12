@@ -24,9 +24,14 @@ from nhx.common.config.base import (
     OIDCServerSessionsConfig,
 )
 from nhx.core.auth.oidc_broker.crypto import client_secret_basic_header, pkce_challenge
-from nhx.core.auth.oidc_broker.routes import get_credential_store, get_identity_store, get_login_store
+from nhx.core.auth.oidc_broker.routes import (
+    get_credential_store,
+    get_identity_store,
+    get_login_store,
+    get_profile_store,
+)
 from nhx.core.auth.oidc_broker.store import DBAuthLoginTransaction, LoginRecord, OidcLoginStore
-from nhx.core.entities.app.repository import AccountCredentialRecord, AccountCredentialType
+from nhx.core.entities.app.repository import AccountCredentialRecord, AccountCredentialType, AccountProfileRecord
 from nhx.core.entities.app.repository.account_identity import AccountIdentityRecord
 from nhx.core.entities.app.repository.sqlalchemy.base import Base
 from sqlalchemy import select
@@ -136,13 +141,34 @@ class MemoryCredentialStore:
 
 
 class MemoryIdentityStore:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
     async def resolve_or_materialize(self, **kwargs) -> AccountIdentityRecord:
+        self.calls.append(kwargs)
         return AccountIdentityRecord(
             account_id="account-1",
             account_type="user",
             identity_id="identity-1",
             issuer=kwargs["issuer"],
             subject=kwargs["subject"],
+        )
+
+
+class MemoryProfileStore:
+    async def get(self, account_id: str) -> AccountProfileRecord | None:
+        return AccountProfileRecord(
+            account_id=account_id,
+            account_type="user",
+            status="active",
+            primary_email="user@example.com",
+            account_display_name=None,
+            display_name_override=None,
+            idp_display_name="User One",
+            avatar_url=None,
+            timezone=None,
+            locale=None,
+            last_login_at=None,
         )
 
 
@@ -308,7 +334,9 @@ def broker_app(monkeypatch: pytest.MonkeyPatch):
     app.dependency_overrides[get_login_store] = lambda: transactions
     app.dependency_overrides[get_credential_store] = lambda: credentials
     app.dependency_overrides[get_identity_store] = lambda: identities
+    app.dependency_overrides[get_profile_store] = MemoryProfileStore
     app.include_router(router, prefix="/apis/auth")
+    app.state.identities = identities
     yield TestClient(app, base_url="https://nemo.example.com"), transactions, credentials
     Configuration.clear_overrides()
 
@@ -456,6 +484,7 @@ def test_web_session_login_sets_account_bound_cookie_and_supports_logout(broker_
         "groups": ["nemo-users"],
         "account_id": "account-1",
         "authz_aliases": ["user-1", "user@example.com"],
+        "display_name": "User One",
     }
     assert "provider-access" not in session.text
 
@@ -969,3 +998,59 @@ def test_broker_redirects_advertise_302_location_responses(broker_app) -> None:
         assert "200" not in responses
         response = responses["302"]
         assert response["headers"]["Location"]["schema"] == {"type": "string"}
+
+
+def _id_token(**claims) -> str:
+    import jwt
+
+    return jwt.encode(claims, key="", algorithm="none")
+
+
+@pytest.mark.parametrize(
+    ("id_token_claims", "expected_name", "expected_picture"),
+    [
+        (
+            {
+                "iss": "https://idp.example.com",
+                "aud": "nemo-helix-user",
+                "sub": "user-1",
+                "name": "ID Name",
+                "picture": "https://cdn.example.com/u.png",
+            },
+            "ID Name",
+            "https://cdn.example.com/u.png",
+        ),
+        # Ignored: issued for another client, by another issuer, or about another user.
+        ({"iss": "https://idp.example.com", "aud": "other-client", "sub": "user-1", "name": "Wrong"}, "User One", None),
+        (
+            {"iss": "https://evil.example.com", "aud": "nemo-helix-user", "sub": "user-1", "name": "Wrong"},
+            "User One",
+            None,
+        ),
+        (
+            {"iss": "https://idp.example.com", "aud": ["nemo-helix-user"], "sub": "user-2", "name": "Wrong"},
+            "User One",
+            None,
+        ),
+    ],
+)
+def test_login_syncs_profile_claims_from_matching_id_token(
+    broker_app, id_token_claims: dict, expected_name: str, expected_picture: str | None
+) -> None:
+    client, _transactions, _credentials = broker_app
+    identities = client.app.state.identities
+    with respx.mock:
+        respx.post("https://idp.example.com/token").respond(
+            200, json={"access_token": "provider-access", "id_token": _id_token(**id_token_claims)}
+        )
+        state, _redirect = _start_web_session_login(client)
+        callback = client.get(
+            "/apis/auth/v2/login/callback", params={"code": "auth-code", "state": state}, follow_redirects=False
+        )
+
+    assert callback.status_code == 302, callback.text
+    profile_claims = identities.calls[-1]["profile_claims"]
+    assert profile_claims.login is True
+    assert profile_claims.email == "user@example.com"
+    assert profile_claims.name == expected_name
+    assert profile_claims.picture == expected_picture

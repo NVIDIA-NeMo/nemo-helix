@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Me, MeAuthMethod } from '@nemo/sdk/generated/platform/schema';
+import { useMe } from '@studio/providers/auth/useMe';
 import { useWebSession } from '@studio/providers/auth/useWebSession';
 import type { User } from 'oidc-client-ts';
 import { useMemo } from 'react';
@@ -11,7 +13,13 @@ export type AuthProfile = {
   id?: string;
   name: string;
   email: string;
+  /** Personal workspace name derived from the email; only used to provision it on first login. */
   workspace: string;
+  accountId?: string;
+  avatarUrl?: string | null;
+  groups?: string[];
+  authMethod?: MeAuthMethod;
+  canEditProfile?: boolean;
   state?: {
     path: string;
     search: string;
@@ -33,23 +41,34 @@ export const getUserAuthProfile = (user: User): AuthProfile => ({
   state: user.state as AuthProfile['state'],
 });
 
+const withMe = (profile: AuthProfile | undefined, me: Me | undefined): AuthProfile | undefined => {
+  if (!me) return profile;
+  return {
+    ...profile,
+    id: profile?.id ?? me.principal_id,
+    name: me.profile.display_name,
+    email: profile?.email || me.email || '',
+    workspace: profile?.workspace ?? '',
+    accountId: me.account_id,
+    avatarUrl: me.profile.avatar_url,
+    groups: me.groups,
+    authMethod: me.auth_method,
+    canEditProfile: me.can_edit_profile,
+  };
+};
+
 export const useAuthProfile = (): AuthProfile | undefined => {
   const auth = useAuth();
   const user = auth?.user;
   const { isServerSession, session } = useWebSession();
+  const { data: me } = useMe();
 
   return useMemo(() => {
     if (isServerSession) {
       if (!session) return undefined;
-      const name = session.email || session.id;
-      return {
-        id: session.id,
-        name,
-        email: session.email || session.id,
-        workspace: name.split('@')[0],
-      };
+      const email = session.email || session.id;
+      return withMe({ id: session.id, name: email, email, workspace: email.split('@')[0] }, me);
     }
-    if (!user) return undefined;
-    return getUserAuthProfile(user);
-  }, [isServerSession, session, user]);
+    return withMe(user ? getUserAuthProfile(user) : undefined, me);
+  }, [isServerSession, session, user, me]);
 };

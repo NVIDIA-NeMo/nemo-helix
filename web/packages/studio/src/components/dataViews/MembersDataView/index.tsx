@@ -19,6 +19,7 @@ import type { WorkspaceMember } from '@nemo/sdk/generated/platform/schema';
 import { Text } from '@nvidia/foundations-react-core';
 import { useWorkspaceMembers } from '@studio/api/entity-store/useWorkspaceMembers';
 import { Loading } from '@studio/components/Layouts/Loading';
+import { PrincipalName } from '@studio/components/PrincipalName';
 import { type ComponentProps, type FC, useCallback, useMemo } from 'react';
 
 export interface MembersDataViewProps {
@@ -81,12 +82,7 @@ export const MembersDataView: FC<MembersDataViewProps> = ({
           header: 'Member',
           enableSorting: true,
           cell({ row }) {
-            const principal = row.original.principal;
-            return (
-              <Text kind="body/bold/md" className="truncate" title={principal}>
-                {principal}
-              </Text>
-            );
+            return <PrincipalName principal={row.original.principal} layout="stacked" bold />;
           },
         }),
         accessor('roles', {

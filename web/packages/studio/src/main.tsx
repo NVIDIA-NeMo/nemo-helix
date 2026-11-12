@@ -5,7 +5,7 @@ import '@studio/index.css';
 
 import { logger } from '@nemo/common/src/utils/logger';
 import { App } from '@studio/App';
-import { UI_THEME } from '@studio/util/localStorage';
+import { UI_THEME, UI_THEME_BOOT } from '@studio/util/localStorage';
 import ReactDOM from 'react-dom/client';
 
 // OpenTelemetry patches fetch/XHR globally, so this must settle before React
@@ -14,7 +14,9 @@ const telemetryReady = import('@studio/telemetry/telemetry').catch((error: unkno
   logger.error('Telemetry failed to initialize', error);
 });
 
-const storedTheme = window.localStorage.getItem(UI_THEME);
+// The account's theme isn't known until /me loads, so first paint uses this browser's last theme.
+const storedTheme =
+  window.localStorage.getItem(UI_THEME_BOOT) ?? window.localStorage.getItem(UI_THEME);
 const theme = storedTheme ? JSON.parse(storedTheme) : 'dark';
 
 if (theme === 'dark') {

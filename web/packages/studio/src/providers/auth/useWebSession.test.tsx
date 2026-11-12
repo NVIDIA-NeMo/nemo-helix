@@ -49,6 +49,8 @@ vi.mock('@studio/constants/environment', async (importOriginal) => ({
   BASE_URL: '/studio/',
 }));
 
+vi.mock('@studio/providers/auth/useMe', () => ({ useMe: () => ({ data: undefined }) }));
+
 vi.mock('@nemo/sdk/src/utils/oidcBrowserAuthentication', () => ({
   getOidcBrowserAuthentication: vi.fn(),
   isRetryableOidcBrowserAuthenticationError: mocks.isRetryableDiscoveryError,

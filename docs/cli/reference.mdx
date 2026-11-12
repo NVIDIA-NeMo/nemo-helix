@@ -136,6 +136,7 @@ nemo auth [OPTIONS] [COMMAND] [ARGS]...
 * `logout`: Remove stored credentials for the current context.
 * `refresh`: Refresh the current access token.
 * `token`: Print the current access token (for use with SDK or curl).
+* `whoami`: Show who the platform thinks you are: account, profile,...
 * `status`: Show current authentication status.
 * `access-keys`: Manage NeMo Helix Scoped Access Keys.
 
@@ -247,6 +248,29 @@ nemo auth token [OPTIONS]
 **Options:**
 
 * `--decode`: Decode the JWT payload claims as JSON. This does not verify the token signature.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo auth whoami
+
+Show who the platform thinks you are: account, profile, groups, and how you authenticated.
+
+Unlike `nemo auth status`, which decodes the local token, this asks the platform.
+
+**Examples:**
+
+```shell
+nemo auth whoami
+nemo -f json auth whoami
+```
+
+**Usage:**
+
+```shell
+nemo auth whoami [OPTIONS]
+```
 
 **Help:**
 
@@ -1035,6 +1059,176 @@ nemo skills install [OPTIONS]
 * `--user`: Install to user scope (default: project scope)
 * `--project-dir, --project-root <DIRECTORY>`: Project directory to install into (default: current working directory)
 * `--path <DIRECTORY>`: Install to a custom skills directory (for example ~/.my-agent/skills)
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+### nemo preferences
+
+Read and edit your preferences.
+
+**Usage:**
+
+```shell
+nemo preferences [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `get`: Show a preference document, with deployment defaults...
+* `set`: Set one value with `--key`, or replace the whole document...
+* `unset`: Remove one value with `--key`, or delete the whole document.
+
+#### nemo preferences get
+
+Show a preference document, with deployment defaults applied unless `--raw`.
+
+Preferences are JSON documents grouped by namespace (studio.ui, cli, plugin.&lt;name>),
+optionally scoped to a workspace. `--key` addresses a dotted path inside the document.
+
+**Examples:**
+
+```shell
+nemo preferences get studio.ui
+nemo preferences get studio.ui --key theme
+nemo preferences get studio.onboarding --workspace default --raw
+```
+
+**Usage:**
+
+```shell
+nemo preferences get [OPTIONS] NAMESPACE
+```
+
+**Arguments:**
+
+* `<NAMESPACE>`: Preference namespace, e.g. studio.ui.
+
+**Options:**
+
+* `--key, -k`: Dotted path inside the document.
+* `--workspace, -w`: Workspace-scoped document; omit for global.
+* `--raw`: Show only your own values, without defaults.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo preferences set
+
+Set one value with `--key`, or replace the whole document with `--json` or `--file`.
+
+**Examples:**
+
+```shell
+nemo preferences set studio.ui --key theme dark
+nemo preferences set cli --key table.maxWidth 120
+nemo preferences set plugin.my-plugin --json '{"enabled": true}'
+```
+
+**Usage:**
+
+```shell
+nemo preferences set [OPTIONS] NAMESPACE [VALUE]
+```
+
+**Arguments:**
+
+* `<NAMESPACE>`: Preference namespace, e.g. studio.ui.
+* `<VALUE>`: Value for `--key`; parsed as JSON, else used as a string.
+
+**Options:**
+
+* `--key, -k`: Dotted path inside the document.
+* `--json`: Replace the whole document.
+* `--file <FILE>`: Replace the whole document from a file.
+* `--workspace, -w`: Workspace-scoped document; omit for global.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo preferences unset
+
+Remove one value with `--key`, or delete the whole document. Defaults then apply.
+
+**Examples:**
+
+```shell
+nemo preferences unset studio.ui --key theme
+nemo preferences unset studio.onboarding --workspace default
+```
+
+**Usage:**
+
+```shell
+nemo preferences unset [OPTIONS] NAMESPACE
+```
+
+**Arguments:**
+
+* `<NAMESPACE>`: Preference namespace, e.g. studio.ui.
+
+**Options:**
+
+* `--key, -k`: Dotted path inside the document.
+* `--workspace, -w`: Workspace-scoped document; omit for global.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+### nemo profile
+
+Manage your NeMo Helix user profile.
+
+**Usage:**
+
+```shell
+nemo profile [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `set`: Update your profile.
+
+#### nemo profile set
+
+Update your profile. Only the options you pass change.
+
+Your email comes from your identity provider and cannot be changed here.
+
+**Examples:**
+
+```shell
+nemo profile set --display-name "Alice A."
+nemo profile set --timezone Europe/Paris --locale fr-FR
+nemo profile set --clear-display-name
+```
+
+**Usage:**
+
+```shell
+nemo profile set [OPTIONS]
+```
+
+**Options:**
+
+* `--display-name`: Name shown to other users.
+* `--clear-display-name`: Remove your name override and use the IdP name.
+* `--timezone`: IANA time zone, e.g. Europe/Paris.
+* `--clear-timezone`: Remove your time zone.
+* `--locale`: BCP 47 language tag, e.g. en-US.
+* `--clear-locale`: Remove your locale.
 
 **Help:**
 

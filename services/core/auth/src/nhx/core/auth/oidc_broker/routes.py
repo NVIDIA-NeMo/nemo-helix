@@ -19,6 +19,7 @@ from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 import httpx
+import jwt
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from nhx.common.api.common import ErrorResponse
@@ -44,6 +45,8 @@ from nhx.core.entities.app.repository import (
     AccountCredentialRecord,
     AccountCredentialStore,
     AccountIdentityStore,
+    AccountProfileStore,
+    IdentityClaims,
 )
 from nhx.core.entities.app.repository.account_identity import AccountIdentityRecord
 from pydantic import BaseModel, ConfigDict, Field
@@ -92,6 +95,7 @@ class WebSessionResponse(BaseModel):
     groups: list[str]
     account_id: str
     authz_aliases: list[str]
+    display_name: str | None = None
 
 
 async def get_login_store() -> OidcLoginStore:
@@ -117,9 +121,17 @@ async def get_identity_store() -> AccountIdentityStore:
         raise HTTPException(status_code=503, detail="OIDC server-side login is not available") from exc
 
 
+async def get_profile_store() -> AccountProfileStore:
+    try:
+        return AccountProfileStore(await get_account_session_maker())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="OIDC server-side login is not available") from exc
+
+
 LoginStore = Annotated[OidcLoginStore, Depends(get_login_store)]
 CredentialStore = Annotated[AccountCredentialStore, Depends(get_credential_store)]
 IdentityStore = Annotated[AccountIdentityStore, Depends(get_identity_store)]
+ProfileStore = Annotated[AccountProfileStore, Depends(get_profile_store)]
 BrokerClientName = Literal["public", "confidential"]
 
 
@@ -216,9 +228,53 @@ def _decrypted_tokens(record: AccountCredentialRecord) -> dict[str, object]:
     return payload
 
 
+def _id_token_claims(tokens: dict[str, object], *, client: BrokerClient, subject: str) -> dict[str, Any]:
+    """Profile claims from the ID token, or {} when it is absent or describes someone else.
+
+    The token came straight from the token endpoint over TLS, so per OIDC Core 3.1.3.7 the signature check is
+    optional; it must still come from the configured issuer, for this client, about the same subject.
+    """
+    id_token = tokens.get("id_token")
+    if not isinstance(id_token, str):
+        return {}
+    try:
+        claims = jwt.decode(id_token, options={"verify_signature": False})
+    except jwt.PyJWTError:
+        return {}
+    oidc = get_auth_config().oidc
+    audience = claims.get("aud")
+    audiences = audience if isinstance(audience, list) else [audience]
+    if (
+        claims.get("iss") != oidc.issuer
+        or client.client_id not in audiences
+        or claims.get(oidc.subject_claim) != subject
+    ):
+        return {}
+    return claims
+
+
+async def _userinfo_claims(access_token: str, *, subject: str) -> dict[str, Any]:
+    """UserInfo claims, used only to fill display fields the ID token left out."""
+    endpoint = get_auth_config().oidc.userinfo_endpoint
+    if not endpoint:
+        return {}
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(endpoint, headers={"Authorization": f"Bearer {access_token}"})
+        claims = response.json() if response.is_success else {}
+    except (httpx.HTTPError, ValueError):
+        return {}
+    return claims if isinstance(claims, dict) and claims.get("sub") == subject else {}
+
+
+def _claim(*sources: dict[str, Any], name: str) -> str | None:
+    return next((value for source in sources if isinstance(value := source.get(name), str) and value), None)
+
+
 async def _resolve_identity(
     tokens: dict[str, object],
     identity_store: AccountIdentityStore,
+    client: BrokerClient,
 ) -> tuple[AccountIdentityRecord, dict[str, Any]]:
     bearer_token = tokens.get("access_token")
     if not isinstance(bearer_token, str):
@@ -229,16 +285,28 @@ async def _resolve_identity(
 
     claims = resolved.claims
     raw_claims = dict(claims.raw_claims)
-    display_name = raw_claims.get("name")
+    # Access tokens often lack name and picture (Entra ID and Okta defaults), so prefer the ID token.
+    id_claims = _id_token_claims(tokens, client=client, subject=claims.subject)
+    sources = [id_claims, raw_claims]
+    if not (_claim(*sources, name="name") and _claim(*sources, name="picture")):
+        sources.append(await _userinfo_claims(bearer_token, subject=claims.subject))
+    name = _claim(*sources, name="name")
     identity = await identity_store.resolve_or_materialize(
         issuer=get_auth_config().oidc.issuer,
         subject=claims.subject,
         subject_claim=get_auth_config().oidc.subject_claim,
         account_type="user",
-        display_name=display_name if isinstance(display_name, str) else claims.email or claims.subject,
+        display_name=name or claims.email or claims.subject,
         primary_email=claims.email,
         claims_snapshot=raw_claims,
         linked_via="oidc_broker_login",
+        profile_claims=IdentityClaims(
+            email=claims.email,
+            name=name,
+            picture=_claim(*sources, name="picture"),
+            snapshot={**raw_claims, **id_claims},
+            login=True,
+        ),
     )
     aliases = [claims.subject]
     if claims.email and claims.email not in aliases:
@@ -259,7 +327,7 @@ async def _finish_token_authorization(
 ) -> RedirectResponse:
     client = _broker_client(_broker_client_name(payload["oidc_client"]))
     tokens = await _exchange_code(client, code, payload["verifier"])
-    identity, metadata = await _resolve_identity(tokens, identity_store)
+    identity, metadata = await _resolve_identity(tokens, identity_store, client)
     one_time = secrets.token_urlsafe(32)
     await credential_store.create(
         credential_type="token_authorization_code",
@@ -457,7 +525,7 @@ async def token_authorization_callback(
         raise HTTPException(status_code=400, detail="Login callback did not include an authorization code")
     selected_client = _broker_client(_broker_client_name(record.payload["oidc_client"]))
     tokens = await _exchange_code(selected_client, code, record.payload["verifier"])
-    identity, metadata = await _resolve_identity(tokens, identity_store)
+    identity, metadata = await _resolve_identity(tokens, identity_store, selected_client)
     session_id = secrets.token_urlsafe(32)
     await credential_store.create(
         credential_type="web_session",
@@ -522,16 +590,20 @@ async def logout(request: Request, credential_store: CredentialStore) -> Respons
     response_model=WebSessionResponse,
     responses={401: {"model": ErrorResponse, "description": "Missing or invalid web session"}},
 )
-async def web_session(request: Request, credential_store: CredentialStore) -> WebSessionResponse:
+async def web_session(
+    request: Request, credential_store: CredentialStore, profile_store: ProfileStore
+) -> WebSessionResponse:
     principal = await resolve_web_session(request, credential_store)
     if principal is None or principal.account_id is None:
         raise HTTPException(status_code=401, detail="Missing session")
+    profile = await profile_store.get(principal.account_id)
     return WebSessionResponse(
         id=principal.id,
         email=principal.email,
         groups=principal.groups,
         account_id=principal.account_id,
         authz_aliases=principal.authz_aliases,
+        display_name=profile.display_name(principal.email or principal.id) if profile else None,
     )
 
 

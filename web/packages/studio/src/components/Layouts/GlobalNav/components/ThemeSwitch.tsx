@@ -3,8 +3,8 @@
 
 import { Moon, SunHigh } from '@nemo/icons/icons';
 import { Button, type Theme, Tooltip, useTheme } from '@nvidia/foundations-react-core';
-import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
-import { UI_THEME } from '@studio/util/localStorage';
+import { studioPreferences } from '@studio/providers/preferences/definitions';
+import { usePreference } from '@studio/providers/preferences/usePreference';
 
 /**
  * @remarks
@@ -12,7 +12,7 @@ import { UI_THEME } from '@studio/util/localStorage';
  */
 export function ThemeSwitch() {
   const { theme, setTheme } = useTheme();
-  const [, setSavedTheme] = useLocalStorage<Theme>(UI_THEME, 'system');
+  const [, setSavedTheme] = usePreference(studioPreferences.theme);
 
   const changeTheme = (newTheme: Theme) => {
     setTheme(newTheme);

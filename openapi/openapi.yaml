@@ -1049,6 +1049,821 @@ paths:
             \  credentials: \"include\",\n});\nif (!response.ok) throw new Error(`Logout\
             \ failed: ${response.status}`);\nconsole.log(response.status); // 204:\
             \ no response body\n"
+  /apis/auth/v2/me:
+    get:
+      tags:
+      - Profiles
+      summary: Get Me
+      description: Return the caller's account, identity, and profile. Works with
+        cookies, bearer tokens, and access keys.
+      operationId: get_me_apis_auth_v2_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+      security:
+      - HelixBearer: []
+  /apis/auth/v2/me/preferences:
+    get:
+      tags:
+      - Profiles
+      summary: List My Preferences
+      description: List the caller's preference documents in one scope, including
+        namespaces that only have defaults.
+      operationId: list_my_preferences_apis_auth_v2_me_preferences_get
+      parameters:
+      - name: namespace
+        in: query
+        required: false
+        schema:
+          description: Namespace, or a prefix such as studio.
+          title: Namespace
+          type: string
+        description: Namespace, or a prefix such as studio.
+      - name: workspace
+        in: query
+        required: false
+        schema:
+          description: Workspace for workspace-scoped preferences; omit for global.
+          title: Workspace
+          type: string
+        description: Workspace for workspace-scoped preferences; omit for global.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreferenceDocumentList'
+        '403':
+          description: Service account or delegated caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
+  /apis/auth/v2/me/preferences/{namespace}:
+    get:
+      tags:
+      - Profiles
+      summary: Get My Preference
+      description: Return one preference document. A namespace the caller never wrote
+        returns an empty value, db_version 0.
+      operationId: get_my_preference_apis_auth_v2_me_preferences__namespace__get
+      parameters:
+      - name: namespace
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9._-]{0,127}$
+          description: Preference namespace, e.g. studio.ui or plugin.<name>.
+          title: Namespace
+        description: Preference namespace, e.g. studio.ui or plugin.<name>.
+      - name: workspace
+        in: query
+        required: false
+        schema:
+          description: Workspace for workspace-scoped preferences; omit for global.
+          title: Workspace
+          type: string
+        description: Workspace for workspace-scoped preferences; omit for global.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreferenceDocument'
+        '403':
+          description: Service account or delegated caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
+    put:
+      tags:
+      - Profiles
+      summary: Replace My Preference
+      description: Replace the caller's document for a namespace.
+      operationId: replace_my_preference_apis_auth_v2_me_preferences__namespace__put
+      parameters:
+      - name: namespace
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9._-]{0,127}$
+          description: Preference namespace, e.g. studio.ui or plugin.<name>.
+          title: Namespace
+        description: Preference namespace, e.g. studio.ui or plugin.<name>.
+      - name: workspace
+        in: query
+        required: false
+        schema:
+          description: Workspace for workspace-scoped preferences; omit for global.
+          title: Workspace
+          type: string
+        description: Workspace for workspace-scoped preferences; omit for global.
+      - name: if-match
+        in: header
+        required: false
+        schema:
+          description: Expected db_version. 0 requires that no document exists yet.
+          title: If-Match
+          type: string
+        description: Expected db_version. 0 requires that no document exists yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreferenceValue'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreferenceDocument'
+        '403':
+          description: Service account or delegated caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Document limit reached, or concurrent writes kept colliding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '412':
+          description: If-Match did not match the stored db_version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '413':
+          description: Document exceeds the size limit (code preference_too_large)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
+    patch:
+      tags:
+      - Profiles
+      summary: Patch My Preference
+      description: Apply an RFC 7396 merge patch to the caller's document. A null
+        value removes that key.
+      operationId: patch_my_preference_apis_auth_v2_me_preferences__namespace__patch
+      parameters:
+      - name: namespace
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9._-]{0,127}$
+          description: Preference namespace, e.g. studio.ui or plugin.<name>.
+          title: Namespace
+        description: Preference namespace, e.g. studio.ui or plugin.<name>.
+      - name: workspace
+        in: query
+        required: false
+        schema:
+          description: Workspace for workspace-scoped preferences; omit for global.
+          title: Workspace
+          type: string
+        description: Workspace for workspace-scoped preferences; omit for global.
+      - name: if-match
+        in: header
+        required: false
+        schema:
+          description: Expected db_version. 0 requires that no document exists yet.
+          title: If-Match
+          type: string
+        description: Expected db_version. 0 requires that no document exists yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreferenceValue'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreferenceDocument'
+        '403':
+          description: Service account or delegated caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Document limit reached, or concurrent writes kept colliding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '412':
+          description: If-Match did not match the stored db_version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '413':
+          description: Document exceeds the size limit (code preference_too_large)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
+    delete:
+      tags:
+      - Profiles
+      summary: Delete My Preference
+      description: Delete the caller's document for a namespace, falling back to defaults.
+      operationId: delete_my_preference_apis_auth_v2_me_preferences__namespace__delete
+      parameters:
+      - name: namespace
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9._-]{0,127}$
+          description: Preference namespace, e.g. studio.ui or plugin.<name>.
+          title: Namespace
+        description: Preference namespace, e.g. studio.ui or plugin.<name>.
+      - name: workspace
+        in: query
+        required: false
+        schema:
+          description: Workspace for workspace-scoped preferences; omit for global.
+          title: Workspace
+          type: string
+        description: Workspace for workspace-scoped preferences; omit for global.
+      - name: if-match
+        in: header
+        required: false
+        schema:
+          description: Expected db_version. 0 requires that no document exists yet.
+          title: If-Match
+          type: string
+        description: Expected db_version. 0 requires that no document exists yet.
+      responses:
+        '204':
+          description: Successful Response
+        '403':
+          description: Service account or delegated caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Document limit reached, or concurrent writes kept colliding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '412':
+          description: If-Match did not match the stored db_version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '413':
+          description: Document exceeds the size limit (code preference_too_large)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
+      x-codeSamples:
+      - lang: Python
+        source: 'import os
+
+          import requests
+
+
+          url = "http://localhost:8080/apis/auth/v2/me/preferences/my-preference"
+
+          # Set NHX_ACCESS_TOKEN to a raw access token before running.
+
+          token = os.environ["NHX_ACCESS_TOKEN"]
+
+          headers = {"Authorization": f"Bearer {token}"}
+
+
+          response = requests.request("DELETE", url, headers=headers)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "// Supply `token` from your application's authentication flow before\
+          \ running.\n// Do not embed a real token in frontend source or build-time\
+          \ environment variables.\nconst response = await fetch(\"http://localhost:8080/apis/auth/v2/me/preferences/my-preference\"\
+          , {\n  method: \"DELETE\",\n  headers: {\"Authorization\": `Bearer ${token}`},\n\
+          });\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(response.status);\
+          \ // no response body\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: ": \"${NHX_ACCESS_TOKEN:?Set NHX_ACCESS_TOKEN to a raw access token}\"\
+            \ncurl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/auth/v2/me/preferences/my-preference\
+            \ \\\n  --header \"Authorization: Bearer ${NHX_ACCESS_TOKEN}\"\n"
+        - sdk: python
+          code: 'import os
+
+            import requests
+
+
+            url = "http://localhost:8080/apis/auth/v2/me/preferences/my-preference"
+
+            # Set NHX_ACCESS_TOKEN to a raw access token before running.
+
+            token = os.environ["NHX_ACCESS_TOKEN"]
+
+            headers = {"Authorization": f"Bearer {token}"}
+
+
+            response = requests.request("DELETE", url, headers=headers)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "// Supply `token` from your application's authentication flow before\
+            \ running.\n// Do not embed a real token in frontend source or build-time\
+            \ environment variables.\nconst response = await fetch(\"http://localhost:8080/apis/auth/v2/me/preferences/my-preference\"\
+            , {\n  method: \"DELETE\",\n  headers: {\"Authorization\": `Bearer ${token}`},\n\
+            });\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(response.status);\
+            \ // no response body\n"
+  /apis/auth/v2/me/profile:
+    patch:
+      tags:
+      - Profiles
+      summary: Update My Profile
+      description: Change the caller's display name, time zone, or locale. Omitted
+        fields are unchanged; null clears.
+      operationId: update_my_profile_apis_auth_v2_me_profile_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdate'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        '403':
+          description: Service account or delegated caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
+  /apis/auth/v2/preferences/defaults:
+    get:
+      tags:
+      - Profiles
+      summary: List Preference Defaults
+      description: List deployment-wide preference defaults.
+      operationId: list_preference_defaults_apis_auth_v2_preferences_defaults_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreferenceDefaultsList'
+      security:
+      - HelixBearer: []
+  /apis/auth/v2/preferences/defaults/{namespace}:
+    get:
+      tags:
+      - Profiles
+      summary: Get Preference Defaults
+      description: Return the defaults for one namespace (an empty value when none
+        are set).
+      operationId: get_preference_defaults_apis_auth_v2_preferences_defaults__namespace__get
+      parameters:
+      - name: namespace
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9._-]{0,127}$
+          description: Preference namespace, e.g. studio.ui or plugin.<name>.
+          title: Namespace
+        description: Preference namespace, e.g. studio.ui or plugin.<name>.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreferenceDefaults'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
+    put:
+      tags:
+      - Profiles
+      summary: Replace Preference Defaults
+      description: Replace the defaults for a namespace (HelixAdmin only).
+      operationId: replace_preference_defaults_apis_auth_v2_preferences_defaults__namespace__put
+      parameters:
+      - name: namespace
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9._-]{0,127}$
+          description: Preference namespace, e.g. studio.ui or plugin.<name>.
+          title: Namespace
+        description: Preference namespace, e.g. studio.ui or plugin.<name>.
+      - name: if-match
+        in: header
+        required: false
+        schema:
+          description: Expected db_version. 0 requires that no document exists yet.
+          title: If-Match
+          type: string
+        description: Expected db_version. 0 requires that no document exists yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreferenceValue'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreferenceDefaults'
+        '403':
+          description: Caller is not a HelixAdmin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Namespace defaults are managed by platform config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '412':
+          description: If-Match did not match the stored db_version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '413':
+          description: Document exceeds the size limit (code preference_too_large)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
+    patch:
+      tags:
+      - Profiles
+      summary: Patch Preference Defaults
+      description: Merge-patch the defaults for a namespace (HelixAdmin only).
+      operationId: patch_preference_defaults_apis_auth_v2_preferences_defaults__namespace__patch
+      parameters:
+      - name: namespace
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9._-]{0,127}$
+          description: Preference namespace, e.g. studio.ui or plugin.<name>.
+          title: Namespace
+        description: Preference namespace, e.g. studio.ui or plugin.<name>.
+      - name: if-match
+        in: header
+        required: false
+        schema:
+          description: Expected db_version. 0 requires that no document exists yet.
+          title: If-Match
+          type: string
+        description: Expected db_version. 0 requires that no document exists yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreferenceValue'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreferenceDefaults'
+        '403':
+          description: Caller is not a HelixAdmin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Namespace defaults are managed by platform config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '412':
+          description: If-Match did not match the stored db_version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '413':
+          description: Document exceeds the size limit (code preference_too_large)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
+    delete:
+      tags:
+      - Profiles
+      summary: Delete Preference Defaults
+      description: Remove the defaults for a namespace (HelixAdmin only).
+      operationId: delete_preference_defaults_apis_auth_v2_preferences_defaults__namespace__delete
+      parameters:
+      - name: namespace
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9._-]{0,127}$
+          description: Preference namespace, e.g. studio.ui or plugin.<name>.
+          title: Namespace
+        description: Preference namespace, e.g. studio.ui or plugin.<name>.
+      - name: if-match
+        in: header
+        required: false
+        schema:
+          description: Expected db_version. 0 requires that no document exists yet.
+          title: If-Match
+          type: string
+        description: Expected db_version. 0 requires that no document exists yet.
+      responses:
+        '204':
+          description: Successful Response
+        '403':
+          description: Caller is not a HelixAdmin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Namespace defaults are managed by platform config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '412':
+          description: If-Match did not match the stored db_version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '413':
+          description: Document exceeds the size limit (code preference_too_large)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_CodedError'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
+      x-codeSamples:
+      - lang: Python
+        source: 'import os
+
+          import requests
+
+
+          url = "http://localhost:8080/apis/auth/v2/preferences/defaults/my-default"
+
+          # Set NHX_ACCESS_TOKEN to a raw access token before running.
+
+          token = os.environ["NHX_ACCESS_TOKEN"]
+
+          headers = {"Authorization": f"Bearer {token}"}
+
+
+          response = requests.request("DELETE", url, headers=headers)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "// Supply `token` from your application's authentication flow before\
+          \ running.\n// Do not embed a real token in frontend source or build-time\
+          \ environment variables.\nconst response = await fetch(\"http://localhost:8080/apis/auth/v2/preferences/defaults/my-default\"\
+          , {\n  method: \"DELETE\",\n  headers: {\"Authorization\": `Bearer ${token}`},\n\
+          });\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(response.status);\
+          \ // no response body\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: ": \"${NHX_ACCESS_TOKEN:?Set NHX_ACCESS_TOKEN to a raw access token}\"\
+            \ncurl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/auth/v2/preferences/defaults/my-default\
+            \ \\\n  --header \"Authorization: Bearer ${NHX_ACCESS_TOKEN}\"\n"
+        - sdk: python
+          code: 'import os
+
+            import requests
+
+
+            url = "http://localhost:8080/apis/auth/v2/preferences/defaults/my-default"
+
+            # Set NHX_ACCESS_TOKEN to a raw access token before running.
+
+            token = os.environ["NHX_ACCESS_TOKEN"]
+
+            headers = {"Authorization": f"Bearer {token}"}
+
+
+            response = requests.request("DELETE", url, headers=headers)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "// Supply `token` from your application's authentication flow before\
+            \ running.\n// Do not embed a real token in frontend source or build-time\
+            \ environment variables.\nconst response = await fetch(\"http://localhost:8080/apis/auth/v2/preferences/defaults/my-default\"\
+            , {\n  method: \"DELETE\",\n  headers: {\"Authorization\": `Bearer ${token}`},\n\
+            });\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(response.status);\
+            \ // no response body\n"
+  /apis/auth/v2/profiles/resolve:
+    post:
+      tags:
+      - Profiles
+      summary: Resolve Profiles
+      description: 'Resolve principal strings (subjects or emails) to public display
+        names and avatars.
+
+
+        Returns only directory fields: never email beyond the principal string sent,
+        groups, or preferences.
+
+        Unresolvable, ambiguous, group, and wildcard principals come back with ``display_name:
+        null``.'
+      operationId: resolve_profiles_apis_auth_v2_profiles_resolve_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileResolveRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResolveResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
   /apis/auth/v2/session:
     get:
       tags:
@@ -19794,6 +20609,60 @@ components:
       - num_mamba_layers
       title: MambaConfig
       description: Mamba/State Space Model configuration.
+    Me:
+      properties:
+        account_id:
+          type: string
+          title: Account Id
+        principal_id:
+          type: string
+          title: Principal Id
+          description: Effective principal id (the on-behalf-of subject when delegated).
+        email:
+          title: Email
+          description: IdP-sourced email. Not editable.
+          type: string
+        groups:
+          items:
+            type: string
+          type: array
+          title: Groups
+        caller_kind:
+          type: string
+          enum:
+          - principal
+          - service_principal
+          title: Caller Kind
+        auth_method:
+          type: string
+          enum:
+          - web_session
+          - oidc_bearer
+          - access_key
+          - workload_token
+          - trusted_header
+          - disabled
+          title: Auth Method
+        profile:
+          $ref: '#/components/schemas/Profile'
+        can_edit_profile:
+          type: boolean
+          title: Can Edit Profile
+          description: False for delegated callers and service accounts.
+        is_platform_admin:
+          type: boolean
+          title: Is Platform Admin
+      type: object
+      required:
+      - account_id
+      - principal_id
+      - caller_kind
+      - auth_method
+      - profile
+      - can_edit_profile
+      - is_platform_admin
+      title: Me
+      description: Who the caller is, resolved to a stable account.
     MessageTemplate:
       properties:
         type:
@@ -21912,6 +22781,100 @@ components:
       type: object
       title: PolygrafDetectionOptions
       description: Configuration options for Polygraf.
+    PreferenceDefaults:
+      properties:
+        namespace:
+          type: string
+          title: Namespace
+        value:
+          additionalProperties: true
+          type: object
+          title: Value
+        managed_by:
+          type: string
+          enum:
+          - config
+          - api
+          title: Managed By
+          description: 'config: set in platform config and read-only through the API;
+            api: set by a HelixAdmin.'
+        db_version:
+          type: integer
+          title: Db Version
+          description: Version for If-Match; 0 for config-managed or unset defaults.
+      type: object
+      required:
+      - namespace
+      - value
+      - managed_by
+      - db_version
+      title: PreferenceDefaults
+    PreferenceDefaultsList:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/PreferenceDefaults'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: PreferenceDefaultsList
+    PreferenceDocument:
+      properties:
+        namespace:
+          type: string
+          title: Namespace
+        workspace:
+          title: Workspace
+          type: string
+        value:
+          additionalProperties: true
+          type: object
+          title: Value
+          description: The caller's own document; PUT and PATCH act on this.
+        defaults:
+          additionalProperties: true
+          type: object
+          title: Defaults
+          description: Deployment-wide defaults for the namespace.
+        effective:
+          additionalProperties: true
+          type: object
+          title: Effective
+          description: defaults merge-patched with value. Render this.
+        db_version:
+          type: integer
+          title: Db Version
+          description: Version for If-Match; 0 when the caller has no document yet.
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+      type: object
+      required:
+      - namespace
+      - value
+      - effective
+      - db_version
+      title: PreferenceDocument
+    PreferenceDocumentList:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/PreferenceDocument'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: PreferenceDocumentList
+    PreferenceValue:
+      additionalProperties:
+        $ref: '#/components/schemas/JsonValue'
+      type: object
+      title: PreferenceValue
+      description: A preference document, or an RFC 7396 merge patch for one.
     PrivateAIDetection:
       properties:
         server_endpoint:
@@ -21945,6 +22908,83 @@ components:
       type: object
       title: PrivateAIDetectionOptions
       description: Configuration options for Private AI.
+    Profile:
+      properties:
+        display_name:
+          type: string
+          title: Display Name
+          description: Override, else IdP name, else email, else principal id.
+        display_name_override:
+          title: Display Name Override
+          description: Name the user set themselves.
+          type: string
+        idp_display_name:
+          title: Idp Display Name
+          description: Name from the identity provider.
+          type: string
+        avatar_url:
+          title: Avatar Url
+          description: Avatar from the identity provider, if any.
+          type: string
+        timezone:
+          title: Timezone
+          description: IANA time zone.
+          type: string
+        locale:
+          title: Locale
+          description: BCP 47 language tag.
+          type: string
+      type: object
+      required:
+      - display_name
+      title: Profile
+      description: The caller's profile. ``display_name`` is the effective name every
+        client should render.
+    ProfileResolveRequest:
+      properties:
+        principals:
+          items:
+            type: string
+          type: array
+          maxItems: 100
+          title: Principals
+      additionalProperties: false
+      type: object
+      required:
+      - principals
+      title: ProfileResolveRequest
+    ProfileResolveResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/ResolvedProfile'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: ProfileResolveResponse
+    ProfileUpdate:
+      properties:
+        display_name:
+          title: Display Name
+          nullable: true
+          type: string
+          maxLength: 256
+        timezone:
+          title: Timezone
+          nullable: true
+          type: string
+          maxLength: 64
+        locale:
+          title: Locale
+          nullable: true
+          type: string
+          maxLength: 35
+      additionalProperties: false
+      type: object
+      title: ProfileUpdate
+      description: Fields to change. Omitted fields are unchanged; null clears a field.
     Project:
       properties:
         id:
@@ -22696,6 +23736,40 @@ components:
       title: RemoteHFClassifierConfig
       description: Configuration for a remote HuggingFace classifier (vLLM, KServe,
         FMS).
+    ResolvedProfile:
+      properties:
+        principal:
+          type: string
+          title: Principal
+        account_id:
+          title: Account Id
+          type: string
+        display_name:
+          title: Display Name
+          type: string
+        idp_display_name:
+          title: Idp Display Name
+          type: string
+        display_name_is_override:
+          type: boolean
+          title: Display Name Is Override
+          default: false
+        avatar_url:
+          title: Avatar Url
+          type: string
+        status:
+          title: Status
+          type: string
+        ambiguous:
+          type: boolean
+          title: Ambiguous
+          default: false
+      type: object
+      required:
+      - principal
+      title: ResolvedProfile
+      description: 'Public display fields for one principal string. Unresolved entries
+        have ``display_name: null``.'
     RetrievalRails:
       properties:
         flows:
@@ -25096,6 +26170,9 @@ components:
             type: string
           type: array
           title: Authz Aliases
+        display_name:
+          title: Display Name
+          type: string
       type: object
       required:
       - id
@@ -25360,6 +26437,21 @@ components:
       required:
       - data
       title: WorkspacesPage
+    _CodedError:
+      properties:
+        detail:
+          type: string
+          title: Detail
+          description: A human-readable error message describing what went wrong.
+          example: Error message
+        code:
+          type: string
+          title: Code
+      type: object
+      required:
+      - detail
+      - code
+      title: _CodedError
   securitySchemes:
     HelixBearer:
       type: http
