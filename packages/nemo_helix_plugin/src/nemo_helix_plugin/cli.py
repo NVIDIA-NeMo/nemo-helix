@@ -113,6 +113,11 @@ class NemoCLI(_NamedPlugin):
     to amend that surface — add a flag, drop a flag, replace the verb entirely,
     or anything else Typer permits. Both hooks default to no-ops, so plugins
     that don't override them get today's auto-generated surface unchanged.
+
+    A plugin with jobs also gets a generated ``list-jobs`` command. To give it
+    extra options, register a ``list-jobs`` command of your own in
+    :meth:`get_cli`, built from :func:`~nemo_helix_plugin.cli_list_jobs.run_list_jobs`;
+    the generated one is then not added.
     """
 
     name: ClassVar[str]

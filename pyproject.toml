@@ -744,6 +744,10 @@ exclude = [
   "docs/",
 
   "./sdk/",
+
+  # Image inventory scripts. openpyxl is not a workspace dependency.
+  "docker/rl/scripts/package_dump_to_xslx.py",
+  "docker/rl/scripts/scan_rl_image_packages.py",
 ]
 
 # TEMPORARY — remove together with the fix in #1237, which is where this file is

@@ -88,13 +88,13 @@ describe('getFilesetRoute', () => {
 
   it('routes a bare name to the detail page', () => {
     expect(getFilesetRoute(workspace, 'unchanged-blue')).toBe(
-      '/workspaces/test-workspace/filesets/unchanged-blue/detail'
+      '/workspaces/test-workspace/filesets/unchanged-blue'
     );
   });
 
   it('drops the namespace from a full entity reference', () => {
     expect(getFilesetRoute(workspace, 'default/unchanged-blue')).toBe(
-      '/workspaces/test-workspace/filesets/unchanged-blue/detail'
+      '/workspaces/test-workspace/filesets/unchanged-blue'
     );
   });
 });
@@ -209,22 +209,22 @@ describe('getFilesetDetailRoute', () => {
     ['tag#1', 'tag%231'],
   ])('encodes %j exactly once', (filesetName, encoded) => {
     expect(getFilesetDetailRoute('my-workspace', filesetName)).toBe(
-      `/workspaces/my-workspace/filesets/${encoded}/detail`
+      `/workspaces/my-workspace/filesets/${encoded}`
     );
   });
 
   it('opens the Files tab when a folder or file is given', () => {
     expect(getFilesetDetailRoute('my-workspace', 'set', { folder: 'nested/folder 1' })).toBe(
-      '/workspaces/my-workspace/filesets/set/detail?tab=files&filesetFolder=nested%2Ffolder+1'
+      '/workspaces/my-workspace/filesets/set/files?filesetFolder=nested%2Ffolder+1'
     );
     expect(getFilesetDetailRoute('my-workspace', 'set', { file: 'a/b.jsonl' })).toBe(
-      '/workspaces/my-workspace/filesets/set/detail?tab=files&file=a%2Fb.jsonl'
+      '/workspaces/my-workspace/filesets/set/files?file=a%2Fb.jsonl'
     );
   });
 
   it('respects an explicit tab', () => {
     expect(getFilesetDetailRoute('my-workspace', 'set', { tab: FilesetDetailTab.Card })).toBe(
-      '/workspaces/my-workspace/filesets/set/detail?tab=card'
+      '/workspaces/my-workspace/filesets/set/card'
     );
   });
 });

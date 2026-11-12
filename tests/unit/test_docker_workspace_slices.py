@@ -198,10 +198,14 @@ def test_safe_synthesizer_sentence_transformers_security_pin() -> None:
 
 def test_rl_virtualenv_patch_precedes_unreferenced_cache_cleanup() -> None:
     """Patch runtime environments and remove old archives, not just metadata."""
-    text = (ROOT / "docker/rl/Dockerfile.nhx-rl-base").read_text()
+    text = (ROOT / "docker/rl/scripts/pin-venv-packages.sh").read_text()
+    dockerfile = (ROOT / "docker/rl/Dockerfile.nhx-rl-base").read_text()
     assert 'm.version("virtualenv")' in text
-    assert '--directory /tmp --python "${py}" --upgrade-package virtualenv "virtualenv>=21.14.9"' in text
-    assert text.index('"virtualenv>=21.14.9"') < text.index('"${d}virtualenv-*.dist-info"')
+    assert '"virtualenv": "virtualenv>=21.14.9"' in dockerfile
+    upgrade = text.index('--upgrade-package virtualenv "${VIRTUALENV_FLOOR}"')
+    # The upgrade must happen before the prune in the same layer, so the old
+    # virtualenv archive is unreferenced when prune-unreferenced-uv-archives.sh runs.
+    assert upgrade < text.index("prune-unreferenced-uv-archives.sh", upgrade)
 
 
 def test_automodel_cve_layer_does_not_pin_full_mlflow_with_cryptography() -> None:
