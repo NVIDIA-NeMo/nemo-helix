@@ -737,9 +737,70 @@ async def test_async_execute_job_list_filters_by_agent_refs() -> None:
     assert json.loads(captured["filter"]) == {"spec.agent_ref": {"$in": ["research/x"]}}
 
 
-def test_execute_job_list_rejects_unqualified_agent_ref() -> None:
-    def handler(_req: httpx.Request) -> httpx.Response:
-        raise AssertionError("should not list with an unqualified ref")
+def test_execute_job_list_qualifies_bare_agent_name_with_listing_workspace() -> None:
+    captured: dict[str, Any] = {}
 
-    with pytest.raises(ValueError, match="'workspace/name'"):
-        AgentsResource(_client(handler)).jobs.execute.list(agents=["x"])
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["path"] = req.url.path
+        captured["filter"] = req.url.params.get("filter")
+        return httpx.Response(200, json=_EMPTY_PAGE)
+
+    AgentsResource(_client(handler)).jobs.execute.list("research", agents=["x", "team-a/y"])
+
+    assert captured["path"] == "/apis/agents/v2/workspaces/research/jobs/execute"
+    assert json.loads(captured["filter"]) == {"spec.agent_ref": {"$in": ["research/x", "team-a/y"]}}
+
+
+def test_execute_job_list_qualifies_bare_agent_name_with_client_workspace() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["filter"] = req.url.params.get("filter")
+        return httpx.Response(200, json=_EMPTY_PAGE)
+
+    AgentsResource(_client(handler)).jobs.execute.list(agents=["x"])
+
+    assert json.loads(captured["filter"]) == {"spec.agent_ref": {"$in": ["team-a/x"]}}
+
+
+async def test_async_execute_job_list_qualifies_bare_agent_name() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["filter"] = req.url.params.get("filter")
+        return httpx.Response(200, json=_EMPTY_PAGE)
+
+    await AsyncAgentsResource(_async_client(handler)).jobs.execute.list(agents=["x"])
+
+    assert json.loads(captured["filter"]) == {"spec.agent_ref": {"$in": ["team-a/x"]}}
+
+
+def test_execute_job_list_across_workspaces_accepts_qualified_refs() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["path"] = req.url.path
+        captured["filter"] = req.url.params.get("filter")
+        return httpx.Response(200, json=_EMPTY_PAGE)
+
+    AgentsResource(_client(handler)).jobs.execute.list("-", agents=["research/x"])
+
+    assert captured["path"] == "/apis/agents/v2/workspaces/-/jobs/execute"
+    assert json.loads(captured["filter"]) == {"spec.agent_ref": {"$in": ["research/x"]}}
+
+
+def test_execute_job_list_across_workspaces_rejects_bare_agent_name() -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not list with a bare name across workspaces")
+
+    with pytest.raises(ValueError, match="'workspace/x'"):
+        AgentsResource(_client(handler)).jobs.execute.list("-", agents=["x"])
+
+
+@pytest.mark.parametrize("ref", ["a/b/c", "a/", "/b", ""])
+def test_execute_job_list_rejects_malformed_agent_ref(ref: str) -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not list with a malformed ref")
+
+    with pytest.raises(ValueError, match="invalid entity reference"):
+        AgentsResource(_client(handler)).jobs.execute.list(agents=[ref])
