@@ -5,7 +5,7 @@ import logging
 import shutil
 import tempfile
 from abc import abstractmethod
-from asyncio import CancelledError, create_task, shield
+from asyncio import CancelledError, create_task, wait
 from dataclasses import dataclass, field
 from os import walk
 from pathlib import Path
@@ -153,12 +153,11 @@ async def _stage_local_files_async(
     cancellation: CancelledError | None = None
     while not acquisition.done():
         try:
-            await shield(acquisition)
+            # Do not forward cancellation or eagerly report the worker's error:
+            # shield() can report it before we restore cancellation on Python 3.14.
+            await wait((acquisition,))
         except CancelledError as error:
             cancellation = cancellation or error
-        except Exception:
-            if cancellation is None:
-                raise
     if cancellation is not None:
         if not acquisition.cancelled():
             acquisition.exception()
