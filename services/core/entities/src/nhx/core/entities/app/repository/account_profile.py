@@ -217,6 +217,32 @@ class AccountProfileStore:
             )
         return profile
 
+    async def principal_keys(self, account_ids: Iterable[str]) -> dict[str, set[str]]:
+        """Strings a role binding may name each account by: identity subjects, primary email, and groups."""
+        wanted = list(dict.fromkeys(account_ids))
+        keys: dict[str, set[str]] = {account_id: set() for account_id in wanted}
+        if not wanted:
+            return keys
+        async with self.session_maker() as session:
+            rows = await session.execute(
+                select(
+                    DBAccount.id, DBAccount.primary_email, DBAccountIdentity.subject, DBAccountIdentity.claims_snapshot
+                )
+                .outerjoin(
+                    DBAccountIdentity,
+                    (DBAccountIdentity.account_id == DBAccount.id) & (DBAccountIdentity.status == "active"),
+                )
+                .where(DBAccount.id.in_(wanted))
+            )
+            for account_id, email, subject, snapshot in rows:
+                groups = (snapshot or {}).get("groups")
+                keys[account_id].update(
+                    key
+                    for key in (email, subject, *(groups if isinstance(groups, list) else ()))
+                    if isinstance(key, str) and key
+                )
+        return keys
+
     async def resolve(self, principals: Iterable[str]) -> list[ResolvedPrincipal]:
         """Map principal strings (subjects or emails) to public profile fields.
 

@@ -1840,8 +1840,13 @@ paths:
         Returns only directory fields: never email beyond the principal string sent,
         groups, or preferences.
 
-        Unresolvable, ambiguous, group, and wildcard principals come back with ``display_name:
-        null``.'
+
+        Only accounts that share an explicitly bound workspace with the caller resolve;
+        platform admins see all.
+
+
+        Everything else, including unresolvable, ambiguous, group, and wildcard principals,
+        has ``display_name: null``.'
       operationId: resolve_profiles_apis_auth_v2_profiles_resolve_post
       requestBody:
         content:

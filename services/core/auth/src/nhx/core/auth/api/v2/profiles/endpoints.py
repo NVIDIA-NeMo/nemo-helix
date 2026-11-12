@@ -29,7 +29,10 @@ from nhx.common.api.common import ErrorResponse
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.auth.openapi import BEARER_AUTH_OPENAPI
 from nhx.common.config import get_service_config
+from nhx.common.entities import EntityClient
+from nhx.common.service.dependencies import get_entity_client
 from nhx.core.auth.app.account_resolution import get_account_session_maker
+from nhx.core.auth.app.directory import accounts_sharing_a_workspace
 from nhx.core.auth.app.profiles import (
     LOCAL_DISPLAY_NAME,
     Caller,
@@ -49,6 +52,7 @@ from nhx.core.entities.app.repository import (
     PreferenceRecord,
     PreferenceTooLargeError,
     PreferenceVersionConflictError,
+    ResolvedPrincipal,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -505,11 +509,32 @@ async def delete_preference_defaults(
 
 
 @router.post("/v2/profiles/resolve", response_model=ProfileResolveResponse, openapi_extra=BEARER_AUTH_OPENAPI)
-async def resolve_profiles(body: ProfileResolveRequest, session_maker: SessionMaker) -> ProfileResolveResponse:
+async def resolve_profiles(
+    body: ProfileResolveRequest,
+    caller: CallerDep,
+    auth_client: Auth,
+    session_maker: SessionMaker,
+    entities_client: Annotated[EntityClient, Depends(get_entity_client)],
+) -> ProfileResolveResponse:
     """Resolve principal strings (subjects or emails) to public display names and avatars.
 
     Returns only directory fields: never email beyond the principal string sent, groups, or preferences.
-    Unresolvable, ambiguous, group, and wildcard principals come back with ``display_name: null``.
+
+    Only accounts that share an explicitly bound workspace with the caller resolve; platform admins see all.
+
+    Everything else, including unresolvable, ambiguous, group, and wildcard principals, has ``display_name: null``.
     """
-    resolved = await AccountProfileStore(session_maker).resolve(body.principals)
+    profiles = AccountProfileStore(session_maker)
+    resolved = await profiles.resolve(body.principals)
+    account_ids = {item.account_id for item in resolved if item.account_id and item.account_id != caller.account_id}
+    if account_ids and auth_client.auth_enabled and not await _is_platform_admin(auth_client, caller):
+        caller_keys = [key for key in (caller.principal_id, caller.email, *caller.groups) if key]
+        visible = await accounts_sharing_a_workspace(
+            entities_client.as_service("auth", internal=True), caller_keys, await profiles.principal_keys(account_ids)
+        )
+        # Hidden accounts look exactly like principals with no account.
+        resolved = [
+            item if item.account_id not in account_ids - visible else ResolvedPrincipal(principal=item.principal)
+            for item in resolved
+        ]
     return ProfileResolveResponse(data=[ResolvedProfile(**asdict(item)) for item in resolved])

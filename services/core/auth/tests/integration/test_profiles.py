@@ -187,18 +187,37 @@ def test_defaults_admin_writes_and_config_managed_namespaces(http_client: TestCl
     assert http_client.get(f"{PREFS}/{namespace}", headers=user).json()["effective"] == {"b": 3}
 
 
-def test_resolve_returns_public_fields_only(http_client: TestClient) -> None:
-    alice = _user()
-    http_client.patch(f"{ME}/profile", json={"display_name": "Alice A."}, headers=alice)
+WORKSPACES = "/apis/entities/v2/workspaces"
+RESOLVE = "/apis/auth/v2/profiles/resolve"
 
-    response = http_client.post(
-        "/apis/auth/v2/profiles/resolve",
-        json={"principals": [alice["X-NHX-Principal-Id"], "nobody@example.com", "*"]},
-        headers=_user(),
-    )
 
+def _shared_workspace(http_client: TestClient, owner: dict[str, str], *members: dict[str, str]) -> str:
+    """A workspace the owner creates (gaining Admin) and adds members to by email or group."""
+    name = f"ws-{uuid.uuid4().hex[:8]}"
+    created = http_client.post(WORKSPACES, json={"name": name}, headers=owner)
+    assert created.status_code in (200, 201), created.text
+    for member in members:
+        principal = member.get("X-NHX-Principal-Groups") or member["X-NHX-Principal-Email"]
+        added = http_client.post(
+            f"{WORKSPACES}/{name}/members", json={"principal": principal, "roles": ["Viewer"]}, headers=owner
+        )
+        assert added.status_code in (200, 201), added.text
+    return name
+
+
+def _resolve(http_client: TestClient, caller: dict[str, str], *principals: str) -> list[dict]:
+    response = http_client.post(RESOLVE, json={"principals": list(principals)}, headers=caller)
     assert response.status_code == 200, response.text
-    alice_entry, nobody, wildcard = response.json()["data"]
+    return response.json()["data"]
+
+
+def test_resolve_returns_public_fields_only(http_client: TestClient) -> None:
+    alice, bob = _user(), _user()
+    http_client.patch(f"{ME}/profile", json={"display_name": "Alice A."}, headers=alice)
+    _shared_workspace(http_client, alice, bob)
+
+    alice_entry, nobody, wildcard = _resolve(http_client, bob, alice["X-NHX-Principal-Id"], "nobody@example.com", "*")
+
     assert alice_entry["display_name"] == "Alice A."
     assert alice_entry["display_name_is_override"] is True
     assert set(alice_entry) == {
@@ -216,3 +235,33 @@ def test_resolve_returns_public_fields_only(http_client: TestClient) -> None:
 
     too_many = http_client.post("/apis/auth/v2/profiles/resolve", json={"principals": ["x"] * 101}, headers=_user())
     assert too_many.status_code == 422
+
+
+def test_resolve_hides_accounts_outside_the_callers_explicit_workspaces(http_client: TestClient) -> None:
+    alice, bob, stranger = _user(), _user(), _user()
+    group_member = {**_user(), "X-NHX-Principal-Groups": f"team-{uuid.uuid4().hex[:8]}"}
+    for headers in (alice, bob, stranger):
+        http_client.patch(f"{ME}/profile", json={"display_name": "Named"}, headers=headers)
+    _shared_workspace(http_client, alice, bob, group_member)
+    principals = [h["X-NHX-Principal-Id"] for h in (bob, stranger, alice)]
+
+    # Everyone shares `default` and `system` through `*` bindings; those don't count.
+    bob_entry, stranger_entry, self_entry = _resolve(http_client, alice, *principals)
+    assert bob_entry["display_name"] == "Named"
+    assert self_entry["display_name"] == "Named"
+    assert stranger_entry == {
+        "principal": stranger["X-NHX-Principal-Id"],
+        "account_id": None,
+        "display_name": None,
+        "idp_display_name": None,
+        "display_name_is_override": False,
+        "avatar_url": None,
+        "status": None,
+        "ambiguous": False,
+    }
+
+    # Membership through a group binding counts for the caller.
+    assert _resolve(http_client, group_member, alice["X-NHX-Principal-Id"])[0]["display_name"] == "Named"
+    assert _resolve(http_client, stranger, alice["X-NHX-Principal-Id"])[0]["account_id"] is None
+    admin_view = _resolve(http_client, _user(TEST_ADMIN_EMAIL), stranger["X-NHX-Principal-Id"])
+    assert admin_view[0]["display_name"] == "Named"

@@ -178,6 +178,20 @@ async def test_resolve_never_reveals_email_for_other_principals(session_maker):
 
 
 @pytest.mark.asyncio
+async def test_principal_keys_cover_subjects_email_and_recorded_groups(session_maker):
+    record = await _materialize(
+        AccountIdentityStore(session_maker),
+        "carol-sub",
+        primary_email="carol@example.com",
+        claims_snapshot={"sub": "carol-sub", "groups": ["ml-team"]},
+    )
+
+    keys = await AccountProfileStore(session_maker).principal_keys([record.account_id, "account-missing"])
+
+    assert keys == {record.account_id: {"carol-sub", "carol@example.com", "ml-team"}, "account-missing": set()}
+
+
+@pytest.mark.asyncio
 async def test_account_delete_cascades_to_profile(session_maker):
     record = await _materialize(AccountIdentityStore(session_maker), "sub-1", profile_claims=IdentityClaims(name="A"))
     async with session_maker() as session, session.begin():
