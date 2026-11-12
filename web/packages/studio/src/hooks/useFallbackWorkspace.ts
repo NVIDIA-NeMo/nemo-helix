@@ -31,11 +31,13 @@ export const useFallbackWorkspace = (
   );
 
   return useMemo(() => {
+    // Until the roamed recents load, any pick would skip the user's most recent workspace.
+    if (!recentKnown) return undefined;
     const usable = (name: string | undefined): name is string => !!name && !exclude.includes(name);
     const personalWorkspace = usable(personal) ? personal : undefined;
     if (!isSuccess && !isError) {
       // Optimistic until the list loads; the workspace access check still guards the choice.
-      return recentKnown ? (recentWorkspaces.find(usable) ?? personalWorkspace) : undefined;
+      return recentWorkspaces.find(usable) ?? personalWorkspace;
     }
     // Without the full list, trust names we know: excluding forbidden ones stops any cycling.
     const accessible = isError ? undefined : (data?.data ?? []).map(({ name }) => name);

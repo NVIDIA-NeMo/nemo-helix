@@ -4,9 +4,10 @@
 import { useFallbackWorkspace } from '@studio/hooks/useFallbackWorkspace';
 import { renderHook } from '@testing-library/react';
 
-const { mockList, mockRecent, mockProfile } = vi.hoisted(() => ({
+const { mockList, mockRecent, mockRecentKnown, mockProfile } = vi.hoisted(() => ({
   mockList: vi.fn(),
   mockRecent: vi.fn(),
+  mockRecentKnown: vi.fn(),
   mockProfile: vi.fn(),
 }));
 
@@ -16,7 +17,7 @@ vi.mock('@nemo/sdk/generated/platform/entity-store', () => ({
 vi.mock('@studio/providers/auth/useAuthProfile', () => ({ useAuthProfile: mockProfile }));
 vi.mock('@studio/providers/auth/useMe', () => ({ useMe: () => ({ isSuccess: true }) }));
 vi.mock('@studio/providers/preferences/usePreference', () => ({
-  usePreference: () => [mockRecent(), vi.fn(), vi.fn(), true],
+  usePreference: () => [mockRecent(), vi.fn(), vi.fn(), mockRecentKnown()],
 }));
 
 const listed = (...names: string[]) => ({
@@ -26,7 +27,18 @@ const listed = (...names: string[]) => ({
 });
 
 describe('useFallbackWorkspace', () => {
-  beforeEach(() => mockProfile.mockReturnValue(undefined));
+  beforeEach(() => {
+    mockProfile.mockReturnValue(undefined);
+    mockRecentKnown.mockReturnValue(true);
+  });
+
+  it('waits for recent workspaces even when the list has loaded', () => {
+    mockRecent.mockReturnValue([]);
+    mockRecentKnown.mockReturnValue(false);
+    mockProfile.mockReturnValue({ workspace: 'jdoe' });
+    mockList.mockReturnValue(listed('jdoe'));
+    expect(renderHook(() => useFallbackWorkspace()).result.current).toBeUndefined();
+  });
 
   it('prefers the most recent accessible workspace, never the excluded one', () => {
     mockRecent.mockReturnValue(['gone', 'forbidden', 'team']);
