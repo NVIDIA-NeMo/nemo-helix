@@ -49,7 +49,10 @@ def test_git_find_files_needs_the_permission_to_create_a_fileset(static_authz_da
     rule = static_authz_data["authz"]["endpoints"]["/apis/files/v2/workspaces/{workspace}/git-repositories/find-files"][
         "post"
     ]
-    assert rule == {"permissions": ["filesets.create"], "scopes": ["files:write", "platform:write"]}
+    fileset_create_rule = static_authz_data["authz"]["endpoints"]["/apis/files/v2/workspaces/{workspace}/filesets"][
+        "post"
+    ]
+    assert rule == fileset_create_rule
 
 
 @pytest.fixture

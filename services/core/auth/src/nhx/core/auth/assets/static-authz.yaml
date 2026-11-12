@@ -1097,8 +1097,13 @@ authz:
     # Does everything creating a git fileset does except store it, or fetches the host's keys to trust first.
     /apis/files/v2/workspaces/{workspace}/git-repositories/find-files:
       post:
-        permissions:
-        - filesets.create
+        direct:
+          actor_perms:
+          - filesets.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.create
         scopes:
         - files:write
         - platform:write
