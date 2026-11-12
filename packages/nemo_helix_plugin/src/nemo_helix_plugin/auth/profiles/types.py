@@ -19,7 +19,7 @@ PreferenceDefaultsSource = Literal["config", "api"]
 PREFERENCE_NAMESPACE_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,127}$"
 MAX_RESOLVE_PRINCIPALS = 100
 # BCP 47 language tag: a 2-3 letter (or 5-8 letter) language plus optional subtags.
-_LOCALE_RE = re.compile(r"^[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,8})*$")
+_LOCALE_RE = re.compile(r"^([A-Za-z]{2,3}|[A-Za-z]{5,8})([_-][A-Za-z0-9]{2,8})*$")
 
 
 class Profile(BaseModel):
