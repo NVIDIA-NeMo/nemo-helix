@@ -176,13 +176,10 @@ describe('CreateDatasetPanel', () => {
 
     // Tab order and default tab (spec 2)
     const tabs = await screen.findAllByRole('tab');
-    expect(tabs.map((t) => t.textContent)).toEqual([
-      'HuggingFace',
-      'NGC',
-      'GitHub',
-      'S3',
-      'Upload',
-    ]);
+    expect(tabs).toHaveLength(5);
+    ['HuggingFace', 'NGC', 'GitHub', 'S3', 'Upload'].forEach((label, index) =>
+      expect(tabs[index]).toHaveAccessibleName(label)
+    );
     expect(screen.getByRole('tab', { name: 'HuggingFace' })).toHaveAttribute(
       'aria-selected',
       'true'
