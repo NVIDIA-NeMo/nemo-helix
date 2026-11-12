@@ -128,7 +128,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    # Shared with ci.yaml and nightly-taskset-runs-e2e.yaml. Outputs: image_registry, image_tag, publish_images.
+    # Shared with ci.yaml and nightly-taskset-runs-e2e.yaml.
     uses: ./.github/workflows/build-cpu-smoke-images.yaml
     with:
       source_sha: ${{ github.event.pull_request.head.sha || github.sha }}

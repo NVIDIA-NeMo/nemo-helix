@@ -17,6 +17,9 @@ Keeps a single GitHub issue for the nightly test and posts each night's result t
 
 Reads the workflow's environment (``NEEDS_JSON``, ``SOURCE_SHA``, ``CLASSIFY_FOR``, ``ARTIFACTS`` and GitHub's
 defaults) and calls the API through ``gh api``, which authenticates with ``GH_TOKEN``. Exits 1 on a red report.
+
+Under nektos/act (``ACT`` set) it calls nothing: each call is printed and answered with a harmless stand-in, so
+the report runs locally without a token or side effects.
 """
 
 from __future__ import annotations
@@ -61,6 +64,14 @@ def gh_api(
     if out.returncode != 0:  # CalledProcessError would hide gh's stderr, which holds the API's reason
         raise RuntimeError(f"gh api {method} {path} exited {out.returncode}: {out.stderr.strip()}")
     return json.loads(out.stdout) if out.stdout.strip() else None
+
+
+def dry_run_api(method: str, path: str, body: Mapping[str, Any] | None = None) -> Any:
+    """Print the call instead of making it: no open issue, and a created issue is number 0."""
+    print(f"[dry run] {method} {path}" + (f" {json.dumps(body)}" if body is not None else ""))
+    if method == "GET":
+        return []
+    return {"number": 0} if method == "POST" and path.endswith("/issues") else None
 
 
 @dataclass(frozen=True)
@@ -114,8 +125,11 @@ def report(github: GitHub, run: Run, evidence: Sequence[Mapping[str, Any]], juni
         + ([f"Stage: `[{stage}]`"] if stage else [])
         + ([f"Taskset runs: {', '.join(ids)}"] if ids else [])
     )
-    issues = github("GET", f"repos/{run.repo}/issues?labels={LABEL}&state=open&per_page=1") or []
-    issue = issues[0]["number"] if issues else None
+    issues = github("GET", f"repos/{run.repo}/issues?labels={LABEL}&state=open&per_page=10") or []
+    issue = issues[0]["number"] if issues else None  # the newest: the API lists newest first
+    if len(issues) > 1:
+        others = ", ".join(f"#{other['number']}" for other in issues[1:])
+        print(f"::warning::{len(issues)} open issues are labelled {LABEL}; reporting on #{issue}, not {others}")
 
     def comment(title: str, body: str) -> int:
         """Comment on the open issue, or open one; returns its number."""
@@ -170,7 +184,8 @@ def read_artifacts(root: Path) -> tuple[list[dict[str, Any]], str]:
     return evidence, junit
 
 
-def main(env: Mapping[str, str] = os.environ, github: GitHub = gh_api) -> int:
+def main(env: Mapping[str, str] = os.environ, github: GitHub | None = None) -> int:
+    github = github or (dry_run_api if env.get("ACT") else gh_api)
     run = Run(
         repo=env["GITHUB_REPOSITORY"],
         server_url=env.get("GITHUB_SERVER_URL", "https://github.com"),

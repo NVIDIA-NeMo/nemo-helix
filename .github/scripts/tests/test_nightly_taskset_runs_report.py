@@ -49,14 +49,16 @@ JUNIT_DISPATCH = '<testcase><failure message="AssertionError: [dispatch] run run
 class FakeGitHub:
     """Records each call; the issue search returns ``open`` and creating an issue returns number 7."""
 
-    def __init__(self, open_issue: int | None = None) -> None:
+    def __init__(self, open_issue: int | None = None, older_open: tuple[int, ...] = ()) -> None:
         self.open_issue = open_issue
+        self.older_open = older_open
         self.calls: list[tuple[str, str, Mapping[str, Any] | None]] = []
 
     def __call__(self, method: str, path: str, body: Mapping[str, Any] | None = None) -> Any:
         self.calls.append((method, path, body))
         if method == "GET":
-            return [{"number": self.open_issue}] if self.open_issue is not None else []
+            numbers = ([self.open_issue] if self.open_issue is not None else []) + list(self.older_open)
+            return [{"number": number} for number in numbers]
         if path == f"repos/{REPO}/issues":
             return {"number": 7}
         return None
@@ -202,6 +204,40 @@ def test_gh_api_failure_names_the_api_error() -> None:
 
     with pytest.raises(RuntimeError, match=r"POST repos/o/r/issues exited 1: .*HTTP 403"):
         report_module.gh_api("POST", "repos/o/r/issues", {"title": "t"}, run=failing_run)
+
+
+def test_more_than_one_open_issue_warns_and_reports_on_the_newest(capsys: pytest.CaptureFixture[str]) -> None:
+    github = FakeGitHub(open_issue=5, older_open=(3,))
+
+    report_module.report(github, make_run(RED_TEST), [], "")
+
+    assert github.writes()[0] == ("POST", f"repos/{REPO}/issues/5/comments")
+    assert "::warning::2 open issues are labelled nightly-taskset-runs-e2e; reporting on #5, not #3" in (
+        capsys.readouterr().out
+    )
+
+
+def test_under_act_main_prints_the_calls_instead_of_making_them(capsys: pytest.CaptureFixture[str]) -> None:
+    env = {
+        "ACT": "true",
+        "GITHUB_REPOSITORY": REPO,
+        "GITHUB_RUN_ID": "100",
+        "SOURCE_SHA": SHA,
+        "NEEDS_JSON": json.dumps(RED_TEST),
+    }
+
+    assert report_module.main(env) == 1  # same exit status as a real red report
+
+    out = capsys.readouterr().out
+    assert f"[dry run] GET repos/{REPO}/issues?labels=nightly-taskset-runs-e2e" in out
+    assert f"[dry run] POST repos/{REPO}/issues/0/labels" in out
+    assert f"[dry run] POST repos/{REPO}/actions/workflows/nightly-taskset-runs-e2e.yaml/dispatches" in out
+
+
+def test_dry_run_api_answers_like_an_empty_repo() -> None:
+    assert report_module.dry_run_api("GET", "repos/o/r/issues?state=open") == []
+    assert report_module.dry_run_api("POST", "repos/o/r/issues", {"title": "t"}) == {"number": 0}
+    assert report_module.dry_run_api("PATCH", "repos/o/r/issues/0", {"state": "closed"}) is None
 
 
 if __name__ == "__main__":
