@@ -58,6 +58,7 @@ def controller(tmp_path):
         ctrl.base_model_name_override = ""
         ctrl.vllm_endpoint = ""
         ctrl.vllm_request_timeout = 120.0
+        ctrl._vllm_loaded_adapters = set()
         return ctrl
 
 
@@ -742,9 +743,9 @@ class TestEagerVllmAdapterLoad:
         routes = [c.args[0] for c in api.call_args_list]
         assert routes == ["/v1/unload_lora_adapter", "/v1/load_lora_adapter"]
 
-    def test_unchanged_adapter_is_reloaded_idempotently(self, controller, transfer_mock, tmp_path):
-        """An up-to-date adapter is not re-downloaded, but is still (idempotently)
-        loaded so it survives a vLLM restart; vLLM tolerates the already-loaded case."""
+    def test_unchanged_adapter_is_loaded_once(self, controller, transfer_mock, tmp_path):
+        """An up-to-date adapter is loaded once. Later cycles remember that and
+        do not call vLLM again."""
         controller.vllm_endpoint = "http://localhost:49152"
         ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
         dir_name = "default--my-adapter"
@@ -758,10 +759,12 @@ class TestEagerVllmAdapterLoad:
 
         with patch.object(controller, "_vllm_api_call", return_value=(200, "")) as api:
             controller._update_lora_adapters(set())
+            controller._update_lora_adapters(set())
 
         transfer_mock.download.assert_not_called()
         api.assert_called_once()
         assert api.call_args.args[0] == "/v1/load_lora_adapter"
+        assert "default--my-adapter" in controller._vllm_loaded_adapters
 
     def test_nim_mode_does_not_call_vllm(self, controller, transfer_mock, tmp_path):
         """With no vLLM endpoint (NIM), the sidecar never touches the runtime LoRA API."""
