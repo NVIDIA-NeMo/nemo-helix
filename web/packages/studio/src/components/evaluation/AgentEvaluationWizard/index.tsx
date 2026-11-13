@@ -180,6 +180,8 @@ const CONFIG_KIND_ITEMS = [
 
 const MAX_PARALLELISM = 16;
 
+const EMPTY_PROMPT_MESSAGE = 'Select at least one field, or write a prompt.';
+
 const NO_EVALUATIONS_MESSAGE =
   'No evaluations with a reusable eval config yet. Go back and create an experiment instead — its run is re-runnable from here afterwards.';
 
@@ -268,7 +270,7 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
         ) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            message: 'Select at least one field, or write a prompt.',
+            message: EMPTY_PROMPT_MESSAGE,
             path: ['promptTemplate'],
           });
         }
@@ -541,7 +543,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     mode: 'onSubmit',
     reValidateMode: 'onChange',
   });
-  const { control, setValue, handleSubmit, clearErrors, trigger, formState } = methods;
+  const { control, setValue, handleSubmit, clearErrors, trigger, formState, setError } = methods;
   const { errors } = formState;
 
   const mode = useWatch({ control, name: 'mode' }) as EvaluationMode;
@@ -1018,6 +1020,14 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   };
   const blocker = stepBlocker();
 
+  const isAgentPromptMissing = () => {
+    if (mode !== MODE_DEFAULT || !isFormConfig || agentPrompt.trim()) {
+      return false;
+    }
+    setError('promptTemplate', { type: 'custom', message: EMPTY_PROMPT_MESSAGE });
+    return true;
+  };
+
   const goNext = async () => {
     if (blocker) {
       return;
@@ -1029,7 +1039,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
           ? ['parallelism', 'dataset', 'promptTemplate', 'body']
           : ['parallelism', 'dataset', 'judgeModel']
       );
-      if (!valid || (!isFormConfig && !pickedSpec)) {
+      if (!valid || (!isFormConfig && !pickedSpec) || isAgentPromptMissing()) {
         return;
       }
     }
@@ -1048,11 +1058,12 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       return;
     }
     if (
-      mode === MODE_DEFAULT &&
-      ((!isFormConfig && !pickedSpec) ||
-        configIssues.errors.length > 0 ||
-        promptIssues.errors.length > 0 ||
-        judgePromptIssues.errors.length > 0)
+      isAgentPromptMissing() ||
+      (mode === MODE_DEFAULT &&
+        ((!isFormConfig && !pickedSpec) ||
+          configIssues.errors.length > 0 ||
+          promptIssues.errors.length > 0 ||
+          judgePromptIssues.errors.length > 0))
     ) {
       setStep('configuration');
       return;
