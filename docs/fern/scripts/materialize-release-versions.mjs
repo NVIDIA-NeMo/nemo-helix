@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { isMap, isScalar, isSeq, parseDocument } from "yaml";
 
 import { buildHelmReferenceMdx } from "./sync-helm-docs.mjs";
+import { buildLibraryVersionsMdx, imageVersionSources, libraryVersionSourcePaths, libraryVersionsInclude } from "./sync-library-versions.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const fernDir = resolve(scriptDir, "..");
@@ -206,6 +207,7 @@ function materializeRelease(release) {
     rmSync(outputRoot, { recursive: true, force: true });
     cpSync(exportedDocs, outputRoot, { recursive: true });
     materializeGeneratedDocs(release, outputRoot);
+    materializeLibraryVersions(release, outputRoot);
     pinStaleSnippetReferences(release, outputRoot);
     syncColabLinks(release, outputRoot);
   } finally {
@@ -401,6 +403,20 @@ function syncColabLinks(release, outputRoot) {
     ],
     { cwd: repoRoot, stdio: "inherit" },
   );
+}
+
+// Inline each release's own dependency table: shared Fern snippets otherwise
+// resolve against Latest, silently showing the wrong library versions.
+function materializeLibraryVersions(release, outputRoot) {
+  const page = join(outputRoot, "support-matrix.mdx");
+  if (!existsSync(page)) return;
+  const text = readFileSync(page, "utf8");
+  if (!text.includes(libraryVersionsInclude)) return;
+  const paths = git([
+    "ls-tree", "-r", "--name-only", release.ref, "--", "uv.lock", "docker/locks", ...imageVersionSources,
+  ]).split("\n");
+  const sources = new Map(libraryVersionSourcePaths(paths).map(path => [path, git(["show", `${release.ref}:${path}`])]));
+  writeFileSync(page, text.replaceAll(libraryVersionsInclude, buildLibraryVersionsMdx(sources).trimEnd()));
 }
 
 function materializeGeneratedDocs(release, outputRoot) {
