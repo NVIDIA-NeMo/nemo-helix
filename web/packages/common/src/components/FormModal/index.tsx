@@ -57,6 +57,8 @@ export interface FormModalProps {
   slotAboveBody?: ReactNode;
   slotFooterLeft?: ReactNode;
   slotFooterRight?: ReactNode;
+  initialFocus?: 'cancel';
+  cancelableWhileDisabled?: boolean;
   attributes?: {
     CancelButton?: ComponentProps<typeof Button>;
     SubmitButton?: ComponentProps<typeof LoadingButton>;
@@ -81,14 +83,21 @@ export const FormModal: FC<PropsWithChildren<FormModalProps>> = ({
   slotAboveBody,
   slotFooterLeft,
   slotFooterRight,
+  initialFocus,
+  cancelableWhileDisabled = false,
   attributes,
 }) => {
   const modalId = useId();
-  // Prevents the user from closing the dialog if the inputs are disabled
+  const cancelDisabled = disabled && !cancelableWhileDisabled;
+  // Prevents the user from closing the dialog while it is disabled, unless `cancelableWhileDisabled` is set
   const handleUserClose = () => {
-    if (!disabled) {
+    if (!cancelDisabled) {
       onClose();
     }
+  };
+
+  const markCancelAutofocus = (button: HTMLButtonElement | null) => {
+    button?.toggleAttribute('autofocus', initialFocus === 'cancel');
   };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -119,12 +128,13 @@ export const FormModal: FC<PropsWithChildren<FormModalProps>> = ({
               {slotFooterRight ?? (
                 <Flex gap="2">
                   <Button
+                    ref={markCancelAutofocus}
                     kind="tertiary"
                     onClick={(e) => {
                       e.stopPropagation();
                       handleUserClose();
                     }}
-                    disabled={disabled}
+                    disabled={cancelDisabled}
                     type="button"
                     {...attributes?.CancelButton}
                   >

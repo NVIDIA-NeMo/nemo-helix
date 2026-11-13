@@ -4790,6 +4790,8 @@ interface FormModalProps {
   slotAboveBody?: ReactNode;
   slotFooterLeft?: ReactNode;
   slotFooterRight?: ReactNode;
+  initialFocus?: 'cancel';
+  cancelableWhileDisabled?: boolean;
   attributes?: {
     CancelButton?: ComponentProps<typeof Button>;
     SubmitButton?: ComponentProps<typeof LoadingButton>;
@@ -4812,7 +4814,7 @@ type NotifyFn = (message: string, type?: NotifyType, options?: MessageFnOptions)
 //#endregion
 //#region src/components/ConfirmationModal/index.d.ts
 type SubmitButtonColor = NonNullable<ComponentProps<typeof LoadingButton>['color']>;
-interface ConfirmationModalProps extends Pick<FormModalProps, 'open' | 'onClose' | 'cancelButtonText'> {
+interface ConfirmationModalProps extends Pick<FormModalProps, 'open' | 'onClose' | 'cancelButtonText' | 'initialFocus'> {
   /** Return true when the action succeeded (shows success toast); false shows error toast. */
   onConfirm: () => boolean | Promise<boolean>;
   title: string;
@@ -4831,6 +4833,7 @@ interface ConfirmationModalProps extends Pick<FormModalProps, 'open' | 'onClose'
   suppressResultToasts?: boolean;
   /** Where result messages go. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
+  children?: ReactNode;
 }
 export declare const ConfirmationModal: FC<ConfirmationModalProps>;
 //#endregion
@@ -6284,9 +6287,14 @@ interface CreateSecretModalProps extends Pick<FormModalProps, 'open' | 'onClose'
 export declare const CreateSecretModal: FC<CreateSecretModalProps>;
 //#endregion
 //#region src/components/DeleteConfirmationModal/index.d.ts
+type DeleteVerb = 'delete' | 'remove';
 interface DeleteModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   onDelete: () => boolean | Promise<boolean>;
-  title: string;
+  title?: string;
+  entity?: string;
+  entityPlural?: string;
+  ids?: readonly string[];
+  verb?: DeleteVerb;
   description?: string;
   confirmationText?: string;
   simpleConfirm?: boolean;

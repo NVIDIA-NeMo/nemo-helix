@@ -9,7 +9,7 @@ import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import { Stack, Text } from '@nvidia/foundations-react-core';
-import { type ComponentProps, type FC, useState } from 'react';
+import { type ComponentProps, type FC, type ReactNode, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 interface FormFields {
@@ -20,7 +20,7 @@ type SubmitButtonColor = NonNullable<ComponentProps<typeof LoadingButton>['color
 
 export interface ConfirmationModalProps extends Pick<
   FormModalProps,
-  'open' | 'onClose' | 'cancelButtonText'
+  'open' | 'onClose' | 'cancelButtonText' | 'initialFocus'
 > {
   /** Return true when the action succeeded (shows success toast); false shows error toast. */
   onConfirm: () => boolean | Promise<boolean>;
@@ -40,6 +40,7 @@ export interface ConfirmationModalProps extends Pick<
   suppressResultToasts?: boolean;
   /** Where result messages go. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
+  children?: ReactNode;
 }
 
 export const ConfirmationModal: FC<ConfirmationModalProps> = ({
@@ -54,9 +55,11 @@ export const ConfirmationModal: FC<ConfirmationModalProps> = ({
   errorText = 'Something went wrong. Please try again.',
   submitButtonText = 'Confirm',
   cancelButtonText,
+  initialFocus,
   submitButtonColor,
   suppressResultToasts = false,
   onNotify,
+  children,
 }) => {
   const {
     reset,
@@ -68,6 +71,7 @@ export const ConfirmationModal: FC<ConfirmationModalProps> = ({
     defaultValues: { confirmText: '' },
   });
   const [isPending, setIsPending] = useState(false);
+  const activeSubmissionRef = useRef<object | null>(null);
   const notify = useNotify(onNotify);
 
   const resetAndClose = () => {
@@ -75,7 +79,15 @@ export const ConfirmationModal: FC<ConfirmationModalProps> = ({
     onClose();
   };
 
+  const abandonAndClose = () => {
+    activeSubmissionRef.current = null;
+    setIsPending(false);
+    resetAndClose();
+  };
+
   const onSubmit = async () => {
+    const submission = {};
+    activeSubmissionRef.current = submission;
     setIsPending(true);
     try {
       const ok = await onConfirm();
@@ -93,8 +105,11 @@ export const ConfirmationModal: FC<ConfirmationModalProps> = ({
       // throws carry no message to read, so those still fall back to `errorText`.
       notify(error instanceof Error ? getErrorMessage(error, errorText) : errorText, 'error');
     } finally {
-      resetAndClose();
-      setIsPending(false);
+      if (activeSubmissionRef.current === submission) {
+        activeSubmissionRef.current = null;
+        resetAndClose();
+        setIsPending(false);
+      }
     }
   };
 
@@ -109,14 +124,16 @@ export const ConfirmationModal: FC<ConfirmationModalProps> = ({
       title={title}
       submitButtonText={submitButtonText}
       cancelButtonText={cancelButtonText}
+      initialFocus={initialFocus}
       disabled={isPending}
+      cancelableWhileDisabled
       submitDisabled={simpleConfirm ? false : !isValid}
       loading={isPending}
       onSubmit={handleSubmit(
         onSubmit,
         handleFormErrorsGeneric({ title: 'Confirmation Form Errors' })
       )}
-      onClose={resetAndClose}
+      onClose={abandonAndClose}
       attributes={
         submitButtonColor
           ? {
@@ -127,8 +144,9 @@ export const ConfirmationModal: FC<ConfirmationModalProps> = ({
           : undefined
       }
     >
-      <Stack gap="density-md">
-        <Text className={`leading-relaxed ${simpleConfirm ? 'mb-4' : ''}`}>{description}</Text>
+      <Stack gap="density-md" className={simpleConfirm ? 'mb-4' : undefined}>
+        <Text className="leading-relaxed">{description}</Text>
+        {children}
         {!simpleConfirm && (
           <ControlledTextInput
             useControllerProps={{
