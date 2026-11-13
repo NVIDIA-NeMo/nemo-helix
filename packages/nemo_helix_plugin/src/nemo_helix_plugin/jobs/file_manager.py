@@ -119,8 +119,9 @@ def _stage_local_files(
     fresh listing in that case; never omit one failed file from an existing
     manifest. Persistent churn and all other filesystem errors still fail the
     upload. The caller owns ``staging_root`` and keeps it until upload finishes.
-    Staging needs temporary disk space for the selected directory contents; a
-    full temporary filesystem is an upload failure, not a reason to omit files.
+    Uploads stage beside ``local_path`` so the copy uses the job's own volume
+    rather than container temporary storage; a full volume is an upload
+    failure, not a reason to omit files.
 
     This stabilizes the upload inputs, not concurrent in-place writes: producers
     must still finish writing their result files before publishing them.
@@ -286,7 +287,7 @@ class FilesetFileManager(BaseFilesetFileManager):
             for rel_path in files_to_upload:
                 self._fs.put_file(str(local_path / rel_path), f"{full_remote_path}/{rel_path}")
         elif local_path.is_dir():
-            with tempfile.TemporaryDirectory(prefix="nemo-result-upload-") as staging_dir:
+            with tempfile.TemporaryDirectory(prefix="nemo-result-upload-", dir=local_path.parent) as staging_dir:
                 snapshot, files_to_upload = _stage_local_files(local_path, Path(staging_dir), ignore_patterns)
                 for rel_path in files_to_upload:
                     try:
@@ -366,7 +367,7 @@ class AsyncFilesetFileManager(BaseFilesetFileManager):
             for rel_path in files_to_upload:
                 await self._fs._put_file(str(local_path / rel_path), f"{full_remote_path}/{rel_path}")
         elif local_path.is_dir():
-            with tempfile.TemporaryDirectory(prefix="nemo-result-upload-") as staging_dir:
+            with tempfile.TemporaryDirectory(prefix="nemo-result-upload-", dir=local_path.parent) as staging_dir:
                 snapshot, files_to_upload = await _stage_local_files_async(
                     local_path, Path(staging_dir), ignore_patterns
                 )

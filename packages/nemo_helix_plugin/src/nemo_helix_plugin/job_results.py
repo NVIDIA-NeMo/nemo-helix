@@ -97,7 +97,7 @@ class JobResults(ABC):
         """Publish ``local_path`` as result ``name``.
 
         Set ``stage`` when other processes may still change a directory's files: the platform copies the
-        selected files to temporary storage first and uploads that copy.
+        selected files to a temporary directory beside it first and uploads that copy.
         """
 
 

@@ -8,9 +8,7 @@ import errno
 import logging
 import os
 import shutil
-import tempfile
 from collections.abc import Callable, Iterator
-from functools import partial
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
@@ -45,15 +43,13 @@ class _RecordingFileSystem:
 
 
 @pytest.fixture
-def upload_temporary_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    root = tmp_path / "upload-copies"
-    root.mkdir()
-    monkeypatch.setattr(
-        file_manager,
-        "tempfile",
-        SimpleNamespace(TemporaryDirectory=partial(tempfile.TemporaryDirectory, dir=root)),
-    )
-    return root
+def upload_temporary_root(tmp_path: Path) -> Path:
+    """Directory holding the upload sources, where staging copies are created beside them."""
+    return tmp_path
+
+
+def _staging_dirs(root: Path) -> list[Path]:
+    return list(root.glob("nemo-result-upload-*"))
 
 
 def _manager(
@@ -228,8 +224,10 @@ async def test_directory_upload_retries_disappearing_lock_and_cleans_staging(
         "default/results#bundle/summary.json": b"summary",
         "default/results#bundle/workspace/.git/user.lock": b"user evidence",
     }
-    assert all(path.is_relative_to(upload_temporary_root) for path in fs.local_paths)
-    assert not list(upload_temporary_root.iterdir())
+    assert all(
+        path.relative_to(upload_temporary_root).parts[0].startswith("nemo-result-upload-") for path in fs.local_paths
+    )
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -256,7 +254,7 @@ async def test_directory_upload_reads_staged_bytes_after_source_changes(
         "default/results#bundle/first": b"first original",
         "default/results#bundle/second": b"second original",
     }
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -275,7 +273,7 @@ async def test_source_root_removed_during_listing_cannot_publish_an_empty_result
     with pytest.raises(FileNotFoundError):
         await _upload(_manager(asynchronous, fs), source)
     assert not fs.local_paths
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -299,7 +297,7 @@ async def test_unreadable_subdirectory_fails_before_upload(
     finally:
         blocked.chmod(0o700)
     assert not fs.local_paths
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -329,7 +327,7 @@ async def test_copy_errors_fail_without_upload_or_reacquisition(
     assert raised.value is error
     assert attempts == 1
     assert not fs.local_paths
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -350,7 +348,7 @@ async def test_valid_empty_directory_and_file_symlink_selection(
     (source / "directory-link").symlink_to(external, target_is_directory=True)
     await _upload(manager, source)
     assert fs.uploads == {"default/results#bundle/file-link": b"linked file"}
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("worker_fails", [False, True], ids=["worker-succeeds", "worker-fails"])
@@ -390,13 +388,13 @@ async def test_cancelled_acquisition_drains_worker_before_cleanup(
         task.cancel("second cancellation")
         await asyncio.sleep(0)
         assert not task.done(), "The acquisition worker still owns the temporary directory"
-        assert list(upload_temporary_root.iterdir())
+        assert _staging_dirs(upload_temporary_root)
         release.set()
         with pytest.raises(asyncio.CancelledError, match="first cancellation"):
             await asyncio.wait_for(task, timeout=5)
         assert finished.is_set()
         assert not fs.local_paths
-        assert not list(upload_temporary_root.iterdir())
+        assert not _staging_dirs(upload_temporary_root)
         await asyncio.sleep(0)
         assert not unhandled
     finally:
@@ -438,7 +436,7 @@ async def test_upload_error_preserves_origin_without_reacquiring(
         str(source / "evidence") in note and "default/results#bundle/evidence" in note
         for note in getattr(error, "__notes__", [])
     )
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -461,7 +459,7 @@ async def test_upload_cancellation_stops_and_cleans_staging(
         await _upload(_manager(asynchronous, fs), source)
     assert raised.value is cancellation
     assert len(fs.local_paths) == 1
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -509,7 +507,7 @@ async def test_failed_upload_is_not_registered_as_complete(
             manager.create_result("bundle", source, stage=True)
     assert raised.value is error
     jobs_client.create_job_result.assert_not_called()
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -538,7 +536,7 @@ async def test_directory_upload_stops_at_first_remote_failure(
         await _upload(_manager(asynchronous, fs), source)
     assert raised.value is error
     assert attempts == ["default/results#bundle/first"]
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.fixture
@@ -582,7 +580,7 @@ async def test_ignored_unreadable_directory_does_not_block_upload(
         blocked.chmod(0o700)
 
     assert fs.uploads == {"default/results#bundle/summary.json": b"summary"}
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -604,7 +602,7 @@ async def test_file_patterns_do_not_prune_directories(
         "default/results#bundle/summary.json": b"summary",
         f"default/results#bundle/{directory}/keep.txt": b"selected",
     }
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -620,7 +618,7 @@ async def test_directory_pattern_does_not_exclude_upload_root(
     await _upload(_manager(asynchronous, fs), source, "cache/")
 
     assert fs.uploads == {"default/results#bundle/summary.json": b"selected root"}
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -638,7 +636,7 @@ async def test_directory_upload_does_not_visit_excluded_subtrees(
     assert fs.uploads == {"default/results#bundle/selected/keep.txt": b"payload"}
     assert source / "selected" in visited_directories
     assert visited_directories.isdisjoint({source / "cache", source / "nested/cache"})
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -677,7 +675,7 @@ async def test_ignored_directory_removed_during_walk_does_not_retry(
     assert fs.uploads == {"default/results#bundle/summary.json": b"summary"}
     assert acquisitions == 1
     assert not [record for record in caplog.records if record.name == file_manager.__name__]
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -695,7 +693,7 @@ async def test_release_directory_patterns_retain_literal_matching(
     await _upload(_manager(asynchronous, fs), source, [pattern])
 
     assert fs.uploads == {f"default/results#bundle/{directory}/keep.txt": b"selected"}
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
@@ -721,4 +719,4 @@ async def test_unstaged_directory_upload_reads_the_source_directly(
         "default/results#bundle/nested/evidence": b"evidence",
     }
     assert sorted(fs.local_paths) == sorted([source / "summary.json", source / "nested/evidence"])
-    assert not list(upload_temporary_root.iterdir())
+    assert not _staging_dirs(upload_temporary_root)
