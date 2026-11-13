@@ -398,7 +398,7 @@ class WorkloadTokenExchangeService:
         claims = jwt.decode(
             subject_token,
             signing_key,
-            algorithms=["RS256"],
+            algorithms=["RS256", "ES256"],
             audience=_workload_subject_audience(config),
             leeway=30,
             options={"require": ["exp"]},
