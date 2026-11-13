@@ -22,7 +22,7 @@
 #       as docker/automodel/Dockerfile.nhx-automodel-base). PyPI wheels only ship through
 #       cuda130; source build replaces the wheel from step 1.
 #   1c. mamba-ssm + causal-conv1d — prebuilt cu13.4 / cp312 wheels built on this
-#       same NGC 26.09 torch. Automodel stays on the cu13.3 wheels.
+#       same NGC 26.09 torch, the same builds Automodel installs.
 #   1d. flash-attn — optional for unsloth and currently NOT installed (see the
 #       commented TODO below). Without it Unsloth falls back when xformers is
 #       also missing (common on newer CUDA stacks), logging "FA2 = False /
@@ -34,7 +34,7 @@
 # Default tag:    `local` (override via BAKE_TAG at build time).
 
 # NGC PyTorch base. 26.09-py3 ships PyTorch 2.14 + CUDA 13.4.1 + Python 3.12.
-# Automodel stays on 26.07 (CUDA 13.3). Override at build time:
+# Automodel uses the same base. Override at build time:
 # --set nhx-unsloth-training.args.PYTORCH_BASE=...
 ARG PYTORCH_BASE=nvcr.io/nvidia/pytorch:26.09-py3
 

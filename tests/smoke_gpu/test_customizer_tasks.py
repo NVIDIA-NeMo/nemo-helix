@@ -35,7 +35,7 @@ MINIMUM_PYTHON_PACKAGE_VERSIONS = {
     "fsspec": "2026.6.0",
     "mamba-ssm": "2.3.0",
     "notebook": "7.6.3",
-    "transformers": "5.12.1",
+    "transformers": "5.18.0",
     "wandb": "0.28.2",
 }
 

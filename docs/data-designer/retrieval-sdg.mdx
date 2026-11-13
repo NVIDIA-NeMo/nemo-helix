@@ -170,6 +170,15 @@ time. The `mining.query_embedding_batch_size` and
 `mining.document_embedding_batch_size` defaults of 16 leave a 48 GB GPU mostly
 idle; raise them to 64–128 for a large split.
 
+`tokenizer_backend` selects how the encoder's tokenizer is loaded. Keep the
+default, `nemo_wrapped_auto`, which uses the encoder's own Hugging Face
+`tokenizer.json`, the one it is trained and served with. `nemo_auto` lets
+Automodel use a tokenizer registered for the encoder's model type instead.
+Nemotron 3 Embed 1B is model type `ministral3`, which Automodel maps to
+Mistral's `tekken.json` format, but the checkpoint ships only `tokenizer.json`,
+so `nemo_auto` makes its mining fail. Use `nemo_auto` only for an encoder that
+ships a Mistral tokenizer file.
+
 All retrieval steps use the same container-backed execution profile so they share job
 storage across generation, conversion, model staging, and mining. Configure it with
 `data_designer.job_executor_profile`, or pass `--profile` for an individual job. The

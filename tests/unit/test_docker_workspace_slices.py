@@ -58,12 +58,13 @@ CVE_PACKAGE_FLOORS = (
             Path("pyproject.toml"),
             Path("services/rl/pyproject.toml"),
             Path("services/unsloth/pyproject.toml"),
-            Path("docker/automodel/Dockerfile.nhx-automodel-base"),
             Path("docker/Dockerfile.nhx-unsloth-training"),
             Path("docker/rl/Dockerfile.nhx-rl-base"),
             Path("docker/locks/nhx-gym-tasks/pyproject.toml"),
         ),
     ),
+    # Automodel 0.7.0's `tracking` extra requires mlflow-skinny 3.16.1, above the CVE floor.
+    ("mlflow-skinny", "3.16.1", (Path("docker/automodel/Dockerfile.nhx-automodel-base"),)),
     (
         "sqlparse",
         "0.6.0",
@@ -257,7 +258,7 @@ def test_automodel_cve_layer_does_not_pin_full_mlflow_with_cryptography() -> Non
     """Full MLflow 3.15 requires cryptography<50 and cannot coinstall with the image floor."""
     text = (ROOT / "docker/automodel/Dockerfile.nhx-automodel-base").read_text(encoding="utf-8")
     assert "cryptography>=50.0.0,<51" in text
-    assert "mlflow-skinny>=3.15.0" in text
+    assert "mlflow-skinny>=3.16.1" in text
     assert not FULL_MLFLOW_SPEC_RE.search(text)
 
 

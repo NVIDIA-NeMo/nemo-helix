@@ -13,7 +13,10 @@ and keep their references to the stub.
 import importlib
 import importlib.util
 import sys
+from typing import Any
 from unittest.mock import MagicMock
+
+import pytest
 
 _STUBBED = ("nemo_automodel", "nemo_automodel._transformers", "nemo_automodel._transformers.registry")
 _IMPORTED_UNDER_STUB = (
@@ -31,3 +34,41 @@ if importlib.util.find_spec("nemo_automodel") is None:
     finally:
         for name in stubbed:
             del sys.modules[name]
+
+
+class Qwen3RerankerForCausalReranking:
+    """Stands in for Automodel's yes/no reranker class, a causal LM."""
+
+    @classmethod
+    def can_generate(cls) -> bool:
+        return True
+
+
+class LlamaBidirectionalForSequenceClassification:
+    """Stands in for Automodel's score-head reranker class."""
+
+    @classmethod
+    def can_generate(cls) -> bool:
+        return False
+
+
+def _automodel_cross_encoder_class(config: dict[str, Any]) -> type | None:
+    """Automodel v0.7.0's cross-encoder dispatch: ``SUPPORTED_BACKBONES`` plus ``supports_config``."""
+    model_type = str(config.get("model_type", "")).lower()
+    if model_type in ("llama", "llama_bidirec"):
+        return LlamaBidirectionalForSequenceClassification
+    if model_type == "qwen3" and {"Qwen3ForCausalLM", "Qwen3RerankerForCausalReranking"} & set(
+        config.get("architectures") or ()
+    ):
+        return Qwen3RerankerForCausalReranking
+    return None
+
+
+@pytest.fixture(autouse=True)
+def automodel_cross_encoder_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without ``nemo_automodel``, answer the registry's dispatch question the way Automodel would."""
+    if importlib.util.find_spec("nemo_automodel") is None:
+        monkeypatch.setattr(
+            "nhx.automodel.tasks.training.backends.registry._automodel_cross_encoder_class",
+            _automodel_cross_encoder_class,
+        )

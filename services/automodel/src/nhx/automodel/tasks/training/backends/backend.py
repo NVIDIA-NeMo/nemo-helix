@@ -126,6 +126,9 @@ class AutomodelBackend:
                 # Continue this job's MLflow run after a resume or rerun, instead of starting another.
                 if mlflow_run_id := find_mlflow_run_id(library_config.config_dict.get("mlflow")):
                     training_env["MLFLOW_RUN_ID"] = mlflow_run_id
+                # A self-hosted W&B server; the compiled wandb block cannot carry it (see config.py).
+                if wandb_base_url := library_config.config_dict.get("_wandb_base_url"):
+                    training_env["WANDB_BASE_URL"] = wandb_base_url
                 training_process = Popen(
                     command,
                     stdout=subprocess.PIPE,
