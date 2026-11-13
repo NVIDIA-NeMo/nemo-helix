@@ -21,6 +21,7 @@ imports silently degrade performance.
 
 import logging
 import os
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any, Literal
 
@@ -40,6 +41,7 @@ from nhx.unsloth.app.constants import SERVICE_NAME
 from nhx.unsloth.integrations.hf_bridge import apply_integrations_to_sft_config
 from nhx.unsloth.schemas import UnslothJobOutput
 from nhx.unsloth.tasks.training.backends.callbacks import TrainingProgressCallback
+from nhx.unsloth.tasks.training.backends.module_selection import set_trainable_modules, unfrozen_module_paths
 from nhx.unsloth.tasks.training.backends.pause import create_pause_callback, newest_complete_checkpoint
 from nhx.unsloth.tasks.training.progress import JobsServiceProgressReporter
 
@@ -94,7 +96,9 @@ def build_model_load_kwargs(spec: UnslothJobOutput, resolved_model: str) -> dict
     return kwargs
 
 
-def build_peft_kwargs(spec: UnslothJobOutput, *, gradient_checkpointing: bool | str) -> dict[str, Any]:
+def build_peft_kwargs(
+    spec: UnslothJobOutput, *, gradient_checkpointing: bool | str, unfrozen_modules: Sequence[str] = ()
+) -> dict[str, Any]:
     """Assemble ``FastLanguageModel.get_peft_model`` kwargs for a LoRA run.
 
     Torch-free (unit-testable). Caller resolves ``gradient_checkpointing`` from
@@ -102,6 +106,9 @@ def build_peft_kwargs(spec: UnslothJobOutput, *, gradient_checkpointing: bool | 
     ``False`` / ``"unsloth"`` mapping). Optional knobs (``loftq_config``,
     ``modules_to_save``, ``layers_to_transform``, ``layer_replication``) are only
     emitted when set so PEFT/Unsloth see absence, not ``None``.
+
+    ``unfrozen_modules`` are the module paths ``training.unfreeze_modules`` picked. They join
+    ``modules_to_save``, the only place a LoRA adapter keeps fully trained modules.
     """
     lora = spec.training.lora
     assert lora is not None  # guaranteed by TrainingSpec._enforce_lora_invariant
@@ -120,8 +127,8 @@ def build_peft_kwargs(spec: UnslothJobOutput, *, gradient_checkpointing: bool | 
     }
     if lora.loftq_config is not None:
         kwargs["loftq_config"] = lora.loftq_config
-    if lora.modules_to_save is not None:
-        kwargs["modules_to_save"] = lora.modules_to_save
+    if lora.modules_to_save is not None or unfrozen_modules:
+        kwargs["modules_to_save"] = list(dict.fromkeys([*(lora.modules_to_save or []), *unfrozen_modules]))
     if lora.layers_to_transform is not None:
         kwargs["layers_to_transform"] = lora.layers_to_transform
     if lora.layer_replication is not None:
@@ -184,9 +191,9 @@ def train_sft(
     from trl import SFTConfig, SFTTrainer
     from unsloth import FastLanguageModel
 
-    if spec.training.training_type != "sft":
+    if spec.training.training_type not in ("sft", "partial_sft"):
         raise RuntimeError(
-            f"Unsloth backend only supports training_type='sft', got {spec.training.training_type!r}",
+            f"Unsloth backend only supports training_type 'sft' or 'partial_sft', got {spec.training.training_type!r}",
         )
 
     # Resolve output path. Container submit passes ``output_path`` (the
@@ -241,15 +248,41 @@ def train_sft(
                     gc_value = True
                 else:
                     gc_value = False
-                model = FastLanguageModel.get_peft_model(
-                    model,
-                    **build_peft_kwargs(spec, gradient_checkpointing=gc_value),
-                )
-            # All-weights FT: leave `model` as-is. `build_model_load_kwargs` passed
+                training = spec.training
+                unfrozen = unfrozen_module_paths(model, training.unfreeze_modules) if training.unfreeze_modules else []
+                try:
+                    model = FastLanguageModel.get_peft_model(
+                        model,
+                        **build_peft_kwargs(spec, gradient_checkpointing=gc_value, unfrozen_modules=unfrozen),
+                    )
+                except TypeError as e:
+                    if not unfrozen:
+                        raise
+                    raise ValueError(
+                        f"Unsloth cannot train {unfrozen} in full alongside LoRA for this model: for Llama, "
+                        "Mistral, Gemma, and Qwen2/3 models it allows only embed_tokens and lm_head. Use "
+                        f"finetuning_type all_weights to train other modules. Unsloth said: {e}"
+                    ) from e
+                if training.freeze_modules:
+                    # Freezes the adapters inside the selected modules; unfrozen modules stay trainable.
+                    set_trainable_modules(model, training.freeze_modules, None)
+            elif spec.training.training_type == "partial_sft":
+                # `full_finetuning=True` made every parameter trainable; keep only the selected ones.
+                set_trainable_modules(model, spec.training.freeze_modules, spec.training.unfreeze_modules)
+                # Unsloth's gradient checkpointing gives a layer's weights gradients only when the layer's
+                # input needs one. With the embeddings frozen nothing upstream does, so the trainable
+                # layers would get none.
+                if not model.get_input_embeddings().weight.requires_grad:
+                    model.enable_input_require_grads()
+            # All-weights FT otherwise: leave `model` as-is. `build_model_load_kwargs` passed
             # `full_finetuning=True`, so `from_pretrained` routed through Unsloth's
             # `FastModel.from_pretrained` and returned an un-wrapped HF model with every
             # parameter trainable (4-/8-bit were already rejected by the spec validator
             # for `finetuning_type='all_weights'`).
+            if spec.training.training_type == "partial_sft":
+                trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+                total = sum(p.numel() for p in model.parameters())
+                logger.info(f"partial_sft: {trainable:,} of {total:,} parameters trainable")
 
             # ── Dataset ────────────────────────────────────────────────────────
             train_ds, eval_ds = _load_datasets(

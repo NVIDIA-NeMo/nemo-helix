@@ -22,7 +22,7 @@ from nemo_helix_plugin.jobs.api_factory import BaseJobsListFilter, HelixJobSpec
 from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nhx.automodel.compile import platform_job_config_compiler
-from nhx.automodel.entities.values import TrainingType
+from nhx.automodel.entities.values import base_training_type
 from nhx.automodel.tasks.training.datasets.preparation import select_dataset_files
 from nhx.automodel.tasks.training.datasets.validation import DatasetValidator
 from nhx.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
@@ -68,7 +68,7 @@ class AutomodelJob(BaseSubmitJob[AutomodelJobInput, AutomodelJobOutput]):
     def _dry_run_datasets(cls, spec: AutomodelJobOutput, workspace: str, traits: CheckpointTraits) -> list[DatasetRows]:
         # Compile rejects a vision checkpoint for every recipe but SFT, which trains image rows.
         validator = DatasetValidator(
-            training_type=TrainingType(spec.training.training_type),
+            training_type=base_training_type(spec.training.training_type),
             allow_multimodal=traits.has_vision_tower,
         )
         return [

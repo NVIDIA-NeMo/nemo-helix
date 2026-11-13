@@ -141,6 +141,29 @@ class TestSubShapesIndependently:
         t = TrainingSpec(finetuning_type="all_weights")
         assert t.lora is None
 
+    @pytest.mark.parametrize(
+        ("training", "error"),
+        [
+            (
+                {"training_type": "partial_sft", "finetuning_type": "all_weights", "freeze_modules": [{"glob": "*"}]},
+                None,
+            ),
+            ({"training_type": "partial_sft", "unfreeze_modules": [{"path": "lm_head"}]}, None),
+            ({"training_type": "partial_sft"}, "needs freeze_modules or unfreeze_modules"),
+            ({"freeze_modules": [{"glob": "*.layers.0.*"}]}, "need training_type partial_sft"),
+            ({"training_type": "partial_sft", "freeze_modules": [{"path": "lm_head", "glob": "*"}]}, "exactly one"),
+            ({"training_type": "partial_sft", "freeze_modules": [{"path": ""}]}, "at least 1"),
+        ],
+        ids=["full-weights", "lora", "partial-without-selectors", "selectors-on-sft", "path-and-glob", "empty"],
+    )
+    def test_module_selectors(self, training: dict[str, object], error: str | None) -> None:
+        """Selectors belong to partial_sft, which needs at least one."""
+        if error is None:
+            TrainingSpec.model_validate(training)
+        else:
+            with pytest.raises(ValidationError, match=error):
+                TrainingSpec.model_validate(training)
+
     def test_output_response_extras_forbidden(self) -> None:
         with pytest.raises(ValidationError):
             OutputResponse.model_validate(

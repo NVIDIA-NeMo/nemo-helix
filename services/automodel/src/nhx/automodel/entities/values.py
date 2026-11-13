@@ -103,3 +103,16 @@ class TrainingType(str, Enum):
     DISTILLATION = "distillation"
     DPO = "dpo"
     GRPO = "grpo"
+
+
+# Partial training types run the same algorithm with only some modules trainable, chosen by
+# training.freeze_modules and unfreeze_modules. Training compiles them as the base algorithm.
+PARTIAL_TRAINING_TYPES: dict[str, TrainingType] = {
+    "partial_sft": TrainingType.SFT,
+    "partial_distillation": TrainingType.DISTILLATION,
+}
+
+
+def base_training_type(training_type: str) -> TrainingType:
+    """The algorithm a job's training type runs: ``partial_sft`` trains as ``sft``, and so on."""
+    return PARTIAL_TRAINING_TYPES.get(training_type) or TrainingType(training_type)

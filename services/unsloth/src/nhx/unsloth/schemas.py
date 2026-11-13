@@ -154,16 +154,66 @@ class LoRAParams(UnslothSchema):
     )
 
 
+class ModuleSelector(UnslothSchema):
+    """One module, and everything under it, picked by exact path or by glob."""
+
+    path: str | None = Field(default=None, min_length=1, description="Exact module path, e.g. 'model.embed_tokens'.")
+    glob: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Case-sensitive shell-style pattern over module paths; '*' also crosses '.', e.g. '*.layers.0.*'.",
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> Self:
+        if (self.path is None) == (self.glob is None):
+            raise ValueError("A module selector takes exactly one of 'path' or 'glob'.")
+        return self
+
+
 class TrainingSpec(UnslothSchema):
     """Algorithm + adapter shape selectors."""
 
-    training_type: Literal["sft"] = "sft"
+    training_type: Literal["sft", "partial_sft"] = Field(
+        default="sft",
+        description=(
+            "Training algorithm. 'partial_sft' trains like 'sft', but only the modules that freeze_modules and "
+            "unfreeze_modules leave trainable."
+        ),
+    )
     finetuning_type: Literal["lora", "all_weights"] = "lora"
     lora: LoRAParams | None = Field(
         default=None,
         description="Required when finetuning_type='lora'. Auto-filled with defaults if omitted.",
     )
     use_gradient_checkpointing: Literal["unsloth", "true", "false"] = "unsloth"
+    freeze_modules: list[ModuleSelector] | None = Field(
+        default=None,
+        description=(
+            "Modules to freeze, each with everything under it. partial_sft only. A selector that matches no "
+            "module fails the job."
+        ),
+    )
+    unfreeze_modules: list[ModuleSelector] | None = Field(
+        default=None,
+        description=(
+            "Modules to train in full, each with everything under it. Wins over freeze_modules. partial_sft only. "
+            "With LoRA they become the adapter's modules_to_save: for Llama, Mistral, Gemma, and Qwen2/3 models "
+            "Unsloth allows only embed_tokens and lm_head, and vLLM serves the result only after a merge."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _selectors_need_partial_type(self) -> Self:
+        # Selectors make training partial, so they belong to partial_sft and nowhere else.
+        partial = self.training_type == "partial_sft"
+        if partial and not (self.freeze_modules or self.unfreeze_modules):
+            raise ValueError("training_type partial_sft needs freeze_modules or unfreeze_modules")
+        if not partial and (self.freeze_modules or self.unfreeze_modules):
+            raise ValueError(
+                f"freeze_modules and unfreeze_modules need training_type partial_sft, not {self.training_type}"
+            )
+        return self
 
     @model_validator(mode="after")
     def _enforce_lora_invariant(self) -> Self:

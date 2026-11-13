@@ -55,12 +55,14 @@ An Automodel job is configured with the following top-level sections: `model`, `
 
 | Parameter | Values | Description | Default |
 |-----------|--------|-------------|---------|
-| `training.training_type` | `sft`, `distillation` | Training method | `sft` |
+| `training.training_type` | `sft`, `distillation`, `partial_sft`, `partial_distillation` | Training method. `partial_sft` and `partial_distillation` train like `sft` and `distillation`, but only the modules that `freeze_modules` and `unfreeze_modules` leave trainable. They work with every `finetuning_type` | `sft` |
 | `training.finetuning_type` | `lora`, `lora_merged`, `all_weights` | Adapter regime. `lora` trains an adapter; `lora_merged` merges it into the base weights; `all_weights` performs full-weight training | `lora` |
 | `training.lora` | `{ rank, alpha, merge, target_modules }` | LoRA configuration (auto-filled with defaults when `finetuning_type` is a LoRA variant) | *(see below)* |
 | `training.max_seq_length` | integer | Maximum sequence length | `2048` |
 | `training.tokenizer_backend` | `nemo_auto`, `nemo_wrapped_auto`, `transformers_auto`, `tokenizers` | How Automodel loads the tokenizer. Leave it unset unless the tokenizer fails to load. Unset, `bi_encoder` and `cross_encoder` use `nemo_wrapped_auto` (the checkpoint's Hugging Face `tokenizer.json`), and other recipes use Automodel's default, `nemo_auto`, which prefers a tokenizer Automodel registers for the model type (for example Mistral's `tekken.json`). Not supported for vision-language models | `null` |
 | `training.mask_generation_prompt` | boolean | Chat (messages) data only. Leaves out of the loss the tokens the chat template writes before each assistant reply: the role header and any empty reasoning block such as `<think></think>` | `false` |
+| `training.freeze_modules` | list of `{ path }` or `{ glob }` | Partial training types only. Modules to freeze, each with everything under it. `glob` uses shell-style patterns where `*` also crosses `.`. A selector that matches nothing fails the job | `null` |
+| `training.unfreeze_modules` | list of `{ path }` or `{ glob }` | Partial training types only. Modules to make trainable; wins over `freeze_modules` and over the frozen vision tower of vision-language jobs. With `lora` or `lora_merged`, Automodel 0.7.0 trains these modules but does not save them in the adapter, so they are lost | `null` |
 
 <Note>
 
@@ -206,10 +208,12 @@ Full-weight training (`training.finetuning_type: "all_weights"`) cannot be combi
 
 | Parameter | Values | Description | Default |
 |-----------|--------|-------------|---------|
-| `training.training_type` | `sft` | Training method | `sft` |
+| `training.training_type` | `sft`, `partial_sft` | Training method. `partial_sft` trains like `sft`, but only the modules that `freeze_modules` and `unfreeze_modules` leave trainable | `sft` |
 | `training.finetuning_type` | `lora`, `all_weights` | Adapter regime. `lora` trains an adapter; `all_weights` performs full-weight training | `lora` |
 | `training.lora` | `LoRAParams` object | LoRA configuration (auto-filled with defaults when `finetuning_type` is `lora`) | *(see below)* |
 | `training.use_gradient_checkpointing` | `unsloth`, `true`, `false` | Gradient checkpointing mode. `unsloth` uses Unsloth's optimized implementation | `unsloth` |
+| `training.freeze_modules` | list of `{ path }` or `{ glob }` | `partial_sft` only. Modules to freeze, each with everything under it, with the same rules as Automodel. A selector that matches nothing fails the job | `null` |
+| `training.unfreeze_modules` | list of `{ path }` or `{ glob }` | `partial_sft` only. Modules to train in full; wins over `freeze_modules`. With `lora` they become the adapter's `modules_to_save` (see the warning below) | `null` |
 
 LoRA parameters (`training.lora`):
 
@@ -224,10 +228,19 @@ LoRA parameters (`training.lora`):
 | `random_state` | LoRA initialization seed | `3407` |
 | `use_dora` | Use weight-decomposed LoRA (DoRA). Can improve quality at low ranks with additional training overhead | `false` |
 | `loftq_config` | LoftQ initialization configuration for quantized base models | `null` |
-| `modules_to_save` | Additional non-LoRA modules to train and save in full, such as `embed_tokens` or `lm_head` | `null` |
+| `modules_to_save` | Additional non-LoRA modules to train and save in full, such as `embed_tokens` or `lm_head` (see the warning below) | `null` |
 | `layers_to_transform` | Layer index or list of layer indexes to receive LoRA; `null` applies LoRA to all layers | `null` |
 | `layer_replication` | Layer-replication ranges, such as `[[0, 16], [8, 24]]` | `null` |
 | `init_lora_weights` | LoRA initialization: `true`, `false`, `gaussian`, `pissa`, `olora`, or `loftq` | `true` |
+
+<Warning>
+
+Fully trained modules in a LoRA adapter, from `lora.modules_to_save` or from `unfreeze_modules` with `finetuning_type: lora`, have two limits:
+
+- For Llama, Mistral, Gemma, and Qwen2/Qwen3 models, Unsloth accepts only `embed_tokens` and `lm_head`. Any other module fails the job; use `finetuning_type: all_weights` to train it.
+- vLLM can't serve the adapter unmerged, because it rejects adapters that carry full modules. Set `output.save_method` to `merged_16bit` and deploy the merged model.
+
+</Warning>
 
 ### Schedule
 
