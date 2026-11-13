@@ -112,7 +112,7 @@ def build_job_run_observation(
     plugins = get_job_telemetry_plugins(custom_fields)
     return JobRunObservation(
         job_type=_job_type_bucket(source),
-        tool_category=job_tool_category(source.strip().lower().replace("_", "-"), plugins),
+        tool_category=job_tool_category(source.strip().lower().replace("_", "-").replace(" ", "-"), plugins),
         status=status if status in {*_STATUS_MAP, "paused"} else "undefined",
         duration_sec=_duration_sec(created_at, updated_at),
         plugins=plugins,

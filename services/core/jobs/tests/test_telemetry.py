@@ -109,6 +109,31 @@ def test_token_count_provenance_and_bounds(raw: object, expected: int) -> None:
     assert telemetry.event.event_id.version == 4
 
 
+@pytest.mark.parametrize(
+    ("source", "plugins", "expected"),
+    [
+        (" Data Designer ", [], "data-designer"),
+        (" DATA_DESIGNER ", [], "data-designer"),
+        (" post training ", [], "post-training"),
+        ("unknown source", ["nemo-evals-plugin"], "evals"),
+        ("unknown source", [], "unknown"),
+    ],
+)
+def test_job_tool_category_normalizes_source_and_preserves_plugin_lookup(
+    source: str, plugins: list[str], expected: str
+) -> None:
+    telemetry = build_job_run_telemetry(
+        source=source,
+        status="completed",
+        status_details={},
+        custom_fields=build_job_telemetry_custom_fields("session-123", plugins=plugins),
+        created_at=None,
+        updated_at=None,
+    )
+    assert telemetry is not None
+    assert telemetry.event.tool_category == expected
+
+
 def test_redact_endpoint_strips_query_and_credentials() -> None:
     endpoint = "https://marker" + "@example.test:8443/events?debug=value"
     assert _redact_endpoint(endpoint) == "https://example.test:8443/events?<redacted>"
