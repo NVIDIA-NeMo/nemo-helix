@@ -31,10 +31,6 @@ export const parseRawAttributes = (raw: string | null | undefined): Record<strin
 export const readRawAttribute = (span: Span, key: string): unknown =>
   parseRawAttributes(span.raw_attributes)[key];
 
-/** Narrow an unknown raw value to a non-empty string, else undefined. */
-export const asString = (value: unknown): string | undefined =>
-  typeof value === 'string' && value !== '' ? value : undefined;
-
 /** Narrow an unknown raw value to a number, else undefined. */
 export const asNumber = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) ? value : undefined;

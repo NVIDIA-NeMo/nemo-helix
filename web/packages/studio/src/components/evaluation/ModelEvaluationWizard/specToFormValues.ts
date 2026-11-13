@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { asNonEmptyString } from '@nemo/common/src/utils/asString';
 import {
   type CanonicalField,
   EMPTY_FIELD_MAPPING,
@@ -19,9 +20,6 @@ import type {
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 
-const asString = (value: unknown): string | undefined =>
-  typeof value === 'string' && value ? value : undefined;
-
 /**
  * The judge model as the select holds it, a ``workspace/name`` ref. Saved configs
  * store that ref; ones saved before carry an inline ``{ url, name }`` with a bare
@@ -29,7 +27,7 @@ const asString = (value: unknown): string | undefined =>
  */
 const judgeModelRef = (model: unknown, workspace: string): string => {
   if (typeof model === 'string') return model;
-  const name = asString(asRecord(model).name);
+  const name = asNonEmptyString(asRecord(model).name);
   return name ? `${workspace}/${name}` : '';
 };
 
@@ -52,8 +50,8 @@ const findMetric = (
  *  anything else is a range. */
 const toPanelScore = (raw: unknown): PanelScoreFormData => {
   const score = asRecord(raw);
-  const name = asString(score.name) ?? '';
-  const description = asString(score.description) ?? '';
+  const name = asNonEmptyString(score.name) ?? '';
+  const description = asNonEmptyString(score.description) ?? '';
   if (Array.isArray(score.rubric)) {
     return {
       scoreType: 'rubric',
@@ -61,9 +59,9 @@ const toPanelScore = (raw: unknown): PanelScoreFormData => {
       description,
       rubric: score.rubric.map((entry) => {
         const level = asRecord(entry);
-        const levelDescription = asString(level.description);
+        const levelDescription = asNonEmptyString(level.description);
         return {
-          label: asString(level.label) ?? '',
+          label: asNonEmptyString(level.label) ?? '',
           ...(levelDescription ? { description: levelDescription } : {}),
           value: Number(level.value),
         };
@@ -107,12 +105,12 @@ export const specToFormValues = (
   const mapping = asRecord(spec.field_mapping);
   const fieldMapping = { ...EMPTY_FIELD_MAPPING };
   for (const field of Object.keys(fieldMapping) as CanonicalField[]) {
-    fieldMapping[field] = asString(mapping[field]) ?? '';
+    fieldMapping[field] = asNonEmptyString(mapping[field]) ?? '';
   }
 
   const judgeMessages = asRecord(judge?.prompt_template).messages;
   const judgePrompt = Array.isArray(judgeMessages)
-    ? (asString(asRecord(judgeMessages[0]).content) ?? null)
+    ? (asNonEmptyString(asRecord(judgeMessages[0]).content) ?? null)
     : null;
 
   const selected = new Set((spec.metrics ?? []).map((bundle) => bundle.metric_type));
