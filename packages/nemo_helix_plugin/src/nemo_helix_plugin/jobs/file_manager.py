@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Protocol
 
 import anyio
+from anyio.to_thread import run_sync
 from filesets import AsyncFilesetFileSystem, FilesetFileSystem, build_fileset_ref, parse_fileset_ref
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.schemas import FileStorageType
@@ -85,6 +86,43 @@ async def _list_local_files(local_path: Path) -> list[str]:
 def _list_local_files_sync(local_path: Path) -> list[str]:
     """List all files in a local directory recursively."""
     return [str(file_path.relative_to(local_path)) for file_path in local_path.rglob("*") if file_path.is_file()]
+
+
+def _stage_local_files(
+    local_path: Path, staging_root: Path, ignore_patterns: list[str] | str | None
+) -> tuple[Path, list[str]]:
+    """Acquire a complete upload copy before sending any directory contents.
+
+    Runtime-owned files can disappear between traversal and opening them (for
+    example, a harness finishing a temporary clone). Restart acquisition from a
+    fresh listing in that case; never omit one failed file from an existing
+    manifest. Persistent churn and all other filesystem errors still fail the
+    upload. The caller owns ``staging_root`` and keeps it until upload finishes.
+    Staging needs temporary disk space for the selected directory contents; a
+    full temporary filesystem is an upload failure, not a reason to omit files.
+
+    This stabilizes the upload inputs, not concurrent in-place writes: producers
+    must still finish writing their result files before publishing them.
+    """
+    for attempt in range(3):
+        snapshot = staging_root / "files"
+        snapshot.mkdir()
+        try:
+            if not local_path.is_dir():
+                raise FileNotFoundError(f"Result directory no longer exists: {local_path}")
+            files = _filter_files_by_patterns(_list_local_files_sync(local_path), ignore_patterns)
+            for rel_path in files:
+                destination = snapshot / rel_path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(local_path / rel_path, destination)
+        except FileNotFoundError:
+            shutil.rmtree(snapshot)
+            if attempt == 2 or not local_path.is_dir():
+                raise
+            logger.warning("Result directory changed during staging; retrying %s", local_path)
+        else:
+            return snapshot, files
+    raise AssertionError("Unreachable: staging either returns or raises")
 
 
 class FileManager(Protocol):
@@ -185,10 +223,10 @@ class FilesetFileManager(BaseFilesetFileManager):
         """Upload file or directory to fileset."""
         full_remote_path = self._fileset_path(remote_path)
         if local_path.is_dir():
-            all_files = _list_local_files_sync(local_path)
-            files_to_upload = _filter_files_by_patterns(all_files, ignore_patterns)
-            for rel_path in files_to_upload:
-                self._fs.put_file(str(local_path / rel_path), f"{full_remote_path}/{rel_path}")
+            with tempfile.TemporaryDirectory(prefix="nemo-result-upload-") as staging_dir:
+                snapshot, files_to_upload = _stage_local_files(local_path, Path(staging_dir), ignore_patterns)
+                for rel_path in files_to_upload:
+                    self._fs.put_file(str(snapshot / rel_path), f"{full_remote_path}/{rel_path}")
         else:
             self._fs.put_file(str(local_path), full_remote_path)
         return self.url(remote_path)
@@ -251,10 +289,12 @@ class AsyncFilesetFileManager(BaseFilesetFileManager):
         """Upload file or directory to fileset."""
         full_remote_path = self._fileset_path(remote_path)
         if local_path.is_dir():
-            all_files = await _list_local_files(local_path)
-            files_to_upload = _filter_files_by_patterns(all_files, ignore_patterns)
-            for rel_path in files_to_upload:
-                await self._fs._put_file(str(local_path / rel_path), f"{full_remote_path}/{rel_path}")
+            with tempfile.TemporaryDirectory(prefix="nemo-result-upload-") as staging_dir:
+                snapshot, files_to_upload = await run_sync(
+                    _stage_local_files, local_path, Path(staging_dir), ignore_patterns
+                )
+                for rel_path in files_to_upload:
+                    await self._fs._put_file(str(snapshot / rel_path), f"{full_remote_path}/{rel_path}")
         else:
             await self._fs._put_file(str(local_path), full_remote_path)
         return self.url(remote_path)
