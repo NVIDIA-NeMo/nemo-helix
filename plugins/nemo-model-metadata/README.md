@@ -1,0 +1,36 @@
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+# Model metadata plugin
+
+Fills in `metadata` on Model entities that a ModelProvider serves: display name, description, family, capabilities, input and output modalities, parameter count, context length, and maximum output tokens.
+
+A background controller (`model-metadata`) checks every Model entity that lists a provider. It asks each configured source about the model's upstream id (the provider's `served_model_name`) and keeps, for each field, the value from the first source that has one. The result is written with `PATCH /v2/workspaces/{workspace}/models/{name}`.
+
+## Sources
+
+| Source | What it reads | Fields it usually fills |
+| --- | --- | --- |
+| `provider` | The provider's own `GET /v1/models`, through the inference gateway provider route, so the provider's credentials are used | OpenRouter and similar: name, description, modalities, context length, max output, tool calling. vLLM: context length |
+| `ngc` | The NGC catalog entry behind a build.nvidia.com model (`/v2/endpoints/{org}/{name}/spec` and `/v2/endpoints/{org}/{name}`), only for providers on `integrate.api.nvidia.com`. The endpoint name comes from the model id, and an entry whose spec names a different model is ignored | Description, capabilities, modalities, parameter count, context length |
+| `models.dev` | The public [models.dev](https://models.dev) catalog. Only the catalog provider that serves the ModelProvider's host is used, for example `integrate.api.nvidia.com` for build.nvidia.com models, `api.openai.com`, or any regional Bedrock host. Self-hosted providers get nothing from this source | Everything except parameter count |
+
+## Behavior
+
+- Metadata with an empty `sources` list counts as set by hand, and the controller never overwrites it.
+- Fetched metadata is refreshed after `refresh_interval_seconds`. A model no source knows is retried after the same interval.
+- Models without a provider, such as fileset-only checkpoints, are skipped.
+
+## Configuration
+
+Set under `platformConfig.model-metadata` in Helm, or with `NHX_MODEL_METADATA_*` environment variables.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `sources` | `["provider", "ngc", "models.dev"]` | Sources in priority order. Remove one to stop calling it, for example on air-gapped installs. |
+| `interval_seconds` | `300` | Seconds between reconcile cycles |
+| `refresh_interval_seconds` | `86400` | Seconds before metadata, or a lookup that found nothing, is fetched again |
+| `request_timeout_seconds` | `15` | Timeout for each request |
+| `ngc_url` | `https://api.ngc.nvidia.com` | NGC catalog API URL |
+| `ngc_org` | `qc69jvmznzxy` | NGC org that publishes the build.nvidia.com endpoints |
+| `models_dev_url` | `https://models.dev/api.json` | Catalog URL, for a mirror |
