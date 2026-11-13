@@ -18,7 +18,9 @@ export const GatewayPanel: FC<{ model: ModelEntity }> = ({ model }) => {
     query: { retry: false },
   });
 
-  if (isError || !virtualModel) return null;
+  // The provider reconciler creates a passthrough per served model; the Virtual Models list hides
+  // those, so linking to one points at something the user can't find.
+  if (isError || !virtualModel || virtualModel.autoprovisioned) return null;
 
   return (
     <DetailPanel
