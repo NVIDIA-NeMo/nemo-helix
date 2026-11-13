@@ -1,7 +1,6 @@
 ---
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-
 title: "Fine-Tune Nemotron 3.5 Super VL on CORD-v2"
 description: ""
 ---
@@ -12,7 +11,7 @@ description: ""
   </a>
 </div>
 
-{/* Temporarily disabled in E2E: the Super VL path needs 8 GPUs and exceeds the cell timeout. */}
+<!-- Temporarily disabled in E2E: the Super VL path needs 8 GPUs and exceeds the cell timeout. -->
 
 # Fine-Tune Nemotron 3.5 Super VL on CORD-v2
 
@@ -94,9 +93,8 @@ PROFILES = {
     },
 }
 profile = PROFILES[PROFILE]
-```
 
-`max_seq_length` 8192 on the Super VL profile is the training length, not the 114,688-token context used at serving time. `max_steps` 400 is the upstream recipe length. The 8-GPU learning rate, rank, and expert-parallel layout are that same upstream reference.
+```
 
 ## 2. Initialize the client
 
@@ -116,9 +114,9 @@ from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.models.types import CreateModelEntityRequest, UpdateModelEntityRequest
-from nemo_helix_plugin.schema import SecretRef
 
 client = NemoClient.from_config()
+
 ```
 
 ## 3. Prepare CORD-v2
@@ -180,9 +178,7 @@ def load_split(split: str, limit: int | None) -> Any:
 
 
 output = Path("cord-v2")
-train_count = write_split(
-    load_split("train", profile["train_limit"]), output / "train", "train.jsonl", "train"
-)
+train_count = write_split(load_split("train", profile["train_limit"]), output / "train", "train.jsonl", "train")
 validation_count = write_split(
     load_split("validation", profile["validation_limit"]),
     output / "validation",
@@ -190,6 +186,7 @@ validation_count = write_split(
     "validation",
 )
 print(f"Wrote {train_count} train rows and {validation_count} validation rows to {output}")
+
 ```
 
 ## 4. Upload the fileset
@@ -210,6 +207,7 @@ FilesetFileSystem(client=FilesClient.from_client(client)).put(
     rpath=f"default/{dataset_name}/",
     recursive=True,
 )
+
 ```
 
 ## 5. Register the model
@@ -254,6 +252,7 @@ while True:
     if time.time() > deadline:
         raise TimeoutError("Model spec did not report a vision tower")
     time.sleep(10)
+
 ```
 
 ## 6. Dry-run, then train
@@ -295,8 +294,9 @@ spec = AutomodelJobInput(
     output={"name": output_name},
     deployment_config=deployment_config,
 )
+Path("job.json").write_text(spec.model_dump_json(indent=2), encoding="utf-8")
+print("Wrote job.json. Dry-run with: nemo customization automodel --job-json ./job.json --workspace default --dry-run")
 
-print(spec.model_dump_json(indent=2))
 ```
 
 Write that JSON to `job.json` and dry-run before submitting. A dry run checks the spec, the model and dataset, and the first rows of each file. It creates nothing.
@@ -307,20 +307,30 @@ nemo customization automodel --job-json ./job.json --workspace default --dry-run
 
 ```python
 customization = Customization.from_client(client)
-job = customization.automodel.jobs.create(
-    spec=spec, workspace="default", name=f"cord-lora-{job_suffix}"
-)
+job = customization.automodel.jobs.create(spec=spec, workspace="default", name=f"cord-lora-{job_suffix}")
 print(job.job.name)
+
 ```
 
 ## 7. Send one image
 
-Wait for the deployment, then for the composite adapter route. READY can arrive before that route exists.
+Wait for the job to finish. The deployment is created in the last step, so looking it up earlier fails. Then wait for the deployment, and for the composite adapter route. READY can arrive before that route exists.
 
 ```python
+import time
+
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 
+status = None
+while True:
+    status = client.jobs.get_job_status(name=job.job.name, workspace="default").data()
+    print(f"Status: {status.status}")
+    if status.status.lower() in ("completed", "failed", "cancelled", "error"):
+        break
+    time.sleep(15)
+
+assert status.status.lower() == "completed"
 
 def find_deployment(model_entity: str):
     configs = client.models.list_deployment_configs(
@@ -358,9 +368,7 @@ response = InferenceGatewayClient.from_client(client).openai_post(
                     "content": [
                         {
                             "type": "image_url",
-                            "image_url": {
-                                "url": f"fileset://default/{dataset_name}#validation/images/00000.png"
-                            },
+                            "image_url": {"url": f"fileset://default/{dataset_name}#validation/images/00000.png"},
                         },
                         {"type": "text", "text": CORD_PROMPT},
                     ],
@@ -373,6 +381,7 @@ response = InferenceGatewayClient.from_client(client).openai_post(
     ),
 )
 print(response)
+
 ```
 
 ## 8. Score the first 20 validation receipts
@@ -428,6 +437,7 @@ similarity = evaluator.submit(
     **common,
 )
 print(exact, similarity)
+
 ```
 
 More on the prompt template: [Images in the Prompt](/documentation/evaluate-models/metrics/model-configuration#images-in-the-prompt).

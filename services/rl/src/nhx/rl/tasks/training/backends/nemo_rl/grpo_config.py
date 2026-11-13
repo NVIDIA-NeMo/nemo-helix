@@ -12,10 +12,9 @@ from typing import Any
 
 import yaml
 from nhx.customization_common.schemas.checkpoint import (
-    VLM_LORA_EXCLUDE_MODULES,
     CheckpointTraits,
-    lora_uses_default_targets,
     traits_from_step_model,
+    vlm_lora_exclude_modules,
 )
 from nhx.customization_common.service.constants import (
     DEFAULT_ENVIRONMENT_PATH,
@@ -57,7 +56,11 @@ from nhx.rl.tasks.training.datasets.validation import DatasetValidator
 logger = logging.getLogger(__name__)
 
 
-def _build_lora_cfg(customizer_config: TrainingStepConfig, is_vlm: bool = False) -> dict[str, Any]:
+def _build_lora_cfg(
+    customizer_config: TrainingStepConfig,
+    is_vlm: bool = False,
+    checkpoint_model_name: str | None = None,
+) -> dict[str, Any]:
     """Map TrainingStepConfig LoRA settings onto NeMo-RL DTensor lora_cfg."""
     enabled = customizer_config.training.finetuning_type in (FinetuningType.LORA, FinetuningType.LORA_MERGED)
     lora = customizer_config.training.lora
@@ -69,9 +72,14 @@ def _build_lora_cfg(customizer_config: TrainingStepConfig, is_vlm: bool = False)
     use_triton = (tp == 1) if requested_triton is None else requested_triton
     target_modules = list(lora.target_modules) if lora and lora.target_modules else []
     exclude_modules = list(lora.exclude_modules) if lora and lora.exclude_modules else []
-    if is_vlm and enabled and lora_uses_default_targets(target_modules, exclude_modules):
+    # A named target list is the caller's filter. An exclude list is unioned with the
+    # vision patterns so ``*.out_proj`` does not drop the vision-tower freeze.
+    if is_vlm and enabled and (not target_modules or target_modules == ["*proj"]):
         target_modules = []
-        exclude_modules = list(VLM_LORA_EXCLUDE_MODULES)
+        exclude_modules = vlm_lora_exclude_modules(
+            exclude_modules,
+            checkpoint_model_name=checkpoint_model_name,
+        )
     return {
         "enabled": enabled,
         "target_modules": target_modules,
@@ -592,7 +600,11 @@ def compile_grpo_config(
     model_path = customizer_config.model.path
     precision = _adapt_precision(customizer_config.model.precision)
     parallelism = customizer_config.parallelism
-    lora_cfg = _build_lora_cfg(customizer_config, is_vlm=traits.has_vision_tower)
+    lora_cfg = _build_lora_cfg(
+        customizer_config,
+        is_vlm=traits.has_vision_tower,
+        checkpoint_model_name=traits.checkpoint_model_name,
+    )
     dynamic_batching_cfg, sequence_packing_cfg = _build_batching_config(
         customizer_config, grpo_hp, is_vlm=traits.has_vision_tower
     )
