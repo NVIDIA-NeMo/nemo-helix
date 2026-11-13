@@ -93,6 +93,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --python /app/.venv/bin/python \
         --output /app/.source-distributions/nhx-api
 
+# Empty writable directories for the non-root nvs user (UID 1000, GID 0 so
+# OpenShift's arbitrary UIDs, which always get GID 0, can write too). COPY --chown
+# only sets ownership on directories it creates, so seed them from here.
+RUN mkdir -p /nvs-skel/home/nvs/.cache /nvs-skel/app/.anonymizer-artifacts && \
+    chmod -R g=u /nvs-skel/home/nvs /nvs-skel/app/.anonymizer-artifacts
+
 FROM ${NHX_API_RUNTIME_BASE} AS runtime
 WORKDIR /app
 
@@ -118,6 +124,12 @@ COPY --from=root-busybox /bin/dirname /bin/dirname
 
 ENV USERNAME=nvs \
     HOME=/home/nvs
+# Home and cache (garak writes ~/.cache/garak on import) and the anonymizer's
+# working-directory artifacts must be writable when the pod runs as UID 1000.
+COPY --chown=1000:0 --from=builder /nvs-skel/home/nvs/ /home/nvs/
+COPY --chown=1000:0 --from=builder /nvs-skel/app/.anonymizer-artifacts/ /app/.anonymizer-artifacts/
+# COPY creates the destination directories 755; make them group-writable too.
+RUN chmod g=u /home/nvs /app/.anonymizer-artifacts
 # DuckDB extension cache (aws, httpfs) for S3 log storage
 COPY --chown=1000:1000 --from=builder /root/.duckdb /home/nvs/.duckdb
 COPY --from=builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
