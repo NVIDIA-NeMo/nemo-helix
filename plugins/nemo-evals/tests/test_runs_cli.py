@@ -116,10 +116,10 @@ def submitting(monkeypatch):
         get_image_build=builds.get_image_build,
     )
     tasksets = SimpleNamespace(
-        retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=MEMBERS),
+        retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=MEMBERS, revision=3),
         replace=lambda name, taskset, workspace: seen.published.append(name),
         list_revisions=lambda name, workspace, page_size: SimpleNamespace(
-            data=[SimpleNamespace(content_hash="3" * 64)]
+            data=[SimpleNamespace(revision=3, content_hash="3" * 64)]
         ),
     )
     fake = SimpleNamespace(tasks=tasks, tasksets=tasksets)
@@ -229,6 +229,16 @@ def test_a_refused_task_is_listed_with_the_command_that_submits_the_others(submi
         f"Submit the other 1 with: nemo evals runs submit --taskset {shlex.quote(STORED)} --sandbox-profile large "
         "--tasks 1",
     ]
+
+
+def test_the_recovery_command_names_the_revision_its_indexes_count_not_a_taskset_that_may_have_moved(submitting):
+    submitting.reject = _rejected(("a", "gpu_unsupported"))
+    result = submitting.invoke("--taskset", "ac9/deep-swe-162c7ea7")  # no digest: the current revision
+    assert result.exit_code == 1
+    assert result.output.splitlines()[-1] == (
+        f"Submit the other 1 with: nemo evals runs submit --taskset 'ac9/deep-swe-162c7ea7#{'3' * 64}' --tasks 1"
+    )
+    assert submitting.bodies[0]["spec"]["tasks"] == "ac9/deep-swe-162c7ea7"  # what's submitted is unchanged
 
 
 def test_a_task_still_waiting_for_its_image_points_to_the_builds_instead(submitting):

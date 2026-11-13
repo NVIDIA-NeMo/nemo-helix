@@ -30,11 +30,12 @@ from nemo_evals.runs_cli import (
     create_taskset,
     dataset_flag,
     failed_builds,
+    pin_taskset_ref,
     qualify_ref,
     read_builds,
     request_builds,
     tasks_without,
-    taskset_members,
+    taskset_members_at,
     wait_for_builds,
 )
 from nemo_evals.sdk.resources import Evaluator
@@ -155,12 +156,12 @@ def add_tasksets_commands(app: typer.Typer, client_factory: Callable[[], NemoCli
 
 def _build_images(evaluator: Evaluator, ref: str, *, wait: bool, status: bool, poll_seconds: float, flag: str) -> int:
     """``build-images``' work; returns its exit code."""
-    refs = taskset_members(evaluator, ref)
+    refs, revision = taskset_members_at(evaluator, ref)
     if status:
         builds = read_builds(evaluator, refs)
         code = _print_status(builds)
 
-        if (hint := _submit_ready_hint(ref, builds, flag)) is not None:
+        if (hint := _submit_ready_hint(evaluator, ref, revision, builds, flag)) is not None:
             typer.echo(hint)
 
         return code
@@ -175,7 +176,7 @@ def _build_images(evaluator: Evaluator, ref: str, *, wait: bool, status: bool, p
     if failed_builds(builds) is not None:
         typer.echo("Rerun this command to retry the failed builds.")
 
-        if (hint := _submit_ready_hint(ref, builds, flag)) is not None:
+        if (hint := _submit_ready_hint(evaluator, ref, revision, builds, flag)) is not None:
             typer.echo(hint)
 
         return 1
@@ -184,8 +185,17 @@ def _build_images(evaluator: Evaluator, ref: str, *, wait: bool, status: bool, p
     return 0
 
 
-def _submit_ready_hint(ref: str, builds: dict[str, ImageBuild] | dict[str, ImageBuild | None], flag: str) -> str | None:
+def _submit_ready_hint(
+    evaluator: Evaluator,
+    ref: str,
+    revision: int,
+    builds: dict[str, ImageBuild] | dict[str, ImageBuild | None],
+    flag: str,
+) -> str | None:
     """The command that submits taskset ``ref``'s tasks whose builds are ready, once every other one has failed.
+
+    ``--tasks`` counts the members of ``revision``, the one ``builds`` were read for, so the command names that
+    revision rather than ``ref``, which may point at a newer one by the time it's run.
 
     A build that keeps failing may never be fixed by a retry, so the ready tasks can run without it. None while
     a build is still going or was never requested (rerunning build-images is the next step then), or when no
@@ -203,8 +213,9 @@ def _submit_ready_hint(ref: str, builds: dict[str, ImageBuild] | dict[str, Image
 
     count, value = option
     tasks = f"{count} ready task{'s' if count != 1 else ''}"
+    pinned = shlex.quote(pin_taskset_ref(evaluator, ref, revision))
 
-    return f"Or submit the {tasks} with: nemo evals runs submit --taskset {shlex.quote(ref)} --tasks {value}{flag}"
+    return f"Or submit the {tasks} with: nemo evals runs submit --taskset {pinned} --tasks {value}{flag}"
 
 
 def _print_status(builds: dict[str, ImageBuild | None], now: datetime | None = None) -> int:

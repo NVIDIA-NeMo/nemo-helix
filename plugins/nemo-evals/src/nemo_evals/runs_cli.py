@@ -346,11 +346,40 @@ def qualify_ref(ref: str, workspace: str) -> str:
     return ref if "/" in head else f"{workspace}/{head}{hash_}{digest}"
 
 
-def taskset_members(evaluator: Evaluator, ref: str) -> list[str]:
-    """The task refs of taskset ``ref`` (``workspace/name[#digest]``), pinned by digest as stored."""
+def taskset_members_at(evaluator: Evaluator, ref: str) -> tuple[list[str], int]:
+    """The task refs of taskset ``ref`` (``workspace/name[#digest]``), pinned by digest as stored, and its revision.
+
+    The revision is the ordinal of the one the members were read from, which ``pin_taskset_ref`` turns into a
+    digest later: an unpinned ``ref`` names whichever revision is current, and that can change in between.
+    """
     workspace, name, digest = _split_ref(ref)
     taskset = evaluator.tasksets.retrieve(name, revision=digest or None, workspace=workspace)
-    return sorted(str(member.root if isinstance(member, TaskRef) else member) for member in taskset.tasks)
+    members = sorted(str(member.root if isinstance(member, TaskRef) else member) for member in taskset.tasks)
+    return members, taskset.revision
+
+
+def taskset_members(evaluator: Evaluator, ref: str) -> list[str]:
+    """The task refs of taskset ``ref`` (``workspace/name[#digest]``), pinned by digest as stored."""
+    return taskset_members_at(evaluator, ref)[0]
+
+
+def pin_taskset_ref(evaluator: Evaluator, ref: str, revision: int) -> str:
+    """``ref`` as ``workspace/name#<content digest>`` of revision ``revision``, the one its members were read from.
+
+    A ``--tasks`` index counts one revision's members, so a command that carries one must name that revision, not
+    a taskset name that may by then point at another. ``ref`` is returned as given when it already has a digest
+    or the digest can't be read: this only improves a printed hint, so it never fails the command.
+    """
+    if "#" in ref:
+        return ref
+    workspace, name, _ = _split_ref(ref)
+    try:
+        for item in evaluator.tasksets.list_revisions(name, workspace=workspace, page_size=100).data:
+            if item.revision == revision and item.content_hash:
+                return f"{ref}#{item.content_hash}"
+    except NemoClientError:
+        pass
+    return ref
 
 
 def tasks_without(refs: Sequence[str], left_out: Collection[str]) -> tuple[int, str] | None:
@@ -780,6 +809,13 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         submitting_key: str | None = None
         spec: dict[str, Any] | None = None
         source: tuple[str, str | None] | None = parse_dataset(intake_dataset) if intake_dataset else None
+        stored_revision: int | None = None  # of the --taskset the members were read from, when it names no digest
+
+        def recovery_ref(ref: str) -> str:
+            """``ref`` as a recovery command names it: ``--tasks`` indexes count ``stored_revision``'s members."""
+            if ref == stored_ref and stored_revision is not None:
+                return pin_taskset_ref(Evaluator.from_client(client), ref, stored_revision)
+            return ref
 
         def rerun(ref: str, tasks: str | None = None) -> str:
             """This submit's command for ``ref``: the source flags become ``--taskset``, the run settings stay.
@@ -816,7 +852,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             evaluator = Evaluator.from_client(client)
             spec = _load_spec(spec_file) if spec_file is not None else None
             if stored_ref is not None and tasks is None:
-                refs, taskset_ref = taskset_members(evaluator, stored_ref), stored_ref
+                refs, stored_revision = taskset_members_at(evaluator, stored_ref)
+                taskset_ref = stored_ref
             elif from_stored:
                 base = stored_ref or _spec_taskset(spec_file, spec)
                 refs, total, prefix = select_from_taskset(evaluator, base, tasks, workspace)
@@ -876,9 +913,9 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             raise typer.Exit(code=130) from None
         except (SelectionError, RuntimeError, NemoClientError, ValueError) as exc:
             if isinstance(exc, SubmitRejectedTasksError) and taskset_ref is not None:
-                _explain_rejected_tasks(exc.tasks, refs, taskset_ref, rerun)
+                _explain_rejected_tasks(exc.tasks, refs, recovery_ref(taskset_ref), rerun)
             elif isinstance(exc, BuildsFailedError) and taskset_ref is not None:
-                _explain_failed_builds(exc.builds, taskset_ref, rerun)
+                _explain_failed_builds(exc.builds, recovery_ref(taskset_ref), rerun)
             else:
                 echo(f"Error: {exc}", err=True)
 
