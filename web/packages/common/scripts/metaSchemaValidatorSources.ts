@@ -44,6 +44,21 @@ const GENERATED_BANNER =
 // `ajv/dist/runtime/equal.js`) and emits it verbatim even under `code.esm`.
 const RUNTIME_REQUIRE = /const (\w+) = require\("([^"]+)"\)\.default;/g;
 
+// ajv's runtime helpers are CommonJS (`exports.default = equal`), so what a
+// loader binds depends on the loader. esbuild's interop hands back the
+// function directly; node's native ESM binds the namespace's `default` to
+// `module.exports`, which is itself `{default: fn}` — so a single unwrap is
+// not enough, and calling the result throws `func0 is not a function`. Unwrap
+// until we reach the callable, and fail loudly rather than at first use.
+const INTEROP_HELPER = `function __ajvRuntime(ns) {
+  let value = ns;
+  while (value && typeof value !== 'function' && 'default' in value) value = value.default;
+  if (typeof value !== 'function') {
+    throw new TypeError('ajv runtime helper did not resolve to a function');
+  }
+  return value;
+}`;
+
 /**
  * Rewrite ajv's hard-coded `require()` calls for its runtime helpers into ESM
  * imports, so the module loads in a browser without a CJS interop shim.
@@ -55,7 +70,11 @@ function requiresToEsmImports(code: string): string {
     // node's ESM resolver rejects an extensionless specifier, and @nemo/common
     // is consumed from node as well as from Vite.
     const resolved = specifier.endsWith('.js') ? specifier : `${specifier}.js`;
-    imports.push(`import ${binding} from '${resolved}';`);
+    // See INTEROP_HELPER: the helper unwraps whatever shape the loader hands
+    // us, so the module behaves identically under node and under a bundler.
+    const ns = `__ns_${binding}`;
+    imports.push(`import * as ${ns} from '${resolved}';`);
+    imports.push(`const ${binding} = __ajvRuntime(${ns});`);
     return '';
   });
   // A leftover `require(` means ajv emitted a shape this transform doesn't
@@ -67,8 +86,9 @@ function requiresToEsmImports(code: string): string {
     );
   }
   // Imports hoist, so placing them after the "use strict" prologue ajv emits
-  // is fine and keeps that prologue first.
-  return body.replace('"use strict";', `"use strict";\n${imports.join('\n')}\n`);
+  // is fine and keeps that prologue first. The interop helper is a function
+  // declaration, so it hoists above the `const` bindings that call it.
+  return body.replace('"use strict";', `"use strict";\n${INTEROP_HELPER}\n${imports.join('\n')}\n`);
 }
 
 /** Source text for both generated files. */
