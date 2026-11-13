@@ -5,6 +5,8 @@ import { Collapsible, Flex, Text } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
 import type { ReactNode, Ref } from 'react';
 
+export const WORK_ICON_SIZE = '12';
+
 interface WorkStepProps {
   readonly children: ReactNode;
   readonly contentClassName?: string;
