@@ -58,12 +58,12 @@ describe('DeleteConfirmationModal', () => {
     expect(await screen.findByText('Delete 5 models?')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete 5 Models' })).toBeInTheDocument();
     const list = screen.getByRole('list');
-    expect(within(list).getAllByRole('listitem')).toHaveLength(3);
+    expect(within(list).getAllByRole('listitem')).toHaveLength(4);
     ['alpha', 'beta', 'gamma'].forEach((name) => {
       expect(within(list).getByText(name)).toBeInTheDocument();
     });
     expect(screen.queryByText('delta')).not.toBeInTheDocument();
-    expect(screen.getByText('and 2 more')).toBeInTheDocument();
+    expect(within(list).getByText('and 2 more')).toBeInTheDocument();
   });
 
   it('omits the overflow line when every name fits', async () => {
