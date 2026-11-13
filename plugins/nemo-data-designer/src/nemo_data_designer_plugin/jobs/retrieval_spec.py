@@ -158,6 +158,14 @@ class RetrievalPrepareJobConfig(BaseModel):
     attn_implementation: Literal["sdpa", "flash_attention_2", "eager"] = "sdpa"
     add_bos_token: bool | None = True
     add_eos_token: bool | None = False
+    tokenizer_backend: Literal["nemo_wrapped_auto", "nemo_auto"] = Field(
+        default="nemo_wrapped_auto",
+        description=(
+            "How the mining encoder's tokenizer is loaded. 'nemo_wrapped_auto' uses the checkpoint's Hugging Face "
+            "tokenizer, the one the encoder is served with. 'nemo_auto' lets Automodel prefer a model-type "
+            "tokenizer such as Mistral's tekken.json; use it only for an encoder that ships one."
+        ),
+    )
     dist_backend: str = "nccl"
     dist_timeout_minutes: int = Field(default=30, ge=1)
     mining: RetrievalMiningOptions = Field(default_factory=RetrievalMiningOptions)

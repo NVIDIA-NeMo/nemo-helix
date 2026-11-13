@@ -279,7 +279,7 @@ print(f"ModelSpec: {base_model.spec}")
 
 Submit to the **Automodel** backend using `AutomodelJobInput` with `finetuning_type: lora`. `deployment_config` deploys the base model with LoRA enabled when training finishes and serves the adapter from it. If the base model already has a LoRA-enabled deployment, the job loads the adapter onto that one instead of deploying again.
 
-The hyperparameters follow the Automodel reference recipes for this architecture, [`customizer_nemotron_nano_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_peft.yaml) and [`nemotron_nano_v3_hellaswag_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/nemotron_nano_v3_hellaswag_peft.yaml):
+The hyperparameters follow the Automodel reference recipes for this architecture, [`customizer_nemotron_nano_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.7.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_peft.yaml) and [`nemotron_nano_v3_hellaswag_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.7.0/examples/llm_finetune/nemotron/nemotron_nano_v3_hellaswag_peft.yaml):
 
 - **Expert parallelism:** the 128 experts are sharded across 4 GPUs (`expert_parallel_size=4`, `tensor_parallel_size=1`).
 - **LoRA targets:** `*.out_proj` is excluded because the Mamba output projection runs through a fused kernel that LoRA cannot wrap.

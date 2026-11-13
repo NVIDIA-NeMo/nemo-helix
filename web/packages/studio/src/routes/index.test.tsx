@@ -199,6 +199,22 @@ describe('Routes', () => {
       ).toBe(true);
     });
 
+    it.each([
+      ['false', 'true', false],
+      ['true', 'false', false],
+      ['true', 'true', true],
+    ])(
+      'includes taskset routes only with evals and tasksets on (tasksets=%s, evals=%s)',
+      async (tasksets, evals, expected) => {
+        vi.stubEnv('VITE_FF_TASKSETS_ENABLED', tasksets);
+        vi.stubEnv('VITE_FF_EVALS_ENABLED', evals);
+        const { routes } = await import('@studio/routes/index');
+        [ROUTES.workspace.tasksets, ROUTES.workspace.tasksetDetail].forEach((route) => {
+          expect(findIfRouteExists(routes, route)).toBe(expected);
+        });
+      }
+    );
+
     it('should exclude intake routes if intake is disabled', async () => {
       vi.stubEnv('VITE_FF_CUSTOMIZER_ENABLED', 'true');
       vi.stubEnv('VITE_FF_INTAKE_ENABLED', 'false');

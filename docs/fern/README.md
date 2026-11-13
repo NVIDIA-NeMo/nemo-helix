@@ -114,6 +114,23 @@ regenerate there too.
 
 Fern groups endpoints by their OpenAPI tag in the sidebar (Customizer, Evaluator, Guardrails, …), which replaces the old per-service filter chips. Link to it from other pages with the nav URL `/documentation/reference/api-reference`.
 
+## Library support matrix
+
+`docs/support-matrix.mdx` includes a generated library-version table. `npm run prepare:libraries`
+(also part of `npm run prepare`) reads the workspace `uv.lock`, isolated `docker/locks/**/uv.lock`
+files, and the Garak/AutoModel/NeMo-RL image pins. It writes the gitignored
+`snippets/_snippets/library-versions.mdx`; do not copy versions into the page by hand.
+`npm run check:libraries` detects stale output without rewriting it.
+
+Library families are discovered from locked distribution names, excluding local Helix
+plugin/service packages. Conditional resolutions and isolated environments are retained,
+and source-built libraries show the actual revision rather than an inferred PyPI version.
+These are resolved dependencies, not a promise of compatibility with every release in a range.
+
+When materializing a release, the table is inlined using that release branch's own locks
+and image pins. It never inherits dependency versions from the shared Latest snippet.
+Existing releases without the table include are left unchanged.
+
 ## Release versioning
 
 Fern does not infer docs versions from git tags. The version selector is built from `docs.yml` `versions:` entries, and each entry points at a version-specific nav file.

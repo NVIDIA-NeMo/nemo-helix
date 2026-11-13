@@ -383,7 +383,6 @@ def test_real_authorization_denies_missing_read_list_and_direct_service(tmp_path
         tmp_dir=tmp_path,
         workspaces=["private"],
         projects=[],
-        auth_bundle_cache_seconds=0,
         dependency_overrides={get_taskset_run_service: lambda: service},
     ) as ctx:
         for principal in ["no-run-permissions@example.com", "service:integration-test"]:
@@ -560,7 +559,6 @@ def test_real_authorization_denies_cancel_without_the_permission(
         tmp_dir=tmp_path,
         workspaces=["private"],
         projects=[],
-        auth_bundle_cache_seconds=0,
         dependency_overrides={get_taskset_run_service: lambda: service, get_service_run_store: lambda: run_store},
     ) as ctx:
         for principal in ["no-run-permissions@example.com", "service:integration-test"]:

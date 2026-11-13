@@ -87,6 +87,7 @@ export const flagDefinitions = {
   modelEvaluationFormEnabled: previewFlag('VITE_FF_MODEL_EVALUATION_FORM_ENABLED', true),
   monitorEnabled: previewFlag('VITE_FF_MONITOR_ENABLED'),
   optimizerEnabled: previewFlag('VITE_FF_OPTIMIZER_ENABLED', true),
+  tasksetsEnabled: previewFlag('VITE_FF_TASKSETS_ENABLED'),
 } as const;
 
 // --- Types ---

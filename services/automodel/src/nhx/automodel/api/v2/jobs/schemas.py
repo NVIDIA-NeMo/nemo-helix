@@ -199,6 +199,15 @@ class RetrievalParams(BaseModel):
         default="passage: ",
         description="Literal prefix prepended to each passage. Empty string disables prefixing.",
     )
+    temperature: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Softmax temperature of the training loss: contrastive for bi_encoder, listwise for cross_encoder. "
+            "Omit for 0.02 (bi_encoder) or 1.0 (cross_encoder). A Qwen3 causal reranker scores with raw yes/no "
+            "logits, so this is its only temperature setting."
+        ),
+    )
     export: Optional[ExportParams] = Field(
         default=None,
         description="Output artifact layout and ONNX export settings. Defaults are applied when omitted.",
@@ -239,8 +248,8 @@ class ParallelismParams(BaseModel):
 class BackendParams(BaseModel):
     """Which implementation Automodel uses for each model component.
 
-    Fields default to ``None`` meaning "leave it to Automodel", whose own defaults depend
-    on what the training node provides; only explicitly set values are forwarded.
+    Fields other than ``rope_fusion`` default to ``None`` meaning "leave it to Automodel", whose
+    own defaults depend on what the training node provides; only explicitly set values are forwarded.
     """
 
     attn: Optional[Literal["te", "sdpa", "flex", "eager", "tilelang"]] = Field(
@@ -251,7 +260,11 @@ class BackendParams(BaseModel):
         default=None, description="RMSNorm kernel."
     )
     rope: Optional[Literal["torch", "quack"]] = Field(default=None, description="Rotary embedding kernel.")
-    rope_fusion: Optional[bool] = Field(default=None, description="Fuse rotary embedding into attention.")
+    rope_fusion: Optional[bool] = Field(
+        default=False,
+        description="Fuse rotary embedding into attention. Automodel v0.7.0 turns this off for every model, "
+        "so true has no effect.",
+    )
     experts: Optional[Literal["torch", "te", "gmm", "torch_mm", "torch_mm_mxfp8"]] = Field(
         default=None, description="MoE expert compute kernel."
     )
@@ -294,7 +307,7 @@ class MTPParams(BaseModel):
         default=None,
         description=(
             "Share one weight-tied layer across the prediction depths. Only some Automodel models accept it "
-            "(Nemotron-H in r0.6.0); omit it for others."
+            "(Nemotron-H in r0.7.0); omit it for others."
         ),
     )
     loss_scaling_factor: Optional[float] = Field(
@@ -452,6 +465,13 @@ class _TrainingBase(BaseModel):
         default=True,
         description="Reshuffle training examples each epoch.",
     )
+    mask_generation_prompt: bool = Field(
+        default=False,
+        description=(
+            "Leave out of the loss the tokens the chat template writes before each assistant reply: the role "
+            "header and any empty reasoning block such as '<think></think>'. Chat-format (messages) datasets only."
+        ),
+    )
 
     # --- Model ---
     max_seq_length: int = Field(
@@ -466,6 +486,14 @@ class _TrainingBase(BaseModel):
     attn_implementation: Literal["sdpa", "flash_attention_2", "eager"] = Field(
         default="sdpa",
         description="Attention backend: 'sdpa' (PyTorch native), 'flash_attention_2', or 'eager'.",
+    )
+    tokenizer_backend: Optional[Literal["nemo_auto", "nemo_wrapped_auto", "transformers_auto", "tokenizers"]] = Field(
+        default=None,
+        description=(
+            "How Automodel loads the tokenizer. Omitted, bi_encoder and cross_encoder use 'nemo_wrapped_auto' (the "
+            "checkpoint's Hugging Face tokenizer) and every other recipe uses Automodel's default, 'nemo_auto'. "
+            "Not supported for vision-language models."
+        ),
     )
     seed: Optional[int] = Field(
         default=None,

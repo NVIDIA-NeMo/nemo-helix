@@ -135,6 +135,8 @@ Workspace creation is controlled by the `WorkspaceCreator` role in the `system` 
 
 JobRunner can upload logs from workload containers but does not grant job creation, job management, or workspace read access by itself.
 
+Docker jobs using workload token exchange have a unique actor identity and the verified actor group `nhx:docker:jobs:<workspace>`. Grant that group JobRunner in the matching workspace to enable log uploads. This group is asserted only after validating a live Docker job delegation; it receives no automatic role grants. Granting JobRunner to the submitting user or IdP group alone does not authorize the job actor. Deployment delegations do not receive this job group.
+
 </Note>
 
 ### Inference
