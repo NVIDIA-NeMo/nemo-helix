@@ -204,6 +204,13 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     cliCommand: 'nemo experiments create <experiment-name> --input-file <config>.json',
     skillPrompt: 'Help me log my first experiment with the nemo-experiments-upload skill',
   },
+  metrics: {
+    heading: 'No metrics yet',
+    subheading:
+      'Metrics are reusable scorers. Store one here to run it in any evaluation and track its scores over time.',
+    // Create is a modal owned by the route, so the callsite supplies `onCreate`.
+    createAction: { label: 'Create Metric' },
+  },
   evalComparison: {
     heading: 'No evaluations selected',
     subheading: 'Select evaluations to compare their results side by side.',

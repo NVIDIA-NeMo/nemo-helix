@@ -48,6 +48,7 @@ export const ROUTE_PARAMS = {
   guardrailChecksSubTab: 'guardrailChecksSubTab',
   virtualModelName: 'virtualModelName',
   pluginName: 'pluginName',
+  metricName: 'metricName',
 } as const;
 
 // Just an alias to make the routes more readable
@@ -151,6 +152,10 @@ export const ROUTES = {
     anonymizerNew: `/workspaces/:${P.workspace}/anonymizer/new`,
     anonymizerJob: `/workspaces/:${P.workspace}/anonymizer/:${P.anonymizerJobName}`,
     secrets: `/workspaces/:${P.workspace}/secrets`,
+    /** Stored evaluation metrics (gated by VITE_FF_METRICS_ENABLED). */
+    metrics: `/workspaces/:${P.workspace}/metrics`,
+    metricNew: `/workspaces/:${P.workspace}/metrics/new`,
+    metricDetail: `/workspaces/:${P.workspace}/metrics/:${P.metricName}`,
     guardrails: `/workspaces/:${P.workspace}/guardrails`,
     optimizer: `/workspaces/:${P.workspace}/optimizer`,
     optimizerInsight: `/workspaces/:${P.workspace}/optimizer/:${P.insightId}`,

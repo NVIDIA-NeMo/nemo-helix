@@ -19,6 +19,7 @@ import {
   INFERENCE_PROVIDER_ENABLED,
   INTAKE_ENABLED,
   MEMBERS_ENABLED,
+  METRICS_ENABLED,
   MODEL_DETAILS_ENABLED,
   MODEL_EVALUATION_FORM_ENABLED,
   OPTIMIZER_ENABLED,
@@ -64,6 +65,9 @@ export const gateEvaluationBenchmarksRoutes = (routes: RouteObject | RouteObject
 
 export const gateExperimentRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(EXPERIMENT_ENABLED, routes);
+
+export const gateMetricsRoutes = (routes: RouteObject | RouteObject[]) =>
+  gateRoutes(EVALS_ENABLED && METRICS_ENABLED, routes);
 
 export const gateGuardrailsRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(GUARDRAILS_ENABLED, routes);
@@ -426,6 +430,15 @@ export const getNewFilesetRoute = (workspace: string) => {
 export const getSecretsRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.secrets, { workspace });
 };
+
+export const getMetricsRoute = (workspace: string) =>
+  generatePath(ROUTES.workspace.metrics, { workspace });
+
+export const getNewMetricRoute = (workspace: string) =>
+  generatePath(ROUTES.workspace.metricNew, { workspace });
+
+export const getMetricDetailRoute = (workspace: string, metricName: string) =>
+  generatePath(ROUTES.workspace.metricDetail, { workspace, metricName });
 
 export const getGuardrailsRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.guardrails, { workspace });

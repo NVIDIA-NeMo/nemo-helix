@@ -18,6 +18,7 @@ import {
   ListBullet,
   Radar,
   Rocket,
+  Ruler,
   Secure,
   Sliders,
   Generate,
@@ -80,6 +81,7 @@ export const ENTITY_ICONS = {
   agentEvaluations: ChartBar,
   evaluationSessions: ChartBar,
   experiments: Beaker,
+  metrics: Ruler,
   insightExperiments: Beaker,
   evalComparison: ScmCompare,
 

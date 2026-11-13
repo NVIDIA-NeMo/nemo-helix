@@ -133,6 +133,11 @@ ENV_MAPPINGS: list[EnvMapping] = [
         marker="STUDIO_UI_VITE_FF_MEMBERS_ENABLED", config_path="studio.feature_flags.members_enabled", default="true"
     ),
     EnvMapping(
+        marker="STUDIO_UI_VITE_FF_METRICS_ENABLED",
+        config_path="studio.feature_flags.metrics_enabled",
+        default="false",
+    ),
+    EnvMapping(
         marker="STUDIO_UI_VITE_FF_MODEL_DETAILS_ENABLED",
         config_path="studio.feature_flags.model_details_enabled",
         default="false",

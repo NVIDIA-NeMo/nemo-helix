@@ -40,6 +40,7 @@ export { inferenceProviderRoutes } from '@studio/routes/groups/inferenceProvider
 export { intakeRoutes, getIntakeSideNavItems } from '@studio/routes/groups/intakeRoutes';
 export { jobRoutes, getJobSideNavItems } from '@studio/routes/groups/jobRoutes';
 export { memberRoutes } from '@studio/routes/groups/memberRoutes';
+export { metricRoutes, getMetricSideNavItems } from '@studio/routes/groups/metricRoutes';
 export {
   modelCompareRoutes,
   getModelCompareSideNavItems,
