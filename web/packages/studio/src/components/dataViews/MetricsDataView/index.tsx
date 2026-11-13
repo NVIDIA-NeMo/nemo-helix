@@ -102,15 +102,20 @@ export const MetricsDataView: FC<MetricsDataViewProps> = ({ workspace, onCreate 
   const metrics = useMemo(() => data?.data ?? [], [data?.data]);
 
   const history = useMetricScoreHistory(workspace);
+  // A failed request would leave partial history that reads as complete, so show no scores instead.
+  const scoredResults = useMemo(
+    () => (history.error ? [] : history.results),
+    [history.error, history.results]
+  );
   const primaryTrend = useMemo(
     () =>
       new Map(
         metrics.map((metric) => [
           metric.id,
-          toMetricTrendSeries(metric, toMetricRuns(metric, history.results))[0],
+          toMetricTrendSeries(metric, toMetricRuns(metric, scoredResults))[0],
         ])
       ),
-    [metrics, history.results]
+    [metrics, scoredResults]
   );
 
   const fetchingStatus = isFetching ? 'loading' : undefined;
