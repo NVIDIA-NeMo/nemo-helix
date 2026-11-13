@@ -74,7 +74,8 @@ def _routes(routes: dict[str, dict[str, Any]], seen: list[str]) -> httpx.MockTra
     ("model_id", "expected"),
     [
         ("moonshotai/kimi-k3", ["kimi-k3"]),
-        ("meta/llama-3.1-8b-instruct", ["llama-3.1-8b-instruct", "llama-3_1-8b-instruct"]),
+        ("meta/llama-3.1-8b-instruct", ["llama-3.1-8b-instruct", "llama-3_1-8b-instruct", "llama-3-1-8b-instruct"]),
+        ("z-ai/glm-5.3", ["glm-5.3", "glm-5_3", "glm-5-3"]),
         ("Qwen/Qwen3-32B", ["qwen3-32b"]),
     ],
 )
