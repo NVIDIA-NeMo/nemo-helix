@@ -15,7 +15,7 @@ import { useAuthProfile } from '@studio/providers/auth';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
-import { FC, useCallback, useEffect, useRef } from 'react';
+import { FC, useCallback, useEffect } from 'react';
 import { matchPath, useNavigate } from 'react-router';
 
 type PersonalWorkspaceStatus = 'ready' | 'forbidden' | 'failed';
@@ -104,13 +104,9 @@ export const AuthSuccessRoute: FC = () => {
     }
   }, [navigate, profile, queryClient, toast]);
 
-  // Workspace creation must run once per sign-in, not again whenever a dependency's identity changes.
-  const hasHandledRef = useRef(false);
   useEffect(() => {
-    if (!profile || hasHandledRef.current) return;
-    hasHandledRef.current = true;
     handleAuthenticated();
-  }, [handleAuthenticated, profile]);
+  }, [handleAuthenticated]);
 
   return <Loading />;
 };

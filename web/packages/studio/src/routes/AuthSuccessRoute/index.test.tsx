@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
+import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { createToastMock } from '@nemo/common/src/providers/toast/useToastMock';
 import { logger } from '@nemo/common/src/utils/logger';
 import {
   entitiesCreateWorkspace,
@@ -15,8 +17,13 @@ import { mockUseNavigate } from '@studio/tests/util/mockUseParams';
 import { render } from '@studio/tests/util/render';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { QueryClient } from '@tanstack/react-query';
-import { screen, waitFor } from '@testing-library/react';
+import { waitFor } from '@testing-library/react';
 import { AxiosError, AxiosHeaders } from 'axios';
+
+vi.mock('@nemo/common/src/providers/toast/useToast', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/common/src/providers/toast/useToast')>()),
+  useToast: vi.fn(),
+}));
 
 vi.mock('@nemo/common/src/utils/logger', () => ({
   logger: { error: vi.fn() },
@@ -29,6 +36,7 @@ vi.mock('@nemo/sdk/generated/platform/entity-store', () => ({
 }));
 
 let mockProfile: AuthProfile;
+let toast = createToastMock();
 
 vi.mock('@studio/providers/auth', () => ({
   useAuthProfile: () => mockProfile,
@@ -50,6 +58,8 @@ describe('AuthSuccessRoute', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockProfile = { workspace: 'alray', name: 'alray@nvidia.com', email: 'alray@nvidia.com' };
+    toast = createToastMock();
+    vi.mocked(useToast).mockReturnValue(toast);
   });
 
   afterEach(() => {
@@ -153,7 +163,7 @@ describe('AuthSuccessRoute', () => {
       await waitFor(() => {
         expect(navigate).toHaveBeenCalledWith(defaultRoute);
       });
-      expect(screen.queryByTestId('mock-toast-error')).not.toBeInTheDocument();
+      expect(toast.error).not.toHaveBeenCalled();
       expect(logger.error).not.toHaveBeenCalled();
     });
 
@@ -167,7 +177,7 @@ describe('AuthSuccessRoute', () => {
         expect(navigate).toHaveBeenCalledWith(defaultRoute);
       });
       expect(mockGetWorkspace).toHaveBeenCalledTimes(2);
-      expect(screen.queryByTestId('mock-toast-error')).not.toBeInTheDocument();
+      expect(toast.error).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -196,12 +206,12 @@ describe('AuthSuccessRoute', () => {
 
       renderRoute();
 
-      expect(await screen.findByTestId('mock-toast-error')).toHaveTextContent(
-        "Couldn't set up your personal workspace alray."
-      );
       await waitFor(() => {
         expect(navigate).toHaveBeenCalledWith(defaultRoute);
       });
+      expect(toast.error).toHaveBeenCalledExactlyOnceWith(
+        "Couldn't set up your personal workspace alray."
+      );
       expect(logger.error).toHaveBeenCalled();
     });
 
