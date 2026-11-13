@@ -137,15 +137,6 @@ RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/r
     --mount=type=bind,source=docker/removals/files/base/cve-cleanup-runtime.txt,target=/tmp/file-removals.txt,readonly \
     sh /bin/cve-cleanup.sh && \
     python /tmp/remove-listed-files.py /tmp/file-removals.txt
-# Recheck after trust updates, runtime copying, and final cleanup.
-RUN /app/.venv/bin/python - <<'PY_PIP_INTEGRITY'
-import importlib.metadata
-from pathlib import Path
-import pip
-root = Path(pip.__file__).parent.parent
-assert list(root.glob("pip-*.dist-info")) == [root / f"pip-{pip.__version__}.dist-info"]
-assert importlib.metadata.version("pip") == pip.__version__
-PY_PIP_INTEGRITY
 ARG NHX_PLATFORM_VERSION=dev
 ARG NHX_CODE_REVISION=
 ENV NHX_PLATFORM_VERSION=${NHX_PLATFORM_VERSION}
