@@ -361,6 +361,31 @@ def test_worker_venv_imports(actor_fqn, module):
 
 
 @pytest.mark.smoke_nhx_rl_training
+@pytest.mark.parametrize(
+    "actor_fqn", sorted(actor for actor, modules in WORKER_VENV_IMPORTS.items() if "vllm" in modules)
+)
+def test_worker_venv_generation_security_versions(actor_fqn):
+    """Check the actual generation workers, not just the driver or upstream lock."""
+    python = RAY_VENVS / actor_fqn / "bin/python"
+    if not python.exists():
+        pytest.skip(f"venv for {actor_fqn} not present; covered by test_worker_venv_prefetched")
+    result = subprocess.run(
+        [
+            str(python),
+            "-c",
+            "from importlib.metadata import version; from packaging.version import Version; "
+            "required = {'vllm': '0.30.0', 'flashinfer-python': '0.6.18.post1', "
+            "'flashinfer-cubin': '0.6.18.post1', 'flashinfer-jit-cache': '0.6.18.post1'}; "
+            "assert all(Version(version(name)) >= Version(floor) for name, floor in required.items()), "
+            "{name: version(name) for name in required}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"generation security versions failed in {python.parent.parent}:\n{result.stderr}"
+
+
+@pytest.mark.smoke_nhx_rl_training
 @pytest.mark.parametrize("actor_fqn", sorted(WORKER_VENV_IMPORTS))
 def test_worker_venv_wandb_opentelemetry_compat(actor_fqn):
     """Same api/sdk skew check as the driver, in each prefetched Ray venv that has wandb."""

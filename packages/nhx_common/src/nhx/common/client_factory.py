@@ -184,8 +184,9 @@ def get_async_nemo_client(
 ) -> AsyncNemoClient:
     """Async counterpart of :func:`get_nemo_client`.
 
-    Uses the explicitly provided ``http_client`` (e.g. from a test fixture), or
-    creates one from the resolved platform endpoint.
+    Borrows an explicitly provided ``http_client`` (e.g. from a test fixture),
+    or owns the new transport created from the resolved platform endpoint.
+    Close the returned client on the event loop where it is used.
     """
     context = build_platform_client_context(
         base_url=base_url,
@@ -200,6 +201,7 @@ def get_async_nemo_client(
         base_url=resolved_base_url,
         workspace=workspace,
         auth=context.async_nemo_client_auth(),
+        owns_http_client=http_client is None,
         default_headers=context.default_headers_or_none(),
         timeout=timeout,
         retry=retry,
