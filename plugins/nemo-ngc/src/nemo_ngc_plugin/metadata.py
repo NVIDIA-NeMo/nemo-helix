@@ -139,4 +139,6 @@ async def _get_json(http: httpx.AsyncClient, url: str) -> dict[str, Any] | None:
         body: object = response.json()
     except ValueError as exc:
         raise SourceUnavailableError(f"NGC returned invalid JSON for {url}") from exc
-    return body if isinstance(body, dict) else None
+    if not isinstance(body, dict):
+        raise SourceUnavailableError(f"NGC returned a non-object response for {url}")
+    return body
