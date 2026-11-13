@@ -194,6 +194,49 @@ def _require_routable_entity(model_cache: ModelCache, entity_id: str) -> None:
         raise_no_providers_for_model_entity(ref.workspace, ref.name)
 
 
+def _model_ids_from_mapping(models: dict[str, object]) -> list[str] | None:
+    """Return model ids from a middleware ``models`` map, or None if the shape is unfamiliar.
+
+    Switchyard stores the ids it writes into ``body["model"]`` as a string or a
+    list of strings under each category (``capable``, ``efficient``, ``judge``).
+    Any other value means this map is not that selection list.
+    """
+    ids: list[str] = []
+    for value in models.values():
+        if isinstance(value, str) and value.strip():
+            ids.append(value.strip())
+            continue
+        if isinstance(value, list) and value and all(isinstance(item, str) and item.strip() for item in value):
+            ids.extend(item.strip() for item in value)
+            continue
+        return None
+    return ids
+
+
+def _replacement_model_ids(virtual_model: VirtualModel) -> list[str] | None:
+    """Ids request middleware writes into ``body["model"]``, when its config names them.
+
+    Returns None when no request-middleware config names those ids. A plain model
+    listed on the VirtualModel is not such a name: middleware may leave the
+    adapter composite in place, and the plain model must not satisfy this check.
+    """
+    found: list[str] = []
+    named = False
+    for call in virtual_model.request_middleware or []:
+        config = call.config if isinstance(call.config, dict) else None
+        models = config.get("models") if config is not None else None
+        if not isinstance(models, dict) or not models:
+            continue
+        ids = _model_ids_from_mapping(models)
+        if ids is None:
+            continue
+        named = True
+        found.extend(ids)
+    if not named:
+        return None
+    return list(dict.fromkeys(found))
+
+
 def _raise_unless_adapter_route_ready(
     model_cache: ModelCache, virtual_model: VirtualModel, workspace: str, model_name: str
 ) -> None:
@@ -203,13 +246,15 @@ def _raise_unless_adapter_route_ready(
     ``default_model_entity`` is set, chat splices that entity with the adapter
     suffix before middleware runs, so that composite has to be routable.
 
-    When it is unset, chat leaves the public name in place and request middleware
-    selects the entity, or answers the request itself. The public composite is
-    then not required. The route is ready when any model the VirtualModel
-    declares, the adapter composite of that model, or the public name can be
-    proxied. Middleware that declares no models owns the response, so there is
-    no cache entry to wait on. When none of those entities can be resolved, this
-    raises the same not-found error chat would.
+    When it is unset, chat leaves the public composite in place unless request
+    middleware replaces ``body["model"]``. A plain model on ``VirtualModel.models``
+    does not say which of those happens, so it cannot make this adapter ready.
+    The public composite is required instead.
+
+    Middleware that names the ids it writes, as Switchyard does under
+    ``config["models"]``, drops the adapter suffix and resolves one of those
+    ids. Every named id has to be routable, because the choice depends on the
+    request. The public composite is not required in that case.
     """
     adapter_parts = parse_adapters_suffix(model_name)
     if adapter_parts is None:
@@ -224,21 +269,14 @@ def _raise_unless_adapter_route_ready(
         )
         return
 
-    if not virtual_model.request_middleware:
-        _require_routable_entity(model_cache, f"{workspace}/{model_name}")
+    replacement_ids = _replacement_model_ids(virtual_model)
+    if replacement_ids is not None:
+        missing = [entity_id for entity_id in replacement_ids if not _entity_is_routable(model_cache, entity_id)]
+        if missing:
+            _require_routable_entity(model_cache, missing[0])
         return
 
-    # Middleware selects the entity after the public name is seeded. A declared
-    # model, that model with this request's adapter suffix, or the public name
-    # itself is enough. The public name is not required.
-    candidates = [f"{workspace}/{model_name}"]
-    for inference_config in virtual_model.models:
-        candidates.append(inference_config.model)
-        candidates.append(format_adapter_composite(inference_config.model, adapter_workspace, adapter_name))
-    if any(_entity_is_routable(model_cache, candidate) for candidate in candidates):
-        return
-    if virtual_model.models:
-        _require_routable_entity(model_cache, virtual_model.models[0].model)
+    _require_routable_entity(model_cache, f"{workspace}/{model_name}")
 
 
 # Use individual decorators with explicit ordering to ensure deterministic OpenAPI generation
