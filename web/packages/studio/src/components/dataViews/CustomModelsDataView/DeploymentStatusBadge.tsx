@@ -94,14 +94,20 @@ interface DeploymentStatusBadgeProps {
   state: DeploymentIndicatorState | undefined;
   /** Whether the row is an adapter subrow, which changes the wording. */
   isAdapter?: boolean;
+  hideUnknown?: boolean;
 }
 
-export const DeploymentStatusBadge: FC<DeploymentStatusBadgeProps> = ({ state, isAdapter }) => {
+export const DeploymentStatusBadge: FC<DeploymentStatusBadgeProps> = ({
+  state,
+  isAdapter,
+  hideUnknown,
+}) => {
   if (!state || state.kind === 'loading') {
     return <Skeleton animated className="h-5 w-24 rounded" />;
   }
 
-  return (
-    <StatusBadge status={toStatusKey(state, Boolean(isAdapter))} statusConfig={STATUS_CONFIG} />
-  );
+  const status = toStatusKey(state, Boolean(isAdapter));
+  if (hideUnknown && status === 'unknown') return null;
+
+  return <StatusBadge status={status} statusConfig={STATUS_CONFIG} />;
 };

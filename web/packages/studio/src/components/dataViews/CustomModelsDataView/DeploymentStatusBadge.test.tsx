@@ -97,6 +97,16 @@ describe('DeploymentStatusBadge', () => {
     expect(screen.queryByText('Not deployed')).not.toBeInTheDocument();
   });
 
+  it('renders nothing for an unknown status when asked to hide it', () => {
+    const { container } = render(<DeploymentStatusBadge state={{ kind: 'unknown' }} hideUnknown />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('still shows known statuses when hiding unknown', () => {
+    render(<DeploymentStatusBadge state={{ kind: 'not-deployed' }} hideUnknown />);
+    expect(screen.getByText('Not deployed')).toBeVisible();
+  });
+
   it('shows no status text while the row is still resolving', () => {
     render(<DeploymentStatusBadge state={undefined} />);
     for (const label of ['Deployed', 'Active', 'Not deployed', 'Not active', 'Unknown']) {
