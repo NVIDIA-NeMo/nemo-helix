@@ -9,7 +9,7 @@ import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import { Stack, Text } from '@nvidia/foundations-react-core';
-import { type ComponentProps, type FC, type ReactNode, useRef, useState } from 'react';
+import { type ComponentProps, type FC, type ReactNode, useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 interface FormFields {
@@ -73,6 +73,13 @@ export const ConfirmationModal: FC<ConfirmationModalProps> = ({
   const [isPending, setIsPending] = useState(false);
   const activeSubmissionRef = useRef<object | null>(null);
   const notify = useNotify(onNotify);
+
+  useEffect(() => {
+    if (!open) {
+      activeSubmissionRef.current = null;
+      setIsPending(false);
+    }
+  }, [open]);
 
   const resetAndClose = () => {
     reset();

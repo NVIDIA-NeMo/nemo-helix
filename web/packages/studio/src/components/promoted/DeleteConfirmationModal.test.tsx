@@ -231,4 +231,57 @@ describe('DeleteConfirmationModal', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete Model' })).toBeEnabled();
   });
+
+  it('does not close a reopened dialog when the parent closed it during a pending delete', async () => {
+    let resolveDelete!: (ok: boolean) => void;
+    const onDelete = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveDelete = resolve;
+        })
+    );
+    const onClose = vi.fn();
+
+    const Harness = () => {
+      const [open, setOpen] = useState(true);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(false)}>
+            Parent close
+          </button>
+          <button type="button" onClick={() => setOpen(true)}>
+            Reopen
+          </button>
+          <DeleteConfirmationModal
+            open={open}
+            onClose={onClose}
+            onDelete={onDelete}
+            onNotify={vi.fn()}
+            entity="model"
+            ids={['llama-7b']}
+            description={DESCRIPTION}
+          />
+        </>
+      );
+    };
+
+    render(<Harness />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Delete Model' }));
+    await waitFor(() => expect(onDelete).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole('button', { name: 'Parent close', hidden: true }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Reopen' }));
+    expect(await screen.findByRole('button', { name: 'Delete Model' })).toBeEnabled();
+
+    await act(async () => {
+      resolveDelete(true);
+    });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete Model' })).toBeEnabled();
+  });
 });
