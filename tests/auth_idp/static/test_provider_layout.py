@@ -71,19 +71,26 @@ def test_authentik_compose_reaches_docker_through_socket_proxy():
     nemo_service = services["nemo"]
 
     assert not any("docker.sock" in volume for volume in nemo_service["volumes"])
-    assert nemo_service["environment"]["DOCKER_HOST"] == "tcp://docker-socket-proxy:2375"
+    assert nemo_service["environment"]["DOCKER_HOST"] == "unix:///run/docker-proxy/docker.sock"
     assert "no-new-privileges:true" in nemo_service["security_opt"]
     assert nemo_service["depends_on"]["docker-socket-proxy"]["condition"] == "service_healthy"
     assert "healthcheck" in services["docker-socket-proxy"]
 
     proxy_volumes = services["docker-socket-proxy"]["volumes"]
-    assert proxy_volumes == ["/var/run/docker.sock:/var/run/docker.sock:ro"]
-    assert "ports" not in services["docker-socket-proxy"]
-    assert set(services["docker-socket-proxy"]["networks"]) == {"docker-api"}
-    assert [name for name, service in services.items() if "docker-api" in service.get("networks", {})] == [
-        "nemo",
-        "docker-socket-proxy",
+    assert proxy_volumes == [
+        "/var/run/docker.sock:/var/run/docker.sock:ro",
+        "./docker-proxy-entrypoint.sh:/usr/local/bin/docker-proxy-entrypoint.sh:ro",
+        "docker-proxy-socket:/run/docker-proxy",
     ]
+    assert "ports" not in services["docker-socket-proxy"]
+    # The filter listens on a Unix socket shared only with nemo, not on a TCP port or network.
+    assert "networks" not in services["docker-socket-proxy"]
+    assert "docker-api" not in compose["networks"]
+    assert [
+        name
+        for name, service in services.items()
+        if "docker-proxy-socket:/run/docker-proxy" in service.get("volumes", [])
+    ] == ["nemo", "docker-socket-proxy"]
     docker_sockets = [
         name for name, service in services.items() if any("docker.sock" in v for v in service.get("volumes", []))
     ]
@@ -337,7 +344,7 @@ def test_authentik_compose_uses_https_gateway_for_workloads():
     )
     assert workload_executor["config"]["cleanup_completed_jobs_immediately"] is True
     assert "workload_identity" not in workload_executor["config"]
-    assert set(nemo["networks"]) == {"nemo-internal", "docker-api"}
+    assert set(nemo["networks"]) == {"nemo-internal"}
     assert "nemo-direct" not in yaml.safe_dump(nemo)
     assert nemo["depends_on"]["gateway-tls-init"]["condition"] == "service_completed_successfully"
     assert gateway["networks"]["nemo-internal"]["aliases"] == ["nemo-gateway"]
