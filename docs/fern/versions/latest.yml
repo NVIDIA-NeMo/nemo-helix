@@ -262,6 +262,9 @@ navigation:
               - page: Nemotron
                 path: ../../customizer/models/llama-nemotron.mdx
                 slug: llama-nemotron
+              - page: Nemotron Vision-Language
+                path: ../../customizer/models/nemotron-vl.mdx
+                slug: nemotron-vl
               - page: Embedding
                 path: ../../customizer/models/embedding.mdx
                 slug: embedding
@@ -305,6 +308,9 @@ navigation:
               - page: LoRA Customization Job
                 path: ../../customizer/tutorials/lora-customization-job.mdx
                 slug: lora-customization-job
+              - page: Super VL CORD LoRA
+                path: ../../customizer/tutorials/super-vl-cord-lora.mdx
+                slug: super-vl-cord-lora
               - page: Distillation Customization Job
                 path: ../../customizer/tutorials/distillation-customization-job.mdx
                 slug: distillation-customization-job

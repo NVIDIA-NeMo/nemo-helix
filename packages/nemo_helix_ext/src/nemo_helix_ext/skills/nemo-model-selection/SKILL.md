@@ -237,6 +237,7 @@ Lead with the *capability that matters most for this agent*, then name the model
 | General-purpose, widely-deployed alternative | `meta/llama-3.3-70b-instruct` |
 | Fast and cheap, simple tool loops | `microsoft/phi-4-mini-instruct` |
 | Self-hosted, single consumer GPU (<24 GB) | `qwen/qwen3-8b` |
+| The agent must read images | Nemotron 3.5 Super VL when a vision-language deployment is available. It is the servable choice for image input. A 1-GPU experiment uses `Qwen/Qwen3-VL-8B-Instruct` and is not a Super VL result |
 
 ### What each model is strong at
 

@@ -11,6 +11,7 @@ description: ""
 Learn how to format a training dataset to work with the model type you want to train, such as a **chat** or **completion** model.
 
 - **Chat Model** — Requires data that adheres to the `messages` schema.
+- **Chat Model with Images** — The same `messages` schema, with `content` as a string or a list of text and `image_url` parts. See [OpenAI Chat Model with Images](/documentation/customizer-reference/models/dataset-format#openai-chat-model-with-images).
 - **Completion Model** — Requires data that adheres to the `prompt-completion` schema.
 
 Customizer expects _all_ datasets to use JSONL format, where each line in the dataset is a training example serialized in JSON.

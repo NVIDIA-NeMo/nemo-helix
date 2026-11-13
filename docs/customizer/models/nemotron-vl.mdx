@@ -1,0 +1,174 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Nemotron Vision-Language Models"
+description: ""
+---
+<a id="model-catalog-nemotron-vl"></a>
+
+This page covers Nemotron vision-language models in NeMo Customizer. For the tested-model list, see [Tested Models](/documentation/customizer-reference/models/model-catalog). Text-only Nemotron models are on [Nemotron Models](/documentation/customizer-reference/models/llama-nemotron).
+
+<Warning>
+
+The multi-LLM NIM cannot serve merged LoRA checkpoints (`finetuning_type: lora_merged`). Deploy merged LoRA models with vLLM. See [Choose an Inference Engine](/documentation/models-and-inference/deploy-models#choose-an-inference-engine).
+
+</Warning>
+
+<Note>
+
+Customizing this model is supported on NVIDIA Hopper or Blackwell GPUs, such as H100, H200, B100, and B200. GPU counts below assume 80 GB GPUs unless a profile says otherwise. For a mixture-of-experts model, set `expert_parallel_size` to a value that divides the GPU count, and keep it within one node.
+
+</Note>
+
+## NVIDIA Nemotron 3.5 Super VL 120B A12B
+
+| Property | Value |
+|----------|--------|
+| Creator | NVIDIA |
+| Architecture | `NemotronH_Omni_Reasoning_V3`: hybrid Mamba-2 and Transformer mixture of experts, with a vision tower and one multi-token prediction (MTP) layer |
+| Parameters | 120B total (about 12B active) |
+| Max model length, as served | 114,688 |
+| Default Name | nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16 |
+| Hugging Face | [BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16), [NVFP4](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4) |
+| NIM | [Nemotron 3.5 Super VL NIM](https://catalog.ngc.nvidia.com/orgs/nim/nvidia/containers/nemotron-3.5-super-vl-120b-a12b), base model only |
+
+<Note>
+
+Train on the BF16 checkpoint. Automodel cannot dequantize the ModelOpt NVFP4 checkpoint. NVFP4 and the NIM serve the released base model only. Adapters and fine-tuned checkpoints are served on BF16.
+
+</Note>
+
+### Training Options
+
+Numbers in this section are the published upstream recipes unless a row says the platform measured them. A platform Super VL GPU count is not yet measured on this platform.
+
+- **CORD-v2 LoRA.** Upstream reference: rank 64, alpha 128, vision tower frozen, expert parallel 8 within one node, tensor parallel 1, 8x 80 GB (about 39 GiB per GPU), global batch 8, 400 steps, about 13 minutes. Recipe file `nemotron_3_5_super_vl_cord_v2_peft.yaml`, documented on the [Automodel Super VL page](https://github.com/NVIDIA-NeMo/Automodel/blob/main/docs/model-coverage/omni/nvidia/nemotron-3-5-super-vl.mdx). Walkthrough: [Fine-Tune Nemotron 3.5 Super VL on CORD-v2](/documentation/customizer-reference/tutorials/super-vl-cord-lora).
+- **Full SFT.** Upstream reference: 4 nodes, text recipe `nemotron_3_5_super_vl_tulu3_text_100steps.yaml` on that same Automodel page. No published scores.
+- **Merged LoRA.** Export a merged checkpoint from the LoRA run and deploy it as a full model. Same serving checkpoint family as full SFT: BF16, no MTP layer when the recipe sets `num_nextn_predict_layers` to 0.
+- **Finance LoRA.** Three adapters, one each for `finance-ocr`, `finance-reasoning`, and `finance-code`. Upstream reference hardware: 8x H100 or 4x GB200. Cookbook: [lora-finance](https://github.com/NVIDIA-NeMo/Nemotron/tree/main/usage-cookbook/Nemotron-3.5-Super-VL/lora-finance). The import that builds those filesets is verified; the row counts are 7283 / 679 / 1062 for OCR (plus 9024 images), 5393 / 532 / 804 for reasoning, and 6235 / 710 / 1083 for code (train / validation / test).
+- **GRPO on CLEVR-CoGenT.** Upstream reference: 16 nodes of 4x GB200, training expert parallel 4, vLLM tensor parallel 4 and expert parallel 4. Guide: [Nemotron 3.5 Super VL in NeMo RL](https://github.com/NVIDIA-NeMo/RL/blob/super-3.5-automodel/docs/guides/models/nemotron/nemotron-3.5-super-vl.md). Do not scale this recipe down to 8 GPUs. Platform settings: [Vision-language models](/documentation/customizer-reference/grpo-and-reward-environments#vision-language-models).
+
+### Constraints
+
+- Register the model with `trust_remote_code` enabled, and wait until `spec.has_vision_tower` is `true` before a dry run. Image rows are rejected on a text-only spec.
+- Supervised fine-tuning and GRPO only. Distillation, sequence packing, and Unsloth are not available for image rows. Unsloth trains text only.
+- Hopper or Blackwell GPUs.
+- When `expert_parallel_size` is greater than 1, `tensor_parallel_size` must be 1, and `expert_parallel_size` must divide the GPU count. Training expert parallel must stay within the GPUs on one node.
+- GRPO for this architecture sets `hf_config_overrides.num_nextn_predict_layers` to `0`, and `vllm_kwargs` to `moe_backend: triton`, `mamba_ssm_cache_dtype: float32`, `skip_mm_profiling: true`, and `limit_mm_per_prompt.image` of 1 for text and 2 for CLEVR. `vllm_expert_parallel_size` must divide the total GPU count and must not exceed the GPUs on one node. Leave `PYTORCH_CUDA_ALLOC_CONF` unset.
+- The vision-language compiler freezes the vision tower for LoRA. Leave `lora.exclude_modules` unset unless you are replacing that default.
+
+### Compute Profiles
+
+Two complete configs exercise the same dataset format and training path. The 8-GPU profile is the Super VL recipe (upstream reference). The 1-GPU profile uses `Qwen/Qwen3-VL-8B-Instruct` so the feature can be tried on one 48 GB GPU. That checkpoint exercises the platform path. It is not a Super VL result, and it is not a tested-model row.
+
+**8 GPUs, one node: Super VL CORD-v2 LoRA.** Upstream reference.
+
+```json
+{
+  "model": "default/nemotron-3-5-super-vl-120b-a12b-bf16",
+  "dataset": {"training": "default/cord-v2"},
+  "training": {
+    "training_type": "sft",
+    "finetuning_type": "lora",
+    "lora": {"rank": 64, "alpha": 128},
+    "max_seq_length": 8192
+  },
+  "schedule": {"max_steps": 400},
+  "batch": {"global_batch_size": 8, "micro_batch_size": 1},
+  "optimizer": {"learning_rate": 2e-4},
+  "parallelism": {
+    "num_nodes": 1,
+    "num_gpus_per_node": 8,
+    "tensor_parallel_size": 1,
+    "expert_parallel_size": 8
+  },
+  "deployment_config": {
+    "engine": "vllm",
+    "gpu": 4,
+    "disk_size": "300Gi",
+    "additional_args": [
+      "--max-model-len", "114688",
+      "--reasoning-parser", "nemotron_v3",
+      "--tool-call-parser", "qwen3_coder",
+      "--enable-auto-tool-choice",
+      "--mamba-ssm-cache-dtype", "float32",
+      "--limit-mm-per-prompt", "{\"image\": 1, \"video\": 1}",
+      "--max-lora-rank", "64",
+      "--max-loras", "2"
+    ]
+  }
+}
+```
+
+Finance LoRA uses the same GPU shape, or 4x GB200, with one job per fileset (`finance-ocr`, `finance-reasoning`, `finance-code`).
+
+**1 GPU: `Qwen/Qwen3-VL-8B-Instruct` CORD-v2 LoRA.** This shape ran on the platform. Use a small subset (the verified run used the first 300 training rows and 30 validation rows). Deploy with one GPU and `--max-model-len 8192`.
+
+```json
+{
+  "model": "default/qwen3-vl-8b-instruct",
+  "dataset": {"training": "default/cord-v2-small"},
+  "training": {
+    "training_type": "sft",
+    "finetuning_type": "lora",
+    "lora": {"rank": 16, "alpha": 32},
+    "max_seq_length": 2048
+  },
+  "schedule": {"epochs": 1},
+  "batch": {"global_batch_size": 8, "micro_batch_size": 1},
+  "optimizer": {"learning_rate": 1e-5, "min_learning_rate": 1e-6},
+  "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1, "tensor_parallel_size": 1},
+  "deployment_config": {
+    "engine": "vllm",
+    "gpu": 1,
+    "additional_args": ["--max-model-len", "8192"]
+  }
+}
+```
+
+The same checkpoint is the 1-GPU model for finance OCR and for CLEVR GRPO. Those job shapes were first run on a smaller vision model; the published 1-GPU profile points them at `Qwen/Qwen3-VL-8B-Instruct` because it fits on one 48 GB GPU. The finance job checks the vision fine-tune path. It was not deployed or scored. `attn_implementation` `sdpa` is the default.
+
+```json
+{
+  "model": "default/qwen3-vl-8b-instruct",
+  "dataset": {"training": "default/finance-ocr-small"},
+  "training": {
+    "training_type": "sft",
+    "finetuning_type": "lora",
+    "lora": {"rank": 16, "alpha": 32},
+    "max_seq_length": 2048,
+    "attn_implementation": "sdpa"
+  },
+  "schedule": {"epochs": 1},
+  "batch": {"global_batch_size": 4, "micro_batch_size": 1},
+  "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1, "tensor_parallel_size": 1}
+}
+```
+
+CLEVR GRPO for this checkpoint is in [Vision-language models](/documentation/customizer-reference/grpo-and-reward-environments#vision-language-models).
+
+### Deployment Configuration
+
+- **vLLM.** The platform default image is vLLM 0.32. Flags, LoRA hot-reload, merged and full checkpoints, and the weights volume are in [Deploy Nemotron 3.5 Super VL](/documentation/models-and-inference/deploy-models#deploy-nemotron-super-vl).
+- **NIM.** The [Nemotron 3.5 Super VL NIM](https://catalog.ngc.nvidia.com/orgs/nim/nvidia/containers/nemotron-3.5-super-vl-120b-a12b) serves the released base model only. It does not load Customizer adapters. A platform GPU count for that NIM is not yet measured; use the profile on the catalog page.
+
+### Measured Uplift
+
+These are the recipe scores. Evaluator's built-in ExactMatch and F1 use a different normalizer (lowercase, strip punctuation, drop a/an/the) and are not these scores. Score CORD with `StringCheckMetric` (`operation` `equals`) and `SequenceSimilarityMetric`. Score finance with the normalizers below.
+
+**CORD-v2.** Greedy decode of the `json2token` string. Scores are exact match and mean similarity. Upstream reference on the first 20 validation receipts, adapter merged, step 199: 8/20 exact, mean similarity 0.954, median 0.997. Source: the Automodel Super VL model-coverage page linked above.
+
+**Finance.** Thinking on, temperature 0, at most 768 new tokens (256 for arithmetic and count), numeric tolerance 0.05.
+
+- `exact_accuracy`: NFKC, casefold, collapse whitespace, then strip edge punctuation.
+- `relaxed_accuracy`: numeric relative error within `max(1e-6, 0.05 * |reference|)`, plus the scale token when the reference has one.
+- `task_accuracy`: span tasks use the exact normalizer; multi-span is an unordered set split on `|`, `##`, or `;`; other tasks use relaxed match.
+- `answer_f1`: token F1 on `[a-z0-9]+` after the finance normalizer.
+- Diagnostics, not the headline: `closed_trace_rate`, `python_syntax_rate`, coverage, and hit-max-tokens.
+
+| Run | Upstream reference | Platform |
+| --- | --- | --- |
+| CORD-v2 LoRA, first 20 validation receipts | 8/20 exact, mean similarity 0.954, median 0.997 | Not yet measured on the platform |
+| Finance adapters | Cookbook metrics above; headline numbers are in the cookbook notebook | Not yet measured on the platform |
+| CLEVR-CoGenT GRPO, valA, 256 samples | 0.57 at step 0, 0.77 at step 10, 0.84 at step 20; `gen_kl_error` stayed about 0.006 to 0.009 | Not yet measured on the platform |
