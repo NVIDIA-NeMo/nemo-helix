@@ -133,6 +133,18 @@ describe('templateFields', () => {
     ).toEqual(['a', 'b']);
   });
 
+  it('ignores raw blocks, macros and Jinja built-ins', () => {
+    expect(
+      templateFields(
+        '{% raw %}{{ not_a_read }}{% endraw %}' +
+          '{% macro row(label, value=1) %}{{ label }}: {{ value }} {{ caller() }}{% endmacro %}' +
+          "{% call row('x') %}{{ item.a }}{% endcall %}" +
+          '{{ row(item.b) }}' +
+          '{{ lipsum() }}{{ cycler(1, 2) }}{{ varargs }}{{ kwargs }}'
+      )
+    ).toEqual(['a', 'b']);
+  });
+
   it('ignores method calls on item but keeps plain attribute reads', () => {
     expect(
       templateFields("{{ item.get('a') }}{{ item.keys() | list }}{{ item.get ('c') }}{{ item.b }}")

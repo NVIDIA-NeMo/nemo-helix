@@ -58,11 +58,13 @@ export const buildAgentEvaluationSpec = (
 
 const BLOCK_RE = /\{\{([\s\S]*?)\}\}|\{%-?([\s\S]*?)-?%\}/g;
 const COMMENT_RE = /\{#[\s\S]*?#\}/g;
+const RAW_RE = /\{%-?\s*raw\s*-?%\}[\s\S]*?\{%-?\s*endraw\s*-?%\}/g;
 const STRING_RE = /'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g;
 const ITEM_KEY_RE = /\bitem\s*\[\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\s*\]/g;
 const ITEM_ATTR_RE = /\bitem\s*\.\s*([A-Za-z_]\w*)\b(?!\s*\()/g;
 const FOR_RE = /^\s*for\s+([\w\s,]+?)\s+in\s/;
 const SET_RE = /^\s*set\s+([A-Za-z_]\w*)/;
+const MACRO_RE = /^\s*macro\s+([A-Za-z_]\w*)\s*\(([^)]*)\)/;
 const ASSIGN_RE = /(?<![\w.])([A-Za-z_]\w*)\s*=(?!=)/g;
 const FILTER_BLOCK_RE = /^\s*filter\s+[A-Za-z_]\w*/;
 const IDENTIFIER_RE = /(?<![\w.])[A-Za-z_]\w*/g;
@@ -97,19 +99,44 @@ const JINJA_WORDS = new Set([
   'endwith',
   'filter',
   'endfilter',
+  'raw',
+  'endraw',
+  'macro',
+  'endmacro',
+  'call',
+  'endcall',
+  'import',
+  'from',
+  'as',
+  'include',
+  'extends',
+  'block',
+  'endblock',
+  'autoescape',
+  'endautoescape',
+  'caller',
+  'varargs',
+  'kwargs',
+  'super',
+  'self',
+  'lipsum',
+  'cycler',
+  'joiner',
 ]);
 
 /** The row fields one template reads: ``item.X`` / ``item['X']`` and bare names, minus
- *  loop, ``set`` and ``with`` locals, keyword arguments, filters, tests and keywords.
- *  ``exact`` holds the ``item`` reads; a bare name is a guess, since it may be a variable the
- *  template defines in a way this misses.
+ *  loop, ``set``, ``with`` and macro-parameter locals, keyword arguments, filters, tests,
+ *  keywords and ``raw`` bodies. ``exact`` holds the ``item`` reads; a bare name is a
+ *  guess, since it may be a variable the template defines in a way this misses.
  *  ponytail: regex approximation of the SDK's Jinja walk
- *  (``nhx_evals_sdk/dataset_schemas/templates.py``); macros are not handled. */
+ *  (``nhx_evals_sdk/dataset_schemas/templates.py``); ``call`` block arguments are not tracked,
+ *  and ``include`` / ``import`` / ``extends`` are not modelled since the evaluator renders
+ *  without a template loader. */
 const templateReads = (
   template: string,
   available: readonly string[] = ALWAYS_AVAILABLE
 ): { fields: string[]; exact: Set<string> } => {
-  const blocks = [...template.replace(COMMENT_RE, '').matchAll(BLOCK_RE)].map(
+  const blocks = [...template.replace(COMMENT_RE, '').replace(RAW_RE, '').matchAll(BLOCK_RE)].map(
     (match) => match[1] ?? match[2] ?? ''
   );
   const locals = new Set<string>();
@@ -120,6 +147,15 @@ const templateReads = (
     const set = SET_RE.exec(block)?.[1];
     if (set) {
       locals.add(set);
+    }
+    const macro = MACRO_RE.exec(block);
+    if (macro) {
+      locals.add(macro[1]);
+      macro[2]
+        .split(',')
+        .map((param) => param.split('=')[0].trim())
+        .filter(Boolean)
+        .forEach((param) => locals.add(param));
     }
     for (const [, name] of block.replace(STRING_RE, ' ').matchAll(ASSIGN_RE)) {
       locals.add(name);
