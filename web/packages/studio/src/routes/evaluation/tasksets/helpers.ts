@@ -8,7 +8,6 @@ import type {
   TaskRefParts,
   TasksetTaskRow,
 } from '@studio/routes/evaluation/tasksets/types';
-import { getFilesetDetailRoute } from '@studio/routes/utils';
 
 export const RUNNER_LABELS = {
   harbor: 'Harbor',
@@ -33,9 +32,6 @@ export const parseFilesRef = (ref: string): FilesRefParts => {
   const [workspace, fileset] = path.split('/');
   return { workspace, fileset, path: file };
 };
-
-export const getFilesetRoute = ({ workspace, fileset }: FilesRefParts): string =>
-  getFilesetDetailRoute(workspace, fileset);
 
 /** Tag names, `latest` first then alphabetical. */
 export const tagNames = (tags: TasksetTags | undefined): string[] =>

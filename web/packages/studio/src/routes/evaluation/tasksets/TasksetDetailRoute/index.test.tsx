@@ -1,11 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
+import { server } from '@studio/mocks/node';
 import { TasksetDetailRoute } from '@studio/routes/evaluation/tasksets/TasksetDetailRoute';
 import { renderRoute } from '@studio/tests/util/render';
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+
+const EVALS_URL = `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace`;
 
 const renderDetail = (path = '/workspaces/default/evaluation/tasksets/sort-suite') =>
   renderRoute(undefined, {
@@ -53,6 +58,42 @@ describe('TasksetDetailRoute', () => {
     ).toBeInTheDocument();
     expect(within(drawer).getByText('Inputs')).toBeInTheDocument();
     expect(within(drawer).getByText('Reference')).toBeInTheDocument();
+  });
+
+  it('flags only the rows of a failed batch, keeping the rest resolved', async () => {
+    server.use(
+      http.get(`${EVALS_URL}/tasksets/:name`, () =>
+        HttpResponse.json({
+          id: 'taskset-mixed',
+          name: 'sort-suite',
+          workspace: 'default',
+          revision: 1,
+          tasks: ['default/sort-ints', 'staging/smoke'],
+          created_at: '2026-10-01T09:00:00Z',
+          updated_at: '2026-10-01T09:00:00Z',
+        })
+      ),
+      // Returning nothing falls through to the default handler for other workspaces.
+      http.get(`${EVALS_URL}/tasks`, ({ params }) =>
+        params.workspace === 'staging'
+          ? HttpResponse.json({ detail: 'boom' }, { status: 500 })
+          : undefined
+      )
+    );
+    renderDetail();
+    const intsRow = await screen.findByRole('row', { name: /\bsort-ints\b/ });
+    expect(await within(intsRow).findByText('Harbor')).toBeInTheDocument();
+    const smokeRow = screen.getByRole('row', { name: /staging\/smoke/ });
+    expect(await within(smokeRow).findByText('Failed to load')).toBeInTheDocument();
+  });
+
+  it('opens a pinned ref at its pinned revision, not the latest', async () => {
+    renderDetail(
+      '/workspaces/default/evaluation/tasksets/sort-suite?task=default%2Fsort-ints%23v1'
+    );
+    const drawer = await screen.findByRole('dialog');
+    expect(await within(drawer).findByText('r1')).toBeInTheDocument();
+    expect(within(drawer).getByText(/Sort the integers in input.txt/)).toBeInTheDocument();
   });
 
   it('shows revision history with the tags on each revision', async () => {

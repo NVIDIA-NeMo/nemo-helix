@@ -17,7 +17,7 @@ import {
 } from '@studio/routes/evaluation/tasksets/helpers';
 import type { TaskFilters, TasksetTaskRow } from '@studio/routes/evaluation/tasksets/types';
 import { useResolvedTasks } from '@studio/routes/evaluation/tasksets/useResolvedTasks';
-import { type ComponentProps, type FC, useMemo } from 'react';
+import { type ComponentProps, type FC, useCallback, useMemo } from 'react';
 
 const RUNNER_OPTIONS = Object.entries(RUNNER_LABELS).map(([value, label]) => ({ value, label }));
 
@@ -43,69 +43,76 @@ export const TaskTable: FC<TaskTableProps> = ({ taskset, onTaskClick }) => {
   const { rows, isFetching, error } = useResolvedTasks(members);
   const matching = rows.filter((row) => matchesTaskFilters(row, { ...filter, name: searchText }));
 
-  const makeColumns: ComponentProps<typeof StudioDataView<TasksetTaskRow>>['makeColumns'] = ({
-    accessor,
-  }) => [
-    accessor('name', {
-      header: 'Name',
-      size: 240,
-      enableSorting: false,
-      cell: ({ row }) => {
-        const { name, workspace } = row.original;
-        return <Text>{workspace === taskset.workspace ? name : `${workspace}/${name}`}</Text>;
-      },
-    }),
-    accessor('version', {
-      header: 'Revision',
-      size: 150,
-      enableSorting: false,
-      cell: ({ row }) => {
-        const { version } = row.original;
-        if (!version) return <Text className="text-subtle">latest</Text>;
-        return (
-          <Text kind="mono/sm" title={version}>
-            {version.slice(0, 12)}
-          </Text>
-        );
-      },
-    }),
-    accessor((row) => row.task?.spec.kind ?? '', {
-      id: 'runner',
-      header: 'Runner',
-      size: 110,
-      enableSorting: false,
-      meta: { filter: { type: 'multi-select', options: RUNNER_OPTIONS } },
-      cell: ({ row }) => {
-        const kind = row.original.task?.spec.kind;
-        if (kind)
+  const makeColumns = useCallback<
+    ComponentProps<typeof StudioDataView<TasksetTaskRow>>['makeColumns']
+  >(
+    ({ accessor }) => [
+      accessor('name', {
+        header: 'Name',
+        size: 240,
+        enableSorting: false,
+        cell: ({ row }) => {
+          const { name, workspace } = row.original;
+          return <Text>{workspace === taskset.workspace ? name : `${workspace}/${name}`}</Text>;
+        },
+      }),
+      accessor('version', {
+        header: 'Revision',
+        size: 150,
+        enableSorting: false,
+        cell: ({ row }) => {
+          const { version } = row.original;
+          if (!version) return <Text className="text-subtle">latest</Text>;
           return (
-            <Tag kind="outline" color="gray" readOnly>
-              {RUNNER_LABELS[kind]}
-            </Tag>
+            <Text kind="mono/sm" title={version}>
+              {version.slice(0, 12)}
+            </Text>
           );
-        return <Text className="text-subtle">{isFetching ? EMPTY_FIELD_VALUE : 'Not found'}</Text>;
-      },
-    }),
-    accessor((row) => row.task?.metadata?.length ?? 0, {
-      id: 'metadata',
-      header: 'Metadata',
-      enableSorting: false,
-      meta: { filter: { type: 'text', placeholder: 'key or value' } },
-      cell: ({ row }) => {
-        const metadata = row.original.task?.metadata ?? [];
-        if (metadata.length === 0) return <Text>{EMPTY_FIELD_VALUE}</Text>;
-        return (
-          <Flex gap="density-xs" wrap="wrap">
-            {metadata.map(({ key, value }) => (
-              <Tag key={key} kind="outline" color="gray" readOnly>
-                {`${key}: ${formatValue(value)}`}
+        },
+      }),
+      accessor((row) => row.task?.spec.kind ?? '', {
+        id: 'runner',
+        header: 'Runner',
+        size: 110,
+        enableSorting: false,
+        meta: { filter: { type: 'multi-select', options: RUNNER_OPTIONS } },
+        cell: ({ row }) => {
+          const { task, failed } = row.original;
+          if (task) {
+            return (
+              <Tag kind="outline" color="gray" readOnly>
+                {RUNNER_LABELS[task.spec.kind]}
               </Tag>
-            ))}
-          </Flex>
-        );
-      },
-    }),
-  ];
+            );
+          }
+          if (failed) return <Text className="text-feedback-danger">Failed to load</Text>;
+          return (
+            <Text className="text-subtle">{isFetching ? EMPTY_FIELD_VALUE : 'Not found'}</Text>
+          );
+        },
+      }),
+      accessor((row) => row.task?.metadata?.length ?? 0, {
+        id: 'metadata',
+        header: 'Metadata',
+        enableSorting: false,
+        meta: { filter: { type: 'text', placeholder: 'key or value' } },
+        cell: ({ row }) => {
+          const metadata = row.original.task?.metadata ?? [];
+          if (metadata.length === 0) return <Text>{EMPTY_FIELD_VALUE}</Text>;
+          return (
+            <Flex gap="density-xs" wrap="wrap">
+              {metadata.map(({ key, value }) => (
+                <Tag key={key} kind="outline" color="gray" readOnly>
+                  {`${key}: ${formatValue(value)}`}
+                </Tag>
+              ))}
+            </Flex>
+          );
+        },
+      }),
+    ],
+    [taskset.workspace, isFetching]
+  );
 
   return (
     <StudioDataView

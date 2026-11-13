@@ -16,6 +16,51 @@ import { type ComponentProps, type FC, useMemo } from 'react';
 
 type RevisionRow = Revision & { id: string };
 
+const makeColumns: ComponentProps<typeof StudioDataView<RevisionRow>>['makeColumns'] = ({
+  accessor,
+}) => [
+  accessor('revision', {
+    header: 'Revision',
+    size: 100,
+    enableSorting: false,
+    cell: ({ row }) => <Text>r{row.original.revision}</Text>,
+  }),
+  accessor((row) => row.tags?.join(',') ?? '', {
+    id: 'tags',
+    header: 'Tags',
+    enableSorting: false,
+    cell: ({ row }) => {
+      const tags = row.original.tags ?? [];
+      if (tags.length === 0) return <Text>{EMPTY_FIELD_VALUE}</Text>;
+      return (
+        <Flex gap="density-xs" wrap="wrap">
+          {tags.map((tag) => (
+            <Tag key={tag} kind="outline" color="gray" readOnly>
+              {tag}
+            </Tag>
+          ))}
+        </Flex>
+      );
+    },
+  }),
+  accessor('content_hash', {
+    header: 'Content Hash',
+    size: 160,
+    enableSorting: false,
+    cell: ({ row }) => (
+      <Text kind="mono/sm" title={row.original.content_hash}>
+        {row.original.content_hash.slice(0, 12)}
+      </Text>
+    ),
+  }),
+  accessor('created_at', {
+    header: 'Published',
+    size: 160,
+    enableSorting: false,
+    cell: ({ row }) => <RelativeTime datetime={row.original.created_at} />,
+  }),
+];
+
 /** Every published revision of a taskset, newest first (the server's order), with the tags
  *  that point at each and the content hash a pinned reference carries. */
 export const RevisionHistory: FC<{ taskset: Taskset }> = ({ taskset }) => {
@@ -33,51 +78,6 @@ export const RevisionHistory: FC<{ taskset: Taskset }> = ({ taskset }) => {
     () => (data?.data ?? []).map((revision) => ({ ...revision, id: String(revision.revision) })),
     [data?.data]
   );
-
-  const makeColumns: ComponentProps<typeof StudioDataView<RevisionRow>>['makeColumns'] = ({
-    accessor,
-  }) => [
-    accessor('revision', {
-      header: 'Revision',
-      size: 100,
-      enableSorting: false,
-      cell: ({ row }) => <Text>r{row.original.revision}</Text>,
-    }),
-    accessor((row) => row.tags?.join(',') ?? '', {
-      id: 'tags',
-      header: 'Tags',
-      enableSorting: false,
-      cell: ({ row }) => {
-        const tags = row.original.tags ?? [];
-        if (tags.length === 0) return <Text>{EMPTY_FIELD_VALUE}</Text>;
-        return (
-          <Flex gap="density-xs" wrap="wrap">
-            {tags.map((tag) => (
-              <Tag key={tag} kind="outline" color="gray" readOnly>
-                {tag}
-              </Tag>
-            ))}
-          </Flex>
-        );
-      },
-    }),
-    accessor('content_hash', {
-      header: 'Content Hash',
-      size: 160,
-      enableSorting: false,
-      cell: ({ row }) => (
-        <Text kind="mono/sm" title={row.original.content_hash}>
-          {row.original.content_hash.slice(0, 12)}
-        </Text>
-      ),
-    }),
-    accessor('created_at', {
-      header: 'Published',
-      size: 160,
-      enableSorting: false,
-      cell: ({ row }) => <RelativeTime datetime={row.original.created_at} />,
-    }),
-  ];
 
   return (
     <StudioDataView

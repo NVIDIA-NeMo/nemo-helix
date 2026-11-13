@@ -20,6 +20,56 @@ import { keepPreviousData } from '@tanstack/react-query';
 import type { ComponentProps, FC } from 'react';
 import { useNavigate } from 'react-router';
 
+const makeColumns: ComponentProps<typeof StudioDataView<Taskset>>['makeColumns'] = ({
+  accessor,
+}) => [
+  accessor('name', { header: 'Name', size: 200 }),
+  accessor('description', {
+    header: 'Description',
+    enableSorting: false,
+    meta: { filter: { type: 'text', placeholder: 'Description contains' } },
+    cell: ({ row }) => (
+      <Text className="truncate" title={row.original.description}>
+        {row.original.description || EMPTY_FIELD_VALUE}
+      </Text>
+    ),
+  }),
+  accessor((row) => row.tasks?.length ?? 0, {
+    id: 'tasks',
+    header: 'Tasks',
+    size: 90,
+    enableSorting: false,
+  }),
+  accessor('revision', {
+    header: 'Latest Revision',
+    size: 130,
+    enableSorting: false,
+    cell: ({ row }) => <Text>r{row.original.revision}</Text>,
+  }),
+  accessor((row) => tagNames(row.tags).join(','), {
+    id: 'tags',
+    header: 'Tags',
+    size: 180,
+    enableSorting: false,
+    meta: { filter: { type: 'text', label: 'Tag', placeholder: 'e.g. stable' } },
+    cell: ({ row }) => (
+      <Flex gap="density-xs" wrap="wrap">
+        {tagNames(row.original.tags).map((tag) => (
+          <Tag key={tag} kind="outline" color="gray" readOnly>
+            {tag}
+          </Tag>
+        ))}
+      </Flex>
+    ),
+  }),
+  accessor('updated_at', {
+    header: 'Updated',
+    size: 140,
+    meta: { filter: dateTimeFilter('Updated At') },
+    cell: ({ row }) => <RelativeTime datetime={row.original.updated_at} />,
+  }),
+];
+
 export const TasksetsDataView: FC<{ workspace: string }> = ({ workspace }) => {
   const navigate = useNavigate();
   const dataViewState = useStudioDataViewState<TasksetFilter>({
@@ -43,56 +93,6 @@ export const TasksetsDataView: FC<{ workspace: string }> = ({ workspace }) => {
     },
     { query: { placeholderData: keepPreviousData } }
   );
-
-  const makeColumns: ComponentProps<typeof StudioDataView<Taskset>>['makeColumns'] = ({
-    accessor,
-  }) => [
-    accessor('name', { header: 'Name', size: 200 }),
-    accessor('description', {
-      header: 'Description',
-      enableSorting: false,
-      meta: { filter: { type: 'text', placeholder: 'Description contains' } },
-      cell: ({ row }) => (
-        <Text className="truncate" title={row.original.description}>
-          {row.original.description || EMPTY_FIELD_VALUE}
-        </Text>
-      ),
-    }),
-    accessor((row) => row.tasks?.length ?? 0, {
-      id: 'tasks',
-      header: 'Tasks',
-      size: 90,
-      enableSorting: false,
-    }),
-    accessor('revision', {
-      header: 'Latest Revision',
-      size: 130,
-      enableSorting: false,
-      cell: ({ row }) => <Text>r{row.original.revision}</Text>,
-    }),
-    accessor((row) => tagNames(row.tags).join(','), {
-      id: 'tags',
-      header: 'Tags',
-      size: 180,
-      enableSorting: false,
-      meta: { filter: { type: 'text', label: 'Tag', placeholder: 'e.g. stable' } },
-      cell: ({ row }) => (
-        <Flex gap="density-xs" wrap="wrap">
-          {tagNames(row.original.tags).map((tag) => (
-            <Tag key={tag} kind="outline" color="gray" readOnly>
-              {tag}
-            </Tag>
-          ))}
-        </Flex>
-      ),
-    }),
-    accessor('updated_at', {
-      header: 'Updated',
-      size: 140,
-      meta: { filter: dateTimeFilter('Updated At') },
-      cell: ({ row }) => <RelativeTime datetime={row.original.updated_at} />,
-    }),
-  ];
 
   return (
     <StudioDataView

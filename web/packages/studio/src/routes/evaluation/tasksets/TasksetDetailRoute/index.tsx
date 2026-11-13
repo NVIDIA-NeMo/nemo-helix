@@ -7,7 +7,7 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { KeyValueGrid } from '@nemo/common/src/components/KeyValueGrid';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
-import { FILTERS_SEARCH_PARAM } from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
+import { DATA_VIEW_SEARCH_PARAMS } from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
 import { useEvalsGetTaskset } from '@nemo/sdk/generated/evals/evals-plugin-tasksets-routes';
 import {
   Anchor,
@@ -25,27 +25,19 @@ import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
-import {
-  getFilesetRoute,
-  parseFilesRef,
-  tagNames,
-} from '@studio/routes/evaluation/tasksets/helpers';
+import { parseFilesRef, tagNames } from '@studio/routes/evaluation/tasksets/helpers';
 import { TaskDetailDrawer } from '@studio/routes/evaluation/tasksets/TaskDetailDrawer';
 import { RevisionHistory } from '@studio/routes/evaluation/tasksets/TasksetDetailRoute/RevisionHistory';
 import { TaskTable } from '@studio/routes/evaluation/tasksets/TasksetDetailRoute/TaskTable';
-import { getTasksetsRoute } from '@studio/routes/utils';
+import { getFilesetDetailRoute, getTasksetsRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import type { FC } from 'react';
 import { Link } from 'react-router';
 
 /** Both tabs' tables keep their state in the same URL params; clear it when switching tabs. */
-const TABLE_STATE_RESET = {
-  page: undefined,
-  page_size: undefined,
-  sort: undefined,
-  s: undefined,
-  [FILTERS_SEARCH_PARAM]: undefined,
-};
+const TABLE_STATE_RESET = Object.fromEntries(
+  Object.values(DATA_VIEW_SEARCH_PARAMS).map((param) => [param, undefined])
+);
 
 export const TasksetDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -98,7 +90,9 @@ export const TasksetDetailRoute: FC = () => {
               wrapValue: true,
               value: files && (
                 <Anchor asChild>
-                  <Link to={getFilesetRoute(files)}>{taskset.files_ref}</Link>
+                  <Link to={getFilesetDetailRoute(files.workspace, files.fileset)}>
+                    {taskset.files_ref}
+                  </Link>
                 </Anchor>
               ),
             },

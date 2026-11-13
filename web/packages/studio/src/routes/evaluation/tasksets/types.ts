@@ -16,6 +16,8 @@ export interface TasksetTaskRow extends TaskRefParts {
   id: string;
   ref: string;
   task?: Task;
+  /** The list call that should have resolved this row failed. */
+  failed?: boolean;
 }
 
 /** `workspace/fileset#path`, split. */

@@ -56,8 +56,8 @@ const mockTasks: Task[] = [
     id: 'task-sort-ints',
     name: 'sort-ints',
     workspace: 'default',
-    revision: 1,
-    tags: { latest: 1 },
+    revision: 2,
+    tags: { latest: 2, v1: 1 },
     metadata: [{ key: 'difficulty', value: 'easy' }],
     created_at: '2026-10-01T09:00:00Z',
     updated_at: '2026-10-01T09:00:00Z',
@@ -144,6 +144,9 @@ const paginate = <T>(request: Request, rows: T[]) => {
   });
 };
 
+const findTask = (workspace: unknown, name: unknown) =>
+  mockTasks.find((t) => t.workspace === workspace && t.name === name);
+
 const findTaskset = (workspace: unknown, name: unknown) =>
   mockTasksets.find((t) => t.workspace === workspace && t.name === name);
 
@@ -166,6 +169,17 @@ export const evaluatorHandlers = [
       request,
       mockTasks.filter((t) => t.workspace === params.workspace && matches(t.name))
     );
+  }),
+
+  http.get(`${EVALS_URL}/tasks/:name`, ({ params }) => {
+    const task = findTask(params.workspace, params.name);
+    return task ? HttpResponse.json(task) : notFound('Task');
+  }),
+  // Resolves tags only: a revision handler keyed by digest would just echo the task back.
+  http.get(`${EVALS_URL}/tasks/:name/revisions/:revision`, ({ params }) => {
+    const task = findTask(params.workspace, params.name);
+    const revision = task?.tags?.[String(params.revision)];
+    return task && revision ? HttpResponse.json({ ...task, revision }) : notFound('Revision');
   }),
 
   // Tasksets — read-only, as the Studio library is.
