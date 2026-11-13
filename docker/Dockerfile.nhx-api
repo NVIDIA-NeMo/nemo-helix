@@ -135,6 +135,12 @@ RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/r
     --mount=type=bind,source=docker/removals/files/base/cve-cleanup-runtime.txt,target=/tmp/file-removals.txt,readonly \
     sh /bin/cve-cleanup.sh && \
     python /tmp/remove-listed-files.py /tmp/file-removals.txt
+# Trust updates and the runtime-base overlay happen after the builder's pip
+# guard. Remove only stale metadata, then validate the final application's pip
+# code/metadata pair after all package-mutating image steps.
+RUN --mount=type=bind,source=docker/scripts/cleanup-pip-metadata.py,target=/tmp/cleanup-pip-metadata.py,readonly \
+    /app/.venv/bin/python /tmp/cleanup-pip-metadata.py && \
+    /app/.venv/bin/python -m pip --version
 ARG NHX_PLATFORM_VERSION=dev
 ARG NHX_CODE_REVISION=
 ENV NHX_PLATFORM_VERSION=${NHX_PLATFORM_VERSION}
