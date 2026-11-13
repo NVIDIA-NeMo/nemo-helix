@@ -146,11 +146,9 @@ Training reads the relative path. Inference and Evaluator requests use `fileset:
 }
 ```
 
-Upload the directory that already holds the JSONL and a sibling `images/` directory. A trailing slash on the upload path puts the files at the fileset root. Without it, the files nest one level down and the relative image paths no longer resolve. A retried upload of thousands of images can leave duplicates, so use a new fileset name when the data changes. A very large image fileset is slow to download when the job starts; a few hundred rows is enough to try the path.
+Upload the directory with a trailing slash so image paths stay at the fileset root. Use a new fileset name if a retry duplicated files. `nemo customization dataset prepare` has no image format; prepare rows with the [CORD-v2 tutorial](/documentation/customizer-reference/tutorials/super-vl-cord-lora).
 
-`nemo customization dataset prepare` has no image format. Prepare CORD-v2 or the finance filesets with the steps in [Fine-Tune Nemotron 3.5 Super VL on CORD-v2](/documentation/customizer-reference/tutorials/super-vl-cord-lora), or with the Customizer skill's import helpers.
-
-For Evaluator, the reference template must resolve to a string, for example `` `{{ item.messages[-1].content }}` ``. A list label fails with "The reference must be a string."
+An Evaluator reference must resolve to a string, for example `` `{{ item.messages[-1].content }}` ``. A list label fails with "The reference must be a string."
 
 ### OpenAI Chat With Tool
 

@@ -650,7 +650,7 @@ response = InferenceGatewayClient.from_client(client).provider_post(
 
 vLLM deployments support LoRA adapters with hot-reload: enable LoRA on the deployment config, then register one or more adapters against the base model entity. An adapter sidecar delivers each enabled adapter to the running server, and vLLM loads it through `lora_filesystem_resolver`. Adapters are registered on the **base model entity**, not as separate models.
 
-Name the adapter in the request as `<workspace>/<base>&adapters/<workspace>/<adapter>`. A deployment can report READY before that composite route is routable. Wait for the route, then send the first request. A Customizer job can pass the same flags inline: `deployment_config.additional_args` and `deployment_config.disk_size` are accepted on the job, and a deployment-config template can set them too. Rank-64 adapters, including Nemotron 3.5 Super VL recipe adapters, need `--max-lora-rank 64`. Super VL also sets `--max-loras 2`.
+Name the adapter as `<workspace>/<base>&adapters/<workspace>/<adapter>`. Wait for that route: READY can arrive first. A job's inline `deployment_config` accepts `additional_args` and `disk_size`.
 
 A deployment loads adapters up to a maximum rank and refuses adapters of a higher rank. Set the maximum to at least the highest rank you serve:
 
@@ -1058,69 +1058,11 @@ response = InferenceGatewayClient.from_client(client).model_post(
 
 #### Merged and full checkpoints
 
-A merged LoRA or a full fine-tune is a new checkpoint, served on BF16 without an adapter. Automodel's Super VL recipes set `num_nextn_predict_layers` to 0, so the saved checkpoint has no MTP layer: use the base flag list and leave out `--speculative-config`. Set `disk_size` to at least `300Gi`.
-
-<Tabs>
-
-<Tab title="CLI">
-
-```bash
-nemo inference deployment-configs create "super-vl-finetune" \
-  --engine "vllm" \
-  --model-spec '{
-    "model_namespace": "default",
-    "model_name": "super-vl-finetune"
-}' \
-  --executor-config '{
-    "gpu": 4,
-    "disk_size": "300Gi",
-    "additional_args": [
-      "--max-model-len", "114688",
-      "--reasoning-parser", "nemotron_v3",
-      "--tool-call-parser", "qwen3_coder",
-      "--enable-auto-tool-choice",
-      "--mamba-ssm-cache-dtype", "float32",
-      "--limit-mm-per-prompt", "{\"image\": 1, \"video\": 1}"
-    ]
-}'
-```
-
-</Tab>
-
-<Tab title="Python SDK">
-
-```python
-client.models.create_deployment_config(
-    body=CreateModelDeploymentConfigRequest(
-        name="super-vl-finetune",
-        engine=Engine.VLLM,
-        model_spec=ModelDeploymentConfigModelSpec(
-            model_namespace="default",
-            model_name="super-vl-finetune",
-        ),
-        executor_config=ContainerExecutorConfig(
-            gpu=4,
-            disk_size="300Gi",
-            additional_args=[
-                "--max-model-len", "114688",
-                "--reasoning-parser", "nemotron_v3",
-                "--tool-call-parser", "qwen3_coder",
-                "--enable-auto-tool-choice",
-                "--mamba-ssm-cache-dtype", "float32",
-                "--limit-mm-per-prompt", '{"image": 1, "video": 1}',
-            ],
-        ),
-    ),
-)
-```
-
-</Tab>
-
-</Tabs>
+A merged LoRA or a full fine-tune is a new BF16 checkpoint with no adapter. These recipes set `num_nextn_predict_layers` to 0, so leave out `--speculative-config` and set `disk_size` to at least `300Gi`. Use the base flag list above.
 
 #### NIM
 
-The [Nemotron 3.5 Super VL NIM](https://catalog.ngc.nvidia.com/orgs/nim/nvidia/containers/nemotron-3.5-super-vl-120b-a12b) serves the released base model. It does not load Customizer adapters. Tuned weights are served by LoRA hot-reload on vLLM, or by deploying a merged or full checkpoint as above. A platform GPU count for the NIM is not yet measured; use the profile published on that catalog page. Select the image from the catalog in the deployment config's image fields rather than inheriting the model-free NIM.
+The [Nemotron 3.5 Super VL NIM](https://catalog.ngc.nvidia.com/orgs/nim/nvidia/containers/nemotron-3.5-super-vl-120b-a12b) serves the released base model only and does not load Customizer adapters. Select that image from the catalog. A platform GPU count for it is not yet measured.
 
 ---
 
