@@ -11,11 +11,9 @@ from nemo_bedrock_plugin.metadata import (
     foundation_model_candidates,
     parse_foundation_model,
 )
-from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.models.metadata import MetadataSourceContext, MetadataTarget, SourceUnavailableError
 from nemo_helix_plugin.models.types import ModelCapability, ModelMetadata, ModelModality, ModelProvider
 
-SECRET_PATH = "/apis/secrets/v2/workspaces/default/secrets/bedrock-key/access"
 CATALOG = {
     "modelSummaries": [
         {
@@ -50,14 +48,12 @@ def _provider(
     )
 
 
-def _platform(value: str = "bedrock-api-key") -> AsyncNemoClient:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == SECRET_PATH
-        return httpx.Response(200, json={"name": "bedrock-key", "workspace": "default", "value": value})
+def _key_resolver(value: str = "bedrock-api-key"):
+    async def resolve(provider: ModelProvider) -> str | None:
+        assert provider.api_key_secret_name == "bedrock-key"
+        return value
 
-    return AsyncNemoClient(
-        base_url="http://platform", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    )
+    return resolve
 
 
 @pytest.mark.parametrize(
@@ -110,7 +106,7 @@ async def test_bedrock_source_reads_catalog_once_per_cycle_with_provider_key():
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         source = BedrockMetadataSource()
-        ctx = MetadataSourceContext(http=http, client=_platform())
+        ctx = MetadataSourceContext(http=http, api_key_resolver=_key_resolver())
         profile = await source.fetch(
             MetadataTarget(upstream_model_id="us.anthropic.claude-sonnet-4-6", provider=_provider()), ctx
         )
@@ -142,7 +138,7 @@ async def test_bedrock_source_returns_none_without_api_key():
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         metadata = await BedrockMetadataSource().fetch(
             MetadataTarget(upstream_model_id="anthropic.claude-sonnet-4-6", provider=_provider(secret=None)),
-            MetadataSourceContext(http=http, client=_platform()),
+            MetadataSourceContext(http=http, api_key_resolver=_key_resolver()),
         )
 
     assert metadata is None
@@ -168,5 +164,5 @@ async def test_bedrock_source_raises_when_catalog_unavailable(response: httpx.Re
         with pytest.raises(SourceUnavailableError):
             await BedrockMetadataSource().fetch(
                 MetadataTarget(upstream_model_id="anthropic.claude-sonnet-4-6", provider=_provider()),
-                MetadataSourceContext(http=http, client=_platform()),
+                MetadataSourceContext(http=http, api_key_resolver=_key_resolver()),
             )

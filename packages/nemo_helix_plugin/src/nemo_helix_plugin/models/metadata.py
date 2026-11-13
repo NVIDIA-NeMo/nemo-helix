@@ -11,12 +11,14 @@ under ``nemo.models.metadata_sources``, or the built-in source that reads the pr
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, TypeVar, cast
 
 import httpx
-from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.models.types import ModelMetadata, ModelModality, ModelProvider
+
+T = TypeVar("T")
 
 METADATA_SOURCES_GROUP = "nemo.models.metadata_sources"
 
@@ -50,10 +52,17 @@ class MetadataTarget:
 
 @dataclass(frozen=True)
 class MetadataSourceContext:
-    """Clients a source may use. ``client`` is the Models service's platform client, for typed service clients."""
+    """What the Models service lends a source: an HTTP client and the API key of the provider being asked about."""
 
     http: httpx.AsyncClient
-    client: AsyncNemoClient
+    api_key_resolver: Callable[[ModelProvider], Awaitable[str | None]]
+
+    async def provider_api_key(self, provider: ModelProvider) -> str | None:
+        """Return the provider's own API key, or ``None`` when it has none.
+
+        Raises :class:`SourceUnavailableError` when the key could not be read.
+        """
+        return await self.api_key_resolver(provider)
 
 
 class NemoModelMetadataSource(ABC):
@@ -66,11 +75,33 @@ class NemoModelMetadataSource(ABC):
         """Whether this source is the one to ask about models served by ``provider``."""
 
     def begin_cycle(self) -> None:
-        """Drop per-cycle caches before a reconcile pass."""
+        """Drop per-cycle caches before a reconcile pass. Overrides must call ``super().begin_cycle()``."""
+        self._cycle_results().clear()
+
+    async def cached_for_cycle(self, key: str, load: Callable[[], Awaitable[T]]) -> T:
+        """Return ``load()``'s result, calling it at most once per cycle for ``key``.
+
+        A :class:`SourceUnavailableError` is cached too, so a failing upstream is asked once per cycle.
+        """
+        results = self._cycle_results()
+        if key not in results:
+            try:
+                results[key] = await load()
+            except SourceUnavailableError as exc:
+                results[key] = exc
+        result = results[key]
+        if isinstance(result, SourceUnavailableError):
+            raise result
+        return cast(T, result)
+
+    def _cycle_results(self) -> dict[str, object]:
+        return self.__dict__.setdefault("_nemo_cycle_results", {})
 
     @abstractmethod
     async def fetch(self, target: MetadataTarget, ctx: MetadataSourceContext) -> ModelMetadata | None:
         """Return what this source knows about the model, or ``None`` when it knows nothing.
+
+        Metadata with no fields set counts as ``None``.
 
         Raise :class:`SourceUnavailableError` when the source could not be asked, so the Models service
         keeps the current metadata and retries on the next cycle.

@@ -42,8 +42,8 @@ def test_parse_provider_model_reads_vllm_max_model_len():
     assert metadata == ModelMetadata(context_length=32768)
 
 
-def test_parse_provider_model_returns_none_for_bare_openai_entry():
-    assert parse_provider_model({"id": "gpt-4o", "object": "model", "owned_by": "openai"}) is None
+def test_parse_provider_model_returns_empty_metadata_for_bare_openai_entry():
+    assert parse_provider_model({"id": "gpt-4o", "object": "model", "owned_by": "openai"}) == ModelMetadata()
 
 
 def test_parse_provider_model_truncates_long_text():
@@ -61,13 +61,18 @@ def _provider() -> ModelProvider:
     )
 
 
-def _ctx(handler) -> MetadataSourceContext:
+async def _no_api_key(provider: ModelProvider) -> str | None:
+    return None
+
+
+def _source(handler) -> tuple[ProviderModelsSource, MetadataSourceContext]:
     client = AsyncNemoClient(
         base_url="http://platform",
         default_headers={"X-NMP-Principal-Id": "service:model-metadata"},
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
-    return MetadataSourceContext(http=httpx.AsyncClient(), client=client)
+    source = ProviderModelsSource(client, request_timeout_seconds=15.0)
+    return source, MetadataSourceContext(http=httpx.AsyncClient(), api_key_resolver=_no_api_key)
 
 
 async def test_provider_source_lists_models_once_per_cycle_with_platform_headers():
@@ -79,8 +84,7 @@ async def test_provider_source_lists_models_once_per_cycle_with_platform_headers
             200, json={"data": [{"id": "gemma-4-12b", "name": "Gemma 4 12B", "context_length": 262144}]}
         )
 
-    source = ProviderModelsSource(request_timeout_seconds=15.0)
-    ctx = _ctx(handler)
+    source, ctx = _source(handler)
     first = await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx)
     missing = await source.fetch(MetadataTarget(upstream_model_id="not-served", provider=_provider()), ctx)
 
@@ -96,8 +100,7 @@ async def test_provider_source_raises_when_listing_fails_and_retries_next_cycle(
     def handler(request: httpx.Request) -> httpx.Response:
         return responses.pop(0)
 
-    source = ProviderModelsSource(request_timeout_seconds=15.0)
-    ctx = _ctx(handler)
+    source, ctx = _source(handler)
     target = MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider())
 
     with pytest.raises(SourceUnavailableError):
@@ -116,8 +119,7 @@ async def test_provider_source_raises_on_malformed_listing(body: object):
             return httpx.Response(200, text=body)
         return httpx.Response(200, json=body)
 
-    source = ProviderModelsSource(request_timeout_seconds=15.0)
-    ctx = _ctx(handler)
+    source, ctx = _source(handler)
 
     with pytest.raises(SourceUnavailableError):
         await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx)
@@ -129,8 +131,7 @@ async def test_provider_source_treats_upstream_without_model_list_as_empty():
             return httpx.Response(200, json={"workspace": "default", "name": "spark"})
         return httpx.Response(404, json={"message": "Not Found"})
 
-    source = ProviderModelsSource(request_timeout_seconds=15.0)
-    ctx = _ctx(handler)
+    source, ctx = _source(handler)
 
     assert await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx) is None
 
@@ -139,8 +140,7 @@ async def test_provider_source_raises_when_gateway_does_not_know_provider_yet():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"detail": "Model provider not found for default/spark"})
 
-    source = ProviderModelsSource(request_timeout_seconds=15.0)
-    ctx = _ctx(handler)
+    source, ctx = _source(handler)
 
     with pytest.raises(SourceUnavailableError):
         await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx)
@@ -153,8 +153,7 @@ async def test_provider_source_does_not_retry_failed_listing():
         attempts.append(request)
         return httpx.Response(503, json={"detail": "upstream down"})
 
-    source = ProviderModelsSource(request_timeout_seconds=15.0)
-    ctx = _ctx(handler)
+    source, ctx = _source(handler)
 
     with pytest.raises(SourceUnavailableError):
         await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx)
