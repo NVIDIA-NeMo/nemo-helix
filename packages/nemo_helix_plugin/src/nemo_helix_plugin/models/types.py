@@ -1197,7 +1197,9 @@ class UpdateModelEntityRequest(BaseModel):
     )
     spec: ModelSpec | None = Field(default=None, description="Detailed specification for the model")
     metadata: ModelMetadata | None = Field(
-        default=None, description="Descriptive model details such as capabilities, modalities, and context length."
+        default=None,
+        description="Descriptive model details such as capabilities, modalities, and context length. Send null to clear it.",
+        json_schema_extra={"nullable": True},
     )
     fileset: str | None = fileset_ref_field(
         None,

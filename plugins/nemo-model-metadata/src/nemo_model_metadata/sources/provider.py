@@ -95,9 +95,8 @@ class ProviderModelsSource(MetadataSource):
                 f"Could not list models for provider {provider.workspace}/{provider.name}: {exc}"
             )
         data = body.get("data") if isinstance(body, dict) else None
-        listing: dict[str, dict[str, Any]] = {}
-        if isinstance(data, list):
-            for entry in data:
-                if isinstance(entry, dict) and isinstance(entry.get("id"), str):
-                    listing[entry["id"]] = entry
-        return listing
+        if not isinstance(data, list):
+            return SourceUnavailableError(
+                f"Provider {provider.workspace}/{provider.name} returned a model list without a data array"
+            )
+        return {entry["id"]: entry for entry in data if isinstance(entry, dict) and isinstance(entry.get("id"), str)}

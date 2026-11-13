@@ -1275,7 +1275,9 @@ class UpdateModelEntityRequest(BaseModel):
     )
     spec: Optional[ModelSpec] = Field(default=None, description="Detailed specification for the model")
     metadata: Optional[ModelMetadata] = Field(
-        default=None, description="Descriptive model details such as capabilities, modalities, and context length."
+        default=None,
+        description="Descriptive model details such as capabilities, modalities, and context length. Send null to clear it.",
+        json_schema_extra={"nullable": True},
     )
     # TODO Replace this with Optional[Union[str, Fileset]] when fileset is accessible outside of the
     # so that a user can inline the fileset definition

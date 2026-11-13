@@ -24391,7 +24391,8 @@ components:
           allOf:
           - $ref: '#/components/schemas/ModelMetadata'
           description: Descriptive model details such as capabilities, modalities,
-            and context length.
+            and context length. Send null to clear it.
+          nullable: true
         fileset:
           title: Fileset
           description: 'A set of checkpoint files, configs, and other auxiliary info
