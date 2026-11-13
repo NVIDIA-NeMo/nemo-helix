@@ -635,6 +635,30 @@ def test_a_job_cannot_switch_uv_back_online_under_a_derived_offline_run(tmp_path
         )
 
 
+def test_the_failure_routing_variable_is_the_one_the_host_reads() -> None:
+    """Evals spells the name out, since the wheel's published nemo-sandboxed-gym predates the host's constant."""
+    from nemo_evals.jobs.gym_sandbox import ROUTE_FAILURES_TO_SIDECAR_ENV_KEY
+    from sandboxed_gym.runtime import gym_host_runtime
+
+    assert ROUTE_FAILURES_TO_SIDECAR_ENV_KEY == gym_host_runtime.ROUTE_FAILURES_TO_SIDECAR_ENV_KEY
+
+
+def test_an_evaluation_host_returns_failed_rollouts_instead_of_failing_the_batch() -> None:
+    """Without it, Gym raises on the first failed agent `/run`, and one bad row costs the job every rollout."""
+    from nemo_evals.jobs.gym_sandbox import ROUTE_FAILURES_TO_SIDECAR_ENV_KEY
+
+    payload = serve_config(target(), capable_plan(), job_id="job-1")
+
+    assert payload["host_env"][ROUTE_FAILURES_TO_SIDECAR_ENV_KEY] == "1"
+
+
+def test_a_job_cannot_set_failure_routing_itself() -> None:
+    from nemo_evals.jobs.gym_sandbox import ROUTE_FAILURES_TO_SIDECAR_ENV_KEY
+
+    with pytest.raises(SandboxUnavailableError, match=ROUTE_FAILURES_TO_SIDECAR_ENV_KEY):
+        serve_config(target(env_vars={ROUTE_FAILURES_TO_SIDECAR_ENV_KEY: "0"}), capable_plan(), job_id="job-1")
+
+
 def test_a_job_may_set_uv_offline_when_the_deployment_does_not_derive_it(tmp_path: Path) -> None:
     persistent = stage_manifest(tmp_path, WHEELS_V1_MANIFEST)
 

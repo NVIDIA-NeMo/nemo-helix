@@ -2040,6 +2040,24 @@ async def test_collection_uses_the_authored_selection(tmp_path: Path) -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_collection_keeps_going_past_a_failed_rollout(tmp_path: Path) -> None:
+    # Gym's default raises on the first failed agent `/run` and ends every rollout still in flight. Routed, the
+    # failure lands in `<output>_failures.jsonl`, which `trials_from_rollouts` reads as a FAILED trial.
+    config = _config(hydra_params={"mcqa": {"port": 8123}})
+    gym = _stub_gym(tmp_path, exit_code=0, message="done")
+    selection = selection_args(config, tmp_path)
+
+    await GymAgentTaskRunner(config=config)._collect_rollouts(
+        gym, selection, tmp_path / "in.jsonl", tmp_path / "out.jsonl", tmp_path, {}
+    )
+
+    argv = (tmp_path / "argv.txt").read_text().splitlines()
+    assert "++route_failures_to_sidecar=true" in argv
+    # Ahead of the selection, so a `hydra_params` override of it would still win.
+    assert argv.index("++route_failures_to_sidecar=true") < len(argv) - len(selection)
+
+
 def test_leftover_captures_refuse_a_second_run_into_the_same_dir(tmp_path: Path) -> None:
     # The sandboxed runner writes captures *before* `rollouts.jsonl`, so a run that died in between
     # leaves them with no file above to catch it. Capture names repeat across runs of one dataset,
