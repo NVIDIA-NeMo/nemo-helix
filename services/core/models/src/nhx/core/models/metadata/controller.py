@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from time import monotonic
 
 import httpx
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -60,7 +61,7 @@ def is_hand_set(metadata: ModelMetadata | None) -> bool:
 @dataclass(frozen=True)
 class LookupResult:
     metadata: ModelMetadata | None
-    all_sources_answered: bool
+    failure: str | None = None
 
 
 class ModelMetadataController:
@@ -77,9 +78,10 @@ class ModelMetadataController:
         self._models_client = AsyncModelsClient.from_client(client)
         self._ctx = MetadataSourceContext(http=http, client=client)
         self._plugin_sources = plugin_sources
-        self._provider_source = ProviderModelsSource()
+        self._provider_source = ProviderModelsSource(request_timeout_seconds=config.request_timeout_seconds)
         self._providers: dict[str, ModelProvider] = {}
-        self._last_miss: dict[str, float] = {}
+        self._retry_after: dict[str, float] = {}
+        self._consecutive_failures: dict[str, int] = {}
 
     @property
     def source_names(self) -> list[str]:
@@ -94,12 +96,14 @@ class ModelMetadataController:
                 logger.exception("Metadata source %s failed to check provider %s", source.name, provider.name)
         return self._provider_source
 
-    async def reconcile(self) -> None:
+    async def reconcile(self, on_progress: Callable[[], None] | None = None) -> None:
         for model in await self.list_models_to_refresh():
             try:
                 await self.reconcile_model(model)
             except Exception:
                 logger.exception("Failed to refresh metadata for model %s/%s", model.workspace, model.name)
+            if on_progress is not None:
+                on_progress()
 
     async def list_models_to_refresh(self) -> list[ModelEntity]:
         try:
@@ -126,22 +130,26 @@ class ModelMetadataController:
             and now - metadata.refreshed_at < refresh_interval
         ):
             return False
-        last_miss = self._last_miss.get(f"{model.workspace}/{model.name}")
-        if last_miss is not None and time.monotonic() - last_miss < self._config.refresh_interval_seconds:
+        retry_after = self._retry_after.get(f"{model.workspace}/{model.name}")
+        if retry_after is not None and monotonic() < retry_after:
             return False
         return True
 
     async def reconcile_model(self, model: ModelEntity) -> None:
         model_key = f"{model.workspace}/{model.name}"
         result = await self.look_up(model, refreshed_at=datetime.now(timezone.utc))
-        if not result.all_sources_answered:
-            logger.warning("Skipped metadata refresh for model %s because a source could not answer", model_key)
+        if result.failure is not None:
+            delay = self._record_failure(model_key)
+            logger.warning(
+                "Skipped metadata refresh for model %s (%s); retrying in %.0fs", model_key, result.failure, delay
+            )
             return
+        self._consecutive_failures.pop(model_key, None)
         if result.metadata is None:
-            self._last_miss[model_key] = time.monotonic()
+            self._retry_after[model_key] = monotonic() + self._config.refresh_interval_seconds
             logger.debug("No metadata found for model %s", model_key)
             return
-        self._last_miss.pop(model_key, None)
+        self._retry_after.pop(model_key, None)
         try:
             current = (await self._models_client.get_model(workspace=model.workspace, name=model.name)).data()
             if is_hand_set(current.metadata):
@@ -154,9 +162,15 @@ class ModelMetadataController:
             return
         logger.info("Updated metadata for model %s from %s", model_key, result.metadata.sources)
 
+    def _record_failure(self, model_key: str) -> float:
+        failures = self._consecutive_failures.get(model_key, 0) + 1
+        self._consecutive_failures[model_key] = failures
+        delay = min(self._config.interval_seconds * (2 ** (failures - 1) - 1), self._config.refresh_interval_seconds)
+        self._retry_after[model_key] = monotonic() + delay
+        return delay
+
     async def look_up(self, model: ModelEntity, refreshed_at: datetime) -> LookupResult:
-        """Ask the source for each of the model's providers in turn until one yields metadata."""
-        all_sources_answered = True
+        failure: str | None = None
         for provider_ref in model.model_providers:
             provider = self._providers.get(provider_ref)
             if provider is None:
@@ -166,13 +180,12 @@ class ModelMetadataController:
             try:
                 metadata = await source.fetch(target, self._ctx)
             except Exception as exc:
-                all_sources_answered = False
-                logger.warning("Metadata source %s failed for %s: %s", source.name, target.upstream_model_id, exc)
+                failure = f"{source.name} failed for {target.upstream_model_id}: {exc}"
                 continue
             if metadata is not None:
                 stamped = metadata.model_copy(update={"sources": [source.name], "refreshed_at": refreshed_at})
-                return LookupResult(metadata=stamped, all_sources_answered=True)
-        return LookupResult(metadata=None, all_sources_answered=all_sources_answered)
+                return LookupResult(metadata=stamped)
+        return LookupResult(metadata=None, failure=failure)
 
     async def _list_providers(self) -> dict[str, ModelProvider]:
         page = await self._models_client.list_providers(workspace="-", query_params={"page_size": _PAGE_SIZE})

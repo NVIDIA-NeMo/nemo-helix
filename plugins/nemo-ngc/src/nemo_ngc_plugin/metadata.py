@@ -37,7 +37,6 @@ _PARAMETER_PATTERN = re.compile(r"^(\d+(?:\.\d+)?)\s*([KMBT])$", re.IGNORECASE)
 
 
 def parse_parameter_count(value: object) -> int | None:
-    """Read NGC's parameter count, which is either an integer or a string such as ``"8B"`` or ``"2.8T"``."""
     if not isinstance(value, str):
         return as_positive_int(value)
     match = _PARAMETER_PATTERN.match(value.strip())
@@ -46,8 +45,8 @@ def parse_parameter_count(value: object) -> int | None:
     return as_positive_int(round(float(match.group(1)) * _PARAMETER_SUFFIXES[match.group(2).upper()]))
 
 
+# NGC names an endpoint after the model id's last segment, sometimes with dots turned into underscores or dashes.
 def endpoint_name_candidates(model_id: str) -> list[str]:
-    """NGC endpoint names are the model id's last segment, sometimes with dots turned into underscores or dashes."""
     name = model_id.rsplit("/", 1)[-1].lower()
     return list(dict.fromkeys([name, name.replace(".", "_"), name.replace(".", "-")]))
 
@@ -62,8 +61,8 @@ def _json_object(value: object) -> dict[str, Any]:
 
 
 def spec_model_id(openapi_spec: object) -> str | None:
-    """Return the default ``model`` of the request schema in the endpoint's OpenAPI document."""
-    schemas = _json_object(openapi_spec).get("components", {}).get("schemas", {})
+    components = _json_object(openapi_spec).get("components")
+    schemas = components.get("schemas") if isinstance(components, dict) else None
     if not isinstance(schemas, dict):
         return None
     for schema in schemas.values():
@@ -106,11 +105,24 @@ class NgcMetadataSource(NemoModelMetadataSource):
         config = config or NgcConfig.get()
         self._base_url = config.url.rstrip("/")
         self._org = config.org
+        self._unavailable: SourceUnavailableError | None = None
+
+    def begin_cycle(self) -> None:
+        self._unavailable = None
 
     def handles(self, provider: ModelProvider) -> bool:
         return urlparse(provider.host_url).hostname == NVIDIA_BUILD_HOST
 
     async def fetch(self, target: MetadataTarget, ctx: MetadataSourceContext) -> ModelMetadata | None:
+        if self._unavailable is not None:
+            raise self._unavailable
+        try:
+            return await self._fetch(target, ctx)
+        except SourceUnavailableError as exc:
+            self._unavailable = exc
+            raise
+
+    async def _fetch(self, target: MetadataTarget, ctx: MetadataSourceContext) -> ModelMetadata | None:
         for endpoint_name in endpoint_name_candidates(target.upstream_model_id):
             endpoint_url = f"{self._base_url}/v2/endpoints/{quote(self._org)}/{quote(endpoint_name)}"
             spec = await _get_json(ctx.http, f"{endpoint_url}/spec")
@@ -126,7 +138,6 @@ class NgcMetadataSource(NemoModelMetadataSource):
 
 
 async def _get_json(http: httpx.AsyncClient, url: str) -> dict[str, Any] | None:
-    """Return the JSON object at ``url``, or ``None`` when NGC has no such endpoint."""
     try:
         response = await http.get(url)
     except httpx.HTTPError as exc:

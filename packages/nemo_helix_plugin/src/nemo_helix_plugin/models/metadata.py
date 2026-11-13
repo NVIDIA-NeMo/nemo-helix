@@ -20,8 +20,17 @@ from nemo_helix_plugin.models.types import ModelMetadata, ModelModality, ModelPr
 
 METADATA_SOURCES_GROUP = "nemo.models.metadata_sources"
 
-MAX_DISPLAY_NAME_LENGTH = 255
-MAX_DESCRIPTION_LENGTH = 4000
+
+def _max_length(field_name: str) -> int:
+    for constraint in ModelMetadata.model_fields[field_name].metadata:
+        max_length = getattr(constraint, "max_length", None)
+        if isinstance(max_length, int):
+            return max_length
+    raise ValueError(f"ModelMetadata.{field_name} has no max_length")
+
+
+MAX_DISPLAY_NAME_LENGTH = _max_length("display_name")
+MAX_DESCRIPTION_LENGTH = _max_length("description")
 
 _KNOWN_MODALITIES = {modality.value for modality in ModelModality}
 _MODALITY_ALIASES = {"file": ModelModality.PDF}

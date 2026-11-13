@@ -93,7 +93,18 @@ def test_spec_model_id_reads_request_schema_default():
     assert spec_model_id(_openapi("moonshotai/kimi-k3")) == "moonshotai/kimi-k3"
 
 
-@pytest.mark.parametrize("openapi_spec", [None, "", "not json", "{}", json.dumps({"components": {"schemas": []}})])
+@pytest.mark.parametrize(
+    "openapi_spec",
+    [
+        None,
+        "",
+        "not json",
+        "{}",
+        json.dumps({"components": None}),
+        json.dumps({"components": {"schemas": None}}),
+        json.dumps({"components": {"schemas": []}}),
+    ],
+)
 def test_spec_model_id_returns_none_without_model_default(openapi_spec: object):
     assert spec_model_id(openapi_spec) is None
 
@@ -251,3 +262,22 @@ async def test_ngc_source_returns_none_when_no_endpoint_matches():
 )
 def test_parse_parameter_count(value: object, expected: int | None):
     assert parse_parameter_count(value) == expected
+
+
+async def test_ngc_source_stops_calling_ngc_for_the_rest_of_the_cycle_after_a_failure():
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        raise httpx.ConnectError("unreachable")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        source = NgcMetadataSource(NgcConfig(url=BASE_URL, org=ORG))
+        for model_id in ("moonshotai/kimi-k3", "z-ai/glm-5.3"):
+            with pytest.raises(SourceUnavailableError):
+                await source.fetch(MetadataTarget(upstream_model_id=model_id, provider=_provider()), _ctx(http))
+        source.begin_cycle()
+        with pytest.raises(SourceUnavailableError):
+            await source.fetch(MetadataTarget(upstream_model_id="moonshotai/kimi-k3", provider=_provider()), _ctx(http))
+
+    assert requests == [f"/v2/endpoints/{ORG}/kimi-k3/spec", f"/v2/endpoints/{ORG}/kimi-k3/spec"]

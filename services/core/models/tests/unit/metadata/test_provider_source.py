@@ -79,7 +79,7 @@ async def test_provider_source_lists_models_once_per_cycle_with_platform_headers
             200, json={"data": [{"id": "gemma-4-12b", "name": "Gemma 4 12B", "context_length": 262144}]}
         )
 
-    source = ProviderModelsSource()
+    source = ProviderModelsSource(request_timeout_seconds=15.0)
     ctx = _ctx(handler)
     first = await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx)
     missing = await source.fetch(MetadataTarget(upstream_model_id="not-served", provider=_provider()), ctx)
@@ -96,7 +96,7 @@ async def test_provider_source_raises_when_listing_fails_and_retries_next_cycle(
     def handler(request: httpx.Request) -> httpx.Response:
         return responses.pop(0)
 
-    source = ProviderModelsSource()
+    source = ProviderModelsSource(request_timeout_seconds=15.0)
     ctx = _ctx(handler)
     target = MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider())
 
@@ -116,7 +116,7 @@ async def test_provider_source_raises_on_malformed_listing(body: object):
             return httpx.Response(200, text=body)
         return httpx.Response(200, json=body)
 
-    source = ProviderModelsSource()
+    source = ProviderModelsSource(request_timeout_seconds=15.0)
     ctx = _ctx(handler)
 
     with pytest.raises(SourceUnavailableError):
@@ -129,7 +129,7 @@ async def test_provider_source_treats_upstream_without_model_list_as_empty():
             return httpx.Response(200, json={"workspace": "default", "name": "spark"})
         return httpx.Response(404, json={"message": "Not Found"})
 
-    source = ProviderModelsSource()
+    source = ProviderModelsSource(request_timeout_seconds=15.0)
     ctx = _ctx(handler)
 
     assert await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx) is None
@@ -139,8 +139,24 @@ async def test_provider_source_raises_when_gateway_does_not_know_provider_yet():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"detail": "Model provider not found for default/spark"})
 
-    source = ProviderModelsSource()
+    source = ProviderModelsSource(request_timeout_seconds=15.0)
     ctx = _ctx(handler)
 
     with pytest.raises(SourceUnavailableError):
         await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx)
+
+
+async def test_provider_source_does_not_retry_failed_listing():
+    attempts: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+        return httpx.Response(503, json={"detail": "upstream down"})
+
+    source = ProviderModelsSource(request_timeout_seconds=15.0)
+    ctx = _ctx(handler)
+
+    with pytest.raises(SourceUnavailableError):
+        await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx)
+
+    assert len(attempts) == 1

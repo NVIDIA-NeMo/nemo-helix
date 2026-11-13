@@ -8,7 +8,14 @@ import threading
 import httpx
 from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.config import get_platform_config
-from nhx.common.controller import Controller, ControllerManager, Loop, TimedLoopWaiter, TrackLastExecutionTime
+from nhx.common.controller import (
+    Controller,
+    ControllerManager,
+    HeartbeatMixin,
+    Loop,
+    TimedLoopWaiter,
+    TrackLastExecutionTime,
+)
 from nhx.common.service.api.health import wait_for_service_ready
 from nhx.core.models.config import config as models_config
 from nhx.core.models.metadata.controller import ModelMetadataController, build_http_client, load_plugin_sources
@@ -19,7 +26,7 @@ CONTROLLER_NAME = "model-metadata"
 _REQUIRED_SERVICES = ("models", "inference-gateway")
 
 
-class _MetadataLoopStep(Controller):
+class _MetadataLoopStep(HeartbeatMixin, Controller):
     """Runs one async reconcile pass per loop step on a private event loop."""
 
     def __init__(self, controller: ModelMetadataController, http: httpx.AsyncClient) -> None:
@@ -28,7 +35,7 @@ class _MetadataLoopStep(Controller):
         self._event_loop = asyncio.new_event_loop()
 
     def step(self) -> None:
-        self._event_loop.run_until_complete(self._controller.reconcile())
+        self._event_loop.run_until_complete(self._controller.reconcile(on_progress=self.emit_heartbeat))
 
     def shutdown(self) -> None:
         if self._event_loop.is_closed():

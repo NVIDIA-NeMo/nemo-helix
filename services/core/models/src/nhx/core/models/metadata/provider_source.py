@@ -4,6 +4,7 @@
 from typing import Any
 
 from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayClient
 from nemo_helix_plugin.models.metadata import (
     MAX_DESCRIPTION_LENGTH,
@@ -29,7 +30,6 @@ _CAPABILITY_PARAMETERS: dict[str, ModelCapability] = {
 
 
 def parse_provider_model(entry: dict[str, Any]) -> ModelMetadata | None:
-    """Parse the extra fields some OpenAI-compatible providers (OpenRouter, vLLM) add to ``GET /v1/models``."""
     architecture = entry.get("architecture")
     if not isinstance(architecture, dict):
         architecture = {}
@@ -59,14 +59,12 @@ def parse_provider_model(entry: dict[str, Any]) -> ModelMetadata | None:
 
 
 class ProviderModelsSource(NemoModelMetadataSource):
-    """Reads the provider's own ``GET /v1/models`` through the inference gateway, which supplies its credentials.
-
-    Used for every provider that no plugin source handles.
-    """
+    """Reads the provider's own ``GET /v1/models`` through the inference gateway, which supplies its credentials."""
 
     name = "provider"
 
-    def __init__(self) -> None:
+    def __init__(self, request_timeout_seconds: float) -> None:
+        self._request_timeout_seconds = request_timeout_seconds
         self._listings: dict[str, dict[str, dict[str, Any]] | SourceUnavailableError] = {}
 
     def handles(self, provider: ModelProvider) -> bool:
@@ -76,7 +74,8 @@ class ProviderModelsSource(NemoModelMetadataSource):
         self._listings.clear()
 
     async def fetch(self, target: MetadataTarget, ctx: MetadataSourceContext) -> ModelMetadata | None:
-        listing = await self._listing(target.provider, AsyncInferenceGatewayClient.from_client(ctx.client))
+        client = ctx.client.with_options(retry=RetryPolicy(max_retries=0), timeout=self._request_timeout_seconds)
+        listing = await self._listing(target.provider, AsyncInferenceGatewayClient.from_client(client))
         entry = listing.get(target.upstream_model_id)
         if entry is None:
             return None
@@ -117,8 +116,8 @@ class ProviderModelsSource(NemoModelMetadataSource):
         return {entry["id"]: entry for entry in data if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
 
 
+# A 404 from a provider the gateway knows came from an upstream without a model list.
 async def _gateway_routes(provider: ModelProvider, gateway_client: AsyncInferenceGatewayClient) -> bool:
-    """Whether the gateway knows the provider, so a 404 came from an upstream without a model list."""
     try:
         await gateway_client.provider_ready(workspace=provider.workspace, name=provider.name)
     except NemoClientError:

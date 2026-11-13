@@ -25,7 +25,6 @@ _INFERENCE_PROFILE_PREFIX = re.compile(r"^(?:us|us-gov|eu|apac|au|ca|jp|global)\
 
 
 def control_plane_url(host_url: str) -> str | None:
-    """Return the Bedrock control plane URL for a Bedrock inference host, or ``None`` for any other host."""
     match = _INFERENCE_HOST.match(urlparse(host_url).hostname or "")
     if match is None:
         return None
