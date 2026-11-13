@@ -5,7 +5,7 @@ import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import {
   type DatasetsPage,
   useOwnedFirstFilesets,
-} from '@studio/components/DatasetsTable/useOwnedFirstFilesets';
+} from '@studio/components/FilesetsTable/useOwnedFirstFilesets';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
 import { TestProviders } from '@studio/tests/util/TestProviders';

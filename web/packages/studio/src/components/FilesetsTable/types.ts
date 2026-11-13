@@ -26,7 +26,7 @@ export type StorageConfig =
 
 export type DatasetWithId = Dataset & { id: string };
 
-export interface DatasetsTableProps {
+export interface FilesetsTableProps {
   /** Callback when datasets are selected */
   onDatasetsSelected?: (datasets: Dataset[]) => void;
   /** Callback when a row is clicked */
@@ -43,7 +43,7 @@ export interface DatasetsTableProps {
   selectionType?: 'multiple' | 'single';
   /** Render dataset name as link - provide a function that returns the route */
   getDatasetRoute?: (dataset: Dataset) => string;
-  /** When set, restricts the fetched filesets to the given purpose. Pass FilesetPurpose.dataset in picker contexts that are specifically designed for dataset inputs. */
+  /** When set, restricts the fetched filesets to the given purpose and drops the Purpose filter. Pass FilesetPurpose.dataset in picker contexts that are specifically designed for dataset inputs. */
   purposeFilter?: FilesetPurpose;
   /** Custom render for row actions */
   renderRowActions?: (

@@ -19,6 +19,8 @@ interface ActionMenuProps {
   onNavigateToDetails: (dataset: FilesetOutput) => void;
   onDatasetUpdated?: (dataset: FilesetOutput) => void;
   onDatasetDeleted?: (dataset: FilesetOutput) => void;
+  /** What the row is called in the menu label and delete copy (default: Dataset) */
+  entityLabel?: string;
 }
 
 export const ActionMenu: FC<ActionMenuProps> = ({
@@ -26,6 +28,7 @@ export const ActionMenu: FC<ActionMenuProps> = ({
   onNavigateToDetails,
   onDatasetUpdated,
   onDatasetDeleted,
+  entityLabel = 'Dataset',
 }) => {
   const [modalOpen, setModalOpen] = useState<'edit' | 'copy' | 'delete' | undefined>(undefined);
   const { mutateAsync: deleteDataset } = useFilesDeleteFileset({
@@ -67,7 +70,7 @@ export const ActionMenu: FC<ActionMenuProps> = ({
   return (
     <>
       <QuickActionsMenuRoot
-        ariaLabel="Open dataset actions menu"
+        ariaLabel={`Open ${entityLabel.toLowerCase()} actions menu`}
         actions={[
           { label: 'View', onSelect: () => onNavigateToDetails(dataset) },
           { label: 'Edit', onSelect: () => setModalOpen('edit') },
@@ -101,10 +104,10 @@ export const ActionMenu: FC<ActionMenuProps> = ({
           open={modalOpen === 'delete'}
           onClose={handleModalClose}
           onDelete={handleDeleteDataset}
-          title={`Delete Dataset: ${dataset.name}`}
+          title={`Delete ${entityLabel}: ${dataset.name}`}
           confirmationText={dataset.name ?? getEntityReference(dataset)}
           simpleConfirm
-          successText="Dataset deleted successfully"
+          successText={`${entityLabel} deleted successfully`}
         />
       )}
     </>

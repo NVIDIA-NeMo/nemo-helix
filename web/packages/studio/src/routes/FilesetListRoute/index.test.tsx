@@ -180,7 +180,9 @@ describe('FilesetListRoute', () => {
           timeout: LG_SELECTOR_TIMEOUT,
         })
       ).toHaveTextContent('Filesets');
-      expect(screen.getByRole('button', { name: 'Create Dataset' })).toBeInTheDocument();
+      // Datasets are created from the Datasets page.
+      expect(screen.getByRole('button', { name: 'Create Model Fileset' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Create Dataset' })).not.toBeInTheDocument();
     });
   });
 

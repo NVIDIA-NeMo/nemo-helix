@@ -8,6 +8,8 @@ import {
 } from '@studio/components/filesets/AddToFolderModal';
 import type { FileSystemNode } from '@studio/components/FilesTable/utils';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
+import { FilesetDetailParentContext } from '@studio/routes/FilesetDetailRoute/FilesetDetailParent';
+import { getDatasetDetailRoute, getWorkspaceDatasetsRoute } from '@studio/routes/utils';
 import { mockUseParams, mockUseNavigate } from '@studio/tests/util/mockUseParams';
 import { render } from '@studio/tests/util/render';
 import { screen, waitFor } from '@testing-library/react';
@@ -375,6 +377,30 @@ describe('AddToFolderModal', () => {
           expect.stringContaining(
             `/workspaces/${DEFAULT_WORKSPACE}/filesets/${MOCK_DATASET_NAME}/files`
           )
+        );
+      });
+    });
+
+    it('stays under the detail page it was opened from', async () => {
+      render(
+        <FilesetDetailParentContext.Provider
+          value={{
+            label: 'Datasets',
+            getListRoute: getWorkspaceDatasetsRoute,
+            getDetailRoute: getDatasetDetailRoute,
+          }}
+        >
+          <AddToFolderModal {...propsWithSingleFile} />
+        </FilesetDetailParentContext.Provider>
+      );
+
+      await user.click(screen.getByTestId('nv-select-trigger'));
+      await user.click(await screen.findByRole('option', { name: '.. (parent folder)' }));
+      await user.click(screen.getByRole('button', { name: /Move/i }));
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith(
+          `/workspaces/${DEFAULT_WORKSPACE}/datasets/${MOCK_DATASET_NAME}/files`
         );
       });
     });

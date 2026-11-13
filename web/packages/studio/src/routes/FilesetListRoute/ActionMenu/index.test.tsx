@@ -199,6 +199,16 @@ describe('ActionMenu', () => {
       expect(screen.getByText(`Delete Dataset: ${mockDataset.name}`)).toBeInTheDocument();
     });
 
+    it('names the row with entityLabel in the menu and delete copy', async () => {
+      const user = userEvent.setup();
+      render(<ActionMenu {...defaultProps} entityLabel="Fileset" />);
+
+      await user.click(screen.getByRole('button', { name: 'Open fileset actions menu' }));
+      await user.click(screen.getByText('Delete'));
+
+      expect(screen.getByText(`Delete Fileset: ${mockDataset.name}`)).toBeInTheDocument();
+    });
+
     it('surfaces the backend message when the fileset is in use', async () => {
       const detail =
         "Cannot delete fileset 'test-workspace/test-dataset' because 2 model entity reference(s) and 1 adapter entity reference(s) still use it. Relink or delete the dependent entities first.";

@@ -35,8 +35,17 @@ const specOf = (job: HelixJobResponse): Record<string, unknown> => job.spec ?? {
 export const evalJobKind = (job: HelixJobResponse): EvalJobKind =>
   specOf(job).dataset !== undefined ? 'dataset' : 'task';
 
+const publishedAgentName = (job: HelixJobResponse): string | undefined => {
+  const intake = asRecord(asRecord(specOf(job).publication)?.intake);
+  const name = asNonEmptyString(intake?.agent_name);
+  const prefix = `${job.workspace}/`;
+  return name?.startsWith(prefix) ? name.slice(prefix.length) : name;
+};
+
+/** The agent a job's results publish under: an explicit ``publication.intake.agent_name`` first,
+ *  as the evaluator itself prefers it, else the registered agent its target names. */
 export const targetNameForEvalJob = (job: HelixJobResponse): string | null =>
-  agentNameForTarget(specOf(job).target, job.workspace);
+  publishedAgentName(job) ?? agentNameForTarget(specOf(job).target, job.workspace);
 
 export const evalJobConfigLabel = (job: HelixJobResponse): string | null => {
   const spec = specOf(job);
