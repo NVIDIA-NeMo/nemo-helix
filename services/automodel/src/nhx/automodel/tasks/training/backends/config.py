@@ -51,10 +51,9 @@ from nhx.automodel.tasks.training.sequence_packing import (
     estimate_dataset_sequence_lengths,
 )
 from nhx.customization_common.schemas.checkpoint import (
-    VLM_LORA_EXCLUDE_MODULES,
     CheckpointTraits,
-    lora_uses_default_targets,
     traits_from_step_model,
+    vlm_lora_exclude_modules,
 )
 from nhx.customization_common.service.context import NHXJobContext
 
@@ -484,11 +483,16 @@ def _apply_vlm_lora_excludes(cfg: dict[str, Any], customizer_config: TrainingSte
     lora = customizer_config.training.lora
     target = None if lora is None else lora.target_modules
     exclude = None if lora is None else lora.exclude_modules
-    if not lora_uses_default_targets(target, exclude):
+    # PeftConfig takes target_modules or exclude_modules, not both. A named target
+    # list is the caller's filter. An exclude list is unioned with the vision patterns.
+    if target and list(target) != ["*proj"]:
         return
     peft.pop("target_modules", None)
     peft["match_all_linear"] = False
-    peft["exclude_modules"] = list(VLM_LORA_EXCLUDE_MODULES)
+    peft["exclude_modules"] = vlm_lora_exclude_modules(
+        exclude,
+        checkpoint_model_name=customizer_config.model.checkpoint_model_name,
+    )
 
 
 def _configure_vlm_datasets(

@@ -1,0 +1,113 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Nemotron Vision-Language Models"
+description: ""
+---
+<a id="model-catalog-nemotron-vl"></a>
+
+This page covers Nemotron vision-language models in NeMo Customizer. For the tested-model list, see [Tested Models](/documentation/customizer-reference/models/model-catalog). Text-only Nemotron models are on [Nemotron Models](/documentation/customizer-reference/models/llama-nemotron).
+
+<Warning>
+
+The multi-LLM NIM cannot serve merged LoRA checkpoints (`finetuning_type: lora_merged`). Deploy merged LoRA models with vLLM. See [Choose an Inference Engine](/documentation/models-and-inference/deploy-models#choose-an-inference-engine).
+
+</Warning>
+
+<Note>
+
+Customizing this model is supported on NVIDIA Hopper or Blackwell GPUs, such as H100, H200, B100, and B200. GPU counts below assume 80 GB GPUs unless a profile says otherwise. For a mixture-of-experts model, set `expert_parallel_size` to a value that divides the GPU count, and keep it within one node.
+
+</Note>
+
+## NVIDIA Nemotron 3.5 Super VL 120B A12B
+
+| Property | Value |
+|----------|--------|
+| Creator | NVIDIA |
+| Architecture | `NemotronH_Omni_Reasoning_V3`: hybrid Mamba-2 and Transformer mixture of experts, with a vision tower and one multi-token prediction (MTP) layer |
+| Parameters | 120B total (about 12B active) |
+| Max model length, as served | 114,688 |
+| Default Name | nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16 |
+| Hugging Face | [BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16), [NVFP4](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4) |
+| NIM | [Nemotron 3.5 Super VL NIM](https://catalog.ngc.nvidia.com/orgs/nim/nvidia/containers/nemotron-3.5-super-vl-120b-a12b), base model only |
+
+<Note>
+
+Train on the BF16 checkpoint. Automodel cannot dequantize the ModelOpt NVFP4 checkpoint. NVFP4 and the NIM serve the released base model only. Adapters and fine-tuned checkpoints are served on BF16.
+
+</Note>
+
+### Training Options
+
+Upstream recipes. None of these GPU counts are measured on the platform yet.
+
+- **CORD-v2 LoRA.** Rank 64, alpha 128, expert parallel 8, 8x 80 GB (about 39 GiB per GPU), global batch 8, 4 epochs. Recipe: [`nemotron_3_5_super_vl_cord_v2_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/main/docs/model-coverage/omni/nvidia/nemotron-3-5-super-vl.mdx). Walkthrough: [Fine-Tune Nemotron 3.5 Super VL on CORD-v2](/documentation/customizer-reference/tutorials/super-vl-cord-lora).
+- **Full SFT.** 4 nodes, text recipe `nemotron_3_5_super_vl_tulu3_text_100steps.yaml` on that page. No published scores.
+- **Merged LoRA.** Deploy the merged checkpoint as a full BF16 model. These recipes set `num_nextn_predict_layers` to 0, so the checkpoint has no MTP layer.
+- **Finance LoRA.** One adapter each for `finance-ocr`, `finance-reasoning`, and `finance-code`, on 8x H100 or 4x GB200. Train/validation/test rows: 7283/679/1062 (OCR, plus 9024 images), 5393/532/804 (reasoning), 6235/710/1083 (code). Cookbook: [lora-finance](https://github.com/NVIDIA-NeMo/Nemotron/tree/main/usage-cookbook/Nemotron-3.5-Super-VL/lora-finance).
+- **GRPO on CLEVR-CoGenT.** 16 nodes of 4x GB200. Do not scale it to 8 GPUs. Job: [Vision-language models](/documentation/customizer-reference/grpo-and-reward-environments#vision-language-models).
+
+### Constraints
+
+- Register with `trust_remote_code`, and wait until `spec.has_vision_tower` is true before a dry run.
+- Image rows: supervised fine-tuning and GRPO only. No distillation, sequence packing, or Unsloth.
+- With `expert_parallel_size` greater than 1, set `tensor_parallel_size` to 1. Expert parallel must divide the GPU count and stay on one node.
+- Leave `lora.exclude_modules` unset. The compiler freezes the vision tower and excludes fused Mamba `*.out_proj`.
+
+### Compute Profiles
+
+**8 GPUs, one node: Super VL CORD-v2 LoRA.** 4 epochs is the recipe's 400 steps: 800 training rows at global batch 8. Leave `max_steps` unset.
+
+```json
+{
+  "model": "default/nemotron-3-5-super-vl-120b-a12b-bf16",
+  "dataset": {"training": "default/cord-v2"},
+  "training": {
+    "training_type": "sft",
+    "finetuning_type": "lora",
+    "lora": {"rank": 64, "alpha": 128},
+    "max_seq_length": 8192
+  },
+  "schedule": {"epochs": 4},
+  "batch": {"global_batch_size": 8, "micro_batch_size": 1},
+  "optimizer": {"learning_rate": 2e-4},
+  "parallelism": {
+    "num_nodes": 1,
+    "num_gpus_per_node": 8,
+    "tensor_parallel_size": 1,
+    "expert_parallel_size": 8
+  },
+  "deployment_config": {
+    "engine": "vllm",
+    "gpu": 4,
+    "disk_size": "300Gi",
+    "additional_args": [
+      "--max-model-len", "114688",
+      "--reasoning-parser", "nemotron_v3",
+      "--tool-call-parser", "qwen3_coder",
+      "--enable-auto-tool-choice",
+      "--mamba-ssm-cache-dtype", "float32",
+      "--limit-mm-per-prompt", "{\"image\": 1, \"video\": 1}",
+      "--max-lora-rank", "64",
+      "--max-loras", "2"
+    ]
+  }
+}
+```
+
+### Deployment Configuration
+
+Flags, LoRA hot-reload, merged checkpoints, and the weights volume: [Deploy Nemotron 3.5 Super VL](/documentation/models-and-inference/deploy-models#deploy-nemotron-super-vl). The [NIM](https://catalog.ngc.nvidia.com/orgs/nim/nvidia/containers/nemotron-3.5-super-vl-120b-a12b) serves the released base model only.
+
+<a id="measured-uplift"></a>
+### Measured Uplift
+
+Evaluator's ExactMatch and F1 strip punctuation, which removes the CORD `json2token` tags. Score CORD with `StringCheckMetric` (`equals`) and `SequenceSimilarityMetric`. Finance uses the cookbook metrics, not those built-ins.
+
+| Run | Upstream reference | Platform |
+| --- | --- | --- |
+| CORD-v2 LoRA, first 20 validation receipts, merged, step 199 | 8/20 exact, mean similarity 0.954, median 0.997 | Not yet measured |
+| Finance adapters | Headline numbers are in the [lora-finance cookbook](https://github.com/NVIDIA-NeMo/Nemotron/tree/main/usage-cookbook/Nemotron-3.5-Super-VL/lora-finance) | Not yet measured |
+| CLEVR-CoGenT GRPO, valA, 256 samples | 0.57 / 0.77 / 0.84 at steps 0 / 10 / 20. `gen_kl_error` about 0.006 to 0.009 | Not yet measured |

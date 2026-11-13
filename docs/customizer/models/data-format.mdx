@@ -115,6 +115,41 @@ Each line in your JSONL file must contain a JSON object with these required fiel
 }
 ```
 
+### OpenAI Chat Model with Images
+
+A vision-language job uses the same `messages` row. `content` is either a string or a list of parts. A string is one text part, so an existing chat fileset still loads.
+
+- **Text part:** `{"type": "text", "text": "..."}`.
+- **Image part:** `{"type": "image_url", "image_url": {"url": "..."}}`.
+- **`url`:** a fileset-relative path, such as `train/images/00000.png`, or a `data:` URL for PNG, JPEG, GIF, or WebP of at most 25 MiB. An `http(s)` URL, an absolute path, and `file://` are rejected at training time.
+- **Assistant label:** one text part. For finance train and validation rows, that string is a `<think>` trace followed by the answer. Test rows used for scoring keep the answer only.
+
+Training reads the relative path. Inference and Evaluator requests use `fileset://<workspace>/<fileset>#<path>`. The gateway downloads the file and inlines it. See [Run Inference](/documentation/models-and-inference/run-inference) for the request forms.
+
+#### Example Dataset Entry
+
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "image_url", "image_url": {"url": "train/images/00000.png"}},
+        {"type": "text", "text": "Describe this image."}
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": "<s_menu><s_nm>BLACK COFFEE</s_nm></s_menu>"
+    }
+  ]
+}
+```
+
+Put the trailing slash on the source path (`cord-v2/`) so the directory contents land at the fileset root. Use a new fileset name if a retry duplicated files. `nemo customization dataset prepare` has no image format; prepare rows with the [CORD-v2 tutorial](/documentation/customizer-reference/tutorials/super-vl-cord-lora).
+
+An Evaluator reference must resolve to a string, for example `` `{{ item.messages[-1].content }}` ``. A list label fails with "The reference must be a string."
+
 ### OpenAI Chat With Tool
 
 #### Required Schema

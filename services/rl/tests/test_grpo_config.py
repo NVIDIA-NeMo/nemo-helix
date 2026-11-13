@@ -1731,6 +1731,36 @@ def test_grpo_vision_checkpoint_sets_is_vlm_and_leaves_image_urls(
     assert "image_url" in (dataset / "training.jsonl").read_text(encoding="utf-8")
 
 
+def test_grpo_vision_unions_a_caller_exclude_with_the_vision_patterns(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(
+        tmp_path,
+        finetuning_type=FinetuningType.LORA,
+        lora=LoRAConfig(exclude_modules=["*.out_proj"]),
+        has_vision_tower=True,
+    )
+
+    exclude = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["lora_cfg"]["exclude_modules"]
+
+    assert exclude[0] == "*vision_tower*"
+    assert exclude[-1] == "*.out_proj"
+
+
+def test_grpo_nemotron_h_vision_excludes_mamba_out_proj_when_unset(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path, finetuning_type=FinetuningType.LORA, lora=LoRAConfig(), has_vision_tower=True)
+    step.model.checkpoint_model_name = "NemotronH_Omni_Reasoning_V3"
+
+    exclude = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["lora_cfg"]["exclude_modules"]
+
+    assert "*lm_head*" in exclude
+    assert exclude[-1] == "*.out_proj"
+
+
 def test_grpo_input_image_rows_count_as_images(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -442,7 +442,7 @@ Or an object to have one created inline. It deploys with vLLM, the recommended e
 | `additional_envs`  | unset                           | Extra environment variables. The default NIM image, the model-free NIM, loads LoRA adapters up to rank 16 unless you set `NIM_PASSTHROUGH_ARGS` to `--max-lora-rank <rank>`.                                      |
 | `tool_call_config` | unset                           | Tool-calling overrides. Requires NIM: setting it without `engine` deploys with NIM, and it is rejected with `"engine": "vllm"`. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
 
-vLLM deployments load LoRA adapters up to rank 32 by default. To serve a higher `rank`, reference a deployment config that sets `"additional_args": ["--max-lora-rank", "<rank>"]` in its `executor_config`.
+vLLM deployments load LoRA adapters up to rank 32 by default. To serve a higher `rank`, set `"additional_args": ["--max-lora-rank", "<rank>"]`. An inline `deployment_config` accepts `additional_args` and `disk_size`; a named template sets them on `executor_config`.
 
 A LoRA job deploys the **base** model with `lora_enabled: true` and serves the adapter from it, so `lora_enabled: false` on a LoRA job is rejected at submit — that deployment could never load the adapter. A full-weight job deploys the new model entity it registers.
 
@@ -455,6 +455,46 @@ Bad configurations fail before training starts, not after the run. These are rej
 If the base model is already deployed with `lora_enabled: true`, a LoRA job does not deploy it again; that deployment serves the adapter. If the base is served only with `lora_enabled: false`, the job creates a LoRA-enabled deployment alongside it. See [Deployment config validation](/documentation/customizer-reference/manage-customization-jobs/customization-job-reference#deployment-config-validation) for how that deployment is named and how to enable LoRA on the existing one instead.
 
 A deployment config that names no model — neither `model_entity_id` nor `model_spec.model_name` — is an **unbound template**. It carries only engine and executor settings, so it is accepted by any job: the trained model is stamped onto a copy of it at deploy time, leaving the template reusable for the next run. This is the only way to share engine/executor settings across full-weight jobs, whose output model does not exist when the job is submitted.
+
+## Vision-language models
+
+Image prompts train through the same GRPO job. The rollout rows carry the image, and the environment is the Gym `servers/vlm` package built from `scripts/grpo-examples/`. CLEVR-CoGenT is the reference task. Packaging steps are in [GRPO Environment Packages](/documentation/customizer-reference/tutorials/grpo-environment-packages#clevr-cogent).
+
+`training.vllm_expert_parallel_size` sets expert parallel on the colocated vLLM engine. It defaults to 1. A value greater than 1 must divide the total GPU count and must not exceed the GPUs on one node. Training `expert_parallel_size` has the same one-node limit. Leave `PYTORCH_CUDA_ALLOC_CONF` unset; `expandable_segments:True` breaks the weight refit. Sequence packing is rejected for vision-language and multimodal runs. Rebuild the environment package from the Gym version the RL image pins. A package built against a different Gym checkout can shadow the image copy even when both report the same version.
+
+**Super VL, upstream reference.** 16 nodes of 4x GB200. Do not scale this to 8 GPUs. valA (256 samples): 0.57 / 0.77 / 0.84 at steps 0 / 10 / 20, `gen_kl_error` about 0.006 to 0.009. Not yet measured on the platform. [Guide](https://github.com/NVIDIA-NeMo/RL/blob/super-3.5-automodel/docs/guides/models/nemotron/nemotron-3.5-super-vl.md).
+
+```json
+{
+  "model": "default/nemotron-3-5-super-vl-120b-a12b-bf16",
+  "dataset": "default/clevr-cogent",
+  "environment": "default/clevr-cogent-env",
+  "training": {
+    "type": "grpo",
+    "finetuning_type": "lora",
+    "lora": {"rank": 64, "alpha": 128},
+    "hf_config_overrides": {"num_nextn_predict_layers": 0},
+    "vllm_kwargs": {
+      "moe_backend": "triton",
+      "mamba_ssm_cache_dtype": "float32",
+      "skip_mm_profiling": true,
+      "limit_mm_per_prompt": {"image": 2}
+    },
+    "vllm_tensor_parallel_size": 4,
+    "vllm_expert_parallel_size": 4,
+    "parallelism": {
+      "num_nodes": 16,
+      "num_gpus_per_node": 4,
+      "tensor_parallel_size": 1,
+      "expert_parallel_size": 4
+    }
+  }
+}
+```
+
+Prepare the rows with `--prompt nemotron-omni`. `skip_tokenizer_init` stays unset; NeMo RL fills it for `NemotronH_Omni_Reasoning_V3`.
+
+The 1-GPU job for `Qwen/Qwen3-VL-8B-Instruct` is on [Qwen Models](/documentation/customizer-reference/models/qwen#qwen3-vl-8b-instruct).
 
 ## Key hyperparameters
 

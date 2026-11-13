@@ -32,6 +32,11 @@ If downloading models hosted on Hugging Face, create a secret with your Hugging 
 View the available Nemotron models from NVIDIA, including Nemotron 3.5 Lightning, Nemotron 3 Nano and Super, and Llama Nemotron variants.
 
 </Card>
+<Card title="Nemotron Vision-Language" href="/documentation/customizer-reference/models/nemotron-vl">
+
+View Nemotron 3.5 Super VL, including the BF16 training checkpoint, image rows, and the 8-GPU profile.
+
+</Card>
 <Card title="Llama Models" href="/documentation/customizer-reference/models/llama">
 
 View the available Llama models from Meta, ranging from 8 billion to 70 billion parameters.
@@ -54,7 +59,7 @@ View the available GPT-OSS models supported for customization.
 </Card>
 <Card title="Qwen Models" href="/documentation/customizer-reference/models/qwen">
 
-View the available Qwen models from Alibaba Cloud, including compact variants for efficient customization.
+View the available Qwen models from Alibaba Cloud, including compact variants for efficient customization and the Qwen3-VL-8B-Instruct vision-language checkpoint for one-GPU runs.
 
 </Card>
 <Card title="Mistral Models" href="/documentation/customizer-reference/models/mistral">
@@ -99,6 +104,14 @@ Deployment configurations on the model family pages that use the multi-LLM NIM (
 </Warning>
 
 [^1]: Read more on [sequence packing with NeMo Framework](https://docs.nvidia.com/nemo-framework/user-guide/latest/sft_peft/packed_sequence.html#)
+
+### Vision-Language Models
+
+These models take image input. NVFP4 checkpoints of the same model are for inference only and are not a training base.
+
+| Model | Fine-tuning Options | Image Input | GRPO | Inference with NIM | Reasoning |
+|--|--|--|--|--|--|
+| [nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16) | LoRA, Full SFT, merged LoRA | Yes | Yes | Base model only | Yes |
 
 ### Embedding Models
 

@@ -1,0 +1,435 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: "Fine-Tune Nemotron 3.5 Super VL on CORD-v2"
+description: ""
+---
+
+<div className="notebook-actions">
+  <a href="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/super-vl-cord-lora.ipynb" target="_blank" rel="noopener noreferrer" className="notebook-actions__button notebook-actions__button--primary">
+    <span aria-hidden="true">&#9654;</span><span>Run in Google Colab</span>
+  </a>
+</div>
+
+Train a LoRA adapter on receipt images, deploy it, and score the validation split. Row format: [OpenAI Chat Model with Images](/documentation/customizer-reference/models/dataset-format#openai-chat-model-with-images). Model notes: [Nemotron Vision-Language Models](/documentation/customizer-reference/models/nemotron-vl).
+
+`PROFILE` selects the hardware:
+
+- `super-vl`: upstream recipe, 8x 80 GB, rank 64, 4 epochs (400 steps on 800 rows at global batch 8). Not yet measured on the platform.
+- `qwen3-vl-8b`: `Qwen/Qwen3-VL-8B-Instruct`, one 48 GB GPU, rank 16, 300/30 rows. Not a Super VL result.
+
+<Tip>
+
+Set `PROFILE = "qwen3-vl-8b"` without a cluster. LoRA fits one 48 GB GPU.
+
+</Tip>
+
+## Prerequisites
+
+1. A [CLI context](/documentation/reference/cli-reference/connect-to-deployments) pointed at your platform.
+2. The Python SDK (`pip install "nemo-helix[all]"`), plus `datasets` and `pillow`.
+3. For `super-vl`: 8x 80 GB Hopper or Blackwell GPUs, and a weights volume of at least 300Gi for the BF16 checkpoint.
+4. For `qwen3-vl-8b`: one 48 GB GPU.
+5. A Hugging Face token if the checkpoint is gated.
+
+## 1. Choose a profile
+
+```python
+PROFILE = "qwen3-vl-8b"  # or "super-vl"
+
+PROFILES = {
+    "super-vl": {
+        "repo_id": "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16",
+        "model_name": "nemotron-3-5-super-vl-120b-a12b-bf16",
+        "dataset_name": "cord-v2",
+        "trust_remote_code": True,
+        "train_limit": None,
+        "validation_limit": None,
+        "lora_rank": 64,
+        "lora_alpha": 128,
+        "max_seq_length": 8192,
+        "epochs": 4,
+        "max_steps": None,
+        "global_batch_size": 8,
+        "learning_rate": 2e-4,
+        "num_gpus_per_node": 8,
+        "expert_parallel_size": 8,
+        "deploy_gpu": 4,
+        "disk_size": "300Gi",
+        "additional_args": [
+            "--max-model-len", "114688",
+            "--reasoning-parser", "nemotron_v3",
+            "--tool-call-parser", "qwen3_coder",
+            "--enable-auto-tool-choice",
+            "--mamba-ssm-cache-dtype", "float32",
+            "--limit-mm-per-prompt", '{"image": 1, "video": 1}',
+            "--max-lora-rank", "64",
+            "--max-loras", "2",
+        ],
+    },
+    "qwen3-vl-8b": {
+        "repo_id": "Qwen/Qwen3-VL-8B-Instruct",
+        "model_name": "qwen3-vl-8b-instruct",
+        "dataset_name": "cord-v2-small",
+        "trust_remote_code": False,
+        "train_limit": 300,
+        "validation_limit": 30,
+        "lora_rank": 16,
+        "lora_alpha": 32,
+        "max_seq_length": 2048,
+        "epochs": 1,
+        "max_steps": None,
+        "global_batch_size": 8,
+        "learning_rate": 1e-5,
+        "num_gpus_per_node": 1,
+        "expert_parallel_size": None,
+        "deploy_gpu": 1,
+        "disk_size": None,
+        "additional_args": ["--max-model-len", "8192"],
+    },
+}
+profile = PROFILES[PROFILE]
+
+```
+
+## 2. Initialize the client
+
+```python
+import json
+import time
+import uuid
+from pathlib import Path
+from typing import Any
+
+from filesets import FilesetFileSystem
+from nemo_automodel_plugin.schema import AutomodelJobInput
+from nemo_customizer.sdk import Customization
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.types import CreateModelEntityRequest, UpdateModelEntityRequest
+
+client = NemoClient.from_config()
+
+```
+
+## 3. Prepare CORD-v2
+
+Automodel does not convert the Hugging Face dataset. This writes `train/train.jsonl`, `validation/validation.jsonl`, and a sibling `images/` directory under `./cord-v2`. Image URLs are relative to the fileset root. Labels are the `json2token` string of the first `gt_parses` entry, which is the CORD scoring target.
+
+```python
+CORD_PROMPT = "Describe this image."
+
+
+def json2token(obj: Any, sort_json_key: bool = True) -> str:
+    if type(obj) is dict:
+        if len(obj) == 1 and "text_sequence" in obj:
+            return obj["text_sequence"]
+        keys = sorted(obj.keys(), reverse=True) if sort_json_key else obj.keys()
+        return "".join(f"<s_{key}>{json2token(obj[key], sort_json_key)}</s_{key}>" for key in keys)
+    if type(obj) is list:
+        return "<sep/>".join(json2token(item, sort_json_key) for item in obj)
+    return str(obj)
+
+
+def cord_label(ground_truth: str) -> str:
+    parsed = json.loads(ground_truth)
+    if "gt_parses" in parsed:
+        return json2token(parsed["gt_parses"][0])
+    return json2token(parsed["gt_parse"])
+
+
+def write_split(examples: Any, dest: Path, jsonl_name: str, url_prefix: str) -> int:
+    images = dest / "images"
+    images.mkdir(parents=True, exist_ok=True)
+    count = 0
+    with (dest / jsonl_name).open("w", encoding="utf-8") as handle:
+        for index, example in enumerate(examples):
+            relative = f"{url_prefix}/images/{index:05d}.png"
+            example["image"].save(images / f"{index:05d}.png")
+            row = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": relative}},
+                            {"type": "text", "text": CORD_PROMPT},
+                        ],
+                    },
+                    {"role": "assistant", "content": cord_label(example["ground_truth"])},
+                ]
+            }
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            count += 1
+    return count
+
+
+def load_split(split: str, limit: int | None) -> Any:
+    from datasets import load_dataset
+
+    spec = split if limit is None else f"{split}[:{limit}]"
+    return load_dataset("naver-clova-ix/cord-v2", split=spec)
+
+
+output = Path("cord-v2")
+train_count = write_split(load_split("train", profile["train_limit"]), output / "train", "train.jsonl", "train")
+validation_count = write_split(
+    load_split("validation", profile["validation_limit"]),
+    output / "validation",
+    "validation.jsonl",
+    "validation",
+)
+print(f"Wrote {train_count} train rows and {validation_count} validation rows to {output}")
+
+```
+
+## 4. Upload the fileset
+
+The trailing slash is on the source path. Without it, `put` keeps the `cord-v2/` prefix and the image paths no longer resolve.
+
+```python
+dataset_name = profile["dataset_name"]
+try:
+    client.files.create_fileset(
+        body=CreateFilesetRequest(name=dataset_name, description="CORD-v2 multimodal JSONL", cache=True),
+    ).data()
+except ConflictError:
+    print(f"Fileset '{dataset_name}' already exists, continuing...")
+
+FilesetFileSystem(client=FilesClient.from_client(client)).put(
+    lpath="cord-v2/",
+    rpath=f"default/{dataset_name}/",
+    recursive=True,
+)
+
+```
+
+## 5. Register the model
+
+Super VL needs `trust_remote_code`. Wait until `spec.has_vision_tower` is true. Until the spec fills in, a dry run treats the model as text-only and rejects the image rows.
+
+```python
+model_name = profile["model_name"]
+try:
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=model_name,
+            storage=HuggingfaceStorageConfig(repo_id=profile["repo_id"], repo_type="model"),
+            cache=True,
+        ),
+    ).data()
+except ConflictError:
+    pass
+
+try:
+    client.models.create_model(
+        body=CreateModelEntityRequest(
+            name=model_name,
+            fileset=f"default/{model_name}",
+            trust_remote_code=profile["trust_remote_code"],
+        ),
+    ).data()
+except ConflictError:
+    client.models.update_model(
+        name=model_name,
+        body=UpdateModelEntityRequest(
+            fileset=f"default/{model_name}",
+            trust_remote_code=profile["trust_remote_code"],
+        ),
+    )
+
+deadline = time.time() + 600
+while True:
+    model = client.models.get_model(name=model_name).data()
+    if model.spec and model.spec.has_vision_tower:
+        break
+    if time.time() > deadline:
+        raise TimeoutError("Model spec did not report a vision tower")
+    time.sleep(10)
+
+```
+
+## 6. Dry-run, then train
+
+Leave `lora.exclude_modules` unset. The compiler freezes the vision tower and excludes the fused Mamba `*.out_proj` on this checkpoint. vLLM's "no matching PunicaWrapper" lines for vision modules are harmless.
+
+```python
+job_suffix = uuid.uuid4().hex[:4]
+output_name = f"cord-lora-{job_suffix}"
+deployment_config: dict[str, Any] = {
+    "engine": "vllm",
+    "gpu": profile["deploy_gpu"],
+    "additional_args": profile["additional_args"],
+}
+if profile["disk_size"]:
+    deployment_config["disk_size"] = profile["disk_size"]
+
+parallelism: dict[str, Any] = {
+    "num_nodes": 1,
+    "num_gpus_per_node": profile["num_gpus_per_node"],
+    "tensor_parallel_size": 1,
+}
+if profile["expert_parallel_size"]:
+    parallelism["expert_parallel_size"] = profile["expert_parallel_size"]
+
+spec = AutomodelJobInput(
+    model=f"default/{model_name}",
+    dataset={"training": f"default/{dataset_name}"},
+    training={
+        "training_type": "sft",
+        "finetuning_type": "lora",
+        "lora": {"rank": profile["lora_rank"], "alpha": profile["lora_alpha"]},
+        "max_seq_length": profile["max_seq_length"],
+    },
+    schedule={"epochs": profile["epochs"], "max_steps": profile["max_steps"]},
+    batch={"global_batch_size": profile["global_batch_size"], "micro_batch_size": 1},
+    optimizer={"learning_rate": profile["learning_rate"]},
+    parallelism=parallelism,
+    output={"name": output_name},
+    deployment_config=deployment_config,
+)
+Path("job.json").write_text(spec.model_dump_json(indent=2), encoding="utf-8")
+print("Wrote job.json. Dry-run with: nemo customization automodel --job-json ./job.json --workspace default --dry-run")
+
+```
+
+```bash
+nemo customization automodel --job-json ./job.json --workspace default --dry-run
+```
+
+```python
+customization = Customization.from_client(client)
+job = customization.automodel.jobs.create(spec=spec, workspace="default", name=f"cord-lora-{job_suffix}")
+print(job.job.name)
+
+```
+
+## 7. Send one image
+
+Wait for the job to finish. The deployment is created in the last step, so looking it up earlier fails. Then wait for the deployment, and for the composite adapter route. READY can arrive before that route exists.
+
+```python
+import time
+
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+
+status = None
+while True:
+    status = client.jobs.get_job_status(name=job.job.name, workspace="default").data()
+    print(f"Status: {status.status}")
+    if status.status.lower() in ("completed", "failed", "cancelled", "error"):
+        break
+    time.sleep(15)
+
+assert status.status.lower() == "completed"
+
+def find_deployment(model_entity: str):
+    configs = client.models.list_deployment_configs(
+        workspace="default",
+        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"}), "sort": "-created_at"},
+    ).items()
+    for config in configs:
+        deployments = client.models.list_deployments(
+            workspace="default",
+            query_params={"filter": json.dumps({"config": config.name}), "sort": "-created_at"},
+        ).items()
+        for deployment in deployments:
+            if deployment.status in ("CREATED", "PENDING", "READY"):
+                return deployment
+    raise RuntimeError(f"No active deployment serves default/{model_entity}")
+
+
+deployment_name = find_deployment(model_name).name
+if not client.models.wait_for_deployment_status(deployment_name, "READY", workspace="default", timeout=1800):
+    raise TimeoutError("Deployment did not become ready")
+
+inference_model = f"default/{model_name}&adapters/default/{output_name}"
+if not client.models.wait_for_model(inference_model, workspace="default", timeout=300):
+    raise TimeoutError(f"Route {inference_model} did not become ready")
+
+response = InferenceGatewayClient.from_client(client).openai_post(
+    workspace="default",
+    trailing_uri="v1/chat/completions",
+    body=JsonBody(
+        {
+            "model": inference_model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"fileset://default/{dataset_name}#validation/images/00000.png"},
+                        },
+                        {"type": "text", "text": CORD_PROMPT},
+                    ],
+                }
+            ],
+            "temperature": 0,
+            "max_tokens": 1024,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+    ),
+)
+print(response)
+
+```
+
+## 8. Score the first 20 validation receipts
+
+Use `StringCheckMetric` (`equals`) and `SequenceSimilarityMetric`. Evaluator's ExactMatch and F1 strip the `json2token` tags. Scores are on [Nemotron Vision-Language Models](/documentation/customizer-reference/models/nemotron-vl#measured-uplift).
+
+```python
+from nemo_evals.sdk import Evaluator, FilesetRef
+from nhx_evals_sdk import InferenceParams, ModelRef, RunConfigOnlineModel, SequenceSimilarityMetric, StringCheckMetric
+
+evaluator = Evaluator.from_client(client)
+image_url = "fileset://default/" + dataset_name + "#{{ item.messages[0].content[0].image_url.url }}"
+prompt_template = {
+    "messages": [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": image_url}},
+                {"type": "text", "text": "{{ item.messages[0].content[1].text }}"},
+            ],
+        }
+    ]
+}
+config = RunConfigOnlineModel(
+    limit_samples=20,
+    inference=InferenceParams(
+        temperature=0,
+        max_tokens=1024,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    ),
+)
+common = {
+    "dataset": FilesetRef(root=f"default/{dataset_name}#validation/validation.jsonl"),
+    "config": config,
+    "target": ModelRef(root=inference_model),
+    "prompt_template": prompt_template,
+}
+exact = evaluator.submit(
+    metric=StringCheckMetric(
+        operation="equals",
+        left_template="{{ sample.output_text | trim }}",
+        right_template="{{ item.messages[-1].content }}",
+    ),
+    **common,
+)
+similarity = evaluator.submit(
+    metric=SequenceSimilarityMetric(
+        reference="{{ item.messages[-1].content }}",
+        candidate="{{ sample.output_text | trim }}",
+    ),
+    **common,
+)
+print(exact, similarity)
+
+```
+
+More on the prompt template: [Images in the Prompt](/documentation/evaluate-models/metrics/model-configuration#images-in-the-prompt).

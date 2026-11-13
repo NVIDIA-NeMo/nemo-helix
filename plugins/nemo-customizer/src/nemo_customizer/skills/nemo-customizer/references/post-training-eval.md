@@ -161,11 +161,11 @@ When comparing several adapters, for example different epoch counts, score each 
 | Model-free NIM, SGLang (`sglang-model-free-nim`) | **16** if the server starts with no adapters; otherwise the highest rank among adapters present at start | `executor_config.additional_envs: {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Multi-LLM NIM (`llm-nim`, NIM 1.x) | **32** | `executor_config.additional_envs: {"NIM_MAX_LORA_RANK": "<rank>"}` |
 
-vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job cannot set `additional_args`, so for a vLLM adapter above the default max rank of 32 (including Nemotron 3.5 Super VL recipe adapters, rank 64) create a deployment config template with the flag and reference it by name. Before training above that rank, confirm the user will deploy with a raised limit.
+vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job accepts `additional_args` and `disk_size`, and a deployment-config template sets the same keys on `executor_config`. For a vLLM adapter above the default max rank of 32 (including Nemotron 3.5 Super VL recipe adapters, rank 64) set `--max-lora-rank` to that rank before training. Confirm the user will deploy with the raised limit.
 
 **Weights volume.** On Kubernetes the deployment downloads the model into a volume of `executor_config.disk_size`, default `50Gi`. When the model's files are larger, set `disk_size` above their size, in the job's inline `deployment_config` or in the deployment config; otherwise the download runs out of space and the deployment never becomes ready.
 
-**Nemotron 3.5 Super VL.** Set `disk_size` to at least `300Gi` (BF16) or `100Gi` (NVFP4). Register the model entity with `trust_remote_code: true`; vLLM needs it to load the checkpoint, and the platform needs it to read the config and size tensor parallelism. Serve adapters and fine-tuned models on the BF16 checkpoint, which the training used. The platform adds no model-specific vLLM flags, so set the flags from NVIDIA's [vLLM cookbook](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/usage-cookbook/Nemotron-3.5-Super-VL/vllm_cookbook.ipynb) yourself in `executor_config.additional_args` of a deployment config template (an inline `deployment_config` cannot set them):
+**Nemotron 3.5 Super VL.** Set `disk_size` to at least `300Gi` (BF16) or `100Gi` (NVFP4). Register the model entity with `trust_remote_code: true`; vLLM needs it to load the checkpoint, and the platform needs it to read the config and size tensor parallelism. Serve adapters and fine-tuned models on the BF16 checkpoint, which the training used. The platform adds no model-specific vLLM flags, so set the flags from NVIDIA's [vLLM cookbook](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/usage-cookbook/Nemotron-3.5-Super-VL/vllm_cookbook.ipynb) yourself in `additional_args`, either on the job's inline `deployment_config` or on a deployment-config template:
 
 - Every deployment: `["--max-model-len", "114688", "--reasoning-parser", "nemotron_v3", "--tool-call-parser", "qwen3_coder", "--enable-auto-tool-choice", "--mamba-ssm-cache-dtype", "float32", "--limit-mm-per-prompt", "{\"image\": 1, \"video\": 1}"]`. Without `--max-model-len`, vLLM sizes the KV cache for the native 1M-token context and exits at startup.
 - Released base model, LoRA disabled: also `"--speculative-config", "{\"method\": \"mtp\", \"num_speculative_tokens\": 3}"` (MTP). Omit it for LoRA, for fine-tuned checkpoints (Automodel's Super VL recipes set `num_nextn_predict_layers: 0`, so they have no MTP layer), and for Nemotron 3.5 Bolt, which shares the architecture but has no MTP layer.
@@ -177,6 +177,18 @@ Two flags stay off unless the user opts in; describe the tradeoff and let the us
 - `--skip-mm-profiling`: faster startup, but vLLM stops reserving vision-encoder memory, so large images under load can run out of GPU memory.
 
 On Blackwell GPUs add `--mm-encoder-attn-backend TORCH_SDPA`. Send images as `data:` URLs, as `fileset://<workspace>/<fileset>#<path>` references, which the gateway inlines on every route (PNG, JPEG, GIF, or WebP; at most 25 MiB), or as `http(s)` URLs, which the deployment downloads itself; `--allowed-media-domains <host> ...` in `additional_args` limits those hosts. Neither the gateway nor the deployment reads local paths.
+
+The Nemotron 3.5 Super VL NIM, on its NGC catalog page, serves the released base model only. It does not load Customizer adapters. Tuned weights go through vLLM LoRA hot-reload, or through a merged or full BF16 checkpoint.
+
+**Finance scores.** These are the cookbook metrics, not Evaluator's ExactMatch or F1. Thinking on, temperature 0, at most 768 new tokens (256 for arithmetic and count), numeric tolerance 0.05.
+
+- `exact_accuracy`: NFKC, casefold, collapse whitespace, then strip edge punctuation.
+- `relaxed_accuracy`: numeric relative error within `max(1e-6, 0.05 * |reference|)`, plus the scale token when the reference has one.
+- `task_accuracy`: span tasks use the exact normalizer; multi-span is an unordered set split on `|`, `##`, or `;`; other tasks use relaxed match.
+- `answer_f1`: token F1 on `[a-z0-9]+` after the finance normalizer.
+- Diagnostics, not the headline: `closed_trace_rate`, `python_syntax_rate`, coverage, and hit-max-tokens.
+
+Headline finance numbers were not captured from the cookbook. Do not invent them.
 
 **Pick the engine.** Deploy with **`engine: vllm`** by default; it is also the default for an inline `deployment_config` on the job. Use `engine: nim` only when the user asks for NIM or has a model-specific NIM image for the model. When using NIM for a Hugging Face checkpoint:
 

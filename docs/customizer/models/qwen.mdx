@@ -72,3 +72,77 @@ Deployment configurations on this page that use the multi-LLM NIM (`nvcr.io/nim/
  - GPU Count: 1x 80GB
  - Additional Environment Variables:
  - `NIM_MODEL_PROFILE`: `vllm`
+
+## Qwen3-VL-8B-Instruct
+
+| Property | Value |
+|----------|--------|
+| Creator | Alibaba Cloud |
+| Architecture | Vision-language transformer |
+| Parameters | 8 billion |
+| License | Apache-2.0 |
+| Default Name | Qwen/Qwen3-VL-8B-Instruct |
+| Hugging Face | [Qwen/Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) |
+
+LoRA fits one 48GB GPU. Full-weight SFT does not. This is not a Super VL result; that profile is on [Nemotron Vision-Language Models](/documentation/customizer-reference/models/nemotron-vl).
+
+### Training Options
+
+- **CORD-v2 LoRA.** Rank 16, alpha 32, first 300 training rows and 30 validation rows. Walkthrough: [Fine-Tune Nemotron 3.5 Super VL on CORD-v2](/documentation/customizer-reference/tutorials/super-vl-cord-lora) with `PROFILE = "qwen3-vl-8b"`.
+- **Finance OCR LoRA.** Same shape as CORD, with global batch 4, `attn_implementation` `sdpa`, and dataset `default/finance-ocr-small`. Not deployed or scored.
+- **CLEVR-CoGenT GRPO.** 32 training rows and 16 validation rows, `--prompt qwen`, `inline_tool_output_images` true, `max_rollout_turns` 2.
+
+### Deployment Configuration
+
+vLLM, 1x 48GB, `--max-model-len 8192`.
+
+### CORD-v2 LoRA job
+
+```json
+{
+  "model": "default/qwen3-vl-8b-instruct",
+  "dataset": {"training": "default/cord-v2-small"},
+  "training": {
+    "training_type": "sft",
+    "finetuning_type": "lora",
+    "lora": {"rank": 16, "alpha": 32},
+    "max_seq_length": 2048
+  },
+  "schedule": {"epochs": 1},
+  "batch": {"global_batch_size": 8, "micro_batch_size": 1},
+  "optimizer": {"learning_rate": 1e-5, "min_learning_rate": 1e-6},
+  "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1, "tensor_parallel_size": 1},
+  "deployment_config": {
+    "engine": "vllm",
+    "gpu": 1,
+    "additional_args": ["--max-model-len", "8192"]
+  }
+}
+```
+
+### CLEVR-CoGenT GRPO job
+
+```json
+{
+  "model": "default/qwen3-vl-8b-instruct",
+  "dataset": "default/clevr-cogent",
+  "environment": "default/clevr-cogent-env",
+  "training": {
+    "type": "grpo",
+    "finetuning_type": "lora",
+    "lora": {"rank": 16, "alpha": 32},
+    "epochs": 1,
+    "learning_rate": 1e-5,
+    "max_seq_length": 2048,
+    "max_new_tokens": 512,
+    "batch_size": 8,
+    "micro_batch_size": 1,
+    "num_generations_per_prompt": 4,
+    "num_prompts_per_step": 2,
+    "max_rollout_turns": 2,
+    "vllm_tensor_parallel_size": 1,
+    "vllm_gpu_memory_utilization": 0.4,
+    "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1, "tensor_parallel_size": 1}
+  }
+}
+```

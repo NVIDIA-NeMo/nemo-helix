@@ -264,6 +264,19 @@ Set `jobs.executors.docker.launcher_tool_path` in `~/.nemo/config.yaml` to the *
 | Job stuck in `active` after training step completes | Upload / model-entity steps still running | Keep polling (`SKILL.md` § **Workflow** step 6) |
 
 
+## Vision-language jobs
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| Dry-run says an image row needs a vision tower, or the job compiles as text SFT | Model spec is still empty, so `has_vision_tower` is not true yet | Poll `nemo models get` until the spec reports a vision tower, then dry-run |
+| Training cannot find images, or paths look nested | Upload omitted the trailing slash, or a retry duplicated files | Upload `./cord-v2/` (trailing slash) to a new fileset name |
+| vLLM exits at startup sizing a 1M-token cache, or Qwen3-VL sizes for 262144 | `--max-model-len` was not set | Super VL: `114688`. Qwen3-VL-8B on one GPU: `8192`. Pass it in `deployment_config.additional_args` |
+| First image request 404s after the deployment is READY | The adapter route is not routable yet | Wait for `default/<model>&adapters/default/<adapter>` |
+| `no matching PunicaWrapper` for `visual.*` | vLLM skips LoRA on the vision tower | Harmless. The vision-language compiler already freezes that tower |
+| Evaluator says the reference must be a string | The label template resolved to a list | Use `{{ item.messages[-1].content }}` |
+| GRPO vision package starts the wrong Gym | The package was built from a different Gym than the RL image pins | Rebuild with `--nemo-rl-root` pointed at the image's checkout |
+| `expert_parallel_size` or `vllm_expert_parallel_size` rejected | The value does not divide the GPU count, or it spans nodes | Keep expert parallel within one node, and make it divide the world size. Leave `PYTORCH_CUDA_ALLOC_CONF` unset |
+
 ## Runtime failures
 
 For a job that starts but fails or misbehaves while training. The poll script's `ALERT:` and `WARN:` lines point here; for a failed job, read `nemo jobs get-logs <job>` for the first error before acting.
