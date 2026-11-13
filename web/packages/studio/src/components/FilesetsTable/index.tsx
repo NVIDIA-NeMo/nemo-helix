@@ -5,7 +5,6 @@ import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataV
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
-import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { Trash } from '@nemo/icons/icons';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { Button } from '@nvidia/foundations-react-core';
@@ -16,6 +15,7 @@ import { makeFilesetsTableColumns } from '@studio/components/FilesetsTable/colum
 import type { FilesetsTableProps } from '@studio/components/FilesetsTable/types';
 import { useFilesetsTable } from '@studio/components/FilesetsTable/useFilesetsTable';
 import { Loading } from '@studio/components/Layouts/Loading';
+import { getDeleteFilesetsDescription } from '@studio/constants/filesets';
 import { DatasetBulkDeleteModal } from '@studio/routes/FilesetListRoute/DatasetBulkDeleteModal';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
 import type { FC } from 'react';
@@ -163,10 +163,10 @@ export const FilesetsTable: FC<FilesetsTableProps> = ({
       {modalOpen === 'delete' && modalDataset && (
         <DeleteConfirmationModal
           open
-          simpleConfirm
+          entity="fileset"
+          ids={[modalDataset.name]}
+          description={getDeleteFilesetsDescription('fileset', 1)}
           onDelete={handleDeleteDataset}
-          title={`Delete Fileset: ${modalDataset.name}`}
-          confirmationText={modalDataset.name ?? getEntityReference(modalDataset)}
           onClose={handleModalClose}
         />
       )}

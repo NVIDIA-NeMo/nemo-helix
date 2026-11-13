@@ -28,52 +28,35 @@ vi.mock('use-debounce', () => ({
   useDebounce: (value: unknown) => [value, () => {}],
 }));
 
-vi.mock('@studio/components/BulkDeleteModal', () => ({
-  BulkDeleteModal: vi.fn(
+vi.mock('@nemo/common/src/components/DeleteConfirmationModal', () => ({
+  DeleteConfirmationModal: vi.fn(
     ({
-      items,
       open,
+      entity,
+      ids,
       onDelete,
       onClose,
     }: {
-      items: FilesetOutput[];
-      open: boolean;
-      onDelete: (items: FilesetOutput[]) => Promise<void>;
+      open?: boolean;
+      entity?: string;
+      ids?: string[];
+      onDelete: () => Promise<boolean>;
       onClose: () => void;
     }) =>
       open ? (
-        <div data-testid="bulk-delete-modal">
-          <span data-testid="bulk-modal-count">{items.length}</span>
+        <div data-testid="delete-confirmation-modal">
+          <span data-testid="delete-entity">{entity}</span>
+          <span data-testid="delete-ids">{ids?.join(', ')}</span>
           <button
             type="button"
-            data-testid="bulk-confirm"
+            data-testid="delete-confirm"
             onClick={async () => {
-              await onDelete(items);
+              await onDelete();
               onClose();
             }}
           >
             Confirm
           </button>
-        </div>
-      ) : null
-  ),
-}));
-
-vi.mock('@nemo/common/src/components/DeleteConfirmationModal', () => ({
-  DeleteConfirmationModal: vi.fn(
-    ({
-      open,
-      title,
-      confirmationText,
-    }: {
-      open?: boolean;
-      title?: string;
-      confirmationText?: string;
-    }) =>
-      open ? (
-        <div data-testid="delete-confirmation-modal">
-          <span data-testid="delete-title">{title}</span>
-          <span data-testid="delete-confirmation-text">{confirmationText}</span>
         </div>
       ) : null
   ),
@@ -762,9 +745,9 @@ describe('FilesetsTable', () => {
       expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
 
       await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
-      expect(await screen.findByTestId('delete-title')).toHaveTextContent(
-        'Delete Fileset: dataset-1'
-      );
+      const modal = await screen.findByTestId('delete-confirmation-modal');
+      expect(within(modal).getByTestId('delete-entity')).toHaveTextContent('fileset');
+      expect(within(modal).getByTestId('delete-ids')).toHaveTextContent('dataset-1');
     });
 
     it('opens DatasetCreateModal in edit mode from the Edit action', async () => {
@@ -838,7 +821,7 @@ describe('FilesetsTable', () => {
       expect(within(modal).getByTestId('modal-dataset-name')).toHaveTextContent('dataset-1');
     });
 
-    it('opens DeleteConfirmationModal with the dataset name as confirmation text when onDelete fires', async () => {
+    it('opens DeleteConfirmationModal naming the dataset when onDelete fires', async () => {
       installListHandler();
       renderWithActionButtons();
 
@@ -848,10 +831,8 @@ describe('FilesetsTable', () => {
       await user.click(deleteButton);
 
       const modal = await screen.findByTestId('delete-confirmation-modal');
-      expect(within(modal).getByTestId('delete-title')).toHaveTextContent(
-        'Delete Fileset: dataset-1'
-      );
-      expect(within(modal).getByTestId('delete-confirmation-text')).toHaveTextContent('dataset-1');
+      expect(within(modal).getByTestId('delete-entity')).toHaveTextContent('fileset');
+      expect(within(modal).getByTestId('delete-ids')).toHaveTextContent('dataset-1');
     });
 
     it('removes the deleted dataset from selection when onDatasetDeleted fires', async () => {
@@ -877,23 +858,26 @@ describe('FilesetsTable', () => {
       await user.click(trigger);
     };
 
-    it('does not render BulkDeleteModal when enableBulkDelete is false', async () => {
+    it('does not offer bulk delete when enableBulkDelete is false', async () => {
       installListHandler();
       renderTable({ enableSelection: true, enableBulkDelete: false });
 
       await selectRow(0);
-      expect(screen.queryByTestId('bulk-delete-modal')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /delete selected filesets/i })
+      ).not.toBeInTheDocument();
     });
 
-    it('renders BulkDeleteModal with the selected datasets when enableBulkDelete is true', async () => {
+    it('opens the delete modal with the selected filesets when enableBulkDelete is true', async () => {
       installListHandler();
       renderTable({ enableSelection: true, enableBulkDelete: true });
 
       await selectRow(0);
       await clickBulkDeleteTrigger();
 
-      const modal = await screen.findByTestId('bulk-delete-modal');
-      expect(within(modal).getByTestId('bulk-modal-count')).toHaveTextContent('1');
+      const modal = await screen.findByTestId('delete-confirmation-modal');
+      expect(within(modal).getByTestId('delete-entity')).toHaveTextContent('fileset');
+      expect(within(modal).getByTestId('delete-ids')).toHaveTextContent('dataset-1');
     });
 
     it('clears selection and re-fetches after a successful bulk delete', async () => {
@@ -911,7 +895,7 @@ describe('FilesetsTable', () => {
       await clickBulkDeleteTrigger();
 
       const countBeforeConfirm = state.requestCount;
-      await user.click(screen.getByTestId('bulk-confirm'));
+      await user.click(screen.getByTestId('delete-confirm'));
 
       await waitFor(() => {
         expect(onDatasetsSelected.mock.calls.at(-1)?.[0]).toHaveLength(0);
