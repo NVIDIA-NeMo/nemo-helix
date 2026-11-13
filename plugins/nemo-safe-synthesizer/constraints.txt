@@ -36,26 +36,26 @@ boto3>=1.40.46,<1.40.62
 botocore>=1.40.46,<1.40.62
 gliner<0.2.27
 opacus==1.5.4
-transformers==5.12.0
+transformers==5.19.0
 
-# Match the NSS v0.1.15 training lock, retaining Helix's Accelerate and
-# safetensors floors. The isolated engine needs datasets >=4.8.4; the host
-# workspace's datasets override must not downgrade it during plugin sync.
-datasets==4.8.4
+# Match the NSS v0.1.17 training stack, retaining Helix's Accelerate and
+# safetensors floors. Keep datasets platform-resolvable, as upstream locks
+# different 5.x versions on amd64 and arm64.
+datasets>=5.0.1,<6
 accelerate==1.15.0
 bitsandbytes==0.49.1
 peft==0.18.1
 trl==0.24.0
 kernels==0.12.1
 gliner==0.2.24
-huggingface-hub==1.17.0
+huggingface-hub==1.33.0
 numpy==2.2.6
 opt-einsum==3.4.0
 prv-accountant==0.2.0
 safetensors==0.8.0
 # GHSA-jhr6-gm9c-rqjv: replace NSS's vulnerable 5.2.3 pin.
 sentence-transformers==5.6.1
-tokenizers==0.22.2
+tokenizers==0.23.3
 triton==3.7.1
 torch==2.13.0+cu129
 torchaudio==2.11.0+cu129

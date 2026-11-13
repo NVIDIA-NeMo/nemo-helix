@@ -22,6 +22,10 @@ DOCKER_IMAGE_WANDB_CONFIG_PATHS = (
     Path("docker/unsloth/no_override_requirements.txt"),
 )
 CVE_PACKAGE_FLOORS = (
+    ("thrift", "0.25.0", (Path("docker/automodel/Dockerfile.nhx-automodel-base"),)),
+    ("anyio", "4.14.2", (Path("docker/automodel/Dockerfile.nhx-automodel-base"),)),
+    ("httpx2", "2.12.0", (Path("docker/automodel/Dockerfile.nhx-automodel-base"),)),
+    ("httpcore2", "2.10.0", (Path("docker/automodel/Dockerfile.nhx-automodel-base"),)),
     (
         "virtualenv",
         "21.14.9",
@@ -188,6 +192,18 @@ def test_ngc_notebook_is_replaced_before_system_copy_cleanup() -> None:
     ):
         text = (ROOT / path).read_text()
         assert text.index('"notebook>=7.6.3,<8"') < text.index(f"source={removals}")
+
+
+def test_safe_synthesizer_generation_stack_uses_patched_upstream_release() -> None:
+    project = _load_pyproject(ROOT / "plugins/nemo-safe-synthesizer/pyproject.toml")
+    assert "nemo-safe-synthesizer==0.1.17" in project["project"]["dependencies"]
+    dockerfile = ROOT / "docker/Dockerfile.nhx-safe-synthesizer-tasks"
+    assert "nemo-safe-synthesizer[engine,cu129]==0.1.17" in dockerfile.read_text()
+    assert "https://wheels.vllm.ai/0.32.0/cu129" in dockerfile.read_text()
+    assert _package_specs(dockerfile, "vllm") == ["vllm==0.32.0+cu129"]
+    for name in ("flashinfer-python", "flashinfer-cubin"):
+        assert _package_specs(dockerfile, name) == [f"{name}==0.7.0.post1"]
+    assert _package_specs(dockerfile, "flashinfer-jit-cache") == ["flashinfer-jit-cache==0.7.0.post1+cu129"]
 
 
 def test_safe_synthesizer_sentence_transformers_security_pin() -> None:
