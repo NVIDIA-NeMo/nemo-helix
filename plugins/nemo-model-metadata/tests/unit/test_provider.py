@@ -104,3 +104,16 @@ async def test_provider_source_raises_when_listing_fails_and_retries_next_cycle(
     source.begin_cycle()
 
     assert await source.fetch(target) is None
+
+
+@pytest.mark.parametrize("body", [{"object": "list"}, ["gemma-4-12b"], "<html>maintenance</html>"])
+async def test_provider_source_raises_on_malformed_listing(body: object):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if isinstance(body, str):
+            return httpx.Response(200, text=body)
+        return httpx.Response(200, json=body)
+
+    source = ProviderModelsSource(_gateway(handler))
+
+    with pytest.raises(SourceUnavailableError):
+        await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()))
