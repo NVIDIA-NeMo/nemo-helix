@@ -18,14 +18,16 @@ CodeFinQA and CodeTAT-QA.
       plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_finance.py \
       --output /tmp/finance
 
-Then upload each capability directory (new fileset names, no ``--exist-ok``):
+Then upload each capability directory's contents (new fileset names, no
+``--exist-ok``). Keep the trailing slash: without it the files land under the
+directory's name in the fileset, and the relative image urls no longer resolve.
 
     nemo files filesets create finance-ocr --workspace default --purpose dataset
-    nemo files upload /tmp/finance/visual_ocr finance-ocr --workspace default
+    nemo files upload /tmp/finance/visual_ocr/ finance-ocr --workspace default
     nemo files filesets create finance-reasoning --workspace default --purpose dataset
-    nemo files upload /tmp/finance/reasoning finance-reasoning --workspace default
+    nemo files upload /tmp/finance/reasoning/ finance-reasoning --workspace default
     nemo files filesets create finance-code --workspace default --purpose dataset
-    nemo files upload /tmp/finance/code_generation finance-code --workspace default
+    nemo files upload /tmp/finance/code_generation/ finance-code --workspace default
 
 ``nemo customization automodel --upload-dataset`` uploads one of those directories.
 """

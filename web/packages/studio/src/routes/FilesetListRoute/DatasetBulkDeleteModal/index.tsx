@@ -27,6 +27,8 @@ interface DatasetBulkDeleteModalProps {
   onSettled: () => void;
   /** Custom trigger element; when provided, used instead of the default Button */
   slotTrigger?: ReactNode;
+  /** What the selected rows are called in the title (default: Dataset) */
+  entityLabel?: string;
 }
 
 export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
@@ -34,6 +36,7 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
   onConfirmSuccess,
   onSettled,
   slotTrigger,
+  entityLabel = 'Dataset',
 }) => {
   const [open, setOpen] = useState(false);
 
@@ -95,7 +98,7 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
         items={selectedDatasets}
         open={open}
         onDelete={handleDelete}
-        title={(count) => `Delete ${count} Dataset${count !== 1 ? 's' : ''}`}
+        title={(count) => `Delete ${count} ${entityLabel}${count !== 1 ? 's' : ''}`}
         onClose={() => setOpen(false)}
       />
     </>

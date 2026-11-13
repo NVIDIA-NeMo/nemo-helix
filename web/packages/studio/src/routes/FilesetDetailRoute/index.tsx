@@ -3,23 +3,13 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
-import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import {
   useFilesListFilesetFiles,
   useFilesRetrieveFileset,
 } from '@nemo/sdk/generated/platform/files';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
-import {
-  Flex,
-  PageHeader,
-  Stack,
-  TabsContent,
-  TabsList,
-  TabsRoot,
-  TabsTrigger,
-  Text,
-} from '@nvidia/foundations-react-core';
+import { Flex, PageHeader, Stack, Tabs, Text } from '@nvidia/foundations-react-core';
 import { FilesetActionMenu } from '@studio/components/FilesetActionMenu';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
@@ -27,26 +17,34 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { FilesetDetailTab, isFilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
-import { FilesetCard } from '@studio/routes/FilesetDetailRoute/FilesetCard';
-import { FilesTab } from '@studio/routes/FilesetDetailRoute/FilesTab';
+import {
+  FILESETS_PARENT,
+  FilesetDetailParentContext,
+  type FilesetDetailParent,
+} from '@studio/routes/FilesetDetailRoute/FilesetDetailParent';
+import type { FilesetDetailOutletContext } from '@studio/routes/FilesetDetailRoute/FilesetDetailTabContent';
 import { getModelSource, isRootReadme } from '@studio/routes/FilesetDetailRoute/utils';
-import { getWorkspaceFilesetsRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import type { FC } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, Navigate, Outlet, useNavigate, useParams, useSearchParams } from 'react-router';
 
-export const FilesetDetailRoute: FC = () => {
+interface FilesetDetailRouteProps {
+  /** The list page this detail page sits under (default: Filesets). */
+  parent?: FilesetDetailParent;
+}
+
+export const FilesetDetailRoute: FC<FilesetDetailRouteProps> = ({ parent = FILESETS_PARENT }) => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
   const { filesetName } = useRequiredPathParams([ROUTE_PARAMS.filesetName]);
   const filesetId = getEntityReference({ namespace: workspace, name: filesetName });
 
-  const { getQueryParam, setQueryParam } = useQueryParams();
-  const tabFromUrl = getQueryParam(QUERY_PARAMETERS.tab) || undefined;
+  const { [ROUTE_PARAMS.filesetTab]: tabFromPath } = useParams();
+  const [searchParams] = useSearchParams();
 
   useBreadcrumbs({
     items: [
-      { href: getWorkspaceFilesetsRoute(workspace), slotLabel: 'Filesets' },
+      { href: parent.getListRoute(workspace), slotLabel: parent.label },
       { slotLabel: filesetName },
     ],
   });
@@ -70,12 +68,6 @@ export const FilesetDetailRoute: FC = () => {
     query: { enabled: queryEnabled },
   });
 
-  const handleTabChange = (value: string) => {
-    if (isFilesetDetailTab(value)) {
-      setQueryParam(QUERY_PARAMETERS.tab, value);
-    }
-  };
-
   if (isFilesPending || isFilesetPending) {
     return <Loading description="Loading fileset..." />;
   }
@@ -91,6 +83,20 @@ export const FilesetDetailRoute: FC = () => {
     );
   }
 
+  // A section scoped to one purpose hands any other fileset back to Filesets.
+  if (parent.purpose && fileset.purpose !== parent.purpose) {
+    return (
+      <Navigate
+        to={FILESETS_PARENT.getDetailRoute(workspace, filesetName, {
+          tab: isFilesetDetailTab(tabFromPath) ? tabFromPath : undefined,
+          folder: searchParams.get(QUERY_PARAMETERS.filesetFolder) ?? undefined,
+          file: searchParams.get(QUERY_PARAMETERS.file) ?? undefined,
+        })}
+        replace
+      />
+    );
+  }
+
   const isDataset = fileset.purpose === FilesetPurpose.dataset;
   const isModel = fileset.purpose === FilesetPurpose.model;
 
@@ -103,7 +109,11 @@ export const FilesetDetailRoute: FC = () => {
   // README card when present and falls back to Files otherwise.
   const hasReadme = files?.some(isRootReadme) ?? false;
   const defaultTab = isDataset || hasReadme ? FilesetDetailTab.Card : FilesetDetailTab.Files;
-  const currentTab: FilesetDetailTab = isFilesetDetailTab(tabFromUrl) ? tabFromUrl : defaultTab;
+  if (!isFilesetDetailTab(tabFromPath)) {
+    return (
+      <Navigate to={parent.getDetailRoute(workspace, filesetName, { tab: defaultTab })} replace />
+    );
+  }
 
   // The source line (HF/NGC origin) is meaningful for model/generic filesets;
   // datasets don't surface it.
@@ -122,51 +132,58 @@ export const FilesetDetailRoute: FC = () => {
   ) : undefined;
 
   return (
-    <AccessibleTitle title={`${typeLabel} ${filesetName}`}>
-      <Stack className="w-full min-h-full p-density-2xl" gap="density-xl">
-        <PageHeader
-          slotHeading={
-            <Stack gap="density-sm">
-              <Flex gap="density-sm" align="center" justify="between">
-                <span>{filesetName}</span>
-                <FilesetActionMenu
-                  fileset={fileset}
-                  onFilesetDeleted={() => navigate(getWorkspaceFilesetsRoute(workspace))}
-                />
-              </Flex>
-            </Stack>
-          }
-          slotDescription={description}
-        />
-        <TabsRoot className="flex flex-col" value={currentTab} onValueChange={handleTabChange}>
-          <TabsList>
-            <TabsTrigger value={FilesetDetailTab.Card}>{cardLabel}</TabsTrigger>
-            <TabsTrigger value={FilesetDetailTab.Files}>Files</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value={FilesetDetailTab.Card} className="p-0">
-            <FilesetCard
-              workspace={workspace}
-              filesetName={filesetName}
-              fileset={fileset}
-              files={files}
-              isFilesError={isFilesError}
-            />
-          </TabsContent>
-
-          <TabsContent value={FilesetDetailTab.Files} className="p-0">
-            <FilesTab
-              workspace={workspace}
-              filesetName={filesetName}
-              filesetId={filesetId}
-              fileset={fileset}
-              files={files}
-              isFilesError={isFilesError}
-              isFilesFetching={isFilesFetching}
-            />
-          </TabsContent>
-        </TabsRoot>
-      </Stack>
-    </AccessibleTitle>
+    <FilesetDetailParentContext.Provider value={parent}>
+      <AccessibleTitle title={`${typeLabel} ${filesetName}`}>
+        <Stack className="w-full min-h-full p-density-2xl" gap="density-xl">
+          <PageHeader
+            slotHeading={
+              <Stack gap="density-sm">
+                <Flex gap="density-sm" align="center" justify="between">
+                  <span>{filesetName}</span>
+                  <FilesetActionMenu
+                    fileset={fileset}
+                    onFilesetDeleted={() => navigate(parent.getListRoute(workspace))}
+                  />
+                </Flex>
+              </Stack>
+            }
+            slotDescription={description}
+          />
+          <Tabs
+            // Tabs used purely for navigation (renderLink); override KUI's default overflow:hidden.
+            className="overflow-visible"
+            value={tabFromPath}
+            items={[
+              {
+                value: FilesetDetailTab.Card,
+                children: cardLabel,
+                href: parent.getDetailRoute(workspace, filesetName, { tab: FilesetDetailTab.Card }),
+              },
+              {
+                value: FilesetDetailTab.Files,
+                children: 'Files',
+                href: parent.getDetailRoute(workspace, filesetName, {
+                  tab: FilesetDetailTab.Files,
+                }),
+              },
+            ]}
+            renderLink={(item) => <Link to={item.href!}>{item.children}</Link>}
+          />
+          <Outlet
+            context={
+              {
+                workspace,
+                filesetName,
+                filesetId,
+                fileset,
+                files,
+                isFilesError,
+                isFilesFetching,
+              } satisfies FilesetDetailOutletContext
+            }
+          />
+        </Stack>
+      </AccessibleTitle>
+    </FilesetDetailParentContext.Provider>
   );
 };
