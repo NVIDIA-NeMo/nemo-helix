@@ -409,8 +409,13 @@ function syncColabLinks(release, outputRoot) {
 // resolve against Latest, silently showing the wrong library versions.
 function materializeLibraryVersions(release, outputRoot) {
   const page = join(outputRoot, "support-matrix.mdx");
-  if (!existsSync(page)) return;
-  const text = readFileSync(page, "utf8");
+  let text;
+  try {
+    text = readFileSync(page, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
   if (!text.includes(libraryVersionsInclude)) return;
   const paths = git([
     "ls-tree", "-r", "--name-only", release.ref, "--", "uv.lock", "docker/locks", ...imageVersionSources,

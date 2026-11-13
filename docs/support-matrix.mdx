@@ -12,19 +12,8 @@ self-managed Kubernetes deployments installed with NeMo Helix Helm chart.
 
 ## NeMo Libraries and Integrations
 
-The table below is generated from this checkout's `uv.lock` files, including
-isolated image environments. It lists resolved dependency versions, **not a
-range of all compatible releases**. Optional libraries are not installed in every
-configuration; multiple versions can reflect different platforms or environments.
-In-tree Helix plugins and services are omitted because their package versions do
-not identify the upstream library they integrate.
-
-Training libraries that are built from source and Garak's isolated audit image
-are not in the workspace lock. Their entries come from the image build pins.
-The RL training image uses NeMo-Gym from the pinned NeMo-RL checkout's submodule,
-which is distinct from the versions locked for standalone Gym runners. Agent
-Hardener's own Garak environment is provisioned by the upstream hardener rather
-than pinned in this repository.
+Versions are generated from this release's dependency lockfiles and image build
+pins. Optional libraries are not installed in every configuration.
 
 <Markdown src="/snippets/_snippets/library-versions.mdx" />
 

@@ -20,6 +20,11 @@ test("discovers library families and new NeMo packages without a version allowli
   const names = ["nemo-anonymizer", "data-designer", "data-designer-config", "data-designer-engine", "data-designer-retrieval-sdg", "nemo-safe-synthesizer", "nemoguardrails", "nemo-compass", "nemo-switchyard", "nemo-fabric-runtime", "nemo-fabric-adapters-codex", "nemo-relay", "nvidia-nat-core", "nemo-new-library", "nemo-helix-tavily-plugin"];
   const table = render(names.map(name => pkg(name, "1.2.3")).join("\n"));
   for (const name of names) assert.ok(table.includes(`| \`${name}\` | \`1.2.3\` |`), name);
+  assert.ok(table.includes("| Library / distribution | Version / source revision | Source of truth |"));
+  assert.ok(!table.includes("Environment"));
+  for (const row of table.split("\n").filter(line => line.startsWith("|"))) {
+    assert.equal(row.split("|").length, 5, "the table should contain exactly three columns");
+  }
 });
 
 test("excludes local plugin versions and unrelated runtime dependencies", () => {
@@ -56,8 +61,8 @@ test("discovers isolated locks and distinguishes their versions from workspace d
   ]);
   assert.ok(table.includes("`nvidia-agent-hardener` | `3.0`"));
   assert.ok(table.includes("`nemo-gym` | `4.0`"));
-  assert.ok(table.includes("`nemo-relay` | `0.9` | Isolated image: nhx-agent-hardener-tasks"));
-  assert.ok(table.includes("`nemo-relay` | `1.0` | Helix workspace"));
+  assert.ok(table.includes("`nemo-relay` | `0.9` | `docker/locks/nhx-agent-hardener-tasks/uv.lock`"));
+  assert.ok(table.includes("`nemo-relay` | `1.0` | `uv.lock`"));
 });
 
 test("reads Garak, AutoModel and RL source pins without inventing package release versions", () => {
@@ -79,6 +84,14 @@ test("fails loudly when version sources are absent, malformed or ambiguous", () 
   assert.throws(() => render('[[package]]\nname = "nemo-example"\n'), /no locked version/);
   assert.throws(() => render(pkg("nemo-example", "1.0"), [["docker/Dockerfile.nhx-garak-tasks", "RUN uv pip install garak\n"]]), /Expected one Garak/);
   assert.throws(() => render(pkg("nemo-example", "1.0"), [["docker/Dockerfile.nhx-garak-tasks", "RUN uv pip install garak==1.0 garak==2.0\n"]]), /found 2/);
+});
+
+test("does not swallow non-missing-file errors when reading generated output", t => {
+  const root = mkdtempSync(join(tmpdir(), "helix-library-versions-error-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, "uv.lock"), pkg("nemo-example", "1.0"));
+  mkdirSync(join(root, "docs/fern/snippets/_snippets/library-versions.mdx"), { recursive: true });
+  assert.throws(() => syncLibraryVersions({ root }), { code: "EISDIR" });
 });
 
 test("generation is deterministic and --check detects stale output", t => {
