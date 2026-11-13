@@ -40,13 +40,23 @@ cookbook's headline score. The report script then combines the jobs into the coo
   setting, for example `--default-extra-body '{"chat_template_kwargs": {"enable_thinking": true}}'` on
   `nemo inference providers create`. The rows set the cookbook's other settings: temperature 0, and 256 new
   tokens for arithmetic and count or 512 for every other task.
-- The cookbook's test sets as chat-transcript JSONL, one directory per capability: `visual_ocr/test.jsonl`
-  with its page images under `visual_ocr/images/`, `reasoning/test.jsonl`, and `code_generation/test.jsonl`.
-  Each row is a user turn whose first line is `Task: <task>`, then an assistant turn with the reference answer.
+- The cookbook's data, as the Customizer skill's
+  [`import_finance.py`](../../../nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_finance.py)
+  writes it. That script rebuilds the cookbook's splits and prompts and writes one directory per capability as
+  chat-transcript JSONL: `visual_ocr/test.jsonl` with its page images under `visual_ocr/images/`,
+  `reasoning/test.jsonl`, and `code_generation/test.jsonl`. Each row is a user turn whose first line is
+  `Task: <task>`, then an assistant turn with the reference answer. Customizer trains the adapters on the same
+  directories, so `convert_rows.py` reshapes the test rows into Gym rows instead of the script writing Gym rows.
 
 ## Run it
 
-The commands assume the `default` workspace and a data directory in `$DATA`.
+The commands run from this directory and assume the `default` workspace. `$DATA` is the directory
+`import_finance.py` writes; if you haven't run it yet:
+
+```bash
+uv run --no-project --with datasets --with pillow --with pymupdf --with huggingface_hub \
+  ../../../nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_finance.py --output "$DATA"
+```
 
 1. Upload the environment. Keep the trailing slash, so `nemo-environment.yaml` is at the FileSet's root:
 
@@ -55,8 +65,11 @@ The commands assume the `default` workspace and a data directory in `$DATA`.
    nemo files upload ./environment/ finance-qa-env --workspace default
    ```
 
-2. Convert each capability's rows. For OCR, also copy the page images the test rows use: the dataset's
-   `images/` directory holds every split's images, about eight times as many.
+2. Convert each capability's rows. OCR rows reference their page images in the FileSet that
+   `--image-fileset` names. Copy just the images the test rows use, as below: the dataset's `images/` directory
+   holds every split's images, about eight times as many. If you already uploaded `$DATA/visual_ocr/` as the
+   `finance-ocr` FileSet, as `import_finance.py` suggests, the images are already there at the paths the rows
+   use: pass `--image-fileset default/finance-ocr`, drop `--copy-images-to`, and skip the image upload in step 3.
 
    ```bash
    mkdir -p rows
@@ -66,8 +79,8 @@ The commands assume the `default` workspace and a data directory in `$DATA`.
    python3 convert_rows.py "$DATA/code_generation/test.jsonl" --output rows/code_generation.jsonl
    ```
 
-3. Upload the images and the rows. Keep the trailing slashes: the images then keep the `images/` prefix the
-   rows reference, and the rows files sit at the FileSet's root.
+3. Upload the images, unless they're already in `finance-ocr`, and the rows. Keep the trailing slashes: the
+   images then keep the `images/` prefix the rows reference, and the rows files sit at the FileSet's root.
 
    ```bash
    nemo files filesets create finance-images --workspace default --purpose dataset
@@ -134,3 +147,5 @@ The commands assume the `default` workspace and a data directory in `$DATA`.
 - A job whose model is a LoRA adapter served through the gateway's model route.
 - A deployment with auth on: which key the sandbox needs, and whether the gateway can read the image FileSet with
   it.
+- Images read from `finance-ocr` instead of an images-only FileSet. The gateway reads any FileSet the caller can
+  read, whatever its purpose, so this should work, but the checked runs used `finance-images`.
