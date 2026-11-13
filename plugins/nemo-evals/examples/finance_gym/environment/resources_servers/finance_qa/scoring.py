@@ -29,8 +29,14 @@ def token_limit(task: str) -> int:
 def chat_message(response: Mapping[str, Any]) -> dict[str, str]:
     """The Responses API ``response`` as the chat message the cookbook reads.
 
-    The output text becomes ``content``. Reasoning that a parser split into its own output item becomes
-    ``reasoning_content``, which the cookbook puts back inside ``<think>`` before splitting the answer off.
+    The model server must run with ``uses_reasoning_parser: true``; without it, Gym's ``inference_provider``
+    drops the provider's ``reasoning_content``. With it, Gym wraps that reasoning in ``<think>`` tags in front of
+    the content, then moves every ``<think>`` block into one reasoning item, a summary part each, in order.
+
+    So the first part is the model's own reasoning, which becomes ``reasoning_content``: the cookbook puts it
+    back inside ``<think>`` before splitting the answer off at the first ``</think>``. Any later part was a
+    ``<think>`` block the model wrote in its content, as the cookbook's prompt asks. It goes back in front of the
+    content, where the cookbook's split still finds it.
     """
     content: list[str] = []
     reasoning: list[str] = []
@@ -39,10 +45,13 @@ def chat_message(response: Mapping[str, Any]) -> dict[str, str]:
         if kind == "message":
             content.extend(part["text"] for part in item.get("content") or [] if part.get("text"))
         elif kind == "reasoning":
-            for part in [*(item.get("summary") or []), *(item.get("content") or [])]:
-                if part.get("text"):
-                    reasoning.append(part["text"])
-    return {"content": "".join(content), "reasoning_content": "\n".join(reasoning)}
+            parts = [*(item.get("summary") or []), *(item.get("content") or [])]
+            reasoning.extend(part["text"] for part in parts if isinstance(part.get("text"), str))
+    own, *written = reasoning or [""]
+    return {
+        "content": "".join(f"<think>{text}</think>" for text in written) + "".join(content),
+        "reasoning_content": own,
+    }
 
 
 def score(*, task: str, expected_answer: str, response: Mapping[str, Any], tolerance: float = 0.05) -> dict[str, float]:
