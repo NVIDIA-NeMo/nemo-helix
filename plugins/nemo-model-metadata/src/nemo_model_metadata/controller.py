@@ -15,7 +15,6 @@ from nemo_helix_plugin.models.types import ModelEntity, ModelProvider, UpdateMod
 from nemo_model_metadata.config import ModelMetadataConfig, SourceName
 from nemo_model_metadata.merge import merge_metadata
 from nemo_model_metadata.sources.base import MetadataSource, MetadataTarget
-from nemo_model_metadata.sources.models_dev import ModelsDevSource
 from nemo_model_metadata.sources.ngc import NgcSource
 from nemo_model_metadata.sources.provider import ProviderModelsSource
 
@@ -39,8 +38,6 @@ def build_sources(
             sources.append(ProviderModelsSource(models_client))
         elif source_name == SourceName.NGC:
             sources.append(NgcSource(http, config.ngc_url, config.ngc_org))
-        elif source_name == SourceName.MODELS_DEV:
-            sources.append(ModelsDevSource(http, config.models_dev_url, config.refresh_interval_seconds))
     return sources
 
 

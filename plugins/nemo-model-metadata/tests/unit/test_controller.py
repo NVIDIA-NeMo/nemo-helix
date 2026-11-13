@@ -80,7 +80,7 @@ def test_merge_takes_each_field_from_first_source_that_has_it():
     merged = merge_metadata(
         [
             ("provider", ModelMetadata(context_length=8192)),
-            ("models.dev", ModelMetadata(display_name="Llama", context_length=131072, capabilities=["tool_calling"])),
+            ("ngc", ModelMetadata(display_name="Llama", context_length=131072, capabilities=["tool_calling"])),
             ("extra", ModelMetadata(display_name="ignored", max_output_tokens=4096)),
         ],
         refreshed_at=NOW,
@@ -91,14 +91,14 @@ def test_merge_takes_each_field_from_first_source_that_has_it():
         context_length=8192,
         capabilities=[ModelCapability.TOOL_CALLING],
         max_output_tokens=4096,
-        sources=["provider", "models.dev", "extra"],
+        sources=["provider", "ngc", "extra"],
         refreshed_at=NOW,
     )
 
 
 def test_merge_lists_only_sources_that_contributed():
     merged = merge_metadata(
-        [("provider", ModelMetadata(context_length=8192)), ("models.dev", ModelMetadata(context_length=1))],
+        [("provider", ModelMetadata(context_length=8192)), ("ngc", ModelMetadata(context_length=1))],
         refreshed_at=NOW,
     )
 
@@ -129,9 +129,9 @@ def test_upstream_model_id_falls_back_to_api_endpoint_then_name():
         (_model(), True),
         (_model(providers=[]), False),
         (_model(ModelMetadata(display_name="hand written")), False),
-        (_model(ModelMetadata(sources=["models.dev"], refreshed_at=NOW - timedelta(hours=1))), False),
-        (_model(ModelMetadata(sources=["models.dev"], refreshed_at=NOW - timedelta(days=2))), True),
-        (_model(ModelMetadata(sources=["models.dev"])), True),
+        (_model(ModelMetadata(sources=["ngc"], refreshed_at=NOW - timedelta(hours=1))), False),
+        (_model(ModelMetadata(sources=["ngc"], refreshed_at=NOW - timedelta(days=2))), True),
+        (_model(ModelMetadata(sources=["ngc"])), True),
     ],
     ids=["no-metadata", "no-provider", "manual", "fresh", "stale", "never-refreshed"],
 )
@@ -143,7 +143,7 @@ def test_needs_refresh(model: ModelEntity, expected: bool):
 
 async def test_reconcile_model_writes_merged_metadata():
     provider_source = FakeSource("provider", ModelMetadata(context_length=8192))
-    catalog_source = FakeSource("models.dev", ModelMetadata(display_name="Llama 3.1 8B"))
+    catalog_source = FakeSource("ngc", ModelMetadata(display_name="Llama 3.1 8B"))
     controller, models_client = _controller([provider_source, catalog_source])
 
     await controller.reconcile_model(_model(), _provider())
@@ -158,20 +158,20 @@ async def test_reconcile_model_writes_merged_metadata():
     metadata = kwargs["body"].metadata
     assert metadata.display_name == "Llama 3.1 8B"
     assert metadata.context_length == 8192
-    assert metadata.sources == ["provider", "models.dev"]
+    assert metadata.sources == ["provider", "ngc"]
     assert metadata.refreshed_at is not None
 
 
 async def test_reconcile_model_continues_past_failing_source():
-    controller, models_client = _controller([FailingSource(), FakeSource("models.dev", ModelMetadata(family="llama"))])
+    controller, models_client = _controller([FailingSource(), FakeSource("ngc", ModelMetadata(context_length=8192))])
 
     await controller.reconcile_model(_model(), _provider())
 
-    assert models_client.update_model.await_args.kwargs["body"].metadata.sources == ["models.dev"]
+    assert models_client.update_model.await_args.kwargs["body"].metadata.sources == ["ngc"]
 
 
 async def test_reconcile_model_skips_retry_after_a_miss():
-    source = FakeSource("models.dev", None)
+    source = FakeSource("ngc", None)
     controller, models_client = _controller([source])
 
     await controller.reconcile_model(_model(), _provider())
@@ -182,7 +182,7 @@ async def test_reconcile_model_skips_retry_after_a_miss():
 
 
 async def test_reconcile_model_tolerates_conflict():
-    controller, models_client = _controller([FakeSource("models.dev", ModelMetadata(family="llama"))])
+    controller, models_client = _controller([FakeSource("ngc", ModelMetadata(context_length=8192))])
     models_client.update_model.side_effect = ConflictError(httpx.Response(409, json={"detail": "conflict"}))
 
     await controller.reconcile_model(_model(), _provider())
