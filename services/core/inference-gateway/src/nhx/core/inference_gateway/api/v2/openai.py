@@ -15,6 +15,7 @@ from nhx.common.service.dependencies import get_nemo_client
 from nhx.core.inference_gateway.api.authz import (
     OPENAI_EXEC_PERMISSION,
     enforce_delegated_workspace_access,
+    enforce_model_ref_access,
 )
 from nhx.core.inference_gateway.api.dependencies import (
     global_http_client,
@@ -166,22 +167,12 @@ async def openai_get_model(
 
     # A LoRA composite also needs its adapter in the routing table.
     if "&adapters/" in model_name:
-        _raise_unless_adapter_route_ready(model_cache, virtual_model, workspace, model_name)
+        await _raise_unless_adapter_route_ready(model_cache, virtual_model, workspace, model_name)
 
     return OpenAIModelResp(
         id=f"{workspace}/{model_name}",
         owned_by=workspace,
     )
-
-
-def _entity_is_routable(model_cache: ModelCache, entity_id: str) -> bool:
-    """True when chat completions could proxy ``entity_id``."""
-    try:
-        ref = parse_model_entity_ref(entity_id)
-    except (TypeError, ValueError):
-        return False
-    entity = model_cache.get_from_model_entity(ref.workspace, ref.name)
-    return entity is not None and bool(entity.model_providers)
 
 
 def _require_routable_entity(model_cache: ModelCache, entity_id: str) -> None:
@@ -198,11 +189,14 @@ def _model_ids_from_mapping(models: dict[str, object]) -> list[str] | None:
     """Return model ids from a middleware ``models`` map, or None if the shape is unfamiliar.
 
     Switchyard stores the ids it writes into ``body["model"]`` as a string or a
-    list of strings under each category (``capable``, ``efficient``, ``judge``).
-    Any other value means this map is not that selection list.
+    list of strings under each category. ``judge`` is omitted: those ids are
+    called internally and are never written into ``body["model"]``. Any other
+    value means this map is not that selection list.
     """
     ids: list[str] = []
-    for value in models.values():
+    for category, value in models.items():
+        if category == "judge":
+            continue
         if isinstance(value, str) and value.strip():
             ids.append(value.strip())
             continue
@@ -234,49 +228,42 @@ def _replacement_model_ids(virtual_model: VirtualModel) -> list[str] | None:
         found.extend(ids)
     if not named:
         return None
-    return list(dict.fromkeys(found))
+    # A map that names only judge ids selects nothing. Fall back to the seeded entity.
+    return list(dict.fromkeys(found)) or None
 
 
-def _raise_unless_adapter_route_ready(
+async def _raise_unless_adapter_route_ready(
     model_cache: ModelCache, virtual_model: VirtualModel, workspace: str, model_name: str
 ) -> None:
     """Raise the same 404 chat completions would for a LoRA composite with no routable entity.
 
-    The check follows the inference path in :func:`virtual_model_proxy`. When
-    ``default_model_entity`` is set, chat splices that entity with the adapter
-    suffix before middleware runs, so that composite has to be routable.
+    Chat seeds the adapter splice of ``default_model_entity``, or the public
+    composite when that is unset, and then request middleware may replace
+    ``body["model"]``. Named replacement ids are checked first, so a default
+    composite neither hides a missing target nor blocks healthy targets.
 
-    When it is unset, chat leaves the public composite in place unless request
-    middleware replaces ``body["model"]``. A plain model on ``VirtualModel.models``
-    does not say which of those happens, so it cannot make this adapter ready.
-    The public composite is required instead.
-
-    Middleware that names the ids it writes, as Switchyard does under
-    ``config["models"]``, drops the adapter suffix and resolves one of those
-    ids. Every named id has to be routable, because the choice depends on the
-    request. The public composite is not required in that case.
+    Each reference is authorized before the routing table is read, matching
+    :func:`enforce_model_ref_access` on the chat path. A denied workspace
+    returns 403 and does not reveal whether the entity exists.
     """
     adapter_parts = parse_adapters_suffix(model_name)
     if adapter_parts is None:
         raise_model_entity_not_found(workspace, model_name)
     _, adapter_workspace, adapter_name = adapter_parts
 
-    default_entity = virtual_model.default_model_entity
-    if default_entity:
-        _require_routable_entity(
-            model_cache,
-            format_adapter_composite(default_entity, adapter_workspace, adapter_name),
-        )
-        return
-
     replacement_ids = _replacement_model_ids(virtual_model)
     if replacement_ids is not None:
-        missing = [entity_id for entity_id in replacement_ids if not _entity_is_routable(model_cache, entity_id)]
-        if missing:
-            _require_routable_entity(model_cache, missing[0])
-        return
+        entity_ids = replacement_ids
+    elif virtual_model.default_model_entity:
+        entity_ids = [format_adapter_composite(virtual_model.default_model_entity, adapter_workspace, adapter_name)]
+    else:
+        entity_ids = [f"{workspace}/{model_name}"]
 
-    _require_routable_entity(model_cache, f"{workspace}/{model_name}")
+    refs = [parse_model_entity_ref(entity_id) for entity_id in entity_ids]
+    for ref in refs:
+        await enforce_model_ref_access(workspace, ref)
+    for ref in refs:
+        _require_routable_entity(model_cache, f"{ref.workspace}/{ref.name}")
 
 
 # Use individual decorators with explicit ordering to ensure deterministic OpenAPI generation
