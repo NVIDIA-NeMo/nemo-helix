@@ -40,9 +40,9 @@ def parse_parameter_count(value: object) -> int | None:
 
 
 def endpoint_name_candidates(model_id: str) -> list[str]:
-    """NGC endpoint names are the model id's last segment, sometimes with dots turned into underscores."""
+    """NGC endpoint names are the model id's last segment, sometimes with dots turned into underscores or dashes."""
     name = model_id.rsplit("/", 1)[-1].lower()
-    return list(dict.fromkeys([name, name.replace(".", "_")]))
+    return list(dict.fromkeys([name, name.replace(".", "_"), name.replace(".", "-")]))
 
 
 def _json_object(value: object) -> dict[str, Any]:
