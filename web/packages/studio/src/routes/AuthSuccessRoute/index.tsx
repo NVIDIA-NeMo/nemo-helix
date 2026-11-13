@@ -54,7 +54,7 @@ async function ensurePersonalWorkspace(workspace: string, name: string): Promise
 
 const landsInWorkspace = (path: string, workspace: string) =>
   path === '/' ||
-  path === '/workspaces' ||
+  !!matchPath('/workspaces', path) ||
   matchPath(`${ROUTES.workspace.index}/*`, path)?.params.workspace === workspace;
 
 export const AuthSuccessRoute: FC = () => {

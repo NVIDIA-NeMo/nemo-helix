@@ -180,6 +180,21 @@ describe('AuthSuccessRoute', () => {
       });
     });
 
+    it.each(['/workspaces', '/workspaces/', '/workspaces//'])(
+      'ignores the %s return path, which redirects to the personal workspace',
+      async (path) => {
+        mockProfile.state = { path, search: '' };
+        mockGetWorkspace.mockRejectedValue(axiosErrorWithStatus(403));
+        mockCreateWorkspace.mockRejectedValue(axiosErrorWithStatus(403));
+
+        renderRoute();
+
+        await waitFor(() => {
+          expect(navigate).toHaveBeenCalledWith(defaultRoute);
+        });
+      }
+    );
+
     it('keeps a return path into another workspace', async () => {
       mockProfile.state = { path: '/workspaces/team/agents', search: '?tab=1' };
       mockGetWorkspace.mockRejectedValue(axiosErrorWithStatus(403));
