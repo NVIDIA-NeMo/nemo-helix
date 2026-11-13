@@ -3,7 +3,9 @@
 
 """Files service implementation."""
 
+import asyncio
 import logging
+from contextlib import suppress
 from typing import ClassVar, List
 
 import sniffio
@@ -14,6 +16,8 @@ from nhx.core.files.api.v2.filesets import endpoints as filesets
 from nhx.core.files.api.v2.hf import endpoints as hf
 from nhx.core.files.api.v2.otlp import endpoints as otlp
 from nhx.core.files.app.backends import storage_impl_factory
+from nhx.core.files.app.backends.git import default_git_cache_root
+from nhx.core.files.app.git_cache_cleanup import run_git_cache_cleanup
 from nhx.core.files.app.http_session import close_http_session
 from nhx.core.files.config import FilesConfig
 from starlette import status
@@ -30,6 +34,7 @@ class FilesService(Service[FilesConfig]):
     def __init__(self):
         """Initialize the files service."""
         super().__init__(name="files", module_name="nhx.core.files")
+        self._git_cache_cleanup: asyncio.Task[None] | None = None
 
     def get_routers(self) -> List[RouterConfig]:
         """Return routers for the files service."""
@@ -62,8 +67,25 @@ class FilesService(Service[FilesConfig]):
         impl = storage_impl_factory(self._service_config.default_storage_config)
         await impl.validate_storage()
 
+        interval = self._service_config.git_cache_cleanup_interval_seconds
+        if interval > 0:
+            self._git_cache_cleanup = asyncio.create_task(
+                run_git_cache_cleanup(
+                    impl,
+                    self.dependency_provider.get_service_entity_client(self.name),
+                    interval_seconds=interval,
+                    grace_seconds=self._service_config.git_cache_cleanup_grace_seconds,
+                    fetch_root=default_git_cache_root(),
+                )
+            )
+
     async def on_shutdown(self) -> None:
         """Clean up resources on shutdown."""
+        if self._git_cache_cleanup is not None:
+            self._git_cache_cleanup.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._git_cache_cleanup
+            self._git_cache_cleanup = None
         await close_http_session()
         await super().on_shutdown()
 

@@ -247,7 +247,14 @@ class S3StorageImpl(StorageImpl):
 
                         # Skip "directory" markers (keys ending with /)
                         if relative_path and not relative_path.endswith("/"):
-                            files.append(FileInfo(path=relative_path, size=obj["Size"]))
+                            modified = obj.get("LastModified")
+                            files.append(
+                                FileInfo(
+                                    path=relative_path,
+                                    size=obj["Size"],
+                                    modified_at=modified.timestamp() if modified is not None else None,
+                                )
+                            )
             except ClientError as e:
                 _raise_for_s3_error(e, f"listing bucket {self.config.bucket}")
 

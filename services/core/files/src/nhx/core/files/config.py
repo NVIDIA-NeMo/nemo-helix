@@ -61,6 +61,19 @@ class FilesConfig(create_service_config_class("files")):  # type: ignore
         description="Maximum concurrent downloads during cache warming",
     )
 
+    git_cache_cleanup_interval_seconds: int = Field(
+        default=3600,
+        ge=0,
+        description="Seconds between sweeps that remove Git fileset cache entries no fileset uses. 0 disables them.",
+    )
+
+    git_cache_cleanup_grace_seconds: int = Field(
+        default=86400,
+        ge=0,
+        description="How long an unused Git fileset cache entry is kept after it was last written, so a fileset "
+        "created soon after a lookup of the same repository still finds it.",
+    )
+
     hf_retry_attempts: int = Field(
         default=4,
         ge=1,
