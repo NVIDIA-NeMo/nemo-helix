@@ -5,6 +5,7 @@ import {
   composeGenerationPrompt,
   composeJudgePromptTemplate,
   type EvaluationFormValues,
+  type MetricConfig,
   renderScoreGuidance,
   type SelectableMetric,
   selectedMetrics,
@@ -107,9 +108,9 @@ const toScorePayload = (score: PanelScoreFormData): Record<string, unknown> =>
  *  ground truth. */
 const OUTPUT_TEMPLATE = '{{sample.output_text}}';
 
-const buildMetricBundle = (
+export const buildMetricBundle = (
   metric: SelectableMetric,
-  values: EvaluationFormValues,
+  body: MetricConfig,
   bindings: DatasetBindings,
   workspace: string
 ): InlineMetricBundle | null => {
@@ -149,17 +150,17 @@ const buildMetricBundle = (
       return bundle(
         metric,
         {
-          operation: values.body.stringCheck.operation,
+          operation: body.stringCheck.operation,
           left_template: OUTPUT_TEMPLATE,
           right_template: reference,
         },
         [continuousOutput(metric)],
-        `string check (${values.body.stringCheck.operation}) against the mapped reference`
+        `string check (${body.stringCheck.operation}) against the mapped reference`
       );
 
     case 'number-check': {
       if (!reference) return null;
-      const { operation, epsilon } = values.body.numberCheck;
+      const { operation, epsilon } = body.numberCheck;
       return bundle(
         metric,
         {
@@ -176,7 +177,7 @@ const buildMetricBundle = (
     }
 
     case 'llm-judge': {
-      const scores = values.body.scores;
+      const scores = body.scores;
       const outputs = scores.flatMap((score) =>
         score.scoreType === 'rubric'
           ? [
@@ -190,12 +191,12 @@ const buildMetricBundle = (
         {
           // A `workspace/name` ref, as for the target: the server resolves it to
           // a gateway route the job can reach. A bare name would not resolve.
-          model: toWorkspaceModelRef(workspace, values.body.judgeModel),
+          model: toWorkspaceModelRef(workspace, body.judgeModel),
           // system_prompt is a TOP-LEVEL field; the API rejects it inside
           // prompt_template. It is injected verbatim, so it carries rendered
           // prose rather than the SDK's Jinja template.
           system_prompt: renderScoreGuidance(scores),
-          prompt_template: composeJudgePromptTemplate(bindings, values.body.judgePrompt),
+          prompt_template: composeJudgePromptTemplate(bindings, body.judgePrompt),
           scores: scores.map(toScorePayload),
         },
         outputs,
@@ -211,7 +212,7 @@ export const buildMetricBundles = (
   workspace: string
 ): InlineMetricBundle[] =>
   selectedMetrics(values)
-    .map((metric) => buildMetricBundle(metric, values, bindings, workspace))
+    .map((metric) => buildMetricBundle(metric, values.body, bindings, workspace))
     .filter((entry): entry is InlineMetricBundle => entry !== null);
 
 /**

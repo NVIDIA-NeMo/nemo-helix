@@ -268,6 +268,9 @@ export interface EvaluationFormValues {
   };
 }
 
+/** Per-metric settings, independent of which metrics are selected. */
+export type MetricConfig = Omit<EvaluationFormValues['body'], 'metrics'>;
+
 export const EMPTY_FIELD_MAPPING: Record<CanonicalField, string> = {
   input: '',
   reference: '',
