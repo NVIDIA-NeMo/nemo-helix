@@ -255,7 +255,8 @@ def test_when_every_task_is_refused_no_command_is_offered(submitting):
     assert result.exit_code == 1 and result.output.splitlines()[-1] == "None of these tasks can run here."
 
 
-def test_a_build_that_keeps_failing_leaves_the_ready_tasks_to_submit(submitting, monkeypatch):
+def _task_a_build_keeps_failing(monkeypatch) -> None:
+    """``--harbor-dir`` publishes ``STORED`` of ``MEMBERS``, and the image build of task a always fails."""
     monkeypatch.setattr("nemo_evals.runs_cli.create_taskset", lambda *a, **k: CreatedTaskset(STORED, MEMBERS, 2, None))
     builds = SimpleNamespace(
         build_images=lambda name, revision, workspace: _image_build("1", "pending"),
@@ -267,6 +268,10 @@ def test_a_build_that_keeps_failing_leaves_the_ready_tasks_to_submit(submitting,
     monkeypatch.setattr(
         "nemo_evals.runs_cli.Evaluator", SimpleNamespace(from_client=lambda _: SimpleNamespace(tasks=builds))
     )
+
+
+def test_a_build_that_keeps_failing_leaves_the_ready_tasks_to_submit(submitting, monkeypatch):
+    _task_a_build_keeps_failing(monkeypatch)
     result = submitting.invoke("--harbor-dir", ".", "--poll-seconds", "0")
     assert result.exit_code == 1 and submitting.bodies == []
     stored = shlex.quote(STORED)
@@ -277,6 +282,37 @@ def test_a_build_that_keeps_failing_leaves_the_ready_tasks_to_submit(submitting,
         f"Once they're ready, submit with: nemo evals runs submit --taskset {stored}",
         f"Or submit the 1 ready task now with: nemo evals runs submit --taskset {stored} --tasks 1",
     ]
+
+
+def _spec_file_with_a_spent_key(tmp_path: Path) -> Path:
+    spec = tmp_path / "run.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "spec": {"tasks": "default/full", "target": {"kind": "harbor", "source": {"name": "openhands"}}},
+                "execution": {},
+                "idempotency_key": "spent",
+            }
+        )
+    )
+    return spec
+
+
+def test_recovery_commands_keep_the_key_given_on_the_command_line(submitting, monkeypatch, tmp_path):
+    """Neither attempt was accepted, so its key is unused; without it the command would fall back to the file's."""
+    spec = str(_spec_file_with_a_spent_key(tmp_path))
+    key = ["--idempotency-key", "fresh"]
+
+    submitting.reject = _rejected(("a", "gpu_unsupported"))
+    refused = submitting.invoke("--taskset", STORED, "--spec-file", spec, *key)
+    assert refused.output.splitlines()[-1].endswith("--tasks 1 --idempotency-key fresh")
+    assert "--idempotency-key" not in submitting.invoke("--taskset", STORED, "--spec-file", spec).output
+
+    _task_a_build_keeps_failing(monkeypatch)
+    failed = submitting.invoke("--harbor-dir", ".", "--poll-seconds", "0", "--spec-file", spec, *key)
+    submit_lines = [line for line in failed.output.splitlines() if "runs submit" in line]
+    assert len(submit_lines) == 2
+    assert all(line.endswith("--idempotency-key fresh") for line in submit_lines)
 
 
 def test_tasks_without_counts_sorted_members_and_matches_any_revision():
@@ -446,7 +482,7 @@ def test_the_rerun_command_warns_when_the_spec_file_pins_the_key(submitting, mon
     # The rerun drops --idempotency-key (repeating k2 would return this run), so it falls back to the file's key
     explicit = submitting.invoke(*args, "--idempotency-key", "k2").output
     assert "spec file's idempotency_key; pass a new --idempotency-key" in explicit
-    assert "k2" not in explicit.split("Rerun these tasks:", 1)[1].splitlines()[0]
+    assert "--idempotency-key" not in explicit.split("Rerun these tasks:", 1)[1].splitlines()[0]
 
 
 def test_submit_reads_the_spec_file_once(submitting, monkeypatch, tmp_path):

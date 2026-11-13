@@ -25,7 +25,7 @@ from collections.abc import Callable, Collection, Coroutine, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 import typer
@@ -817,10 +817,12 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 return pin_taskset_ref(Evaluator.from_client(client), ref, stored_revision)
             return ref
 
-        def rerun(ref: str, tasks: str | None = None) -> str:
+        def rerun(ref: str, tasks: str | None = None, *, with_key: bool = False) -> str:
             """This submit's command for ``ref``: the source flags become ``--taskset``, the run settings stay.
 
-            ``tasks`` is a ``--tasks`` value that narrows it to some of the taskset's tasks.
+            ``tasks`` is a ``--tasks`` value that narrows it to some of the taskset's tasks. ``with_key`` keeps an
+            explicit ``--idempotency-key``, for a run that was never accepted: its key is unused, and without it
+            the command would fall back to the spec file's, which may be spent and then replays as a 409.
             """
             kept: list[tuple[str, object]] = [
                 ("--spec-file", "<spec file>" if spec_file is not None and _is_stream(spec_file) else spec_file),
@@ -833,6 +835,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 ("--experiment", experiment),
                 ("--intake-dataset", "@".join(p for p in source if p) if experiment and source else None),
                 ("--tasks", tasks),
+                ("--idempotency-key", idempotency_key if with_key else None),
             ]
             options = "".join(f" {name} {shlex.quote(str(value))}" for name, value in kept if value is not None)
             return f"nemo evals runs submit --taskset {shlex.quote(ref)}{options}{flag}"
@@ -942,9 +945,13 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         echo(f"View evaluation run: nemo evals runs status {status['run_id']}{flag} --watch")
 
 
-def _explain_rejected_tasks(
-    tasks: list[dict[str, Any]], refs: Sequence[str], taskset_ref: str, rerun: Callable[[str, str | None], str]
-) -> None:
+class Rerun(Protocol):
+    """The ``runs submit`` command builder the explanations print their recovery commands with."""
+
+    def __call__(self, ref: str, tasks: str | None = None, *, with_key: bool = False) -> str: ...
+
+
+def _explain_rejected_tasks(tasks: list[dict[str, Any]], refs: Sequence[str], taskset_ref: str, rerun: Rerun) -> None:
     """Print each task the platform refused and why, then the command that submits the others.
 
     A task whose image isn't built yet (``image_unavailable``) may still build, so then this points to the
@@ -971,12 +978,10 @@ def _explain_rejected_tasks(
         return
 
     count, value = option
-    echo(f"Submit the other {count} with: {rerun(taskset_ref, value)}")
+    echo(f"Submit the other {count} with: {rerun(taskset_ref, value, with_key=True)}")
 
 
-def _explain_failed_builds(
-    builds: dict[str, ImageBuild], taskset_ref: str, rerun: Callable[[str, str | None], str]
-) -> None:
+def _explain_failed_builds(builds: dict[str, ImageBuild], taskset_ref: str, rerun: Rerun) -> None:
     """Print each failed build, how to retry them, and the command that submits the tasks whose builds are ready.
 
     A build that fails the same way again won't be fixed by retrying, so the ready tasks can run without it.
@@ -990,14 +995,16 @@ def _explain_failed_builds(
 
     # The ref names its workspace, and build-images takes no --workspace.
     echo(f"Retry the failed builds with: nemo evals tasksets build-images {shlex.quote(taskset_ref)} --wait")
-    echo(f"Once they're ready, submit with: {rerun(taskset_ref, None)}")
+    echo(f"Once they're ready, submit with: {rerun(taskset_ref, None, with_key=True)}")
 
     option = tasks_without(list(builds), failed)
     if option is None:
         return
 
     count, value = option
-    echo(f"Or submit the {count} ready task{'s' if count != 1 else ''} now with: {rerun(taskset_ref, value)}")
+    echo(
+        f"Or submit the {count} ready task{'s' if count != 1 else ''} now with: {rerun(taskset_ref, value, with_key=True)}"
+    )
 
 
 def _stderr(line: str) -> None:
