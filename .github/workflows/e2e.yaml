@@ -255,7 +255,7 @@ jobs:
             -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .
 
       - name: Log in to GHCR
-        if: env.PUBLISH_IMAGES == 'true'
+        if: env.PUBLISH_IMAGES == 'true' || env.BAKE_CACHE_TARGET_BRANCH != ''
         shell: bash
         env:
           GHCR_TOKEN: ${{ github.token }}
