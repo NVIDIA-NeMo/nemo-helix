@@ -15,7 +15,9 @@ from nhx.common.entities.client import (
 from nhx.common.jobs.schemas import HelixJobLogPage, InvalidPageCursorError
 from nhx.common.service.dependencies import get_entity_client, get_nemo_client
 from nhx.core.files.api.endpoint_helpers import (
+    HTTP_EXCEPTION_DETAIL,
     get_fileset,
+    require_writable_storage,
     resolve_storage_secrets_for_user,
 )
 from nhx.core.files.api.v2.otlp.schemas import (
@@ -33,6 +35,7 @@ from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
 from pydantic import BaseModel, Field
 from starlette.status import (
     HTTP_200_OK,
+    HTTP_409_CONFLICT,
 )
 
 logger = logging.getLogger(__name__)
@@ -149,6 +152,12 @@ async def query_otlp_logs(
     summary="Upload OTLP Logs to Fileset",
     response_model=OtelExportLogsServiceResponse,
     status_code=HTTP_200_OK,
+    responses={
+        HTTP_409_CONFLICT: {
+            "description": "Fileset storage is read-only",
+            **HTTP_EXCEPTION_DETAIL,
+        }
+    },
 )
 async def upload_otlp_logs(
     workspace: str,
@@ -165,6 +174,7 @@ async def upload_otlp_logs(
     Upload OTLP logs to a specified fileset in JSON or Protobuf format.
 
     Supports both application/json and application/x-protobuf content types.
+    Read-only storage returns HTTP 409 before reading the request body.
     """
 
     logger.debug(
@@ -173,6 +183,7 @@ async def upload_otlp_logs(
         workspace,
     )
     fileset = await get_fileset(workspace, name, entity_store)
+    require_writable_storage(fileset.storage)
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 

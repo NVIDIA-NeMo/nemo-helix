@@ -10,13 +10,12 @@
  * its affiliates is strictly prohibited.
  */
 
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import type { ButtonProps } from '@nvidia/foundations-react-core';
 import { CreateButton } from '@studio/components/common/CreateButton';
-import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { FilesetCreateModal } from '@studio/components/FilesetCreateModal';
-import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { getDatasetDetailRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
 import type { FC } from 'react';
 
@@ -34,17 +33,15 @@ export const NewDatasetButton: FC<Props> = ({ ...buttonProps }) => {
       <CreateButton onClick={() => setOpen()} {...buttonProps}>
         Create Dataset
       </CreateButton>
-      {isOpen &&
-        (FILESET_DETAILS_ENABLED ? (
-          <FilesetCreateModal
-            open={isOpen}
-            onClose={setClosed}
-            workspace={workspace}
-            purpose={FilesetPurpose.dataset}
-          />
-        ) : (
-          <DatasetCreateModal open={isOpen} onClose={setClosed} onDatasetCreated={setClosed} />
-        ))}
+      {isOpen && (
+        <FilesetCreateModal
+          open={isOpen}
+          onClose={setClosed}
+          workspace={workspace}
+          purpose={FilesetPurpose.dataset}
+          getDetailRoute={getDatasetDetailRoute}
+        />
+      )}
     </>
   );
 };

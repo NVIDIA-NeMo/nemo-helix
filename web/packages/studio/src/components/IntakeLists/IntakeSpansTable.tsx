@@ -11,12 +11,8 @@ import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
-import {
-  SpanKind,
-  type ListSpansMode,
-  type SpanFilter,
-  type SpanSortField,
-} from '@nemo/sdk/generated/platform/schema';
+import type { ListSpansMode, SpanFilter, SpanSortField } from '@nemo/sdk/generated/platform/schema';
+import { SpanKind } from '@nemo/sdk/generated/platform/schema/SpanKind';
 import { useListSpans } from '@nemo/sdk/generated/platform/spans';
 import { Anchor, Text } from '@nvidia/foundations-react-core';
 import { IntakeTelemetryStatusBadge } from '@studio/components/IntakeDetail/IntakeComponents/IntakeTelemetryStatusBadge';

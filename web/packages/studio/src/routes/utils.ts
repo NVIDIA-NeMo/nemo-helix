@@ -15,12 +15,10 @@ import {
   EVALS_BENCHMARKS_ENABLED,
   EVALS_ENABLED,
   EXPERIMENT_ENABLED,
-  FILESET_DETAILS_ENABLED,
   GUARDRAILS_ENABLED,
   INFERENCE_PROVIDER_ENABLED,
   INTAKE_ENABLED,
   MEMBERS_ENABLED,
-  MODEL_COMPARE_ENABLED,
   MODEL_DETAILS_ENABLED,
   MODEL_EVALUATION_FORM_ENABLED,
   OPTIMIZER_ENABLED,
@@ -30,7 +28,7 @@ import { ROUTES } from '@studio/constants/routes';
 import { ACTION_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import type { NewAgentTab } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
-import type { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
+import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import type { GuardrailChecksSubTab } from '@studio/routes/guardrails/GuardrailChecksTab/constants';
 import type { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { createSearchParams, generatePath, type RouteObject } from 'react-router';
@@ -48,9 +46,6 @@ export const gateModelDetailsRoutes = (routes: RouteObject | RouteObject[]) =>
 
 export const gateDashboardRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(DASHBOARD_ROUTE_ENABLED, routes);
-
-export const gateFilesetDetailsRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(FILESET_DETAILS_ENABLED, routes);
 
 export const gateIntakeRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(INTAKE_ENABLED, routes);
@@ -84,9 +79,6 @@ export const gateMembersRoutes = (routes: RouteObject | RouteObject[]) =>
 
 export const gateAssistantStudioRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(ASSISTANT_STUDIO_ENABLED, routes);
-
-export const gateModelCompareRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(MODEL_COMPARE_ENABLED, routes);
 
 export const gateOptimizerRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(OPTIMIZER_ENABLED, routes);
@@ -157,6 +149,9 @@ export const getWorkspaceBaseModelsRoute = (
   const query = searchParams.toString();
   return query ? `${path}?${query}` : path;
 };
+
+export const getWorkspaceDatasetsRoute = (workspace: string) =>
+  generatePath(ROUTES.workspace.datasets, { workspace });
 
 export const getWorkspaceFilesetsRoute = (workspace: string) => {
   const searchParams = new URLSearchParams(window.location.search);
@@ -496,64 +491,62 @@ export const getModelCompareRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.modelCompare, { workspace });
 };
 
-export const getFilesetDetailsRoute = (
+export interface FilesetDetailRouteOptions {
+  tab?: FilesetDetailTab;
+  folder?: string;
+  file?: string;
+}
+
+/** Builds a detail-page URL from a section's index and tab route patterns. */
+const buildFilesetDetailRoute = (
+  routes: { index: string; tab: string },
   workspace: string,
-  filesetId: string,
-  filesetFolder?: string,
-  resetPage?: boolean
+  filesetName: string,
+  options?: FilesetDetailRouteOptions
 ) => {
-  const searchParams = new URLSearchParams(window.location.search);
-  if (filesetFolder) {
-    searchParams.set(QUERY_PARAMETERS.filesetFolder, filesetFolder);
-  } else {
-    searchParams.delete(QUERY_PARAMETERS.filesetFolder);
-  }
-  const baseUrl = generatePath(ROUTES.workspace.filesetDetails, {
-    workspace,
-    filesetId,
-  });
-
-  if (resetPage) {
-    // To make sure the new fileset is front and center we need to remove some query params
-    // If we are OK not showing the current fileset in the table this could be removed
-    searchParams.delete('page');
-    searchParams.delete('sort_by');
-    searchParams.delete('order');
-  }
-
-  return searchParams.size ? `${baseUrl}?${searchParams.toString()}` : baseUrl;
+  // Folder and file selection only render on the Files tab, so default to it.
+  const tab =
+    options?.tab ?? (options?.folder || options?.file ? FilesetDetailTab.Files : undefined);
+  const base = tab
+    ? generatePath(routes.tab, { workspace, filesetName, filesetTab: tab })
+    : generatePath(routes.index, { workspace, filesetName });
+  const search = new URLSearchParams();
+  if (options?.folder) search.set(QUERY_PARAMETERS.filesetFolder, options.folder);
+  if (options?.file) search.set(QUERY_PARAMETERS.file, options.file);
+  return search.size ? `${base}?${search.toString()}` : base;
 };
 
 export const getFilesetDetailRoute = (
   workspace: string,
   filesetName: string,
-  options?: { tab?: FilesetDetailTab }
-) => {
-  const base = generatePath(ROUTES.workspace.filesetDetail, { workspace, filesetName });
-  return options?.tab ? `${base}?${QUERY_PARAMETERS.tab}=${options.tab}` : base;
-};
+  options?: FilesetDetailRouteOptions
+) =>
+  buildFilesetDetailRoute(
+    { index: ROUTES.workspace.filesetDetail, tab: ROUTES.workspace.filesetDetailTab },
+    workspace,
+    filesetName,
+    options
+  );
 
+/** The same detail page as `getFilesetDetailRoute`, under the Datasets section. */
+export const getDatasetDetailRoute = (
+  workspace: string,
+  filesetName: string,
+  options?: FilesetDetailRouteOptions
+) =>
+  buildFilesetDetailRoute(
+    { index: ROUTES.workspace.datasetDetail, tab: ROUTES.workspace.datasetDetailTab },
+    workspace,
+    filesetName,
+    options
+  );
+
+/** Accepts a bare fileset name or a `workspace/name` reference. */
 export const getFilesetRoute = (
   workspace: string,
   filesetRef: string,
-  options?: { tab?: FilesetDetailTab }
-) => {
-  if (FILESET_DETAILS_ENABLED) {
-    return getFilesetDetailRoute(workspace, filesetRef.split('/').pop() ?? filesetRef, options);
-  }
-  return getFilesetDetailsRoute(
-    workspace,
-    filesetRef.includes('/') ? filesetRef : `${workspace}/${filesetRef}`
-  );
-};
-
-export const getFilesetFileRoute = (workspace: string, fileset: string, filePath: string) => {
-  return generatePath(ROUTES.workspace.filesetFile, {
-    workspace,
-    filesetId: fileset,
-    filePathEncoded: filePath,
-  });
-};
+  options?: FilesetDetailRouteOptions
+) => getFilesetDetailRoute(workspace, filesetRef.split('/').pop() ?? filesetRef, options);
 
 export const getIntakeTracesRoute = (workspace: string, options: { agentName?: string } = {}) => {
   const path = generatePath(ROUTES.workspace.intakeTraces, { workspace });

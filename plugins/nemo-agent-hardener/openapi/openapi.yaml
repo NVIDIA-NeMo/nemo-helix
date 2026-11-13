@@ -1875,6 +1875,10 @@ components:
           description: Fileset ref holding the uploaded project bundle, for a 'project'
             manifest. The run expands this instead of ``agent_fileset``.
           default: ''
+        agent_fileset_id:
+          title: Agent Fileset Id
+          description: Allocation ID of the owned scaffold; absent on legacy manifests.
+          type: string
         agent_fileset:
           type: string
           title: Agent Fileset

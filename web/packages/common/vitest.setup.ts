@@ -26,6 +26,8 @@ failOnConsole({
       )
     )
       return true;
+    if (message.includes('An update to CodeSnippetCode inside a test was not wrapped in act'))
+      return true;
     return false;
   },
 });

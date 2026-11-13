@@ -67,15 +67,10 @@ vi.mock('@studio/routes/utils', async (importOriginal) => {
     ...actual,
     // Mirrors the real helper: callers pass raw values and the helper encodes
     // path params (generatePath does this in production).
-    getFilesetDetailsRoute: (project: string, datasetName: string) =>
-      `/projects/${project}/filesets/${encodeURIComponent(datasetName)}`,
-    getNewFilesetRoute: (project: string) => `/projects/${project}/filesets/new`,
+    getFilesetDetailRoute: (project: string, filesetName: string) =>
+      `/projects/${project}/filesets/${encodeURIComponent(filesetName)}`,
   };
 });
-
-vi.mock('@studio/routes/FilesetListRoute/PanelManagement', () => ({
-  PanelManagement: vi.fn(({ workspace }) => <div data-testid="panel-management">{workspace}</div>),
-}));
 
 const renderRoute = () => {
   return render(
@@ -185,7 +180,9 @@ describe('FilesetListRoute', () => {
           timeout: LG_SELECTOR_TIMEOUT,
         })
       ).toHaveTextContent('Filesets');
-      expect(screen.getByRole('link', { name: 'Create Fileset' })).toBeInTheDocument();
+      // Datasets are created from the Datasets page.
+      expect(screen.getByRole('button', { name: 'Create Model Fileset' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Create Dataset' })).not.toBeInTheDocument();
     });
   });
 
@@ -224,7 +221,7 @@ describe('FilesetListRoute', () => {
             ),
           },
           {
-            path: '/projects/:workspace/filesets/:filesetId',
+            path: '/projects/:workspace/filesets/:filesetName',
             element: <div data-testid="dataset-details-route" />,
           },
         ],

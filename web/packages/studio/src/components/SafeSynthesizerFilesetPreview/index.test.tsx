@@ -3,7 +3,7 @@
 
 import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
 import { useFilesDownloadFile } from '@nemo/sdk/generated/platform/files';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import {
   useSafeSynthesizerDownloadJobResultSyntheticData,
   useSafeSynthesizerListJobResults,

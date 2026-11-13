@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import json
 import math
+import tempfile
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -40,18 +42,20 @@ def _make_preview(
     use_in_process_detector: bool = True,
 ) -> None:
     """Run ``Anonymizer.preview(...)`` and stream the result frames."""
-    anonymizer = _make_anonymizer(
-        model_configs_yaml=model_configs_yaml,
-        dd_providers=dd_providers,
-        use_in_process_detector=use_in_process_detector,
-    )
     config: AnonymizerConfig = spec.config
 
-    # Do NOT stop the in-process GLiNER runtime here: it is owned by the long-lived
-    # Anonymizer service and shared across previews, so tearing it down per request
-    # would re-pay the model load + server startup on every preview. Upstream's
-    # runtime registers an atexit handler to stop the child on service shutdown.
-    result = anonymizer.preview(config=config, data=data, num_records=num_records)
+    with tempfile.TemporaryDirectory(prefix="anonymizer-preview-") as artifact_dir:
+        anonymizer = _make_anonymizer(
+            model_configs_yaml=model_configs_yaml,
+            dd_providers=dd_providers,
+            artifact_path=Path(artifact_dir),
+            use_in_process_detector=use_in_process_detector,
+        )
+        # Do NOT stop the in-process GLiNER runtime here: it is owned by the long-lived
+        # Anonymizer service and shared across previews, so tearing it down per request
+        # would re-pay the model load + server startup on every preview. Upstream's
+        # runtime registers an atexit handler to stop the child on service shutdown.
+        result = anonymizer.preview(config=config, data=data, num_records=num_records)
 
     send_frame(PreviewDatasetFrame(records=_to_jsonable_records(result.dataframe)))
     send_frame(
@@ -76,6 +80,7 @@ def _make_anonymizer(
     *,
     model_configs_yaml: str,
     dd_providers: list[DDModelProvider] | None,
+    artifact_path: Path,
     use_in_process_detector: bool = True,
 ) -> Anonymizer:
     if not model_configs_yaml:
@@ -85,8 +90,13 @@ def _make_anonymizer(
             return build_gliner_anonymizer(
                 model_configs_yaml=model_configs_yaml,
                 dd_providers=dd_providers,
+                artifact_path=artifact_path,
             )
-        return Anonymizer(model_configs=model_configs_yaml, model_providers=dd_providers)
+        return Anonymizer(
+            model_configs=model_configs_yaml,
+            model_providers=dd_providers,
+            artifact_path=artifact_path,
+        )
 
 
 def _to_jsonable_records(df: pd.DataFrame) -> list[dict[str, Any]]:

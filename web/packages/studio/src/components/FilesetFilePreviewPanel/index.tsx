@@ -38,10 +38,9 @@ export interface FilesetFilePreviewPanelProps {
 /**
  * Side-panel wrapper around `FilesetFilePreviewContent`.
  *
- * Kept as a thin shim so legacy callers (`FilesetListRoute/PanelManagement`)
- * continue to render the file preview as a right-side panel. The newer
- * fileset detail Files tabs (dataset, model) embed `FilesetFilePreviewContent`
- * inline instead.
+ * Used where a file preview opens over another page (job outputs, seed
+ * dataset config). The fileset detail page's Files tab embeds
+ * `FilesetFilePreviewContent` inline instead.
  */
 export const FilesetFilePreviewPanel: FC<FilesetFilePreviewPanelProps> = ({
   open,

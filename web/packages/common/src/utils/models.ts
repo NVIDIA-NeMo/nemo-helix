@@ -7,12 +7,9 @@ import {
 } from '@nemo/common/src/api/models/modelPages';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import type { ResourceRef } from '@nemo/common/src/types';
-import {
-  type Adapter,
-  FinetuningType,
-  ModelDeploymentStatus,
-  type ModelEntity,
-} from '@nemo/sdk/generated/platform/schema';
+import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import { FinetuningType } from '@nemo/sdk/generated/platform/schema/FinetuningType';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 
 const DEFAULT_WORKSPACE = 'default';
 

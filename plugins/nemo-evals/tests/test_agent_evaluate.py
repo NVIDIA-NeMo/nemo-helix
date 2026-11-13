@@ -723,8 +723,8 @@ def test_agent_eval_job_retry_replaces_a_failed_attempts_bundle(tmp_path: Path, 
 
 
 def test_agent_eval_job_survives_result_persistence_failure(tmp_path: Path, mocker: MockerFixture) -> None:
-    # The queryable result record is a best-effort convenience index; the authoritative output (bundle
-    # + summary artifacts) is already saved. A persistence failure must not fail a successful eval.
+    # The queryable result record is a best-effort convenience index; the authoritative bundle
+    # is already saved. A persistence failure must not fail a successful eval.
     mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
     persist = mocker.patch(
         "nemo_evals.jobs.agent_evaluate.persist_agent_eval_result",
@@ -3292,3 +3292,155 @@ def test_trials_of_an_agent_whose_models_cannot_all_be_named_get_an_open_policy_
     assert issuer is not None
     assert issuer._policy == ModelPolicy(model_access=ModelAccess.OPEN)
     assert "aren't limited to the models it configures" in caplog.text
+
+
+@pytest.mark.parametrize("summary_fails", [False, True])
+def test_bundle_failure_attempts_summary_and_preserves_the_original_error(
+    tmp_path: Path, mocker: MockerFixture, caplog: pytest.LogCaptureFixture, summary_fails: bool
+) -> None:
+    """Attempt the summary after a bundle error and raise that same error without wrapping it."""
+    ctx = _job_context(tmp_path)
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
+    persist = mocker.patch("nemo_evals.jobs.agent_evaluate.persist_agent_eval_result")
+    publish = mocker.patch(
+        "nemo_evals.jobs.agent_evaluate.publish_agent_eval_result",
+        return_value=PublicationOutcome(status=HelixJobStatus.COMPLETED, evaluation_id="eval-a"),
+    )
+    original = ctx.results.save
+    attempted = []
+    upload_error = OSError("bundle upload failed")
+
+    def save(name, path, **kwargs):
+        """Always fail the bundle and optionally fail its independent summary copy."""
+        attempted.append(name)
+        if name == DEFAULT_RESULT_NAME:
+            raise upload_error
+        if summary_fails:
+            raise OSError("summary upload failed")
+        return original(name, path, **kwargs)
+
+    mocker.patch.object(ctx.results, "save", side_effect=save)
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=_runner_target(),
+        publication=PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-a", agent_name="agent-a")),
+    )
+    with pytest.raises(OSError, match="bundle upload failed") as raised:
+        AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+    assert attempted == [DEFAULT_RESULT_NAME, SUMMARY_RESULT_NAME]
+    publish.assert_not_called()
+    persist.assert_not_called()
+    assert raised.value is upload_error
+    assert upload_error.__notes__ == [f"Failed to save result {DEFAULT_RESULT_NAME!r}"]
+    if summary_fails:
+        assert "summary upload failed" in caplog.text
+    else:
+        assert (ctx.storage.persistent / "results" / SUMMARY_RESULT_NAME).is_file()
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_summary_failure_preserves_the_run_outcome_publication_and_cleanup(
+    tmp_path: Path, mocker: MockerFixture, caplog: pytest.LogCaptureFixture, failed: bool
+) -> None:
+    """Keep summary-copy failure nonfatal and complete publication and snapshot cleanup once."""
+    ctx = _job_context(tmp_path)
+    evaluator = _FakeEvaluator(failed=failed)
+    run = mocker.spy(evaluator, "run_sync")
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=evaluator)
+    persist = mocker.patch("nemo_evals.jobs.agent_evaluate.persist_agent_eval_result")
+    report = mocker.patch("nemo_evals.jobs.agent_evaluate.report_run_outcome")
+    publish = mocker.patch(
+        "nemo_evals.jobs.agent_evaluate.publish_agent_eval_result",
+        return_value=PublicationOutcome(status=HelixJobStatus.COMPLETED, evaluation_id="eval-a"),
+    )
+    (ctx.storage.persistent / agent_evaluate.ENVIRONMENT_STORAGE_DIR).mkdir()
+    discard = mocker.patch("nemo_evals.jobs.agent_evaluate.discard_snapshot_sync")
+    original = ctx.results.save
+
+    def save(name, path, **kwargs):
+        """Retain the authoritative bundle and fail only its redundant summary copy."""
+        if name == SUMMARY_RESULT_NAME:
+            raise OSError("summary upload failed")
+        return original(name, path, **kwargs)
+
+    save_result = mocker.patch.object(ctx.results, "save", side_effect=save)
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=_runner_target(),
+        publication=PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-a", agent_name="agent-a")),
+    )
+    client = _sync_sdk_with_identity()
+
+    output = AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=client)
+
+    assert output["status"] == ("failed" if failed else "completed")
+    assert output[STATUS_DETAILS_KEY]["failed"] is failed
+    assert report.call_args.args[0].failed is failed
+    assert output["publication"]["evaluation_id"] == "eval-a"
+    bundle = ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME
+    assert (bundle / "summary.json").is_file()
+    assert "the bundle contains summary.json" in caplog.text
+    assert "summary upload failed" in caplog.text
+    assert save_result.call_count == 2
+    run.assert_called_once()
+    persist.assert_called_once()
+    publish.assert_called_once()
+    discard.assert_called_once_with(spec.target, client)
+
+
+@pytest.mark.parametrize("failed_step", ["publish", "client"])
+def test_summary_failure_does_not_mask_publication_errors(
+    tmp_path: Path, mocker: MockerFixture, failed_step: str
+) -> None:
+    """Log summary-copy failures while propagating the original publication or client error."""
+    ctx = _job_context(tmp_path)
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
+    mocker.patch("nemo_evals.jobs.agent_evaluate.persist_agent_eval_result")
+    upload_error = OSError("summary upload failed")
+    publication_error = RuntimeError("publication failed")
+    publish = mocker.patch("nemo_evals.jobs.agent_evaluate.publish_agent_eval_result", side_effect=publication_error)
+    if failed_step == "client":
+        mocker.patch.object(AsyncIntakeClient, "from_client", side_effect=publication_error)
+    original = ctx.results.save
+
+    def save(name, path, **kwargs):
+        """Retain the bundle and fail only the redundant summary copy."""
+        if name == SUMMARY_RESULT_NAME:
+            raise upload_error
+        return original(name, path, **kwargs)
+
+    mocker.patch.object(ctx.results, "save", side_effect=save)
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=_runner_target(),
+        publication=PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-a", agent_name="agent-a")),
+    )
+    with pytest.raises(RuntimeError, match="publication failed") as raised:
+        AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+    assert raised.value is publication_error
+    assert publish.call_count == (1 if failed_step == "publish" else 0)
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, asyncio.CancelledError])
+@pytest.mark.parametrize("interrupted_result", [DEFAULT_RESULT_NAME, SUMMARY_RESULT_NAME])
+def test_result_upload_does_not_swallow_cancellation(
+    tmp_path: Path, mocker: MockerFixture, interruption: type[BaseException], interrupted_result: str
+) -> None:
+    """Stop immediately on interruption during either save without entering publication."""
+    ctx = _job_context(tmp_path)
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
+    original = ctx.results.save
+
+    def save_result(name, path, **kwargs):
+        """Interrupt the selected save and retain any earlier result normally."""
+        if name == interrupted_result:
+            raise interruption
+        return original(name, path, **kwargs)
+
+    save = mocker.patch.object(ctx.results, "save", side_effect=save_result)
+    publish = mocker.patch("nemo_evals.jobs.agent_evaluate.publish_agent_eval_result")
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=_runner_target())
+    with pytest.raises(interruption):
+        AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+    assert save.call_count == (1 if interrupted_result == DEFAULT_RESULT_NAME else 2)
+    publish.assert_not_called()

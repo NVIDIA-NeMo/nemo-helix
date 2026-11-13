@@ -28,6 +28,8 @@ class ProbeReport(BaseModel):
     forbidden_status: Annotated[int, Field(strict=True, ge=100, le=599)] | None
     forbidden_error: Annotated[str, Field(max_length=80)] | None
     public_status: Annotated[int, Field(strict=True, ge=100, le=599)] | None
+    result_status: Annotated[int, Field(strict=True, ge=100, le=599)] | None = None
+    result_error: Annotated[str, Field(max_length=80)] | None = None
 
 
 class Observation(ProbeReport):

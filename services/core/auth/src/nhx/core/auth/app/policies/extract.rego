@@ -116,27 +116,43 @@ extract_caller_kind := caller_kind if {
 	caller_kind := input.caller_kind
 } else := ""
 
-# Extract principal_email from either format
+# Direct-format principal_email/groups describe the effective user. Envoy
+# headers carry actor and represented-user claims in distinct header families.
 extract_principal_email := email if {
-	# Direct format
 	input.principal_email
 	email := input.principal_email
 } else := email if {
-	# Envoy format - try x-nhx-principal-email header
-	request_headers["x-nhx-principal-email"]
-	email := request_headers["x-nhx-principal-email"]
+	extract_on_behalf_of_principal_id != ""
+	email := object.get(request_headers, "x-nhx-principal-on-behalf-of-email", "")
+} else := email if {
+	extract_on_behalf_of_principal_id == ""
+	email := object.get(request_headers, "x-nhx-principal-email", "")
 } else := ""
 
-# Extract principal_groups from either format
 extract_principal_groups := groups if {
-	# Direct format
 	input.principal_groups
 	groups := input.principal_groups
 } else := groups if {
-	# Envoy format - try x-nhx-principal-groups header (comma-separated)
-	request_headers["x-nhx-principal-groups"]
-	groups := split(request_headers["x-nhx-principal-groups"], ",")
+	extract_on_behalf_of_principal_id != ""
+	groups := split(object.get(request_headers, "x-nhx-principal-on-behalf-of-groups", ""), ",")
+} else := groups if {
+	extract_on_behalf_of_principal_id == ""
+	groups := split(object.get(request_headers, "x-nhx-principal-groups", ""), ",")
 } else := []
+
+extract_actor_email := email if {
+	input.actor_email
+	email := input.actor_email
+} else := extract_principal_email if {
+	extract_on_behalf_of_principal_id == ""
+} else := object.get(request_headers, "x-nhx-principal-email", "")
+
+extract_actor_groups := groups if {
+	input.actor_groups
+	groups := input.actor_groups
+} else := extract_principal_groups if {
+	extract_on_behalf_of_principal_id == ""
+} else := split(object.get(request_headers, "x-nhx-principal-groups", ""), ",")
 
 # Extract on-behalf-of principal id from either format
 extract_on_behalf_of_principal_id := principal_id if {
@@ -226,8 +242,20 @@ extract_workspace_from_path(path) := workspace if {
 	workspace := path_parts[i]
 }
 
-# Request-scoped workspace, memoized once per evaluation (see common.endpoint_scan).
-# The function above stays intact for the policy tests; allow rules use this 0-arg rule.
-workspace_scan := w if {
-	w := extract_workspace_from_path(extract_path)
+# Reuse the selected endpoint instead of scanning the route table again. This
+# binds workspace and permission requirements to the same matched contract.
+workspace_scan := workspace if {
+	pattern_parts := split(data.common.endpoint_scan, "/")
+	path_parts := split(split(extract_path, "?")[0], "/")
+	some i in numbers.range(0, count(pattern_parts) - 1)
+	pattern_parts[i] in ["{workspace}", "{workspace_id}"]
+	workspace := path_parts[i]
+} else := workspace if {
+	pattern_parts := split(data.common.endpoint_scan, "/")
+	path_parts := split(split(extract_path, "?")[0], "/")
+	some i in numbers.range(1, count(pattern_parts) - 1)
+	pattern_parts[i - 1] == "workspaces"
+	startswith(pattern_parts[i], "{")
+	endswith(pattern_parts[i], "}")
+	workspace := path_parts[i]
 } else := ""

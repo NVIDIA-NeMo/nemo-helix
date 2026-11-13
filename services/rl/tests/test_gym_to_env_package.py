@@ -178,6 +178,25 @@ constraint-dependencies = ["urllib3>=2.7.0"]
     assert overrides == ["setuptools<81,>=80.10.2"]
 
 
+def test_rl_dependency_policy_skips_package_scoped_overrides(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[tool.uv]
+override-dependencies = [
+  "setuptools>=80.10.2",
+  { package = { name = "vllm", version = "0.29.0" }, dependencies = ["flashinfer-python==0.6.18.post1"] },
+]
+constraint-dependencies = ["urllib3>=2.7.0"]
+""",
+        encoding="utf-8",
+    )
+
+    overrides, constraints = MODULE.rl_dependency_policy(tmp_path)
+
+    assert overrides == ["setuptools<81,>=80.10.2"]
+    assert constraints == ["urllib3>=2.7.0"]
+
+
 def test_rl_dependency_policy_rejects_a_checkout_without_uv_limits(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.uv]\nmanaged = true\n", encoding="utf-8")
 

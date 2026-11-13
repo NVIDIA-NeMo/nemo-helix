@@ -4,7 +4,7 @@
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { getEntityReference, getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import {
   Anchor,
   Banner,

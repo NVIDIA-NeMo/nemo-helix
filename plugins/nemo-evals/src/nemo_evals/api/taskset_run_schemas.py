@@ -319,7 +319,7 @@ class TasksetRunStatus(BaseModel):
     )
 
 
-_INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}
+_INTERNAL_FIELDS = {"plan_ref", "plan_fileset_id", "plan_digest", "request_digest"}
 
 
 class TasksetRunTask(BaseModel):

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getCustomizationListJobTemplatesQueryKey } from '@nemo/sdk/generated/customizer/customization-job-templates';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { customizationJob1 } from '@studio/mocks/customizer/customization-jobs';

@@ -112,11 +112,6 @@ ENV_MAPPINGS: list[EnvMapping] = [
         default="true",
     ),
     EnvMapping(
-        marker="STUDIO_UI_VITE_FF_FILESET_DETAILS_ENABLED",
-        config_path="studio.feature_flags.fileset_details_enabled",
-        default="false",
-    ),
-    EnvMapping(
         marker="STUDIO_UI_VITE_FF_FLAG_OVERRIDES_ENABLED",
         config_path="studio.feature_flags.flag_overrides_enabled",
         default="false",
@@ -136,11 +131,6 @@ ENV_MAPPINGS: list[EnvMapping] = [
     ),
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_MEMBERS_ENABLED", config_path="studio.feature_flags.members_enabled", default="true"
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_MODEL_COMPARE_ENABLED",
-        config_path="studio.feature_flags.model_compare_enabled",
-        default="false",
     ),
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_MODEL_DETAILS_ENABLED",

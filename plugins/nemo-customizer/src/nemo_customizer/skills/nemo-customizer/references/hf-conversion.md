@@ -90,8 +90,10 @@ uv run --no-project --with datasets --with pillow \
   plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_cord.py \
   --output /tmp/cord-v2
 nemo files filesets create cord-v2 --workspace default --purpose dataset
-nemo files upload /tmp/cord-v2 cord-v2 --workspace default
+nemo files upload /tmp/cord-v2/ cord-v2 --workspace default
 ```
+
+Keep the trailing slash on the upload source, here and for the finance directories below. Without it, `nemo files upload` puts the files under `cord-v2/` in the fileset, and the fileset-relative image urls no longer resolve.
 
 `cord-v2` contains `train/train.jsonl` and `validation/validation.jsonl`, each with `images/` beside the JSONL. Image urls are fileset-relative (`train/images/00000.png`, `validation/images/00000.png`). Automodel selects training files from `train/` and validation files from `validation/`. Job JSON names this one fileset. The Evaluator scores `validation/validation.jsonl` in it: that official validation file is CORD's frozen split, and the script does not write `test.jsonl`. That is an exception to the own-fileset test-split rule (`post-training-eval.md`): the scored file lives in the training fileset because CORD has no separate test split.
 
@@ -155,7 +157,7 @@ if "validation" in ds:
     write_jsonl(Path("/tmp/train-data/validation.jsonl"), ds["validation"], "validation", train_images)
 ```
 
-Each `image_url.url` is that relative path, or a `data:` URL when the bytes stay inline. A row with several images gets one `image_url` part per image, then the text part. Upload `/tmp/train-data/` to the dataset fileset and `/tmp/test-data/` to `<DATASET_NAME>-test`. Each directory holds its JSONL and `images/`. Validate with `nemo files list <DATASET_NAME> --workspace default`.
+Each `image_url.url` is that relative path, or a base64 `data:` URL when the bytes stay inline (PNG, JPEG, GIF or WebP, at most 25 MiB; `dataset-formats.md` § **Image rows**). A row with several images gets one `image_url` part per image, then the text part. Upload `/tmp/train-data/` to the dataset fileset and `/tmp/test-data/` to `<DATASET_NAME>-test`. Each directory holds its JSONL and `images/`. Validate with `nemo files list <DATASET_NAME> --workspace default`.
 
 A Gym row that needs an image uses Responses API parts on `responses_create_params.input[].content`: `{type: input_image, image_url: "<string>"}` followed by `{type: input_text, text}`. A string `content` stays one text part. The automodel fileset stays `{type: image_url, image_url: {url}}`. See the **nemo-gym-environments** skill, `references/rollout-rows.md`.
 

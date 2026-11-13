@@ -36,6 +36,7 @@ from nhx.common.config.base import (
 from nhx.common.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -112,6 +113,7 @@ RESERVED_JOB_ENVIRONMENT_VARIABLE_NAMES: frozenset[str] = (
             # From nhx.common.jobs.constants
             CONFIG_TASK_STORAGE_PATH_ENVVAR,
             EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+            NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
             NEMO_JOB_ATTEMPT_ID_ENVVAR,
             NEMO_JOB_FILESET_ENVVAR,
             NEMO_JOB_ID_ENVVAR,

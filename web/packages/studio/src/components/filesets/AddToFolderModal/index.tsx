@@ -30,7 +30,8 @@ import {
 import type { FileSystemNode } from '@studio/components/FilesTable/utils';
 import { useDatasetNavigator } from '@studio/hooks/useDatasetNavigator';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getFilesetDetailsRoute } from '@studio/routes/utils';
+import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
+import { useFilesetDetailParent } from '@studio/routes/FilesetDetailRoute/FilesetDetailParent';
 import { type FC, useMemo } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
@@ -94,6 +95,7 @@ export const AddToFolderModal: FC<AddToFolderModalProps> = ({
   const toast = useToast();
   const navigate = useNavigate();
   const routeWorkspace = useWorkspaceFromPath();
+  const { getDetailRoute } = useFilesetDetailParent();
 
   // Fetch files list if folder contents not provided (e.g., from quick actions)
   const { data: fetchedFilesResponse, isLoading: isLoadingFiles } = useFilesListFilesetFiles(
@@ -185,11 +187,13 @@ export const AddToFolderModal: FC<AddToFolderModalProps> = ({
     }
 
     const parentFolder = getParentFolder(currentFolder);
-    const datasetFullName = `${workspace}/${datasetName}`;
     navigate(
       // Pass raw values: generatePath encodes path params and URLSearchParams
       // encodes the folder query param.
-      getFilesetDetailsRoute(routeWorkspace, datasetFullName, parentFolder ?? undefined)
+      getDetailRoute(routeWorkspace, datasetName, {
+        tab: FilesetDetailTab.Files,
+        folder: parentFolder || undefined,
+      })
     );
   };
 

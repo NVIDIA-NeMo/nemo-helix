@@ -27,7 +27,6 @@ from datasets import Dataset, DatasetDict, load_dataset
 from filesets import FilesetFileSystem, parse_fileset_ref
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client_provider import get_nemo_client
-from nemo_helix_plugin.config import get_platform_config
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.client import JobsClient
@@ -389,17 +388,13 @@ def run_from_env() -> None:
     initialize_observability()
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "default")
     client = get_nemo_client()
-    files_url = get_platform_config().get_service_url("files")
-    if files_url:
-        logger.info("Initializing model weights from Files API...")
-        results = init_models_sync(files_api_url=files_url)
-        failed = [m for m, success in results.items() if not success]
-        if failed:
-            logger.warning("Some models failed to download: %s", failed)
-        else:
-            logger.info("Successfully initialized %d model(s)", len(results))
+    logger.info("Initializing model weights from Files API...")
+    results = init_models_sync()
+    failed = [m for m, success in results.items() if not success]
+    if failed:
+        logger.warning("Some models failed to download: %s", failed)
     else:
-        logger.debug("Files API URL not configured, skipping model initialization")
+        logger.info("Successfully initialized %d model(s)", len(results))
 
     _setup_classify_endpoint()
 

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
+import { SamplerType } from '@nemo/sdk/generated/data-designer/schema/SamplerType';
 import { COLUMN_TYPE_GROUPS } from '@studio/components/AddColumnPalette/constants';
 import type { ColumnTypeOption } from '@studio/components/AddColumnPalette/types';
 import { FILESET_TEMPLATES } from '@studio/components/CreateFilesetStart/templates';
@@ -290,6 +290,16 @@ describe('sampler columns', () => {
     const { edges } = buildGraph(columns);
     expect(edges).toContainEqual({ source: 'a', target: 'b' });
     expect(edges).toContainEqual({ source: 'c', target: 'd' });
+  });
+
+  it('flags unsupported person-sampler locales', () => {
+    const bad = column('a', 'p', 'sampler', { locale: 'es_ES' }, 'person');
+    const ok = column('b', 'q', 'sampler', { locale: 'en_US' }, 'person');
+
+    expect(validateColumns([bad])).toContainEqual(
+      expect.stringContaining('not a supported locale')
+    );
+    expect(validateColumns([ok])).toEqual([]);
   });
 
   it('flags malformed numeric and JSON sampler params', () => {

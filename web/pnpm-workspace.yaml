@@ -24,7 +24,6 @@ overrides:
 
 # https://pnpm.io/catalogs
 catalog:
-  '@mui/x-charts': ^7.28.0
   '@mui/x-data-grid': ^7.28.3
   '@nvidia/foundations-react-core': 1.19.0
   '@nvidia/foundations-tailwind-plugin': 1.19.0

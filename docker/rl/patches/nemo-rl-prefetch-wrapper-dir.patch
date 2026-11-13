@@ -9,7 +9,7 @@ diff --git a/nemo_rl/utils/prefetch_venvs.py b/nemo_rl/utils/prefetch_venvs.py
 diff --git a/nemo_rl/utils/venvs.py b/nemo_rl/utils/venvs.py
 --- a/nemo_rl/utils/venvs.py
 +++ b/nemo_rl/utils/venvs.py
-@@ -139,8 +139,9 @@ def create_local_venv(
+@@ -145,8 +145,9 @@ def create_local_venv(
 -    # Run uv sync first to ensure build requirements are set (for --no-build-isolation packages).
 -    # --inexact: this base-set sync must not prune extras out of a venv that was
 -    # pre-materialized in the image; pruning and re-adding hardlinked packages would copy

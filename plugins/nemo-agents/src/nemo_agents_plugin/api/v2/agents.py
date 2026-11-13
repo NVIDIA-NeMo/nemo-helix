@@ -193,6 +193,11 @@ async def delete_agent(
     still reference this agent.  Delete or wait for those deployments to finish
     before deleting the agent.
     """
+    try:
+        _delete_target = await entity_client.get(Agent, name=name, workspace=workspace)
+    except NemoEntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"Agent '{name}' not found in workspace '{workspace}'.") from exc
+
     # Check for live deployments that would be orphaned by this deletion.
     try:
         result = await entity_client.list(AgentDeployment, workspace=workspace)
@@ -214,7 +219,7 @@ async def delete_agent(
         )
 
     try:
-        await entity_client.delete(Agent, name=name, workspace=workspace)
+        await entity_client.delete_by_id(Agent, _delete_target.id, expected_db_version=_delete_target.db_version)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,

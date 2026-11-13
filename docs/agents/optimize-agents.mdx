@@ -225,10 +225,18 @@ quality, cost, and latency. Pin the baseline to keep it at the top.
 
 ### 5. Promote the Winner
 
-Replace the agent with the winning config, then resolve the Insight in [NeMo Studio](/documentation/studio/insights):
+Replace the agent with the winning config downloaded in Step 2, then resolve the Insight in
+[NeMo Studio](/documentation/studio/insights). For example, if the Switchyard candidate
+`my-agent-3f2a9c1e` wins, use the same config file you registered earlier:
 
 ```bash
-nemo agents redeploy --agent my-agent --agent-config ./winner/agent.yaml
+nemo agents redeploy \
+  --agent my-agent \
+  --agent-config ./switchyard-results/agent-my-agent-3f2a9c1e.yaml
 ```
+
+Replace the example virtual model name with the winner from your run's `switchyard-result.json`.
+For another strategy, pass its downloaded winning config instead (for example,
+`./prompt-master-results/agent.yaml` for Prompt Master); redeploy does not generate the config file.
 
 New traces from the promoted agent start the next round.

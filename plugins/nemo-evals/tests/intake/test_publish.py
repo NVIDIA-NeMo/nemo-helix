@@ -723,7 +723,7 @@ async def test_a_gym_rollout_whose_agent_never_ran_publishes_a_failed_root_span(
         + "\n",
         encoding="utf-8",
     )
-    trials = trials_from_rollouts(rollouts, tasks, index_map)
+    trials = trials_from_rollouts(rollouts, tasks, index_map, run_id="run-1")
     intake = InMemoryIntakeService()
 
     await publish_to_intake(_result(trials, []), client=intake.client(), experiment_id="exp-1", agent_name="a")
@@ -1623,3 +1623,35 @@ async def test_otlp_trial_total_tokens_preserves_missing_and_recorded_values(tok
         assert "gen_ai.usage.total_tokens" not in root
     else:
         assert root["gen_ai.usage.total_tokens"].int_value == tokens
+
+
+async def test_republishing_retained_otlp_preserves_ids_parents_and_links() -> None:
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+    child_id = "1112131415161718"
+    child = {
+        "traceId": _OTLP_TRACE_ID,
+        "spanId": child_id,
+        "parentSpanId": _OTLP_SPAN_ID,
+        "name": "model call",
+        "links": [{"traceId": _OTLP_TRACE_ID, "spanId": _OTLP_SPAN_ID}],
+    }
+    result = _result([_otlp_trial(extra_spans=[child])], [])
+    original = result.model_dump_json()
+    intake = InMemoryIntakeService()
+    client = intake.client()
+
+    for _ in range(2):
+        report = await publish_to_intake(result, client=client, experiment_id="exp-1", agent_name="a")
+        assert report.published_trials[0].span_id == _OTLP_SPAN_ID
+
+    for request in intake.otlp_requests:
+        sent = ExportTraceServiceRequest.FromString(request["body"])
+        root, published_child = sent.resource_spans[0].scope_spans[0].spans
+        assert root.trace_id.hex() == published_child.trace_id.hex() == _OTLP_TRACE_ID
+        assert root.span_id.hex() == published_child.parent_span_id.hex() == _OTLP_SPAN_ID
+        assert published_child.span_id.hex() == child_id
+        assert published_child.links[0].trace_id == root.trace_id
+        assert published_child.links[0].span_id == root.span_id
+    assert len(intake.otlp_requests) == 2
+    assert result.model_dump_json() == original

@@ -12,16 +12,19 @@ import importlib.metadata
 import io
 import json
 import os
-import platform
 import re
 import runpy
 import shutil
-import subprocess
+import stat
 import sys
 import tarfile
 import tempfile
-import urllib.request
 from pathlib import Path
+from platform import machine
+from shutil import which
+from subprocess import check_output
+from subprocess import run as run_process
+from urllib.request import urlopen
 
 ROOTS = (
     "/app/.venv",
@@ -48,10 +51,10 @@ def source_collection_enabled() -> bool:
 
 @functools.cache
 def fixed_pip_wheel() -> bytes:
-    with urllib.request.urlopen("https://pypi.org/pypi/pip/26.2.2/json", timeout=120) as response:
+    with urlopen("https://pypi.org/pypi/pip/26.2.2/json", timeout=120) as response:
         metadata = json.load(response)
     wheel = next(file for file in metadata["urls"] if file["filename"] == "pip-26.2.2-py3-none-any.whl")
-    with urllib.request.urlopen(wheel["url"], timeout=120) as response:
+    with urlopen(wheel["url"], timeout=120) as response:
         data = response.read()
     if hashlib.sha256(data).hexdigest() != wheel["digests"]["sha256"]:
         raise ValueError("pip bootstrap wheel checksum mismatch")
@@ -59,7 +62,7 @@ def fixed_pip_wheel() -> bytes:
 
 
 def update_ensurepip(python: Path) -> None:
-    origin = subprocess.check_output(
+    origin = check_output(
         [
             str(python),
             "-c",
@@ -88,7 +91,7 @@ def update_ensurepip(python: Path) -> None:
 
 
 def python_environments(roots: list[Path]) -> list[Path]:
-    interpreters = {Path(shutil.which("python3") or shutil.which("python") or "/usr/bin/python3")}
+    interpreters = {Path(which("python3") or which("python") or "/usr/bin/python3")}
     for root in roots:
         if not root.exists():
             continue
@@ -103,7 +106,7 @@ def python_environments(roots: list[Path]) -> list[Path]:
 
 
 def update_bundles(python: Path) -> None:
-    probe = subprocess.check_output(
+    probe = check_output(
         [
             str(python),
             "-c",
@@ -120,7 +123,7 @@ def update_bundles(python: Path) -> None:
         if name in installed
     ]
     if requirements:
-        subprocess.run(
+        run_process(
             [
                 "/usr/local/bin/uv",
                 "pip",
@@ -140,10 +143,10 @@ def update_bundles(python: Path) -> None:
 
 
 def download_source(version: str, destination: Path) -> Path:
-    with urllib.request.urlopen(f"https://pypi.org/pypi/wandb/{version}/json", timeout=120) as response:
+    with urlopen(f"https://pypi.org/pypi/wandb/{version}/json", timeout=120) as response:
         metadata = json.load(response)
     source = next(file for file in metadata["urls"] if file["packagetype"] == "sdist")
-    with urllib.request.urlopen(source["url"], timeout=120) as response:
+    with urlopen(source["url"], timeout=120) as response:
         data = response.read()
     if hashlib.sha256(data).hexdigest() != source["digests"]["sha256"]:
         raise ValueError(f"wandb {version} source checksum mismatch")
@@ -173,15 +176,15 @@ def rebuild_wandb(version: str, work: Path) -> Path:
             with_cgo=False,
             wandb_commit_sha=None,
             target_system="linux",
-            target_arch={"x86_64": "amd64", "aarch64": "arm64"}[platform.machine()],
+            target_arch={"x86_64": "amd64", "aarch64": "arm64"}[machine()],
         )
     finally:
         os.chdir(previous)
-    version_info = subprocess.check_output(["/usr/local/go/bin/go", "version", "-m", str(output)], text=True)
+    version_info = check_output(["/usr/local/go/bin/go", "version", "-m", str(output)], text=True)
     if version_info.splitlines()[0].split()[-1] != "go1.27.3":
         raise ValueError(f"Unexpected wandb-core toolchain: {version_info}")
     if source_collection_enabled():
-        subprocess.run(
+        run_process(
             [
                 sys.executable,
                 "/tmp/collect-go-module-sources.py",
@@ -210,6 +213,19 @@ def replace_binary(binary: Path, source: Path, record: Path) -> None:
         record.unlink()
         with record.open("w", newline="") as handle:
             csv.writer(handle).writerows(rows)
+
+
+def prune_cache_files(cache: Path) -> None:
+    """Drop orphaned uv content-addressed files without pruning prefetched archives."""
+    # uv 0.13 stores wheel files in files-v0 and hardlinks them into archive-v0,
+    # independently of the environment's install link mode. Replacing wandb-core
+    # detaches those hardlinks but leaves the original vulnerable Go binary here.
+    # Match uv's prune_archive_files rule: retain every file with another hardlink.
+    # Do not use full `uv cache prune`: RL ships archives used by prefetched venvs.
+    for path in (cache / "files-v0").rglob("*"):
+        info = path.lstat()
+        if stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
+            path.unlink()
 
 
 def main() -> None:
@@ -267,6 +283,9 @@ def main() -> None:
                     if link.is_symlink() and link.resolve().is_relative_to(archive):
                         link.unlink()
             shutil.rmtree(archive)
+
+    for cache in CACHE_ROOTS:
+        prune_cache_files(cache)
 
 
 if __name__ == "__main__":

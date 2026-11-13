@@ -115,7 +115,9 @@ def test_run_reads_preserve_email_group_and_account_grants(tmp_path: Path, monke
         policy_entities = ServiceEntityClient(AsyncEntitiesClient.from_client(ctx.async_client))
         factory = dependencies.get_async_nemo_client
 
-        def provide(*, as_service: str, internal: bool, on_behalf_of: str | RuntimePrincipal) -> AsyncNemoClient:
+        def provide(
+            *, as_service: str, internal: bool, on_behalf_of: str | RuntimePrincipal | None = None
+        ) -> AsyncNemoClient:
             client = factory(as_service=as_service, internal=internal, on_behalf_of=on_behalf_of)
             # Keep production client/header construction; route its HTTP transport to the test platform.
             monkeypatch.setattr(client._http, "_transport_for_url", ctx.async_client._http._transport_for_url)

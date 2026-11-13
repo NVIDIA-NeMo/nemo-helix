@@ -97,6 +97,23 @@ describe('DatasetBulkDeleteModal', () => {
       expect(await screen.findByText(/Delete 1 Dataset$/)).toBeInTheDocument();
     });
 
+    it('names the rows with entityLabel in the modal heading', async () => {
+      const user = userEvent.setup();
+
+      render(
+        <DatasetBulkDeleteModal
+          entityLabel="Fileset"
+          selectedDatasets={bulkDeleteTestDatasets}
+          onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
+        />
+      );
+
+      await user.click(screen.getByTestId('bulk-delete-modal-trigger-button'));
+
+      expect(await screen.findByText(/Delete 3 Filesets/)).toBeInTheDocument();
+    });
+
     it('closes modal when cancel button is clicked', async () => {
       const user = userEvent.setup();
 

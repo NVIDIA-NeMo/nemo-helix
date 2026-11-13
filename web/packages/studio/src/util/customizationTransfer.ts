@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { HelixJobStepStatusResponse } from '@nemo/sdk/generated/customizer/schema';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import type { CustomizationJob } from '@studio/util/customizationBackend';
 import { formatPipelineStepName } from '@studio/util/customizationFailure';
 

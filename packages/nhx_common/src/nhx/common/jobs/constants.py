@@ -11,6 +11,9 @@ from nemo_helix_plugin.jobs.constants import DEFAULT_TASK_STORAGE_PATH as DEFAUL
 from nemo_helix_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR as EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
 )
+from nemo_helix_plugin.jobs.constants import (
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR as NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
+)
 from nemo_helix_plugin.jobs.constants import NEMO_JOB_ATTEMPT_ID_ENVVAR as NEMO_JOB_ATTEMPT_ID_ENVVAR
 from nemo_helix_plugin.jobs.constants import NEMO_JOB_FILESET_ENVVAR as NEMO_JOB_FILESET_ENVVAR
 from nemo_helix_plugin.jobs.constants import NEMO_JOB_ID_ENVVAR as NEMO_JOB_ID_ENVVAR

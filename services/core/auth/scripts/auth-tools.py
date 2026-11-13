@@ -12,7 +12,7 @@ have corresponding entries in the static authorization configuration.
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import typer
 from rich.console import Console
@@ -150,6 +150,23 @@ def extract_openapi_opt_out_endpoints(auth_path: Path) -> Dict[str, Set[str]]:
     return opt_outs
 
 
+def extract_endpoint_permissions(config: dict[str, Any]) -> set[str]:
+    """Collect referenced grants for catalog checks, without combining authorization decisions."""
+    permissions: set[str] = set()
+    legacy = config.get("permissions", [])
+    if isinstance(legacy, list):
+        permissions.update(permission for permission in legacy if isinstance(permission, str))
+    for branch_name in ("direct", "delegated"):
+        branch = config.get(branch_name)
+        if not isinstance(branch, dict):
+            continue
+        for key in ("actor_perms", "subject_perms"):
+            required = branch.get(key, [])
+            if isinstance(required, list):
+                permissions.update(permission for permission in required if isinstance(permission, str))
+    return permissions
+
+
 def extract_all_permissions_from_endpoints(auth_config: Dict) -> Set[str]:
     """Extract all permissions referenced in endpoints."""
     permissions = set()
@@ -162,10 +179,8 @@ def extract_all_permissions_from_endpoints(auth_config: Dict) -> Set[str]:
             continue
 
         for method, config in methods.items():
-            if isinstance(config, dict) and "permissions" in config:
-                perms = config["permissions"]
-                if isinstance(perms, list):
-                    permissions.update(perms)
+            if isinstance(config, dict):
+                permissions.update(extract_endpoint_permissions(config))
 
     return permissions
 
@@ -605,7 +620,7 @@ def check(
             endpoints_using_perm = []
             for path, methods in auth_config.get("authz", {}).get("endpoints", {}).items():
                 for method, config in methods.items():
-                    for endpoint_perm in config.get("permissions", []):
+                    for endpoint_perm in extract_endpoint_permissions(config):
                         if strip_workspace_from_permission(endpoint_perm) == perm:
                             endpoints_using_perm.append(f"{method.upper()} {path}")
 

@@ -18,6 +18,7 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import (
     GymRuntimeConfig,
@@ -39,6 +40,8 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.records import ENV_LOG_NAME
 from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     aggregate_scores_from_gym,
     ensure_fresh_output,
+    gym_scoring_metrics,
+    natively_scored_components,
     read_run_aggregations,
     require_full_coverage,
     trials_from_rollouts,
@@ -47,6 +50,7 @@ from nhx_evals_sdk.agent_eval.runtimes.provenance import redact_credentials
 from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_values
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
+from nhx_evals_sdk.metrics.protocol import Metric
 from nhx_evals_sdk.resolver_protocols import EnvSecretSource
 from nhx_evals_sdk.resolvers import LocalSecretResolver
 from nhx_evals_sdk.values.results import AggregateScore
@@ -75,6 +79,7 @@ class GymAgentTaskRunner:
     def __init__(self, *, config: GymRuntimeConfig, secret_resolver: EnvSecretSource | None = None) -> None:
         self._config = config
         self._run_aggregations: dict[str, Any] | None = None
+        self._component_names: frozenset[str] = frozenset()
         self._secret_resolver = secret_resolver if secret_resolver is not None else LocalSecretResolver()
         if config.env_secrets and not isinstance(self._secret_resolver, EnvSecretSource):
             raise TypeError(
@@ -96,6 +101,14 @@ class GymAgentTaskRunner:
         """
         return self._config
 
+    def scoring_metrics(self, task: AgentEvalTask, trials: Sequence[AgentEvalTrial]) -> list[Metric]:
+        """Add the reward components this task's trials reported as optional ``gym_reward`` outputs.
+
+        Satisfies :class:`~nhx_evals_sdk.agent_eval.trials.TrialAwareMetricsProvider`: a multi-reward
+        resources-server's components are known only once rollouts exist.
+        """
+        return gym_scoring_metrics(task, trials)
+
     def run_aggregate_scores(self) -> Sequence[AggregateScore]:
         """Gym's ``agent_metrics`` mapped onto typed aggregate scores, namespaced ``runner.gym.<metric>``.
 
@@ -103,7 +116,7 @@ class GymAgentTaskRunner:
         natively as ``gym_reward.reward``, and two differently-derived numbers under one name invites
         exactly the confusion the namespace is there to prevent.
         """
-        return aggregate_scores_from_gym(self._run_aggregations)
+        return aggregate_scores_from_gym(self._run_aggregations, scored_natively=self._component_names)
 
     def runner_info(self) -> RunnerInfo:
         """Identify this runner and the Gym settings that shape its results.
@@ -138,8 +151,10 @@ class GymAgentTaskRunner:
         tasks: Sequence[AgentEvalTask],
         config: AgentEvalRunConfig | None = None,
     ) -> list[AgentEvalTrial]:
+        run_id = config.run_id if config is not None and config.run_id else str(uuid4())
         cfg = self._config
         self._run_aggregations = None  # reset per run so a reused runner never leaks a prior run's numbers
+        self._component_names: frozenset[str] = frozenset()
         # don't cache the resolved env secrets in self because they may change between runs
         resolved_env = env_secret_values(cfg.env_secrets, self._secret_resolver)
         # Provenance for the log line only — the file Gym actually reads is the normalized one we
@@ -178,10 +193,12 @@ class GymAgentTaskRunner:
             rollouts_path,
             tasks,
             index_to_task_id,
+            run_id=run_id,
             reward_key=cfg.reward_key,
             capture_dir=model_call_capture_dir(work_dir),
         )
         require_full_coverage(tasks, covered_task_ids={trial.task_id for trial in trials}, rollouts_path=rollouts_path)
+        self._component_names = natively_scored_components(tasks, trials)
         return trials
 
     async def _validate_config(

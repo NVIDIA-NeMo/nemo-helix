@@ -45,7 +45,7 @@ SOUNDFILE_FILE_REMOVALS = {
     "/opt/uv_cache/archive-v0/*/soundfile.py",
 }
 BASE_VENV_MINIMUM_PYTHON_PACKAGE_VERSIONS = {
-    "wandb": "0.30.0",
+    "wandb": "0.31.0",
 }
 
 # Actor FQN -> packages that must import inside that actor's venv.
@@ -172,16 +172,127 @@ def test_nhx_rl_training_importable():
     from nhx.rl.tasks.training import __main__ as training_main  # noqa: F401
 
 
+# SyncRolloutActor does not load sandboxed gym. The training image does not install it there.
+JOB_REAPER_ACTORS = [
+    "driver",
+    *(
+        actor_fqn
+        for actor_fqn in sorted(WORKER_VENV_IMPORTS)
+        if actor_fqn != "nemo_rl.experience.sync_rollout_actor.SyncRolloutActor"
+    ),
+]
+
+
+@pytest.mark.smoke_nhx_rl_training
+@pytest.mark.parametrize("actor_fqn", JOB_REAPER_ACTORS)
+def test_job_reaper_importable(actor_fqn):
+    """Every training venv can reap sandboxes for a cancelled job.
+
+    ``_reap_job_sandboxes`` imports ``sandboxed_gym.job_reaper`` in the process the
+    runtime signals. ``import sandboxed_gym`` does not cover that: a venv whose
+    install predates ``job_reaper`` raises ``No module named 'sandboxed_gym.job_reaper'``
+    and the job's sandboxes stay up until ``ttl_s``.
+    """
+    venv = Path("/opt/nemo_rl_venv") if actor_fqn == "driver" else RAY_VENVS / actor_fqn
+    python = venv / "bin" / "python"
+    if actor_fqn != "driver" and not python.exists():
+        pytest.skip(f"venv for {actor_fqn} not present; covered by test_worker_venv_prefetched")
+    result = subprocess.run(
+        [str(python), "-c", "from sandboxed_gym.job_reaper import reap_job_sandboxes"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"`sandboxed_gym.job_reaper` failed in {venv}:\n{result.stderr}"
+
+
+def _candidate_venv_pythons() -> list[Path]:
+    """Interpreters that might own the nemo-helix install, not only the Ray workers.
+
+    The RL backend module is part of the nemo-helix installation. That install is
+    editable into the driver venv here, but a published nemo-helix wheel can land
+    in a different venv than ``/opt/ray_venvs``.
+    """
+    roots = (
+        Path("/opt/nemo_rl_venv"),
+        Path("/opt/venv"),
+        Path("/app/.venv"),
+        RAY_VENVS,
+        Path("/opt/gym_venvs"),
+    )
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        direct = root / "bin" / "python"
+        pythons = [direct] if direct.exists() else []
+        if not direct.exists():
+            pythons.extend(root.glob("*/bin/python"))
+            pythons.extend(root.glob("*/*/bin/python"))
+            pythons.extend(root.glob("*/.venv/bin/python"))
+        for python in pythons:
+            if not python.is_file():
+                continue
+            resolved = python.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            found.append(python)
+    return found
+
+
+@pytest.mark.smoke_nhx_rl_training
+def test_nemo_helix_backend_can_import_job_reaper():
+    """The venv that loads nemo-helix's RL backend can import the job reaper.
+
+    ``nhx.rl.tasks.training.backends.nemo_rl.backend`` (``backend.py`` in the
+    nemo-helix installation) calls ``_reap_job_sandboxes``, which does
+    ``from sandboxed_gym.job_reaper import reap_job_sandboxes``. That module is
+    not installed into every Ray venv, so the check has to use the interpreter
+    that actually imports ``backend.py``.
+    """
+    owners: list[tuple[Path, str]] = []
+    for python in _candidate_venv_pythons():
+        probe = subprocess.run(
+            [
+                str(python),
+                "-c",
+                "import nhx.rl.tasks.training.backends.nemo_rl.backend as backend; print(backend.__file__)",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if probe.returncode == 0:
+            owners.append((python, probe.stdout.strip()))
+    assert owners, (
+        "no image venv can import nhx.rl.tasks.training.backends.nemo_rl.backend; "
+        "the nemo-helix installation that runs _reap_job_sandboxes was not found"
+    )
+    failures: list[str] = []
+    for python, backend_file in owners:
+        result = subprocess.run(
+            [str(python), "-c", "from sandboxed_gym.job_reaper import reap_job_sandboxes"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            failures.append(
+                f"{python} loads {backend_file} but cannot import sandboxed_gym.job_reaper:\n{result.stderr}"
+            )
+    assert not failures, "\n".join(failures)
+
+
 @pytest.mark.smoke_nhx_rl_training
 def test_sandboxed_gym_driver_imports():
     """The driver must be able to import the mode-B sandbox modules.
 
     Sandboxed GRPO calls spinup_nemo_gym_actor() in the DRIVER process, which imports the
-    adapter and sandboxed_gym.host.models at module scope, so the base venv needs both even
-    though the Gym actor itself runs in its own venv. The `uv sync --all-groups` in the base
-    image is exact and prunes the nemo_gym extra, so this is only satisfied by the explicit
-    `uv pip install` of the Gym workspace member — without it, mode B fails at Gym spin-up
-    with a ModuleNotFoundError, minutes into a run and only on a sandbox-capable cluster.
+    adapter and sandboxed_gym.host.models at module scope, so the driver venv needs both even
+    though the Gym actor itself runs in its own venv. The base image skips the published
+    nemo-sandboxed-gym wheel, and its `uv sync --all-groups` prunes the nemo_gym extra, so
+    the import is satisfied only by the training image's install of the in-tree package.
+    Without that install, mode B fails at Gym spin-up with a ModuleNotFoundError, minutes
+    into a run and only on a sandbox-capable cluster.
     """
     from nemo_rl.environments.sandbox.nemo_gym_actor import SandboxedGymActorConfig  # noqa: F401
     from sandboxed_gym.host.models import NemoGymSandboxedConfig  # noqa: F401
@@ -270,7 +381,7 @@ def test_worker_venv_wandb_opentelemetry_compat(actor_fqn):
             "-c",
             "from opentelemetry.util.types import _ExtendedAttributes; import wandb; "
             "from importlib.metadata import version; from packaging.version import Version; "
-            "assert Version(version('wandb')) >= Version('0.30.0'), version('wandb')",
+            "assert Version(version('wandb')) >= Version('0.31.0'), version('wandb')",
         ],
         capture_output=True,
         text=True,

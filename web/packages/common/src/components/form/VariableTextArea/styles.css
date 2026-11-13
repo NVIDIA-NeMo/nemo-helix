@@ -3,6 +3,7 @@
 
 .nv-variable-text-area .cm-editor {
   background: transparent;
+  border: none;
 }
 .nv-variable-text-area .cm-editor.cm-focused {
   outline: none;

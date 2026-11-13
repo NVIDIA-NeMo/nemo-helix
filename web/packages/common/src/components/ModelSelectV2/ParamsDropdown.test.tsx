@@ -24,6 +24,29 @@ describe('ParamsDropdown', () => {
     expect(screen.getByRole('button', { name: 'Model parameters' })).toBeInTheDocument();
   });
 
+  it('opens on its own when the caller does not control it', async () => {
+    render(<ParamsDropdown />);
+    const trigger = screen.getByTestId('params-dropdown-trigger');
+    fireEvent.pointerDown(trigger, { button: 0 });
+    fireEvent.click(trigger);
+    expect(await screen.findByTestId('params-dropdown-content')).toBeInTheDocument();
+  });
+
+  it('shows only the icon, still named and still opening, when iconOnly', async () => {
+    render(<ParamsDropdown iconOnly />);
+    const trigger = screen.getByRole('button', { name: 'Model parameters' });
+    expect(screen.queryByText('Params')).not.toBeInTheDocument();
+    fireEvent.pointerDown(trigger, { button: 0 });
+    fireEvent.click(trigger);
+    expect(await screen.findByTestId('params-dropdown-content')).toBeInTheDocument();
+  });
+
+  it('shows only the requested fields', async () => {
+    render(<ParamsDropdown open fields={['temperature', 'max_tokens']} />);
+    await screen.findByText('Temperature');
+    expect(screen.queryByText('Top P')).not.toBeInTheDocument();
+  });
+
   describe('when open', () => {
     it('renders temperature, max tokens, and top p sliders', async () => {
       renderOpen();

@@ -167,13 +167,23 @@ class FilesetFileManager(BaseFilesetFileManager):
                 )
 
     def upload(self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None) -> str:
-        """Upload file or directory to fileset."""
+        """Upload files, attempting every directory member before raising ordinary upload errors."""
         full_remote_path = self._fileset_path(remote_path)
         if local_path.is_dir():
             all_files = _list_local_files_sync(local_path)
             files_to_upload = _filter_files_by_patterns(all_files, ignore_patterns)
+            errors: list[Exception] = []
             for rel_path in files_to_upload:
-                self._fs.put_file(str(local_path / rel_path), f"{full_remote_path}/{rel_path}")
+                try:
+                    self._fs.put_file(str(local_path / rel_path), f"{full_remote_path}/{rel_path}")
+                except Exception as error:
+                    error.add_note(f"Failed to upload {local_path / rel_path} to {full_remote_path}/{rel_path}")
+                    errors.append(error)
+                    logger.exception("Failed to upload %s; attempting remaining files", local_path / rel_path)
+            if len(errors) == 1:
+                raise errors[0]
+            if errors:
+                raise ExceptionGroup("Directory upload failed", errors)
         else:
             self._fs.put_file(str(local_path), full_remote_path)
         return self.url(remote_path)
@@ -233,13 +243,23 @@ class AsyncFilesetFileManager(BaseFilesetFileManager):
                 )
 
     async def _upload(self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None) -> str:
-        """Upload file or directory to fileset."""
+        """Upload files, attempting every directory member before raising ordinary upload errors."""
         full_remote_path = self._fileset_path(remote_path)
         if local_path.is_dir():
             all_files = await _list_local_files(local_path)
             files_to_upload = _filter_files_by_patterns(all_files, ignore_patterns)
+            errors: list[Exception] = []
             for rel_path in files_to_upload:
-                await self._fs._put_file(str(local_path / rel_path), f"{full_remote_path}/{rel_path}")
+                try:
+                    await self._fs._put_file(str(local_path / rel_path), f"{full_remote_path}/{rel_path}")
+                except Exception as error:
+                    error.add_note(f"Failed to upload {local_path / rel_path} to {full_remote_path}/{rel_path}")
+                    errors.append(error)
+                    logger.exception("Failed to upload %s; attempting remaining files", local_path / rel_path)
+            if len(errors) == 1:
+                raise errors[0]
+            if errors:
+                raise ExceptionGroup("Directory upload failed", errors)
         else:
             await self._fs._put_file(str(local_path), full_remote_path)
         return self.url(remote_path)

@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The oracle writes a wrong answer; the verifier runs in its own sandbox.
+schema_version = "1.1"
+artifacts = [{ source = "/app/artifacts", destination = "output" }]
+
+[task]
+name = "taskset-e2e/unsolved"
+
+[agent]
+timeout_sec = 120.0
+
+[verifier]
+timeout_sec = 60.0
+# Its own sandbox, built from tests/Dockerfile; Harbor re-uploads the agent's /app/artifacts into it.
+environment_mode = "separate"
+
+[verifier.environment]
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 512
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 512
