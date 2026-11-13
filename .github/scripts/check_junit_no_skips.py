@@ -31,7 +31,9 @@ def counts(report: Path) -> tuple[int, int]:
     root = ET.parse(report).getroot()
     suites = [root] if root.tag == "testsuite" else [suite for suite in root if suite.tag == "testsuite"]
     tests = sum(int(suite.get("tests", 0)) for suite in suites)
-    skipped = sum(int(suite.get("skipped", 0)) for suite in suites)
+    # The larger of the suite's own count and its `<skipped>` cases: pytest writes both, but a writer
+    # that records only the cases must not read as "none skipped".
+    skipped = sum(max(int(suite.get("skipped", 0)), sum(1 for _ in suite.iter("skipped"))) for suite in suites)
     return tests, skipped
 
 
@@ -43,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         tests, skipped = counts(args.report)
-    except (OSError, ET.ParseError, ValueError) as error:
+    except (OSError, ET.ParseError, ValueError, LookupError) as error:
         print(f"{args.label}: cannot read JUnit report {args.report}: {error}", file=sys.stderr)
         return 1
     if tests == 0 or skipped:

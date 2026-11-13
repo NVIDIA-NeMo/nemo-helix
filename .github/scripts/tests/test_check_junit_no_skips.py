@@ -83,7 +83,36 @@ def test_a_nested_suite_is_not_counted_twice(tmp_path: Path) -> None:
     assert check_junit_no_skips.counts(report) == (2, 0)
 
 
-@pytest.mark.parametrize("body", ["", "<testsuites><testsuite", '<testsuites><testsuite tests="two"/></testsuites>'])
+def test_skips_recorded_only_as_cases_are_counted(tmp_path: Path) -> None:
+    # No `skipped` attribute on the suite: some writers record a skip only on the case itself.
+    report = _report(
+        tmp_path,
+        '<testsuite tests="2"><testcase name="a"><skipped/></testcase><testcase name="b"/></testsuite>',
+    )
+
+    assert check_junit_no_skips.counts(report) == (2, 1)
+
+
+def test_a_skip_recorded_both_ways_is_counted_once(tmp_path: Path) -> None:
+    # What pytest writes: the suite's count and the case's element describe the same skip.
+    report = _report(
+        tmp_path,
+        '<testsuites><testsuite tests="2" skipped="1"><testcase name="a"><skipped/></testcase>'
+        '<testcase name="b"/></testsuite></testsuites>',
+    )
+
+    assert check_junit_no_skips.counts(report) == (2, 1)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "",
+        "<testsuites><testsuite",
+        '<testsuites><testsuite tests="two"/></testsuites>',
+        '<?xml version="1.0" encoding="no-such-encoding"?><testsuites/>',
+    ],
+)
 def test_an_unreadable_report_fails_instead_of_raising(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], body: str
 ) -> None:
