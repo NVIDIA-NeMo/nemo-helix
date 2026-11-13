@@ -1,0 +1,106 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+from datetime import datetime, timezone
+
+import httpx
+import pytest
+from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayClient
+from nemo_helix_plugin.models.types import ModelCapability, ModelMetadata, ModelModality, ModelProvider
+from nemo_model_metadata.sources.base import MetadataTarget, SourceUnavailableError
+from nemo_model_metadata.sources.provider import ProviderModelsSource, parse_provider_model
+
+PROVIDER_MODELS_PATH = "/apis/inference-gateway/v2/workspaces/default/provider/spark/-/v1/models"
+
+
+def test_parse_provider_model_reads_openrouter_fields():
+    metadata = parse_provider_model(
+        {
+            "id": "meta-llama/llama-3.1-8b-instruct",
+            "name": "Meta: Llama 3.1 8B Instruct",
+            "description": "Meta's latest class of model",
+            "context_length": 131072,
+            "architecture": {"input_modalities": ["text", "file"], "output_modalities": ["text"]},
+            "top_provider": {"max_completion_tokens": 16384},
+            "supported_parameters": ["tools", "tool_choice", "response_format", "temperature"],
+        }
+    )
+
+    assert metadata == ModelMetadata(
+        display_name="Meta: Llama 3.1 8B Instruct",
+        description="Meta's latest class of model",
+        capabilities=[ModelCapability.TOOL_CALLING, ModelCapability.STRUCTURED_OUTPUT],
+        input_modalities=[ModelModality.TEXT, ModelModality.PDF],
+        output_modalities=[ModelModality.TEXT],
+        context_length=131072,
+        max_output_tokens=16384,
+    )
+
+
+def test_parse_provider_model_reads_vllm_max_model_len():
+    metadata = parse_provider_model({"id": "Qwen/Qwen2.5-7B-Instruct", "owned_by": "vllm", "max_model_len": 32768})
+
+    assert metadata == ModelMetadata(context_length=32768)
+
+
+def test_parse_provider_model_returns_none_for_bare_openai_entry():
+    assert parse_provider_model({"id": "gpt-4o", "object": "model", "owned_by": "openai"}) is None
+
+
+def test_parse_provider_model_truncates_long_text():
+    metadata = parse_provider_model({"id": "m", "name": "n" * 300, "description": "d" * 5000})
+
+    assert metadata is not None
+    assert metadata.display_name == "n" * 255
+    assert metadata.description == "d" * 4000
+
+
+def _provider() -> ModelProvider:
+    now = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    return ModelProvider(
+        name="spark", workspace="default", host_url="http://spark:8089/v1", created_at=now, updated_at=now
+    )
+
+
+def _gateway(handler) -> AsyncInferenceGatewayClient:
+    return AsyncInferenceGatewayClient(
+        base_url="http://platform",
+        default_headers={"X-NMP-Principal-Id": "service:model-metadata"},
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+
+async def test_provider_source_lists_models_once_per_cycle_with_platform_headers():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200, json={"data": [{"id": "gemma-4-12b", "name": "Gemma 4 12B", "context_length": 262144}]}
+        )
+
+    source = ProviderModelsSource(_gateway(handler))
+    first = await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()))
+    missing = await source.fetch(MetadataTarget(upstream_model_id="not-served", provider=_provider()))
+
+    assert [request.url.path for request in requests] == [PROVIDER_MODELS_PATH]
+    assert requests[0].headers["X-NMP-Principal-Id"] == "service:model-metadata"
+    assert first == ModelMetadata(display_name="Gemma 4 12B", context_length=262144)
+    assert missing is None
+
+
+async def test_provider_source_raises_when_listing_fails_and_retries_next_cycle():
+    responses = [httpx.Response(424, json={"detail": "provider not ready"}), httpx.Response(200, json={"data": []})]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return responses.pop(0)
+
+    source = ProviderModelsSource(_gateway(handler))
+    target = MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider())
+
+    with pytest.raises(SourceUnavailableError):
+        await source.fetch(target)
+    with pytest.raises(SourceUnavailableError):
+        await source.fetch(target)
+    source.begin_cycle()
+
+    assert await source.fetch(target) is None
