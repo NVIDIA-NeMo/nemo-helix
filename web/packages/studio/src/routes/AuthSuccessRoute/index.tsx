@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isForbiddenError } from '@nemo/common/src/api/common/utils';
+import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
 import {
@@ -9,33 +11,65 @@ import {
   getEntitiesGetWorkspaceQueryKey,
 } from '@nemo/sdk/generated/platform/entity-store';
 import { Loading } from '@studio/components/Layouts/Loading';
+import { ROUTES } from '@studio/constants/routes';
 import { useAuthProfile } from '@studio/providers/auth';
+import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { FC, useCallback, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { matchPath, useNavigate } from 'react-router';
 
-async function createWorkspaceIfNotExists(workspace: string, name: string) {
+type PersonalWorkspaceStatus = 'ready' | 'forbidden' | 'failed';
+
+const checkAccess = (workspace: string): Promise<PersonalWorkspaceStatus> =>
+  entitiesGetWorkspace(workspace).then(
+    () => 'ready',
+    (error) => {
+      if (isForbiddenError(error)) return 'forbidden';
+      logger.error(`Failed to look up workspace ${workspace}`, error);
+      return 'failed';
+    }
+  );
+
+/**
+ * Creates the user's personal workspace if needed. `forbidden` is the expected outcome when
+ * operators restrict WorkspaceCreator; `failed` is anything else.
+ */
+async function ensurePersonalWorkspace(
+  workspace: string,
+  name: string
+): Promise<PersonalWorkspaceStatus> {
   try {
     await entitiesGetWorkspace(workspace);
+    return 'ready';
   } catch (error) {
-    if (isAxiosError(error) && (error.response?.status === 404 || error.response?.status === 403)) {
-      try {
-        await entitiesCreateWorkspace({
-          name: workspace,
-          description: `Automatically created workspace for ${name}`,
-        });
-      } catch (createError) {
-        // A concurrent login (another tab) may have created it first.
-        if (!isAxiosError(createError) || createError.response?.status !== 409) {
-          throw createError;
-        }
-      }
-    } else {
-      throw error;
+    if (!isAxiosError(error) || ![403, 404].includes(error.response?.status ?? 0)) {
+      logger.error(`Failed to look up workspace ${workspace}`, error);
+      return 'failed';
     }
   }
+
+  try {
+    await entitiesCreateWorkspace({
+      name: workspace,
+      description: `Automatically created workspace for ${name}`,
+    });
+    return 'ready';
+  } catch (error) {
+    // Either a concurrent login created it, or it exists but this user can't read it.
+    if (isAxiosError(error) && error.response?.status === 409) {
+      return checkAccess(workspace);
+    }
+    if (isForbiddenError(error)) return 'forbidden';
+    logger.error(`Failed to create workspace ${workspace}`, error);
+    return 'failed';
+  }
 }
+
+const landsInWorkspace = (path: string, workspace: string) =>
+  path === '/' ||
+  !!matchPath('/workspaces', path) ||
+  matchPath(`${ROUTES.workspace.index}/*`, path)?.params.workspace === workspace;
 
 export const AuthSuccessRoute: FC = () => {
   const profile = useAuthProfile();
@@ -46,30 +80,30 @@ export const AuthSuccessRoute: FC = () => {
   const handleAuthenticated = useCallback(async () => {
     if (profile) {
       const { workspace, name } = profile;
-      try {
-        await createWorkspaceIfNotExists(workspace, name);
-      } catch (error) {
-        toast.error(`Failed to create workspace ${workspace}: ${error}`);
-        logger.error(`Failed to create workspace ${workspace}: ${error}`);
+      const status = await ensurePersonalWorkspace(workspace, name);
+      if (status === 'failed') {
+        toast.error(`Couldn't set up your personal workspace ${workspace}.`);
       }
 
-      // WorkspaceProvider starts its access check before the workspace exists, so its 403 is
-      // already cached (and not retried) by now. Refetch it before navigating, otherwise the
-      // first login lands on the "no access to this workspace" screen until a manual reload.
-      await queryClient.invalidateQueries({
-        queryKey: getEntitiesGetWorkspaceQueryKey(workspace),
-      });
-
-      if (profile.state?.path) {
-        navigate({
-          pathname: profile.state.path,
-          search: profile.state.search,
+      if (status === 'ready') {
+        // WorkspaceProvider starts its access check before the workspace exists, so its 403 is
+        // already cached (and not retried) by now. Refetch it before navigating, otherwise the
+        // first login lands on the "no access to this workspace" screen until a manual reload.
+        await queryClient.invalidateQueries({
+          queryKey: getEntitiesGetWorkspaceQueryKey(workspace),
         });
+      }
+
+      const path = profile.state?.path;
+      if (status !== 'ready' && (!path || landsInWorkspace(path, workspace))) {
+        navigate(getWorkspaceDetailsDefaultRoute(DEFAULT_WORKSPACE));
+      } else if (path) {
+        navigate({ pathname: path, search: profile.state?.search });
       } else {
         navigate('/');
       }
     }
-  }, [toast, navigate, profile, queryClient]);
+  }, [navigate, profile, queryClient, toast]);
 
   useEffect(() => {
     handleAuthenticated();
