@@ -1,12 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { Trash } from '@nemo/icons/icons';
 import { Button } from '@nvidia/foundations-react-core';
 import { useDatasetFilesDelete } from '@studio/api/datasets/useDatasetFilesDelete';
-import { BulkDeleteModal as GenericBulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { extractFilePathsFromDirectory } from '@studio/components/filesets/FilesetFileExplorer/extractFilePathsFromDirectory';
 import type { FileSystemNode } from '@studio/components/FilesTable/utils';
+import {
+  DELETE_FILES_AND_FOLDERS_DESCRIPTION,
+  getDeleteFilesDescription,
+  getDeleteFoldersDescription,
+} from '@studio/constants/filesets';
 import {
   cloneElement,
   isValidElement,
@@ -29,6 +34,16 @@ interface BulkDeleteModalProps {
   slotTrigger?: ReactNode;
 }
 
+const getDeleteTarget = (items: FileSystemNode[]) => {
+  if (items.every((item) => item.type === 'file')) {
+    return { entity: 'file', description: getDeleteFilesDescription(items.length) };
+  }
+  if (items.every((item) => item.type === 'directory')) {
+    return { entity: 'folder', description: getDeleteFoldersDescription(items.length) };
+  }
+  return { entity: 'item', description: DELETE_FILES_AND_FOLDERS_DESCRIPTION };
+};
+
 export const BulkDeleteModal: FC<BulkDeleteModalProps> = ({
   selectedItems,
   workspace,
@@ -36,12 +51,12 @@ export const BulkDeleteModal: FC<BulkDeleteModalProps> = ({
   onConfirmDelete,
   slotTrigger,
 }) => {
-  const [open, setOpen] = useState(false);
+  const [itemsToDelete, setItemsToDelete] = useState<FileSystemNode[]>([]);
   const { mutateAsync: deleteFiles } = useDatasetFilesDelete();
 
-  const handleDelete = async (items: FileSystemNode[]) => {
-    const directFilePaths = items.filter((i) => i.type === 'file').map((i) => i.path);
-    const directoryFilePaths = items
+  const handleDelete = async () => {
+    const directFilePaths = itemsToDelete.filter((i) => i.type === 'file').map((i) => i.path);
+    const directoryFilePaths = itemsToDelete
       .filter((i) => i.type === 'directory')
       .flatMap((d) => extractFilePathsFromDirectory(d));
     const allFilePaths = [...directFilePaths, ...directoryFilePaths];
@@ -49,9 +64,10 @@ export const BulkDeleteModal: FC<BulkDeleteModalProps> = ({
       await deleteFiles({ workspace, datasetName, paths: allFilePaths });
     }
     onConfirmDelete();
+    return true;
   };
 
-  const openTrigger = () => setOpen(true);
+  const openTrigger = () => setItemsToDelete(selectedItems);
 
   const trigger = isValidElement<TriggerProps>(slotTrigger) ? (
     cloneElement(slotTrigger, {
@@ -70,13 +86,15 @@ export const BulkDeleteModal: FC<BulkDeleteModalProps> = ({
   return (
     <>
       {trigger}
-      <GenericBulkDeleteModal
-        items={selectedItems}
-        open={open}
-        onDelete={handleDelete}
-        title={(count) => `Delete ${count} Item${count !== 1 ? 's' : ''}`}
-        onClose={() => setOpen(false)}
-      />
+      {itemsToDelete.length > 0 && (
+        <DeleteConfirmationModal
+          open
+          {...getDeleteTarget(itemsToDelete)}
+          ids={itemsToDelete.map((item) => item.path)}
+          onDelete={handleDelete}
+          onClose={() => setItemsToDelete([])}
+        />
+      )}
     </>
   );
 };
