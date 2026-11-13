@@ -450,7 +450,7 @@ uv run --no-project --with datasets --with pillow \
   --prompt qwen
 ```
 
-`--prompt nemotron-omni` is the Super VL prompt. `--prompt qwen` is the prompt for `Qwen/Qwen3-VL-8B-Instruct`, the 1-GPU profile in [Vision-language models](/documentation/customizer-reference/grpo-and-reward-environments#vision-language-models).
+`--prompt nemotron-omni` is the Super VL prompt. `--prompt qwen` is the prompt for `Qwen/Qwen3-VL-8B-Instruct`, the 1-GPU checkpoint in [Qwen Models](/documentation/customizer-reference/models/qwen#qwen3-vl-8b-instruct).
 
 Package the server with the conversion environment's Python, not `uv run` against the project environment:
 
@@ -475,7 +475,7 @@ nemo files filesets create clevr-cogent --workspace default --purpose dataset --
 nemo files upload ./clevr-cogent/ clevr-cogent --workspace default
 ```
 
-The trailing slash uploads the directory contents. Job JSON for the 16x4 Super VL reference and the 1-GPU Qwen3-VL-8B profile is in [Vision-language models](/documentation/customizer-reference/grpo-and-reward-environments#vision-language-models).
+The trailing slash uploads the directory contents. Job JSON for the 16x4 Super VL reference is in [Vision-language models](/documentation/customizer-reference/grpo-and-reward-environments#vision-language-models). The 1-GPU Qwen3-VL-8B job is in [Qwen Models](/documentation/customizer-reference/models/qwen#qwen3-vl-8b-instruct).
 
 ## Next Steps
 

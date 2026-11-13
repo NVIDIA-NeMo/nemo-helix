@@ -60,8 +60,6 @@ Numbers in this section are the published upstream recipes unless a row says the
 
 ### Compute Profiles
 
-Two complete configs exercise the same dataset format and training path. The 8-GPU profile is the Super VL recipe (upstream reference). The 1-GPU profile uses `Qwen/Qwen3-VL-8B-Instruct` so the feature can be tried on one 48 GB GPU. That checkpoint exercises the platform path. It is not a Super VL result, and it is not a tested-model row.
-
 **8 GPUs, one node: Super VL CORD-v2 LoRA.** Upstream reference.
 
 ```json
@@ -102,51 +100,6 @@ Two complete configs exercise the same dataset format and training path. The 8-G
 ```
 
 Finance LoRA uses the same GPU shape, or 4x GB200, with one job per fileset (`finance-ocr`, `finance-reasoning`, `finance-code`).
-
-**1 GPU: `Qwen/Qwen3-VL-8B-Instruct` CORD-v2 LoRA.** This shape ran on the platform. Use a small subset (the verified run used the first 300 training rows and 30 validation rows). Deploy with one GPU and `--max-model-len 8192`.
-
-```json
-{
-  "model": "default/qwen3-vl-8b-instruct",
-  "dataset": {"training": "default/cord-v2-small"},
-  "training": {
-    "training_type": "sft",
-    "finetuning_type": "lora",
-    "lora": {"rank": 16, "alpha": 32},
-    "max_seq_length": 2048
-  },
-  "schedule": {"epochs": 1},
-  "batch": {"global_batch_size": 8, "micro_batch_size": 1},
-  "optimizer": {"learning_rate": 1e-5, "min_learning_rate": 1e-6},
-  "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1, "tensor_parallel_size": 1},
-  "deployment_config": {
-    "engine": "vllm",
-    "gpu": 1,
-    "additional_args": ["--max-model-len", "8192"]
-  }
-}
-```
-
-The same checkpoint is the 1-GPU model for finance OCR and for CLEVR GRPO. Those job shapes were first run on a smaller vision model; the published 1-GPU profile points them at `Qwen/Qwen3-VL-8B-Instruct` because it fits on one 48 GB GPU. The finance job checks the vision fine-tune path. It was not deployed or scored. `attn_implementation` `sdpa` is the default.
-
-```json
-{
-  "model": "default/qwen3-vl-8b-instruct",
-  "dataset": {"training": "default/finance-ocr-small"},
-  "training": {
-    "training_type": "sft",
-    "finetuning_type": "lora",
-    "lora": {"rank": 16, "alpha": 32},
-    "max_seq_length": 2048,
-    "attn_implementation": "sdpa"
-  },
-  "schedule": {"epochs": 1},
-  "batch": {"global_batch_size": 4, "micro_batch_size": 1},
-  "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1, "tensor_parallel_size": 1}
-}
-```
-
-CLEVR GRPO for this checkpoint is in [Vision-language models](/documentation/customizer-reference/grpo-and-reward-environments#vision-language-models).
 
 ### Deployment Configuration
 

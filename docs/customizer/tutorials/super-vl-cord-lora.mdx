@@ -11,10 +11,6 @@ description: ""
   </a>
 </div>
 
-<!-- Temporarily disabled in E2E: the Super VL path needs 8 GPUs and exceeds the cell timeout. -->
-
-# Fine-Tune Nemotron 3.5 Super VL on CORD-v2
-
 Train a LoRA adapter on receipt images, deploy it with vLLM, and score the official validation split. The dataset row is an OpenAI chat message whose user turn is an image part plus a text part. See [OpenAI Chat Model with Images](/documentation/customizer-reference/models/dataset-format#openai-chat-model-with-images) and [Nemotron Vision-Language Models](/documentation/customizer-reference/models/nemotron-vl).
 
 The walkthrough is written once. `PROFILE` selects the hardware:
