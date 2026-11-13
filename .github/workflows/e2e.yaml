@@ -257,7 +257,7 @@ jobs:
         run: |
           target=docker-cpu
           if [ "${PUBLISH_IMAGES}" = "true" ]; then
-            target=docker-cpu-e2e
+            target=docker-cpu-ci
           fi
           make docker-print TARGET="${target}"
 
@@ -266,11 +266,10 @@ jobs:
         shell: bash
         run: make docker-load TARGET=docker-cpu
 
-      # docker-cpu-e2e is docker-cpu-ci plus nhx-gym-host, which kind-gym-sandbox-e2e runs in a sandbox.
       - name: Build and publish CPU images
         if: env.PUBLISH_IMAGES == 'true'
         shell: bash
-        run: make docker-push TARGET=docker-cpu-e2e
+        run: make docker-push TARGET=docker-cpu-ci
 
       - name: Save fastembed model cache
         if: steps.fastembed-cache.outputs.cache-hit != 'true'
@@ -279,6 +278,80 @@ jobs:
         with:
           path: ${{ runner.temp }}/fastembed-cache
           key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
+
+  # Separate from build-cpu-smoke-images, whose steps must stay identical to ci.yaml's. nhx-gym-host
+  # is a larger image that only kind-gym-sandbox-e2e uses, so its build cannot fail or delay the other
+  # Kind lanes. The registry and tag are computed as that job computes them, which is why the lane can
+  # pull this image by that job's outputs.
+  build-gym-host-image:
+    name: Build sandboxed Gym host image
+    needs: [eligibility]
+    # Only useful published: the Kind lane pulls the image from GHCR. A manual run that does not
+    # publish skips this job, and with it the lane.
+    if: github.event_name != 'workflow_dispatch' || inputs.publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
+        with:
+          disable_swap: "true"
+          remove_haskell: "true"
+          remove_java: "true"
+          remove_ruby: "true"
+          remove_swift: "true"
+          prune_docker: "true"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          name: nhx-builder
+          driver: docker-container
+          cleanup: true
+
+      - name: Configure bake variables
+        shell: bash
+        env:
+          INPUT_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          image_registry="ghcr.io/${GITHUB_REPOSITORY,,}"
+          source_sha="${SOURCE_SHA:-$GITHUB_SHA}"
+          bake_tag="${INPUT_IMAGE_TAG:-$source_sha}"
+
+          {
+            printf 'IMAGE_REGISTRY=%s\n' "$image_registry"
+            printf 'BASE_REGISTRY=%s\n' "$image_registry"
+            printf 'CACHE_REGISTRY=%s\n' "$image_registry"
+            printf 'BAKE_TAG=%s\n' "$bake_tag"
+            printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
+          } >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Print Docker bake graph
+        shell: bash
+        run: make docker-print TARGET=docker-gym-host
+
+      - name: Build and publish Gym host image
+        shell: bash
+        run: make docker-push TARGET=docker-gym-host
 
   kind-cpu-e2e:
     name: Kind CPU e2e
@@ -429,10 +502,12 @@ jobs:
   # tests in kind-gym-e2e cannot share it.
   kind-gym-sandbox-e2e:
     name: Kind sandboxed Gym agent-evaluate e2e
-    needs: [eligibility, build-cpu-smoke-images]
+    needs: [eligibility, build-cpu-smoke-images, build-gym-host-image]
     if: needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Above the 35 minutes one of its two tests may take, so a hung run ends on that test's own
+    # timeout, with its diagnostics, and not on this limit.
+    timeout-minutes: 75
     permissions:
       contents: read
       packages: read
@@ -489,17 +564,8 @@ jobs:
             --junitxml=report-kubernetes-gym-sandbox-e2e.xml
 
           # This lane exists to run these tests, so one that skips fails the job rather than passing as green.
-          python3 - <<'EOF'
-          import xml.etree.ElementTree as ET
-
-          root = ET.parse("report-kubernetes-gym-sandbox-e2e.xml").getroot()
-          suites = [root] if root.tag == "testsuite" else list(root)
-          tests = sum(int(suite.get("tests", 0)) for suite in suites)
-          skipped = sum(int(suite.get("skipped", 0)) for suite in suites)
-          if tests == 0 or skipped:
-              raise SystemExit(f"sandboxed Gym e2e ran {tests} tests and skipped {skipped}: expected none skipped")
-          print(f"sandboxed Gym e2e: {tests} tests, none skipped")
-          EOF
+          uv run --no-cache .github/scripts/check_junit_no_skips.py \
+            report-kubernetes-gym-sandbox-e2e.xml --label "sandboxed Gym e2e"
 
       - name: Finalize Kind sandboxed Gym e2e
         if: always()
@@ -1012,6 +1078,7 @@ jobs:
       - policy-wasm
       - python-auth-idp-static-test
       - build-cpu-smoke-images
+      - build-gym-host-image
       - kind-cpu-e2e
       - kind-gym-e2e
       - kind-gym-sandbox-e2e

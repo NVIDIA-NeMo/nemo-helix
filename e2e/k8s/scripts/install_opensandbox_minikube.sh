@@ -32,8 +32,9 @@
 #   KUBE_CONTEXT                 kubectl/helm --context for a cluster that is not minikube; overrides MINIKUBE_PROFILE.
 #                                For kind, use install_opensandbox_kind.sh, which sets this and the next two.
 #   BATCHSANDBOX_TEMPLATE        BatchSandbox template ConfigMap to apply (default: e2e/k8s/values/batchsandbox-minikube-template.yaml)
-#   SANDBOX_PULL_SECRET          Pull Secret that template names, which must exist in KUBE_NAMESPACE
-#                                (default: nvcrimagepullsecret). Set it empty to skip the check.
+#   PULL_SECRET_CHECK            What to do when a pull Secret the template names is missing from KUBE_NAMESPACE:
+#                                `error` (default) stops the install, `warn` continues, for a cluster whose
+#                                nodes already hold the sandbox images.
 #   SKIP_VERIFY=1                Skip k8s/helm/examples/opensandbox/verify/shared-kernel.sh
 #   HELM_TIMEOUT                 Helm --wait timeout (default: 10m)
 set -euo pipefail
@@ -50,8 +51,7 @@ NHX_NAMESPACE="${KUBE_NAMESPACE}"
 MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
 export KUBE_CONTEXT="${KUBE_CONTEXT:-${MINIKUBE_PROFILE}}"
 BATCHSANDBOX_TEMPLATE="${BATCHSANDBOX_TEMPLATE:-${REPO_ROOT}/e2e/k8s/values/batchsandbox-minikube-template.yaml}"
-# `-` rather than `:-`: an empty value is a choice, for a template whose images need no pull Secret.
-SANDBOX_PULL_SECRET="${SANDBOX_PULL_SECRET-nvcrimagepullsecret}"
+PULL_SECRET_CHECK="${PULL_SECRET_CHECK:-error}"
 HELM_TIMEOUT="${HELM_TIMEOUT:-10m}"
 API_SECRET="opensandbox-server-api-key"
 OPENSANDBOX_CONTROLLER_VERSION="${OPENSANDBOX_CONTROLLER_VERSION:-0.2.0}"
@@ -83,11 +83,42 @@ for tool in kubectl helm openssl python3 curl tar; do
     fi
 done
 
+if [ ! -f "${BATCHSANDBOX_TEMPLATE}" ]; then
+    log_error "BATCHSANDBOX_TEMPLATE does not exist or is not a file: ${BATCHSANDBOX_TEMPLATE}"
+    exit 1
+fi
+
+case "${PULL_SECRET_CHECK}" in
+    error|warn) ;;
+    *)
+        log_error "PULL_SECRET_CHECK must be error or warn, got: ${PULL_SECRET_CHECK}"
+        exit 1
+        ;;
+esac
+
 if ! kubectl get node >/dev/null 2>&1; then
     log_error "kubectl cannot reach a cluster on context ${KUBE_CONTEXT}. For minikube, start it first:"
     log_error "  ./e2e/k8s/scripts/setup_local_minikube_gpu.sh"
     exit 1
 fi
+
+# The pull Secrets a BatchSandbox template names, one per line. Read from the template rather than
+# repeated here, so the check below cannot drift from what sandbox pods will actually ask for.
+template_pull_secrets() {
+    awk '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*imagePullSecrets:/ { in_list = 1; next }
+        in_list && /^[[:space:]]*$/ { next }
+        in_list && /^[[:space:]]*-[[:space:]]*name:/ {
+            sub(/^[[:space:]]*-[[:space:]]*name:[[:space:]]*/, "")
+            sub(/[[:space:]]+#.*$/, "")
+            gsub(/["[:space:]]/, "")
+            print
+            next
+        }
+        in_list { in_list = 0 }
+    ' "$1"
+}
 
 download_tarball() {
     local url="$1"
@@ -149,18 +180,24 @@ kubectl create namespace "${CONTROL_PLANE_NS}" --dry-run=client -o yaml | kubect
 kubectl create namespace "${KUBE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
 log_info "Applying BatchSandbox template ConfigMap..."
-if [ ! -f "${BATCHSANDBOX_TEMPLATE}" ]; then
-    log_error "BATCHSANDBOX_TEMPLATE does not exist or is not a file: ${BATCHSANDBOX_TEMPLATE}"
-    exit 1
-fi
 kubectl apply -f "${BATCHSANDBOX_TEMPLATE}"
 
-if [ -n "${SANDBOX_PULL_SECRET}" ] && ! kubectl get secret "${SANDBOX_PULL_SECRET}" -n "${KUBE_NAMESPACE}" >/dev/null 2>&1; then
-    log_error "Secret ${SANDBOX_PULL_SECRET} is missing in ${KUBE_NAMESPACE}."
-    log_error "The BatchSandbox template names it in imagePullSecrets. Run the cluster setup script first"
-    log_error "(setup_local_minikube_gpu.sh, or setup_local_kind_cpu.sh with GITHUB_TOKEN set), create the pull Secret,"
-    log_error "or edit imagePullSecrets in ${BATCHSANDBOX_TEMPLATE} and set SANDBOX_PULL_SECRET to match."
-    exit 1
+MISSING_PULL_SECRETS=()
+while IFS= read -r pull_secret; do
+    if [ -n "${pull_secret}" ] && ! kubectl get secret "${pull_secret}" -n "${KUBE_NAMESPACE}" >/dev/null 2>&1; then
+        MISSING_PULL_SECRETS+=("${pull_secret}")
+    fi
+done < <(template_pull_secrets "${BATCHSANDBOX_TEMPLATE}")
+if [ "${#MISSING_PULL_SECRETS[@]}" -gt 0 ]; then
+    if [ "${PULL_SECRET_CHECK}" = "warn" ]; then
+        log_warn "${BATCHSANDBOX_TEMPLATE} names pull Secret(s) missing from ${KUBE_NAMESPACE}: ${MISSING_PULL_SECRETS[*]}."
+        log_warn "Sandboxes will start only from images already on the node."
+    else
+        log_error "${BATCHSANDBOX_TEMPLATE} names pull Secret(s) missing from ${KUBE_NAMESPACE}: ${MISSING_PULL_SECRETS[*]}."
+        log_error "Run the cluster setup script first (setup_local_minikube_gpu.sh, or setup_local_kind_cpu.sh with"
+        log_error "GITHUB_TOKEN set), create the Secret, or edit imagePullSecrets in the template."
+        exit 1
+    fi
 fi
 
 if kubectl get secret "${API_SECRET}" -n "${CONTROL_PLANE_NS}" >/dev/null 2>&1; then

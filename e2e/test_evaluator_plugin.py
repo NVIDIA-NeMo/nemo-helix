@@ -69,6 +69,8 @@ from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
 from nhx_evals_sdk.values.results import EvaluationResult
 from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
 
+from e2e.utils import kube_target_from_env
+
 pytestmark = [
     pytest.mark.container_only,
     pytest.mark.timeout(1800),
@@ -801,6 +803,26 @@ def _gym_task_payloads(limit: int) -> list[dict[str, object]]:
     ]
 
 
+def _download_agent_eval_bundle(client: NemoClient, workspace: str, job_name: str, tmp_path: Path) -> Path:
+    """Download and unpack the job's ``agent-eval-results`` archive, returning the directory its files are in."""
+    archive_path = tmp_path / "agent-eval-results.tar.gz"
+    archive = JobsClient.from_client(client).download_job_result(
+        name="agent-eval-results", job=job_name, workspace=workspace
+    )
+    archive_path.write_bytes(archive.read())
+    extract_dir = tmp_path / "agent-eval-results"
+    with tarfile.open(archive_path) as bundle:
+        bundle.extractall(extract_dir, filter="data")
+    trials_files = list(extract_dir.rglob("trials.jsonl"))
+    assert trials_files, f"trials.jsonl missing under {extract_dir}"
+    return trials_files[0].parent
+
+
+def _bundle_trials(bundle: Path) -> list[dict[str, Any]]:
+    lines = (bundle / "trials.jsonl").read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
+
+
 @pytest.mark.gym_e2e
 @pytest.mark.timeout(1800)
 def test_gym_agent_evaluate_job_completes(
@@ -851,24 +873,8 @@ def test_gym_agent_evaluate_job_completes(
         )
         assert job.status.lower() == "completed", f"job {job_name!r} ended {job.status!r}"
 
-        # Download the results archive to a tmp path.
-        archive_path = tmp_path / "agent-eval-results.tar.gz"
-        archive = JobsClient.from_client(evaluator_client).download_job_result(
-            name="agent-eval-results", job=job_name, workspace=evaluator_workspace
-        )
-        archive_path.write_bytes(archive.read())
-
-        # Extract the trials.jsonl file from the archive.
-        extract_dir = tmp_path / "agent-eval-results"
-        with tarfile.open(archive_path) as archive:
-            archive.extractall(extract_dir, filter="data")
-        trials_files = list(extract_dir.rglob("trials.jsonl"))
-        assert trials_files, f"trials.jsonl missing under {extract_dir}"
-
-        trial_lines = [line for line in trials_files[0].read_text(encoding="utf-8").splitlines() if line.strip()]
-        assert trial_lines, "Gym job produced no trials"
-
-        trials = [json.loads(line) for line in trial_lines]
+        trials = _bundle_trials(_download_agent_eval_bundle(evaluator_client, evaluator_workspace, job_name, tmp_path))
+        assert trials, "Gym job produced no trials"
         assert len(trials) == 2
         assert [trial.get("status") for trial in trials] == ["completed", "completed"]
         rewards = [float(trial["metadata"]["reward"]) for trial in trials]
@@ -903,7 +909,12 @@ GYM_HOST_GONE_TIMEOUT_SECONDS = 180.0
 UNLISTED_PUBLIC_ADDRESS = "1.1.1.1:443"
 #: Long enough for a host to start on a small CI node, where the default 240s is tight.
 GYM_HOST_STARTUP_TIMEOUT_SECONDS = 600
-SANDBOXED_GYM_JOB_TIMEOUT_SECONDS = 1200.0
+SANDBOXED_GYM_JOB_TIMEOUT_SECONDS = 900.0
+#: The job's run time above, the 600s it may also spend pending, the wait for the host to go, and
+#: setup. More than the module's 1800s, so a slow run ends on an assertion and not on this limit.
+SANDBOXED_GYM_TEST_TIMEOUT_SECONDS = 2100
+#: Evaluator's own words for a run that overran ``collection_timeout_s``, as its step logs them.
+COLLECTION_TIMEOUT_LOG_TEXT = "exceeded collection_timeout_s"
 
 # The environment's resources server, which runs inside the Gym host. Besides scoring the greeting,
 # it checks one fact about the sandbox it runs in when a row's ``probe`` names one. The reward is
@@ -911,6 +922,7 @@ SANDBOXED_GYM_JOB_TIMEOUT_SECONDS = 1200.0
 # own, and a failing one is named by its task. ``hang`` never answers, for a run that must fail.
 _GREETING_VERIFIER_SOURCE = """\
 import asyncio
+import errno
 import os
 import socket
 from pathlib import Path
@@ -963,8 +975,9 @@ def _environment_staged(_target):
 def _environment_read_only(_target):
     try:
         (ENVIRONMENT / "written-by-the-environment").write_text("refused")
-    except OSError:
-        return True
+    except OSError as error:
+        # A permission or missing-path error would say nothing about how the path is mounted.
+        return error.errno == errno.EROFS
     return False
 
 
@@ -1112,13 +1125,20 @@ class _SandboxCluster:
     namespace: str
 
     def _get(self, *resource: str, namespace: str | None = None) -> dict[str, Any]:
+        """``kubectl get`` as JSON. However it fails, it raises RuntimeError, so callers handle one type."""
         cmd = ["kubectl", "--context", self.context, "--namespace", namespace or self.namespace, "get", *resource]
-        result = subprocess.run(
-            [*cmd, "-o", "json"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False
-        )
+        try:
+            result = subprocess.run(
+                [*cmd, "-o", "json"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError(f"`{' '.join(cmd)}` did not complete: {error}") from error
         if result.returncode != 0:
             raise RuntimeError(f"`{' '.join(cmd)}` failed: {result.stderr.strip()}")
-        return json.loads(result.stdout)
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"`{' '.join(cmd)}` did not print JSON: {error}") from error
 
     def api_server_address(self) -> str:
         """The Kubernetes API's in-cluster ``address:port``, which any pod reaches unless something stops it."""
@@ -1131,7 +1151,8 @@ class _SandboxCluster:
         A sandbox carries its job's id in its metadata and its bootstrap environment, which is also how
         k8s/helm/examples/opensandbox/verify/lib.sh finds one. A pod is the host's when it has the
         label OpenSandbox gives the pods it creates and either belongs to one of those BatchSandboxes
-        or names the job itself. The label matters: the job's own step pods name the job too.
+        or names the job itself. The label matters: the job's own step pods name the job too. The
+        server selects on it, so a busy namespace costs no more to read than an idle one.
         """
 
         def names_job(item: Mapping[str, Any]) -> bool:
@@ -1144,10 +1165,12 @@ class _SandboxCluster:
             if names_job(sandbox):
                 sandboxes.add(sandbox["metadata"]["name"])
                 found[f"batchsandboxes/{sandbox['metadata']['name']}"] = sandbox
-        for pod in self._get("pods").get("items") or []:
+        for pod in self._get("pods", "--selector", SANDBOX_POD_LABEL).get("items") or []:
             metadata = pod.get("metadata") or {}
             sandbox_id = (metadata.get("labels") or {}).get(SANDBOX_POD_LABEL)
             if sandbox_id is None:
+                # The selector already excludes these. Counting a job's own step pod as its host would
+                # report a leak that is not one, so do not rely on the selector alone.
                 continue
             owners = {owner.get("name") for owner in metadata.get("ownerReferences") or []}
             if sandbox_id in sandboxes or owners & sandboxes or names_job(pod):
@@ -1172,9 +1195,10 @@ class _GymHostWatch:
         while not self._stop.is_set():
             try:
                 hosts = self._cluster.gym_hosts(self.markers)
-            except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
-                # One failed read must not end the watch: the next may still see the host.
-                self.failed_polls.append(str(error))
+            except Exception as error:
+                # Nothing may end the watch: the next read may still see the host, and a thread that died
+                # here would leave "no host was seen" as the only symptom. kubectl failures are RuntimeError.
+                self.failed_polls.append(f"{type(error).__name__}: {error}")
             else:
                 self.seen.update(hosts)
                 self.running_pods.update(
@@ -1201,13 +1225,15 @@ def sandbox_cluster() -> _SandboxCluster:
 
     Required, not skipped: without it these tests could not tell a removed Gym host from a leaked one.
     """
-    context = os.environ.get("NHX_E2E_KUBE_CONTEXT")
-    if not context:
-        pytest.fail(
-            "NHX_E2E_KUBE_CONTEXT is required by the sandboxed Gym tests: name the kubectl context of the "
-            "cluster the platform runs on (they never use the current context); see e2e/README.md"
-        )
-    return _SandboxCluster(context=context, namespace=os.environ.get("NHX_E2E_KUBE_NAMESPACE") or "nemo-helix")
+    context, namespace = kube_target_from_env()
+    cluster = _SandboxCluster(context=context, namespace=namespace)
+    try:
+        # The two reads every later check depends on, made once here so a wrong context, a missing
+        # kubectl or a cluster without OpenSandbox fails by name before any job is submitted.
+        cluster.gym_hosts(frozenset())
+    except RuntimeError as error:
+        pytest.fail(f"the sandboxed Gym tests cannot read sandboxes on context {context!r}: {error}")
+    return cluster
 
 
 def _host_port(url: str) -> str:
@@ -1274,16 +1300,10 @@ def _run_sandboxed_gym_job(
     return job, watch
 
 
-def _job_steps(client: NemoClient, workspace: str, job_name: str) -> dict[str, str]:
-    """Each step's status, by step name."""
+def _job_steps_and_report(client: NemoClient, workspace: str, job_name: str) -> tuple[dict[str, str], str]:
+    """Each step's status by name, and the same read with error details as text for a failed assertion."""
     status = JobsClient.from_client(client).get_job_status(workspace=workspace, name=job_name).data()
-    return {step.name: step.status.value for step in status.steps}
-
-
-def _describe_job(client: NemoClient, workspace: str, job_name: str) -> str:
-    """The job's and its steps' statuses and error details, for a failed assertion's message."""
-    status = JobsClient.from_client(client).get_job_status(workspace=workspace, name=job_name).data()
-    return json.dumps(
+    report = json.dumps(
         {
             "status": status.status.value,
             "error_details": status.error_details,
@@ -1294,6 +1314,22 @@ def _describe_job(client: NemoClient, workspace: str, job_name: str) -> str:
         },
         default=str,
     )
+    return {step.name: step.status.value for step in status.steps}, report
+
+
+def _assert_job_logged(client: NemoClient, workspace: str, job_name: str, text: str, timeout: float = 120.0) -> None:
+    """Fail unless a line the job logged contains ``text``. Logs are batched, so they can trail the job's end."""
+    jobs = JobsClient.from_client(client)
+    deadline = time.monotonic() + timeout
+    while True:
+        messages = [entry.message for entry in jobs.list_job_logs(workspace=workspace, name=job_name).items()]
+        if any(text in message for message in messages):
+            return
+        if time.monotonic() >= deadline:
+            pytest.fail(
+                f"no log line of job {job_name!r} contains {text!r} after {timeout:g}s; its last lines: {messages[-8:]}"
+            )
+        time.sleep(EVALUATOR_POLL_INTERVAL_SECONDS)
 
 
 def _assert_gym_host_removed(cluster: _SandboxCluster, watch: _GymHostWatch, job_name: str) -> None:
@@ -1307,11 +1343,19 @@ def _assert_gym_host_removed(cluster: _SandboxCluster, watch: _GymHostWatch, job
         f"host objects seen: {sorted(watch.seen)}; failed polls: {watch.failed_polls[-3:]}"
     )
     deadline = time.monotonic() + GYM_HOST_GONE_TIMEOUT_SECONDS
-    while left := cluster.gym_hosts(watch.markers):
+    while True:
+        try:
+            left = sorted(cluster.gym_hosts(watch.markers))
+        except RuntimeError as error:
+            # A read that failed says nothing either way, so ask again rather than fail on it.
+            state = f"unknown, because the cluster could not be read: {error}"
+        else:
+            if not left:
+                return
+            state = f"still on the cluster: {left}"
         if time.monotonic() >= deadline:
             pytest.fail(
-                f"job {job_name!r} ended, but its Gym host was still on the cluster "
-                f"{GYM_HOST_GONE_TIMEOUT_SECONDS:g}s later: {sorted(left)}"
+                f"job {job_name!r} ended, and {GYM_HOST_GONE_TIMEOUT_SECONDS:g}s later its Gym host was {state}"
             )
         time.sleep(GYM_HOST_POLL_INTERVAL_SECONDS)
 
@@ -1341,23 +1385,9 @@ def _assert_host_mounts_job_storage(pod: Mapping[str, Any]) -> None:
     )
 
 
-def _download_agent_eval_bundle(client: NemoClient, workspace: str, job_name: str, tmp_path: Path) -> Path:
-    """Download and unpack the job's ``agent-eval-results`` archive, returning the directory its files are in."""
-    archive_path = tmp_path / "agent-eval-results.tar.gz"
-    archive = JobsClient.from_client(client).download_job_result(
-        name="agent-eval-results", job=job_name, workspace=workspace
-    )
-    archive_path.write_bytes(archive.read())
-    extract_dir = tmp_path / "agent-eval-results"
-    with tarfile.open(archive_path) as bundle:
-        bundle.extractall(extract_dir, filter="data")
-    trials_files = list(extract_dir.rglob("trials.jsonl"))
-    assert trials_files, f"trials.jsonl missing under {extract_dir}"
-    return trials_files[0].parent
-
-
 @pytest.mark.gym_e2e
 @pytest.mark.gym_sandbox_e2e
+@pytest.mark.timeout(SANDBOXED_GYM_TEST_TIMEOUT_SECONDS)
 @requires_sandboxed_gym
 def test_gym_wheels_v1_environment_runs_with_only_its_extras_vendored(
     client: NemoClient,
@@ -1394,20 +1424,15 @@ def test_gym_wheels_v1_environment_runs_with_only_its_extras_vendored(
     )
     try:
         job, watch = _run_sandboxed_gym_job(evaluator_client, evaluator_workspace, job_name, sandbox_cluster)
-        report = _describe_job(evaluator_client, evaluator_workspace, job_name)
+        steps, report = _job_steps_and_report(evaluator_client, evaluator_workspace, job_name)
         assert job.status.lower() == "completed", f"job {job_name!r} ended {job.status!r}: {report}"
-        steps = _job_steps(evaluator_client, evaluator_workspace, job_name)
         assert (steps.get("stage-environment"), steps.get("agent-evaluate")) == ("completed", "completed"), report
 
         _assert_gym_host_removed(sandbox_cluster, watch, job_name)
         _assert_host_mounts_job_storage(next(iter(watch.running_pods.values())))
 
         bundle = _download_agent_eval_bundle(evaluator_client, evaluator_workspace, job_name, tmp_path)
-        trials = [
-            json.loads(line)
-            for line in (bundle / "trials.jsonl").read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        trials = _bundle_trials(bundle)
         assert sorted(trial["task_id"] for trial in trials) == sorted(labels), trials
         assert {trial.get("status") for trial in trials} == {"completed"}, trials
         # A reward below 1.0 names the fact that did not hold; `greeting` alone means the agent's reply was wrong.
@@ -1418,15 +1443,19 @@ def test_gym_wheels_v1_environment_runs_with_only_its_extras_vendored(
         assert summary_path.is_file(), f"summary.json missing from {bundle}"
         summary = AgentEvalSummary.model_validate_json(summary_path.read_text(encoding="utf-8"))
         assert (summary.task_count, summary.trial_count, summary.error_count) == (len(rows), len(rows), 0), summary
-        reward_scores = [score for score in summary.scores.scores if score.name.endswith(".reward")]
-        assert reward_scores, f"summary.json aggregates no reward: {summary.scores}"
-        assert all(score.mean == 1.0 and score.nan_count == 0 for score in reward_scores), reward_scores
+        # By its exact name, `<metric type>.<output>`: a runner may add aggregates of its own under `runner.`.
+        reward_metric = GymRewardMetric()
+        reward_name = f"{reward_metric.type.value}.{reward_metric.output_name}"
+        reward_score = summary.scores_by_name.get(reward_name)
+        assert reward_score is not None, f"summary.json has no {reward_name!r}: {sorted(summary.scores_by_name)}"
+        assert (getattr(reward_score, "mean", None), reward_score.nan_count) == (1.0, 0), reward_score
     finally:
         _cleanup_evaluator_job(evaluator_client, job_name)
 
 
 @pytest.mark.gym_e2e
 @pytest.mark.gym_sandbox_e2e
+@pytest.mark.timeout(SANDBOXED_GYM_TEST_TIMEOUT_SECONDS)
 @requires_sandboxed_gym
 def test_gym_host_is_removed_when_a_sandboxed_evaluation_fails_after_provisioning(
     client: NemoClient,
@@ -1438,7 +1467,9 @@ def test_gym_host_is_removed_when_a_sandboxed_evaluation_fails_after_provisionin
     """A run that fails with its Gym host already up still removes the host.
 
     The environment stages and the host starts as they do for the passing run, then its verifier
-    never answers, so collection overruns ``collection_timeout_s`` and agent-evaluate fails.
+    never answers, so collection overruns ``collection_timeout_s`` and agent-evaluate fails. The
+    step's own log must say so: collection begins only once the host is ready, which is what makes
+    this a failure after provisioning and not one on the way to it.
     """
     greeting = "hello there"
     fileset_name = _upload_greeting_environment(evaluator_client, evaluator_workspace, tmp_path / "package")
@@ -1450,13 +1481,12 @@ def test_gym_host_is_removed_when_a_sandboxed_evaluation_fails_after_provisionin
     )
     try:
         job, watch = _run_sandboxed_gym_job(evaluator_client, evaluator_workspace, job_name, sandbox_cluster)
-        report = _describe_job(evaluator_client, evaluator_workspace, job_name)
+        steps, report = _job_steps_and_report(evaluator_client, evaluator_workspace, job_name)
         assert job.status.lower() == "error", f"job {job_name!r} ended {job.status!r}: {report}"
-        steps = _job_steps(evaluator_client, evaluator_workspace, job_name)
         assert (steps.get("stage-environment"), steps.get("agent-evaluate")) == ("completed", "error"), report
 
-        # Also what shows the failure came after provisioning: it needs the host's pod seen running.
         _assert_gym_host_removed(sandbox_cluster, watch, job_name)
+        _assert_job_logged(evaluator_client, evaluator_workspace, job_name, COLLECTION_TIMEOUT_LOG_TEXT)
     finally:
         _cleanup_evaluator_job(evaluator_client, job_name)
 

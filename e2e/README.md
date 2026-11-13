@@ -252,7 +252,8 @@ They check that:
   and folds each into the reward of a task of its own, so a failed check names itself.
 - The Gym host pod mounts the environment and workspace from one PVC.
 - The Gym host is removed after a run that completes, and after a run that fails once the host is
-  up (its verifier never answers, so collection overruns `collection_timeout_s`).
+  up. In that run the verifier never answers, so collection overruns `collection_timeout_s`, and
+  the step's log must say so: collection starts only when the host is ready.
 
 The tests skip unless `NHX_E2E_SANDBOXED_GYM=1`, and fail rather than skip when `NHX_E2E_KUBE_CONTEXT`
 is missing: they watch the cluster for the Gym host with `kubectl`, which is the only place its
@@ -294,12 +295,14 @@ On a cluster with no route to the internet the public-address check passes witho
 anything; the Kubernetes API check is the one that holds everywhere.
 
 **CI.** The `kind-gym-sandbox-e2e` job in `.github/workflows/e2e.yaml` runs these tests on a kind
-cluster of its own, and fails if any of them skips. Its `setup-kind-cluster` step creates the cluster
-(`setup_local_kind_cpu.sh`), installs OpenSandbox (`install_opensandbox_kind.sh`, which ends by
+cluster of its own, and fails if any of them skips (`.github/scripts/check_junit_no_skips.py`). Its
+`setup-kind-cluster` step creates the cluster (`setup_local_kind_cpu.sh`), installs OpenSandbox
+(`install_opensandbox_kind.sh`, which pulls OpenSandbox's images onto the node first and ends by
 creating and deleting a sandbox), and installs the platform with `kind.yaml` and `gym-sandbox.yaml`.
-The job then pulls `nhx-gym-host` onto the node. That image is built by the `docker-cpu-e2e` bake
-group, which only the E2E workflow uses. The colocated Gym tests stay in `kind-gym-e2e`: turning on
-`sandboxed_gym_default` sandboxes every Gym target on a cluster.
+The job then pulls `nhx-gym-host` onto the node. That image comes from `build-gym-host-image`, a job
+of its own that builds the `docker-gym-host` bake group, so a failure there stops only this lane.
+The colocated Gym tests stay in `kind-gym-e2e`: turning on `sandboxed_gym_default` sandboxes every
+Gym target on a cluster.
 
 ### Custom Registry and Tag (Docker)
 
