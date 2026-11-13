@@ -187,7 +187,7 @@ print(f"Wrote {train_count} train rows and {validation_count} validation rows to
 
 ## 4. Upload the fileset
 
-The trailing slash uploads the directory contents. Without it, image paths nest under `cord-v2/` and no longer resolve.
+The trailing slash is on the source path. Without it, `put` keeps the `cord-v2/` prefix and the image paths no longer resolve.
 
 ```python
 dataset_name = profile["dataset_name"]
@@ -199,7 +199,7 @@ except ConflictError:
     print(f"Fileset '{dataset_name}' already exists, continuing...")
 
 FilesetFileSystem(client=FilesClient.from_client(client)).put(
-    lpath="cord-v2",
+    lpath="cord-v2/",
     rpath=f"default/{dataset_name}/",
     recursive=True,
 )
