@@ -296,6 +296,23 @@ describe('AgentEvaluationWizard dataset', () => {
     );
   });
 
+  it('names a dataset from another workspace with its workspace', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openConfigurationStep(user);
+    await pickDataset(user, 'other-ws/generated#output/part-0.parquet');
+    await chooseConfigKind(user, 'Upload');
+    await uploadConfig(user);
+    await leaveConfiguration(user);
+    await nameAndRun(user);
+
+    expect(createRunEvaluation).toHaveBeenCalledWith(
+      DEFAULT_WORKSPACE,
+      expect.objectContaining({ datasetName: 'other-ws/generated' })
+    );
+  });
+
   it('reads every Parquet shard beside the picked one once the box is ticked', async () => {
     mockListApis(['output/part-0.parquet', 'output/part-1.parquet']);
     const user = userEvent.setup();

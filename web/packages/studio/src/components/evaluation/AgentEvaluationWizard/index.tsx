@@ -356,6 +356,19 @@ interface ConfigPick extends FilePick {
   format?: EvalConfigFormat;
 }
 
+const datasetLabel = (spec: EvalSpec, workspace: string): string | undefined => {
+  if (!isDatasetEvalSpec(spec) || typeof spec.dataset !== 'string') {
+    return undefined;
+  }
+  const location = parseFilesetLocation(spec.dataset, workspace);
+  if (!location) {
+    return undefined;
+  }
+  return location.workspace === workspace
+    ? location.name
+    : `${location.workspace}/${location.name}`;
+};
+
 const configFormatForFile = (name: string): EvalConfigFormat =>
   /\.ya?ml$/i.test(name) ? 'yaml' : 'json';
 
@@ -889,10 +902,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
           name: formData.evaluationRecordName,
           nameStem,
           filesetName,
-          datasetName:
-            isDatasetEvalSpec(spec) && typeof spec.dataset === 'string'
-              ? parseFilesetLocation(spec.dataset, workspace)?.name
-              : undefined,
+          datasetName: datasetLabel(spec, workspace),
           parentEvaluationId,
         }).catch((err: unknown) => {
           if (isConflictError(err)) {
