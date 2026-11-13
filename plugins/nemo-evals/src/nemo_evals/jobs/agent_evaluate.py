@@ -747,8 +747,9 @@ class _AgentEvalJobBase(NemoJob):
         artifact = None
         bundle_error: Exception | None = None
         try:
+            # Stage the bundle: agent runtimes can still change files under its evidence while it uploads.
             artifact = ctx.results.save(
-                DEFAULT_RESULT_NAME, files.bundle_dir, ignore_patterns=spec.result_ignore_patterns
+                DEFAULT_RESULT_NAME, files.bundle_dir, ignore_patterns=spec.result_ignore_patterns, stage=True
             )
         except Exception as error:
             error.add_note(f"Failed to save result {DEFAULT_RESULT_NAME!r}")
