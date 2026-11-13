@@ -45,6 +45,16 @@ def test_access_key_lifecycle_routes_are_available_to_authenticated_owners(
         }
 
 
+def test_git_find_files_needs_the_permission_to_create_a_fileset(static_authz_data: dict[str, Any]) -> None:
+    rule = static_authz_data["authz"]["endpoints"]["/apis/files/v2/workspaces/{workspace}/git-repositories/find-files"][
+        "post"
+    ]
+    fileset_create_rule = static_authz_data["authz"]["endpoints"]["/apis/files/v2/workspaces/{workspace}/filesets"][
+        "post"
+    ]
+    assert rule == fileset_create_rule
+
+
 @pytest.fixture
 def minimal_authz_data():
     """Minimal authorization data for testing."""

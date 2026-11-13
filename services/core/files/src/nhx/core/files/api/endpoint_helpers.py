@@ -4,6 +4,8 @@
 """Shared business logic for Files Service API endpoints."""
 
 import logging
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import AsyncIterator
 
@@ -21,6 +23,7 @@ from nhx.common.secrets.exceptions import SecretAccessDeniedError, SecretNotFoun
 from nhx.core.files.app.backends import FileInfo, StorageConfig
 from nhx.core.files.app.backends.base import ByteRange, StorageImpl
 from nhx.core.files.app.cache import CacheStatus, cache_file_directly
+from nhx.core.files.app.external_hosts import ExternalHostInvalidError, ExternalHostNotAllowedError
 from nhx.core.files.app.file_lock import FileLockManager
 from nhx.core.files.app.range_requests import (
     download_response_status_and_headers,
@@ -37,6 +40,7 @@ from nhx.core.files.exceptions import (
     NotFoundError,
     StorageAccessError,
     StorageBackendError,
+    StorageConfigError,
     StorageServerFault,
     StorageUnavailableError,
 )
@@ -56,7 +60,6 @@ UPSTREAM_STORAGE_ACCESS_DETAIL = (
 )
 UPSTREAM_STORAGE_UNAVAILABLE_DETAIL = "Failed to connect to upstream storage backend"
 
-
 HTTP_EXCEPTION_DETAIL = {
     "content": {
         "application/json": {
@@ -67,6 +70,35 @@ HTTP_EXCEPTION_DETAIL = {
         }
     }
 }
+
+
+@contextmanager
+def storage_errors_as_http(failure: str) -> Generator[None]:
+    """Map errors from resolving a user's storage config to HTTP errors, prefixing backend errors with ``failure``."""
+    try:
+        yield
+    except ExternalHostNotAllowedError as exc:
+        raise HTTPException(HTTP_400_BAD_REQUEST, f"Storage host or endpoint not in allowed list: {exc}") from exc
+    except ExternalHostInvalidError as exc:
+        raise HTTPException(HTTP_400_BAD_REQUEST, f"Invalid URL for external host: {exc}") from exc
+    except SecretNotFoundError as exc:
+        logger.warning("Secret not found: %s", exc)
+        raise HTTPException(HTTP_400_BAD_REQUEST, f"Secret not found: {exc}") from exc
+    except SecretAccessDeniedError as exc:
+        logger.warning("Secret access denied: %s", exc)
+        raise HTTPException(HTTP_400_BAD_REQUEST, f"Access denied to secret: {exc}") from exc
+    except StorageAccessError as exc:
+        logger.warning("Storage access denied: %s", exc)
+        raise HTTPException(HTTP_400_BAD_REQUEST, f"Access denied to storage backend: {exc}") from exc
+    except StorageConfigError as exc:
+        logger.warning("Storage config invalid: %s", exc)
+        raise HTTPException(HTTP_400_BAD_REQUEST, f"Invalid storage configuration: {exc}") from exc
+    except StorageUnavailableError as exc:
+        logger.warning("Storage backend unavailable: %s", exc)
+        raise HTTPException(HTTP_502_BAD_GATEWAY, f"Storage backend unavailable: {exc}") from exc
+    except StorageBackendError as exc:
+        logger.warning("%s: %s", failure, exc)
+        raise HTTPException(HTTP_400_BAD_REQUEST, f"{failure}: {exc}") from exc
 
 
 def require_writable_storage(storage: StorageConfig) -> None:

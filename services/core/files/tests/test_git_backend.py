@@ -23,6 +23,7 @@ import pytest
 from dulwich.errors import ApplyDeltaError, ChecksumMismatch
 from dulwich.object_store import MemoryObjectStore
 from dulwich.objects import Blob, Tree
+from nemo_helix_plugin.files.storage_config import parse_ssh_remote
 from nhx.common.api.common import SecretRef
 from nhx.common.files.storage_config import LocalStorageConfig
 from nhx.core.files.app.backends import git as git_backend
@@ -46,6 +47,9 @@ from nhx.core.files.app.backends.git import (
     _regular_files,
     _repo_lock,
     normalize_private_key,
+    parse_keyscan_output,
+    scan_host_keys,
+    ssh_fingerprint,
     stop_process_group,
 )
 from nhx.core.files.app.backends.local import LocalStorageImpl
@@ -55,6 +59,7 @@ from pydantic import ValidationError
 
 KNOWN_HOSTS = "gitlab.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample"
 SECRETS = {"ssh_key": "-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----"}
+GITLAB_KEY = "AAAAC3NzaC1lZDI1NTE5AAAAIFbMmqfotspZLBqH1+F3thpn9Ta95bqU6tVT2Pl4TJ9t"
 
 # Signing, hooks and default-branch settings in a developer's git config would change these repositories.
 _ISOLATED_GIT_ENV = {
@@ -244,7 +249,6 @@ class TestGitStorageConfig:
             ("original_revision", "-upload-pack=evil"),
             ("original_revision", "main\n"),
             ("path", "agents\x00/calc"),
-            ("known_hosts", " "),
             ("known_hosts", "host ssh-ed25519 AAAA\x00"),
         ],
     )
@@ -341,6 +345,16 @@ class TestSshCredentials:
         with GitStorageImpl(config, SECRETS, cache_root=tmp_path)._remote() as remote:
             assert (remote.client.host, remote.client.username, remote.path) == ("host.example", "git", path)
 
+    @pytest.mark.parametrize("known_hosts", ["", " \n"])
+    def test_refuses_to_connect_without_known_hosts(self, tmp_path, known_hosts):
+        config = GitStorageConfig(url="git@host.example:org/repo.git", ssh_key_secret=SecretRef("key"))
+        config = config.model_copy(update={"known_hosts": known_hosts})
+        with (
+            pytest.raises(GitConfigError, match="known_hosts is required to connect to host.example"),
+            GitStorageImpl(config, SECRETS, cache_root=tmp_path)._remote(),
+        ):
+            pass
+
     def test_repr_leaves_out_the_private_key(self, tmp_path):
         impl = GitStorageImpl(_config("ssh://localhost/x"), {"ssh_key": "SECRET-KEY-MATERIAL"}, cache_root=tmp_path)
         assert "SECRET-KEY-MATERIAL" not in repr(impl)
@@ -412,6 +426,95 @@ class TestClassifyFailure:
         message = str(_classify_failure(stderr, "ssh://nope.invalid/o/r.git"))
         assert "Could not resolve hostname nope.invalid" in message
         assert "repository exists" not in message
+
+
+class TestHostKeyScan:
+    def test_fingerprint_matches_ssh_keygen(self):
+        assert ssh_fingerprint(GITLAB_KEY) == "SHA256:tpqkiXZfC92uxW2cbtsytSTUAkCrBCJ29o5pXdMIdY4"
+
+    def test_parses_keyscan_output_preferring_ed25519(self):
+        output = (
+            "# gitlab-master.nvidia.com:12051 SSH-2.0-GitLab-SSHD\n"
+            f"[gitlab-master.nvidia.com]:12051 ssh-rsa {GITLAB_KEY}\n"
+            f"[gitlab-master.nvidia.com]:12051 ssh-ed25519 {GITLAB_KEY}\n"
+        )
+        keys = parse_keyscan_output(output)
+        assert [key.key_type for key in keys] == ["ssh-ed25519", "ssh-rsa"]
+        assert keys[0].known_hosts_line == f"[gitlab-master.nvidia.com]:12051 ssh-ed25519 {GITLAB_KEY}"
+
+    async def test_missing_ssh_keyscan_is_reported(self, monkeypatch):
+        monkeypatch.setenv("PATH", str(Path(__file__).parent / "no-such-bin"))
+        with pytest.raises(GitServerFault, match="ssh-keyscan is not installed"):
+            await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
+
+    @staticmethod
+    def _fake_keyscan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:
+        script = tmp_path / "ssh-keyscan"
+        script.write_text(f"#!/bin/sh\n{body}\n")
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+
+    async def test_scan_returns_keys_from_ssh_keyscan(self, tmp_path, monkeypatch):
+        self._fake_keyscan(
+            tmp_path, monkeypatch, f"echo '# host:22 SSH-2.0-x' >&2; echo 'host ssh-ed25519 {GITLAB_KEY}'"
+        )
+        keys = await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
+        assert [key.key_type for key in keys] == ["ssh-ed25519"]
+
+    async def test_scan_reports_why_ssh_keyscan_found_no_keys(self, tmp_path, monkeypatch):
+        self._fake_keyscan(
+            tmp_path, monkeypatch, "echo 'getaddrinfo nosuchhost: nodename nor servname provided' >&2; exit 1"
+        )
+        with pytest.raises(GitUnavailableError, match="getaddrinfo nosuchhost"):
+            await scan_host_keys(parse_ssh_remote("git@nosuchhost:org/repo.git"))
+
+    async def test_scan_with_no_output_reports_a_timeout(self, tmp_path, monkeypatch):
+        self._fake_keyscan(tmp_path, monkeypatch, "echo '# host:22 SSH-2.0-x' >&2")
+        with pytest.raises(GitUnavailableError, match="before the scan timed out"):
+            await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
+
+    async def test_scan_kills_a_hung_ssh_keyscan(self, tmp_path, monkeypatch):
+        self._fake_keyscan(tmp_path, monkeypatch, "exec sleep 30")
+        monkeypatch.setattr(git_backend, "_KEYSCAN_GRACE_SECONDS", 0.2)
+        with pytest.raises(GitUnavailableError, match="Timed out scanning host keys of host"):
+            await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"), timeout_seconds=0)
+
+    async def test_scan_runs_without_the_service_environment(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("NHX_SERVICE_SECRET", "leak")
+        self._fake_keyscan(
+            tmp_path, monkeypatch, f"[ -z \"$NHX_SERVICE_SECRET\" ] && echo 'host ssh-ed25519 {GITLAB_KEY}'"
+        )
+        keys = await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
+        assert [key.key_type for key in keys] == ["ssh-ed25519"]
+
+    async def test_scans_beyond_the_limit_wait_for_a_slot(self, tmp_path, monkeypatch):
+        running = tmp_path / "running"
+        self._fake_keyscan(
+            tmp_path,
+            monkeypatch,
+            f"mkdir '{running}' || exit 1; sleep 0.2; rmdir '{running}'; echo 'host ssh-ed25519 {GITLAB_KEY}'",
+        )
+        monkeypatch.setattr(git_backend, "_KEYSCAN_SLOTS", asyncio.Semaphore(1))
+        remote = parse_ssh_remote("git@host:org/repo.git")
+        results = await asyncio.gather(scan_host_keys(remote), scan_host_keys(remote))
+        assert [len(keys) for keys in results] == [1, 1]
+
+    async def test_scan_gives_up_when_no_slot_frees_in_time(self, monkeypatch):
+        monkeypatch.setattr(git_backend, "_KEYSCAN_SLOTS", asyncio.Semaphore(0))
+        monkeypatch.setattr(git_backend, "_KEYSCAN_GRACE_SECONDS", 0.1)
+        with pytest.raises(GitUnavailableError, match="Too many host key scans"):
+            await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"), timeout_seconds=0)
+
+    async def test_cancelling_a_scan_after_ssh_keyscan_exits_still_cancels(self, tmp_path, monkeypatch):
+        self._fake_keyscan(tmp_path, monkeypatch, "exit 0")
+
+        async def exit_then_cancel(proc):
+            await proc.communicate()
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(git_backend, "_communicate", exit_then_cancel)
+        with pytest.raises(asyncio.CancelledError):
+            await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
 
 
 class TestProcessGroups:

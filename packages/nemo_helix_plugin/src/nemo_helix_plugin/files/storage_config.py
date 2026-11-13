@@ -309,9 +309,14 @@ class SshRemote:
         return f"ssh://{user}{self.host}{port}/{self.path}"
 
     @property
+    def authority(self) -> str:
+        """``host[:port]``, the host as shown to a user."""
+        return f"{self.host}:{self.port}" if self.port else self.host
+
+    @property
     def host_url(self) -> str:
         """The ``ssh://host[:port]`` authority checked against the external-host allowlist."""
-        return f"ssh://{self.host}:{self.port}" if self.port else f"ssh://{self.host}"
+        return f"ssh://{self.authority}"
 
 
 def parse_ssh_remote(url: str) -> SshRemote:
@@ -449,9 +454,11 @@ class GitStorageConfig(BaseStorageConfig):
     )
     ssh_key_secret: SecretRef = Field(description="Secret holding an unencrypted SSH private key with read access")
     known_hosts: str = Field(
+        default="",
         description="known_hosts lines for the remote host, e.g. the output of `ssh-keyscan host` once its "
         "fingerprint has been checked against one obtained through a trusted channel. "
-        "The host key is verified against these and nothing else.",
+        "The host key is verified against these and nothing else. Required to read the repository; "
+        "leave it empty only to have find-files return the host's keys.",
     )
 
     @field_validator("url")
@@ -486,8 +493,8 @@ class GitStorageConfig(BaseStorageConfig):
 
     @field_validator("known_hosts")
     @classmethod
-    def require_known_hosts(cls, v: str) -> str:
-        return _reject_control_chars("known_hosts", _reject_blank("known_hosts", v), allow_newlines=True)
+    def reject_unsafe_known_hosts(cls, v: str) -> str:
+        return _reject_control_chars("known_hosts", v, allow_newlines=True)
 
     @property
     def remote(self) -> SshRemote:

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import errno
 import hashlib
 import json
@@ -40,7 +41,8 @@ from dulwich.protocol import DEFAULT_GIT_PROTOCOL_VERSION_FETCH
 from dulwich.refs import Ref
 from dulwich.repo import Repo
 from nemo_helix_plugin.config import nhx_user_data_dir
-from nemo_helix_plugin.files.storage_config import is_commit_sha
+from nemo_helix_plugin.files.storage_config import SshRemote, is_commit_sha
+from nemo_helix_plugin.files.types import SshHostKey
 from nhx.common.files.storage_config import GitStorageConfig as GitStorageConfig
 from nhx.core.files.app.backends.base import (
     ByteRange,
@@ -72,6 +74,12 @@ _repo_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueD
 # Separate, so a slow remote never holds up reading what is already fetched.
 _REMOTE_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="nhx-git-remote")
 _LOCAL_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="nhx-git-local")
+_KEYSCAN_SLOTS = asyncio.Semaphore(16)
+_KEYSCAN_GRACE_SECONDS = 5.0
+
+
+def _ssh_env() -> dict[str, str]:
+    return {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "/"), "LC_ALL": "C"}
 
 
 class GitBackendError(StorageBackendError):
@@ -222,6 +230,28 @@ def _pick_ref(refs: dict[str, str], revision: str) -> str | None:
     return None
 
 
+_KEY_TYPE_PREFERENCE = ("ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "ssh-rsa")
+
+
+def ssh_fingerprint(key_base64: str) -> str:
+    digest = hashlib.sha256(base64.b64decode(key_base64)).digest()
+    return "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
+
+
+def parse_keyscan_output(output: str) -> list[SshHostKey]:
+    keys: list[SshHostKey] = []
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) < 3 or line.startswith("#"):
+            continue
+        _, key_type, key = fields[:3]
+        keys.append(
+            SshHostKey(key_type=key_type, fingerprint=ssh_fingerprint(key), known_hosts_line=" ".join(fields[:3]))
+        )
+    rank = {key_type: index for index, key_type in enumerate(_KEY_TYPE_PREFERENCE)}
+    return sorted(keys, key=lambda host_key: rank.get(host_key.key_type, len(rank)))
+
+
 _GRACE_SECONDS = 2.0
 _MAX_STDERR_BYTES = 64 * 1024
 
@@ -318,6 +348,65 @@ class SessionSSHVendor(SSHVendor):
                     pipe.close()
         for errors in self._stderr_files:
             errors.close()
+
+
+async def scan_host_keys(remote: SshRemote, timeout_seconds: int = 10) -> list[SshHostKey]:
+    try:
+        await asyncio.wait_for(_KEYSCAN_SLOTS.acquire(), timeout_seconds + _KEYSCAN_GRACE_SECONDS)
+    except TimeoutError:
+        raise GitUnavailableError(
+            f"Too many host key scans are running to scan {remote.authority}; try again shortly"
+        ) from None
+    try:
+        return await _scan_host_keys(remote, timeout_seconds)
+    finally:
+        _KEYSCAN_SLOTS.release()
+
+
+async def _scan_host_keys(remote: SshRemote, timeout_seconds: int) -> list[SshHostKey]:
+    port = ["-p", str(remote.port)] if remote.port else []
+    subject = remote.authority
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ssh-keyscan",
+            "-T",
+            str(timeout_seconds),
+            *port,
+            remote.host,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_ssh_env(),
+            start_new_session=True,
+        )
+    except FileNotFoundError as exc:
+        raise GitServerFault("ssh-keyscan is not installed in the files service") from exc
+    try:
+        stdout, stderr = await asyncio.wait_for(_communicate(proc), timeout_seconds + _KEYSCAN_GRACE_SECONDS)
+    except (TimeoutError, asyncio.CancelledError) as exc:
+        with suppress(ProcessLookupError):
+            proc.kill()
+        await proc.wait()
+        if isinstance(exc, TimeoutError):
+            raise GitUnavailableError(f"Timed out scanning host keys of {subject}") from None
+        raise
+
+    keys = parse_keyscan_output(stdout.decode(errors="replace"))
+    if not keys:
+        raise _keyscan_failure(stderr.decode(errors="replace"), subject)
+    return keys
+
+
+async def _communicate(proc: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
+    return await proc.communicate()
+
+
+def _keyscan_failure(stderr: str, subject: str) -> GitUnavailableError:
+    # ssh-keyscan prints a "# host SSH-2.0-..." banner per connection it opened.
+    errors = "\n".join(line for line in stderr.splitlines() if not line.startswith("#"))
+    if not errors.strip():
+        return GitUnavailableError(f"{subject} returned no SSH host keys before the scan timed out")
+    return GitUnavailableError(f"Could not scan host keys of {subject}: {_failure_detail(errors)}")
 
 
 def _regular_files(store: BaseObjectStore, tree_id: ObjectID) -> Iterator[tuple[str, ObjectID]]:
@@ -537,6 +626,8 @@ class GitStorageImpl(StorageImpl):
         key = self.secrets.get("ssh_key", "")
         if not key.strip():
             raise GitConfigError(f"The SSH key secret for {self.config.url} is empty")
+        if not self.config.known_hosts.strip():
+            raise GitConfigError(f"known_hosts is required to connect to {self.config.remote.authority}")
 
         with tempfile.TemporaryDirectory(prefix="nhx-git-ssh-") as tmp:
             key_path = Path(tmp) / "id"
@@ -573,9 +664,7 @@ class GitStorageImpl(StorageImpl):
                     "ServerAliveCountMax=3",
                 ]
             )
-            vendor = SessionSSHVendor(
-                {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "/"), "LC_ALL": "C"}
-            )
+            vendor = SessionSSHVendor(_ssh_env())
             remote = self.config.remote
             client = SSHGitClient(
                 remote.host, port=remote.port, username=remote.user, vendor=vendor, ssh_command=ssh_command

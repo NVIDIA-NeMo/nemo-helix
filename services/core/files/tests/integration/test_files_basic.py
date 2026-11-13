@@ -519,6 +519,23 @@ class TestFilesBasic:
             assert exc.status_code == 400
             assert "use_sdk_auth=true is not allowed" in str(exc.body).lower()
 
+    def test_fileset_create_rejects_git_storage_without_known_hosts(self, client: NemoClient):
+        files = FilesClient.from_client(client)
+        with pytest.raises(BadRequestError) as raised:
+            files.create_fileset(
+                body=CreateFilesetRequest(
+                    name="reject-git-without-known-hosts",
+                    storage={
+                        "type": "git",
+                        "url": "git@gitlab.example.com:org/repo.git",
+                        "ssh_key_secret": "missing-key",
+                    },
+                ),
+                workspace=DEFAULT_WORKSPACE_ID,
+            )
+        assert raised.value.status_code == 400
+        assert "known_hosts is required" in str(raised.value.body)
+
     def test_fileset_create_allows_user_provided_local_storage_when_enabled(
         self, client_allow_user_local_storage: NemoClient, tmp_path: Path
     ):

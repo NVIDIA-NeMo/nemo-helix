@@ -174,6 +174,16 @@ class TestServiceBase:
 
         assert openapi["paths"]["/nested/child"]["get"]["tags"] == ["Nested"]
 
+    def test_routers_sharing_a_tag_list_it_once_in_openapi(self):
+        class SharedTagService(MockService):
+            def get_routers(self) -> List[RouterConfig]:
+                return [
+                    RouterConfig(APIRouter(), tag="Files", description="File management endpoints"),
+                    RouterConfig(APIRouter(), tag="Files", description="Lookups"),
+                ]
+
+        assert SharedTagService().app.openapi_tags == [{"name": "Files", "description": "File management endpoints"}]
+
     def test_service_openapi_schema_is_generated_lazily(self, monkeypatch: pytest.MonkeyPatch):
         import nhx.common.service.base as service_base
 
