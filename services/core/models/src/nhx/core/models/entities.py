@@ -24,6 +24,7 @@ from nhx.core.models.schemas import (
     Lora,
     ModelDeploymentConfigModelSpec,
     ModelDeploymentStatus,
+    ModelMetadata,
     ModelProviderStatus,
     ModelSpec,
     PromptData,
@@ -95,6 +96,10 @@ class Model(EntityBase):
     spec: ModelSpec | None = Field(
         default=None,
         description="Detailed specification for the model.",
+    )
+    metadata: ModelMetadata | None = Field(
+        default=None,
+        description="Descriptive model details such as capabilities, modalities, and context length.",
     )
     finetuning_type: FinetuningType | None = Field(
         default=None,

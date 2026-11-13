@@ -355,6 +355,13 @@ nemo-automodel-plugin = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
+nemo-bedrock-plugin = [
+  "httpx>=0.27.0,<1",
+  "nemo-helix-plugin",
+  "pydantic>=2.0.0",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
 nemo-builder-plugin = [
   "nemo-helix-plugin",
   "pydantic>=2.0.0",
@@ -474,6 +481,13 @@ nemo-helix-plugin = [
   "pyjwt>=2.13.0",
   "pyyaml>=6.0.2",
   "typer>=0.20.0,<0.26",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
+nemo-ngc-plugin = [
+  "httpx>=0.27.0,<1",
+  "nemo-helix-plugin",
+  "pydantic>=2.0.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -623,6 +637,7 @@ plugins = [
     "nemo-helix[nemo-agents-plugin]",
     "nemo-helix[nemo-anonymizer-plugin]",
     "nemo-helix[nemo-automodel-plugin]",
+    "nemo-helix[nemo-bedrock-plugin]",
     "nemo-helix[nemo-builder-plugin]",
     "nemo-helix[nemo-compass-plugin]",
     "nemo-helix[nemo-customizer-plugin]",
@@ -631,6 +646,7 @@ plugins = [
     "nemo-helix[nemo-evals-plugin]",
     "nemo-helix[nemo-garak-plugin]",
     "nemo-helix[nemo-guardrails-plugin]",
+    "nemo-helix[nemo-ngc-plugin]",
     "nemo-helix[nemo-optimization-plugin]",
     "nemo-helix[nemo-rl-plugin]",
     "nemo-helix[nemo-safe-synthesizer-plugin]",
@@ -800,6 +816,11 @@ nemo-evals-trial-recording = "nemo_evals.gateway.middleware.trial_recording:Tria
 platform = "nhx.common.observability.task_logging:HelixTaskLoggingProvider"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
+[project.entry-points."nemo.models.metadata_sources"]
+bedrock = "nemo_bedrock_plugin.metadata:BedrockMetadataSource"
+ngc = "nemo_ngc_plugin.metadata:NgcMetadataSource"
+
+# Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.optimization.backends"]
 optuna = "nemo_optimization.backends.optuna.backend:OptunaBackend"
 ga = "nemo_optimization.backends.ga.backend:GaBackend"
@@ -927,6 +948,8 @@ nemo-guardrails-plugin = { source = "../../plugins/nemo-guardrails/src/nemo_guar
 nemo-rl-plugin = { source = "../../plugins/nemo-rl/src/nemo_rl_plugin", module = "nemo_rl_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-safe-synthesizer-plugin = { source = "../../plugins/nemo-safe-synthesizer/src/nemo_safe_synthesizer_plugin", module = "nemo_safe_synthesizer_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-switchyard-plugin = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard", inherit = { "entry-points" = ["nemo.*"] }, deps_group = "nemo-switchyard" }
+nemo-bedrock-plugin = { source = "../../plugins/nemo-bedrock/src/nemo_bedrock_plugin", module = "nemo_bedrock_plugin", inherit = { "entry-points" = ["nemo.*"] } }
+nemo-ngc-plugin = { source = "../../plugins/nemo-ngc/src/nemo_ngc_plugin", module = "nemo_ngc_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-unsloth-plugin = { source = "../../plugins/nemo-unsloth/src/nemo_unsloth_plugin", module = "nemo_unsloth_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 
 # Core services

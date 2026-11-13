@@ -182,6 +182,7 @@ def _model_to_model_entity(
         project=model.project,
         description=model.description,
         spec=spec,
+        metadata=model.metadata,
         fileset=model.fileset,
         finetuning_type=model.finetuning_type,
         base_model=model.base_model,
@@ -407,6 +408,7 @@ class ModelEntityService:
             project=request.project,
             description=request.description,
             spec=request.spec,
+            metadata=request.metadata,
             finetuning_type=request.finetuning_type,
             fileset=request.fileset,
             base_model=str(request.base_model) if request.base_model else None,
@@ -555,16 +557,19 @@ class ModelEntityService:
             schema=True,
         )
 
-        # Apply updates (only non-None values). ``backend_format`` is nullable by
-        # contract, so preserve an explicit null when the client wants to clear it.
+        # Apply updates (only non-None values). ``backend_format`` and ``metadata`` are nullable by
+        # contract, so preserve an explicit null when the client wants to clear them.
         update_data = request.model_dump(exclude_none=True)
-        if "backend_format" in request.model_fields_set:
-            update_data["backend_format"] = request.backend_format
+        for nullable_field in ("backend_format", "metadata"):
+            if nullable_field in request.model_fields_set:
+                update_data[nullable_field] = getattr(request, nullable_field)
 
         if "description" in update_data:
             model.description = update_data["description"]
         if "spec" in update_data:
             model.spec = update_data["spec"]
+        if "metadata" in update_data:
+            model.metadata = request.metadata
         if "fileset" in update_data:
             await get_fileset_and_files_list(self.files, workspace, update_data["fileset"])
             model.fileset = update_data["fileset"]

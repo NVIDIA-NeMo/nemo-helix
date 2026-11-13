@@ -207,6 +207,8 @@ enabled-plugins = [
   "nemo-garak-plugin",
   "nemo-safe-synthesizer-plugin",
   "nemo-switchyard-plugin",
+  "nemo-bedrock-plugin",
+  "nemo-ngc-plugin",
   "nemo-agents-plugin",
   "nemo-deployments-plugin[docker,k8s,openshell]",
   # OpenShell job backend SDK; the jobs service itself is a root dependency.
@@ -476,6 +478,8 @@ nemo-guardrails-plugin = { workspace = true }
 nemo-garak-plugin = { workspace = true }
 nemo-safe-synthesizer-plugin = { workspace = true }
 nemo-switchyard-plugin = { workspace = true }
+nemo-bedrock-plugin = { workspace = true }
+nemo-ngc-plugin = { workspace = true }
 nemo-agents-plugin = { workspace = true }
 nemo-deployments-plugin = { workspace = true }
 nemo-agent-config-example-email-security-triage = { workspace = true }
@@ -535,6 +539,8 @@ members = [
   "plugins/nemo-garak",
   "plugins/nemo-safe-synthesizer",
   "plugins/nemo-switchyard",
+  "plugins/nemo-bedrock",
+  "plugins/nemo-ngc",
   "plugins/nemo-agents",
   "plugins/nemo-deployments",
   "plugins/nemo-compass",
