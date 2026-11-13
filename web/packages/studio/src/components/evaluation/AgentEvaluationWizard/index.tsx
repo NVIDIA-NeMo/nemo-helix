@@ -53,6 +53,12 @@ import {
   DATASET_FILE_TYPES,
   EVAL_CONFIG_FILE_ACCEPT,
 } from '@studio/components/evaluation/AgentEvaluationWizard/consts';
+import {
+  DATASET_SNAPSHOT_KEY,
+  datasetDrift,
+  datasetSnapshotOf,
+  takeDatasetSnapshot,
+} from '@studio/components/evaluation/AgentEvaluationWizard/datasetSnapshot';
 import { EvaluationSourceSelect } from '@studio/components/evaluation/AgentEvaluationWizard/EvaluationSourceSelect';
 import { FilesetConfigPicker } from '@studio/components/evaluation/AgentEvaluationWizard/FilesetConfigPicker';
 import { inspectDatasetFile } from '@studio/components/evaluation/AgentEvaluationWizard/inspectDatasetFile';
@@ -586,8 +592,23 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     enabled: mode === MODE_EXPERIMENT && !!selectedEvaluation,
   });
 
+  const sourceSnapshot = selectedEvaluation ? datasetSnapshotOf(selectedEvaluation) : null;
+  const { data: sourceDatasetDrift, isFetching: isCheckingSourceDataset } = useQuery({
+    queryKey: ['evaluation-dataset-drift', workspace, evaluationName],
+    queryFn: sourceSnapshot
+      ? ({ signal }) => datasetDrift(workspace, sourceSnapshot, signal)
+      : skipToken,
+    enabled: mode === MODE_EXPERIMENT,
+    retry: false,
+  });
+  const sourceDatasetMissing =
+    sourceDatasetDrift === 'missing' && sourceSnapshot
+      ? `The dataset this evaluation read, ${sourceSnapshot.ref}, no longer exists. Pick another evaluation.`
+      : undefined;
+
   const evaluationFileset = selectedEvaluation ? evaluationFilesetName(selectedEvaluation) : null;
-  const evaluationFieldError = errors.evaluationName?.message ?? evaluationConfigIssue ?? undefined;
+  const evaluationFieldError =
+    errors.evaluationName?.message ?? evaluationConfigIssue ?? sourceDatasetMissing ?? undefined;
 
   const configKind = useWatch({ control, name: 'configKind' });
   const isFormConfig = configKind === CONFIG_KIND_FORM;
@@ -899,6 +920,11 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
           parentEvaluationId = selectedEvaluation.id;
         }
 
+        const specDataset =
+          isDatasetEvalSpec(spec) && typeof spec.dataset === 'string' ? spec.dataset : null;
+        const datasetSnapshot = specDataset
+          ? await takeDatasetSnapshot(workspace, specDataset).catch(() => null)
+          : null;
         const evaluationId = await createRunEvaluation(workspace, {
           experimentIds,
           name: formData.evaluationRecordName,
@@ -906,6 +932,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
           filesetName,
           datasetName: datasetLabel(spec, workspace),
           parentEvaluationId,
+          metadata: datasetSnapshot
+            ? { [DATASET_SNAPSHOT_KEY]: JSON.stringify(datasetSnapshot) }
+            : undefined,
         }).catch((err: unknown) => {
           if (isConflictError(err)) {
             throw new Error(
@@ -999,7 +1028,10 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
         if (isValidatingEvaluation) {
           return blockedWith('Checking the saved eval config...');
         }
-        if (evaluationConfigIssue) {
+        if (isCheckingSourceDataset) {
+          return blockedWith('Checking the dataset...');
+        }
+        if (evaluationConfigIssue || sourceDatasetMissing) {
           return SHOWN_ON_FIELD;
         }
       }
@@ -1422,6 +1454,12 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                     disabled={isPending}
                   />
                 ))}
+              {mode === MODE_EXPERIMENT && sourceDatasetDrift === 'changed' ? (
+                <Banner kind="inline" status="warning">
+                  The dataset has changed since {evaluationName} ran, so its scores may not compare
+                  with this run&apos;s.
+                </Banner>
+              ) : null}
 
               <ControlledTextInput
                 useControllerProps={{ control, name: 'evaluationRecordName' }}
