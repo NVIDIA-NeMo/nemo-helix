@@ -299,7 +299,7 @@ def _mcp_config(config: AgentConfig) -> Any:
 def _tools_config(config: AgentConfig) -> Any:
     if config.tools is None:
         return None
-    return fabric.ToolsConfig(blocked=config.tools.blocked)
+    return fabric.ToolsConfig(enabled=config.tools.enabled, blocked=config.tools.blocked)
 
 
 def _apply_telemetry(fabric_config: Any, config: AgentConfig, model: ModelConfig) -> None:
