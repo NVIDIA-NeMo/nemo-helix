@@ -843,7 +843,9 @@ async def test_job_binding_tracks_live_execution_identity(harness: Harness, chan
 
         response = wire.data(await driver._dispatch("ResolveCredentials", request))
         assert response["credentials"][0]["value"] == harness.secret
-        assert len([r for r in harness.calls if "/apis/jobs/" in r.url.path]) == 4
+        job_calls = [r for r in harness.calls if "/apis/jobs/" in r.url.path]
+        assert len(job_calls) == 4
+        assert all("/jobs/job-id/steps/" in r.url.path for r in job_calls if "/steps/" in r.url.path)
     else:
         with pytest.raises(RegistrationDenied):
             await driver._dispatch("ResolveCredentials", request)

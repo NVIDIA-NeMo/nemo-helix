@@ -43,6 +43,11 @@ export type BadgeStatus<T = HelixJobStatus> =
   | 'lost';
 
 export const badgeStatus: Record<BadgeStatus | 'default', BadgeProps> = {
+  provisional: {
+    label: 'Provisional',
+    color: 'gray',
+    icon: Refresh,
+  },
   created: {
     label: 'Created',
     color: 'teal',

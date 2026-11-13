@@ -9,9 +9,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nhx.common.entities import DEFAULT_WORKSPACE, EntityClient
 from nhx.common.jobs.log_client import dep_job_logs_client
-from nhx.common.jobs.schemas import HelixJobLog, HelixJobLogPage, InvalidPageCursorError
+from nhx.common.jobs.schemas import HelixJobLog, HelixJobLogPage, HelixJobStatus, InvalidPageCursorError
 from nhx.core.jobs.api.v2.jobs.endpoints import dep_dispatcher, router
 from nhx.core.jobs.app.dispatcher import JobDispatcher
+from nhx.core.jobs.entities import HelixJob
 from nhx.testing import create_test_client
 
 
@@ -59,8 +60,10 @@ class TestJobLogsAPI:
         projects = ["default/test-project"]
         with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
             mock_files = AsyncMock()
+            mock_files.with_retry = MagicMock(return_value=mock_files)
             mock_fileset_obj = MagicMock()
             mock_fileset_obj.name = "test-fileset-id"
+            mock_fileset_obj.id = "fileset-owned-allocation"
             mock_resp = MagicMock()
             mock_resp.data.return_value = mock_fileset_obj
             mock_files.create_fileset.return_value = mock_resp
@@ -76,6 +79,20 @@ class TestJobLogsAPI:
         app.dependency_overrides[dep_job_logs_client] = lambda: mock_logs_client
         app.include_router(router)
         return TestClient(app)
+
+    @pytest.mark.parametrize("attempt_query", ["", "?attempt_id=current"])
+    async def test_provisional_job_logs_conflict(
+        self, test_client, dispatcher, mock_logs_client, sample_platform_job_request, attempt_query
+    ):
+        job = await dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+        owner = await dispatcher.store.get_by_id(HelixJob, job.id)
+        owner.status = HelixJobStatus.PROVISIONAL
+        await dispatcher.store.update(owner)
+
+        response = test_client.get(f"/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{job.id}/logs{attempt_query}")
+
+        assert response.status_code == 409
+        mock_logs_client.query_logs.assert_not_called()
 
     async def test_get_job_logs_success(
         self, test_client, dispatcher, mock_logs_client, sample_logs, sample_platform_job_request
@@ -329,3 +346,23 @@ class TestJobLogsAPI:
         assert data["total"] == 3
         assert len(data["data"]) == 3
         mock_logs_client.query_logs.assert_called_once()
+
+    async def test_no_attempt_job_omits_attempt_id_and_conflicts_on_tasks(
+        self, test_client, dispatcher, sample_platform_job_request
+    ):
+        owner = await dispatcher.store.create(
+            HelixJob(
+                name="not-run",
+                workspace=DEFAULT_WORKSPACE,
+                source="test",
+                fileset="outputs",
+                output_location="outputs",
+                status=HelixJobStatus.CREATED,
+                platform_spec=sample_platform_job_request.platform_spec,
+            )
+        )
+        response = test_client.get(f"/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{owner.id}")
+        assert response.status_code == 200
+        assert "attempt_id" not in response.json()
+        response = test_client.get(f"/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{owner.id}/steps/basic/tasks")
+        assert response.status_code == 409

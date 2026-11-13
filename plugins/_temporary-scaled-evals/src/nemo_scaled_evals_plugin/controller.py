@@ -334,7 +334,7 @@ class ScaledEvalsJobsController(NemoController):
                 # Cancelling an ACTIVE Job instead would race a task that has
                 # launched a sandbox but not yet persisted its handle.
                 with suppress(ConflictError):
-                    await self.jobs.cancel_job(workspace=settings.platform_jobs_workspace, name=name)
+                    await self.jobs.cancel_job(workspace=settings.platform_jobs_workspace, name=status.id)
                 continue
             if status.status in _ACTIVE_JOB_STATUSES:
                 # The task observes durable cancellation and performs runtime

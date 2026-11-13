@@ -488,7 +488,12 @@ def test_deleted_job_storage_is_reclaimed_on_every_backend_then_cleared(
             JobStorageTarget(provider="gpu", profile="not-configured"),
         ],
     )
-    system_entities.list.return_value = SimpleNamespace(data=[record])
+    system_entities.list.side_effect = lambda entity_type, **kwargs: SimpleNamespace(
+        data=[record] if entity_type is HelixJobStorageReclaim else []
+    )
+    system_entities.get_by_id.side_effect = lambda entity_type, entity_id: (
+        record if entity_type is HelixJobStorageReclaim else None
+    )
     mock_jobs_client.list_steps.side_effect = lambda **_: paginated_response([])
     backend = reconciler._backend_registry.get_backend(provider="subprocess", profile="default")
 
@@ -496,7 +501,9 @@ def test_deleted_job_storage_is_reclaimed_on_every_backend_then_cleared(
         reconciler.step()
 
     reclaim.assert_called_once_with("team", "train-llama")
-    system_entities.delete_by_id.assert_called_once_with(HelixJobStorageReclaim, record.id)
+    system_entities.delete_by_id.assert_called_once_with(
+        HelixJobStorageReclaim, record.id, expected_db_version=record.db_version
+    )
 
 
 @pytest.mark.parametrize("shared_backend", [False, True])
@@ -540,14 +547,19 @@ def test_reclaim_persists_progress_across_ticks_and_controller_restarts(
         ],
     )
     stored = {record.name: record}
-    system_entities.list.side_effect = lambda *args, **kwargs: SimpleNamespace(data=list(stored.values()))
+    system_entities.list.side_effect = lambda entity_type, **kwargs: SimpleNamespace(
+        data=list(stored.values()) if entity_type is HelixJobStorageReclaim else []
+    )
+    system_entities.get_by_id.side_effect = lambda entity_type, entity_id: (
+        stored[record.name] if entity_type is HelixJobStorageReclaim else None
+    )
 
     def persist(entity):
         stored[entity.name] = entity
         return entity
 
     system_entities.update.side_effect = persist
-    system_entities.delete_by_id.side_effect = lambda *args: stored.clear()
+    system_entities.delete_by_id.side_effect = lambda *args, **kwargs: stored.clear()
 
     for _ in range(3):
         # Read the saved record rather than retaining progress only in controller memory.
@@ -559,7 +571,9 @@ def test_reclaim_persists_progress_across_ticks_and_controller_restarts(
         reconciler = JobReconciler(reconciler._backend_registry, mock_nemo_client, system_entity_client=system_entities)
 
     assert not stored
-    system_entities.delete_by_id.assert_called_once_with(HelixJobStorageReclaim, record.id)
+    system_entities.delete_by_id.assert_called_once_with(
+        HelixJobStorageReclaim, record.id, expected_db_version=record.db_version
+    )
     first.reclaim_persistent_storage.reset_mock()
     second.reclaim_persistent_storage.reset_mock()
     reconciler._reclaim_queued_storage()
@@ -615,14 +629,19 @@ def test_reclaim_drains_kubernetes_cleanup_workloads_for_shared_and_distinct_cla
         targets=[JobStorageTarget(provider=provider, profile="default") for provider in backends],
     )
     stored = {record.name: record}
-    system_entities.list.side_effect = lambda *args, **kwargs: SimpleNamespace(data=list(stored.values()))
+    system_entities.list.side_effect = lambda entity_type, **kwargs: SimpleNamespace(
+        data=list(stored.values()) if entity_type is HelixJobStorageReclaim else []
+    )
+    system_entities.get_by_id.side_effect = lambda entity_type, entity_id: (
+        stored[record.name] if entity_type is HelixJobStorageReclaim else None
+    )
 
     def persist(entity):
         stored[entity.name] = entity
         return entity
 
     system_entities.update.side_effect = persist
-    system_entities.delete_by_id.side_effect = lambda *args: stored.clear()
+    system_entities.delete_by_id.side_effect = lambda *args, **kwargs: stored.clear()
 
     for _ in range(3):
         reconciler._reclaim_queued_storage()
@@ -659,7 +678,12 @@ def test_reclaim_stops_if_completed_target_cannot_be_persisted(backend_registry,
             JobStorageTarget(provider="gpu", profile="default"),
         ],
     )
-    system_entities.list.return_value = SimpleNamespace(data=[record])
+    system_entities.list.side_effect = lambda entity_type, **kwargs: SimpleNamespace(
+        data=[record] if entity_type is HelixJobStorageReclaim else []
+    )
+    system_entities.get_by_id.side_effect = lambda entity_type, entity_id: (
+        record if entity_type is HelixJobStorageReclaim else None
+    )
     system_entities.update.side_effect = EntityConflictError("concurrent update")
     backend = MagicMock()
     reconciler._backend_registry = MagicMock()
@@ -780,7 +804,12 @@ def test_queued_storage_stays_queued_until_it_is_gone(
         job_name="train-llama",
         targets=[JobStorageTarget(provider="subprocess", profile="default")],
     )
-    system_entities.list.return_value = SimpleNamespace(data=[record])
+    system_entities.list.side_effect = lambda entity_type, **kwargs: SimpleNamespace(
+        data=[record] if entity_type is HelixJobStorageReclaim else []
+    )
+    system_entities.get_by_id.side_effect = lambda entity_type, entity_id: (
+        record if entity_type is HelixJobStorageReclaim else None
+    )
     mock_jobs_client.list_steps.side_effect = lambda **_: paginated_response([])
     backend = reconciler._backend_registry.get_backend(provider="subprocess", profile="default")
 
@@ -855,3 +884,312 @@ def test_reconciler_loop_stays_healthy_during_a_slow_retention_scan(
 
     assert scan_seconds > 3 * interval
     assert not unhealthy
+
+
+@pytest.mark.parametrize("borrowed", [False, True])
+def test_provisional_cleanup_keeps_owner_until_files_settle_and_survives_restart(
+    backend_registry, tmp_path, borrowed: bool
+):
+    import time_machine
+    from nemo_helix_plugin.entities.client import EntitiesClient
+    from nemo_helix_plugin.files.client import FilesClient
+    from nemo_helix_plugin.files.types import CreateFilesetRequest
+    from nhx.common.entities import EntityNotFoundError, SyncEntityClient
+    from nhx.core.files.service import FilesService
+    from nhx.core.jobs.app.test_helpers import TestConstants
+    from nhx.core.jobs.entities import HelixJob, HelixJobAttempt, HelixJobStep
+    from nhx.testing import ClientContext, create_test_client
+
+    with create_test_client(FilesService, client_type=ClientContext, tmp_dir=tmp_path) as ctx:
+        store = SyncEntityClient(EntitiesClient.from_client(ctx.client)).as_service("jobs", internal=True)
+        files = FilesClient.from_client(ctx.client)
+        job = store.create(
+            HelixJob(
+                name="recoverable",
+                workspace="default",
+                source="test",
+                platform_spec=TestConstants.PLATFORM_SPEC,
+                fileset="artifacts",
+                output_location="artifacts" if borrowed else None,
+                status=HelixJobStatus.PROVISIONAL,
+            )
+        )
+        allocation = files.create_fileset(workspace="default", body=CreateFilesetRequest(name="artifacts")).data()
+        files.upload_file(workspace="default", name=allocation.name, path="result.txt", content=b"retained-output")
+        job.fileset_id = None if borrowed else allocation.id
+        job = store.update(job)
+        attempt = store.create(
+            HelixJobAttempt(name="initial", workspace="default", job=job.id, platform_spec=job.platform_spec)
+        )
+        store.create(HelixJobStep(name="basic", workspace="default", attempt_id=attempt.id))
+        future = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+        with time_machine.travel(future, tick=False):
+            first = JobReconciler(backend_registry, ctx.client)
+            if not borrowed:
+                with patch.object(
+                    first._files, "delete_fileset_by_id", side_effect=RuntimeError("Files temporarily unavailable")
+                ):
+                    first._cleanup_provisional_jobs()
+                assert store.get_by_id(HelixJob, job.id).status == HelixJobStatus.PROVISIONAL
+                assert (
+                    files.download_file(workspace="default", name=allocation.name, path="result.txt").read()
+                    == b"retained-output"
+                )
+            # A replacement controller discovers ownership from persisted state.
+            replacement = JobReconciler(backend_registry, ctx.client)
+            replacement._cleanup_provisional_jobs()
+        with pytest.raises(EntityNotFoundError):
+            store.get_by_id(HelixJob, job.id)
+        with pytest.raises(EntityNotFoundError):
+            store.get_by_id(HelixJobAttempt, attempt.id)
+        if borrowed:
+            assert (
+                files.download_file(workspace="default", name=allocation.name, path="result.txt").read()
+                == b"retained-output"
+            )
+        else:
+            from nemo_helix_plugin.client.errors import NotFoundError
+
+            with pytest.raises(NotFoundError):
+                files.get_fileset_by_id(workspace="default", fileset_id=allocation.id)
+
+
+def test_late_setup_child_is_cascaded_after_cleanup_fences_owner(backend_registry, tmp_path):
+    import time_machine
+    from nemo_helix_plugin.entities.client import EntitiesClient
+    from nhx.common.entities import EntityNotFoundError, EntityValidationError, SyncEntityClient
+    from nhx.core.jobs.app.test_helpers import TestConstants
+    from nhx.core.jobs.entities import HelixJob, HelixJobAttempt
+    from nhx.testing import ClientContext, create_test_client
+
+    with create_test_client(client_type=ClientContext, tmp_dir=tmp_path) as ctx:
+        store = SyncEntityClient(EntitiesClient.from_client(ctx.client)).as_service("jobs", internal=True)
+        job = store.create(
+            HelixJob(
+                name="late-child",
+                workspace="default",
+                source="test",
+                platform_spec=TestConstants.PLATFORM_SPEC,
+                fileset="borrowed",
+                output_location="borrowed",
+                status=HelixJobStatus.PROVISIONAL,
+            )
+        )
+        cleaner = JobReconciler(backend_registry, ctx.client)
+        settle = cleaner._settle_provisional_storage
+        late_ids: list[str] = []
+
+        def late_insert(owner: HelixJob) -> bool:
+            assert owner.db_version > job.db_version
+            late = store.create(
+                HelixJobAttempt(name="late", workspace="default", job=job.id, platform_spec=job.platform_spec)
+            )
+            late_ids.append(late.id)
+            return settle(owner)
+
+        with time_machine.travel(
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1), tick=False
+        ):
+            with patch.object(cleaner, "_settle_provisional_storage", side_effect=late_insert):
+                cleaner._cleanup_provisional_jobs()
+        assert len(late_ids) == 1
+        with pytest.raises(EntityNotFoundError):
+            store.get_by_id(HelixJobAttempt, late_ids[0])
+        with pytest.raises(EntityValidationError):
+            store.create(
+                HelixJobAttempt(name="after-deletion", workspace="default", job=job.id, platform_spec=job.platform_spec)
+            )
+
+
+@pytest.mark.parametrize("has_attempt", [False, True])
+def test_missing_receipt_never_adopts_editable_fileset_ownership(backend_registry, mock_nemo_client, has_attempt):
+    from nhx.core.jobs.app.test_helpers import TestConstants
+    from nhx.core.jobs.entities import HelixJob
+
+    owner = HelixJob(
+        id="owner",
+        name="owned-name",
+        workspace="default",
+        source="test",
+        fileset="pre-existing",
+        status=HelixJobStatus.PROVISIONAL,
+        current_attempt_id="attempt" if has_attempt else None,
+        platform_spec=TestConstants.PLATFORM_SPEC,
+    )
+    controller = JobReconciler(backend_registry, mock_nemo_client)
+    controller._files = MagicMock()
+    controller._files.get_fileset.return_value = data_response(
+        SimpleNamespace(id="unrelated-allocation", custom_fields={"job_id": owner.id})
+    )
+    if has_attempt:
+        with pytest.raises(RuntimeError, match="ownership"):
+            controller._settle_provisional_artifacts(owner)
+    else:
+        assert controller._settle_provisional_artifacts(owner).fileset_id is None
+    controller._files.get_fileset.assert_not_called()
+    controller._files.delete_fileset_by_id.assert_not_called()
+
+
+def test_reclaim_queue_advances_past_retained_owners(backend_registry, mock_nemo_client):
+    from nhx.core.jobs.app.test_helpers import TestConstants
+    from nhx.core.jobs.entities import HelixJob
+
+    entities = MagicMock()
+    owner = HelixJob(
+        name="retained",
+        workspace="default",
+        source="test",
+        fileset="outputs",
+        status=HelixJobStatus.PROVISIONAL,
+        platform_spec=TestConstants.PLATFORM_SPEC,
+    )
+    records = [
+        HelixJobStorageReclaim(
+            name=f"claim-{i}",
+            workspace="system",
+            job_id=f"job-{i}",
+            job_workspace="default",
+            job_name=f"name-{i}",
+            targets=[],
+        )
+        for i in range(100)
+    ]
+    entities.list.side_effect = [SimpleNamespace(data=records), SimpleNamespace(data=[])]
+    entities.get_by_id.return_value = owner
+    controller = JobReconciler(backend_registry, mock_nemo_client, system_entity_client=entities)
+    controller._reclaim_queued_storage()
+    controller._reclaim_queued_storage()
+    assert [call.kwargs["page"] for call in entities.list.call_args_list] == [1, 2]
+    assert all(call.kwargs["sort"] == "created_at" for call in entities.list.call_args_list)
+    assert controller._reclaim_page == 1
+
+
+@pytest.mark.parametrize("published", [False, True])
+@pytest.mark.parametrize("fail_projection", [False, True])
+def test_abandoned_rerun_recovery_survives_restart_and_fences_late_start(
+    backend_registry,
+    tmp_path,
+    published,
+    fail_projection,
+):
+    import time_machine
+    from nemo_helix_plugin.entities.client import EntitiesClient
+    from nemo_helix_plugin.jobs.client import JobsClient
+    from nhx.common.entities import SyncEntityClient
+    from nhx.core.jobs.app.test_helpers import TestConstants
+    from nhx.core.jobs.entities import HelixJob, HelixJobAttempt, HelixJobStep
+    from nhx.core.jobs.service import JobsService
+    from nhx.testing import ClientContext, create_test_client
+
+    with create_test_client(JobsService, client_type=ClientContext, tmp_dir=tmp_path) as ctx:
+        store = SyncEntityClient(EntitiesClient.from_client(ctx.client)).as_service("jobs", internal=True)
+        job = store.create(
+            HelixJob(
+                name="interrupted-rerun",
+                workspace="default",
+                source="test",
+                platform_spec=TestConstants.PLATFORM_SPEC,
+                fileset="borrowed",
+                output_location="borrowed",
+                status=HelixJobStatus.ERROR,
+            )
+        )
+        original = store.create(
+            HelixJobAttempt(
+                name="original",
+                job=job.id,
+                workspace="default",
+                status=HelixJobStatus.ERROR,
+                platform_spec=job.platform_spec,
+            )
+        )
+        job.current_attempt_id = original.id
+        job = store.update(job)
+        prepared = store.create(
+            HelixJobAttempt(
+                name="prepared",
+                job=job.id,
+                seq=1,
+                workspace="default",
+                platform_spec=job.platform_spec,
+            )
+        )
+        held_job = job.model_copy(deep=True)
+        if published:
+            job.current_attempt_id = prepared.id
+            job.status = HelixJobStatus.CREATED
+            job = store.update(job)
+        jobs = JobsClient(base_url=ctx.client.base_url, http_client=ctx.client._client)
+        controller = JobReconciler(backend_registry, ctx.client)
+        controller._jobs = jobs
+        # Recent requests must be allowed to finish.
+        controller._recover_unstarted_reruns()
+        assert not store.list(HelixJobStep, workspace="default", filter_obj={"attempt_id": prepared.id}).data
+        with time_machine.travel(
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1),
+            tick=False,
+        ):
+            if fail_projection:
+                with patch.object(
+                    controller._jobs, "update_attempt_step_status", side_effect=RuntimeError("store down")
+                ):
+                    controller._recover_unstarted_reruns()
+                assert store.get_by_id(HelixJobAttempt, prepared.id).status == HelixJobStatus.CREATED
+                # The ERROR Step persists even if projecting it onto the Attempt fails.
+                tombstone = store.get(HelixJobStep, "basic", parent=prepared.id, workspace="default")
+                assert tombstone.status_details["task_cleanup_pending"]
+                controller = JobReconciler(backend_registry, ctx.client)
+                controller._jobs = jobs
+                controller.step()
+            else:
+                controller._recover_unstarted_reruns()
+            assert store.get_by_id(HelixJobAttempt, prepared.id).status == HelixJobStatus.ERROR
+            with pytest.raises(EntityConflictError):
+                store.create(HelixJobStep(name="basic", attempt_id=prepared.id, workspace="default"))
+            held_job.current_attempt_id = prepared.id
+            with pytest.raises(EntityConflictError):
+                store.update(held_job)
+            jobs.delete_job(name=job.id, workspace="default")
+
+
+def test_rerun_recovery_cannot_replace_a_concurrently_started_step(backend_registry, tmp_path):
+    import time_machine
+    from nemo_helix_plugin.entities.client import EntitiesClient
+    from nhx.common.entities import SyncEntityClient
+    from nhx.core.jobs.app.test_helpers import TestConstants
+    from nhx.core.jobs.entities import HelixJob, HelixJobAttempt, HelixJobStep
+    from nhx.testing import ClientContext, create_test_client
+
+    with create_test_client(client_type=ClientContext, tmp_dir=tmp_path) as ctx:
+        store = SyncEntityClient(EntitiesClient.from_client(ctx.client)).as_service("jobs", internal=True)
+        job = store.create(
+            HelixJob(
+                name="live-rerun",
+                workspace="default",
+                source="test",
+                platform_spec=TestConstants.PLATFORM_SPEC,
+                fileset="borrowed",
+                status=HelixJobStatus.CREATED,
+            )
+        )
+        attempt = store.create(
+            HelixJobAttempt(
+                name="prepared",
+                job=job.id,
+                seq=1,
+                workspace="default",
+                platform_spec=job.platform_spec,
+            )
+        )
+        controller = JobReconciler(backend_registry, ctx.client, system_entity_client=store)
+        original_create = store.create
+
+        def starter_wins(entity):
+            original_create(HelixJobStep(name=entity.name, attempt_id=attempt.id, workspace="default"))
+            return original_create(entity)
+
+        with time_machine.travel(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)):
+            with patch.object(store, "create", side_effect=starter_wins):
+                controller._recover_unstarted_reruns()
+        assert store.get(HelixJobStep, "basic", parent=attempt.id, workspace="default").status == HelixJobStatus.CREATED
+        assert store.get_by_id(HelixJobAttempt, attempt.id).status == HelixJobStatus.CREATED

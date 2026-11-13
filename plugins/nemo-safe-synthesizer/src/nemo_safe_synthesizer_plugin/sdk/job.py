@@ -56,11 +56,17 @@ class ReportHtml:
 class SafeSynthesizerJob:
     """Convenience wrapper for a Safe Synthesizer platform job."""
 
-    def __init__(self, job_name: str, client: NemoClient, workspace: str = "default"):
+    def __init__(self, job_name: str, client: NemoClient, workspace: str = "default", *, job_id: str | None = None):
         self.job_name = job_name
+        self._job_id = job_id
         self._client = client
         self._workspace = workspace
         self._jobs = JobsClient.from_client(client)
+
+    def _reference(self) -> str:
+        if self._job_id is None:
+            self._job_id = self._jobs.get_job(name=self.job_name, workspace=self._workspace).data().id
+        return self._job_id
 
     def fetch_status(self) -> str:
         """Fetch the current job status."""
@@ -68,7 +74,10 @@ class SafeSynthesizerJob:
 
     def fetch_status_info(self) -> HelixJobStatusResponse:
         """Fetch the current job status response."""
-        return self._jobs.get_job_status(name=self.job_name, workspace=self._workspace).data()
+        status = self._jobs.get_job_status(name=self._job_id or self.job_name, workspace=self._workspace).data()
+        if self._job_id is None:
+            self._job_id = status.id
+        return status
 
     def wait_for_completion(
         self, poll_interval: int = 10, verbose: bool = True, log_timeout: float | None = None
@@ -118,13 +127,13 @@ class SafeSynthesizerJob:
 
     def fetch_summary(self) -> SafeSynthesizerSummary:
         """Fetch the machine-readable job summary."""
-        data = self._jobs.download_job_result(name="summary", job=self.job_name, workspace=self._workspace).read()
+        data = self._jobs.download_job_result(name="summary", job=self._reference(), workspace=self._workspace).read()
         return SafeSynthesizerSummary.model_validate(json.loads(data.decode("utf-8")))
 
     def fetch_report(self) -> ReportHtml:
         """Fetch the evaluation report as HTML."""
         data = self._jobs.download_job_result(
-            name="evaluation-report", job=self.job_name, workspace=self._workspace
+            name="evaluation-report", job=self._reference(), workspace=self._workspace
         ).read()
         return ReportHtml(html=data.decode("utf-8"))
 
@@ -139,7 +148,7 @@ class SafeSynthesizerJob:
     def fetch_data(self) -> pd.DataFrame:
         """Fetch generated synthetic data as a pandas DataFrame."""
         data = self._jobs.download_job_result(
-            name="synthetic-data", job=self.job_name, workspace=self._workspace
+            name="synthetic-data", job=self._reference(), workspace=self._workspace
         ).read()
         return pd.read_csv(BytesIO(data))
 
@@ -158,7 +167,7 @@ class SafeSynthesizerJob:
                 logs_query["page_cursor"] = current_cursor
             page = (
                 self._jobs.with_options(timeout=timeout)
-                .list_job_logs(name=self.job_name, workspace=self._workspace, query_params=logs_query)
+                .list_job_logs(name=self._reference(), workspace=self._workspace, query_params=logs_query)
                 .page()
             )
 
@@ -176,7 +185,7 @@ class SafeSynthesizerJob:
         timeout = 300.0 if timeout is None else timeout
         yield from (
             self._jobs.with_options(timeout=timeout)
-            .list_job_logs(name=self.job_name, workspace=self._workspace)
+            .list_job_logs(name=self._reference(), workspace=self._workspace)
             .items()
         )
 

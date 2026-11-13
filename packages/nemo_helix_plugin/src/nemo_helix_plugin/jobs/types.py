@@ -270,7 +270,7 @@ class HelixJobResponse(BaseModel):
     """Response model for a platform job."""
 
     id: str
-    attempt_id: str
+    attempt_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     name: str
     workspace: str = Field(..., description="Workspace identifier")
     project: Optional[str] = Field(default=None, description="Project URN")
@@ -282,7 +282,7 @@ class HelixJobResponse(BaseModel):
         default_factory=JobControl,
         description="Mutable job behavior. This is not part of the execution spec.",
     )
-    fileset: str = Field(..., description="Fileset ID for storing job artifacts")
+    fileset: str = Field(..., description="Fileset name for storing job artifacts")
     output_location: Optional[str] = Field(
         default=None, description="Caller-supplied artifact fileset; None when the fileset was auto-created"
     )

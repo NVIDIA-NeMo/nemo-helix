@@ -43,6 +43,11 @@ class JobsStorageConfig(BaseModel):
         description="How long storage is kept after a job fails, measured from the failed step's stopped_at. "
         "0 reclaims on the next retention pass.",
     )
+    creation_timeout_seconds: int = Field(
+        default=900,
+        ge=1,
+        description="Grace before the controller fences and cleans a PROVISIONAL Job.",
+    )
     retention_interval_seconds: int = Field(
         default=300,
         ge=1,

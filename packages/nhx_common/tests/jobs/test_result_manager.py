@@ -41,7 +41,7 @@ def test_result_remote_path_nests_under_base():
     """_result_remote_path prepends the per-job base only when one is supplied."""
     sdk = _sync_client()
     mgr = rm.ResultManager(
-        job_name="my-job",
+        job_id="my-job",
         workspace="ws",
         attempt_id="att-1",
         fileset_name="test-fileset",
@@ -65,7 +65,7 @@ def test_create_result_nests_under_the_job_base_path(tmp_path, mock_sync_file_ma
         mock_jobs = MagicMock(spec=JobsClient)
         mock_jobs.create_job_result.return_value = _resp(MagicMock())
         mgr = rm.ResultManager(
-            job_name="test-job",
+            job_id="test-job",
             workspace="test-ws",
             attempt_id="att-1",
             fileset_name="test-fileset",
@@ -74,7 +74,7 @@ def test_create_result_nests_under_the_job_base_path(tmp_path, mock_sync_file_ma
             jobs_client=mock_jobs,
         )
         with (
-            patch.object(mgr, "_create_file_manager", return_value=mock_sync_file_manager),
+            patch.object(type(mgr), "_create_file_manager", return_value=mock_sync_file_manager),
         ):
             mgr.create_result("summary", test_file)
         assert mock_sync_file_manager.upload.call_args.kwargs["remote_path"] == expected
@@ -94,7 +94,7 @@ def test_create_result_returns_existing_on_conflict_sync(tmp_path, mock_sync_fil
 
     sdk = _sync_client()
     mgr = rm.ResultManager(
-        job_name="test-job",
+        job_id="test-job",
         workspace="test-ws",
         attempt_id="att-123",
         fileset_name="test-fileset",
@@ -102,7 +102,7 @@ def test_create_result_returns_existing_on_conflict_sync(tmp_path, mock_sync_fil
         jobs_client=mock_jobs,
     )
 
-    with patch.object(mgr, "_create_file_manager", return_value=mock_sync_file_manager):
+    with patch.object(type(mgr), "_create_file_manager", return_value=mock_sync_file_manager):
         result = mgr.create_result("my-result", test_file)
 
     mock_jobs.get_job_result.assert_called_once_with(name="my-result", job="test-job", workspace="test-ws")
@@ -119,7 +119,7 @@ def test_create_result_wraps_transport_errors_sync(tmp_path, mock_sync_file_mana
     )
     sdk = _sync_client()
     mgr = rm.ResultManager(
-        job_name="test-job",
+        job_id="test-job",
         workspace="test-ws",
         attempt_id="att-123",
         fileset_name="test-fileset",
@@ -128,7 +128,7 @@ def test_create_result_wraps_transport_errors_sync(tmp_path, mock_sync_file_mana
     )
 
     with (
-        patch.object(mgr, "_create_file_manager", return_value=mock_sync_file_manager),
+        patch.object(type(mgr), "_create_file_manager", return_value=mock_sync_file_manager),
         pytest.raises(CreateJobResultError, match="Error creating job result"),
     ):
         mgr.create_result("my-result", test_file)
@@ -149,7 +149,7 @@ async def test_create_result_returns_existing_on_conflict_async(tmp_path, mock_a
 
     sdk = _async_client()
     mgr = rm.AsyncResultManager(
-        job_name="test-job",
+        job_id="test-job",
         workspace="test-ws",
         attempt_id="att-123",
         fileset_name="test-fileset",
@@ -157,7 +157,7 @@ async def test_create_result_returns_existing_on_conflict_async(tmp_path, mock_a
         jobs_client=mock_jobs,
     )
 
-    with patch.object(mgr, "_create_file_manager", return_value=mock_async_file_manager):
+    with patch.object(type(mgr), "_create_file_manager", return_value=mock_async_file_manager):
         result = await mgr.create_result("my-result", test_file)
 
     mock_jobs.get_job_result.assert_awaited_once_with(name="my-result", job="test-job", workspace="test-ws")
@@ -175,7 +175,7 @@ async def test_create_result_wraps_transport_errors_async(tmp_path, mock_async_f
     )
     sdk = _async_client()
     mgr = rm.AsyncResultManager(
-        job_name="test-job",
+        job_id="test-job",
         workspace="test-ws",
         attempt_id="att-123",
         fileset_name="test-fileset",
@@ -184,7 +184,7 @@ async def test_create_result_wraps_transport_errors_async(tmp_path, mock_async_f
     )
 
     with (
-        patch.object(mgr, "_create_file_manager", return_value=mock_async_file_manager),
+        patch.object(type(mgr), "_create_file_manager", return_value=mock_async_file_manager),
         pytest.raises(CreateJobResultError, match="Error creating job result"),
     ):
         await mgr.create_result("my-result", test_file)

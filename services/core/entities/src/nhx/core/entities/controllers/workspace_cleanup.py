@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
@@ -364,25 +364,27 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
             cleanup_errors: list[tuple[str, Exception]] = []
             for job in jobs:
                 try:
-                    if not _job_status_is_terminal(job.status):
-                        cancel_succeeded = False
-                        try:
+                    if job.status != HelixJobStatus.PROVISIONAL:
+                        if not _job_status_is_terminal(job.status) and job.attempt_id is not None:
                             logger.info(f"Cancelling job: {job.name}")
-                            await jobs_client.cancel_job(
-                                name=job.name,
-                                workspace=workspace.name,
-                            )
-                            cancel_succeeded = True
-                        except Exception as e:
-                            logger.warning(f"Failed to cancel job {job.name}: {e}")
-                        if cancel_succeeded:
-                            await self._wait_for_terminal_job(jobs_client, workspace.name, job.name)
-
-                    logger.info(f"Deleting job: {job.name}")
-                    await jobs_client.delete_job(
-                        name=job.name,
-                        workspace=workspace.name,
-                    )
+                            try:
+                                await jobs_client.cancel_job(name=job.id, workspace=workspace.name)
+                            except NemoClientError:
+                                logger.warning(
+                                    "Cancellation failed; deletion must still pass Jobs lifecycle checks",
+                                    extra={"job": job.id},
+                                )
+                            else:
+                                await self._wait_for_terminal_job(jobs_client, workspace.name, job.id)
+                        logger.info(f"Requesting deletion of job: {job.name}")
+                        try:
+                            await jobs_client.delete_job(name=job.id, workspace=workspace.name)
+                        except NemoClientError:
+                            # A lost response can follow a committed deletion request.
+                            current = (await jobs_client.get_job(name=job.id, workspace=workspace.name)).data()
+                            if current.status != HelixJobStatus.PROVISIONAL:
+                                raise
+                    await self._wait_for_job_absence(jobs_client, workspace.name, job.id)
                 except NotFoundError:
                     logger.info(f"Job already deleted: {job.name}")
                 except Exception as e:
@@ -419,6 +421,19 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
                     f"Timed out waiting for job {job_name} in workspace {workspace} to reach a terminal status; "
                     f"last status was {last_status}"
                 )
+            self.emit_heartbeat()
+            await async_sleep(_JOB_TERMINAL_WAIT_POLL_SECONDS)
+
+    async def _wait_for_job_absence(self, jobs_client: AsyncJobsClient, workspace: str, job_id: str) -> None:
+        """DELETE acknowledges acceptance; Files/workspace cleanup waits for removal."""
+        deadline = asyncio.get_running_loop().time() + _JOB_TERMINAL_WAIT_TIMEOUT_SECONDS
+        while True:
+            try:
+                await jobs_client.get_job(name=job_id, workspace=workspace)
+            except NotFoundError:
+                return
+            if asyncio.get_running_loop().time() >= deadline:
+                raise TimeoutError(f"Timed out waiting for Job {job_id} cleanup in workspace {workspace}")
             self.emit_heartbeat()
             await async_sleep(_JOB_TERMINAL_WAIT_POLL_SECONDS)
 

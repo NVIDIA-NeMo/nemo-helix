@@ -81,6 +81,7 @@ def _make_jobs_client(jobs: list | None = None) -> MagicMock:
     jobs_client.list_jobs = AsyncMock(return_value=_MockAsyncPaginatedResponse(jobs or []))
     jobs_client.cancel_job = AsyncMock()
     jobs_client.delete_job = AsyncMock()
+    jobs_client.get_job = AsyncMock(side_effect=_not_found())
     jobs_client.get_job_status = AsyncMock(return_value=_make_response(_make_job_status("cancelled")))
     return jobs_client
 
@@ -137,6 +138,8 @@ def _patch_clients(jobs_client: MagicMock, files_client: MagicMock, models_clien
 def _make_job(name: str, status: str = "completed") -> MagicMock:
     job = MagicMock()
     job.name = name
+    job.id = f"job-id-{name}"
+    job.attempt_id = "attempt-original"
     job.status = status
     return job
 
@@ -871,6 +874,7 @@ class TestWorkspaceCleanupJobs:
         workspace = _make_workspace()
         running_job = MagicMock()
         running_job.name = "running-job"
+        running_job.id = "job-id-running-job"
         running_job.status = "active"
 
         jobs_client = _make_jobs_client([running_job])
@@ -880,11 +884,11 @@ class TestWorkspaceCleanupJobs:
             await controller._cleanup_jobs(workspace)
 
         jobs_client.cancel_job.assert_awaited_once_with(
-            name="running-job",
+            name="job-id-running-job",
             workspace="test-workspace",
         )
         jobs_client.delete_job.assert_awaited_once_with(
-            name="running-job",
+            name="job-id-running-job",
             workspace="test-workspace",
         )
 
@@ -938,7 +942,7 @@ class TestWorkspaceCleanupJobs:
             with pytest.raises(WorkspaceJobCleanupError):
                 await controller._cleanup_jobs(workspace)
 
-        jobs_client.cancel_job.assert_awaited_once_with(name="still-running-job", workspace="test-workspace")
+        jobs_client.cancel_job.assert_awaited_once_with(name="job-id-still-running-job", workspace="test-workspace")
         jobs_client.delete_job.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -1162,8 +1166,8 @@ class TestJobCancellationBranches:
         with _patch_jobs_client(jobs_client):
             await controller._cleanup_jobs(workspace)
 
-        jobs_client.cancel_job.assert_awaited_once_with(name="pending-job", workspace="test-workspace")
-        jobs_client.delete_job.assert_awaited_once_with(name="pending-job", workspace="test-workspace")
+        jobs_client.cancel_job.assert_awaited_once_with(name="job-id-pending-job", workspace="test-workspace")
+        jobs_client.delete_job.assert_awaited_once_with(name="job-id-pending-job", workspace="test-workspace")
 
     @pytest.mark.asyncio
     async def test_cancels_created_jobs(self):
@@ -1203,10 +1207,11 @@ class TestJobCancellationBranches:
 
         controller = _make_controller()
         with _patch_jobs_client(jobs_client):
-            await controller._cleanup_jobs(workspace)
+            with pytest.raises(WorkspaceJobCleanupError, match="cancel failed"):
+                await controller._cleanup_jobs(workspace)
 
         jobs_client.cancel_job.assert_awaited_once()
-        jobs_client.delete_job.assert_awaited_once_with(name="flaky-job", workspace="test-workspace")
+        jobs_client.delete_job.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_mixed_statuses(self):
@@ -1223,5 +1228,31 @@ class TestJobCancellationBranches:
             await controller._cleanup_jobs(workspace)
 
         cancel_calls = [c.kwargs["name"] for c in jobs_client.cancel_job.call_args_list]
-        assert set(cancel_calls) == {"active-job", "pending-job"}
+        assert set(cancel_calls) == {"job-id-active-job", "job-id-pending-job"}
         assert jobs_client.delete_job.await_count == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,has_attempt", [("completed", True), ("created", False), ("provisional", False)])
+async def test_job_cleanup_waits_for_actual_absence_and_keeps_the_workspace_on_timeout(
+    monkeypatch: pytest.MonkeyPatch, status: str, has_attempt: bool
+):
+    from nhx.core.entities.controllers import workspace_cleanup as module
+
+    monkeypatch.setattr(module, "_JOB_TERMINAL_WAIT_TIMEOUT_SECONDS", 0)
+    job = _make_job("same-name", status=status)
+    job.attempt_id = "attempt-original" if has_attempt else None
+    jobs = _make_jobs_client([job])
+    jobs.get_job.side_effect = None
+    jobs.get_job.return_value = _make_response(_make_job("same-name", status="provisional"))
+    controller = _make_controller()
+    with _patch_jobs_client(jobs):
+        with pytest.raises(WorkspaceJobCleanupError, match="Timed out waiting"):
+            await controller._cleanup_jobs(_make_workspace())
+    jobs.cancel_job.assert_not_awaited()
+    assert jobs.delete_job.await_count == (0 if status == "provisional" else 1)
+    jobs.get_job.assert_awaited_once_with(name=job.id, workspace="test-workspace")
+    # A restart observes the remaining owner; absence is the completion signal.
+    jobs.get_job.side_effect = _not_found()
+    with _patch_jobs_client(jobs):
+        await controller._cleanup_jobs(_make_workspace())

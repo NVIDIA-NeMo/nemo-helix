@@ -17635,8 +17635,8 @@ components:
           type: string
           title: Id
         attempt_id:
-          type: string
           title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -17668,7 +17668,7 @@ components:
         fileset:
           type: string
           title: Fileset
-          description: Fileset ID for storing job artifacts
+          description: Fileset name for storing job artifacts
         output_location:
           title: Output Location
           description: Caller-supplied artifact fileset; None when the fileset was
@@ -17705,7 +17705,6 @@ components:
       type: object
       required:
       - id
-      - attempt_id
       - name
       - workspace
       - source
@@ -17857,6 +17856,7 @@ components:
     HelixJobStatus:
       type: string
       enum:
+      - provisional
       - created
       - queued
       - pending

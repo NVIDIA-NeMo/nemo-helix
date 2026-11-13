@@ -13,10 +13,12 @@ collection writes, so no job compiles or runs.
 """
 
 from collections.abc import Generator
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import data_designer.config as dd
 import pytest
+import time_machine
 from fastapi.testclient import TestClient
 from nemo_data_designer_plugin.jobs.retrieval_spec import (
     RetrievalGenerateJobConfig,
@@ -36,6 +38,8 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nhx.core.files.service import FilesService
+from nhx.core.jobs.controllers.backends.registry import BackendRegistry
+from nhx.core.jobs.controllers.reconciler import JobReconciler
 from nhx.core.jobs.service import JobsService
 from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 from nhx.testing import ClientContext, create_test_client
@@ -183,4 +187,7 @@ def test_retrieval_job_stored_before_split_breaks_create_list_until_deleted(ctx:
     core_jobs.cancel_job(name="legacy-generate-job", workspace=WORKSPACE)
     core_jobs.delete_job(name="legacy-generate-job", workspace=WORKSPACE)
 
+    # DELETE accepts cleanup; the existing reconciler must remove the Job first.
+    with time_machine.travel(datetime.now(timezone.utc) + timedelta(hours=1), tick=False):
+        JobReconciler(BackendRegistry({}), ctx.client)._cleanup_provisional_jobs()
     assert _list_names(ctx.test_client, "create") == {"create-job"}

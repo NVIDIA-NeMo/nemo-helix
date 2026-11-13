@@ -10,7 +10,9 @@ from collections.abc import Iterable, Iterator
 from typing import cast
 
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError
+from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError, NemoTransportError
+from nemo_helix_plugin.client.retry import is_retryable
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import (
     HelixJobStatusUpdateRequest,
@@ -399,6 +401,18 @@ class JobScheduler(HeartbeatMixin, Controller):
 
     def schedule_step(self, step: HelixJobStepWithContext) -> JobUpdate:
         """Hand the step to its provider/profile backend and return the resulting status update."""
+        try:
+            job = self._jobs.get_job(name=step.job_id or step.job, workspace=step.workspace).data()
+        except NemoTransportError as exc:
+            if is_retryable(self._nemo_client.retry or RetryPolicy(), exc.error):
+                raise SchedulingDeferred("Job lookup temporarily unavailable") from exc
+            raise
+        except NemoHTTPError as exc:
+            if is_retryable(self._nemo_client.retry or RetryPolicy(), exc.http_response):
+                raise SchedulingDeferred("Job lookup temporarily unavailable") from exc
+            raise
+        if job.status == HelixJobStatus.PROVISIONAL:
+            raise SchedulingDeferred("Job creation or deletion is pending")
         provider, profile = extract_provider_profile(step)
         backend = self._backend_registry.get_backend(profile=profile, provider=provider)
         self._step_scheduled_total.add(1, attributes={"provider": provider, "profile": profile})

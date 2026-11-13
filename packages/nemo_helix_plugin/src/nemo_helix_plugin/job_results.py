@@ -67,7 +67,7 @@ class _ResultManager(Protocol):
 
 
 def result_manager_factory(
-    job_name: str,
+    job_id: str,
     *,
     attempt_id: str,
     files_client: FilesClient,
@@ -79,7 +79,7 @@ def result_manager_factory(
     from nemo_helix_plugin.jobs.result_manager import result_manager_factory as create_result_manager
 
     return create_result_manager(
-        job_name=job_name,
+        job_id=job_id,
         attempt_id=attempt_id,
         workspace=workspace,
         files_client=files_client,
@@ -261,7 +261,7 @@ class HelixJobResults(JobResults):
         artifact_base_path: str | None,
     ) -> None:
         self._manager = result_manager_factory(
-            job_name=job_name,
+            job_id=job_name,
             workspace=workspace,
             attempt_id=attempt_id,
             files_client=FilesClient.from_client(client),
