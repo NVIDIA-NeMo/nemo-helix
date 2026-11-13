@@ -15,6 +15,14 @@ const FilesetNewRoute = lazy(() =>
 const FilesetListRoute = lazy(() =>
   import('@studio/routes/FilesetListRoute').then((module) => ({ default: module.FilesetListRoute }))
 );
+const DatasetListRoute = lazy(() =>
+  import('@studio/routes/DatasetListRoute').then((module) => ({ default: module.DatasetListRoute }))
+);
+const DatasetDetailRoute = lazy(() =>
+  import('@studio/routes/DatasetDetailRoute').then((module) => ({
+    default: module.DatasetDetailRoute,
+  }))
+);
 const FilesetDetailRoute = lazy(() =>
   import('@studio/routes/FilesetDetailRoute').then((module) => ({
     default: module.FilesetDetailRoute,
@@ -27,6 +35,22 @@ const FilesetDetailTabContent = lazy(() =>
 );
 
 export const filesetRoutes: RouteObject[] = [
+  {
+    path: ROUTES.workspace.datasets,
+    element: <DatasetListRoute />,
+    errorElement: <RouteErrorPanel title="Datasets" />,
+  },
+  {
+    path: ROUTES.workspace.datasetDetail,
+    element: <DatasetDetailRoute />,
+    errorElement: <RouteErrorPanel title="Dataset" />,
+    children: [
+      {
+        path: ROUTES.workspace.datasetDetailTab,
+        element: <FilesetDetailTabContent />,
+      },
+    ],
+  },
   {
     path: ROUTES.workspace.filesets,
     element: <FilesetListRoute />,

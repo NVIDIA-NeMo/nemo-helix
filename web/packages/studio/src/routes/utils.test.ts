@@ -11,6 +11,7 @@ import {
   getEvaluationMetricsRunRoute,
   getEvaluationNewRoute,
   getEvaluationSessionDetailRoute,
+  getDatasetDetailRoute,
   getFilesetDetailRoute,
   getFilesetRoute,
   getIntakeSessionRoute,
@@ -19,6 +20,7 @@ import {
   getWorkspaceBaseModelsRoute,
   getWorkspaceInferenceProvidersRoute,
   getModelDetailRoute,
+  getNewFilesetRoute,
 } from '@studio/routes/utils';
 
 describe('Evaluation route helpers', () => {
@@ -200,6 +202,15 @@ describe('intake session detail routes', () => {
   });
 });
 
+describe('getNewFilesetRoute', () => {
+  it('uses a segment no fileset name can take, so a fileset named "new" stays reachable', () => {
+    expect(getNewFilesetRoute('my-workspace')).toBe('/workspaces/my-workspace/filesets/~new');
+    expect(getFilesetDetailRoute('my-workspace', 'new')).toBe(
+      '/workspaces/my-workspace/filesets/new'
+    );
+  });
+});
+
 describe('getFilesetDetailRoute', () => {
   // Callers must pass raw values: the helper encodes the path param via generatePath and
   // query params via URLSearchParams. Pre-encoding would double-encode.
@@ -225,6 +236,17 @@ describe('getFilesetDetailRoute', () => {
   it('respects an explicit tab', () => {
     expect(getFilesetDetailRoute('my-workspace', 'set', { tab: FilesetDetailTab.Card })).toBe(
       '/workspaces/my-workspace/filesets/set/card'
+    );
+  });
+});
+
+describe('getDatasetDetailRoute', () => {
+  it('builds the detail page under /datasets with the same query options', () => {
+    expect(getDatasetDetailRoute('my-workspace', '100% coverage')).toBe(
+      '/workspaces/my-workspace/datasets/100%25%20coverage'
+    );
+    expect(getDatasetDetailRoute('my-workspace', 'set', { folder: 'nested' })).toBe(
+      '/workspaces/my-workspace/datasets/set/files?filesetFolder=nested'
     );
   });
 });
