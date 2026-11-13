@@ -50,10 +50,11 @@ cookbook's headline score. The report script then combines the jobs into the coo
 
 ## Run it
 
-The commands run from this directory and assume the `default` workspace. `$DATA` is the directory
-`import_finance.py` writes; if you haven't run it yet:
+The commands run from this directory and assume the `default` workspace. Set `DATA` to the directory
+`import_finance.py` writes, or already wrote, then run the import if you haven't yet:
 
 ```bash
+export DATA=/tmp/finance
 uv run --no-project --with datasets --with pillow --with pymupdf --with huggingface_hub \
   ../../../nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_finance.py --output "$DATA"
 ```
