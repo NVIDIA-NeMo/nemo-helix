@@ -54,7 +54,7 @@ const detailOf = (error: unknown): string | undefined => {
   return candidate;
 };
 
-const describeFailure = (error: unknown): string => {
+export const describeFailure = (error: unknown): string => {
   const status = statusOf(error);
   const detail = detailOf(error);
   if (status) return `The live test failed (${status}).${detail ? ` ${detail}` : ''}`;
