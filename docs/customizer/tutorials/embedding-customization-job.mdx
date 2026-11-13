@@ -636,6 +636,8 @@ print("dim", len(resp_body["data"][0]["embedding"]))
 
 `retrieve-eval` embeds the corpus with each model, ranks the queries, and reports nDCG@k, Recall@k, Precision@k, and MAP@k for the target and the baseline. Pass the same artifacts fileset every run.
 
+`retrieve-eval` puts `query: ` before each query and `passage: ` before each passage, the same prefixes this recipe trains with. If you train with other `training.retrieval.query_prefix` or `passage_prefix` values, pass the target as an object with the same prefixes for the best scores, for example `"target": {"embeddings": "default/nemotron-3-embed-1b-tuned", "query_prefix": "...", "passage_prefix": "..."}`.
+
 Equivalent CLI:
 
 ```bash
@@ -737,6 +739,7 @@ Learning rate is the most sensitive parameter, followed by epochs, warmup, and b
 | GPUs                           | `parallelism.num_gpus_per_node`                                                                           | `4`, tensor parallel `1`                   |
 | Sequence length                | `training.max_seq_length`, `training.retrieval.query_max_length`, `training.retrieval.passage_max_length` | `512`                                      |
 | Passages per query             | `training.retrieval.train_n_passages`                                                                     | `5`, one positive and four mined negatives |
+| Pooling                        | `training.retrieval.pooling`, `training.retrieval.normalize`                                              | Unset: the base's own, mean with normalization |
 
 Batch size sets how many gradient steps an epoch takes rather than how many negatives each query sees, so smaller datasets benefit from a smaller global batch. When you scale data, adding documents helps more than generating more queries per document: new documents bring new vocabulary and retrieval patterns, while extra queries cover the same passage from another angle.
 

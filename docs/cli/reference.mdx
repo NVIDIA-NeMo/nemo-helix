@@ -10463,13 +10463,13 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--training.retrieval.eval-negative-size <INTEGER>`: Override `training.retrieval.eval_negative_size` in the spec.
 * `--training.retrieval.do-gradient-checkpointing`: Override `training.retrieval.do_gradient_checkpointing` in the spec.
 * `--training.retrieval.do-distributed-inbatch-negative`: Score each query against every passage in the global batch rather than only its own train_n_passages. Ignored for cross_encoder.
+* `--training.retrieval.normalize`: Scale bi_encoder embeddings to unit length, so a dot product equals cosine similarity. Omit to keep the base checkpoint's choice: normalize unless its Sentence Transformers files leave out Normalize. Ignored for cross_encoder.
 * `--training.retrieval.query-max-length <INTEGER>`: Override `training.retrieval.query_max_length` in the spec.
 * `--training.retrieval.passage-max-length <INTEGER>`: Override `training.retrieval.passage_max_length` in the spec.
 * `--training.retrieval.query-prefix`: Literal prefix prepended to each query. Empty string disables prefixing.
 * `--training.retrieval.passage-prefix`: Literal prefix prepended to each passage. Empty string disables prefixing.
 * `--training.retrieval.temperature <FLOAT>`: Softmax temperature of the training loss: contrastive for bi_encoder, listwise for cross_encoder. Omit for 0.02 (bi_encoder) or 1.0 (cross_encoder). A Qwen3 causal reranker scores with raw yes/no logits, so this is its only temperature setting.
 * `--training.retrieval.export.opset <INTEGER>`: Override `training.retrieval.export.opset` in the spec.
-* `--training.retrieval.export.normalize`: L2-normalize embeddings. Ignored for cross_encoder.
 * `--training.retrieval.export.dimensions`: Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.
 * `--training.activation-checkpointing`: Recompute intermediate activations in the backward pass instead of storing them. Substantially lowers memory use for a modest slowdown, and is commonly enabled when training large MoE models.
 * `--training.mtp.num-nextn-predict-layers <INTEGER>`: How many tokens ahead to predict. Omit to keep the checkpoint's own value.
@@ -10539,7 +10539,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 
 Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `training.backend.attn`, `training.backend.linear`, `training.backend.rms_norm`, `training.backend.rope`, `training.backend.experts`, `training.backend.dispatcher`, `training.tokenizer_backend`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `parallelism.pipeline.round_virtual_stages_to_pp_multiple`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.pooling`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.backend.attn`, `training.backend.linear`, `training.backend.rms_norm`, `training.backend.rope`, `training.backend.experts`, `training.backend.dispatcher`, `training.tokenizer_backend`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `parallelism.pipeline.round_virtual_stages_to_pp_multiple`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**

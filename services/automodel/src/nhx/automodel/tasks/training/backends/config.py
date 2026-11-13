@@ -17,7 +17,7 @@ from typing import Any
 
 from nemo_automodel._transformers.registry import ModelRegistry
 from nhx.automodel.app.constants import PAUSE_SENTINEL_FILE_NAME, PAUSE_SIGNAL
-from nhx.automodel.tasks.training.backends.checkpoints import auto_torch_dtype
+from nhx.automodel.tasks.training.backends.checkpoints import auto_torch_dtype, embedding_pooling
 from nhx.automodel.tasks.training.backends.registry import (
     causal_reranker_class,
     causal_reranker_collator,
@@ -196,7 +196,8 @@ def _compile_retrieval_config(
         }
     )
     if is_bi_encoder:
-        cfg["model"]["l2_normalize"] = True
+        # The job's pooling, else the base's own. Sent explicitly so the compiled config shows it.
+        cfg["model"]["pooling"], cfg["model"]["l2_normalize"] = embedding_pooling(customizer_config)
         cfg["model"]["do_distributed_inbatch_negative"] = retrieval_config.do_distributed_inbatch_negative
     else:
         cfg["model"]["num_labels"] = 1

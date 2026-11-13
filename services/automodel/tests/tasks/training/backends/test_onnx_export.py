@@ -151,6 +151,7 @@ class TestEmbeddingExport:
             tokenizer_path=str(embedding_checkpoint),
             model_type=ModelType.EMBEDDING,
             cfg=_parity_config(),
+            pooling="avg",
             trust_remote_code=False,
             load_trust_remote_code=False,
         )
@@ -192,7 +193,8 @@ class TestEmbeddingExport:
             output_path=out,
             tokenizer_path=str(embedding_checkpoint),
             model_type=ModelType.EMBEDDING,
-            cfg=_parity_config(pooling=pooling),
+            cfg=_parity_config(),
+            pooling=pooling,
             trust_remote_code=False,
             load_trust_remote_code=False,
         )
@@ -219,6 +221,7 @@ class TestEmbeddingExport:
             tokenizer_path=str(embedding_checkpoint),
             model_type=ModelType.EMBEDDING,
             cfg=_parity_config(dimensions=True),
+            pooling="avg",
             trust_remote_code=False,
             load_trust_remote_code=False,
         )
