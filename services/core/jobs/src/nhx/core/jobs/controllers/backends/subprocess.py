@@ -75,6 +75,9 @@ SUBPROCESS_INHERITED_ENV_ALLOWLIST = frozenset(
         "VIRTUAL_ENV",
         # A path on the build host, so operator-set like the rest of this list.
         "NEMO_AGENTS_WHEEL",
+        # The documented platform opt-out. Without it, jobs such as Data Designer fall back to
+        # telemetry on even when the operator has turned it off.
+        "NEMO_TELEMETRY_ENABLED",
     }
 )
 
