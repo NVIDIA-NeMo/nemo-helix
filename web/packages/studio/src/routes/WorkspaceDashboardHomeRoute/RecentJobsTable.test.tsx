@@ -3,11 +3,8 @@
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
-import {
-  type HelixJobResponse,
-  type HelixJobResponsesPage,
-  HelixJobStatus,
-} from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobResponse, HelixJobResponsesPage } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { DEFAULT_QUERY_RETRY_COUNT } from '@studio/api/queryClient';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
@@ -114,7 +111,11 @@ describe('RecentJobsTable', () => {
       http.get(JOBS_URL, () =>
         HttpResponse.json(
           makeJobsPage([
-            makeJob({ name: 'dd-run', source: 'data-designer', status: HelixJobStatus.active }),
+            makeJob({
+              name: 'dd-run',
+              source: 'nemo-data-designer-plugin',
+              status: HelixJobStatus.active,
+            }),
             makeJob({ id: 'job-id-2', name: 'eval-run', status: HelixJobStatus.completed }),
           ])
         )

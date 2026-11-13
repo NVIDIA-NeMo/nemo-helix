@@ -3,9 +3,11 @@
 import * as React$1 from "react";
 import react__default, { AriaAttributes, CSSProperties, ChangeEvent, ComponentProps, ComponentPropsWithRef, ComponentPropsWithoutRef, ComponentType, ElementType, FC, ForwardRefExoticComponent, JSX as JSX$1, JSXElementConstructor, MouseEventHandler, PropsWithChildren, ReactElement, ReactNode, RefAttributes, RefObject, SVGProps } from "react";
 import { ThreadMessageLike, ThreadPrimitive, ToolCallMessagePartComponent } from "@assistant-ui/react";
-import { HelixJobLog, HelixJobStatus, PromptData } from "@nemo/sdk/generated/platform/schema";
+import { HelixJobLog, HelixJobStatus, InferenceParams, ModelEntity, ModelEntityFilter, ModelEntitysPage, ModelsListModelsParams, PromptData } from "@nemo/sdk/generated/platform/schema";
 import { Agent } from "@nemo/sdk/generated/agents/schema";
 import { VariantProps } from "class-variance-authority";
+import { ModelEntitySortField } from "@nemo/sdk/generated/platform/schema/ModelEntitySortField";
+import { HelixJobStatus as HelixJobStatus$1 } from "@nemo/sdk/generated/platform/schema/HelixJobStatus";
 //#endregion
 //#region src/components/AccessibleTitle/index.d.ts
 interface AccessibleTitleProps {
@@ -692,8 +694,8 @@ interface AssistantChatProps {
   onError?: (error: Error) => void;
   /**
    * Explains a failed reply. Called with the raw error message; a returned title and hint become
-   * the message body, while the raw error stays in the error banner and is what "Copy error"
-   * copies. Omit it (or return `undefined`) to show the generic line above the raw error.
+   * the error banner's message, while the raw error sits behind the "Show details" row below it.
+   * Omit it (or return `undefined`) to show the generic line instead.
    */
   describeError?: DescribeChatError;
   /**
@@ -4093,6 +4095,298 @@ interface PaginationRootProps extends PrimitivePropsWithRef<"div"> {
    */
   action?: PaginationAction;
 }
+interface SliderInputProps extends Omit<ComponentPropsWithoutRef<"input">, "type"> {}
+/**
+ * The native `<input type="range">` that owns the slider's value, focus, and keyboard interaction.
+ * @param props - {@link SliderInputProps}
+ */
+declare const SliderInput: React$1.ForwardRefExoticComponent<SliderInputProps & React$1.RefAttributes<HTMLInputElement>>;
+interface SliderRootProps extends PrimitivePropsWithRef<"span"> {
+  /**
+   * Whether the track runs horizontally or vertically.
+   * @defaultValue "horizontal"
+   */
+  orientation?: "horizontal" | "vertical";
+}
+interface SliderStepsProps extends Omit<ComponentPropsWithRef<"span">, "children"> {
+  /** Formats each step label before it is rendered. Receives the numeric value and returns the display string. */
+  stepFormatFn?: (value: number) => string;
+  /**
+   * Side of the track the step markers render on.
+   * @defaultValue "end"
+   */
+  position?: "start" | "end";
+  /** Distance between rendered step markers. Falls back to the slider's `step` value when omitted. */
+  stepInterval?: number;
+  /** Explicit list of values to render as markers. Overrides `step` and `stepInterval` when provided. */
+  customSteps?: number[];
+  /**
+   * Lower bound of the value range.
+   * @defaultValue 0
+   */
+  min?: number;
+  /**
+   * Upper bound of the value range.
+   * @defaultValue 100
+   */
+  max?: number;
+  /**
+   * Step increment used to generate marker positions.
+   * @defaultValue 1
+   */
+  step?: number;
+}
+/**
+ * Tick marks and labels rendered alongside the slider track to communicate the available range.
+ * @param props - {@link SliderStepsProps}
+ */
+declare const SliderSteps: React$1.ForwardRefExoticComponent<Omit<SliderStepsProps, "ref"> & React$1.RefAttributes<HTMLSpanElement>>;
+type InputAttributes$1 = Exclude<AttributesFor<"input">, "type">;
+interface PropsFromRoot$2 extends Omit<SliderRootProps, InputAttributes$1> {}
+interface PropsFromInput$1 extends Pick<SliderInputProps, InputAttributes$1> {}
+interface PropsFromSteps extends Pick<SliderStepsProps, "stepInterval" | "customSteps" | "stepFormatFn"> {
+  /** Side of the track the step markers render on. Markers are hidden when omitted. */
+  stepPosition?: SliderStepsProps["position"];
+}
+interface SliderProps$1 extends PropsFromRoot$2, PropsFromInput$1, PropsFromSteps {
+  /**
+   * Lower bound of the value range.
+   * @defaultValue 0
+   */
+  min?: number;
+  /**
+   * Upper bound of the value range.
+   * @defaultValue 100
+   */
+  max?: number;
+  /**
+   * Step increment between selectable values.
+   * @defaultValue 1
+   */
+  step?: number;
+  /** Initial value for uncontrolled use. */
+  defaultValue?: number;
+  /** Controlled value. Pair with `onValueChange` to keep the slider in sync. */
+  value?: number;
+  /** Fires on every value change while the user drags or steps the thumb. */
+  onValueChange?: (value: number) => void;
+  /** Fires once when the user releases the thumb. Useful for committing the final value to a backend. */
+  onValueCommit?: (value: number) => void;
+  /** Native HTML attributes forwarded to the internal composed components. */
+  attributes?: {
+    SliderInput?: NativeElementAttributes<"input", typeof SliderInput>;
+    SliderSteps?: NativeElementAttributes<"span", typeof SliderSteps>;
+  };
+}
+/**
+ * A single-value range input rendered along a bar. Use for continuous settings like volume, brightness, or threshold values where the relative position carries meaning.
+ * @param props - {@link SliderProps}
+ * @alias Range Input, Input Range
+ *
+ * @llm Use Slider when the relative position within a range matters more than the exact value. For precise numeric entry (port number, replica count, timeout) use TextInput with `type="number"` instead.
+ * @llm Pair the Slider with a TextInput that displays and accepts the current value when the range is large (e.g. 0-10000), users may know their target value, or precision matters but the range context is still useful.
+ * @llm Default to `orientation="horizontal"`. Reach for `orientation="vertical"` only when the metaphor is inherently vertical (audio fader, equalizer band, temperature).
+ * @llm Show step marks (`stepPosition`) when the range has a small number of discrete valid values or when the step size is non-obvious. Hide them for continuous ranges or many fine-grained steps.
+ * @llm Always render the slider's min and max values near the track so users understand the boundaries of the range.
+ * @llm Set `step` to match the smallest meaningful increment so the thumb cannot land between valid values.
+ * @see {@link RangeSlider}
+ *
+ * @example
+ * <caption>Basic Slider</caption>
+ * ```tsx
+ * <Slider defaultValue={50} aria-label="Volume" />
+ * ```
+ *
+ * @example
+ * <caption>With Step Marks Slider</caption>
+ * Use step marks to show discrete positions and help users pick precise values.
+ * ```tsx
+ * <Slider
+ * 	defaultValue={40}
+ * 	step={10}
+ * 	stepPosition="end"
+ * 	aria-label="Brightness"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>Custom Range Slider</caption>
+ * Use custom min/max/step when the default 0–100 range does not match the domain.
+ * ```tsx
+ * <Slider
+ * 	defaultValue={250}
+ * 	min={100}
+ * 	max={500}
+ * 	step={50}
+ * 	stepPosition="end"
+ * 	aria-label="Budget"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>Disabled Slider</caption>
+ * Use when the slider value is locked and cannot be changed.
+ * ```tsx
+ * <Slider defaultValue={30} disabled aria-label="Locked" />
+ * ```
+ *
+ * @example
+ * <caption>Vertical Slider</caption>
+ * Use vertical orientation for controls like volume faders or equalizer bands.
+ * ```tsx
+ * <Slider
+ * 	defaultValue={60}
+ * 	orientation="vertical"
+ * 	stepPosition="start"
+ * 	step={20}
+ * 	aria-label="Level"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>With Step Interval Slider</caption>
+ * Use stepInterval to space the visible step markers at a coarser interval than the slider's underlying step value, so users can drag with fine precision while still seeing key reference points.
+ * ```tsx
+ * <Slider
+ * 	defaultValue={50}
+ * 	min={0}
+ * 	max={100}
+ * 	step={1}
+ * 	stepInterval={20}
+ * 	stepPosition="end"
+ * 	aria-label="Precision control"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>With Custom Steps Slider</caption>
+ * Use customSteps when the meaningful tick positions are non-uniform or only certain anchor values matter (e.g. quality presets, named breakpoints). It overrides both step and stepInterval for marker placement.
+ * ```tsx
+ * <Slider
+ * 	defaultValue={50}
+ * 	min={0}
+ * 	max={100}
+ * 	step={5}
+ * 	customSteps={[0, 25, 50, 75, 100]}
+ * 	stepPosition="end"
+ * 	aria-label="Quality preset"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>With Formatted Steps Slider</caption>
+ * Use stepFormatFn to render step labels in a domain-specific format like currency, percentages, units, or descriptive words (e.g. Mute / Quiet / Loud). Works with both orientations.
+ * ```tsx
+ * <Slider
+ * 	defaultValue={60}
+ * 	min={0}
+ * 	max={100}
+ * 	step={1}
+ * 	stepInterval={20}
+ * 	stepPosition="end"
+ * 	stepFormatFn={(value) => `${value}°C`}
+ * 	aria-label="Temperature"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>With Form Name Slider</caption>
+ * Set name to submit the slider value as a standard form field — the underlying native range input participates in form submission with no extra wiring.
+ * ```tsx
+ * <Slider
+ * 	name="volume"
+ * 	defaultValue={50}
+ * 	step={10}
+ * 	stepPosition="end"
+ * 	aria-label="Volume"
+ * />
+ * ```
+ *
+ * @example
+ * <caption>With Text Input Slider</caption>
+ * Pair a Slider with a TextInput by sharing controlled state — useful when users need both quick coarse adjustment via the slider and precise numeric entry via the input. Track the numeric value alongside a string buffer so the user can type freely, then clamp the buffer into the slider's range on blur.
+ * ```tsx
+ * () => {
+ * 	const min = 0;
+ * 	const max = 100;
+ * 	const [value, setValue] = useState(50);
+ * 	const [inputValue, setInputValue] = useState("50");
+ *
+ * 	return (
+ * 		<Flex align="center" gap="density-md">
+ * 			<TextInput
+ * 				className="w-fit"
+ * 				type="number"
+ * 				min={min}
+ * 				max={max}
+ * 				value={inputValue}
+ * 				onValueChange={(next) => {
+ * 					setInputValue(next);
+ * 					const parsed = Number(next);
+ * 					if (next.trim() !== "" && !Number.isNaN(parsed)) {
+ * 						const clamped = Math.min(max, Math.max(min, parsed));
+ * 						setValue(clamped);
+ * 					}
+ * 				}}
+ * 				onBlur={() => {
+ * 					const parsed = Number(inputValue);
+ * 					const clamped = Number.isNaN(parsed)
+ * 						? value
+ * 						: Math.min(max, Math.max(min, parsed));
+ * 					setValue(clamped);
+ * 					setInputValue(String(clamped));
+ * 				}}
+ * 				aria-label="Volume"
+ * 			/>
+ * 			<Slider
+ * 				min={min}
+ * 				max={max}
+ * 				value={value}
+ * 				onValueChange={(next) => {
+ * 					setValue(next);
+ * 					setInputValue(String(next));
+ * 				}}
+ * 				aria-label="Volume"
+ * 			/>
+ * 		</Flex>
+ * 	);
+ * }
+ * ```
+ *
+ * @example
+ * <caption>Composed</caption>
+ * Use the composed primitives when you need full control over the slider track, input, and step label layout.
+ * ```tsx
+ * <SliderRoot orientation="horizontal" aria-label="Custom slider">
+ * 	<SliderInput
+ * 		aria-label="Custom slider input"
+ * 		defaultValue={50}
+ * 		min={0}
+ * 		max={100}
+ * 		step={25}
+ * 	/>
+ * 	<SliderSteps min={0} max={100} step={25} position="end" />
+ * </SliderRoot>
+ * ```
+ *
+ * @example
+ * <caption>HTML</caption>
+ * The track fill reads the `--slider-percent` custom property on the root, which CSS cannot derive from the input's value. Leave it unset — as above — unless JS keeps it in sync on every `input` event, or the fill will freeze at its authored width while the thumb moves: `root.style.setProperty("--slider-percent", ((value - min) / (max - min)) * 100 + "%")`.
+ * ```html
+ * <span class="nv-slider-root">
+ *   <input
+ *     class="nv-slider-input"
+ *     type="range"
+ *     min="0"
+ *     max="100"
+ *     step="1"
+ *     value="50"
+ *     aria-label="Volume"
+ *   />
+ * </span>
+ * ```
+ */
+declare const Slider: React$1.ForwardRefExoticComponent<Omit<SliderProps$1, "ref"> & React$1.RefAttributes<HTMLInputElement>>;
 interface StatusMessageFooterProps extends PrimitivePropsWithRef<"div"> {}
 /**
  * The action area of a status message. Aligns and spaces call-to-action buttons that help the user recover from or act on the state.
@@ -4496,6 +4790,8 @@ interface FormModalProps {
   slotAboveBody?: ReactNode;
   slotFooterLeft?: ReactNode;
   slotFooterRight?: ReactNode;
+  initialFocus?: 'cancel';
+  cancelableWhileDisabled?: boolean;
   attributes?: {
     CancelButton?: ComponentProps<typeof Button>;
     SubmitButton?: ComponentProps<typeof LoadingButton>;
@@ -4518,7 +4814,7 @@ type NotifyFn = (message: string, type?: NotifyType, options?: MessageFnOptions)
 //#endregion
 //#region src/components/ConfirmationModal/index.d.ts
 type SubmitButtonColor = NonNullable<ComponentProps<typeof LoadingButton>['color']>;
-interface ConfirmationModalProps extends Pick<FormModalProps, 'open' | 'onClose' | 'cancelButtonText'> {
+interface ConfirmationModalProps extends Pick<FormModalProps, 'open' | 'onClose' | 'cancelButtonText' | 'initialFocus'> {
   /** Return true when the action succeeded (shows success toast); false shows error toast. */
   onConfirm: () => boolean | Promise<boolean>;
   title: string;
@@ -4537,6 +4833,7 @@ interface ConfirmationModalProps extends Pick<FormModalProps, 'open' | 'onClose'
   suppressResultToasts?: boolean;
   /** Where result messages go. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
+  children?: ReactNode;
 }
 export declare const ConfirmationModal: FC<ConfirmationModalProps>;
 //#endregion
@@ -5990,9 +6287,14 @@ interface CreateSecretModalProps extends Pick<FormModalProps, 'open' | 'onClose'
 export declare const CreateSecretModal: FC<CreateSecretModalProps>;
 //#endregion
 //#region src/components/DeleteConfirmationModal/index.d.ts
+type DeleteVerb = 'delete' | 'remove';
 interface DeleteModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   onDelete: () => boolean | Promise<boolean>;
-  title: string;
+  title?: string;
+  entity?: string;
+  entityPlural?: string;
+  ids?: readonly string[];
+  verb?: DeleteVerb;
   description?: string;
   confirmationText?: string;
   simpleConfirm?: boolean;
@@ -9859,6 +10161,263 @@ interface LogViewerProps {
 }
 export declare const LogViewer: FC<LogViewerProps>;
 //#endregion
+//#region src/api/models/modelPages.d.ts
+/**
+ * Lists one page of a workspace's models. Studio passes the SDK's `modelsListModels`; a plugin
+ * passes `host.sdk.platform.modelsListModels` so the request runs on Studio's authenticated client.
+ */
+type ListModels = (workspace: string, params: ModelsListModelsParams) => Promise<ModelEntitysPage>;
+type ModelWorkspaceGroup = {
+  workspace: string;
+  models: ModelEntity[];
+};
+//#endregion
+//#region src/components/TrainingParameterSlider/types.d.ts
+type SliderProps = ComponentProps<typeof Slider>;
+type HyperparameterFieldMetadata<T> = { readonly [K in keyof Required<T>]: {
+  readonly name: string;
+  readonly min: number;
+  readonly max: number;
+  readonly description?: string;
+  readonly default: number;
+  readonly step?: SliderProps['step'];
+  readonly values?: readonly number[];
+  readonly customSteps?: SliderProps['customSteps'];
+}; };
+//#endregion
+//#region src/components/ModelSelectV2/InferenceParameters.d.ts
+declare const INFERENCE_PARAMETER_FIELDS: ["temperature", "max_tokens", "top_p"];
+type InferenceParameterField = (typeof INFERENCE_PARAMETER_FIELDS)[number];
+type FieldMetadata = HyperparameterFieldMetadata<Record<InferenceParameterField, number>>[InferenceParameterField];
+interface InferenceParametersProps {
+  value: Partial<InferenceParams>;
+  onChange: (value: Partial<InferenceParams>) => void;
+  disabled?: boolean;
+  /** Per-field overrides of the shared bounds and defaults, for callers whose backend differs. */
+  fieldMetadata?: Partial<Record<InferenceParameterField, Partial<FieldMetadata>>>;
+  /** The fields to show, for callers whose request only carries some of them. Defaults to all. */
+  fields?: readonly InferenceParameterField[];
+}
+//#endregion
+//#region src/components/ModelSelectV2/types.d.ts
+interface ModelSelection {
+  /** Model URN (e.g. "workspace/model_name") */
+  model: string;
+  /** Adapter name, if an adapter was selected instead of the base model */
+  adapter?: string;
+  /**
+   * The catalogue entry the user picked, when the selection came from the dropdown. Saves
+   * callers a lookup (or a second request) for fields like `model_providers`; absent when the
+   * selection was restored from a URL, a form default, or any other source outside the list.
+   */
+  entity?: ModelEntity;
+}
+/** The params control shown beside the model button. */
+interface ModelSelectParamsProps {
+  /** Show the params button alongside the model button */
+  showParams?: boolean;
+  /** Current inference parameter values */
+  inferenceParams?: Partial<InferenceParams>;
+  /** Called when the user changes any inference parameter */
+  onInferenceParamsChange?: (params: Partial<InferenceParams>) => void;
+  /**
+   * Disable the params control on its own. Defaults to `disabled`; pass `false` to keep
+   * params editable while the model is fixed (e.g. a locked chat panel).
+   */
+  paramsDisabled?: boolean;
+  /** Per-field bounds and defaults for the params control, for callers whose backend differs. */
+  paramsFieldMetadata?: InferenceParametersProps['fieldMetadata'];
+  /** The params to show, for callers whose request only carries some of them. Defaults to all. */
+  paramsFields?: InferenceParametersProps['fields'];
+  /** Show only the icon on the params button, for tight layouts. */
+  paramsIconOnly?: boolean;
+}
+interface ModelSelectProps extends ModelSelectParamsProps {
+  /** Currently selected model (and optional adapter) */
+  value: ModelSelection | null;
+  /** Called when user selects a model or adapter */
+  onValueChange: (selection: ModelSelection) => void;
+  /**
+   * The page of models to show, grouped by workspace. The dropdown renders exactly what it is
+   * given — pair with {@link onSearchChange} and {@link onLoadMore} (see `useModelSearch`) so a
+   * large catalogue arrives one page at a time instead of all at once.
+   */
+  groups?: ModelWorkspaceGroup[];
+  /**
+   * Server-side search. When set, the dropdown stops filtering {@link groups} itself and instead
+   * reports the debounced filter text; the caller re-queries and passes back new `groups`.
+   * Leave unset to filter the given groups client-side.
+   */
+  onSearchChange?: (search: string) => void;
+  /** How long the filter box settles before {@link onSearchChange} fires. */
+  searchDebounceMs?: number;
+  /** Called as the list scrolls near its end. Ignored unless {@link hasMore} is true. */
+  onLoadMore?: () => void | Promise<void>;
+  /** Whether another page is available for {@link onLoadMore} to fetch. */
+  hasMore?: boolean;
+  /** Whether the next page is in flight. */
+  isLoadingMore?: boolean;
+  /** Footer copy shown once every page has loaded. Omit to render nothing. */
+  doneLoadingMessage?: string;
+  /** Copy shown when no models match. */
+  emptyMessage?: string;
+  /** Whether the first page of models is still loading */
+  loading?: boolean;
+  /** Whether the component is disabled */
+  disabled?: boolean;
+  /** Placeholder text for the model trigger button */
+  placeholder?: string;
+  /** Show the Custom/Base segmented control toggle */
+  showModelTypeToggle?: boolean;
+  /** Default active segment when toggle is shown */
+  defaultModelType?: ModelType;
+  /**
+   * Called when the model-type segment changes. Same contract as {@link onSearchChange}: when set,
+   * the caller owns the filter and the dropdown stops applying it to {@link groups}.
+   */
+  onModelTypeChange?: (modelType: ModelType) => void;
+  /**
+   * Hide each model's adapter sub-list. When true, models render as flat,
+   * directly-selectable items even if they have adapters.
+   *
+   * Use this when only base models are valid selections (e.g. fine-tuning
+   * source models, where the customizer requires a model URN with a
+   * fileset, not an adapter).
+   */
+  hideAdapters?: boolean;
+  /** Make the component fill the width of its container */
+  fullWidth?: boolean;
+  /** Preferred side for the dropdown content */
+  dropdownSide?: 'top' | 'bottom';
+  /** Called when the model dropdown opens or closes */
+  onOpenChange?: (open: boolean) => void;
+  /** aria-label for the button group */
+  'aria-label'?: string;
+}
+type ModelType = 'custom' | 'base';
+//#endregion
+//#region src/components/ModelSelectV2/ModelSelect.d.ts
+export declare const ModelSelect: FC<ModelSelectProps>;
+//#endregion
+//#region src/api/filterOperators.d.ts
+/**
+ * Mongo-style comparison operators accepted by NeMo Helix's unified filter
+ * syntax (e.g. `{ name: { $like: '%foo%' } }`, `{ created_at: { $gte, $lte } }`).
+ *
+ * The OpenAPI-generated SDK types model filter fields as bare scalars
+ * (`name?: string`) and do not expose the operator-object form. Use
+ * {@link WithFilterOperators} to widen a generated filter shape so call sites
+ * can build operator filters without `as unknown as` casts.
+ */
+interface FilterOperators<V> {
+  $eq?: V;
+  $ne?: V;
+  $in?: readonly V[];
+  $nin?: readonly V[];
+  $gt?: V;
+  $gte?: V;
+  $lt?: V;
+  $lte?: V;
+  /** Substring match (e.g. `%foo%`). String-typed regardless of `V`. */
+  $like?: string;
+}
+/**
+ * Widens each field of `F` so it accepts either its original scalar value or
+ * a {@link FilterOperators} object. Intended for API call sites that need
+ * operator-object filters; coerce back to the generated filter type once at
+ * the SDK boundary.
+ *
+ * @example
+ * type ModelFilterInput = WithFilterOperators<ModelEntityFilter>;
+ * const filter: ModelFilterInput = { name: { $like: '%foo%' } };
+ */
+type WithFilterOperators<F> = { [K in keyof F]?: F[K] | FilterOperators<NonNullable<F[K]>>; };
+/**
+ * Build a typed operator-filter and coerce it to the generated SDK filter type
+ * in one step. Centralizes the unavoidable cast at the SDK boundary so call
+ * sites can be written with full type-checking on operator objects.
+ *
+ * @example
+ * filter: withOperators<FilesetFilter>({ name: { $like: `%${search}%` } })
+ */
+export declare const withOperators: <F>(filter: WithFilterOperators<F>) => F;
+//#endregion
+//#region src/api/models/useModelSearchCore.d.ts
+/**
+ * Page size for search-as-you-type model lists. Small on purpose: the dropdown pulls the next
+ * page as the user scrolls, so the first page needs to arrive fast, not be complete.
+ */
+export declare const MODEL_SEARCH_PAGE_SIZE = 25;
+type ModelSearchFilter = WithFilterOperators<ModelEntityFilter>;
+interface UseModelSearchCoreOptions {
+  /** Workspace to search. The query stays idle while this is null. */
+  workspace: string | null;
+  listModels: ListModels;
+  /** Extra filters merged into the request (e.g. `lora_enabled`, `base_model`). */
+  filter?: ModelSearchFilter;
+  sort?: ModelEntitySortField;
+  pageSize?: number;
+  enabled?: boolean;
+  /**
+   * Client-side predicate applied to every page — for conditions the API cannot express, such as
+   * "has a ready deployment" (`model_providers.length > 0`). The hook keeps paging while a page
+   * filters down to nothing, so an excluded page never stalls the list.
+   */
+  include?: (model: ModelEntity) => boolean;
+}
+/**
+ * Props for `ModelSelect`, ready to spread. Every field lines up with a prop name so a caller
+ * that needs nothing custom is a single line.
+ */
+interface ModelSearchProps {
+  groups: ModelWorkspaceGroup[];
+  loading: boolean;
+  onSearchChange: (search: string) => void;
+  onLoadMore: () => Promise<void>;
+  hasMore: boolean;
+  isLoadingMore: boolean;
+}
+interface UseModelSearchResult extends ModelSearchProps {
+  models: ModelEntity[];
+  search: string;
+  error: Error | null;
+}
+/**
+ * Server-side model search with progressive paging — the counterpart to `useAllModels`, which
+ * walks every page up front. Filtering happens in the API and pages arrive as the user scrolls,
+ * so a workspace with thousands of models costs one small request at a time.
+ *
+ * Takes its fetcher so plugins can run it on `host.sdk`; Studio code uses `useModelSearch`.
+ *
+ * @example
+ * const [open, setOpen] = useState(false);
+ * const models = useModelSearchCore({ workspace, listModels, enabled: open });
+ * return <ModelSelect {...models} value={value} onValueChange={onChange} onOpenChange={setOpen} />;
+ */
+declare const useModelSearchCore: ({ workspace, listModels, filter, sort, pageSize, enabled, include }: UseModelSearchCoreOptions) => UseModelSearchResult;
+//#endregion
+//#region src/components/ModelSelectV2/WorkspaceModelSelectCore.d.ts
+interface WorkspaceModelSelectCoreProps extends Omit<ModelSelectProps, keyof ModelSearchProps> {
+  /** Workspace to search. Nothing is fetched while this is null. */
+  workspace: string | null;
+  listModels: ListModels;
+  /** Extra filters merged into the search request (e.g. `lora_enabled`). */
+  filter?: ModelSearchFilter;
+  /** Client-side predicate for conditions the API cannot express (e.g. "has a deployment"). */
+  include?: (model: ModelEntity) => boolean;
+  /** Hold the request back for reasons of the caller's own, on top of the open check. */
+  enabled?: boolean;
+}
+/**
+ * `ModelSelect` wired to its own paged search: nothing is requested until the user opens the
+ * menu, the filter box queries the API, and further pages arrive as the list scrolls.
+ *
+ * Takes its fetcher so plugins can run it on `host.sdk`; Studio code uses `WorkspaceModelSelect`.
+ * Reach for the search hook directly only when the caller needs the models themselves — to merge
+ * in a pinned entry, or to surface the query error.
+ */
+declare const WorkspaceModelSelectCore: FC<WorkspaceModelSelectCoreProps>;
+//#endregion
 //#region src/components/RadioCard/index.d.ts
 interface RadioCardProps extends Omit<ComponentProps<typeof RadioGroupItem>, 'children'> {
   /** The radio value (forwarded to RadioGroupInput) */
@@ -11071,49 +11630,6 @@ interface StudioDataViewState<FilterType = Record<string, unknown>> extends Data
  */
 export declare const useStudioDataViewState: <FilterType = Record<string, unknown>>(options?: UseStudioDataViewStateOptions) => StudioDataViewState<FilterType>;
 //#endregion
-//#region src/api/filterOperators.d.ts
-/**
- * Mongo-style comparison operators accepted by NeMo Helix's unified filter
- * syntax (e.g. `{ name: { $like: '%foo%' } }`, `{ created_at: { $gte, $lte } }`).
- *
- * The OpenAPI-generated SDK types model filter fields as bare scalars
- * (`name?: string`) and do not expose the operator-object form. Use
- * {@link WithFilterOperators} to widen a generated filter shape so call sites
- * can build operator filters without `as unknown as` casts.
- */
-interface FilterOperators<V> {
-  $eq?: V;
-  $ne?: V;
-  $in?: readonly V[];
-  $nin?: readonly V[];
-  $gt?: V;
-  $gte?: V;
-  $lt?: V;
-  $lte?: V;
-  /** Substring match (e.g. `%foo%`). String-typed regardless of `V`. */
-  $like?: string;
-}
-/**
- * Widens each field of `F` so it accepts either its original scalar value or
- * a {@link FilterOperators} object. Intended for API call sites that need
- * operator-object filters; coerce back to the generated filter type once at
- * the SDK boundary.
- *
- * @example
- * type ModelFilterInput = WithFilterOperators<ModelEntityFilter>;
- * const filter: ModelFilterInput = { name: { $like: '%foo%' } };
- */
-type WithFilterOperators<F> = { [K in keyof F]?: F[K] | FilterOperators<NonNullable<F[K]>>; };
-/**
- * Build a typed operator-filter and coerce it to the generated SDK filter type
- * in one step. Centralizes the unavoidable cast at the SDK boundary so call
- * sites can be written with full type-checking on operator objects.
- *
- * @example
- * filter: withOperators<FilesetFilter>({ name: { $like: `%${search}%` } })
- */
-export declare const withOperators: <F>(filter: WithFilterOperators<F>) => F;
-//#endregion
 //#region src/api/fetchAllPages.d.ts
 interface PaginatedResponse<T> {
   data?: T[];
@@ -11227,9 +11743,9 @@ export declare const DEFAULT_PAGE = 1;
 export declare const DEFAULT_PAGE_SIZE = 50;
 //#endregion
 //#region src/constants/query.d.ts
-export declare const CJobCancellableStatuses: HelixJobStatus[];
-export declare const CJobLaunchableStatuses: HelixJobStatus[];
-export declare const CJobTerminalStatuses: HelixJobStatus[];
-export declare const HelixJobTerminalStatuses: HelixJobStatus[];
+export declare const CJobCancellableStatuses: HelixJobStatus$1[];
+export declare const CJobLaunchableStatuses: HelixJobStatus$1[];
+export declare const CJobTerminalStatuses: HelixJobStatus$1[];
+export declare const HelixJobTerminalStatuses: HelixJobStatus$1[];
 //#endregion
-export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type LogStatus, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type WithFilterOperators };
+export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type ListModels, type LogStatus, type ModelSearchFilter, type ModelSearchProps, type ModelSelectProps, type ModelSelection, type ModelType, type ModelWorkspaceGroup, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseModelSearchCoreOptions as UseModelSearchOptions, type UseModelSearchResult, type UseStudioDataViewStateOptions, type WithFilterOperators, WorkspaceModelSelectCore as WorkspaceModelSelect, type WorkspaceModelSelectCoreProps as WorkspaceModelSelectProps, useModelSearchCore as useModelSearch };

@@ -43,7 +43,7 @@ import {
   type ModelPanelTab,
 } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
 import { VirtualizedCardGrid } from '@studio/components/VirtualizedCardGrid';
-import { CUSTOMIZER_ENABLED } from '@studio/constants/environment';
+import { CUSTOMIZER_ENABLED, MODEL_DETAILS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getWorkspaceBaseModelsRoute } from '@studio/routes/utils';
@@ -240,7 +240,11 @@ export const WorkspaceBaseModelsRoute: FC = () => {
     }
   }, [modelNameFromPath, resolvedModelFromPath]);
 
-  const handleOpenPanel = (model: ModelEntity) => {
+  const handleOpenModel = (model: ModelEntity) => {
+    if (MODEL_DETAILS_ENABLED) {
+      navigate(getWorkspaceBaseModelsRoute(workspace, { model: model.name }));
+      return;
+    }
     setSelectedModel(model);
     navigate(getWorkspaceBaseModelsRoute(workspace, { model: model.name, searchParams }), {
       replace: true,
@@ -399,7 +403,7 @@ export const WorkspaceBaseModelsRoute: FC = () => {
                     model={model}
                     isChatAvailable={getModelEntityChatStatus(model) === 'enabled'}
                     showCustomizationBadges={CUSTOMIZER_ENABLED}
-                    onClick={() => handleOpenPanel(model)}
+                    onClick={() => handleOpenModel(model)}
                   />
                 )}
                 getItemKey={(model) => `${model.workspace}/${model.name}`}

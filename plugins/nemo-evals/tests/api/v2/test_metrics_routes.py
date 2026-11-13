@@ -13,17 +13,21 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_evals.api.dependencies import get_metric_service
+from nemo_evals.api import dependencies
+from nemo_evals.api.dependencies import get_metric_files_metadata_client, get_metric_service
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.api.service.metric_service import MetricService
 from nemo_evals.api.v2 import metrics as metrics_routes
 from nemo_evals.entities import MetricBundleEntity
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
+from nemo_helix_plugin.client.errors import AuthenticationError, InternalServerError, PermissionDeniedError
 from nemo_helix_plugin.entities import ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.filter_ops import FilterOperation
@@ -60,6 +64,18 @@ class _FakeEntityClient:
         self.entities[key] = entity
         self.entity_versions[key] = entity.db_version
         return entity
+
+    async def delete_by_id(self, entity_type, entity_id, *, expected_db_version=None):
+        for key, entity in self.entities.items():
+            if isinstance(entity, entity_type) and entity.id == entity_id:
+                return await self.delete(
+                    entity_type,
+                    entity.name,
+                    workspace=entity.workspace,
+                    parent=entity._parent,
+                    expected_db_version=expected_db_version,
+                )
+        raise NemoEntityNotFoundError(entity_id)
 
     async def delete(
         self,
@@ -110,6 +126,8 @@ class _FakeEntityClient:
 class _MetricsRouteHarness:
     client: TestClient
     entity_client: _FakeEntityClient
+    files_service: InMemoryFilesService
+    app: FastAPI
 
 
 @pytest.fixture
@@ -121,7 +139,8 @@ def metrics_route_harness() -> Iterator[_MetricsRouteHarness]:
     entity_client = _FakeEntityClient()
     service = MetricService(entity_client, fake_files)
     app.dependency_overrides[get_metric_service] = lambda: service
-    yield _MetricsRouteHarness(TestClient(app), entity_client)
+    app.dependency_overrides[get_metric_files_metadata_client] = lambda: fake_files
+    yield _MetricsRouteHarness(TestClient(app), entity_client, files_service, app)
 
 
 @pytest.fixture
@@ -236,3 +255,66 @@ def test_create_cloudpickle_metric_is_rejected_by_default(
     assert resp.status_code == 422
     assert "cloudpickle metrics are disabled on this deployment" in resp.json()["detail"]
     assert client.get(f"{_BASE}/custom").status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_status"),
+    [
+        (AuthenticationError(httpx.Response(401)), 401),
+        (PermissionDeniedError(httpx.Response(403)), 403),
+        (InternalServerError(httpx.Response(503)), 500),
+        (httpx.ConnectError("Files service unavailable"), 500),
+    ],
+)
+def test_delete_lookup_failure_preserves_metric_for_retry(
+    metrics_route_harness: _MetricsRouteHarness, failure: Exception, expected_status: int
+) -> None:
+    """Keep the owner and allocation when lookup fails; deletion can succeed on retry."""
+    client = metrics_route_harness.client
+    entities = metrics_route_harness.entity_client
+    files = metrics_route_harness.files_service
+    assert client.post(f"{_BASE}/exact", json=_create_body()).status_code == 201
+    entity = entities.entities[("default", "exact")]
+    entity.bundle_fileset_id = None
+    allocations = dict(files.allocations)
+    files.calls.clear()
+    files.failures["get"] = failure
+
+    response = client.delete(f"{_BASE}/exact")
+
+    assert response.status_code == expected_status
+    assert entities.entities[("default", "exact")] is entity
+    assert entity.bundle_fileset_id is None
+    assert entities.delete_expected_db_versions == []
+    assert files.allocations == allocations
+    assert not any(operation == "delete" for operation, _, _ in files.calls)
+
+    files.failures.clear()
+    assert client.delete(f"{_BASE}/exact").status_code == 204
+    assert ("default", "exact") not in entities.entities
+    assert files.allocations == {}
+
+
+def test_metadata_service_client_is_opened_only_for_delete(
+    metrics_route_harness: _MetricsRouteHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reads and creation use caller clients; only deletion opens the service metadata client."""
+    client = metrics_route_harness.client
+    app = metrics_route_harness.app
+    files = metrics_route_harness.files_service
+    app.dependency_overrides.pop(get_metric_service)
+    app.dependency_overrides.pop(get_metric_files_metadata_client)
+    app.dependency_overrides[dependencies.get_entity_client] = lambda: metrics_route_harness.entity_client
+    app.dependency_overrides[dependencies.get_nemo_client] = files.client
+    metadata_factory = MagicMock(return_value=files.client())
+    monkeypatch.setattr(dependencies, "get_async_nemo_client", metadata_factory)
+
+    assert client.post(f"{_BASE}/exact", json=_create_body()).status_code == 201
+    assert client.get(_BASE).status_code == 200
+    assert client.get(f"{_BASE}/exact").status_code == 200
+    metadata_factory.assert_not_called()
+
+    metrics_route_harness.entity_client.entities[("default", "exact")].bundle_fileset_id = None
+    assert client.delete(f"{_BASE}/exact").status_code == 204
+    metadata_factory.assert_called_once_with(as_service="evals", internal=True)
+    assert files.allocations == {}

@@ -534,6 +534,17 @@ class SessionBackedGymRunner:
             return []
         return self._delegate.run_aggregate_scores()
 
+    def scoring_metrics(self, task: Any, trials: Any) -> Any:
+        """The task's metrics, with its Gym reward metric extended to the reward components its trials report.
+
+        ``SandboxedGymAgentTaskRunner``'s ``TrialAwareMetricsProvider`` hook, which ``AgentEvaluator`` calls
+        on the runner it was handed: this one, not the delegate. Without it a multi-reward server's
+        components stay in trial metadata unscored.
+        """
+        from nhx_evals_sdk.agent_eval.runtimes.gym.results import gym_scoring_metrics
+
+        return gym_scoring_metrics(task, trials)
+
     async def run_tasks(self, tasks: Any, config: Any = None) -> Any:
         from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import (
             SandboxedGymAgentTaskRunner,

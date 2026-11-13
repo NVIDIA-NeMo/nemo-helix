@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ChatMulti, Warning, ChartFlow } from '@nemo/icons/icons';
-import { SpanStatus } from '@nemo/sdk/generated/platform/schema';
+import { SpanStatus } from '@nemo/sdk/generated/platform/schema/SpanStatus';
 import {
   TreeNavBranch,
   TreeNavBranchTrigger,

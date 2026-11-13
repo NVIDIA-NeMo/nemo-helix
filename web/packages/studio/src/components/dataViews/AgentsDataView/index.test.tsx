@@ -8,6 +8,7 @@ import { ROUTES } from '@studio/constants/routes';
 import { server } from '@studio/mocks/node';
 import { getAgentsListRoute, getModelCompareRoute } from '@studio/routes/utils';
 import { XL_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
+import { menuFor } from '@studio/tests/util/menuFor';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -149,17 +150,17 @@ describe('CombinedAgentsTable', () => {
 
       await screen.findByText(MOCK_AGENTS[0].name);
 
-      const menuButtons = screen.getAllByRole('button', { name: /actions/i });
-      await user.click(menuButtons[0]);
+      const trigger = screen.getAllByRole('button', { name: /actions/i })[0];
+      await user.click(trigger);
 
-      const deployItems = await screen.findAllByRole('menuitem', { name: 'Deploy' });
-      const testModelItems = screen.getAllByRole('menuitem', { name: 'Test models' });
-      const cloneItems = screen.getAllByRole('menuitem', { name: 'Clone' });
-      const deleteItems = screen.getAllByRole('menuitem', { name: 'Delete' });
-      expect(deployItems.length).toBeGreaterThan(0);
-      expect(testModelItems.length).toBeGreaterThan(0);
-      expect(cloneItems.length).toBeGreaterThan(0);
-      expect(deleteItems.length).toBeGreaterThan(0);
+      const items = within(menuFor(trigger)).getAllByTestId('quick-actions-menu-item');
+      expect(items.map((item) => item.textContent)).toEqual([
+        'Deploy',
+        'Test models',
+        'Clone',
+        'Delete',
+      ]);
+      expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
     });
 
     it('opens Playground with the row model selected when Test models is selected', async () => {

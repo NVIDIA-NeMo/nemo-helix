@@ -47,7 +47,7 @@ def restore_process_state(monkeypatch: pytest.MonkeyPatch):
 def test_a_termination_signal_destroys_the_host(signum, monkeypatch: pytest.MonkeyPatch) -> None:
     """SIGTERM is what Kubernetes sends before SIGKILL, and the last chance to free the sandbox."""
     calls: list[str] = []
-    monkeypatch.setattr("os.kill", lambda pid, sig: calls.append(f"kill:{sig}"))
+    monkeypatch.setattr(orchestrator_module, "kill", lambda pid, sig: calls.append(f"kill:{sig}"))
 
     install_termination_cleanup(lambda: calls.append("shutdown"))
     handler = signal.getsignal(signum)
@@ -60,7 +60,7 @@ def test_a_termination_signal_destroys_the_host(signum, monkeypatch: pytest.Monk
 @pytest.mark.parametrize("signum", TERMINATION_SIGNALS)
 def test_the_signal_is_re_raised_with_the_default_action(signum, monkeypatch: pytest.MonkeyPatch) -> None:
     """The exit status must still report the signal, or a cancelled job reads as a clean stop."""
-    monkeypatch.setattr("os.kill", lambda pid, sig: None)
+    monkeypatch.setattr(orchestrator_module, "kill", lambda pid, sig: None)
 
     install_termination_cleanup(lambda: None)
     handler = signal.getsignal(signum)
@@ -78,7 +78,7 @@ def test_the_default_action_is_restored_before_cleanup_runs(signum, monkeypatch:
     slowest part, since it waits on the sandbox being destroyed -- so an impatient second SIGTERM
     would stack another destroy on top of the in-flight one.
     """
-    monkeypatch.setattr("os.kill", lambda pid, sig: None)
+    monkeypatch.setattr(orchestrator_module, "kill", lambda pid, sig: None)
     observed: list[object] = []
 
     install_termination_cleanup(lambda: observed.append(signal.getsignal(signum)))
@@ -97,7 +97,7 @@ def test_the_signal_is_re_raised_even_when_cleanup_fails(signum, monkeypatch: py
     process keeps running with its exit status never reporting the signal.
     """
     killed: list[int] = []
-    monkeypatch.setattr("os.kill", lambda pid, sig: killed.append(sig))
+    monkeypatch.setattr(orchestrator_module, "kill", lambda pid, sig: killed.append(sig))
 
     def _explode() -> None:
         raise RuntimeError("destroy_host failed")
@@ -136,6 +136,6 @@ def test_handlers_are_optional_off_the_main_thread(monkeypatch: pytest.MonkeyPat
     def _refuse(signum: int, handler: object) -> None:
         raise ValueError("signal only works in main thread")
 
-    monkeypatch.setattr(signal, "signal", _refuse)
+    monkeypatch.setattr(orchestrator_module, "set_signal_handler", _refuse)
 
     install_termination_cleanup(lambda: None)

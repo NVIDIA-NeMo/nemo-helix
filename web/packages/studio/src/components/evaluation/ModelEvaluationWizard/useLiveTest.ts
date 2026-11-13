@@ -4,14 +4,15 @@
 import { resolveKeyPath } from '@nemo/common/src/utils/file';
 import { evalsRunEvaluateLiveEvaluation } from '@nemo/sdk/generated/evals/evals-plugin-live-evaluation-route';
 import type { LiveScoreRequest, MetricInline } from '@nemo/sdk/generated/evals/schema';
-import { buildMetricBundles } from '@studio/components/evaluation/ModelEvaluationWizard/buildEvaluationSpec';
+import { buildMetricBundles } from '@studio/components/evaluation/EvalWizard/buildEvaluationSpec';
 import {
   composeGenerationPrompt,
   type EvaluationFormValues,
   type DatasetBindings,
   toFieldMapping,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { asRecord } from '@studio/util/guards';
 import { toWorkspaceModelRef } from '@studio/util/models';
 import { useCallback, useRef, useState } from 'react';
 
@@ -28,9 +29,6 @@ export type LiveTestState =
   | { status: 'busy'; label: string }
   | { status: 'done'; result: LiveTestResult }
   | { status: 'error'; message: string };
-
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
 
 const statusOf = (error: unknown): number | undefined => {
   const status = asRecord(error)?.status;

@@ -10,11 +10,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path, Query, Request, status
 from fastapi.openapi.models import Example
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
+from nemo_helix_plugin.entities.base import ID_PATTERN
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.result_manager import download_from_result_info
 from nemo_helix_plugin.jobs.types import JobControl
@@ -369,7 +370,7 @@ async def get_execution_profiles() -> list[ExecutionProfileT]:
     status_code=status.HTTP_201_CREATED,
 )
 async def create_job(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     request: Annotated[CreateHelixJobRequest, Body(openapi_examples=_CREATE_JOB_OPENAPI_EXAMPLES)],
     auth_client: AuthClient = Depends(get_auth_client),
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
@@ -1262,6 +1263,7 @@ async def list_attempt_steps(
 
 @router.get(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}",
+    responses={status.HTTP_404_NOT_FOUND: {"description": "Attempt step not found"}},
     status_code=status.HTTP_200_OK,
 )
 async def get_attempt_step(
@@ -1427,6 +1429,7 @@ async def list_attempt_step_tasks(
 
 @router.put(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks/{name}",
+    responses={status.HTTP_404_NOT_FOUND: {"description": "Attempt or step not found"}},
     status_code=status.HTTP_200_OK,
 )
 async def update_attempt_step_task(
@@ -1455,6 +1458,7 @@ async def update_attempt_step_task(
 
 @router.get(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks/{name}",
+    responses={status.HTTP_404_NOT_FOUND: {"description": "Attempt step or task not found"}},
     status_code=status.HTTP_200_OK,
 )
 async def get_attempt_step_task(

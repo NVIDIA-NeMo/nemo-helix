@@ -34,6 +34,11 @@ HARBOR_PRIMARY_REWARD_KEY = "harbor_primary_reward_key"
 REWARD_REJECTIONS_KEY = "reward_rejections"
 REWARD_ENTRY_REJECTIONS_KEY = "reward_entry_rejections"
 
+#: Trial-metadata key carrying a Gym rollout's reward components: the per-objective scores a multi-reward
+#: resources-server returns beside its scalar ``reward`` (Gym's ``BaseMultiRewardVerifyResponse``), as
+#: ``{name: finite float}``.
+GYM_REWARD_COMPONENTS_KEY = "reward_components"
+
 # ``<output>.pass@<k>`` is how the SDK names pass@k aggregates of a metric output; a reward name
 # carrying that suffix would collide with them in the summary.
 _RESERVED_REWARD_KEY_RE = re.compile(r"\.pass@\d+$")

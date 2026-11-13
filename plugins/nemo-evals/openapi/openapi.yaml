@@ -806,11 +806,12 @@ paths:
         \  active: Restrict to accepted and running phases when True.\n    mine: Restrict\
         \ to the effective caller's records when True.\n    page: One-based page number,\
         \ validated by FastAPI.\n    page_size: Maximum page size, from 1 to 1000.\n\
-        \    caller: Effective principal supplied by the platform dependency.\n  \
-        \  service: Shared request-scoped run service.\n\nReturns:\n    Stored statuses\
-        \ and filtered pagination counts, excluding null optionals.\n\nRaises:\n \
-        \   HTTPException: Permission denied (403), or unexpected storage or projection\
-        \ failure (500)."
+        \    progress: Include each run's progress when True.\n    caller: Effective\
+        \ principal supplied by the platform dependency.\n    service: Shared request-scoped\
+        \ run service.\n\nReturns:\n    Stored statuses and filtered pagination counts,\
+        \ excluding null optionals; each status includes its\n    progress when ``progress``\
+        \ is True.\n\nRaises:\n    HTTPException: Permission denied (403), or unexpected\
+        \ storage or projection failure (500)."
       operationId: list_taskset_runs_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_get
       parameters:
       - name: workspace
@@ -837,6 +838,17 @@ paths:
           default: false
           title: Mine
         description: Include only runs created by the effective caller.
+      - name: progress
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include each run's progress (task and trial counts), the same
+            as getting a single run does.
+          default: false
+          title: Progress
+        description: Include each run's progress (task and trial counts), the same
+          as getting a single run does.
       - name: page
         in: query
         required: false
@@ -1038,6 +1050,60 @@ paths:
           description: Caller lacks permission to read run resources.
         '404':
           description: Run not found in this workspace.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}/tasks/{task_index}:
+    get:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: Get Taskset Run Task
+      description: "Read one task of a run with each of its trials, as its task Job\
+        \ reports them while it runs.\n\nArgs:\n    workspace: Workspace containing\
+        \ the run and its children.\n    run_id: Public run name.\n    task_index:\
+        \ Zero-based task index, as the run's task list gives it.\n    service: Shared\
+        \ request-scoped run service.\n\nReturns:\n    The stored task with ``trials``\
+        \ read from its task Job now; omitted before the task has a Job,\n    when\
+        \ the Job reported no trials, or when the caller can't read it.\n\nRaises:\n\
+        \    HTTPException: Permission denied (403), the run or task is absent (404),\
+        \ or an unexpected failure (500)."
+      operationId: get_taskset_run_task_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__tasks__task_index__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      - name: task_index
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 0
+          description: Zero-based index of the task in the run's resolved task list.
+          title: Task Index
+        description: Zero-based index of the task in the run's resolved task list.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunTaskDetail'
+        '403':
+          description: Caller lacks permission to read run resources.
+        '404':
+          description: Run, or that task of it, not found in this workspace.
         '422':
           description: Validation Error
           content:
@@ -3641,6 +3707,17 @@ components:
           title: Labels
           description: Caller-supplied tags recorded on the run's metadata (e.g. benchmark,
             mode, backend).
+        result_ignore_patterns:
+          items:
+            type: string
+            minLength: 1
+          type: array
+          title: Result Ignore Patterns
+          description: Files to leave out of the saved result bundle. `*.ext` and
+            `name` match files at any depth, `name/` matches directories with that
+            name at any depth (folder globs allowed), and `dir/sub/` matches that
+            directory at the bundle root, with each folder name a glob such as `sub*`.
+            Omit to keep every file.
         publication:
           allOf:
           - $ref: '#/components/schemas/PublicationSpec'
@@ -3649,6 +3726,7 @@ components:
         tasks:
           anyOf:
           - $ref: '#/components/schemas/TasksetRef'
+          - $ref: '#/components/schemas/FilesetTaskSource'
           - items:
               $ref: '#/components/schemas/AgentEvalTaskInput'
             type: array
@@ -3659,7 +3737,9 @@ components:
             minItems: 1
           title: Tasks
           description: 'Tasks to evaluate: a nonempty list containing only inline
-            tasks or only task references, or a stored taskset reference.'
+            tasks or only task references, a stored taskset reference, or a FileSet
+            task source (`{fileset, snapshot}`) whose dataset file is converted to
+            tasks at submission.'
       additionalProperties: false
       type: object
       required:
@@ -3668,11 +3748,13 @@ components:
       description: 'Submitter-facing agent-evaluation input.
 
 
-        ``tasks`` accepts inline tasks, stored task references, or a stored taskset
-        reference.
+        ``tasks`` accepts inline tasks, stored task references, a stored taskset reference,
+        or a dataset
 
-        Stored definitions and scoring expand at submission; Harbor archives are prepared
-        on the worker.'
+        file in a FileSet. Stored definitions, files and scoring expand at submission;
+        Harbor archives are
+
+        prepared on the worker.'
     AgentEvalMetricOutputCoverage:
       properties:
         total:
@@ -3896,6 +3978,17 @@ components:
           title: Labels
           description: Caller-supplied tags recorded on the run's metadata (e.g. benchmark,
             mode, backend).
+        result_ignore_patterns:
+          items:
+            type: string
+            minLength: 1
+          type: array
+          title: Result Ignore Patterns
+          description: Files to leave out of the saved result bundle. `*.ext` and
+            `name` match files at any depth, `name/` matches directories with that
+            name at any depth (folder globs allowed), and `dir/sub/` matches that
+            directory at the bundle root, with each folder name a glob such as `sub*`.
+            Omit to keep every file.
         publication:
           allOf:
           - $ref: '#/components/schemas/PublicationSpec'
@@ -5660,6 +5753,48 @@ components:
       title: FilesetRef
       description: Reference to a persisted platform fileset, optionally with a file
         fragment.
+    FilesetTaskSource:
+      properties:
+        fileset:
+          allOf:
+          - $ref: '#/components/schemas/FilesetRef'
+          description: 'The dataset file, as `workspace/fileset#path/to/file.jsonl`.
+            One file only: a whole FileSet or a glob is refused. It is read once,
+            as the submitter, at submission. Each distinct row becomes one task, `gym-<row
+            content hash>` unless `id_field` names it, scored by the Gym reward. Requires
+            a `gym` target.'
+        snapshot:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRef'
+          description: Taskset to publish the file's tasks as, `workspace/name` or
+            `name`; it is created if absent, and tasks are written to its workspace.
+            Each submission publishes a revision only when the file changed, and the
+            evaluation runs exactly the published tasks. Omit to run the file's tasks
+            inline, storing nothing but the job.
+        id_field:
+          title: Id Field
+          description: Row key that names each task, so an edited row keeps its task
+            (and, with `snapshot`, gets a new revision of it) instead of becoming
+            a new task. Every row must carry a non-empty string or finite number there,
+            unique within the file. Requires `id_prefix`.
+          type: string
+          minLength: 1
+        id_prefix:
+          title: Id Prefix
+          description: 'Prefix of keyed task ids, `<id_prefix>-<hash of the row''s
+            id_field value>`: a lowercase letter, then up to 7 lowercase letters or
+            digits, and not `gym`, which ids without a key use. Choose one per dataset,
+            so two files with the same keys don''t share tasks in a workspace. Requires
+            `id_field`.'
+          type: string
+          pattern: ^[a-z][a-z0-9]{0,7}$
+      additionalProperties: false
+      type: object
+      required:
+      - fileset
+      title: FilesetTaskSource
+      description: A Gym jsonl dataset file in a FileSet, converted into tasks at
+        submission, optionally published first.
     GenericAgent:
       properties:
         url:
@@ -7772,6 +7907,10 @@ components:
             re-registration while the job is queued cannot change the files it runs
             with. Present only when the resolved config refers to files by relative
             path.'
+        fileset_id:
+          title: Fileset Id
+          description: ID of the snapshot allocation; absent on legacy jobs.
+          type: string
       additionalProperties: false
       type: object
       required:
@@ -8823,6 +8962,15 @@ components:
           description: "Ordinal of the published revision this content corresponds\
             \ to. Every stored task has at least one revision \u2014 creating a task\
             \ publishes revision 1 \u2014 so this is never 0."
+        content_hash:
+          title: Content Hash
+          description: Digest of the revision this content corresponds to; pin it
+            as 'workspace/name#<content_hash>'. A create or replace returns the digest
+            it published, or of the existing revision it matched when the content
+            was unchanged. Always set by this server; optional only so clients still
+            read responses from servers that predate it.
+          type: string
+          pattern: ^[0-9a-f]{64}$
         tags:
           additionalProperties:
             type: integer
@@ -9373,6 +9521,14 @@ components:
           title: Task Jobs
           description: 'Registered members by their task Job''s status as the controller
             last read it, for example {"active": 18, "pending": 2}.'
+        trial_counts:
+          allOf:
+          - $ref: '#/components/schemas/TrialCounts'
+          description: 'Trial counts summed across the run''s tasks. The reward is
+            the mean of each task''s mean reward, so every task counts equally regardless
+            of how many trials it ran. None when any task has no counts, as in a run
+            that was already going when trial counts were added: a total over only
+            some of its tasks would read as the whole run''s.'
       type: object
       required:
       - tasks
@@ -9471,8 +9627,9 @@ components:
         progress:
           allOf:
           - $ref: '#/components/schemas/TasksetRunProgress'
-          description: Counted from the run's members on each GET of this run; None
-            before the controller creates them, and in run lists and submit responses.
+          description: Counted from the run's members on each GET of this run, and
+            in run lists that ask for it; None before the controller creates them,
+            and in other run lists and submit responses.
       additionalProperties: false
       type: object
       required:
@@ -9592,8 +9749,9 @@ components:
         progress:
           allOf:
           - $ref: '#/components/schemas/TasksetRunProgress'
-          description: Counted from the run's members on each GET of this run; None
-            before the controller creates them, and in run lists and submit responses.
+          description: Counted from the run's members on each GET of this run, and
+            in run lists that ask for it; None before the controller creates them,
+            and in other run lists and submit responses.
         warnings:
           items:
             type: string
@@ -9628,6 +9786,11 @@ components:
           minimum: 0.0
           title: Task Index
           description: Zero-based index of the task in the run's resolved task list.
+        task_name:
+          title: Task Name
+          description: The task's id in the run's taskset (a Harbor task's native
+            id); omitted for runs from before it.
+          type: string
         phase:
           allOf:
           - $ref: '#/components/schemas/MemberPhase'
@@ -9651,6 +9814,11 @@ components:
           - $ref: '#/components/schemas/PublicationOutcome'
           description: What the task published to Intake, as its Job reported it when
             the task settled; omitted when it reported nothing.
+        trial_counts:
+          allOf:
+          - $ref: '#/components/schemas/TrialCounts'
+          description: The task Job's trials counted by phase, as the controller last
+            read them; every planned trial counts as pending until the Job reports.
       additionalProperties: false
       type: object
       required:
@@ -9665,6 +9833,67 @@ components:
         Construction takes the public fields only. Instances contain no parent,
 
         persistence metadata or live Job state; read routes omit unset details.'
+    TasksetRunTaskDetail:
+      properties:
+        task:
+          type: string
+          title: Task
+          description: Member name within the run, for example task-7.
+        task_index:
+          type: integer
+          minimum: 0.0
+          title: Task Index
+          description: Zero-based index of the task in the run's resolved task list.
+        task_name:
+          title: Task Name
+          description: The task's id in the run's taskset (a Harbor task's native
+            id); omitted for runs from before it.
+          type: string
+        phase:
+          allOf:
+          - $ref: '#/components/schemas/MemberPhase'
+          description: Stored image preparation and execution progress of this task.
+        job:
+          title: Job
+          description: Name of this task's Jobs Service Job; set when the create is
+            first attempted.
+          type: string
+        job_status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The Job's status as the controller last read it; omitted until
+            the task's Job is registered.
+        error:
+          title: Error
+          description: Stored reason the task failed, was cancelled or expired.
+          type: string
+        publication:
+          allOf:
+          - $ref: '#/components/schemas/PublicationOutcome'
+          description: What the task published to Intake, as its Job reported it when
+            the task settled; omitted when it reported nothing.
+        trial_counts:
+          allOf:
+          - $ref: '#/components/schemas/TrialCounts'
+          description: The task Job's trials counted by phase, as the controller last
+            read them; every planned trial counts as pending until the Job reports.
+        trials:
+          title: Trials
+          description: Each of the task's trials, read from its Job on this request;
+            trial_counts is counted from this list. Omitted before the task has a
+            Job, when the Job reported no trials, or when the Job can't be read.
+          items:
+            $ref: '#/components/schemas/TrialProgress'
+          type: array
+      additionalProperties: false
+      type: object
+      required:
+      - task
+      - task_index
+      - phase
+      title: TasksetRunTaskDetail
+      description: One task with each of its trials, as its task Job last reported
+        them.
     TasksetRunTasksPage:
       properties:
         data:
@@ -9724,6 +9953,45 @@ components:
       required:
       - data
       title: TasksetsPage
+    TrialCounts:
+      properties:
+        total:
+          type: integer
+          minimum: 0.0
+          title: Total
+          description: Trials the task Job planned.
+        phases:
+          additionalProperties:
+            type: integer
+          propertyNames:
+            $ref: '#/components/schemas/TrialPhase'
+          type: object
+          title: Phases
+          description: 'Trials by phase, for example {"pending": 1, "agent_running":
+            1, "succeeded": 2}; a phase with no trials is left out.'
+        rewarded:
+          type: integer
+          minimum: 0.0
+          title: Rewarded
+          description: Trials with a reward; reward averages over them.
+          default: 0
+        reward:
+          title: Reward
+          description: Mean reward over the rewarded trials; None without any.
+          type: number
+        errors:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Errors
+          description: 'Errored trials by exception type, for example {''AgentTimeoutError'':
+            1}.'
+      type: object
+      required:
+      - total
+      title: TrialCounts
+      description: 'A task''s trials counted by phase, with their mean reward: what
+        run and task lists show per task.'
     TrialError:
       properties:
         type:
@@ -9818,6 +10086,70 @@ components:
       type: object
       title: TrialMeasurements
       description: Validated usage, runtime, and cost measurements for one trial.
+    TrialPhase:
+      type: string
+      enum:
+      - pending
+      - starting
+      - agent_running
+      - verifying
+      - retrying
+      - succeeded
+      - errored
+      - cancelled
+      title: TrialPhase
+      description: Where a Harbor trial is in its lifecycle, following the events
+        Harbor raises for it.
+    TrialProgress:
+      properties:
+        trial:
+          type: string
+          title: Trial
+          description: Harbor's trial name, unique within the task Job.
+        session_id:
+          title: Session Id
+          description: Intake session holding the trial's traces (<task Job>:<trial>),
+            once anything is recorded there.
+          type: string
+        phase:
+          allOf:
+          - $ref: '#/components/schemas/TrialPhase'
+          description: Where the trial is in its lifecycle.
+        attempts:
+          type: integer
+          minimum: 0.0
+          title: Attempts
+          description: Attempts Harbor started, retries included.
+          default: 0
+        started_at:
+          title: Started At
+          description: When the trial's first attempt started.
+          type: string
+          format: date-time
+        finished_at:
+          title: Finished At
+          description: When the trial settled; None until then.
+          type: string
+          format: date-time
+        reward:
+          title: Reward
+          description: The verifier's primary reward for the last attempt.
+          type: number
+        error_type:
+          title: Error Type
+          description: Exception type of the last failed attempt.
+          type: string
+        error:
+          title: Error
+          description: Exception message of the last failed attempt, truncated.
+          type: string
+      type: object
+      required:
+      - trial
+      - phase
+      title: TrialProgress
+      description: 'One trial of a task Job: its phase, timing, reward and error,
+        as of the Job''s last report.'
     ValidationError:
       properties:
         loc:

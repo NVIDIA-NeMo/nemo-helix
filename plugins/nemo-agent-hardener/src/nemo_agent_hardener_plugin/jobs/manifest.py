@@ -18,6 +18,7 @@ from typing import Any
 
 import yaml
 from nemo_agent_hardener_plugin.agent_resolver import (
+    ResolvedManifest,
     current_agent_timestamp,
     gateway_backend,
     parse_agent_ref,
@@ -25,12 +26,15 @@ from nemo_agent_hardener_plugin.agent_resolver import (
 )
 from nemo_agent_hardener_plugin.cli.client import base_url
 from nemo_agent_hardener_plugin.entities import AGENT_HARDENER_MANIFEST_TYPE
-from nemo_agent_hardener_plugin.filesets import download_and_extract_project, upload_project_dir
+from nemo_agent_hardener_plugin.filesets import delete_fileset_by_id, download_and_extract_project, upload_project_dir
 from nemo_agent_hardener_plugin.jobs import _common
 from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_FILESET, CATEGORY_MANIFEST, AgentHardenerRunError
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.entities.client import EntitiesClient
-from nemo_helix_plugin.entities.types import EntityUpdate
+from nemo_helix_plugin.entities.types import Entity, EntityUpdate
 from nemo_helix_plugin.job_context import JobContext
 
 logger = logging.getLogger(__name__)
@@ -406,20 +410,57 @@ def _materialize_legacy_agent_manifest(
     return resolved.manifest
 
 
-def _persist_upgraded_bundle(sdk: Any, manifest_id: str, ctx: JobContext, record: Any, resolved: Any) -> None:
-    """Store the freshly-resolved scaffold on the manifest; best-effort, the run proceeds regardless."""
+def _persist_upgraded_bundle(
+    sdk: NemoClient, manifest_id: str, ctx: JobContext, record: Entity, resolved: ResolvedManifest
+) -> None:
+    """Attach one uploaded agent fileset, retrying one version conflict on the same manifest ID."""
     try:
         fileset = upload_project_dir(sdk, resolved.project_dir, workspace=ctx.workspace)
-        updated = {**(getattr(record, "data", {}) or {})}
-        updated["agent_fileset"] = fileset
-        updated["manifest_yaml"] = yaml.safe_dump(resolved.manifest, sort_keys=False)
-        client_from_platform(sdk, EntitiesClient).update_entity_by_name(
-            name=manifest_id,
-            entity_type=AGENT_HARDENER_MANIFEST_TYPE,
-            workspace=ctx.workspace,
-            body=EntityUpdate(data=updated),
-        )
-    except Exception:  # the war-game matters more than the upgrade; it retries next run
+        entities = client_from_platform(sdk, EntitiesClient)
+        # Reconcile each write outcome before retrying; a lost response must not replay the PUT.
+        writes = entities.with_retry(RetryPolicy(max_retries=0))
+        current = record
+        for attempt in range(2):
+            if current.data.get("agent_fileset") or current.data.get("agent_fileset_id"):
+                if current.data.get("agent_fileset_id") != fileset.fileset_id:
+                    delete_fileset_by_id(sdk, workspace=ctx.workspace, fileset_id=fileset.fileset_id)
+                return
+            # A changed resolution input needs a fresh bundle on a later run.
+            if any(
+                current.data.get(key) != record.data.get(key)
+                for key in ("source_type", "agent", "egress", "secrets", "env", "port")
+            ):
+                delete_fileset_by_id(sdk, workspace=ctx.workspace, fileset_id=fileset.fileset_id)
+                return
+            updated = {**current.data}
+            updated["agent_fileset"] = fileset.ref
+            updated["agent_fileset_id"] = fileset.fileset_id
+            updated["manifest_yaml"] = yaml.safe_dump(resolved.manifest, sort_keys=False)
+            try:
+                writes.update_entity_by_id(
+                    entity_id=record.id,
+                    workspace=ctx.workspace,
+                    entity_type=AGENT_HARDENER_MANIFEST_TYPE,
+                    body=EntityUpdate(data=updated, expected_db_version=current.db_version),
+                )
+                return
+            except NotFoundError:
+                delete_fileset_by_id(sdk, workspace=ctx.workspace, fileset_id=fileset.fileset_id)
+                return
+            except ConflictError:
+                try:
+                    current = entities.get_entity_by_id(entity_id=record.id).data()
+                except NotFoundError:
+                    delete_fileset_by_id(sdk, workspace=ctx.workspace, fileset_id=fileset.fileset_id)
+                    return
+                # An attached copy of this fileset must never be rolled back.
+                if current.data.get("agent_fileset_id") == fileset.fileset_id:
+                    return
+                if attempt == 1:
+                    delete_fileset_by_id(sdk, workspace=ctx.workspace, fileset_id=fileset.fileset_id)
+                    logger.warning("could not freeze manifest %s after a version conflict retry", manifest_id)
+    except Exception:
+        # A lost write response leaves ownership uncertain; retain the allocation.
         logger.warning("could not freeze manifest %s on this run", manifest_id, exc_info=True)
 
 

@@ -80,8 +80,8 @@ S3_ASSET_FIXTURES = (
     "grpo_math_env_cache",
     "grpo_math_env_native_cache",
     "grpo_math_env_native_ref_cache",
-    "grpo_ascii_tree_env_cache",
-    "grpo_ascii_tree_smoke_cache",
+    "grpo_deepscaler_env_cache",
+    "grpo_deepscaler_smoke_cache",
     "grpo_math_smoke_cache",
     "grpo_math_uplift_cache",
     "embed_model_cache",
@@ -161,15 +161,15 @@ def grpo_math_env_native_ref_cache() -> Path:
 
 
 @pytest.fixture(scope="session")
-def grpo_ascii_tree_env_cache() -> Path:
-    """Prime Intellect ``ascii-tree`` converted to ``adapter-wheels-v1``."""
-    return stage_assets.sync_dataset_format("grpo_ascii_tree_env")
+def grpo_deepscaler_env_cache() -> Path:
+    """Prime Intellect ``deepscaler-math`` converted to ``adapter-wheels-v1``."""
+    return stage_assets.sync_dataset_format("grpo_deepscaler_env")
 
 
 @pytest.fixture(scope="session")
-def grpo_ascii_tree_smoke_cache() -> Path:
-    """The converter's dataset for ``ascii-tree``, with its vendored Hugging Face cache."""
-    return stage_assets.sync_dataset_format("grpo_ascii_tree_smoke")
+def grpo_deepscaler_smoke_cache() -> Path:
+    """Rows materialized by the converter from the hub environment's dataset."""
+    return stage_assets.sync_dataset_format("grpo_deepscaler_smoke")
 
 
 @pytest.fixture(scope="session")
@@ -302,19 +302,18 @@ def grpo_math_env_native_ref_fileset(
 
 
 @pytest.fixture(scope="module")
-def grpo_ascii_tree_env_fileset(client: NemoClient, customizer_workspace: str, grpo_ascii_tree_env_cache: Path) -> str:
+def grpo_deepscaler_env_fileset(client: NemoClient, customizer_workspace: str, grpo_deepscaler_env_cache: Path) -> str:
     return _stage_tree(
-        client, customizer_workspace, grpo_ascii_tree_env_cache, "ascii-tree-env", FilesetPurpose.ENVIRONMENT
+        client, customizer_workspace, grpo_deepscaler_env_cache, "deepscaler-env", FilesetPurpose.ENVIRONMENT
     )
 
 
 @pytest.fixture(scope="module")
-def grpo_ascii_tree_smoke_fileset(
-    client: NemoClient, customizer_workspace: str, grpo_ascii_tree_smoke_cache: Path
+def grpo_deepscaler_smoke_fileset(
+    client: NemoClient, customizer_workspace: str, grpo_deepscaler_smoke_cache: Path
 ) -> str:
-    """The whole dataset tree: the sandbox reads the vendored ``.huggingface`` cache offline."""
     return _stage_tree(
-        client, customizer_workspace, grpo_ascii_tree_smoke_cache, "ascii-tree-smoke", FilesetPurpose.DATASET
+        client, customizer_workspace, grpo_deepscaler_smoke_cache, "deepscaler-smoke", FilesetPurpose.DATASET
     )
 
 

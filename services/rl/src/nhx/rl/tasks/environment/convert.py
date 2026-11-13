@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import ast
+import importlib
+import inspect
 import json
 import logging
 import os
@@ -41,7 +43,10 @@ from packaging.version import InvalidVersion, Version
 logger = logging.getLogger(__name__)
 
 PRIME_HUB_SIMPLE_INDEX = "https://hub.primeintellect.ai/primeintellect/simple/"
-DEFAULT_VERIFIERS_SPEC = "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.3.1"
+# v0.3.1 requires prime-sandboxes>=0.2.39, and that release requires connectrpc<0.12.
+# The NeMo-RL lock pins connectrpc==0.12.1, so a closure built against it does not
+# resolve. v0.3.0 still accepts prime-sandboxes 0.2.38, which does not depend on connectrpc.
+DEFAULT_VERIFIERS_SPEC = "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.3.0"
 
 # Training image is linux/amd64; resolve and download for that, not this host.
 # pip matches --platform tags literally, so several glibc floors are listed.
@@ -75,7 +80,7 @@ GYM_VENV_REQUIREMENTS = (
 # Snapshot of the hub env's HF dataset, mounted at SANDBOX_DATASET_PATH.
 HUB_ENV_DATASET_FILENAME = "hub_environment.parquet"
 DATASET_PATH_ARG = "dataset_path"
-# Isolated Hugging Face cache from convert, for loaders that ignore dataset_path.
+# Isolated Hugging Face cache from convert, for loaders that do not accept dataset_path.
 HUB_ENV_HF_CACHE_DIRNAME = ".huggingface"
 
 
@@ -135,9 +140,27 @@ def rl_dependency_policy(nemo_rl_root: Path) -> tuple[list[str], list[str]]:
             "host applies during the offline install."
         )
     return (
-        _keep_pkg_resources_setuptools(list(uv_config["override-dependencies"])),
-        list(uv_config["constraint-dependencies"]),
+        _keep_pkg_resources_setuptools(_requirement_strings(uv_config["override-dependencies"])),
+        _requirement_strings(uv_config["constraint-dependencies"]),
     )
+
+
+def _requirement_strings(items: list) -> list[str]:
+    """Keep requirement lines and drop package-scoped uv override tables.
+
+    ``override-dependencies`` may name one package and replace only its dependencies.
+    ``uv pip compile --override`` takes requirement strings. A scoped table is not a
+    requirement, and its inner dependencies must not become global overrides.
+    """
+    lines: list[str] = []
+    for item in items:
+        if isinstance(item, str):
+            lines.append(item)
+            continue
+        if isinstance(item, dict) and "package" in item:
+            continue
+        raise ValueError(f"unsupported uv dependency entry: {item!r}")
+    return lines
 
 
 def _keep_pkg_resources_setuptools(overrides: list[str]) -> list[str]:
@@ -659,6 +682,25 @@ def _sandbox_hub_dataset_path(filename: str = HUB_ENV_DATASET_FILENAME) -> str:
     return f"{SANDBOX_DATASET_PATH.rstrip('/')}/{filename}"
 
 
+def _loader_accepts_argument(vf_env_id: str, argument: str) -> bool:
+    """True when the installed hub ``load_environment`` can take ``argument``.
+
+    ``verifiers.load_environment`` forwards ``vf_env_args`` as keywords. A loader
+    that only declares ``dataset_name``, or takes ``dataset_path`` positional-only,
+    raises ``TypeError`` on it.
+    """
+    module_name = vf_env_id.replace("-", "_").split("/")[-1]
+    module = importlib.import_module(module_name)
+    loader = getattr(module, "load_environment", None)
+    if loader is None:
+        return False
+    try:
+        inspect.signature(loader).bind_partial(**{argument: None})
+    except TypeError:
+        return False
+    return True
+
+
 @contextmanager
 def _isolated_hf_home(hf_home: Path) -> Generator[Path, None, None]:
     """Point Hugging Face cache settings at ``hf_home`` for the duration of the block.
@@ -882,7 +924,15 @@ def convert_prime_environment(spec: ConvertEnvironmentSpec) -> ConvertedPackage:
                     )
                 vendor_hub_environment_dataset(env, dataset_out)
                 snapshot_huggingface_home(hf_home, dataset_out)
-                package_vf_env_args[DATASET_PATH_ARG] = _sandbox_hub_dataset_path()
+                if _loader_accepts_argument(vf_env_id, DATASET_PATH_ARG):
+                    package_vf_env_args[DATASET_PATH_ARG] = _sandbox_hub_dataset_path()
+                else:
+                    logger.info(
+                        "%s load_environment does not accept %s; the sandbox loads through "
+                        "the loader's own dataset argument and the snapshotted Hugging Face cache",
+                        vf_env_id,
+                        DATASET_PATH_ARG,
+                    )
 
         manifest = write_adapter_wheels_package(
             out_dir=env_out,

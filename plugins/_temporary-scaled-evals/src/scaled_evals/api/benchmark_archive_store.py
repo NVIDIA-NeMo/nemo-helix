@@ -15,9 +15,10 @@ from uuid import uuid4
 from nemo_scaled_evals_plugin.entities import ScaledEvalsBenchmarkArchive, ScaledEvalsBenchmarkRun
 
 from scaled_evals.api import entity_store
-from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
-from scaled_evals.api.evaluation_store import EvaluationStore
+from scaled_evals.api.benchmark_run_store import BenchmarkRunRequestRepository
+from scaled_evals.api.evaluation_store import EvaluationGlobalQueries
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
+from scaled_evals.api.resource_access import INTERNAL_ACCESS, ResourceAccess
 from scaled_evals.models.benchmark_archives import BenchmarkArchiveMember
 
 _MAX_ATTEMPTS = 3
@@ -54,16 +55,18 @@ def _owns(entity: ScaledEvalsBenchmarkRun, token: str) -> ScaledEvalsBenchmarkAr
 
 def _members(run_id: str) -> list[dict]:
     """Return the run's live member evaluations by id, with the task slug and name they ran."""
-    rows = sorted(EvaluationStore().list_for_runs([run_id]), key=lambda row: row["id"])
+    rows = sorted(EvaluationGlobalQueries().members_for_runs([run_id]), key=lambda row: row["id"])
     for row in rows:
         task = (row.get("execution_snapshot") or {}).get("task") or {}
         row["task_slug"], row["task_name"] = task.get("slug"), task.get("name")
     return rows
 
 
-class BenchmarkArchiveStore:
-    def __init__(self) -> None:
-        self._runs = BenchmarkRunStore()
+class _BenchmarkArchiveRepositoryBase:
+    """Shared archive state and version-checked writes."""
+
+    def __init__(self, *, access: ResourceAccess) -> None:
+        self._runs = BenchmarkRunRequestRepository(access=access)
 
     def _runs_with_archive(self, *statuses: str) -> list[ScaledEvalsBenchmarkRun]:
         """Return runs whose archive has one of `statuses`, deleted runs included."""
@@ -83,12 +86,17 @@ class BenchmarkArchiveStore:
 
         return self._runs._mutate(run_id, synced, include_deleted=include_deleted)
 
+
+class BenchmarkArchiveRequestRepository(_BenchmarkArchiveRepositoryBase):
+    """Read or request archives under parent and member authorization."""
+
     def get(self, run_id: str) -> dict | None:
         entity = self._runs._get(run_id)
         return None if entity is None else _row(entity)
 
     def request(self, run_id: str, *, force: bool = False) -> dict:
-        run = self._runs.get(run_id)
+        """Authorize the run and its members before inspecting or queuing an archive."""
+        run = self._runs.get_for_mutation(run_id)
         if run is None:
             raise NotFound("benchmark_run", "benchmark run not found")
         if run["framework"] != "harbor":
@@ -133,6 +141,13 @@ class BenchmarkArchiveStore:
         if row is None:
             raise NotFound("benchmark_run", "benchmark run not found")
         return row
+
+
+class BenchmarkArchiveWorkerRepository(BenchmarkArchiveRequestRepository):
+    """Archive build leases, publication, and cleanup across owners."""
+
+    def __init__(self) -> None:
+        super().__init__(access=INTERNAL_ACCESS)
 
     def list_claimable(self, *, claim_timeout: float, limit: int) -> list[dict]:
         """Return archives a builder may claim, without claiming them."""

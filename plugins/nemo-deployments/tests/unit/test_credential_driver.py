@@ -23,6 +23,7 @@ import httpx
 import jwt
 import pytest
 import time_machine
+from nemo_deployments_plugin.backends.openshell.credential_driver.owned import OwnedCredentials
 from nemo_deployments_plugin.backends.openshell.credential_driver.registry import BindingRegistry, ProviderOwner
 from nemo_deployments_plugin.backends.openshell.credential_driver.server import read_private_file, running_server
 from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
@@ -158,6 +159,36 @@ async def test_driver_rejects_mismatched_auth_mode_before_secret_access(harness:
                 "credentials": [
                     {**harness.owner.model_dump(), "request_id": "read", "handle": {"driver": "nemo", "handle": handle}}
                 ]
+            },
+        )
+    assert not harness.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "key"),
+    [
+        ("job-provider", "API_TOKEN"),
+        ("sandbox-ssh-different-owner", "SSH_HOST_PRIVATE_KEY"),
+        ("sandbox-ssh-provider-uuid", "API_TOKEN"),
+    ],
+)
+async def test_invalid_registration_or_internal_owner_never_stores_a_value(
+    harness: Harness, provider: str, key: str
+) -> None:
+    driver = CredentialDriver(
+        harness.registry,
+        harness.client,
+        owned=OwnedCredentials(harness.registry, harness.client, "openshell-internal"),
+    )
+    with pytest.raises(RegistrationDenied):
+        await driver._dispatch(
+            "StoreCredential",
+            {
+                **harness.owner.model_dump(),
+                "provider": provider,
+                "credential_key": key,
+                "value": "invalid-registration-must-not-become-a-stored-secret",
             },
         )
     assert not harness.calls
@@ -574,7 +605,7 @@ def test_sidecar_syncs_rotated_and_removed_token_before_success(tmp_path: Path) 
             synced_tokens.append(staged.read_bytes() if staged.exists() else None)
 
     module = "nemo_deployments_plugin.backends.openshell.credential_driver.sidecar"
-    with patch(f"{module}.os.fsync", side_effect=sync_and_observe):
+    with patch(f"{module}.fsync", side_effect=sync_and_observe):
         prepare_credentials(source, destination)
         assert synced_tokens[-1] == b"new-token"
         prepare_credentials(source, destination, auth_disabled=True)
@@ -585,7 +616,7 @@ def test_sidecar_syncs_rotated_and_removed_token_before_success(tmp_path: Path) 
             raise OSError("Directory sync failed")
         original_fsync(descriptor)
 
-    with patch(f"{module}.os.fsync", side_effect=fail_directory_sync):
+    with patch(f"{module}.fsync", side_effect=fail_directory_sync):
         with pytest.raises(OSError, match="Directory sync failed"):
             prepare_credentials(source, destination)
 

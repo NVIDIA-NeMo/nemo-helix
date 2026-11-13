@@ -5,7 +5,7 @@ import { getSourceDisplay } from '@studio/components/dataViews/JobsDataView/sour
 
 describe('getSourceDisplay', () => {
   it('labels a known source', () => {
-    expect(getSourceDisplay('data-designer').label).toBe('Data Designer');
+    expect(getSourceDisplay('nemo-data-designer-plugin').label).toBe('Data Designer');
   });
 
   it.each(['custom-source', 'constructor', 'toString', '__proto__'])(

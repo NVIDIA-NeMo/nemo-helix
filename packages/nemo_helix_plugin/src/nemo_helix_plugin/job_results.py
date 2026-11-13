@@ -33,6 +33,7 @@ from typing import Protocol
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.ignore_patterns import matches_ignore_patterns
 from nemo_helix_plugin.jobs.schemas import HelixJobResultResponse
 from pydantic import BaseModel
 
@@ -107,8 +108,8 @@ class LocalJobResults(JobResults):
     job that already wrote into ``ctx.storage.persistent / "results"``
     can register the path without copying.
 
-    Directories are copied recursively; ``ignore_patterns`` is forwarded
-    to :func:`shutil.copytree` so callers can skip cache files (matches
+    Directories are copied recursively; ``ignore_patterns`` uses the same
+    matching rules as hosted uploads so callers can skip cache files (matches
     the evaluator's ``ignore_patterns=["cache.db", "cache/"]`` usage).
     """
 
@@ -148,29 +149,31 @@ def _copy(src: Path, dst: Path, ignore_patterns: list[str] | str | None) -> None
         else:
             dst.unlink()
     if src.is_dir():
-        ignore = _make_ignore(ignore_patterns)
+        ignore = _make_ignore(ignore_patterns, src)
         shutil.copytree(src, dst, ignore=ignore)
     else:
         shutil.copyfile(src, dst)
 
 
-def _make_ignore(patterns: list[str] | str | None):
-    """Build a ``shutil.copytree`` ignore callable from ``ignore_patterns``.
-
-    Mirrors the shape the file manager accepts (``list[str] | str | None``)
-    so the local and platform impls take identical kwargs at call sites.
-    Trailing ``/`` and ``\\`` are stripped so directory-style patterns
-    like ``"cache/"`` match a directory named ``cache`` —
-    :func:`shutil.ignore_patterns` matches via :mod:`fnmatch` over bare
-    child names, where a trailing slash is a literal character that
-    would otherwise never match.
-    """
+def _make_ignore(patterns: list[str] | str | None, root: Path):
+    """Build a copytree callback using the hosted uploader's root-relative matching rules."""
     if patterns is None:
         return None
-    if isinstance(patterns, str):
-        patterns = [patterns]
-    normalized = [pattern.rstrip("/\\") for pattern in patterns]
-    return shutil.ignore_patterns(*normalized)
+    normalized = [patterns] if isinstance(patterns, str) else patterns
+
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        """Prune matching directories and exclude matching files at their bundle-relative paths."""
+        return {
+            name
+            for name in names
+            if matches_ignore_patterns(
+                Path(directory, name).relative_to(root),
+                normalized,
+                is_directory=Path(directory, name).is_dir(),
+            )
+        }
+
+    return ignore
 
 
 class HelixJobResults(JobResults):
@@ -181,6 +184,11 @@ class HelixJobResults(JobResults):
     uploads into the job's fileset under
     ``results/<attempt_id>/<result_name>`` and registers the result via
     ``JobsClient.create_job_result`` (conflict-idempotent).
+
+    Directory uploads attempt every nonignored file after ordinary file-upload
+    failures, retaining successful uploads. Failures are raised after all files
+    are attempted (as an ``ExceptionGroup`` for multiple failures), so a partial
+    upload is not registered as a complete result. Cancellation stops immediately.
 
     Args:
         job_name: Platform job name this sink publishes results for.

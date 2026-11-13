@@ -309,8 +309,10 @@ def test_convert_vendors_hub_dataset_and_configures_its_sandbox_path(tmp_path: P
         (isolated / "hub" / "datasets--primeintellect--ascii-tree").write_text("cached", encoding="utf-8")
         return FakeEnv()
 
+    monkeypatch.setattr(convert_mod, "_vendor_missing_agent_wheels", lambda *a, **k: None)
     monkeypatch.setattr(convert_mod, "_install_hub_package_from_wheels", lambda *a, **k: None)
     monkeypatch.setattr(convert_mod, "_load_verifiers_environment", _fake_load)
+    monkeypatch.setattr(convert_mod, "_loader_accepts_argument", lambda *_a, **_k: True)
 
     result = convert_prime_environment(
         ConvertEnvironmentSpec(
@@ -337,6 +339,99 @@ def test_convert_vendors_hub_dataset_and_configures_its_sandbox_path(tmp_path: P
     assert getattr(hub_constants, "HF_HOME") == str(developer_hf)
     assert getattr(hub_constants, "HF_HUB_CACHE") == str(developer_hf / "hub")
     assert getattr(datasets_config, "HF_DATASETS_CACHE") == developer_hf / "datasets"
+
+
+def test_convert_omits_dataset_path_when_the_loader_rejects_it(tmp_path: Path, monkeypatch) -> None:
+    """deepscaler-math takes dataset_name, so the sandbox config must not pass dataset_path."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
+
+    wheels = tmp_path / "prebuilt"
+    wheels.mkdir()
+    (wheels / "deepscaler_math-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    class FakeDataset:
+        column_names = ["prompt", "answer"]
+
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, key: str):
+            if key == "prompt":
+                return [[{"role": "user", "content": "2 + 2"}]]
+            return [""]
+
+        def to_parquet(self, path: str) -> None:
+            Path(path).write_bytes(b"PARQUET")
+
+    class FakeEnv:
+        dataset = FakeDataset()
+
+        def get_dataset(self, n: int = -1, seed: int | None = None):
+            return self.dataset
+
+    monkeypatch.setattr(convert_mod, "_vendor_missing_agent_wheels", lambda *a, **k: None)
+    monkeypatch.setattr(convert_mod, "_install_hub_package_from_wheels", lambda *a, **k: None)
+    monkeypatch.setattr(convert_mod, "_load_verifiers_environment", lambda *a, **k: FakeEnv())
+    monkeypatch.setattr(convert_mod, "_loader_accepts_argument", lambda *_a, **_k: False)
+
+    result = convert_prime_environment(
+        ConvertEnvironmentSpec(
+            hub_id="primeintellect/deepscaler-math",
+            out_dir=tmp_path / "env",
+            dataset_dir=tmp_path / "dataset",
+            wheels_dir=wheels,
+            dataset_size=1,
+        )
+    )
+    agent = yaml.safe_load((result.environment_root / "configs" / "verifiers_agent.yaml").read_text())
+    vf_env_args = agent["verifiers_agent"]["responses_api_agents"]["verifiers_agent"]["vf_env_args"]
+    assert vf_env_args == {}
+    assert (result.dataset_dir / "hub_environment.parquet").read_bytes() == b"PARQUET"
+
+
+def _load_by_name(dataset_name: str = "agentica-org/DeepScaleR-Preview-Dataset"):
+    return dataset_name
+
+
+def _load_starred(**kwargs):
+    return kwargs
+
+
+def _load_by_path(dataset_path=None):
+    return dataset_path
+
+
+def _load_keyword_only(*, dataset_path):
+    return dataset_path
+
+
+def _load_positional_only(dataset_path=None, /):
+    return dataset_path
+
+
+@pytest.mark.parametrize(
+    ("loader", "accepted"),
+    [
+        (_load_by_name, False),
+        (_load_starred, True),
+        (_load_by_path, True),
+        (_load_keyword_only, True),
+        # verifiers passes vf_env_args as keywords, which a positional-only parameter rejects.
+        (_load_positional_only, False),
+    ],
+)
+def test_loader_accepts_argument_follows_the_installed_signature(monkeypatch, loader, accepted: bool) -> None:
+    import sys
+    from types import ModuleType
+
+    from nhx.rl.tasks.environment.convert import DATASET_PATH_ARG, _loader_accepts_argument
+
+    module = ModuleType("hub_env")
+    setattr(module, "load_environment", loader)
+    monkeypatch.setitem(sys.modules, "hub_env", module)
+
+    assert _loader_accepts_argument("primeintellect/hub-env", DATASET_PATH_ARG) is accepted
 
 
 def test_split_train_validation_never_overlaps() -> None:
@@ -1316,6 +1411,29 @@ def test_setuptools_override_keeps_the_pkg_resources_ceiling(tmp_path: Path) -> 
     overrides, _constraints = rl_dependency_policy(rl)
 
     assert overrides == ["setuptools<81,>=80.10.2", "fastapi[standard]>=0.133.0,<0.137.0"]
+
+
+def test_rl_dependency_policy_skips_package_scoped_overrides(tmp_path: Path) -> None:
+    from nhx.rl.tasks.environment.convert import rl_dependency_policy
+
+    rl = tmp_path / "RL"
+    rl.mkdir()
+    (rl / "pyproject.toml").write_text(
+        """
+[tool.uv]
+override-dependencies = [
+  "setuptools>=80.10.2",
+  { package = { name = "vllm", version = "0.29.0" }, dependencies = ["flashinfer-python==0.6.18.post1"] },
+]
+constraint-dependencies = ["urllib3>=2.7.0"]
+""",
+        encoding="utf-8",
+    )
+
+    overrides, constraints = rl_dependency_policy(rl)
+
+    assert overrides == ["setuptools<81,>=80.10.2"]
+    assert constraints == ["urllib3>=2.7.0"]
 
 
 def test_rl_dependency_policy_rejects_a_checkout_without_uv_limits(tmp_path: Path) -> None:

@@ -3,7 +3,7 @@
 
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -13,6 +13,7 @@ pytest.importorskip("scaled_evals")
 
 
 from fastapi import HTTPException, Response
+from nemo_scaled_evals_plugin.entities import ScaledEvalsBenchmarkImport
 from scaled_evals.api.auth import CurrentPrincipal
 from scaled_evals.api.benchmark_import_store import BenchmarkImportStore, import_id_for
 from scaled_evals.api.db import Database
@@ -279,7 +280,20 @@ def test_public_import_promotes_reused_owned_task_visibility() -> None:
         "updated_at": now,
     }
     db = MagicMock()
-    db.benchmark_imports.create.return_value = row
+    created = ScaledEvalsBenchmarkImport(
+        name=row["id"],
+        workspace="scaled-evals-internal",
+        owner_id=row["owner_id"],
+        manifest_sha256=body.manifest_sha256,
+        manifest=manifest,
+        visibility=row["visibility"],
+        description=row["description"],
+    )
+    created._id = "original-import-id"
+    created._created_at = created._updated_at = now
+    db.benchmark_imports.create.return_value = created
+    row["updated_at"] = now + timedelta(seconds=10)
+    db.benchmark_imports.get.return_value = row
     db.tasks.get_by_slug.return_value = {
         "id": "task_one",
         "owner_id": "usr_test",
@@ -314,13 +328,14 @@ def test_public_import_promotes_reused_owned_task_visibility() -> None:
         }
     ]
 
-    create_benchmark_import(
+    result = create_benchmark_import(
         body,
         db,
         CurrentPrincipal(owner_type="user", owner_id="usr_test"),
         Response(),
     )
 
+    assert result.updated_at == row["updated_at"]
     db.tasks.update.assert_called_once_with("task_one", visibility="public")
 
 
@@ -378,3 +393,85 @@ def test_public_import_promotes_reused_benchmark_visibility() -> None:
     db.benchmark_imports.set_benchmark_revision.assert_called_once_with(
         "bmi_one", "bench", benchmark_id="bm_one", benchmark_revision=1
     )
+
+
+def test_failed_import_rollback_preserves_a_same_name_replacement(monkeypatch: pytest.MonkeyPatch) -> None:
+    import scaled_evals.api.routers.benchmark_imports as routes
+
+    manifest = {
+        "schema_version": 1,
+        "catalog_id": "fixture",
+        "visibility": "private",
+        "source": {"type": "git", "commit": "b" * 40},
+        "tasks": [{"name": "Task", "slug": "task", "pack": "packs/task.tar.gz", "pack_sha256": "c" * 64}],
+        "benchmarks": [{"name": "Bench", "slug": "bench", "tasks": ["task"]}],
+    }
+    body = BenchmarkImportCreate.model_validate(
+        {
+            "manifest_sha256": canonical_manifest_sha256(manifest),
+            "manifest": manifest,
+            "visibility": "private",
+        }
+    )
+    store = BenchmarkImportStore()
+    replacement: list[ScaledEvalsBenchmarkImport] = []
+
+    def replace_then_fail(
+        import_id: str, request: BenchmarkImportCreate, db: Database, current: CurrentPrincipal
+    ) -> None:
+        selected = store._get(import_id)
+        assert selected is not None
+        store.delete_by_id(selected.id)
+        created = store.create(
+            import_id,
+            owner_id="usr_test",
+            manifest_sha256=body.manifest_sha256,
+            manifest=manifest,
+            visibility="private",
+            description="replacement",
+        )
+        assert created is not None and created.id != selected.id
+        replacement.append(created)
+        raise RuntimeError("population failed after name reuse")
+
+    monkeypatch.setattr(routes, "_populate_import", replace_then_fail)
+    with pytest.raises(RuntimeError, match="population failed"):
+        create_benchmark_import(body, Database(), CurrentPrincipal(owner_type="user", owner_id="usr_test"), Response())
+    retained = store._get(replacement[0].name)
+    assert retained is not None and retained.id == replacement[0].id
+
+
+def test_import_rollback_by_id_handles_own_population_updates() -> None:
+    store = BenchmarkImportStore()
+    created = store.create(
+        "bmi_cleanup",
+        owner_id="usr_test",
+        manifest_sha256="a" * 64,
+        manifest={"benchmarks": []},
+        visibility="private",
+        description=None,
+    )
+    assert created is not None
+    store.add_benchmark(created.name, position=0, slug="bench", name="Bench", task_slugs=[])
+    store.delete_by_id(created.id)
+    assert store.get(created.name, owner_id="usr_test") is None
+
+
+def test_name_delete_retains_id_without_adding_a_version_precondition() -> None:
+    store = BenchmarkImportStore()
+    client = MagicMock()
+    selected = ScaledEvalsBenchmarkImport(
+        name="bmi_cleanup",
+        workspace="scaled-evals-internal",
+        owner_id="usr_test",
+        manifest_sha256="a" * 64,
+        manifest={"benchmarks": []},
+        visibility="private",
+    )
+    selected._id = "original-import-id"
+    client.get.return_value = selected
+    store._client = client
+
+    store.delete(selected.name)
+
+    client.delete_by_id.assert_called_once_with(ScaledEvalsBenchmarkImport, selected.id)

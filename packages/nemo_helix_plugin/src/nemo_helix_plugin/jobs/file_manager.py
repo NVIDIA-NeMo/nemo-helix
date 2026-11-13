@@ -12,6 +12,7 @@ from typing import Protocol
 import anyio
 from filesets import AsyncFilesetFileSystem, FilesetFileSystem, build_fileset_ref, parse_fileset_ref
 from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.jobs.ignore_patterns import matches_ignore_patterns
 from nemo_helix_plugin.jobs.schemas import FileStorageType
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,10 @@ def _filter_files_by_patterns(
         ignore_patterns: Glob patterns for files to ignore. Supports:
             - "*.ext" - match files by extension (at any depth)
             - "name" - match files by name (at any depth)
-            - "dir/" - match all files inside directories named "dir"
+            - "dir/" - match all files inside directories named "dir" at any depth;
+              the folder name may be a glob, such as "dir*/"
+            - "dir/sub/" - match all files inside "dir/sub" at the root of the listed paths;
+              each folder name may be a glob, such as "dir/sub*/"
 
     Returns:
         Filtered list of relative path strings (files not matching any pattern)
@@ -57,19 +61,7 @@ def _filter_files_by_patterns(
     if isinstance(ignore_patterns, str):
         ignore_patterns = [ignore_patterns]
 
-    def matches(rel_path: str) -> bool:
-        path = Path(rel_path)
-        for pattern in ignore_patterns:
-            if pattern.endswith("/"):
-                # Directory pattern: match files under directories with this name
-                dir_name = pattern.rstrip("/")
-                if dir_name in path.parts[:-1]:
-                    return True
-            elif path.match(pattern):
-                return True
-        return False
-
-    return [p for p in relative_paths if not matches(p)]
+    return [p for p in relative_paths if not matches_ignore_patterns(Path(p), ignore_patterns)]
 
 
 # Uploaded trees can hold files written by untrusted agents, and a symlink there would upload whatever it
@@ -188,13 +180,23 @@ class FilesetFileManager(BaseFilesetFileManager):
                 )
 
     def upload(self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None) -> str:
-        """Upload file or directory to fileset."""
+        """Upload files, attempting every directory member before raising ordinary upload errors."""
         full_remote_path = self._fileset_path(remote_path)
         if local_path.is_dir():
             all_files = _list_local_files_sync(local_path)
             files_to_upload = _filter_files_by_patterns(all_files, ignore_patterns)
+            errors: list[Exception] = []
             for rel_path in files_to_upload:
-                self._fs.put_file(str(local_path / rel_path), f"{full_remote_path}/{rel_path}")
+                try:
+                    self._fs.put_file(str(local_path / rel_path), f"{full_remote_path}/{rel_path}")
+                except Exception as error:
+                    error.add_note(f"Failed to upload {local_path / rel_path} to {full_remote_path}/{rel_path}")
+                    errors.append(error)
+                    logger.exception("Failed to upload %s; attempting remaining files", local_path / rel_path)
+            if len(errors) == 1:
+                raise errors[0]
+            if errors:
+                raise ExceptionGroup("Directory upload failed", errors)
         else:
             self._fs.put_file(str(local_path), full_remote_path)
         return self.url(remote_path)
@@ -254,13 +256,23 @@ class AsyncFilesetFileManager(BaseFilesetFileManager):
                 )
 
     async def _upload(self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None) -> str:
-        """Upload file or directory to fileset."""
+        """Upload files, attempting every directory member before raising ordinary upload errors."""
         full_remote_path = self._fileset_path(remote_path)
         if local_path.is_dir():
             all_files = await _list_local_files(local_path)
             files_to_upload = _filter_files_by_patterns(all_files, ignore_patterns)
+            errors: list[Exception] = []
             for rel_path in files_to_upload:
-                await self._fs._put_file(str(local_path / rel_path), f"{full_remote_path}/{rel_path}")
+                try:
+                    await self._fs._put_file(str(local_path / rel_path), f"{full_remote_path}/{rel_path}")
+                except Exception as error:
+                    error.add_note(f"Failed to upload {local_path / rel_path} to {full_remote_path}/{rel_path}")
+                    errors.append(error)
+                    logger.exception("Failed to upload %s; attempting remaining files", local_path / rel_path)
+            if len(errors) == 1:
+                raise errors[0]
+            if errors:
+                raise ExceptionGroup("Directory upload failed", errors)
         else:
             await self._fs._put_file(str(local_path), full_remote_path)
         return self.url(remote_path)

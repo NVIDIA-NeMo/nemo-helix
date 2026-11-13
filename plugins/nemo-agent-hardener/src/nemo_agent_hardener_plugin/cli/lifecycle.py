@@ -80,7 +80,7 @@ def _project_init_body(
         raise typer.Exit(code=1)
 
     try:
-        fileset = upload_project_dir(ctx.sdk, root, workspace=ctx.workspace)
+        fileset = upload_project_dir(ctx.sdk, root, workspace=ctx.workspace).ref
     except Exception as exc:
         typer.secho(f"Error: could not upload the project — {exc}", fg="red")
         raise typer.Exit(code=1) from exc

@@ -11,7 +11,7 @@ import {
   DocumentPreview,
   IconFunction,
 } from '@nemo/icons/icons';
-import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
+import { SamplerType } from '@nemo/sdk/generated/data-designer/schema/SamplerType';
 import type { FilesetTemplate } from '@studio/components/CreateFilesetStart/types';
 import { DEFAULT_BUILD_MODEL_NAME, DEFAULT_EMBEDDER_MODEL_NAME } from '@studio/constants/constants';
 

@@ -120,6 +120,9 @@ class MetricBundleEntity(EntityBase):
         description="Format-specific digest of the stored payload, used to verify integrity on load.",
         max_length=MAX_NAME_LENGTH,
     )
+    bundle_fileset_id: str | None = Field(
+        default=None, description="Immutable Files allocation ID; absent on legacy metrics."
+    )
     bundle_ref: str = Field(
         description="Files reference to the canonical serialized MetricBundle (format: workspace/fileset#path).",
     )

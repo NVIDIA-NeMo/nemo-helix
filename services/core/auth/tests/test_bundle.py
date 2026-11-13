@@ -48,7 +48,7 @@ async def test_authorization_data_merges_plugin_authz_contributions(monkeypatch)
 
     data = await _build_authorization_data_internal(entities_client=None)
 
-    assert data["authz"]["endpoints"][plugin_path]["get"]["permissions"] == ["example-plugin.jobs.read"]
+    assert data["authz"]["endpoints"][plugin_path]["get"]["direct"]["actor_perms"] == ["example-plugin.jobs.read"]
     assert "example-plugin.jobs.read" in data["authz"]["roles"]["Viewer"]["permissions"]
 
 
@@ -246,3 +246,14 @@ def test_degraded_plugin_fences_both_key_and_mount_name(monkeypatch):
     bundle = _patch_failmode(monkeypatch, [degraded], "deny_route")
     merged = bundle.merge_plugin_authz_contributions({"authz": {}})
     assert merged["authz"]["config"]["denied_plugin_prefixes"] == ["/apis/bad", "/apis/bad-actual"]
+
+
+@pytest.mark.asyncio
+async def test_bundle_rejects_endpoint_shorthand_instead_of_converting_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nhx.core.auth.app.bundle import _build_authorization_data_internal
+
+    shorthand = {"authz": {"endpoints": {"/apis/example/v2/items": {"get": {"permissions": []}}}}}
+    monkeypatch.setattr("nhx.core.auth.app.bundle.merge_plugin_authz_contributions", lambda data: shorthand)
+    with pytest.raises(ValueError, match="shorthand"):
+        await _build_authorization_data_internal(None)
+    assert shorthand["authz"]["endpoints"]["/apis/example/v2/items"]["get"] == {"permissions": []}

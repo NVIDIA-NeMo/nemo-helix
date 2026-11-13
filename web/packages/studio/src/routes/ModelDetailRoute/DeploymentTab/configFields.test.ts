@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Engine, type ModelDeploymentConfig } from '@nemo/sdk/generated/platform/schema';
+import type { ModelDeploymentConfig } from '@nemo/sdk/generated/platform/schema';
+import { Engine } from '@nemo/sdk/generated/platform/schema/Engine';
 import {
   getConfigFields,
   getConfigTiles,

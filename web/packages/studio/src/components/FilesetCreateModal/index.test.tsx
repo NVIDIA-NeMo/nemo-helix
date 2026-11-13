@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
-import { FilesetPurpose, type FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { FilesetCreateModal } from '@studio/components/FilesetCreateModal';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { mockUseNavigate, mockUseParams } from '@studio/tests/util/mockUseParams';
@@ -289,7 +290,7 @@ describe('FilesetCreateModal', () => {
       await user.click(screen.getByRole('button', { name: 'Create Dataset' }));
       await waitFor(() => {
         expect(navigate).toHaveBeenCalledWith(
-          expect.stringContaining('/workspaces/default/filesets/mydataset/detail?tab=files')
+          expect.stringContaining('/workspaces/default/filesets/mydataset/files')
         );
       });
     });
@@ -318,7 +319,7 @@ describe('FilesetCreateModal', () => {
       await user.click(screen.getByRole('button', { name: 'Create Model Fileset' }));
       await waitFor(() => {
         expect(navigate).toHaveBeenCalledWith(
-          expect.stringContaining('/workspaces/default/filesets/mymodel/detail?tab=files')
+          expect.stringContaining('/workspaces/default/filesets/mymodel/files')
         );
       });
     });

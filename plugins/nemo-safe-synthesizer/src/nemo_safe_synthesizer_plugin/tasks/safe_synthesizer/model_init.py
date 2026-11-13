@@ -10,12 +10,16 @@ import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-import httpx
-from nemo_helix_plugin.config import get_platform_config
+from nemo_helix_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.client_provider import get_async_nemo_client
+from nemo_helix_plugin.files.client import AsyncFilesClient
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_HF_HOME = "/app/.cache/huggingface"
+# Per-phase httpx timeout for the weight downloads. A fileset backed by a remote source
+# can take a while to produce the first byte of a large shard.
+DOWNLOAD_TIMEOUT_SECONDS = 600.0
 
 
 @dataclass
@@ -72,38 +76,28 @@ def is_model_cached(model_id: str, hf_home: str | None = None) -> bool:
 
 
 async def download_file(
-    client: httpx.AsyncClient,
-    files_api_url: str,
+    client: AsyncFilesClient,
     workspace: str,
     fileset_name: str,
     file_path: str,
     dest_path: Path,
 ) -> None:
-    """Download a single file from the Files API."""
-    url = f"{files_api_url}/v2/workspaces/{workspace}/filesets/{fileset_name}/-/{file_path}"
+    """Stream a single fileset file to disk."""
     dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-    async with client.stream("GET", url) as response:
-        response.raise_for_status()
+    response = await client.download_file(workspace=workspace, name=fileset_name, path=file_path)
+    async with response.stream(chunk_size=64 * 1024) as chunks:
         with open(dest_path, "wb") as f:
-            async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
+            async for chunk in chunks:
                 await asyncio.to_thread(f.write, chunk)
 
     logger.debug("Downloaded: %s -> %s", file_path, dest_path)
 
 
-async def list_fileset_files(
-    client: httpx.AsyncClient,
-    files_api_url: str,
-    workspace: str,
-    fileset_name: str,
-) -> list[dict]:
-    """List all files in a fileset."""
-    url = f"{files_api_url}/v2/workspaces/{workspace}/filesets/{fileset_name}/files"
-    response = await client.get(url)
-    response.raise_for_status()
-    payload = response.json()
-    return payload.get("data", payload.get("files", []))
+async def list_fileset_files(client: AsyncFilesClient, workspace: str, fileset_name: str) -> list[str]:
+    """Paths of all files in a fileset."""
+    response = await client.list_files(workspace=workspace, name=fileset_name)
+    return [file.path for file in response.data().data]
 
 
 def _snapshot_target_path(snapshot_path: Path, file_path: str) -> Path:
@@ -125,8 +119,7 @@ def _snapshot_target_path(snapshot_path: Path, file_path: str) -> Path:
 
 
 async def download_model_fileset(
-    client: httpx.AsyncClient,
-    files_api_url: str,
+    client: AsyncFilesClient,
     fileset: ModelFileset,
     hf_home: str | None = None,
     force: bool = False,
@@ -139,7 +132,7 @@ async def download_model_fileset(
 
     logger.info("Downloading model: %s from fileset %s", model_id, fileset.fileset_ref)
     try:
-        files = await list_fileset_files(client, files_api_url, fileset.workspace, fileset.name)
+        files = await list_fileset_files(client, fileset.workspace, fileset.name)
         if not files:
             logger.warning("No files found in fileset: %s", fileset.fileset_ref)
             return False
@@ -148,22 +141,19 @@ async def download_model_fileset(
         snapshot_hash = generate_snapshot_hash(fileset.name)
         snapshot_path = model_cache_path / "snapshots" / snapshot_hash
 
-        downloads = []
-        for file_info in files:
-            file_path = file_info["path"]
-            downloads.append(
-                (
+        downloads = [
+            (
+                file_path,
+                download_file(
+                    client,
+                    fileset.workspace,
+                    fileset.name,
                     file_path,
-                    download_file(
-                        client,
-                        files_api_url,
-                        fileset.workspace,
-                        fileset.name,
-                        file_path,
-                        _snapshot_target_path(snapshot_path, file_path),
-                    ),
-                )
+                    _snapshot_target_path(snapshot_path, file_path),
+                ),
             )
+            for file_path in files
+        ]
         results = await asyncio.gather(
             *(download for _, download in downloads),
             return_exceptions=True,
@@ -184,8 +174,8 @@ async def download_model_fileset(
 
         logger.info("Successfully downloaded model: %s (%d files)", model_id, len(files))
         return True
-    except httpx.HTTPStatusError as e:
-        logger.error("HTTP error downloading %s: %s", model_id, e.response.status_code)
+    except NemoHTTPError as e:
+        logger.error("HTTP error downloading %s: %s", model_id, e)
         return False
     except Exception as e:
         logger.error("Error downloading %s: %s", model_id, e)
@@ -193,46 +183,33 @@ async def download_model_fileset(
 
 
 async def init_models(
-    files_api_url: str,
     filesets: list[ModelFileset] | None = None,
     hf_home: str | None = None,
     force: bool = False,
-    timeout: float = 600.0,
 ) -> dict[str, bool]:
-    """Initialize model weights by downloading them from Files API."""
+    """Initialize model weights by downloading them from the Files API.
+
+    Uses the task's platform client (job principal, platform files URL), the same
+    one the dataset download goes through.
+    """
     filesets = filesets or DEFAULT_MODEL_FILESETS
     results = {}
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    # The platform client owns the HTTP transport; the Files client is a view over it.
+    async with get_async_nemo_client() as platform_client:
+        client = AsyncFilesClient.from_client(platform_client).with_options(timeout=DOWNLOAD_TIMEOUT_SECONDS)
+        logger.info("Initializing models from Files API: %s", client.base_url)
         for fileset in filesets:
-            results[fileset.hf_model_id] = await download_model_fileset(client, files_api_url, fileset, hf_home, force)
+            results[fileset.hf_model_id] = await download_model_fileset(client, fileset, hf_home, force)
     return results
 
 
 def init_models_sync(
-    files_api_url: str | None = None,
     filesets: list[ModelFileset] | None = None,
     hf_home: str | None = None,
     force: bool = False,
 ) -> dict[str, bool]:
     """Synchronous wrapper for model initialization."""
-    if files_api_url is None:
-        files_api_url = get_platform_config().get_service_url("files")
-
-    if not files_api_url:
-        logger.warning(
-            "Files API URL not configured. Set NHX_FILES_URL or pass files_api_url parameter. Skipping model download."
-        )
-        return {}
-
-    logger.info("Initializing models from Files API: %s", files_api_url)
-    return asyncio.run(
-        init_models(
-            files_api_url=files_api_url,
-            filesets=filesets,
-            hf_home=hf_home,
-            force=force,
-        )
-    )
+    return asyncio.run(init_models(filesets=filesets, hf_home=hf_home, force=force))
 
 
 if __name__ == "__main__":

@@ -139,7 +139,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Playground',
     description: 'Studio has a playground UI for chatting with and comparing models.',
     getHref: getModelCompareRoute,
-    requiredFeatureFlags: ['modelCompareEnabled'],
     patterns: [
       /\bmodel playground\b/i,
       /\bopen (the )?playground (for|with) (a )?model\b/i,

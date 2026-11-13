@@ -147,7 +147,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "grpcio>=1.81.1,<2" \
     "thrift>=0.24.0" \
     "virtualenv>=21.14.9" \
-    "wandb>=0.30.0"
+    "wandb>=0.31.0"
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}

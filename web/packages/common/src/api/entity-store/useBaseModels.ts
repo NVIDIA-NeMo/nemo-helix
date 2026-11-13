@@ -6,12 +6,12 @@ import { DEFAULT_NAMESPACE } from '@nemo/common/src/constants';
 import { DEFAULT_PAGE_SIZE, QUERY_PREFIX_ENTITY_STORE } from '@nemo/common/src/constants/api';
 import { isBaseModel } from '@nemo/common/src/utils/models';
 import { modelsListModels } from '@nemo/sdk/generated/platform/models';
-import {
-  type ModelEntity,
-  type ModelEntityFilter,
-  ModelEntitySortField,
-  type ModelEntitysPage,
+import type {
+  ModelEntity,
+  ModelEntityFilter,
+  ModelEntitysPage,
 } from '@nemo/sdk/generated/platform/schema';
+import { ModelEntitySortField } from '@nemo/sdk/generated/platform/schema/ModelEntitySortField';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 

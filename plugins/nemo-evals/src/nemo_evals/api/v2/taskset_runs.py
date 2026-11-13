@@ -6,7 +6,7 @@
 import logging
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from fastapi.exceptions import RequestValidationError
 from nemo_evals.api.dependencies import get_service_run_store, get_taskset_run_service
 from nemo_evals.api.service.taskset_run_service import (
@@ -23,6 +23,7 @@ from nemo_evals.api.taskset_run_schemas import (
     TasksetRunStatus,
     TasksetRunSubmitResponse,
     TasksetRunTask,
+    TasksetRunTaskDetail,
     to_status,
 )
 from nemo_evals.authz import scope
@@ -39,7 +40,7 @@ from nemo_evals.taskset_runs.store import (
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.client.errors import AuthenticationError, PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import Page
@@ -223,6 +224,10 @@ async def list_taskset_runs(
     active: bool = Query(default=False, description="Include only accepted and running runs."),
     mine: bool = Query(default=False, description="Include only runs created by the effective caller."),
     page_params: PageParams = Depends(make_page_dep()),
+    progress: bool = Query(
+        default=False,
+        description="Include each run's progress (task and trial counts), the same as getting a single run does.",
+    ),
     caller: str = Depends(get_effective_principal_id),
     service: TasksetRunService = Depends(get_taskset_run_service),
 ) -> Page[TasksetRunStatus]:
@@ -234,11 +239,13 @@ async def list_taskset_runs(
         mine: Restrict to the effective caller's records when True.
         page: One-based page number, validated by FastAPI.
         page_size: Maximum page size, from 1 to 1000.
+        progress: Include each run's progress when True.
         caller: Effective principal supplied by the platform dependency.
         service: Shared request-scoped run service.
 
     Returns:
-        Stored statuses and filtered pagination counts, excluding null optionals.
+        Stored statuses and filtered pagination counts, excluding null optionals; each status includes its
+        progress when ``progress`` is True.
 
     Raises:
         HTTPException: Permission denied (403), or unexpected storage or projection failure (500).
@@ -251,6 +258,7 @@ async def list_taskset_runs(
             mine=mine,
             page=page_params.page,
             page_size=page_params.page_size,
+            progress=progress,
         )
     except PermissionDeniedError as exc:
         logger.warning(
@@ -361,6 +369,8 @@ async def cancel_taskset_run(
         raise HTTPException(status_code=409, detail=str(exc), headers={"x-should-retry": "false"}) from exc
     except CancelContended as exc:
         raise HTTPException(status_code=503, detail=str(exc), headers={"x-should-retry": "true"}) from exc
+    except (AuthenticationError, PermissionDeniedError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail="Fileset lookup access denied") from exc
     except Exception:
         logger.exception("Failed to cancel taskset run %s/%s", sanitize_for_log(workspace), sanitize_for_log(run_id))
         raise HTTPException(status_code=500, detail="Internal server error") from None
@@ -424,4 +434,62 @@ async def list_taskset_run_tasks(
         raise HTTPException(status_code=500, detail="Internal server error") from None
     if result is None:
         raise HTTPException(status_code=404, detail="Taskset run not found")
+    return result
+
+
+@router.get(
+    "/agent-evaluate/runs/{run_id}/tasks/{task_index}",
+    summary="Get Taskset Run Task",
+    response_model=TasksetRunTaskDetail,
+    response_model_exclude_none=True,
+    responses={
+        403: {"description": "Caller lacks permission to read run resources."},
+        404: {"description": "Run, or that task of it, not found in this workspace."},
+    },
+)
+@scope.read
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[TasksetRunPerms.READ])
+async def get_taskset_run_task(
+    workspace: str,
+    run_id: str,
+    task_index: int = Path(ge=0, description="Zero-based index of the task in the run's resolved task list."),
+    service: TasksetRunService = Depends(get_taskset_run_service),
+) -> TasksetRunTaskDetail:
+    """Read one task of a run with each of its trials, as its task Job reports them while it runs.
+
+    Args:
+        workspace: Workspace containing the run and its children.
+        run_id: Public run name.
+        task_index: Zero-based task index, as the run's task list gives it.
+        service: Shared request-scoped run service.
+
+    Returns:
+        The stored task with ``trials`` read from its task Job now; omitted before the task has a Job,
+        when the Job reported no trials, or when the caller can't read it.
+
+    Raises:
+        HTTPException: Permission denied (403), the run or task is absent (404), or an unexpected failure (500).
+    """
+    try:
+        result = await service.get_task(workspace, run_id, task_index)
+    except PermissionDeniedError as exc:
+        logger.warning(
+            "Downstream permission denied while attempting to get taskset run task %s/%s/%s (status=%s, request_id=%s)",
+            sanitize_for_log(workspace),
+            sanitize_for_log(run_id),
+            sanitize_for_log(str(task_index)),
+            exc.status_code,
+            sanitize_for_log(exc.http_response.headers.get("x-request-id", "unknown")),
+        )
+        raise HTTPException(status_code=403, detail="Forbidden") from exc
+    except Exception:
+        logger.exception(
+            "Failed to get taskset run task %s/%s/%s",
+            sanitize_for_log(workspace),
+            sanitize_for_log(run_id),
+            sanitize_for_log(str(task_index)),
+        )
+        raise HTTPException(status_code=500, detail="Internal server error") from None
+    if result is None:
+        raise HTTPException(status_code=404, detail="Taskset run task not found")
     return result

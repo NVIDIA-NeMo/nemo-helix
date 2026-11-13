@@ -20,6 +20,7 @@ import yaml
 from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.training.errors.classifier import classify_exception, failure_status_details
+from nhx.customization_common.training.errors.exceptions import TrainingEnvironmentError
 from nhx.rl.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME
 from nhx.rl.app.jobs.training.schemas import (
     GPUInfo,
@@ -215,6 +216,9 @@ class TrainingRunner:
         Any changes to the configs would affect only coordinator, so avoid any config changes.
         """
         if self._dist_ctx.is_coordinator:
+            # Before Ray, vLLM, and the sandbox host. A stale nemo-gym wheel otherwise
+            # fails only after those have started.
+            self._reject_mismatched_nemo_gym_wheel()
             if isinstance(self._backend, SupportsPreprocessing):
                 self._progress.report_running(TrainingPhase.CONVERSIONS)
                 self._backend.run_preprocessing(self._config)
@@ -223,6 +227,32 @@ class TrainingRunner:
             self._dist_ctx.signal(BARRIER_PREPROCESSING_COMPLETE)
         else:
             self._dist_ctx.wait_for_coordinator(BARRIER_PREPROCESSING_COMPLETE)
+
+    def _reject_mismatched_nemo_gym_wheel(self) -> None:
+        """Fail a GRPO job whose vendored nemo-gym wheel is not the image's Gym."""
+        gym = getattr(self._config, "gym", None)
+        environment_path = getattr(gym, "environment_path", None) if gym is not None else None
+        if not environment_path:
+            return
+        from sandboxed_gym.runtime.gym_host_runtime import require_packaged_nemo_gym_matches_image
+
+        try:
+            checked = require_packaged_nemo_gym_matches_image(Path(environment_path))
+        except RuntimeError as exc:
+            if "does not match the Gym" not in str(exc):
+                raise
+            raise TrainingEnvironmentError(
+                message=(
+                    "Environment configuration error. The environment's nemo-gym wheel does not match "
+                    "the Gym in this image. Rebuild the wheelhouse from this image's Gym checkout and "
+                    "replace the environment fileset."
+                ),
+                detail=str(exc),
+                cause="gym_version_mismatch",
+                rerunnable=False,
+            ) from exc
+        if checked:
+            logger.info("Environment nemo-gym wheel matches the Gym in this image")
 
     def _compile_config_phase(self) -> LibraryConfig:
         """
