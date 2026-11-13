@@ -247,6 +247,11 @@ class _PolicyRuntimeManager:
             self._generation += 1
         self._clear_thread_policy()
 
+    def has_data(self) -> bool:
+        """Return whether a policy document has been loaded."""
+        with self._lock:
+            return self._data_loaded
+
 
 _policy_runtime = _PolicyRuntimeManager()
 
@@ -259,6 +264,11 @@ def get_policy() -> OPAPolicy:
 def set_policy_data(data: Dict[str, Any]) -> None:
     """Set policy data (principals, roles, etc.), deriving ``authz.scope_families`` for scopes.rego."""
     _policy_runtime.set_data(with_scope_families(data))
+
+
+def has_policy_data() -> bool:
+    """Return whether any policy document has been loaded into the runtime."""
+    return _policy_runtime.has_data()
 
 
 def reload_policy() -> None:

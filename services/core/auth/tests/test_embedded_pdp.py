@@ -3,13 +3,16 @@
 
 """Tests for the WASM policy engine."""
 
+import asyncio
+import copy
 from pathlib import Path
 from queue import Queue
 from threading import Thread
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import pytest
 import yaml
+from nhx.common.entities import EntityClient
 from nhx.core.auth.app.embedded_pdp import (
     OPAPolicy,
     PolicyEngineError,
@@ -1144,3 +1147,123 @@ async def test_taskset_task_read_authorizer_preserves_caller_access(static_authz
 def test_policy_snapshot_rejects_shorthand_before_publication() -> None:
     with pytest.raises(ValueError, match="shorthand"):
         set_policy_data({"authz": {"endpoints": {"/api/x": {"get": {"permissions": []}}}}})
+
+
+RELOAD_QUERY = {
+    "principal_id": "test@example.com",
+    "workspace": "test-workspace",
+    "permissions": ["models.read"],
+}
+
+
+class _ReloadEntityClient:
+    """Entity client stand-in: a reload only needs opaque service-client elevation."""
+
+    def as_service(self, _service_name: str, *, internal: bool) -> "_ReloadEntityClient":
+        assert internal
+        return self
+
+
+def _reload_entity_client() -> EntityClient:
+    return cast(EntityClient, _ReloadEntityClient())
+
+
+class _StubBundle:
+    """Replace bundle building with a controlled bootstrap/dynamic pair."""
+
+    def __init__(self, static_data: dict[str, Any], dynamic_data: dict[str, Any] | None) -> None:
+        self.static_data = static_data
+        self.dynamic_data = dynamic_data
+        self.live_decisions: list[bool] = []
+
+    async def __call__(self, entities_client: object) -> dict[str, Any]:
+        if entities_client is None:
+            return self.static_data
+        # This runs while the reload's entity fetch is in flight: record what the
+        # store answers for the caller whose binding is already live.
+        self.live_decisions.append(evaluate("has_permissions", RELOAD_QUERY)["allowed"])
+        if self.dynamic_data is None:
+            raise RuntimeError("entity store unavailable")
+        return self.dynamic_data
+
+
+class TestPolicyDataReload:
+    """Policy reloads must never publish a document that drops live role bindings.
+
+    The embedded PDP store is process-wide, so a document published by one task is
+    what every concurrent evaluation sees. Reloading therefore has to leave the last
+    complete document in place until its replacement is ready; publishing the
+    role-binding-free static bootstrap in between makes every principal unauthorized
+    for the whole entity fetch.
+    """
+
+    def test_reload_keeps_live_bindings_while_the_new_document_is_fetched(
+        self,
+        static_authz_data: dict[str, Any],
+        minimal_authz_data: dict[str, Any],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import nhx.core.auth.app.embedded_pdp.data as pdp_data
+
+        set_policy_data(minimal_authz_data)
+        assert evaluate("has_permissions", RELOAD_QUERY)["allowed"] is True
+
+        # The bootstrap document is the real static YAML, which carries no role bindings.
+        stub = _StubBundle(static_data=static_authz_data, dynamic_data=minimal_authz_data)
+        monkeypatch.setattr(pdp_data, "build_authorization_data", stub)
+
+        assert asyncio.run(pdp_data.load_policy_data(_reload_entity_client())) is True
+
+        assert stub.live_decisions == [True]
+        assert evaluate("has_permissions", RELOAD_QUERY)["allowed"] is True
+
+    def test_a_slow_load_never_overwrites_a_newer_document(
+        self, static_authz_data: dict[str, Any], minimal_authz_data: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import nhx.core.auth.app.embedded_pdp.data as pdp_data
+
+        set_policy_data(minimal_authz_data)
+        stale = copy.deepcopy(minimal_authz_data)
+        stale["authz"]["principals"].pop("test@example.com")
+
+        release_older = asyncio.Event()
+        dynamic_calls = 0
+
+        async def build(entities_client: object) -> dict[str, Any]:
+            nonlocal dynamic_calls
+            if entities_client is None:
+                return static_authz_data
+            dynamic_calls += 1
+            if dynamic_calls == 1:
+                # Read before the newer load and publish after it.
+                await release_older.wait()
+                return stale
+            return minimal_authz_data
+
+        monkeypatch.setattr(pdp_data, "build_authorization_data", build)
+
+        async def overlap() -> None:
+            older = asyncio.create_task(pdp_data.load_policy_data(_reload_entity_client()))
+            await asyncio.sleep(0)
+            newer = asyncio.create_task(pdp_data.load_policy_data(_reload_entity_client()))
+            assert await newer is True
+            assert evaluate("has_permissions", RELOAD_QUERY)["allowed"] is True
+            release_older.set()
+            assert await older is True
+
+        asyncio.run(overlap())
+        assert evaluate("has_permissions", RELOAD_QUERY)["allowed"] is True
+
+    def test_failed_reload_keeps_the_last_complete_document(
+        self, minimal_authz_data: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import nhx.core.auth.app.embedded_pdp.data as pdp_data
+
+        set_policy_data(minimal_authz_data)
+        stub = _StubBundle(static_data={"authz": {"principals": {}, "roles": {}, "endpoints": {}}}, dynamic_data=None)
+        monkeypatch.setattr(pdp_data, "build_authorization_data", stub)
+
+        assert asyncio.run(pdp_data.load_policy_data(_reload_entity_client())) is False
+
+        assert stub.live_decisions == [True]
+        assert evaluate("has_permissions", RELOAD_QUERY)["allowed"] is True

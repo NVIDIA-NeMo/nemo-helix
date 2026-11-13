@@ -13,7 +13,7 @@ import uuid
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from time import sleep
+from time import monotonic, sleep
 from typing import Awaitable, Callable, Coroutine, Generator, Mapping, Protocol, TypeVar
 from unittest.mock import patch
 
@@ -399,6 +399,10 @@ _DEFAULT_WORKSPACES = ["default"]
 _DEFAULT_PROJECTS = ["default/test-project"]
 _AUTH_WARMUP_DEADLINE_SECONDS = 5.0
 _AUTH_WARMUP_PAUSE_SECONDS = 0.05
+# Every request reloads policy data before it is authorized, so under coverage on a loaded
+# runner a single denied attempt can outlast the whole retry budget. Guarantee this many
+# attempts regardless of how long each one takes, or the retry never happens at all.
+_AUTH_WARMUP_MIN_ATTEMPTS = 3
 
 
 class _AuthWarmupResponse(Protocol):
@@ -425,12 +429,16 @@ def _post_after_auth_warmup(
     The embedded PDP can deny the first request after role-binding seed. A 403
     in that window is retried. A later non-success is raised instead of ignored.
     """
-    deadline = time.monotonic() + _AUTH_WARMUP_DEADLINE_SECONDS
+    deadline = monotonic() + _AUTH_WARMUP_DEADLINE_SECONDS
+    attempts = 0
     while True:
+        attempts += 1
         response = client.post(url, json=json, headers=headers)
         if response.status_code in {200, 201, 409}:
             return
-        if response.status_code != 403 or time.monotonic() >= deadline:
+        if response.status_code != 403:
+            raise RuntimeError(f"POST {url} failed: {response.status_code} {response.text}")
+        if attempts >= _AUTH_WARMUP_MIN_ATTEMPTS and monotonic() >= deadline:
             raise RuntimeError(f"POST {url} failed: {response.status_code} {response.text}")
         sleep(_AUTH_WARMUP_PAUSE_SECONDS)
 

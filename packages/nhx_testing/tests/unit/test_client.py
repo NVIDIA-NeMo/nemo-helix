@@ -571,6 +571,48 @@ def test_post_after_auth_warmup_retries_the_first_forbidden(monkeypatch: pytest.
     assert client.calls == 2
 
 
+def test_post_after_auth_warmup_retries_when_one_attempt_outlasts_the_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nhx.testing.client import _post_after_auth_warmup
+
+    monkeypatch.setattr("nhx.testing.client.sleep", lambda _seconds: None)
+    # The first denied attempt burns the whole deadline; the retry must still happen.
+    ticks = iter([0.0, 100.0, 100.0])
+    monkeypatch.setattr("nhx.testing.client.monotonic", lambda: next(ticks))
+    client = _ScriptedPostClient([403, 201])
+
+    _post_after_auth_warmup(
+        client,
+        "/apis/entities/v2/workspaces",
+        json={"name": "destination"},
+        headers={"X-NHX-Principal-Id": "user@example.com"},
+    )
+
+    assert client.calls == 2
+
+
+def test_post_after_auth_warmup_still_fails_a_caller_without_the_grant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nhx.testing.client import _AUTH_WARMUP_MIN_ATTEMPTS, _post_after_auth_warmup
+
+    monkeypatch.setattr("nhx.testing.client.sleep", lambda _seconds: None)
+    ticks = iter([0.0, 100.0, 100.0, 100.0])
+    monkeypatch.setattr("nhx.testing.client.monotonic", lambda: next(ticks))
+    client = _ScriptedPostClient([403] * _AUTH_WARMUP_MIN_ATTEMPTS)
+
+    with pytest.raises(RuntimeError, match="403"):
+        _post_after_auth_warmup(
+            client,
+            "/apis/entities/v2/workspaces",
+            json={"name": "destination"},
+            headers={"X-NHX-Principal-Id": "user@example.com"},
+        )
+
+    assert client.calls == _AUTH_WARMUP_MIN_ATTEMPTS
+
+
 def test_post_after_auth_warmup_raises_when_the_denial_is_not_warmup(monkeypatch: pytest.MonkeyPatch) -> None:
     from nhx.testing.client import _post_after_auth_warmup
 
