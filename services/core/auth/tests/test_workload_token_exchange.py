@@ -11,10 +11,10 @@ from urllib.parse import urlencode
 import nhx.common.auth.signing_keys as signing_keys_mod
 import pytest
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from jwt.algorithms import RSAAlgorithm
+from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 from nemo_helix_plugin.auth import AuthContext as PluginAuthContext
 from nhx.common.auth import Principal
 from nhx.common.auth.signing_keys import RSASigningKeyCache
@@ -1573,6 +1573,73 @@ def test_jwt_subject_token_decoder_refreshes_cached_jwks_on_unknown_kid(
 
     assert claims["sub"] == "authentik-user"
     assert captured["request_count"] == 2
+
+
+def _mock_subject_jwks(monkeypatch: pytest.MonkeyPatch, jwks: dict[str, Any]) -> None:
+    class FakeAsyncClient:
+        def __init__(self, *, timeout: float) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def get(self, url: str) -> _FakeResponse:
+            return _FakeResponse(jwks)
+
+    monkeypatch.setattr(exchange, "AsyncClient", FakeAsyncClient)
+
+
+def test_jwt_subject_token_decoder_accepts_es256_subject_token(
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Identity providers that sign with ES256 publish an EC key in their JWKS.
+    ec_key = ec.generate_private_key(ec.SECP256R1())
+    jwk = json.loads(ECAlgorithm.to_jwk(ec_key.public_key()))
+    jwk.update({"kid": "ec-key", "use": "sig", "alg": "ES256"})
+    _mock_subject_jwks(monkeypatch, {"keys": [jwk]})
+    subject_token = exchange.jwt.encode(
+        {
+            "iss": _workload(exchange_config).subject_issuers[0],
+            "sub": "es256-user",
+            "aud": "nemo-helix-workload",
+            "exp": int(exchange.time.time()) + 300,
+        },
+        ec_key,
+        algorithm="ES256",
+        headers={"kid": "ec-key"},
+    )
+
+    claims = asyncio.run(exchange_service.decode_jwt_subject_token(exchange_config, subject_token))
+
+    assert claims["sub"] == "es256-user"
+
+
+def test_jwt_subject_token_decoder_rejects_unlisted_algorithm(
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_subject_jwks_client(exchange_config, exchange_service, monkeypatch)
+    signing_key = exchange_service.workload_signing_key(exchange_config)
+    subject_token = exchange.jwt.encode(
+        {
+            "iss": _workload(exchange_config).subject_issuers[0],
+            "sub": "authentik-user",
+            "aud": "nemo-helix-workload",
+            "exp": int(exchange.time.time()) + 300,
+        },
+        signing_key.private_key,
+        algorithm="PS256",
+        headers={"kid": signing_key.kid},
+    )
+
+    with pytest.raises(exchange.jwt.InvalidAlgorithmError):
+        asyncio.run(exchange_service.decode_jwt_subject_token(exchange_config, subject_token))
 
 
 def test_jwt_subject_token_decoder_rejects_wrong_audience(
