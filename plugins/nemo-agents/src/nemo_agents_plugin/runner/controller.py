@@ -794,8 +794,25 @@ class AgentDeploymentController(NemoController):
             await self.entities.delete_by_id(AgentDeployment, dep.id, expected_db_version=dep.db_version)
         except Exception:
             logger.exception("Failed to delete deployment entity '%s'", dep.name)
-        else:
-            logger.info("Deployment '%s' deleted.", dep.name)
+            return
+        logger.info("Deployment '%s' deleted.", dep.name)
+        if dep.remove_image_on_delete and dep.deployment_mode == "docker" and dep.image:
+            await self._remove_deployment_image(dep)
+
+    async def _remove_deployment_image(self, dep: AgentDeployment) -> None:
+        """Best effort: a failure here never blocks or retries the delete."""
+        # Deferred like the deployments backend itself: it pulls in nemo-deployments.
+        from nemo_agents_plugin.images import remove_unused_image
+
+        image_store = getattr(self._backend_for(dep), "image_store", None)
+        if image_store is None:
+            return
+        try:
+            store = await image_store()
+        except Exception:
+            logger.warning("No image store to remove %s from", dep.image, exc_info=True)
+            return
+        await remove_unused_image(store, self.entities, dep.image, dep.workspace)
 
     async def _save(self, dep: AgentDeployment) -> None:
         try:

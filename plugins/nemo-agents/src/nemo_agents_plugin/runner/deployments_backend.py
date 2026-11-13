@@ -48,7 +48,7 @@ from nemo_agents_plugin.telemetry.intake_export import (
     supports_intake_atif_export,
 )
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
-from nemo_deployments_plugin.backends.base import LogResult
+from nemo_deployments_plugin.backends.base import DeploymentBackend, LogResult
 from nemo_deployments_plugin.backends.docker.config import DockerExecutorConfig
 from nemo_deployments_plugin.backends.openshell.config import OpenShellExecutorConfig
 from nemo_deployments_plugin.backends.registry import ExecutorRegistry, ExecutorSpec
@@ -935,6 +935,10 @@ class DeploymentsRunnerBackend(RunnerBackend):
             deployment_mode,
         )
         return DeploymentInfo(name=name, status="starting", endpoint="", endpoints=[], staged_spec=staged_spec)
+
+    async def image_store(self) -> DeploymentBackend:
+        """The docker executor's backend, which holds the host's local agent images."""
+        return (await self._registry()).resolve(executor_for_mode(self._config, "docker"))
 
     async def get_deployment_status(self, workspace: str, name: str) -> DeploymentInfo | None:
         entities = self._entity_client()

@@ -546,6 +546,19 @@ paths:
         schema:
           type: string
           title: Name
+      - name: remove_image
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: After teardown, also remove the deployment's image if the platform
+            built it and no other deployment uses it. Images you built or pulled yourself
+            are never removed.
+          default: true
+          title: Remove Image
+        description: After teardown, also remove the deployment's image if the platform
+          built it and no other deployment uses it. Images you built or pulled yourself
+          are never removed.
       responses:
         '204':
           description: Successful Response
@@ -3117,6 +3130,12 @@ components:
           title: Use Image Entrypoint
           description: 'Container modes only: preserve the image ENTRYPOINT/CMD instead
             of injecting the platform-owned NAT/Fabric server command.'
+          default: false
+        remove_image_on_delete:
+          type: boolean
+          title: Remove Image On Delete
+          description: 'Set when the deployment is deleted: after teardown, also remove
+            its platform-built image if no other deployment uses it.'
           default: false
         plugin_deployment:
           type: string

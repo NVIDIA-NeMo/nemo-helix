@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nemo_agents_plugin.config import ControllerConfig
@@ -366,6 +366,45 @@ class TestReconcileOne:
 
         ctrl.entities.delete_by_id.assert_not_awaited()
         assert "no persisted ID" in caplog.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("mode", "remove_image", "image", "expected"),
+        [
+            ("docker", True, "nemo-agents/default/a:1", True),
+            ("docker", False, "nemo-agents/default/a:1", False),
+            ("docker", True, "", False),
+            ("k8s", True, "nemo-agents/default/a:1", False),
+        ],
+    )
+    async def test_deleting_removes_the_image_only_when_asked(
+        self, mode: DeploymentMode, remove_image: bool, image: str, expected: bool
+    ) -> None:
+        ctrl = _make_controller()
+        dep = _make_deployment(status="deleting", deployment_mode=mode, image=image)
+        dep.remove_image_on_delete = remove_image
+
+        with patch("nemo_agents_plugin.images.remove_unused_image", AsyncMock(return_value=True)) as remove:
+            await ctrl._reconcile_one(dep)
+
+        ctrl.entities.delete.assert_awaited_once()
+        if expected:
+            remove.assert_awaited_once_with(ctrl.backend.image_store.return_value, ctrl.entities, image, dep.workspace)
+        else:
+            remove.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_image_store_failure_does_not_block_delete(self) -> None:
+        ctrl = _make_controller()
+        dep = _make_deployment(status="deleting", deployment_mode="docker", image="nemo-agents/default/a:1")
+        dep.remove_image_on_delete = True
+        ctrl.backend.image_store.side_effect = RuntimeError("no docker")
+
+        with patch("nemo_agents_plugin.images.remove_unused_image", AsyncMock()) as remove:
+            await ctrl._reconcile_one(dep)
+
+        ctrl.entities.delete.assert_awaited_once()
+        remove.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_deleting_keeps_entity_when_teardown_incomplete(self) -> None:

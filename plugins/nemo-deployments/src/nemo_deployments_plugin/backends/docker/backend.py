@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from nemo_deployments_plugin.backends.base import (
     BackendStatusUpdate,
     DeploymentBackend,
+    ImageInUseError,
     LogResult,
     MissingBackendDependencyError,
     VolumeStatusUpdate,
@@ -1627,6 +1628,24 @@ class DockerDeploymentBackend(DeploymentBackend):
             if ws and dep_name:
                 seen.add(f"{ws}/{dep_name}")
         return sorted(seen)
+
+    async def remove_image(self, reference: str) -> bool:
+        try:
+            await asyncio.to_thread(self._client.images.remove, reference, force=False)
+        except (self._docker_errors.ImageNotFound, self._docker_errors.NotFound):
+            return False
+        except self._docker_errors.APIError as exc:
+            if exc.status_code == 409:
+                raise ImageInUseError(str(exc)) from exc
+            raise
+        return True
+
+    async def image_tags(self, reference: str) -> list[str] | None:
+        try:
+            image = await asyncio.to_thread(self._client.images.get, reference)
+        except (self._docker_errors.ImageNotFound, self._docker_errors.NotFound):
+            return None
+        return list(image.tags)
 
     def _executor_volume_bindings(self) -> dict[str, dict[str, str]]:
         return {

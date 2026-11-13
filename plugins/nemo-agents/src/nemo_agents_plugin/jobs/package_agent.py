@@ -35,6 +35,7 @@ from nemo_agents_plugin.entities import (
     Agent,
     ethos_fileset_name,
 )
+from nemo_agents_plugin.images import TAG_NAMESPACE
 from nemo_helix_plugin.agents.validation import require_agent_config, resolve_agent_fileset
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoResponseValidationError
@@ -74,10 +75,6 @@ IMAGE_TAG_PATTERN = r"^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$"
 VERSION_PATTERN = r"^[0-9]+(\.[0-9]+){0,2}$"
 #: The repository grammar with an optional ``:tag``, so the trailing ``$`` is dropped first.
 IMAGE_REFERENCE_PATTERN = IMAGE_REPOSITORY_PATTERN[:-1] + r"(:[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})?$"
-
-#: Docker tags are daemon-global but the auth boundary is the workspace, so every
-#: image is nested under ``{TAG_NAMESPACE}/{workspace}/``.
-TAG_NAMESPACE = "nemo-agents"
 
 #: One name component plus optional tag — no ``/``, so a submitted value cannot
 #: climb out of that namespace.
