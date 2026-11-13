@@ -166,9 +166,22 @@ USER ${BUILD_UID}:${BUILD_GID}
 # Empty UV_SYNC_MODE relocks. Default is --frozen.
 ARG UV_SYNC_MODE=--frozen
 
+# The pinned RL fork still declares vLLM 0.29.0, affected by CVE-2026-105759.
+# vLLM 0.30.0 retains torch 2.13.0 and requires FlashInfer 0.6.18.post1.
+# Update the actual vllm extra and lock together before any frozen sync, so
+# prefetched workers and later uv invocations cannot restore the vulnerable pin.
+# Remove this adaptation when the upstream RL source pin carries these versions.
+RUN uv add --optional vllm --no-sync \
+        'vllm==0.30.0' \
+        'flashinfer-python==0.6.18.post1' \
+        'flashinfer-cubin==0.6.18.post1' \
+        'flashinfer-jit-cache==0.6.18.post1' && \
+    mkdir -p /tmp/nhx-nemo-rl-lock && \
+    cp pyproject.toml uv.lock /tmp/nhx-nemo-rl-lock/
+
 # Warm the uv cache. Extras conflict, so each sync prunes the last; the cache is what remains.
 # The two combined syncs match the worker venvs: mcore+nemo_gym and vllm+nemo_gym.
-# RL's own pyproject.toml and uv.lock are used as-is. These nine packages are left out of
+# Use RL's manifest/lock with the generation security update above. These nine packages are left out of
 # the sync and installed from rl-cuda-ext-wheel after prefetch.
 #
 # `uv sync` is EXACT, so these do NOT accumulate - each --extra prunes the previous one and the base
@@ -332,6 +345,10 @@ EOF
 # After the worker syncs, so a source-only bump reuses that layer.
 # Exclude submodule .git dirs here; a later rm would still leave them in this layer.
 COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/nemo-rl
+# The full-source copy includes the upstream manifests. Restore the exact inputs
+# used for the prefetched venvs rather than shipping the old generation pins.
+RUN cp /tmp/nhx-nemo-rl-lock/pyproject.toml /tmp/nhx-nemo-rl-lock/uv.lock /opt/nemo-rl/ && \
+    rm -rf /tmp/nhx-nemo-rl-lock
 
 # Upstream's tokenizer assert already allows the 5.17.0 override (<5.20). The
 # verifiers pin and wrapper-dir patch stay so a later run of prefetch_venvs.py
@@ -356,7 +373,7 @@ EOF
 # ---- Per-environment Gym venvs, separate from /opt/ray_venvs. Off unless listed. ----
 ARG NEMO_GYM_PREFETCH_CONFIGS=""
 # Gym pins vllm==0.25.1, the CUDA 12 wheel. Override it to the cu130 build.
-# RL's own vllm extra stays 0.29.0.
+# RL's own vllm extra is patched to 0.30.0 above.
 ARG NEMO_GYM_CUDA=cu130
 ARG NEMO_GYM_VLLM_VERSION=0.25.1
 ARG TARGETARCH

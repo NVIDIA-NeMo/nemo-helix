@@ -180,9 +180,87 @@ async def ensure_gliner_fileset_async(async_sdk: AsyncHelixClient) -> None:
 def _hf_hub_cache_dir() -> Path:
     # Match ``snapshot_download``'s own default (``HF_HUB_CACHE``, which already
     # honors ``HF_HOME``), so prewarming writes exactly where the runtime reads.
+    # ``huggingface_hub.constants`` is frozen at import time, so an
+    # ``HF_HUB_CACHE`` set later (see :func:`gliner_caches_under`) is read from
+    # the live environment. That is where the GLiNER child process reads it.
+    override = os.environ.get("HF_HUB_CACHE")
+    if override:
+        return Path(override).expanduser()
+
     from huggingface_hub import constants as hf_constants
 
     return Path(hf_constants.HF_HUB_CACHE)
+
+
+def _xdg_cache_dir() -> Path:
+    """Cache root upstream builds its isolated GLiNER2 server environment under."""
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+
+
+def _is_writable_dir(path: Path) -> bool:
+    """True when ``path`` exists as a writable dir, or could be created as one.
+
+    A missing path is checked against its nearest existing ancestor, since that
+    is the directory ``mkdir(parents=True)`` would have to write into.
+    ``os.access`` also reports a read-only filesystem as not writable. A path we
+    cannot even inspect (e.g. under another uid's mode-0700 ``$HOME``) raises
+    ``PermissionError`` from ``exists()`` and counts as not writable.
+    """
+    try:
+        candidate = path
+        while not candidate.exists():
+            if candidate.parent == candidate:
+                return False
+            candidate = candidate.parent
+        return candidate.is_dir() and os.access(candidate, os.W_OK | os.X_OK)
+    except OSError:
+        return False
+
+
+def _is_gliner_cached_safely() -> bool:
+    """:func:`is_gliner_cached`, treating a cache we cannot read as not cached."""
+    try:
+        return is_gliner_cached()
+    except OSError:
+        return False
+
+
+@contextmanager
+def gliner_caches_under(scratch_dir: Path) -> Generator[None, None, None]:
+    """Redirect the GLiNER caches into ``scratch_dir`` when their defaults are not writable.
+
+    The GLiNER weights land in the HuggingFace hub cache, and upstream builds the
+    detector's isolated server environment under ``$XDG_CACHE_HOME``. Both
+    default to ``$HOME/.cache``. A hardened job pod (read-only root filesystem,
+    or a uid that does not own ``$HOME``) cannot write there.
+
+    A cache that is already writable is left alone, so operator-configured
+    locations and warm caches from earlier runs are still used. So is a read-only
+    hub cache that already holds the complete pinned weights (e.g. a pre-populated
+    volume), since loading them needs no writes. Overrides apply only inside the
+    block, which must include the GLiNER runtime start: the child process copies
+    the environment when it is spawned.
+    """
+    overrides: dict[str, str] = {}
+    if not _is_writable_dir(_hf_hub_cache_dir()) and not _is_gliner_cached_safely():
+        hf_home = scratch_dir / "huggingface"
+        overrides["HF_HOME"] = str(hf_home)
+        overrides["HF_HUB_CACHE"] = str(hf_home / "hub")
+    if not _is_writable_dir(_xdg_cache_dir()):
+        overrides["XDG_CACHE_HOME"] = str(scratch_dir / "cache")
+
+    if overrides:
+        logger.info("Default model cache is not writable; using %s instead", scratch_dir)
+    previous = {name: os.environ.get(name) for name in overrides}
+    os.environ.update(overrides)
+    try:
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 def _upstream_snapshot_dir() -> Path:
