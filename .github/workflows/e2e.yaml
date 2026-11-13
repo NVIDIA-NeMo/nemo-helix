@@ -157,6 +157,13 @@ jobs:
           driver: docker-container
           cleanup: true
 
+      - name: Resolve bake cache branch
+        id: cache-branch
+        uses: ./.github/actions/bake-cache-branch
+        with:
+          base-ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.base_ref || github.ref_name }}
+          event-name: ${{ github.event_name }}
+
       - name: Configure bake variables
         id: bake-vars
         shell: bash
@@ -165,6 +172,8 @@ jobs:
           INPUT_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
           INPUT_PUBLISH: ${{ inputs.publish }}
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CACHE_SOURCE_BRANCH: ${{ steps.cache-branch.outputs.source-branch }}
+          CACHE_TARGET_BRANCH: ${{ steps.cache-branch.outputs.target-branch }}
         run: |
           set -euo pipefail
 
@@ -202,6 +211,8 @@ jobs:
             printf 'FASTEMBED_MODEL_REPO=%s\n' "qdrant/all-MiniLM-L6-v2-onnx"
             printf 'FASTEMBED_MODEL_REVISION=%s\n' "main"
             printf 'PUBLISH_IMAGES=%s\n' "$publish_images"
+            printf 'BAKE_CACHE_SOURCE_BRANCH=%s\n' "$CACHE_SOURCE_BRANCH"
+            printf 'BAKE_CACHE_TARGET_BRANCH=%s\n' "$CACHE_TARGET_BRANCH"
           } >> "$GITHUB_ENV"
           {
             printf 'image_registry=%s\n' "$image_registry"
@@ -244,7 +255,7 @@ jobs:
             -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .
 
       - name: Log in to GHCR
-        if: env.PUBLISH_IMAGES == 'true'
+        if: env.PUBLISH_IMAGES == 'true' || env.BAKE_CACHE_TARGET_BRANCH != ''
         shell: bash
         env:
           GHCR_TOKEN: ${{ github.token }}

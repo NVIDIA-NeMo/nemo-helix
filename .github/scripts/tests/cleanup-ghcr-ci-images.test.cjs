@@ -68,6 +68,17 @@ test("CI cleanup preserves RC and historical release artifacts", () => {
   assert.deepEqual(candidates("ci", "2026-10-23T00:00:00Z"), [5]);
 });
 
+test("CI cleanup preserves branch build caches", () => {
+  assert.deepEqual(
+    candidates("ci", "2026-10-23T00:00:00Z", [
+      "cache-main-linux-amd64",
+      "cache-release-0-10-linux-arm64",
+      "cache-20261021010203",
+    ]),
+    [2],
+  );
+});
+
 test("other timestamped tags retain the CI cleanup policy", () => {
   const tags = [
     "main-20261021010203",
