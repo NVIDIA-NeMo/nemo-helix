@@ -121,6 +121,10 @@ Retrieval recipes replace the batch and optimizer defaults above. When `training
 | `optimizer.learning_rate` | `1e-5` | `3e-6` |
 | `optimizer.warmup_steps` | `5` | `100` |
 
+<Note>
+`auto` reads the checkpoint head that model registration infers from the checkpoint's files. A Qwen3 reranker (a `Qwen3ForCausalLM` that scores with its yes/no logits) looks like a chat model unless its model card sets `pipeline_tag: text-ranking`, as the published Qwen3-Reranker does. A Qwen3 reranker trained by Customizer, or fine-tuned elsewhere, doesn't carry that tag, so `auto` trains it with `sft`. Set `training.recipe: cross_encoder` explicitly to re-tune it.
+</Note>
+
 ### Parallelism
 
 The `parallelism` block scales Automodel training across GPUs and nodes.

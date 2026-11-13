@@ -18,7 +18,11 @@ from typing import Any
 from nemo_automodel._transformers.registry import ModelRegistry
 from nhx.automodel.app.constants import PAUSE_SENTINEL_FILE_NAME, PAUSE_SIGNAL
 from nhx.automodel.tasks.training.backends.checkpoints import auto_torch_dtype
-from nhx.automodel.tasks.training.backends.registry import is_causal_reranker_checkpoint
+from nhx.automodel.tasks.training.backends.registry import (
+    causal_reranker_class,
+    causal_reranker_collator,
+    is_causal_reranker_checkpoint,
+)
 from nhx.automodel.tasks.training.backends.vlm import CONVERSATION_DATASET_TARGET, rewrite_fileset_rows
 from nhx.automodel.tasks.training.chat_templates import resolve_chat_template
 from nhx.automodel.tasks.training.datasets.preparation import (
@@ -197,7 +201,7 @@ def _compile_retrieval_config(
     else:
         cfg["model"]["num_labels"] = 1
         if is_causal_reranker_checkpoint(customizer_config.model.path):
-            # Automodel scores a Qwen3 causal LM by its yes/no next-token logits. That reranker
+            # Automodel scores this causal LM by its yes/no next-token logits. That reranker
             # has no classifier head to pool for, and takes the recipe's temperature (above).
             del cfg["model"]["pooling"]
             if customizer_config.model.precision is None:
@@ -1296,38 +1300,34 @@ def _configure_retrieval_dataset(
     """
 
     model_type = "bi_encoder" if recipe == TrainingRecipe.BI_ENCODER else "cross_encoder"
-    collator_target = (
-        "nemo_automodel.components.datasets.llm.BiEncoderCollator"
-        if recipe == TrainingRecipe.BI_ENCODER
-        else "nemo_automodel.components.datasets.llm.CrossEncoderCollator"
+    causal_reranker = (
+        causal_reranker_class(customizer_config.model.path) if recipe == TrainingRecipe.CROSS_ENCODER else None
     )
+    if recipe == TrainingRecipe.BI_ENCODER:
+        collator_target = "nemo_automodel.components.datasets.llm.BiEncoderCollator"
+    elif causal_reranker is not None:
+        # The reranker's own prompt, so training reads the yes/no logits where the model and vLLM's
+        # template for it expect them. Resolved here so an unknown reranker fails before data loads.
+        collator_target = causal_reranker_collator(causal_reranker)
+    else:
+        collator_target = "nemo_automodel.components.datasets.llm.CrossEncoderCollator"
     logger.info(
         "Configuring %s dataset with train_n_passages=%s",
         model_type,
         retrieval_config.train_n_passages,
     )
 
-    causal_reranker = recipe == TrainingRecipe.CROSS_ENCODER and is_causal_reranker_checkpoint(
-        customizer_config.model.path
-    )
-
     def collator_config(*, validation: bool = False) -> dict[str, Any]:
-        if causal_reranker:
-            # Qwen3-Reranker's own prompt (system message, <Instruct>/<Query>/<Document>, then the empty
-            # think block), so training reads the yes/no logits where the model, Automodel's example
-            # recipe, and vLLM's Qwen3 reranker template all put them.
-            return {
-                "_target_": "nemo_automodel.components.models.qwen3_reranker.collator.Qwen3ContextAwareRerankerCollator",
-                "rerank_max_length": retrieval_config.passage_max_length,
-                "pad_to_multiple_of": 8,
-            }
         if recipe == TrainingRecipe.CROSS_ENCODER:
-            return {
+            reranker: dict[str, Any] = {
                 "_target_": collator_target,
                 "rerank_max_length": retrieval_config.passage_max_length,
-                "prompt_template": "question:{query} \n \n passage:{passage}",
                 "pad_to_multiple_of": 8,
             }
+            if causal_reranker is None:
+                # A causal reranker's collator writes its own prompt and takes no prompt_template.
+                reranker["prompt_template"] = "question:{query} \n \n passage:{passage}"
+            return reranker
         result: dict[str, Any] = {
             "_target_": collator_target,
             "q_max_len": retrieval_config.query_max_length,

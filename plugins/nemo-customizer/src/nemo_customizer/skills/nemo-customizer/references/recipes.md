@@ -43,7 +43,7 @@ Nemotron 3.5 Lightning 30B-A3B and Nemotron 3 Nano 30B-A3B share the `NemotronH`
 | Nemotron Nano 12B v2 | GRPO | NeMo-RL [`grpo-nano-v2-12b-2n8g-fsdp2tp1.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/recipes/llm/grpo-nano-v2-12b-2n8g-fsdp2tp1.yaml) |
 | Nemotron Flash 1B | LoRA / full SFT | Automodel [`nemotron_flash_1b_squad_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.7.0/examples/llm_finetune/nemotron_flash/nemotron_flash_1b_squad_peft.yaml), [`nemotron_flash_1b_squad.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.7.0/examples/llm_finetune/nemotron_flash/nemotron_flash_1b_squad.yaml) |
 
-The Automodel Super VL recipes load `nvidia/NVIDIA-Nemotron-3.5-Super-midtrain-67B-vision-pretrained`, a vision-pretrained checkpoint with the same `NemotronH_Omni_Reasoning_V3` architecture as the released model. Keep the recipe's training values and point the job at the user's model entity, normally the released BF16 checkpoint (`nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16`).
+The Automodel Super VL recipes load the released BF16 checkpoint, `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16`. Keep the recipe's training values and point the job at the user's model entity for that checkpoint.
 
 All of [`examples/llm_finetune/nemotron/`](https://github.com/NVIDIA-NeMo/Automodel/tree/r0.7.0/examples/llm_finetune/nemotron) also covers Llama-Nemotron 8B / 49B.
 

@@ -112,7 +112,7 @@ Full template:
 | Field | Default | Notes |
 |-------|---------|-------|
 | `training_type` | `sft` | `distillation` requires `teacher_model` (entity ref) |
-| `recipe` | `auto` | `auto` uses the checkpoint head; `sft`, `bi_encoder`, or `cross_encoder` explicitly selects the recipe. Explicit encoder recipes can wrap a causal-LM checkpoint. Unset batch/LR/warmup fields are rewritten for encoder recipes — see **Retrieval recipe defaults** below. |
+| `recipe` | `auto` | `auto` uses the checkpoint head; `sft`, `bi_encoder`, or `cross_encoder` explicitly selects the recipe. Explicit encoder recipes can wrap a causal-LM checkpoint. A Qwen3 reranker without a `pipeline_tag: text-ranking` model card (any Customizer output, or one fine-tuned elsewhere) reads as a chat model, so set `cross_encoder` explicitly for it. Unset batch/LR/warmup fields are rewritten for encoder recipes — see **Retrieval recipe defaults** below. |
 | `finetuning_type` | `lora` | `all_weights` (full fine-tune), `lora_merged` (merge adapter into base) |
 | `lora.rank` | `16` | Higher → more capacity, more VRAM. Typical training range 8–32. Default vLLM deployments load adapters up to **rank 32** and model-free NIM deployments up to **rank 16**; above that the deployment needs a raised `--max-lora-rank` (`post-training-eval.md` § **LoRA rank limit**) |
 | `lora.alpha` | `32` | Scaling; common rule of thumb **alpha ≈ 2× rank** |
@@ -290,8 +290,9 @@ Dataset, collator, and export knobs for `bi_encoder` / `cross_encoder`. Use `tra
 
 **Qwen3 causal rerankers** (a `cross_encoder` job on a `Qwen3ForCausalLM` base such as Qwen3-Reranker) have no score head:
 - **Training prompt.** Helix trains them on Qwen3-Reranker's own prompt: system message, `<Instruct>`/`<Query>`/`<Document>`, then the empty think block. Classifier rerankers keep `question:{query} \n \n passage:{passage}`.
-- **Score.** `logit("yes") - logit("no")` at the last token. The HF output stays a plain Qwen3 causal LM tagged `text-ranking`, and the ONNX `logits` holds that score.
-- **Serving.** Score the tuned model with the same prompt, for example vLLM's Qwen3 reranker template. Other formatting reads the yes/no logits at the wrong position.
+- **Score.** `logit("yes") - logit("no")` at the last token. The HF output stays a plain Qwen3 causal LM, and the ONNX `logits` holds that score.
+- **Re-tuning.** The output's files look like a chat model's, so model registration labels it a chat model and `recipe: auto` picks `sft`. Set `training.recipe: cross_encoder` explicitly when you train from a tuned Qwen3 reranker, including one fine-tuned outside Helix.
+- **Serving.** Score the tuned model with the same prompt, for example vLLM's Qwen3 reranker template. Other formatting reads the yes/no logits at the wrong position. On vLLM, train with `retrieval.export.primary: hf` (vLLM serves the fileset root) and deploy with `executor_config.additional_args`: `["--runner", "pooling", "--hf-overrides", "{\"architectures\": [\"Qwen3ForSequenceClassification\"], \"classifier_from_token\": [\"no\", \"yes\"], \"is_original_qwen3_reranker\": true}", "--chat-template", "<Qwen3 reranker template>"]`. The overrides make vLLM score with the yes/no logits instead of loading a chat model.
 
 ### `parallelism`
 

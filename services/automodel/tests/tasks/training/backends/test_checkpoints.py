@@ -20,7 +20,6 @@ from nhx.automodel.tasks.training.backends.checkpoints import (
     _restructure_encoder_output,
     auto_torch_dtype,
     find_selected_checkpoints,
-    mark_text_ranking,
     merge_lora_cross_encoder_adapter,
     process_checkpoint,
     process_selected_checkpoints,
@@ -84,7 +83,7 @@ class TestCrossEncoderCheckpoint:
     def test_merges_cross_encoder_lora_and_exports_onnx(
         self, merged_lora_config: MagicMock, patched_checkpoint_io: dict, tmp_path: Path, causal_reranker: bool
     ) -> None:
-        """A causal reranker merges and traces as a causal LM, and its card marks it as a reranker."""
+        """A causal reranker merges and traces as a causal LM; a score-head reranker keeps its head."""
         checkpoint_path = tmp_path / "adapter"
         output_path = tmp_path / "output"
         (tmp_path / "base").mkdir()
@@ -124,8 +123,6 @@ class TestCrossEncoderCheckpoint:
         assert call["causal_reranker"] is causal_reranker
         patched_checkpoint_io["sanitize"].assert_called_once_with(output_path, tmp_path / "base")
         assert patched_checkpoint_io["order"] == ["export", "sanitize", "restructure"]
-        readme = output_path / "README.md"
-        assert ("pipeline_tag: text-ranking" in readme.read_text()) if causal_reranker else not readme.exists()
 
 
 class TestLlmLoraMerged:
@@ -474,16 +471,6 @@ class TestMergeLoraCrossEncoderAdapter:
         torch.testing.assert_close(merged.score.weight.float(), trained_score.float(), atol=1e-3, rtol=1e-3)
 
 
-def test_mark_text_ranking_keeps_the_rest_of_an_existing_card(tmp_path: Path) -> None:
-    (tmp_path / "README.md").write_text("---\ntags:\n- qwen3\npipeline_tag: text-generation\n---\nModel card body\n")
-
-    mark_text_ranking(tmp_path)
-
-    text = (tmp_path / "README.md").read_text()
-    assert text.startswith("---\ntags:\n- qwen3\npipeline_tag: text-ranking\n---\n")
-    assert text.endswith("Model card body\n")
-
-
 class TestSanitizeEncoderHf:
     def _write_configs(self, tmp_path: Path) -> tuple[Path, Path]:
         base = tmp_path / "base"
@@ -616,18 +603,20 @@ def test_auto_torch_dtype_follows_transformers(
 
 
 @pytest.mark.parametrize(
-    ("reference", "onnx_output", "passes"),
+    ("reference", "onnx_output", "error"),
     [
-        ([[-1.8398], [-0.2305]], [[-1.8281], [-0.2314]], True),
-        ([[-1.8398], [-0.2305]], [[-0.2305], [-1.8398]], False),
-        ([[0.1, -0.05]], [[0.12, -0.05]], False),
+        ([[-1.8398], [-0.2305]], [[-1.8281], [-0.2314]], None),
+        ([[-1.8398], [-0.2305]], [[-0.2305], [-1.8398]], "ONNX output diverges"),
+        ([[0.1, -0.05]], [[0.12, -0.05]], "ONNX output diverges"),
+        ([[float("inf")], [0.5]], [[0.0], [0.5]], "HuggingFace output has NaN or infinite"),
+        ([[1.0], [0.5]], [[float("nan")], [0.5]], "ONNX output has NaN or infinite"),
     ],
-    ids=["fp16-qwen3-reranker-drift", "rows-swapped", "embedding-off-by-2e-2"],
+    ids=["fp16-qwen3-reranker-drift", "rows-swapped", "embedding-off-by-2e-2", "infinite-reference", "nan-onnx"],
 )
 def test_onnx_tolerance_scales_with_reference_magnitude(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reference: list, onnx_output: list, passes: bool
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reference: list, onnx_output: list, error: str | None
 ) -> None:
-    """fp16 drift measured on Qwen3-Reranker-0.6B passes; tracing bugs and drifted embeddings do not."""
+    """fp16 drift measured on Qwen3-Reranker-0.6B passes; tracing bugs, drift, and non-finite outputs do not."""
     import types
 
     import numpy as np
@@ -647,10 +636,10 @@ def test_onnx_tolerance_scales_with_reference_magnitude(
         rtol=rtol,
     )
 
-    if passes:
+    if error is None:
         verify()
     else:
-        with pytest.raises(ValueError, match="ONNX output diverges"):
+        with pytest.raises(ValueError, match=error):
             verify()
 
 

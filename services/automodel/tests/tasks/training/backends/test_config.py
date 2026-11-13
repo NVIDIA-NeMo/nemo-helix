@@ -325,6 +325,38 @@ class TestConfigureRetrievalDataset:
             assert cfg[loader]["collate_fn"]["rerank_max_length"] == 512
             assert cfg[loader]["collate_fn"].get("prompt_template") == prompt_template
 
+    def test_cross_encoder_stops_for_a_causal_reranker_without_a_known_prompt(
+        self, tmp_path: Path, mock_customizer_config: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A causal reranker Automodel adds later fails at setup until Helix knows its prompt."""
+
+        class NewCausalReranker:
+            @classmethod
+            def can_generate(cls) -> bool:
+                return True
+
+        monkeypatch.setattr(
+            "nhx.automodel.tasks.training.backends.registry._automodel_cross_encoder_class",
+            lambda _config: NewCausalReranker,
+        )
+        base = tmp_path / "base"
+        base.mkdir()
+        (base / "config.json").write_text('{"model_type": "new_model", "architectures": ["NewModelForCausalLM"]}')
+        mock_customizer_config.model.path = str(base)
+        train_file = tmp_path / "train.jsonl"
+        train_file.write_text('{"query":"q","pos_doc":"p","neg_doc":["n"]}\n')
+
+        with pytest.raises(ValueError, match="NewCausalReranker yes/no reranker"):
+            _configure_retrieval_dataset(
+                {},
+                mock_customizer_config,
+                train_file,
+                train_file,
+                seed=42,
+                retrieval_config=RetrievalConfig(),
+                recipe=TrainingRecipe.CROSS_ENCODER,
+            )
+
     def test_bi_encoder_strips_trailing_space_from_nemotron_prefixes(
         self,
         tmp_path: Path,

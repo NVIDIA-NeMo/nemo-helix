@@ -785,7 +785,8 @@ def verify_onnx_matches_reference(
     rtol: float = 0.0,
     providers: list[str] | None = None,
 ) -> float:
-    """Return max abs diff. Raise ``ValueError`` on shape mismatch or diff > ``atol + rtol * max|reference|``."""
+    """Return max abs diff. Raise ``ValueError`` on a shape mismatch, a NaN or infinite output, or
+    diff > ``atol + rtol * max|reference|``."""
     import numpy as np
     import onnxruntime
 
@@ -804,6 +805,10 @@ def verify_onnx_matches_reference(
 
     if actual.shape != expected.shape:
         raise ValueError(f"ONNX output shape {actual.shape} does not match HuggingFace output shape {expected.shape}.")
+    # A NaN or infinite value makes the diff or the tolerance non-finite, and the comparison below then passes.
+    for source, values in (("ONNX", actual), ("HuggingFace", expected)):
+        if not np.isfinite(values).all():
+            raise ValueError(f"The {source} output has NaN or infinite values; the ONNX export cannot be verified.")
 
     max_diff = float(np.max(np.abs(actual.astype("float64") - expected.astype("float64"))))
     scale = float(np.max(np.abs(expected)))
@@ -815,30 +820,6 @@ def verify_onnx_matches_reference(
         )
     logger.info("ONNX verification passed (max abs diff %.3e <= tolerance %.3e)", max_diff, tolerance)
     return max_diff
-
-
-def mark_text_ranking(hf_dir: Path) -> None:
-    """Mark a causal-LM checkpoint that scores as a reranker so it registers as one.
-
-    Its config is a plain causal LM, so only the model card can say that it ranks text.
-    ``pipeline_tag: text-ranking`` is the cross-encoder signal model-spec inspection reads.
-    """
-    import yaml
-
-    readme = hf_dir / "README.md"
-    frontmatter: dict = {}
-    body = ""
-    if readme.is_file():
-        text = readme.read_text(encoding="utf-8")
-        match = re.match(r"\A---\s*\n(.*?)\n---\s*\n?", text, re.DOTALL)
-        if match:
-            parsed = yaml.safe_load(match.group(1))
-            frontmatter = parsed if isinstance(parsed, dict) else {}
-            body = text[match.end() :]
-        else:
-            body = text
-    frontmatter["pipeline_tag"] = "text-ranking"
-    readme.write_text(f"---\n{yaml.safe_dump(frontmatter, sort_keys=False)}---\n{body}", encoding="utf-8")
 
 
 def _resolve_export_config(customizer_config: TrainingStepConfig) -> ExportConfig:
@@ -1004,8 +985,6 @@ def process_checkpoint(
             sanitize_encoder_hf(output_path, Path(base_model_path))
         if is_embedding:
             write_sentence_transformer_modules(output_path, Path(base_model_path))
-        if causal_reranker:
-            mark_text_ranking(output_path)
         _restructure_encoder_output(output_path, export_cfg.primary)
 
     # Determine precision: use explicit config value, or extract from base model

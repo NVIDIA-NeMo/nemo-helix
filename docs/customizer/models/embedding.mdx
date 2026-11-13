@@ -141,6 +141,6 @@ An alternate checkpoint for retrieval.
 | Max sequence length | 8192 |
 | Embedding dimensions | 2048 (Matryoshka: 384, 512, 768, 1024, or 2048) |
 | Finetuning | `all_weights` or `lora_merged` |
-| Model entity | Create it with `--trust-remote-code` (`trust_remote_code: true`). The checkpoint ships its own model code (`llama_bidirec`), and without the flag its model spec never populates. |
+| Model entity | Create it with `--trust-remote-code` (`trust_remote_code: true`). The checkpoint ships its own model code (`llama_bidirec`), and without the flag its model spec never populates. Only an administrator can set the flag, unless the platform config pre-approves the fileset's source. |
 
 This checkpoint uses the same Automodel `bi_encoder` contract; set `export.primary` to whichever artifact its NIM loads from the fileset root. New work should start from Nemotron 3 Embed 1B on Retriever NIM 2.2.0.
