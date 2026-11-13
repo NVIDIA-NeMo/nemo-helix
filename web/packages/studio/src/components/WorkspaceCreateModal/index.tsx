@@ -11,6 +11,7 @@
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { isForbiddenError } from '@nemo/common/src/api/common/utils';
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
@@ -116,6 +117,10 @@ export const WorkspaceCreateModal: FC<WorkspaceCreateModalProps> = ({
 
       if (errorDetail === `Workspace ${data.name} already exists.`) {
         setError('name', { message: errorDetail });
+      } else if (isForbiddenError(error)) {
+        toast.error(
+          "You don't have permission to create workspaces. Ask an administrator for access."
+        );
       } else {
         // Extract message from errorDetail if it's an array with msg property
         let errorMessage: string;

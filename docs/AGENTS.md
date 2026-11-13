@@ -65,6 +65,7 @@ These are generated; edit the source and regenerate:
 |---|---|
 | `docs/cli/reference.mdx`, `docs/fern/snippets/_snippets/cli-summary.mdx` | `make generate-cli-reference-docs` |
 | `docs/set-up/config-reference.mdx` | `make generate-config-reference-docs` |
+| `docs/fern/snippets/_snippets/library-versions.mdx` (gitignored) | `npm --prefix docs/fern run prepare:libraries` (also runs during docs prepare) |
 | `docs/auth/authorization/permissions-reference.mdx` | `uv run python services/core/auth/scripts/auth-tools.py generate-docs` |
 
 ## API reference
