@@ -124,6 +124,7 @@ format retain the legacy `nat-workflow-v1` default.
 | `instructions.system.content` | The system prompt, shared by every harness. |
 | `skills.paths` | Skill directories relative to `agent.yaml`; each must contain a `SKILL.md`. |
 | `mcp.servers` | MCP servers that expose tools to the harness. |
+| `tools.enabled` | Optional tool allowlist. Omitted or `null` preserves harness defaults, subject to `blocked`; `[]` denies all tools. |
 | `tools.blocked` | Tool names the harness must not call. |
 | `runtime` | `timeout_seconds` and `max_turns`. |
 | `environment` | Workspace and artifacts directories, and environment variables. |

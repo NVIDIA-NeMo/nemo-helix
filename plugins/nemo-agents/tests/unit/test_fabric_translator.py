@@ -403,6 +403,18 @@ class TestTranslateAgentConfig:
         assert mcp.servers["disabled"].custom_headers == {"Authorization": "Bearer ${MCP_ACCESS_TOKEN}"}
         assert tools.blocked == ["shell", "browser"]
 
+    @pytest.mark.parametrize("tools", [{}, {"enabled": None}, {"enabled": []}, {"enabled": ["execute"]}])
+    def test_tools_allowlist_survives_normalization_and_translation(self, tools: dict[str, Any]) -> None:
+        payload = _example_yaml_config()
+        payload["tools"] = {**tools, "blocked": ["file_write"]}
+        normalized = validate_agent_config(payload["config_format"], payload)
+
+        translated = translate_agent_config(AgentConfig.model_validate(normalized))
+
+        assert translated.tools is not None
+        assert translated.tools.enabled == tools.get("enabled")
+        assert translated.tools.blocked == ["file_write"]
+
     def test_top_level_prompts_rejected_until_shared_prompt_contract_exists(self) -> None:
         payload = copy.deepcopy(_example_yaml_config())
         payload["prompts"] = {"system": "prompts/system.md"}

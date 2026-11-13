@@ -468,6 +468,15 @@ def test_register_resolves_default_model_placeholder(tmp_path, placeholder: str)
         ("config_format: []", "Input should be a valid string"),
         ("helix_registration:\n  reference: []", "Input should be a valid dictionary"),
         ("helix_registration:\n  default_inptu: hi", "Extra inputs are not permitted"),
+        (
+            "config_format: nemo-agents-spec-v1\n"
+            "name: calc\n"
+            "default_harness: deepagents\n"
+            "harnesses: {deepagents: {kind: deepagents}}\n"
+            "models: {default: {provider: openai, model: test-model}}\n"
+            "tools: {enabled: [file_write], blocked: [file_write]}\n",
+            "tool 'file_write' cannot be both enabled and blocked",
+        ),
     ],
 )
 def test_register_reports_invalid_agent_config_without_traceback(tmp_path, config_text: str, error: str) -> None:
