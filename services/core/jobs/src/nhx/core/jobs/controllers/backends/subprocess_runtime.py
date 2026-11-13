@@ -40,8 +40,12 @@ from opentelemetry.sdk.environment_variables import (
     OTEL_BLRP_SCHEDULE_DELAY,
 )
 from opentelemetry.sdk.resources import Resource
+from pydantic import JsonValue
 
 logger = logging.getLogger(__name__)
+
+#: Attributes services set on a Job, by service name, carried into its workload access tokens.
+ServiceAttributes = dict[str, dict[str, JsonValue]]
 
 NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR = "NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT"
 NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR = "NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH"
@@ -186,13 +190,14 @@ def parse_secret_references(secrets_env: str) -> list[SecretReference]:
     return references
 
 
-def _mint_task_access_token(principal: Principal | None) -> str | None:
-    """A ``jobs`` service token delegated to *principal*, or ``None`` without workload token exchange."""
+def _mint_task_access_token(principal: Principal | None, service_attributes: ServiceAttributes) -> str | None:
+    """A ``jobs`` service token delegated to *principal* and carrying *service_attributes*, or ``None`` without
+    workload token exchange."""
     auth_config = get_auth_config()
     if not (auth_config.enabled and auth_config.oidc.workload is not None):
         return None
     on_behalf_of = principal.effective_principal if principal is not None and principal.id else None
-    return ServiceWorkloadAccessTokenProvider(auth_config, "jobs", on_behalf_of).get_access_token()
+    return ServiceWorkloadAccessTokenProvider(auth_config, "jobs", on_behalf_of, service_attributes).get_access_token()
 
 
 def _delegable_principal(env: dict[str, str]) -> Principal | None:
@@ -212,7 +217,9 @@ def write_task_access_token(token_file: Path, token: str) -> None:
     os.replace(tmp, token_file)
 
 
-def inject_subprocess_task_auth(env: dict[str, str], token_file: Path) -> dict[str, str]:
+def inject_subprocess_task_auth(
+    env: dict[str, str], token_file: Path, service_attributes: ServiceAttributes
+) -> dict[str, str]:
     """Give the child a short-lived bearer token delegated from its job principal, via a rotatable file.
 
     Without workload token exchange, or without a principal to delegate from, the child gets no
@@ -221,7 +228,7 @@ def inject_subprocess_task_auth(env: dict[str, str], token_file: Path) -> dict[s
     env.pop(ACCESS_TOKEN_ENVVAR, None)
     env.pop(ACCESS_TOKEN_FILE_ENVVAR, None)
     principal = _delegable_principal(env)
-    if principal is None or not (token := _mint_task_access_token(principal)):
+    if principal is None or not (token := _mint_task_access_token(principal, service_attributes)):
         return env
     write_task_access_token(token_file, token)
     env[ACCESS_TOKEN_FILE_ENVVAR] = str(token_file)
@@ -234,13 +241,13 @@ def task_access_token_refresh_interval() -> float:
     return (workload.token_ttl_seconds if workload is not None else 300) / 2
 
 
-def refresh_subprocess_task_auth(env: dict[str, str], token_file: Path) -> bool:
+def refresh_subprocess_task_auth(env: dict[str, str], token_file: Path, service_attributes: ServiceAttributes) -> bool:
     """Re-mint the child's delegated token into *token_file*; the child re-reads it on each request.
 
     ``False`` when there was nothing to mint, so the caller keeps retrying instead of treating it as rotated.
     """
     principal = _delegable_principal(env)
-    if principal is None or not (token := _mint_task_access_token(principal)):
+    if principal is None or not (token := _mint_task_access_token(principal, service_attributes)):
         return False
     write_task_access_token(token_file, token)
     return True
@@ -496,7 +503,7 @@ def _secret_request_headers(principal: Principal | None, *, access_token: str | 
     if access_token:
         return {"Authorization": f"Bearer {access_token}"}
 
-    if token := _mint_task_access_token(principal):
+    if token := _mint_task_access_token(principal, {}):
         return {"Authorization": f"Bearer {token}"}
 
     if principal is None or not principal.id:

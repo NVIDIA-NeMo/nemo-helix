@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from nhx.common.auth import AuthContext
 from nhx.common.config import HelixConfig
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.providers import SubprocessExecutionProvider
@@ -979,6 +980,7 @@ def _auth_metadata(tmp_path, *, exited: bool = False, refreshed_ago: float = 0.0
         process=process,
         task_auth_env={"NHX_PRINCIPAL": '{"id": "creator"}'},
         task_auth_token_file=tmp_path / ".nhx-access-token",
+        task_auth_service_attributes={"evals": {"build": "b-1"}},
         task_auth_refreshed_at=time.monotonic() - refreshed_ago,
     )
 
@@ -1007,7 +1009,9 @@ def test_refresh_task_auth_rotates_token_only_for_running_processes_past_half_tt
 
     assert refresh.called is expect_refresh
     if expect_refresh:
-        refresh.assert_called_once_with(metadata.task_auth_env, metadata.task_auth_token_file)
+        refresh.assert_called_once_with(
+            metadata.task_auth_env, metadata.task_auth_token_file, metadata.task_auth_service_attributes
+        )
         assert time.monotonic() - metadata.task_auth_refreshed_at < 5
 
 
@@ -1132,8 +1136,9 @@ def test_task_token_file_removal_is_retried_after_a_failure(mock_nemo_client, tm
 
 
 def _schedule_with_delegated_token(backend: SubprocessJobBackend, step, token_file_name: str = ".nhx-access-token"):
-    def _inject(env: dict[str, str], token_file) -> dict[str, str]:
+    def _inject(env: dict[str, str], token_file, service_attributes) -> dict[str, str]:
         assert token_file.name == token_file_name
+        assert service_attributes == (step.auth_context.service_attributes if step.auth_context else {})
         token_file.write_text("minted-token", encoding="utf-8")
         env["NHX_ACCESS_TOKEN_FILE"] = str(token_file)
         env["NHX_PRINCIPAL"] = '{"id": "creator"}'
@@ -1148,6 +1153,9 @@ def test_schedule_registers_the_delegated_token_for_rotation(
 ):
     backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "exit 0"])
+    step.auth_context = AuthContext(
+        principal_id="service:evals", principal_on_behalf_of="creator", service_attributes={"evals": {"build": "b-1"}}
+    )
 
     _schedule_with_delegated_token(backend, step)
 
@@ -1158,6 +1166,7 @@ def test_schedule_registers_the_delegated_token_for_rotation(
     assert metadata.task_auth_token_file is not None
     assert metadata.task_auth_token_file.read_text(encoding="utf-8") == "minted-token"
     assert metadata.task_auth_env == {"NHX_PRINCIPAL": '{"id": "creator"}'}
+    assert metadata.task_auth_service_attributes == {"evals": {"build": "b-1"}}
 
 
 def test_sync_rotates_the_token_of_a_running_process(
@@ -1182,4 +1191,6 @@ def test_sync_rotates_the_token_of_a_running_process(
         metadata.process.kill()
         metadata.process.wait(timeout=5)
 
-    refresh.assert_called_once_with(metadata.task_auth_env, metadata.task_auth_token_file)
+    refresh.assert_called_once_with(
+        metadata.task_auth_env, metadata.task_auth_token_file, metadata.task_auth_service_attributes
+    )

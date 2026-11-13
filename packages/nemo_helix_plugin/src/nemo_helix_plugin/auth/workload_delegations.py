@@ -19,7 +19,7 @@ from nemo_helix_plugin.entities import SyncEntityClient
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 SYSTEM_WORKSPACE = "system"
 WORKLOAD_DELEGATION_ENTITY_TYPE = "workload_delegation"
@@ -27,6 +27,8 @@ JWT_WORKLOAD_SUBJECT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt"
 DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE = "urn:nvidia:nemo:params:oauth:token-type:docker-opaque-workload-proof"
 OPAQUE_DOCKER_PROOF_PREFIX = "nhx_obo_v1"
 KUBERNETES_POD_UID_REFERENCE_NAME = "authentication.kubernetes.io/pod-uid"
+#: Token claim holding the attributes services set, by service name.
+SERVICE_ATTRIBUTES_CLAIM = "nhx_service_attributes"
 
 _OPAQUE_DOCKER_PROOF_SECRET_BYTES = 32
 _OPAQUE_DOCKER_PROOF_HASH_PREFIX = "v1:sha256:"
@@ -55,6 +57,24 @@ class ParsedOpaqueDockerProofToken:
 
     delegation_name: str
     secret: bytes
+
+
+def current_workload_service_attributes(service: str) -> dict[str, JsonValue] | None:
+    """The attributes ``service`` set on what the current request's verified workload access token was issued to.
+
+    ``None`` for any other credential, when ``service`` set none, and outside the platform process.
+    """
+    try:
+        from nhx.common.auth.dependencies import auth_client_context
+    except ImportError:
+        return None
+    auth_client = auth_client_context.get()
+    resolved = None if auth_client is None else auth_client.resolved_bearer_token
+    if resolved is None or resolved.token_kind != "workload_access_token":
+        return None
+    attributes = resolved.claims.raw_claims.get(SERVICE_ATTRIBUTES_CLAIM)
+    mine = attributes.get(service) if isinstance(attributes, dict) else None
+    return mine if isinstance(mine, dict) else None
 
 
 class WorkloadDelegationLookupScope(BaseModel):

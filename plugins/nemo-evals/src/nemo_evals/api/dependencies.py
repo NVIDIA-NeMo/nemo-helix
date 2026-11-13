@@ -123,18 +123,21 @@ def get_task_service(
     )
 
 
-def get_image_build_service(
+async def get_image_build_service(
     workspace: str,
+    caller: str = Depends(get_effective_principal_id),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
-    async_client: AsyncNemoClient = Depends(get_nemo_client),
     authorize: RequestAuthorizer = Depends(get_request_authorizer),
-) -> ImageBuildService:
-    """Provide an ImageBuildService whose task-builder Jobs are created as the caller."""
-    return ImageBuildService(
-        entity_client,
-        JobsServiceBuildJobs(AsyncJobsClient.from_client(async_client), workspace=workspace),
-        builder_authorizer(authorize),
-    )
+) -> AsyncGenerator[ImageBuildService, None]:
+    """Provide an ImageBuildService whose task-builder Jobs Evals creates for the caller."""
+    principal = current_auth_context()
+    on_behalf_of = principal.to_principal() if principal is not None else caller or None
+    async with get_async_nemo_client(as_service=_EVALS_SERVICE, internal=True, on_behalf_of=on_behalf_of) as client:
+        yield ImageBuildService(
+            entity_client,
+            JobsServiceBuildJobs(AsyncJobsClient.from_client(client), workspace=workspace),
+            builder_authorizer(authorize),
+        )
 
 
 def get_taskset_service(

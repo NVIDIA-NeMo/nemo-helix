@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from jwt.algorithms import RSAAlgorithm
 from nemo_helix_plugin.auth import AuthContext as PluginAuthContext
+from nemo_helix_plugin.auth.workload_delegations import SERVICE_ATTRIBUTES_CLAIM
 from nhx.common.auth import Principal
 from nhx.common.auth.signing_keys import RSASigningKeyCache
 from nhx.common.auth.workload_delegations import (
@@ -873,6 +874,50 @@ def test_opaque_docker_proof_token_mints_delegated_access_token(
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
     assert claims["sub"] == "creator@example.com"
     assert claims["act"] == {"sub": delegation.name}
+
+
+def test_the_attributes_a_service_set_on_a_job_are_signed_into_its_token(
+    client: TestClient,
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    entity_client: _FakeEntityClient,
+) -> None:
+    subject_token, token_hash = create_opaque_docker_proof_token(_docker_delegation_name())
+    creator = PluginAuthContext.from_principal(
+        Principal(id="service:evals", on_behalf_of="creator@example.com", on_behalf_of_email="creator@example.com")
+    )
+    creator.service_attributes = {"evals": {"build": "b-1"}}
+    delegation = _delegation_entity(opaque_subject_token_hash=token_hash, auth_context=creator)
+    entity_client.entities[delegation.name] = delegation
+
+    response = client.post(
+        "/token",
+        data=_exchange_form(subject_token, subject_token_type=DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE),
+    )
+
+    assert response.status_code == 200
+    claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
+    assert claims["sub"] == "creator@example.com"
+    assert claims[SERVICE_ATTRIBUTES_CLAIM] == {"evals": {"build": "b-1"}}
+
+
+def test_a_job_with_no_service_attributes_gets_no_attributes_claim(
+    client: TestClient,
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    entity_client: _FakeEntityClient,
+) -> None:
+    subject_token, token_hash = create_opaque_docker_proof_token(_docker_delegation_name())
+    delegation = _delegation_entity(opaque_subject_token_hash=token_hash)
+    entity_client.entities[delegation.name] = delegation
+
+    response = client.post(
+        "/token",
+        data=_exchange_form(subject_token, subject_token_type=DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE),
+    )
+
+    claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
+    assert SERVICE_ATTRIBUTES_CLAIM not in claims
 
 
 def test_opaque_docker_proof_token_mints_delegated_access_token_for_deployment_row(

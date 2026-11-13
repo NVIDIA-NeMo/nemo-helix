@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, NotRequired, Optional, Self, TypedDict
 
+from nemo_helix_plugin.auth.access_keys.types import validate_service_attributes
 from nemo_helix_plugin.entities.types import HTTPValidationError
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nemo_helix_plugin.files.types import MAX_LENGTH as FILESET_NAME_MAX_LENGTH
@@ -33,7 +34,7 @@ from nemo_helix_plugin.jobs.schemas import (
 from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.k8s_naming import k8s_safe_name, workspace_name_identity
 from nemo_helix_plugin.schema import Value
-from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, field_validator, model_validator
 
 _FILESET_NAME_RE = re.compile(FILESET_NAME_PATTERN)
 
@@ -151,6 +152,10 @@ class AuthContext(BaseModel):
     principal_on_behalf_of_authz_aliases: list[str] = Field(
         default_factory=list,
         description="Alternate trusted identifiers for the on-behalf-of principal",
+    )
+    service_attributes: dict[str, dict[str, JsonValue]] = Field(
+        default_factory=dict,
+        description="Attributes the creating service set, by service name, signed into the workload access tokens of what it created",
     )
 
 
@@ -441,8 +446,22 @@ class CreateHelixJobRequest(BaseModel):
     ownership: Optional[dict] = None
     custom_fields: Optional[dict] = None
     output_location: Optional[str] = None
+    service_attributes: Optional[dict[str, JsonValue]] = Field(
+        default=None,
+        description=(
+            "Facts the creating platform service vouches for, signed into the Job's workload access tokens under "
+            "that service's name in the nhx_service_attributes claim. Only a service principal may set them; "
+            "ignored with auth off. Same limits as a Scoped Access Key's service_attributes."
+        ),
+    )
 
     _validate_output_location = field_validator("output_location")(validate_output_location)
+
+    @model_validator(mode="after")
+    def _validate_service_attributes(self) -> Self:
+        if self.service_attributes is not None:
+            validate_service_attributes(self.service_attributes)
+        return self
 
 
 class UpdateHelixJobRequest(BaseModel):

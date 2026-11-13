@@ -24,6 +24,7 @@ from nhx.common.api.common import Page, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params, parse_deep_object
 from nhx.common.auth import AuthClient, AuthContext, get_auth_client
+from nhx.common.auth.principal_identifier import parse_principal_identifier
 from nhx.common.config import get_platform_config
 from nhx.common.entities.client import EntityConflictError, EntityNotFoundError, EntityValidationError
 from nhx.common.jobs.docker import validate_gpu_available_for_docker
@@ -382,13 +383,15 @@ async def create_job(
     )
     request = request.model_copy(update={"platform_spec": platform_spec})
     validate_job_spec(request.platform_spec, profiles)
+    auth_context = AuthContext.from_principal(auth_client.principal)
+    if request.service_attributes is not None and auth_client.auth_enabled:
+        identifier = parse_principal_identifier(auth_client.principal.id, validate=False)
+        if not identifier.is_service_principal() or identifier.service_name is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Only a platform service can set service_attributes")
+        auth_context.service_attributes = {identifier.service_name: dict(request.service_attributes)}
 
     try:
-        return await dispatcher.create_job(
-            request,
-            workspace,
-            auth_context=AuthContext.from_principal(auth_client.principal),
-        )
+        return await dispatcher.create_job(request, workspace, auth_context=auth_context)
     except PauseTTLLimitError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.detail) from exc
     except JobOutputLocationError as exc:

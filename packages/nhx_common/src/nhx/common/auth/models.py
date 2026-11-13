@@ -12,7 +12,7 @@ import re
 from typing import Dict, List, Literal, Optional, Self
 from urllib.parse import quote
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, JsonValue, ValidationError
 
 from .exceptions import InvalidPrincipalHeader
 from .principal_identifier import (
@@ -500,6 +500,10 @@ class AuthContext(BaseModel):
     principal_on_behalf_of_authz_aliases: List[str] = Field(
         default_factory=list,
         description="Alternate trusted identifiers for the on-behalf-of principal",
+    )
+    service_attributes: Dict[str, Dict[str, JsonValue]] = Field(
+        default_factory=dict,
+        description="Attributes the creating service set, by service name, signed into the workload access tokens of what it created",
     )
 
     @classmethod

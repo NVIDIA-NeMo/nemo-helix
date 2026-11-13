@@ -18,8 +18,9 @@ from typing import Generator
 
 import pytest
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.jobs.client import JobsClient
-from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, JobControl
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, JobControl, UpdateHelixJobRequest
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.service import JobsService
 from nhx.testing import as_user, create_test_client, short_unique_name, unique_email
@@ -176,3 +177,66 @@ class TestJobCreationWithAuth:
         steps = list(JobsClient.from_client(service_client).list_steps(name=job_name, workspace=workspace).items())
         assert steps[0].auth_context is not None
         assert steps[0].auth_context.principal_id == creator_email
+
+
+def _attributed_job(name: str) -> CreateHelixJobRequest:
+    return CreateHelixJobRequest(
+        name=name,
+        source="auth-propagation-test",
+        spec={},
+        platform_spec={
+            "steps": [
+                {
+                    "name": "test-step",
+                    "executor": {
+                        "provider": "cpu",
+                        "profile": "default",
+                        "container": {"image": "busybox:latest", "entrypoint": ["entrypoint"], "command": ["command"]},
+                    },
+                },
+            ]
+        },
+        service_attributes={"build": "b-1"},
+    )
+
+
+class TestServiceAttributes:
+    def test_a_service_sets_attributes_under_its_own_name(self, client: NemoClient):
+        creator_email = unique_email("creator")
+        job_name = short_unique_name("svc-attrs")
+        evals_for_creator = _as_service_principal(client, "evals").with_headers(
+            {"X-NHX-Principal-On-Behalf-Of": creator_email}
+        )
+
+        JobsClient.from_client(evals_for_creator).create_job(workspace="default", body=_attributed_job(job_name))
+
+        steps = list(
+            JobsClient.from_client(_as_service_principal(client)).list_steps(name=job_name, workspace="default").items()
+        )
+        assert steps[0].auth_context is not None
+        assert steps[0].auth_context.service_attributes == {"evals": {"build": "b-1"}}
+
+    def test_a_user_cannot_set_service_attributes(self, client: NemoClient):
+        user = JobsClient.from_client(as_user(client, unique_email("creator")))
+
+        with pytest.raises(PermissionDeniedError, match="Only a platform service"):
+            user.create_job(workspace="default", body=_attributed_job(short_unique_name("svc-attrs")))
+
+    def test_a_users_update_drops_the_attributes_a_service_set(self, client: NemoClient):
+        """An update can change what the Job runs, so it carries no attributes the updating user couldn't set."""
+        creator_email = unique_email("creator")
+        job_name = short_unique_name("svc-attrs")
+        evals_for_creator = _as_service_principal(client, "evals").with_headers(
+            {"X-NHX-Principal-On-Behalf-Of": creator_email}
+        )
+        JobsClient.from_client(evals_for_creator).create_job(workspace="default", body=_attributed_job(job_name))
+
+        JobsClient.from_client(as_user(client, creator_email)).update_job(
+            name=job_name, workspace="default", body=UpdateHelixJobRequest(description="edited")
+        )
+
+        steps = list(
+            JobsClient.from_client(_as_service_principal(client)).list_steps(name=job_name, workspace="default").items()
+        )
+        assert steps[0].auth_context is not None
+        assert steps[0].auth_context.service_attributes == {}
