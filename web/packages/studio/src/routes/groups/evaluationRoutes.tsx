@@ -3,14 +3,16 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
-import { EVALS_ENABLED } from '@studio/constants/environment';
+import { EVALS_ENABLED, TASKSETS_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
 import {
   gateEvaluationBenchmarksRoutes,
   gateEvaluationRoutes,
   gateModelEvaluationFormRoutes,
+  gateTasksetRoutes,
   getEvaluationResultsRoute,
+  getTasksetsRoute,
 } from '@studio/routes/utils';
 import { lazy } from 'react';
 import { Navigate, type RouteObject } from 'react-router';
@@ -38,6 +40,17 @@ const EvaluationResultDetailsRoute = lazy(() =>
 const EvaluationNewRoute = lazy(() =>
   import('@studio/routes/evaluation/EvaluationNewRoute').then((module) => ({
     default: module.EvaluationNewRoute,
+  }))
+);
+
+const TasksetListRoute = lazy(() =>
+  import('@studio/routes/evaluation/tasksets/TasksetListRoute').then((module) => ({
+    default: module.TasksetListRoute,
+  }))
+);
+const TasksetDetailRoute = lazy(() =>
+  import('@studio/routes/evaluation/tasksets/TasksetDetailRoute').then((module) => ({
+    default: module.TasksetDetailRoute,
   }))
 );
 
@@ -75,9 +88,22 @@ export const evaluationRoutes: RouteObject[] = gateEvaluationRoutes([
       },
     ],
   },
+  ...gateTasksetRoutes([
+    {
+      path: ROUTES.workspace.tasksets,
+      element: <TasksetListRoute />,
+      errorElement: <RouteErrorPanel title="Tasksets" />,
+    },
+    {
+      path: ROUTES.workspace.tasksetDetail,
+      element: <TasksetDetailRoute />,
+      errorElement: <RouteErrorPanel title="Taskset" />,
+    },
+  ]),
 ]);
 
 const NavIcon = ENTITY_ICONS.evaluationResults;
+const TasksetsIcon = ENTITY_ICONS.tasksets;
 
 export const getEvaluationSideNavItems = (workspace: string) =>
   EVALS_ENABLED
@@ -87,6 +113,19 @@ export const getEvaluationSideNavItems = (workspace: string) =>
           slotIcon: <NavIcon className={iconColorClass} />,
           slotLabel: 'Evaluations',
           href: getEvaluationResultsRoute(workspace),
+        },
+      ]
+    : [];
+
+/** Tasksets sit in the Evaluations nav group, beside the Experiments they feed. */
+export const getTasksetSideNavItems = (workspace: string) =>
+  EVALS_ENABLED && TASKSETS_ENABLED
+    ? [
+        {
+          id: 'tasksets',
+          slotIcon: <TasksetsIcon className={iconColorClass} />,
+          slotLabel: 'Tasksets',
+          href: getTasksetsRoute(workspace),
         },
       ]
     : [];

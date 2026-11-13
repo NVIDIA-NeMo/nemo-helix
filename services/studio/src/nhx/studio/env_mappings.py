@@ -152,4 +152,9 @@ ENV_MAPPINGS: list[EnvMapping] = [
         config_path="studio.feature_flags.optimizer_enabled",
         default="true",
     ),
+    EnvMapping(
+        marker="STUDIO_UI_VITE_FF_TASKSETS_ENABLED",
+        config_path="studio.feature_flags.tasksets_enabled",
+        default="false",
+    ),
 ]
