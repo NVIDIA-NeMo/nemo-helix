@@ -4,7 +4,6 @@
 import json
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -61,8 +60,12 @@ def _provider(host_url: str = "https://integrate.api.nvidia.com/v1") -> ModelPro
     return ModelProvider(name="build", workspace="default", host_url=host_url, created_at=now, updated_at=now)
 
 
+async def _no_api_key(provider: ModelProvider) -> str | None:
+    return None
+
+
 def _ctx(http: httpx.AsyncClient) -> MetadataSourceContext:
-    return MetadataSourceContext(http=http, client=MagicMock())
+    return MetadataSourceContext(http=http, api_key_resolver=_no_api_key)
 
 
 def _routes(routes: dict[str, dict[str, Any]], seen: list[str]) -> httpx.MockTransport:
@@ -122,8 +125,8 @@ def test_parse_ngc_endpoint():
     )
 
 
-def test_parse_ngc_endpoint_returns_none_without_metadata():
-    assert parse_ngc_endpoint({"attributes": "not json"}, None) is None
+def test_parse_ngc_endpoint_returns_empty_metadata_without_fields():
+    assert parse_ngc_endpoint({"attributes": "not json"}, None) == ModelMetadata()
 
 
 async def test_ngc_source_fetches_spec_and_description():

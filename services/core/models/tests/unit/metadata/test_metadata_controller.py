@@ -290,3 +290,43 @@ async def test_reconcile_reports_progress_after_each_model():
     await controller.reconcile(on_progress=progress)
 
     assert progress.call_count == 2
+
+
+def _secret_response(value: str) -> MagicMock:
+    return MagicMock(data=MagicMock(return_value=MagicMock(value=value)))
+
+
+async def test_provider_api_key_reads_only_the_providers_own_secret():
+    controller, _ = _controller([])
+    controller._secrets_client = MagicMock(access_secret=AsyncMock(return_value=_secret_response("sk-bedrock")))
+    provider = _provider().model_copy(update={"api_key_secret_name": "bedrock-key"})
+
+    assert await controller._ctx.provider_api_key(provider) == "sk-bedrock"
+    controller._secrets_client.access_secret.assert_awaited_once_with(workspace="default", name="bedrock-key")
+
+
+async def test_provider_api_key_is_none_without_a_secret():
+    controller, _ = _controller([])
+    controller._secrets_client = MagicMock(access_secret=AsyncMock())
+
+    assert await controller._ctx.provider_api_key(_provider()) is None
+    controller._secrets_client.access_secret.assert_not_awaited()
+
+
+async def test_provider_api_key_failure_makes_the_source_unavailable():
+    controller, _ = _controller([])
+    error = InternalServerError(httpx.Response(500, json={}))
+    controller._secrets_client = MagicMock(access_secret=AsyncMock(side_effect=error))
+    provider = _provider().model_copy(update={"api_key_secret_name": "bedrock-key"})
+
+    with pytest.raises(SourceUnavailableError):
+        await controller._ctx.provider_api_key(provider)
+
+
+async def test_reconcile_model_treats_empty_metadata_as_a_miss():
+    controller, models_client = _controller([FakeSource(ModelMetadata())])
+
+    await controller.reconcile_model(_model())
+
+    models_client.update_model.assert_not_awaited()
+    assert controller.needs_refresh(_model(), NOW) is False

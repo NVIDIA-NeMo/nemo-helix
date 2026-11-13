@@ -74,7 +74,7 @@ def spec_model_id(openapi_spec: object) -> str | None:
     return None
 
 
-def parse_ngc_endpoint(spec: dict[str, Any], artifact: dict[str, Any] | None) -> ModelMetadata | None:
+def parse_ngc_endpoint(spec: dict[str, Any], artifact: dict[str, Any] | None) -> ModelMetadata:
     attributes = _json_object(spec.get("attributes"))
     specifications = attributes.get("specifications")
     if not isinstance(specifications, dict):
@@ -83,7 +83,7 @@ def parse_ngc_endpoint(spec: dict[str, Any], artifact: dict[str, Any] | None) ->
     if not isinstance(flags, dict):
         flags = {}
     capabilities = [capability for flag, capability in _CAPABILITY_FLAGS.items() if flags.get(flag) is True]
-    metadata = ModelMetadata(
+    return ModelMetadata(
         description=bounded_text((artifact or {}).get("shortDescription"), MAX_DESCRIPTION_LENGTH),
         capabilities=capabilities,
         input_modalities=modalities(specifications.get("inputModalities")),
@@ -91,9 +91,6 @@ def parse_ngc_endpoint(spec: dict[str, Any], artifact: dict[str, Any] | None) ->
         parameter_count=parse_parameter_count(specifications.get("parameters")),
         context_length=as_positive_int(specifications.get("contextLength")),
     )
-    if metadata == ModelMetadata():
-        return None
-    return metadata
 
 
 class NgcMetadataSource(NemoModelMetadataSource):
@@ -108,6 +105,7 @@ class NgcMetadataSource(NemoModelMetadataSource):
         self._unavailable: SourceUnavailableError | None = None
 
     def begin_cycle(self) -> None:
+        super().begin_cycle()
         self._unavailable = None
 
     def handles(self, provider: ModelProvider) -> bool:

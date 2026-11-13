@@ -17,9 +17,11 @@ from nemo_helix_plugin.models.metadata import (
     MetadataSourceContext,
     MetadataTarget,
     NemoModelMetadataSource,
+    SourceUnavailableError,
 )
 from nemo_helix_plugin.models.refs import served_model_name_for_entity
 from nemo_helix_plugin.models.types import ModelEntity, ModelMetadata, ModelProvider, UpdateModelEntityRequest
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.core.models.config import MetadataControllerConfig
 from nhx.core.models.metadata.provider_source import ProviderModelsSource
 
@@ -76,9 +78,10 @@ class ModelMetadataController:
     ) -> None:
         self._config = config
         self._models_client = AsyncModelsClient.from_client(client)
-        self._ctx = MetadataSourceContext(http=http, client=client)
+        self._secrets_client = AsyncSecretsClient.from_client(client)
+        self._ctx = MetadataSourceContext(http=http, api_key_resolver=self._provider_api_key)
         self._plugin_sources = plugin_sources
-        self._provider_source = ProviderModelsSource(request_timeout_seconds=config.request_timeout_seconds)
+        self._provider_source = ProviderModelsSource(client, request_timeout_seconds=config.request_timeout_seconds)
         self._providers: dict[str, ModelProvider] = {}
         self._retry_after: dict[str, float] = {}
         self._consecutive_failures: dict[str, int] = {}
@@ -162,6 +165,21 @@ class ModelMetadataController:
             return
         logger.info("Updated metadata for model %s from %s", model_key, result.metadata.sources)
 
+    async def _provider_api_key(self, provider: ModelProvider) -> str | None:
+        if not provider.api_key_secret_name:
+            return None
+        try:
+            secret = (
+                await self._secrets_client.access_secret(
+                    workspace=provider.workspace, name=provider.api_key_secret_name
+                )
+            ).data()
+        except NemoClientError as exc:
+            raise SourceUnavailableError(
+                f"Could not read the API key for provider {provider.workspace}/{provider.name}: {exc}"
+            ) from exc
+        return secret.value
+
     def _record_failure(self, model_key: str) -> float:
         failures = self._consecutive_failures.get(model_key, 0) + 1
         self._consecutive_failures[model_key] = failures
@@ -182,7 +200,7 @@ class ModelMetadataController:
             except Exception as exc:
                 failure = f"{source.name} failed for {target.upstream_model_id}: {exc}"
                 continue
-            if metadata is not None:
+            if metadata is not None and metadata != ModelMetadata():
                 stamped = metadata.model_copy(update={"sources": [source.name], "refreshed_at": refreshed_at})
                 return LookupResult(metadata=stamped)
         return LookupResult(metadata=None, failure=failure)

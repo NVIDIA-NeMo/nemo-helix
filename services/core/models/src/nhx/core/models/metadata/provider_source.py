@@ -3,6 +3,7 @@
 
 from typing import Any
 
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayClient
@@ -29,7 +30,7 @@ _CAPABILITY_PARAMETERS: dict[str, ModelCapability] = {
 }
 
 
-def parse_provider_model(entry: dict[str, Any]) -> ModelMetadata | None:
+def parse_provider_model(entry: dict[str, Any]) -> ModelMetadata:
     architecture = entry.get("architecture")
     if not isinstance(architecture, dict):
         architecture = {}
@@ -44,7 +45,7 @@ def parse_provider_model(entry: dict[str, Any]) -> ModelMetadata | None:
             if capability is not None and capability not in capabilities:
                 capabilities.append(capability)
 
-    metadata = ModelMetadata(
+    return ModelMetadata(
         display_name=bounded_text(entry.get("name"), MAX_DISPLAY_NAME_LENGTH),
         description=bounded_text(entry.get("description"), MAX_DESCRIPTION_LENGTH),
         capabilities=capabilities,
@@ -53,9 +54,6 @@ def parse_provider_model(entry: dict[str, Any]) -> ModelMetadata | None:
         context_length=as_positive_int(entry.get("context_length")) or as_positive_int(entry.get("max_model_len")),
         max_output_tokens=as_positive_int(top_provider.get("max_completion_tokens")),
     )
-    if metadata == ModelMetadata():
-        return None
-    return metadata
 
 
 class ProviderModelsSource(NemoModelMetadataSource):
@@ -63,56 +61,36 @@ class ProviderModelsSource(NemoModelMetadataSource):
 
     name = "provider"
 
-    def __init__(self, request_timeout_seconds: float) -> None:
-        self._request_timeout_seconds = request_timeout_seconds
-        self._listings: dict[str, dict[str, dict[str, Any]] | SourceUnavailableError] = {}
+    def __init__(self, client: AsyncNemoClient, request_timeout_seconds: float) -> None:
+        no_retry_client = client.with_options(retry=RetryPolicy(max_retries=0), timeout=request_timeout_seconds)
+        self._gateway_client = AsyncInferenceGatewayClient.from_client(no_retry_client)
 
     def handles(self, provider: ModelProvider) -> bool:
         return True
 
-    def begin_cycle(self) -> None:
-        self._listings.clear()
-
     async def fetch(self, target: MetadataTarget, ctx: MetadataSourceContext) -> ModelMetadata | None:
-        client = ctx.client.with_options(retry=RetryPolicy(max_retries=0), timeout=self._request_timeout_seconds)
-        listing = await self._listing(target.provider, AsyncInferenceGatewayClient.from_client(client))
+        provider = target.provider
+        listing = await self.cached_for_cycle(
+            f"{provider.workspace}/{provider.name}", lambda: self._fetch_listing(provider)
+        )
         entry = listing.get(target.upstream_model_id)
         if entry is None:
             return None
         return parse_provider_model(entry)
 
-    async def _listing(
-        self, provider: ModelProvider, gateway_client: AsyncInferenceGatewayClient
-    ) -> dict[str, dict[str, Any]]:
-        key = f"{provider.workspace}/{provider.name}"
-        cached = self._listings.get(key)
-        if cached is None:
-            cached = await self._fetch_listing(provider, gateway_client)
-            self._listings[key] = cached
-        if isinstance(cached, SourceUnavailableError):
-            raise cached
-        return cached
-
-    async def _fetch_listing(
-        self, provider: ModelProvider, gateway_client: AsyncInferenceGatewayClient
-    ) -> dict[str, dict[str, Any]] | SourceUnavailableError:
+    async def _fetch_listing(self, provider: ModelProvider) -> dict[str, dict[str, Any]]:
+        provider_ref = f"{provider.workspace}/{provider.name}"
         try:
-            body = await gateway_client.get_provider_models(workspace=provider.workspace, name=provider.name)
+            body = await self._gateway_client.get_provider_models(workspace=provider.workspace, name=provider.name)
         except NotFoundError as exc:
-            if await _gateway_routes(provider, gateway_client):
+            if await _gateway_routes(provider, self._gateway_client):
                 return {}
-            return SourceUnavailableError(
-                f"Could not list models for provider {provider.workspace}/{provider.name}: {exc}"
-            )
+            raise SourceUnavailableError(f"Could not list models for provider {provider_ref}: {exc}") from exc
         except NemoClientError as exc:
-            return SourceUnavailableError(
-                f"Could not list models for provider {provider.workspace}/{provider.name}: {exc}"
-            )
+            raise SourceUnavailableError(f"Could not list models for provider {provider_ref}: {exc}") from exc
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, list):
-            return SourceUnavailableError(
-                f"Provider {provider.workspace}/{provider.name} returned a model list without a data array"
-            )
+            raise SourceUnavailableError(f"Provider {provider_ref} returned a model list without a data array")
         return {entry["id"]: entry for entry in data if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
 
 
