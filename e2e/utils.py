@@ -31,6 +31,6 @@ def kube_target_from_env() -> tuple[str, str]:
     if not context:
         pytest.fail(
             "NHX_E2E_KUBE_CONTEXT is required: name the kubectl context of the cluster the platform runs on "
-            "(tests never use the current context); see e2e/README.md"
+            "(tests never use the current context)"
         )
     return context, os.environ.get("NHX_E2E_KUBE_NAMESPACE") or "nemo-helix"

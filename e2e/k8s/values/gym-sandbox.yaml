@@ -23,9 +23,10 @@ platformConfig:
     # sandbox_runtime_image is left unset: the default is nhx-gym-host from the platform's own
     # image registry and tag, which is the image the CI run built.
     #
-    # The only destination a Gym host may reach, besides the episode broker Evaluator adds: the
-    # platform API, where the tests' mock model is served. The tests reach it by this name, so run
-    # them with NHX_E2E_INTERNAL_BASE_URL set to the same URL.
+    # The only destination a Gym host may reach, besides the two Evaluator adds itself (the episode
+    # broker and the job pod's DNS resolvers): the platform API, where the tests' mock model is
+    # served. The tests reach it by this name, so run them with NHX_E2E_INTERNAL_BASE_URL set to
+    # the same URL.
     sandbox_policy_base_urls:
       - 'http://{{ include "nhx-api.api-servicename" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.service.port }}'
     # Requests and limits of each Gym host, sized to fit beside the platform on a 4-CPU, 16 GB CI

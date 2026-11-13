@@ -247,18 +247,29 @@ They check that:
 - `stage-environment` and `agent-evaluate` both succeed, and the downloaded bundle has one completed
   trial per task, a reward of 1.0 for each, and a `summary.json` that agrees.
 - From inside the Gym host, the staged package is mounted read-only, the workspace is writable, the
-  allowed model endpoint is reachable, and two unlisted destinations are blocked: the Kubernetes
-  API's in-cluster address and a public address. The environment's own verifier makes these checks
-  and folds each into the reward of a task of its own, so a failed check names itself.
-- The Gym host pod mounts the environment and workspace from one PVC.
+  allowed model endpoint is reachable, and three unlisted destinations are blocked: the Kubernetes
+  API's in-cluster address, a public address (`1.1.1.1`), and a public name (`example.com`). The
+  environment's own verifier makes each check and scores it as a task of its own, on that check
+  alone; one more task, `greeting`, is scored on the agent's reply. So a task below 1.0 names what
+  failed. A blocked destination must fail as a denied connection does (its name does not resolve,
+  or the connection times out or is refused, reset, unreachable, or not permitted); a probe that
+  fails any other way, or cannot run, scores 0.
+- The Gym host pod mounts the environment and workspace from one PVC, as two directories, neither
+  inside the other.
 - The Gym host is removed after a run that completes, and after a run that fails once the host is
   up. In that run the verifier never answers, so collection overruns `collection_timeout_s`, and
   the step's log must say so: collection starts only when the host is ready.
+- The Gym host gets its model key from a platform secret through `env_secrets`, as a real credential
+  would reach it. Unless `NHX_E2E_GYM_POLICY_API_KEY_SECRET` names one, the tests create a secret in
+  their own workspace holding the placeholder `not-used`.
 
-The tests skip unless `NHX_E2E_SANDBOXED_GYM=1`. Once that is set they fail rather than skip when
-something they need is missing: `NHX_E2E_KUBE_CONTEXT`, read access to the cluster, or a model to
-call. They watch the cluster for the Gym host with `kubectl`, which is the only place its removal
-shows.
+The tests skip unless `NHX_E2E_SANDBOXED_GYM=1`. With that set and a deployment to run against
+(`--kubernetes --cluster-url`, as in the command below; without one every e2e test is skipped), they
+fail rather than skip when something they need is missing: `NHX_E2E_KUBE_CONTEXT`, read access to
+the cluster, a platform API pod in `NHX_E2E_KUBE_NAMESPACE`, or a model to call. They check the
+cluster before they submit anything. They watch it for the Gym host with `kubectl`, which is the
+only place its removal shows. The host is gone by the time the cluster's logs are collected, so a
+failure message carries its last state as seen there: pod phase, conditions, and container states.
 
 **What the deployment needs:**
 
@@ -266,30 +277,54 @@ shows.
   settings from the page above. `e2e/k8s/values/gym-sandbox.yaml` is the set CI uses.
 - `sandbox_policy_base_urls` listing the URL the tests reach the model by (`NHX_E2E_INTERNAL_BASE_URL`,
   or `NHX_E2E_GYM_POLICY_ROUTE`), and nothing in `sandbox_egress_allow` that covers the Kubernetes
-  API or `1.1.1.1`.
-- The `nhx-gym-host` image for the platform's image tag, pullable by sandbox pods.
+  API, `1.1.1.1`, or `example.com`.
+- The `nhx-gym-host` image for the platform's image tag, pullable by sandbox pods, and best already
+  on the nodes. The tests give a job 15 minutes of run time, and a cold pull of that image counts
+  against it.
 - A mock inference provider (`platformConfig.inference_gateway.mock_provider_prefix`, as in
   `e2e/k8s/values/kind.yaml`), or a real model through `NHX_E2E_GYM_POLICY_ROUTE` and
   `NHX_E2E_GYM_POLICY_MODEL`. Without either, the tests fail.
-- A model endpoint the Gym host can call. The host sends no credential unless
-  `NHX_E2E_GYM_POLICY_API_KEY_SECRET` names a platform secret holding one, and it refuses to start
-  when the endpoint answers `401`. A platform with auth on protects its Inference Gateway routes,
-  the mock model's included, so there the secret is required. CI runs with auth off.
+- A key the model endpoint accepts. As it starts, the Gym host calls the endpoint with its key and
+  refuses to start on a `401`. The placeholder the tests store by default is enough for the mock
+  model on a platform with auth off, as in CI, and for an endpoint that checks no key. Otherwise put
+  the key in a secret and name it in `NHX_E2E_GYM_POLICY_API_KEY_SECRET`:
+  - For the mock model on a platform with auth on: a Helix access key scoped to `inference`, created
+    by the user the tests run as, because the mock model is in the workspace the tests create. The
+    Inference Gateway accepts such a key only when the platform has
+    [Scoped Access Keys](../docs/auth/deployment/configuration.mdx#scoped-access-keys) enabled
+    (`auth.access_keys.enabled`). With OIDC on (`auth.oidc.enabled`), a token from the identity
+    provider also works. A platform with neither, such as one installed with
+    `e2e/k8s/values/auth-overlay.yaml`, answers every key with `401`, so there only a real model
+    works.
+  - For a real model (`NHX_E2E_GYM_POLICY_ROUTE`): that provider's key.
+
+  Code in the Gym host can read the key, so keep it scoped and short-lived:
+
+  ```bash
+  nemo auth access-keys create --name gym-e2e-key --scope inference --expires-in 86400 \
+    | nemo secrets create gym-e2e-key --workspace my-workspace --from-file -
+  export NHX_E2E_GYM_POLICY_API_KEY_SECRET=my-workspace/gym-e2e-key
+  ```
+
 - For whoever runs the tests: `kubectl` access to list pods and BatchSandboxes in the release
-  namespace and to read the `kubernetes` Service in `default`.
+  namespace and to read the `kubernetes` Service in `default`. The tests recognise the release's
+  namespace by its API pods' `app.kubernetes.io/component` label, which must be the chart default
+  `nhx-api` or the legacy `nmp-api`; a release with any other `api.componentLabel` fails that check.
 
 | Variable | Description | Default |
 |---|---|---|
 | `NHX_E2E_SANDBOXED_GYM` | Set to `1` to run the tests | unset (skipped) |
 | `NHX_E2E_KUBE_CONTEXT` | kubectl context of the cluster the platform runs on. Required: the tests never use the current context | (none) |
-| `NHX_E2E_KUBE_NAMESPACE` | Release namespace, which is also where OpenSandbox runs sandboxes | `nemo-helix` |
+| `NHX_E2E_KUBE_NAMESPACE` | Release namespace, which is also where OpenSandbox runs sandboxes. The tests fail unless a platform API pod runs there | `nemo-helix` (the kind scripts default to `default`) |
 | `NHX_E2E_INTERNAL_BASE_URL` | Platform API URL as the Gym host reaches it. Use the name `sandbox_policy_base_urls` allows, which is the Service's full DNS name in the example values | `http://nemo-helix-api:8080` |
 | `NHX_E2E_GYM_POLICY_ROUTE` / `NHX_E2E_GYM_POLICY_MODEL` | A real model's base URL (`http://` or `https://`) and name, used instead of the mock. Set both or neither; one alone fails the tests | unset (mock model) |
-| `NHX_E2E_GYM_POLICY_API_KEY_SECRET` | Platform secret holding the credential for the model endpoint, as `secret-name` or `workspace/secret-name`. The Gym host receives it through `env_secrets` | unset (no credential sent) |
+| `NHX_E2E_GYM_POLICY_API_KEY_SECRET` | Platform secret holding the model endpoint's key, as `workspace/secret-name`, readable by the user the tests run as. A bare name fails the tests: they submit from a temporary `e2e-eval-*` workspace of their own, where it would be looked up | unset (the tests create a secret holding the placeholder `not-used`) |
 
 ```bash
-# Against a deployed cluster. When it runs with auth, add --config e2e/quickstart/auth.yaml for the
-# test client and set NHX_E2E_GYM_POLICY_API_KEY_SECRET for the Gym host.
+# Against a deployed cluster. With auth on, the test client needs a principal too: add
+# --config e2e/quickstart/auth.yaml where the API accepts principal headers (a release installed
+# with e2e/k8s/values/auth-overlay.yaml), and otherwise pass --access-token or set
+# NHX_E2E_ACCESS_TOKEN. The Gym host's key is NHX_E2E_GYM_POLICY_API_KEY_SECRET, as above.
 NHX_E2E_SANDBOXED_GYM=1 \
 NHX_E2E_KUBE_CONTEXT=my-cluster-context \
 NHX_E2E_KUBE_NAMESPACE=nemo-helix \
@@ -299,14 +334,44 @@ uv run --frozen pytest e2e/test_evaluator_plugin.py \
     -m gym_sandbox_e2e -v -rs --no-cov
 ```
 
-On a cluster with no route to the internet the public-address check passes without proving
-anything; the Kubernetes API check is the one that holds everywhere.
+On a cluster with no route to the internet the public-address and public-name checks pass without
+proving anything; the Kubernetes API check is the one that holds everywhere.
+
+**On a local kind cluster.** The scripts CI uses also run locally, from the repository root. Every
+step must use one namespace: the cluster setup puts the platform Secrets and the Gateway there,
+OpenSandbox runs sandboxes there, and the tests look for the Gym host there. The scripts default to
+`default` and the tests to `nemo-helix`, so set it once:
+
+```bash
+export KIND_CLUSTER_NAME=nhx-e2e KUBE_NAMESPACE=nemo-helix   # and NGC_API_KEY, GITHUB_TOKEN
+./e2e/k8s/scripts/setup_local_kind_cpu.sh
+./e2e/k8s/scripts/install_opensandbox_kind.sh
+NAMESPACE="${KUBE_NAMESPACE}" NHX_E2E_REGISTRY=<registry> NHX_E2E_TAG=<tag> \
+  HELM_VALUES=e2e/k8s/values/kind.yaml HELM_EXTRA_ARGS="-f e2e/k8s/values/gym-sandbox.yaml" \
+  ./e2e/k8s/scripts/install_helm_e2e.sh
+# Optional, as CI does: keeps the Gym host image pull out of the tests' 15 minutes. Needs bash 4.4
+# or later, and KIND_IMAGE_PULL_USER and KIND_IMAGE_PULL_TOKEN for a private registry.
+./e2e/k8s/scripts/prepull_kind_images.sh <registry>/nhx-gym-host:<tag>
+NHX_E2E_SANDBOXED_GYM=1 \
+NHX_E2E_KUBE_CONTEXT="kind-${KIND_CLUSTER_NAME}" \
+NHX_E2E_KUBE_NAMESPACE="${KUBE_NAMESPACE}" \
+NHX_E2E_INTERNAL_BASE_URL="http://nemo-helix-api.${KUBE_NAMESPACE}.svc.cluster.local:8080" \
+uv run --frozen pytest e2e/test_evaluator_plugin.py \
+    --kubernetes --cluster-url=<gateway-url> \
+    -m gym_sandbox_e2e -v -rs --no-cov
+```
+
+`<gateway-url>` is the URL `install_helm_e2e.sh` logs as `Resolved Gateway URL`. The header of
+`e2e/k8s/scripts/install_opensandbox_kind.sh` lists the variables it reads. It pulls OpenSandbox's
+images onto the node first only under bash 4.4 or later; with an older bash, such as the one macOS
+ships, the kubelet pulls them.
 
 **CI.** The `kind-gym-sandbox-e2e` job in `.github/workflows/e2e.yaml` runs these tests on a kind
-cluster of its own, and fails if any of them skips (`.github/scripts/check_junit_no_skips.py`). Its
-`setup-kind-cluster` step creates the cluster (`setup_local_kind_cpu.sh`), installs OpenSandbox
-(`install_opensandbox_kind.sh`, which pulls OpenSandbox's images onto the node first and ends by
-creating and deleting a sandbox), and installs the platform with `kind.yaml` and `gym-sandbox.yaml`.
+cluster of its own, and fails if any of them skips or if its report does not hold exactly two tests
+(`.github/scripts/check_junit_no_skips.py`). Its `setup-kind-cluster` step creates the cluster
+(`setup_local_kind_cpu.sh`), installs OpenSandbox (`install_opensandbox_kind.sh`, which pulls
+OpenSandbox's images onto the node first and ends by creating and deleting a sandbox), and installs
+the platform with `kind.yaml` and `gym-sandbox.yaml`.
 The job then pulls `nhx-gym-host` onto the node. That image comes from `build-gym-host-image`, a job
 of its own that builds the `docker-gym-host` bake group, so a failure there stops only this lane.
 The colocated Gym tests stay in `kind-gym-e2e`: turning on `sandboxed_gym_default` sandboxes every

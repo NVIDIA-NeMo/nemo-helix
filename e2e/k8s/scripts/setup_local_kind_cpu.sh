@@ -215,5 +215,9 @@ if [ "${KIND_ENABLE_GATEWAY}" = "true" ]; then
     log_info "Cluster URL: assigned after Helm install programs the Gateway"
     log_info "cloud-provider-kind container: ${CLOUD_PROVIDER_KIND_CONTAINER}"
 fi
-log_info "NetworkPolicy enforcement: ${KIND_ENABLE_NETWORK_POLICIES}"
+if [ "${KIND_ENABLE_NETWORK_POLICIES}" = "true" ]; then
+    log_info "NetworkPolicy provider: Calico"
+else
+    log_info "NetworkPolicy provider: kindnet, kind's default CNI (enforces NetworkPolicy since kind v0.24.0)"
+fi
 log_info "=========================================="
