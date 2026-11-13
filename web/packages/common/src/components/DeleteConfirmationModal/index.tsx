@@ -31,6 +31,9 @@ export interface DeleteModalProps extends Pick<FormModalProps, 'open' | 'onClose
   onNotify?: NotifyFn;
 }
 
+const capitalizeWords = (text: string) =>
+  text.replace(/(^|\s)(\S)/g, (_, space: string, char: string) => `${space}${char.toUpperCase()}`);
+
 const describeTarget = (entity: string, entityPlural: string, ids: readonly string[]) => {
   const [firstId] = ids;
   const isBulk = ids.length > 1;
@@ -39,7 +42,7 @@ const describeTarget = (entity: string, entityPlural: string, ids: readonly stri
   return {
     isBulk,
     target: isSingle ? `${entity} '${firstId}'` : countTarget,
-    buttonTarget: isSingle ? entity : countTarget,
+    buttonTarget: capitalizeWords(isSingle ? entity : countTarget),
   };
 };
 

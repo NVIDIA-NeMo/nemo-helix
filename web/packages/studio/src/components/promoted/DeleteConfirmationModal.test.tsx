@@ -39,7 +39,7 @@ describe('DeleteConfirmationModal', () => {
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText("Delete model 'llama-7b'?")).toBeInTheDocument();
     expect(within(dialog).getByText(DESCRIPTION)).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Delete model' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Delete Model' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expect(within(dialog).queryByRole('list')).not.toBeInTheDocument();
     expect(within(dialog).queryByRole('textbox')).not.toBeInTheDocument();
@@ -49,14 +49,14 @@ describe('DeleteConfirmationModal', () => {
     renderModal();
 
     expect(await screen.findByRole('button', { name: 'Cancel' })).toHaveAttribute('autofocus');
-    expect(screen.getByRole('button', { name: 'Delete model' })).not.toHaveAttribute('autofocus');
+    expect(screen.getByRole('button', { name: 'Delete Model' })).not.toHaveAttribute('autofocus');
   });
 
   it('uses the count and lists the first three ids for several items', async () => {
     renderModal({ ids: ['alpha', 'beta', 'gamma', 'delta', 'epsilon'] });
 
     expect(await screen.findByText('Delete 5 models?')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Delete 5 models' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete 5 Models' })).toBeInTheDocument();
     const list = screen.getByRole('list');
     expect(within(list).getAllByRole('listitem')).toHaveLength(3);
     ['alpha', 'beta', 'gamma'].forEach((name) => {
@@ -83,7 +83,7 @@ describe('DeleteConfirmationModal', () => {
     const { onNotify, user } = renderModal({ entity: 'member', ids: ['alice'], verb: 'remove' });
 
     expect(screen.getByText("Remove member 'alice'?")).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Remove member' }));
+    await user.click(screen.getByRole('button', { name: 'Remove Member' }));
 
     await waitFor(() =>
       expect(onNotify).toHaveBeenCalledWith("Removed member 'alice'.", 'success', undefined)
@@ -93,7 +93,7 @@ describe('DeleteConfirmationModal', () => {
   it('deletes, closes and shows the generated success toast', async () => {
     const { onDelete, onClose, onNotify, user } = renderModal();
 
-    await user.click(screen.getByRole('button', { name: 'Delete model' }));
+    await user.click(screen.getByRole('button', { name: 'Delete Model' }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(onDelete).toHaveBeenCalledTimes(1);
@@ -106,7 +106,7 @@ describe('DeleteConfirmationModal', () => {
       onDelete: vi.fn().mockResolvedValue(false),
     });
 
-    await user.click(screen.getByRole('button', { name: 'Delete 2 models' }));
+    await user.click(screen.getByRole('button', { name: 'Delete 2 Models' }));
 
     await waitFor(() =>
       expect(onNotify).toHaveBeenCalledWith("Couldn't delete 2 models.", 'error', undefined)
@@ -123,7 +123,7 @@ describe('DeleteConfirmationModal', () => {
     });
     const { onNotify, user } = renderModal({ onDelete: vi.fn().mockRejectedValue(error) });
 
-    await user.click(screen.getByRole('button', { name: 'Delete model' }));
+    await user.click(screen.getByRole('button', { name: 'Delete Model' }));
 
     await waitFor(() =>
       expect(onNotify).toHaveBeenCalledWith('Model is still deployed.', 'error', undefined)
@@ -133,7 +133,7 @@ describe('DeleteConfirmationModal', () => {
   it('prefers caller-supplied toast text', async () => {
     const { onNotify, user } = renderModal({ successText: 'Deletion started.' });
 
-    await user.click(screen.getByRole('button', { name: 'Delete model' }));
+    await user.click(screen.getByRole('button', { name: 'Delete Model' }));
 
     await waitFor(() =>
       expect(onNotify).toHaveBeenCalledWith('Deletion started.', 'success', undefined)
@@ -144,7 +144,7 @@ describe('DeleteConfirmationModal', () => {
     const onDelete = vi.fn(() => new Promise<boolean>(() => {}));
     const { onClose, user } = renderModal({ onDelete });
 
-    const submit = screen.getByRole('button', { name: 'Delete model' });
+    const submit = screen.getByRole('button', { name: 'Delete Model' });
     await user.click(submit);
 
     await waitFor(() => expect(submit).toBeDisabled());
@@ -158,7 +158,7 @@ describe('DeleteConfirmationModal', () => {
     renderModal({ ids: [] });
 
     expect(await screen.findByText('Delete 0 models?')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Delete 0 models' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete 0 Models' })).toBeInTheDocument();
   });
 
   it('uses the verb in the fallback success toast when no entity is given', async () => {
@@ -213,13 +213,13 @@ describe('DeleteConfirmationModal', () => {
     render(<Harness />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('button', { name: 'Delete model' }));
+    await user.click(screen.getByRole('button', { name: 'Delete Model' }));
     await waitFor(() => expect(onDelete).toHaveBeenCalledTimes(1));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(closes).toHaveLength(1);
 
     await user.click(screen.getByRole('button', { name: 'Reopen', hidden: true }));
-    const submit = await screen.findByRole('button', { name: 'Delete model' });
+    const submit = await screen.findByRole('button', { name: 'Delete Model' });
     expect(submit).toBeEnabled();
 
     await act(async () => {
@@ -229,6 +229,6 @@ describe('DeleteConfirmationModal', () => {
     expect(onNotify).toHaveBeenCalledWith("Deleted model 'llama-7b'.", 'success', undefined);
     expect(closes).toHaveLength(1);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Delete model' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Delete Model' })).toBeEnabled();
   });
 });
