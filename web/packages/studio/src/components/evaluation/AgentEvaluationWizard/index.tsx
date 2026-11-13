@@ -1203,6 +1203,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
             <>
               <DatasetPanel
                 slotLabel={<Text kind="label/bold/xl">Dataset File</Text>}
+                slotHelp="Read from its fileset, not copied, so later changes to this file also change re-runs."
                 acceptedFileTypes={DATASET_FILE_TYPES}
                 showMapping={false}
                 onFileSelected={() => {
