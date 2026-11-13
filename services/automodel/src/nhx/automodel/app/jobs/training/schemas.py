@@ -205,11 +205,6 @@ class ExportConfig(BaseModel):
         default="eager",
         description="Attention backend for the traced model. The exporter cannot trace SDPA/GQA.",
     )
-    pooling: Literal["avg", "cls", "last"] = Field(
-        default="avg",
-        description="Embedding pooling over hidden states. Ignored for cross_encoder.",
-    )
-    normalize: bool = Field(default=True, description="L2-normalize pooled embeddings. Ignored for cross_encoder.")
     dimensions: bool = Field(
         default=False,
         description="Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.",
@@ -249,6 +244,19 @@ class RetrievalConfig(BaseModel):
     do_distributed_inbatch_negative: bool = Field(
         default=False,
         description=("Use other queries' passages in the global batch as extra negatives. Ignored for cross_encoder."),
+    )
+
+    # Embedding pooling
+    pooling: Optional[Literal["avg", "cls", "last"]] = Field(
+        default=None,
+        description=(
+            "How a bi_encoder turns token vectors into one embedding: 'avg' (mean), 'cls' (first token), "
+            "or 'last' (last token). Unset uses the base checkpoint's pooling. Ignored for cross_encoder."
+        ),
+    )
+    normalize: Optional[bool] = Field(
+        default=None,
+        description="L2-normalize bi_encoder embeddings. Unset uses the base checkpoint's choice. Ignored for cross_encoder.",
     )
 
     # Tokenization configuration
