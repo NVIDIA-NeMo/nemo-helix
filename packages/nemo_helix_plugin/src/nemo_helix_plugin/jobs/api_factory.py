@@ -8,6 +8,7 @@ import os
 import tarfile
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum, auto
@@ -1538,6 +1539,18 @@ def job_route_factory(
             job_resp = await _require_job_in_collection(jobs_client, name=name, workspace=workspace)
             if job_resp is None:
                 job_resp = (await jobs_client.get_job(name=name, workspace=workspace)).data()
+            # The Jobs service resolves the name across every source in the workspace, so the record
+            # may belong to another collection (e.g. a taskset run's task Job read through the
+            # agent-evaluate route). ``source`` alone can't decide: records from before a source
+            # rename carry the old tag but are still this collection's. A foreign source whose spec
+            # doesn't fit this collection is not this collection's Job: 404, not a render 500.
+            if job_resp.source != service_name:
+                try:
+                    job_output_adapter.validate_python(deepcopy(job_resp.spec))
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{name}' not found"
+                    ) from exc
             return from_response(job_resp)
 
         @router.patch(
