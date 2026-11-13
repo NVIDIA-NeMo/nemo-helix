@@ -151,6 +151,15 @@ class RetrievalSpec(AutomodelSchema):
         default="passage: ",
         description="Literal prefix prepended to each passage. Empty string disables prefixing.",
     )
+    temperature: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Softmax temperature of the training loss: contrastive for bi_encoder, listwise for cross_encoder. "
+            "Omit for 0.02 (bi_encoder) or 1.0 (cross_encoder). A Qwen3 causal reranker scores with raw yes/no "
+            "logits, so this is its only temperature setting."
+        ),
+    )
     export: ExportSpec | None = Field(
         default=None, description="Artifact layout and ONNX export settings. Defaults are applied when omitted."
     )
@@ -170,7 +179,7 @@ class MTPSpec(AutomodelSchema):
         default=None,
         description=(
             "Share one weight-tied layer across the prediction depths. Only some Automodel models accept it "
-            "(Nemotron-H in r0.6.0); omit it for others."
+            "(Nemotron-H in r0.7.0); omit it for others."
         ),
     )
     loss_scaling_factor: float | None = Field(
@@ -183,9 +192,9 @@ class MTPSpec(AutomodelSchema):
 class BackendSpec(AutomodelSchema):
     """Which implementation Automodel uses for each model component.
 
-    Every field defaults to ``None``, meaning "leave it to Automodel". Its own defaults
-    depend on what the training node has available (Transformer Engine, DeepEP, CUDA), so
-    only explicitly set values are forwarded.
+    Every field except ``rope_fusion`` defaults to ``None``, meaning "leave it to Automodel".
+    Its own defaults depend on what the training node has available (Transformer Engine,
+    DeepEP, CUDA), so only explicitly set values are forwarded.
     """
 
     attn: Literal["te", "sdpa", "flex", "eager", "tilelang"] | None = Field(
@@ -198,10 +207,15 @@ class BackendSpec(AutomodelSchema):
         default=None, description="RMSNorm kernel. 'torch_fp32' normalises in fp32 for numerical stability."
     )
     rope: Literal["torch", "quack"] | None = Field(default=None, description="Rotary position embedding kernel.")
-    rope_fusion: bool | None = Field(default=None, description="Fuse the rotary embedding into the attention kernel.")
+    rope_fusion: bool | None = Field(
+        default=False,
+        description="Fuse the rotary embedding into the attention kernel. Automodel v0.7.0 turns this off for "
+        "every model, so true has no effect.",
+    )
     experts: Literal["torch", "te", "gmm", "torch_mm", "torch_mm_mxfp8"] | None = Field(
         default=None,
-        description="MoE expert compute kernel. 'gmm' is the grouped-matmul path used by the large MoE recipes.",
+        description="MoE expert compute kernel. 'torch_mm' is the grouped-matmul path used by the large MoE "
+        "recipes; 'gmm' is a deprecated alias for it.",
     )
     dispatcher: Literal["torch", "deepep", "hybridep", "uccl_ep"] | None = Field(
         default=None,
@@ -293,6 +307,25 @@ class TrainingSpec(AutomodelSchema):
         default=None,
         description="Low-level kernel selection for the model's components. Omit to let Automodel "
         "choose based on the hardware it lands on.",
+    )
+    tokenizer_backend: Literal["nemo_auto", "nemo_wrapped_auto", "transformers_auto", "tokenizers"] | None = Field(
+        default=None,
+        description=(
+            "How Automodel loads the tokenizer. Omit unless the default fails or does not match how the model is "
+            "served. Omitted, bi_encoder and cross_encoder use 'nemo_wrapped_auto' (the checkpoint's Hugging Face "
+            "tokenizer) and every other recipe uses Automodel's own default, 'nemo_auto', which prefers a "
+            "model-specific tokenizer such as Mistral's tekken.json when Automodel has one for the model type. "
+            "'transformers_auto' is Hugging Face AutoTokenizer without Automodel's wrapper; 'tokenizers' reads "
+            "tokenizer.json directly. Not supported for vision-language models, which load a processor."
+        ),
+    )
+    mask_generation_prompt: bool = Field(
+        default=False,
+        description=(
+            "Leave out of the loss the tokens the chat template writes before each assistant reply: the role "
+            "header and any empty reasoning block such as '<think></think>'. The model never generates them. "
+            "Chat-format (messages) datasets only."
+        ),
     )
 
     @model_validator(mode="after")

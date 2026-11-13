@@ -14,6 +14,7 @@ export const QUERY_PARAMETERS = {
   spanId: 'spanId',
   compareWith: 'compareWith',
   tab: 'tab',
+  task: 'task',
 } as const;
 
 export const iconColorClass = 'text-subtle';

@@ -324,6 +324,10 @@ class GymAgentTaskRunner:
             str(cfg.num_repeats),
             "--concurrency",
             str(cfg.concurrency),
+            # A failed agent `/run` becomes a row in Gym's `<output>_failures.jsonl`, which
+            # `trials_from_rollouts` turns into a FAILED trial with its cause, instead of ending the
+            # collection and losing every rollout. Before `selection`, so `hydra_params` can still turn it off.
+            "++route_failures_to_sidecar=true",
             *selection,
         ]
         stdout_log = work_dir / "gym_eval.stdout.log"

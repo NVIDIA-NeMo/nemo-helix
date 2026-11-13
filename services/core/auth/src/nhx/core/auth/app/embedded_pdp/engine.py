@@ -219,6 +219,10 @@ class _PolicyRuntimeManager:
             if generation == self._generation_snapshot():
                 return policy
 
+    def has_data(self) -> bool:
+        """Return whether any policy data has been loaded."""
+        return self._data_snapshot()[2]
+
     def set_data(self, data: Dict[str, Any]) -> None:
         """Set policy data (principals, roles, etc.)."""
         validate_static_authz_data(data)
@@ -259,6 +263,11 @@ def get_policy() -> OPAPolicy:
 def set_policy_data(data: Dict[str, Any]) -> None:
     """Set policy data (principals, roles, etc.), deriving ``authz.scope_families`` for scopes.rego."""
     _policy_runtime.set_data(with_scope_families(data))
+
+
+def has_policy_data() -> bool:
+    """Return whether the embedded PDP already holds a policy document."""
+    return _policy_runtime.has_data()
 
 
 def reload_policy() -> None:

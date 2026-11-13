@@ -1,15 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import errno
 import logging
 import shutil
+import stat
 import tempfile
 from abc import abstractmethod
+from asyncio import CancelledError, create_task, wait
 from dataclasses import dataclass, field
+from os import walk
 from pathlib import Path, PurePosixPath
-from typing import Protocol
+from typing import NoReturn, Protocol
 
 import anyio
+from anyio.to_thread import run_sync
 from filesets import AsyncFilesetFileSystem, FilesetFileSystem, build_fileset_ref, parse_fileset_ref
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.ignore_patterns import compile_ignore_rules
@@ -72,6 +77,112 @@ def _list_local_files_sync(local_path: Path) -> list[str]:
     return [str(file_path.relative_to(local_path)) for file_path in local_path.rglob("*") if file_path.is_file()]
 
 
+_NOT_A_FILE_ERRNOS = frozenset({errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP})
+
+
+def _is_regular_file(path: Path) -> bool:
+    """Return whether ``path`` resolves to a regular file, raising unexpected status errors.
+
+    Missing targets and symlink loops are not files, as with ``Path.is_file()`` before Python 3.14.
+    Python 3.14 returns ``False`` for every error, which would silently drop an inaccessible file.
+    """
+    try:
+        return stat.S_ISREG(path.stat().st_mode)
+    except OSError as error:
+        if error.errno in _NOT_A_FILE_ERRNOS:
+            return False
+        raise
+
+
+def _list_selected_files(local_path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
+    """List selected files for staging, propagating traversal and status errors.
+
+    Ignore patterns apply before each file's status check, so excluded entries cannot fail the upload.
+    """
+
+    def raise_error(error: OSError) -> NoReturn:
+        raise error
+
+    rules = compile_ignore_rules(ignore_patterns)
+
+    def excluded(relative: Path, *, is_directory: bool = False) -> bool:
+        return rules is not None and rules.excludes(PurePosixPath(relative.as_posix()), is_directory=is_directory)
+
+    files: list[str] = []
+    for directory, directories, names in walk(local_path, onerror=raise_error, followlinks=False):
+        relative_directory = Path(directory).relative_to(local_path)
+        directories[:] = [name for name in directories if not excluded(relative_directory / name, is_directory=True)]
+        selected = [str(relative_directory / name) for name in names if not excluded(relative_directory / name)]
+        files.extend(rel_path for rel_path in selected if _is_regular_file(local_path / rel_path))
+    return files
+
+
+def _stage_local_files(
+    local_path: Path, staging_root: Path, ignore_patterns: list[str] | str | None
+) -> tuple[Path, list[str]]:
+    """Acquire a complete upload copy before sending any directory contents.
+
+    Runtime-owned files can disappear between traversal and opening them (for
+    example, a harness finishing a temporary clone). Restart acquisition from a
+    fresh listing in that case; never omit one failed file from an existing
+    manifest. Persistent churn and all other filesystem errors still fail the
+    upload. The caller owns ``staging_root`` and keeps it until upload finishes.
+    Uploads stage beside ``local_path`` so the copy uses the job's own volume
+    rather than container temporary storage; a full volume is an upload
+    failure, not a reason to omit files.
+
+    This stabilizes the upload inputs, not concurrent in-place writes: producers
+    must still finish writing their result files before publishing them.
+    """
+    for attempt in range(3):
+        snapshot = staging_root / "files"
+        snapshot.mkdir()
+        try:
+            if not local_path.is_dir():
+                raise FileNotFoundError(f"Result directory no longer exists: {local_path}")
+            files = _list_selected_files(local_path, ignore_patterns=ignore_patterns)
+            if not local_path.is_dir():
+                raise FileNotFoundError(f"Result directory no longer exists: {local_path}")
+            for rel_path in files:
+                destination = snapshot / rel_path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(local_path / rel_path, destination)
+        except FileNotFoundError:
+            shutil.rmtree(snapshot)
+            if attempt == 2 or not local_path.is_dir():
+                raise
+            logger.warning("Result directory changed during staging; retrying %s", local_path)
+        else:
+            return snapshot, files
+    raise AssertionError("Unreachable: staging either returns or raises")
+
+
+async def _stage_local_files_async(
+    local_path: Path, staging_root: Path, ignore_patterns: list[str] | str | None
+) -> tuple[Path, list[str]]:
+    """Keep the acquisition worker alive until it releases its temporary directory.
+
+    Native asyncio cancellation can interrupt ``run_sync`` before its worker
+    stops. Drain the owned task through repeated cancellation before the caller
+    cleans up staging, consuming any later worker error without masking the
+    first cancellation.
+    """
+    acquisition = create_task(run_sync(_stage_local_files, local_path, staging_root, ignore_patterns))
+    cancellation: CancelledError | None = None
+    while not acquisition.done():
+        try:
+            # Do not forward cancellation or eagerly report the worker's error:
+            # shield() can report it before we restore cancellation on Python 3.14.
+            await wait((acquisition,))
+        except CancelledError as error:
+            cancellation = cancellation or error
+    if cancellation is not None:
+        if not acquisition.cancelled():
+            acquisition.exception()
+        raise cancellation
+    return acquisition.result()
+
+
 class FileManager(Protocol):
     """
     Protocol for a generic file provider. Both the async and sync versions must be implemented,
@@ -82,7 +193,9 @@ class FileManager(Protocol):
     def validate_storage(self) -> None: ...
 
     @abstractmethod
-    def upload(self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None) -> str: ...
+    def upload(
+        self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None, *, stage: bool = False
+    ) -> str: ...
 
     @abstractmethod
     def download_from_url(self, url: str, local_dir: str | Path | None = None) -> TmpDirPath: ...
@@ -100,7 +213,7 @@ class AsyncFileManager(Protocol):
 
     @abstractmethod
     async def upload(
-        self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None
+        self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None, *, stage: bool = False
     ) -> str: ...
 
     @abstractmethod
@@ -166,10 +279,16 @@ class FilesetFileManager(BaseFilesetFileManager):
                     f"Fileset [{self.fileset_name}] in workspace [{self.workspace}] does not exist."
                 )
 
-    def upload(self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None) -> str:
-        """Upload files, attempting every directory member before raising ordinary upload errors."""
+    def upload(
+        self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None, *, stage: bool = False
+    ) -> str:
+        """Upload a file or directory to the fileset.
+
+        With ``stage``, copy a directory's selected files first and upload that copy (see ``_stage_local_files``).
+        Attempt every directory member before raising ordinary upload errors.
+        """
         full_remote_path = self._fileset_path(remote_path)
-        if local_path.is_dir():
+        if local_path.is_dir() and not stage:
             all_files = _list_local_files_sync(local_path)
             files_to_upload = _filter_files_by_patterns(all_files, ignore_patterns)
             errors: list[Exception] = []
@@ -184,6 +303,21 @@ class FilesetFileManager(BaseFilesetFileManager):
                 raise errors[0]
             if errors:
                 raise ExceptionGroup("Directory upload failed", errors)
+        elif local_path.is_dir():
+            with tempfile.TemporaryDirectory(prefix="nemo-result-upload-", dir=local_path.parent) as staging_dir:
+                snapshot, files_to_upload = _stage_local_files(local_path, Path(staging_dir), ignore_patterns)
+                errors: list[Exception] = []
+                for rel_path in files_to_upload:
+                    try:
+                        self._fs.put_file(str(snapshot / rel_path), f"{full_remote_path}/{rel_path}")
+                    except Exception as error:
+                        error.add_note(f"Failed to upload {local_path / rel_path} to {full_remote_path}/{rel_path}")
+                        errors.append(error)
+                        logger.exception("Failed to upload %s; attempting remaining files", local_path / rel_path)
+                if len(errors) == 1:
+                    raise errors[0]
+                if errors:
+                    raise ExceptionGroup("Directory upload failed", errors)
         else:
             self._fs.put_file(str(local_path), full_remote_path)
         return self.url(remote_path)
@@ -242,10 +376,16 @@ class AsyncFilesetFileManager(BaseFilesetFileManager):
                     f"Fileset [{self.fileset_name}] in workspace [{self.workspace}] does not exist."
                 )
 
-    async def _upload(self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None) -> str:
-        """Upload files, attempting every directory member before raising ordinary upload errors."""
+    async def _upload(
+        self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None, *, stage: bool = False
+    ) -> str:
+        """Upload a file or directory to the fileset.
+
+        With ``stage``, copy a directory's selected files first and upload that copy (see ``_stage_local_files``).
+        Attempt every directory member before raising ordinary upload errors.
+        """
         full_remote_path = self._fileset_path(remote_path)
-        if local_path.is_dir():
+        if local_path.is_dir() and not stage:
             all_files = await _list_local_files(local_path)
             files_to_upload = _filter_files_by_patterns(all_files, ignore_patterns)
             errors: list[Exception] = []
@@ -260,6 +400,23 @@ class AsyncFilesetFileManager(BaseFilesetFileManager):
                 raise errors[0]
             if errors:
                 raise ExceptionGroup("Directory upload failed", errors)
+        elif local_path.is_dir():
+            with tempfile.TemporaryDirectory(prefix="nemo-result-upload-", dir=local_path.parent) as staging_dir:
+                snapshot, files_to_upload = await _stage_local_files_async(
+                    local_path, Path(staging_dir), ignore_patterns
+                )
+                errors: list[Exception] = []
+                for rel_path in files_to_upload:
+                    try:
+                        await self._fs._put_file(str(snapshot / rel_path), f"{full_remote_path}/{rel_path}")
+                    except Exception as error:
+                        error.add_note(f"Failed to upload {local_path / rel_path} to {full_remote_path}/{rel_path}")
+                        errors.append(error)
+                        logger.exception("Failed to upload %s; attempting remaining files", local_path / rel_path)
+                if len(errors) == 1:
+                    raise errors[0]
+                if errors:
+                    raise ExceptionGroup("Directory upload failed", errors)
         else:
             await self._fs._put_file(str(local_path), full_remote_path)
         return self.url(remote_path)
@@ -293,8 +450,10 @@ class AsyncFilesetFileManager(BaseFilesetFileManager):
     async def validate_storage(self) -> None:
         await self._validate_storage()
 
-    async def upload(self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None) -> str:
-        return await self._upload(local_path, remote_path, ignore_patterns)
+    async def upload(
+        self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None, *, stage: bool = False
+    ) -> str:
+        return await self._upload(local_path, remote_path, ignore_patterns, stage=stage)
 
     async def download_from_url(self, url: str, local_dir: str | Path | None = None) -> TmpDirPath:
         return await self._download_from_url(url, local_dir)

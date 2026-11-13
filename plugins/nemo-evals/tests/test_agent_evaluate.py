@@ -454,9 +454,14 @@ def test_agent_eval_job_reconstructs_tasks_and_persists_bundle(tmp_path: Path, m
     fake = _FakeEvaluator()
     mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
     ctx = _job_context(tmp_path)
+    save = mocker.spy(ctx.results, "save")
 
     spec = AgentEvalSpec(tasks=[_task_spec()], target=_runner_target("openai/gpt-5.4"))
     result = AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+
+    # Only the bundle, whose evidence agent runtimes may still change, is staged before upload.
+    staged = {call.args[0]: call.kwargs.get("stage", False) for call in save.call_args_list}
+    assert staged == {DEFAULT_RESULT_NAME: True, SUMMARY_RESULT_NAME: False}
 
     # The job reconstructed runtime tasks (bundled metric round-tripped) before handing off.
     assert [task.id for task in fake.received_tasks] == ["task-1"]

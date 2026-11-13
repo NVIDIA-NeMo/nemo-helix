@@ -92,6 +92,8 @@ class ResultManager(BaseResultManager):
         result_name: str,
         artifact_local_path: str | Path,
         ignore_patterns: list[str] | str | None = None,
+        *,
+        stage: bool = False,
     ) -> HelixJobResultResponse:
         attempt_id = self.attempt_id
         file_manager = self._create_file_manager(self.fileset_name)
@@ -99,7 +101,7 @@ class ResultManager(BaseResultManager):
         artifact_local_path = self._validate_local_path(artifact_local_path)
         remote_path = self._result_remote_path(attempt_id, result_name, base=self.artifact_base_path)
         artifact_url = file_manager.upload(
-            local_path=artifact_local_path, remote_path=remote_path, ignore_patterns=ignore_patterns
+            local_path=artifact_local_path, remote_path=remote_path, ignore_patterns=ignore_patterns, stage=stage
         )
         try:
             job_result = self.jobs_client.create_job_result(
@@ -158,6 +160,8 @@ class AsyncResultManager(BaseResultManager):
         result_name: str,
         artifact_local_path: str | Path,
         ignore_patterns: list[str] | str | None = None,
+        *,
+        stage: bool = False,
     ) -> HelixJobResultResponse:
         attempt_id = self.attempt_id
         file_manager = self._create_file_manager(self.fileset_name)
@@ -165,7 +169,7 @@ class AsyncResultManager(BaseResultManager):
         artifact_local_path = self._validate_local_path(artifact_local_path)
         remote_path = self._result_remote_path(attempt_id, result_name, base=self.artifact_base_path)
         artifact_url = await file_manager.upload(
-            local_path=artifact_local_path, remote_path=remote_path, ignore_patterns=ignore_patterns
+            local_path=artifact_local_path, remote_path=remote_path, ignore_patterns=ignore_patterns, stage=stage
         )
         try:
             job_result = (

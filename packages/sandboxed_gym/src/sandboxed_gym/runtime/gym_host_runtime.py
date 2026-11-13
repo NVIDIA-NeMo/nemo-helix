@@ -95,6 +95,10 @@ _SERVER_TYPE_KEYS = ("responses_api_agents", "responses_api_models", "resources_
 COMPONENT_VENV_DIRNAME = ".venv"
 COMPONENT_VENV_ROOT_SUBDIR = "gym_venvs"
 UV_OFFLINE_ENV_KEY = "UV_OFFLINE"
+#: Set by an evaluation that wants each failed rollout back as Gym's failure row (``_ng_failure_class`` and
+#: the ``_ng_failure_*`` fields) instead of an error that fails every rollout in the batch. Off unless
+#: set: GRPO shares this host, and its consumers haven't been checked against failure rows.
+ROUTE_FAILURES_TO_SIDECAR_ENV_KEY = "NHX_GYM_ROUTE_FAILURES_TO_SIDECAR"
 NEMO_GYM_EXTRA_ROOTS_ENV_KEY = "NEMO_GYM_EXTRA_ROOTS"
 #: Writable copy of the image Gym checkout. ``gym_host.sh`` stages it here before this process starts.
 IMAGE_GYM_SRC_ENV_KEY = "SANDBOXED_GYM_SRC_DIR"
@@ -1278,16 +1282,26 @@ def _read_capture(capture_dir: str, result: dict, *, budget: int) -> tuple[list[
     return (calls, len(data)) if calls else ([], 0)
 
 
+def _route_failures_to_sidecar() -> bool:
+    """Whether this host was started with :data:`ROUTE_FAILURES_TO_SIDECAR_ENV_KEY` on."""
+    return os.environ.get(ROUTE_FAILURES_TO_SIDECAR_ENV_KEY, "").strip().lower() in {"1", "true", "yes"}
+
+
 async def _collect_rollout_results(
     examples: list[dict],
     head_server_config: Any,
     rollout_helper: Any,
     capture_dir: str | None = None,
     capture_budget: int = 0,
+    route_failures_to_sidecar: bool = False,
 ) -> list[dict]:
     results: list[dict] = []
     remaining = capture_budget
-    for task in rollout_helper.run_examples(examples=examples, head_server_config=head_server_config):
+    # Gym's own switch (in Gym 0.7.0): a failed agent `/run` resolves to a failure row rather than raising, which
+    # would end every rollout still in flight and lose the batch. Passed only when on, so the call is
+    # unchanged for a host that leaves it off.
+    options = {"route_failures_to_sidecar": True} if route_failures_to_sidecar else {}
+    for task in rollout_helper.run_examples(examples=examples, head_server_config=head_server_config, **options):
         row, nemo_gym_result = await task
         result = _with_row_identity(nemo_gym_result, row)
         if capture_dir is not None:
@@ -1319,6 +1333,7 @@ def submit_rollouts(
     rollout_helper: Any,
     capture_dir: str | None = None,
     capture_budget: int = 0,
+    route_failures_to_sidecar: bool = False,
 ) -> concurrent.futures.Future[list[dict]]:
     """Start ``examples`` on the shared loop and return without waiting.
 
@@ -1328,7 +1343,9 @@ def submit_rollouts(
     # Handler threads hand work to the one loop, so concurrent /rollouts/run calls interleave on
     # it rather than each running a loop of its own.
     return asyncio.run_coroutine_threadsafe(
-        _collect_rollout_results(examples, head_server_config, rollout_helper, capture_dir, capture_budget),
+        _collect_rollout_results(
+            examples, head_server_config, rollout_helper, capture_dir, capture_budget, route_failures_to_sidecar
+        ),
         _ensure_event_loop(),
     )
 
@@ -1339,8 +1356,11 @@ def run_rollouts_sync(
     rollout_helper: Any,
     capture_dir: str | None = None,
     capture_budget: int = 0,
+    route_failures_to_sidecar: bool = False,
 ) -> list[dict]:
-    return submit_rollouts(examples, head_server_config, rollout_helper, capture_dir, capture_budget).result()
+    return submit_rollouts(
+        examples, head_server_config, rollout_helper, capture_dir, capture_budget, route_failures_to_sidecar
+    ).result()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1433,6 +1453,7 @@ class Handler(BaseHTTPRequestHandler):
             # into "every result lost". Half leaves the records themselves the same room they
             # have today; past it, captures stop and rollouts still return.
             capture_budget=self.max_response_bytes // 2,
+            route_failures_to_sidecar=_route_failures_to_sidecar(),
         )
 
         # Committed to 200 before the work is done, so the first byte leaves immediately and no hop

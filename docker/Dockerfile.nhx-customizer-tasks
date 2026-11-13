@@ -6,11 +6,11 @@
 #
 # Hosts file_io / model_entity (nhx.customization_common.tasks.*), model_spec
 # analysis (nhx.core.models.tasks.model_spec), and the LoRA adapter sidecar.
-# Built on NGC PyTorch 26.07 + transformers/accelerate + Nemotron wheels
+# Built on NGC PyTorch 26.09 + transformers/accelerate + Nemotron wheels
 # (mamba-ssm, causal-conv1d) + platform glue + nhx-models.
 
 ARG SMOKE_MARKER=smoke_nhx_customizer_tasks
-ARG PYTORCH_BASE=nvcr.io/nvidia/pytorch:26.07-py3
+ARG PYTORCH_BASE=nvcr.io/nvidia/pytorch:26.09-py3
 
 FROM ${PYTORCH_BASE} AS base
 
@@ -49,22 +49,22 @@ RUN mkdir -p /home/${USERNAME}/.cache && \
 
 # HF stack for model_spec + Nemotron configs. preserve_base_torch.txt blocks uv from
 # pulling PyPI torch (same idea as Automodel update_pyproject_pytorch.sh /
-# docker/common/uv-pytorch.toml). TRANSFORMERS_VERSION matches the Automodel r0.6.0 pin
+# docker/common/uv-pytorch.toml). TRANSFORMERS_VERSION matches the Automodel v0.7.0 pin
 # (AUTOMODEL_COMMIT in docker/automodel/Dockerfile.nhx-automodel-base); bump them together.
-ARG TRANSFORMERS_VERSION=5.12.1
+ARG TRANSFORMERS_VERSION=5.18.0
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
     --overrides /app/docker/customizer/preserve_base_torch.txt \
     "transformers==${TRANSFORMERS_VERSION}" \
     "accelerate>=1.0.0"
 
-# Nemotron/Mamba CUDA wheels — compiled against NGC 26.07 torch; install --no-deps
+# Nemotron/Mamba CUDA wheels — compiled against NGC 26.09 torch; install --no-deps
 # after the HF stack so a PyPI torch never lands in the venv first.
 RUN --mount=from=causal-conv1d-wheel-src,target=/tmp/causal-conv1d-wheel-src,readonly \
     --mount=from=mamba-ssm-wheel-src,target=/tmp/mamba-ssm-wheel-src,readonly \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache-dir --no-deps \
-    /tmp/causal-conv1d-wheel-src/wheels/cu13.3/causal_conv1d-*cp312*.whl \
-    /tmp/mamba-ssm-wheel-src/wheels/cu13.3/mamba_ssm-2.3.0-cp312*.whl
+    /tmp/causal-conv1d-wheel-src/wheels/cu13.4/causal_conv1d-*cp312*.whl \
+    /tmp/mamba-ssm-wheel-src/wheels/cu13.4/mamba_ssm-2.3.0-cp312*.whl
 
 # Platform glue — no_override_requirements.txt keeps uv from clobbering NGC torch
 # or re-resolving the HF stack (same pattern as nhx-automodel-training).
@@ -79,7 +79,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     -e /app/services/core/models
 
 # Pin scanner-tracked runtime packages into /opt/venv before removing stale
-# NGC system-site copies inherited from nvcr.io/nvidia/pytorch:26.07-py3.
+# NGC system-site copies inherited from nvcr.io/nvidia/pytorch:26.09-py3.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
     --reinstall-package wandb \

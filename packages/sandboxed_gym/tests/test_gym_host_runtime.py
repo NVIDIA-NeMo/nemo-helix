@@ -2554,3 +2554,87 @@ def test_the_host_accessors_return_this_interpreters_live_objects() -> None:
     replacement = io.StringIO()
     with contextlib.redirect_stderr(replacement):
         assert runtime._host_stderr() is replacement
+
+
+class _FailureRoutingHelper:
+    """Records the options ``run_examples`` was called with, and answers task 1 with Gym's failure row."""
+
+    def __init__(self):
+        self.options = []
+
+    def run_examples(self, examples, head_server_config=None, **options):
+        self.options.append(options)
+
+        async def _one(row):
+            if row["_ng_task_index"] == 1:
+                # What Gym's `_agent_request_failure_row` builds for a `/run` that answered 500: no reward,
+                # no response, and no rollout identity of its own.
+                return row, {
+                    "_ng_failure_class": "agent_run_error",
+                    "_ng_failure_type": "ClientResponseError",
+                    "_ng_failure_message": "500, message='Internal Server Error'",
+                    "_ng_failure_http_status": 500,
+                    "_ng_failure_response_body": "Image file default/fs#missing.png not found.",
+                }
+            return row, {"response": {"output": []}, "reward": 1.0, **row}
+
+        return [_one(row) for row in examples]
+
+
+def test_a_routing_host_returns_a_failed_rollout_as_a_failure_row_beside_the_others():
+    helper = _FailureRoutingHelper()
+
+    results = asyncio.run(
+        runtime._collect_rollout_results(_rollout_examples(3), MagicMock(), helper, route_failures_to_sidecar=True)
+    )
+
+    assert helper.options == [{"route_failures_to_sidecar": True}]
+    assert [result.get("reward") for result in results] == [1.0, None, 1.0]
+    failed = results[1]
+    assert failed["_ng_failure_class"] == "agent_run_error"
+    assert failed["_ng_failure_response_body"] == "Image file default/fs#missing.png not found."
+    # The job attributes a result by these, and Gym's failure row carries neither.
+    assert (failed["_ng_task_index"], failed["_ng_rollout_index"]) == (1, 0)
+
+
+def test_a_host_leaves_gyms_default_alone_unless_routing_is_on():
+    helper = _FailureRoutingHelper()
+
+    asyncio.run(runtime._collect_rollout_results(_rollout_examples(1), MagicMock(), helper))
+
+    # Not even `route_failures_to_sidecar=False`: a helper that predates the option keeps working.
+    assert helper.options == [{}]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"), [("1", True), ("true", True), ("TRUE", True), ("", False), ("0", False)]
+)
+def test_routing_follows_the_hosts_environment(monkeypatch, value, expected):
+    monkeypatch.setenv(runtime.ROUTE_FAILURES_TO_SIDECAR_ENV_KEY, value)
+
+    assert runtime._route_failures_to_sidecar() is expected
+
+
+def test_routing_is_off_for_a_host_started_without_it(monkeypatch):
+    monkeypatch.delenv(runtime.ROUTE_FAILURES_TO_SIDECAR_ENV_KEY, raising=False)
+
+    assert runtime._route_failures_to_sidecar() is False
+
+
+@pytest.mark.parametrize(("value", "expected"), [("1", [{"route_failures_to_sidecar": True}]), (None, [{}])])
+def test_the_rollout_endpoint_routes_failures_only_on_a_host_started_with_it(
+    ready_server, monkeypatch, value, expected
+):
+    if value is None:
+        monkeypatch.delenv(runtime.ROUTE_FAILURES_TO_SIDECAR_ENV_KEY, raising=False)
+    else:
+        monkeypatch.setenv(runtime.ROUTE_FAILURES_TO_SIDECAR_ENV_KEY, value)
+    helper = _FailureRoutingHelper()
+    runtime._ROLLOUT_HELPER = helper
+
+    with _post_rollouts(ready_server, _rollout_examples(2), timeout=10) as response:
+        body = json.loads(response.read().decode())
+
+    assert helper.options == expected
+    # The row reaches the job as the host got it; whether Gym raises instead is the option's business.
+    assert len(body["results"]) == 2

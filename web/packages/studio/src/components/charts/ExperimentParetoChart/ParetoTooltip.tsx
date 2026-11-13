@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChartTooltipSurface } from '@nemo/common/src/components/charts/ChartTooltip';
 import { Text } from '@nvidia/foundations-react-core';
 import type {
   ParetoMetric,
@@ -33,9 +34,8 @@ export const ParetoTooltip: FC<ParetoTooltipProps> = ({ active, payload, xMetric
   const point = payload?.[0]?.payload;
   if (!active || !point) return null;
   return (
-    <div className="rounded border border-base bg-surface p-2 shadow-md">
-      <Text kind="body/semibold/sm">{point.name}</Text>
-      <div className="mt-1 flex flex-col gap-0.5">
+    <ChartTooltipSurface label={point.name}>
+      <div className="flex flex-col gap-0.5">
         <Text kind="body/regular/xs">
           {xMetric.label}: {formatMetricValue(xMetric, point.x)}
         </Text>
@@ -48,6 +48,6 @@ export const ParetoTooltip: FC<ParetoTooltipProps> = ({ active, payload, xMetric
           </Text>
         )}
       </div>
-    </div>
+    </ChartTooltipSurface>
   );
 };
