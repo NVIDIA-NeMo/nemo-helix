@@ -167,7 +167,8 @@ USER ${BUILD_UID}:${BUILD_GID}
 ARG UV_SYNC_MODE=--frozen
 
 # The pinned RL fork still declares vLLM 0.29.0, affected by CVE-2026-105759.
-# vLLM 0.30.0 retains torch 2.13.0 and requires FlashInfer 0.6.18.post1.
+# vLLM 0.30.0 retains torch 2.13.0 and requires FlashInfer 0.6.18.post1
+# plus CUTLASS DSL 4.7.1; update those coordinated generation pins together.
 # Update the actual vllm extra and lock together before any frozen sync, so
 # prefetched workers and later uv invocations cannot restore the vulnerable pin.
 # Remove this adaptation when the upstream RL source pin carries these versions.
@@ -175,7 +176,8 @@ RUN uv add --optional vllm --no-sync \
         'vllm==0.30.0' \
         'flashinfer-python==0.6.18.post1' \
         'flashinfer-cubin==0.6.18.post1' \
-        'flashinfer-jit-cache==0.6.18.post1' && \
+        'flashinfer-jit-cache==0.6.18.post1' \
+        'nvidia-cutlass-dsl[cu13]==4.7.1' && \
     mkdir -p /tmp/nhx-nemo-rl-lock && \
     cp pyproject.toml uv.lock /tmp/nhx-nemo-rl-lock/
 
