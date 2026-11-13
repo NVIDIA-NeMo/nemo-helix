@@ -55,9 +55,9 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     ensure_fresh_output,
     failures_path_for,
     gym_scoring_metrics,
+    natively_scored_components,
     read_run_aggregations,
     require_full_coverage,
-    reward_component_names,
     trials_from_rollouts,
 )
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
@@ -394,5 +394,5 @@ class SandboxedGymAgentTaskRunner:
             rollouts_path, tasks, index_to_task_id, run_id=run_id, reward_key=cfg.reward_key, capture_dir=capture_dir
         )
         require_full_coverage(tasks, covered_task_ids={trial.task_id for trial in trials}, rollouts_path=rollouts_path)
-        self._component_names = reward_component_names(trials)
+        self._component_names = natively_scored_components(tasks, trials)
         return trials

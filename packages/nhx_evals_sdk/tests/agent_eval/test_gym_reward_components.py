@@ -25,6 +25,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.records import NG_ROLLOUT_INDEX, NG_T
 from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     aggregate_scores_from_gym,
     gym_scoring_metrics,
+    natively_scored_components,
     trials_from_rollouts,
 )
 from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner, SandboxedGymRuntimeConfig
@@ -66,14 +67,15 @@ def test_a_rollouts_reward_components_reach_its_trial(tmp_path: Path) -> None:
 
 def test_unusable_components_are_left_out_and_logged(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     tasks = _tasks(1)
-    components = {"kept": 0.25, "text": "high", "flag": True, "nan": math.nan, "x.pass@1": 1.0}
+    huge = 10**400  # JSON reads it as an int too large for a float
+    components = {"kept": 0.25, "text": "high", "flag": True, "nan": math.nan, "huge": huge, "x.pass@1": 1.0}
     record = {NG_TASK_INDEX: 0, NG_ROLLOUT_INDEX: 0, "reward": 1.0, "reward_components": components}
     with caplog.at_level(logging.WARNING):
         (trial,) = _trials([record], tasks, tmp_path)
-    # A boolean isn't read as 1/0, a non-finite value isn't a measurement, and a reserved name would
-    # collide with the SDK's pass@k aggregates.
+    # A boolean isn't read as 1/0, a non-finite or unconvertible value isn't a measurement, and a reserved
+    # name would collide with the SDK's pass@k aggregates.
     assert trial.metadata["reward_components"] == {"kept": 0.25}
-    assert caplog.text.count("unusable reward component") == 4
+    assert caplog.text.count("unusable reward component") == 5
 
 
 def test_components_that_are_not_a_mapping_are_ignored(tmp_path: Path) -> None:
@@ -169,6 +171,26 @@ def test_components_scored_natively_are_not_imported_again() -> None:
     }
     imported = aggregate_scores_from_gym(aggregations, scored_natively=frozenset({"exact"}))
     assert {score.name for score in imported} == {"runner.gym.steps"}
+
+
+def test_only_components_scored_per_trial_drop_gyms_aggregates(tmp_path: Path) -> None:
+    check = StringCheckMetric(operation="equals", left_template="a", right_template="a")
+    scored, unscored = _tasks(2)
+    scored = scored.model_copy(update={"metrics": [GymRewardMetric(reward_components=("declared",))]})
+    unscored = unscored.model_copy(update={"metrics": [check]})
+    records = [
+        {NG_TASK_INDEX: 0, NG_ROLLOUT_INDEX: 0, "reward": 1.0, "reward_components": {"exact": 1.0}},
+        {NG_TASK_INDEX: 1, NG_ROLLOUT_INDEX: 0, "reward": 1.0, "reward_components": {"relaxed": 0.5}},
+    ]
+    trials = _trials(records, [scored, unscored], tmp_path)
+
+    # The task without a Gym reward metric scores no component per trial, so Gym's aggregate is its only number.
+    names = natively_scored_components([scored, unscored], trials)
+    assert names == {"declared", "exact"}
+    family = {"mean": 0.5, "max": 1.0, "min": 0.0, "median": 0.5, "std": 0.5}
+    agent_metrics = {f"{stat}/{metric}": value for metric in ("exact", "relaxed") for stat, value in family.items()}
+    imported = aggregate_scores_from_gym({"simple_agent": {"agent_metrics": agent_metrics}}, scored_natively=names)
+    assert {score.name for score in imported} == {"runner.gym.relaxed"}
 
 
 async def test_an_evaluation_scores_components_per_trial(tmp_path: Path) -> None:

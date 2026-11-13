@@ -552,7 +552,11 @@ def _as_float(value: Any) -> float | None:
     """``float`` for a numeric Gym metric value; None for anything else (bools included: not measurements)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value) if math.isfinite(value) else None
+    try:
+        number = float(value)
+    except OverflowError:  # an integer too large for a float, such as JSON's 1 followed by 400 zeros
+        return None
+    return number if math.isfinite(number) else None
 
 
 def ensure_fresh_output(rollouts_path: Path) -> None:
@@ -644,6 +648,25 @@ def gym_scoring_metrics(task: AgentEvalTask, trials: Sequence[AgentEvalTrial]) -
             metric = GymRewardMetric.model_validate({**metric.model_dump(), "reward_components": names})
         metrics.append(metric)
     return metrics
+
+
+def natively_scored_components(tasks: Sequence[AgentEvalTask], trials: Sequence[AgentEvalTrial]) -> frozenset[str]:
+    """The reward components scored per trial as ``gym_reward.<component>``, so Gym's own aggregates are redundant.
+
+    They are the components :func:`gym_scoring_metrics` gives each task's Gym reward metric, from that task's
+    trials. A task with no Gym reward metric scores none, so its components keep their Gym aggregates.
+    """
+    from nhx_evals_sdk.metrics.runner_rewards import GymRewardMetric
+
+    trials_by_task: dict[str, list[AgentEvalTrial]] = {}
+    for trial in trials:
+        trials_by_task.setdefault(trial.task_id, []).append(trial)
+    names: set[str] = set()
+    for task in tasks:
+        for metric in gym_scoring_metrics(task, trials_by_task.get(task.id, [])):
+            if isinstance(metric, GymRewardMetric):
+                names.update(metric.reward_components)
+    return frozenset(names)
 
 
 def _resolve_task_id(

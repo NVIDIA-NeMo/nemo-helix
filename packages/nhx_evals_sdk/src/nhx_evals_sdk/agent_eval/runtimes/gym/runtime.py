@@ -41,9 +41,9 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     aggregate_scores_from_gym,
     ensure_fresh_output,
     gym_scoring_metrics,
+    natively_scored_components,
     read_run_aggregations,
     require_full_coverage,
-    reward_component_names,
     trials_from_rollouts,
 )
 from nhx_evals_sdk.agent_eval.runtimes.provenance import redact_credentials
@@ -198,7 +198,7 @@ class GymAgentTaskRunner:
             capture_dir=model_call_capture_dir(work_dir),
         )
         require_full_coverage(tasks, covered_task_ids={trial.task_id for trial in trials}, rollouts_path=rollouts_path)
-        self._component_names = reward_component_names(trials)
+        self._component_names = natively_scored_components(tasks, trials)
         return trials
 
     async def _validate_config(
