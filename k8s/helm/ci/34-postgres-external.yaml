@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+postgresql:
+  enabled: false
+externalDatabase:
+  host: postgres.example.internal
+  existingSecret: external-db
+  existingSecretPasswordKey: password
+networkPolicies:
+  enabled: true

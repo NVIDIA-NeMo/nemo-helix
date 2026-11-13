@@ -21,6 +21,7 @@ const pathParams = {
   [RP.adapterName]: 'test-adapter',
   [RP.filesetId]: dataset1.id!,
   [RP.filesetName]: dataset1.name!,
+  [RP.filesetTab]: 'card',
   [RP.filePathEncoded]: '',
   [RP.folderPathEncoded]: '',
   [RP.evalConfigNamespace]: '',

@@ -290,7 +290,7 @@ describe('FilesetCreateModal', () => {
       await user.click(screen.getByRole('button', { name: 'Create Dataset' }));
       await waitFor(() => {
         expect(navigate).toHaveBeenCalledWith(
-          expect.stringContaining('/workspaces/default/filesets/mydataset/detail?tab=files')
+          expect.stringContaining('/workspaces/default/filesets/mydataset/files')
         );
       });
     });
@@ -319,7 +319,7 @@ describe('FilesetCreateModal', () => {
       await user.click(screen.getByRole('button', { name: 'Create Model Fileset' }));
       await waitFor(() => {
         expect(navigate).toHaveBeenCalledWith(
-          expect.stringContaining('/workspaces/default/filesets/mymodel/detail?tab=files')
+          expect.stringContaining('/workspaces/default/filesets/mymodel/files')
         );
       });
     });

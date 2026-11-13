@@ -199,22 +199,34 @@ def get_osv_scanner() -> Path:
     return Path(osv_path)
 
 
+# Per-package OSV fields that carry vulnerability data. We only consume
+# ``package`` and ``licenses``; these change whenever the OSV database is
+# updated (new aliases, ``modified`` timestamps, rewritten advisories) and
+# create large diffs unrelated to licensing.
+_OSV_VULNERABILITY_KEYS = ("groups", "vulnerabilities")
+
+
 def _sanitize_osv_json(output_file: Path) -> None:
     """
-    Remove machine-specific paths from OSV JSON output.
+    Strip machine-specific and non-license data from OSV JSON output.
 
-    The osv-scanner includes absolute paths like /Users/username/code/nhx/uv.lock
-    which cause unnecessary diffs when different developers run the tool.
+    - The osv-scanner includes absolute paths like /Users/username/code/nhx/uv.lock
+      which cause unnecessary diffs when different developers run the tool.
+    - It also embeds vulnerability advisories per package, which we ignore (only
+      licenses are used) but which churn whenever the OSV database changes.
+      osv-scanner has no flag to omit them, so they are pruned here.
     """
 
     with open(output_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # Remove path from source objects in results
     for result in data.get("results", []):
         source = result.get("source", {})
         if "path" in source:
             del source["path"]
+        for pkg_entry in result.get("packages", []):
+            for key in _OSV_VULNERABILITY_KEYS:
+                pkg_entry.pop(key, None)
 
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)

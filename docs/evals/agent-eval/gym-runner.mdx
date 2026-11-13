@@ -259,6 +259,28 @@ it can be checked against Gym's output: accuracy there is **0–100**, so
 Trials, scores, and the run bundle are otherwise read exactly as in
 [Reading Results](/documentation/evaluate-models/agent-eval/reading-results).
 
+### Several scores per row
+
+A resources server can score each rollout on several objectives. Gym's `BaseMultiRewardVerifyResponse`
+returns them in `reward_components`, beside the scalar `reward`. Each component a trial reports
+becomes a score of its own, `gym_reward.<component>`, with its own mean and pass@k. A task built
+with a plain `GymRewardMetric()` reports them too: the runner adds the components it finds in the
+rollouts. A trial that doesn't report a component has no score for it, rather than a 0.
+
+```python
+# a server returning reward_components={"exact": ..., "relaxed": ...}
+# gym_reward.reward
+# gym_reward.exact
+# gym_reward.relaxed
+```
+
+Since the SDK scores those components itself, it drops Gym's own aggregates of them, as it does
+for `reward`. Other `runner.gym.*` metrics, including any a server computes in `compute_metrics`,
+are imported as before.
+
+To rescore saved trials without a runner, name the components on the metric:
+`GymRewardMetric(reward_components=("exact", "relaxed"))`.
+
 ## Output directories
 
 Each run writes to a fresh temporary directory by default. To choose one, set `work_dir` on the run

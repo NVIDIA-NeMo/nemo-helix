@@ -16,21 +16,21 @@ import {
   DEFAULT_PURPOSE_FILTER,
   isDefaultPurposeFilter,
   VISIBLE_PURPOSES,
-} from '@studio/components/DatasetsTable/constants';
+} from '@studio/components/FilesetsTable/constants';
 import type {
   DatasetWithId,
-  DatasetsTableProps,
+  FilesetsTableProps,
   ModalOpenState,
-} from '@studio/components/DatasetsTable/types';
-import { useOwnedFirstFilesets } from '@studio/components/DatasetsTable/useOwnedFirstFilesets';
+} from '@studio/components/FilesetsTable/types';
+import { useOwnedFirstFilesets } from '@studio/components/FilesetsTable/useOwnedFirstFilesets';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
 import { keepPreviousData } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
-type UseDatasetsTableArgs = Pick<
-  DatasetsTableProps,
+type UseFilesetsTableArgs = Pick<
+  FilesetsTableProps,
   | 'onDatasetsSelected'
   | 'onRowClick'
   | 'enableFilters'
@@ -40,7 +40,7 @@ type UseDatasetsTableArgs = Pick<
   | 'purposeFilter'
 >;
 
-export function useDatasetsTable({
+export function useFilesetsTable({
   onDatasetsSelected,
   onRowClick,
   enableFilters,
@@ -48,7 +48,7 @@ export function useDatasetsTable({
   selectionType,
   getDatasetRoute,
   purposeFilter,
-}: UseDatasetsTableArgs) {
+}: UseFilesetsTableArgs) {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
 
@@ -57,11 +57,14 @@ export function useDatasetsTable({
     defaultSort: [{ id: 'created_at', desc: true }],
   });
 
+  // A fixed `purposeFilter` makes the Purpose filter moot, so the table drops it.
+  const enablePurposeFilter = enableFilters && purposeFilter === undefined;
+
   // Seed the default purposes as checked (generic stays off) once on load, alongside any
   // filters already in the URL. A later deliberate "uncheck all" is not re-seeded.
   const seededDefaults = useRef(false);
   useEffect(() => {
-    if (!enableFilters || seededDefaults.current) return;
+    if (!enablePurposeFilter || seededDefaults.current) return;
     seededDefaults.current = true;
     const current = dataViewState.columnFiltering.state;
     if (!current.some((f) => f.id === 'purpose')) {
@@ -70,7 +73,7 @@ export function useDatasetsTable({
         { id: 'purpose', value: DEFAULT_PURPOSE_FILTER },
       ]);
     }
-  }, [enableFilters, dataViewState.columnFiltering]);
+  }, [enablePurposeFilter, dataViewState.columnFiltering]);
 
   // The seeded default doesn't count as the user filtering, so empty states stay "no filesets yet".
   const hasActiveFilters = dataViewState.debouncedColumnFilters.some(
@@ -92,10 +95,10 @@ export function useDatasetsTable({
   const resetFilters = useCallback(() => {
     onDatasetsSelected?.([]);
     dataViewState.resetFilters();
-    if (enableFilters) {
+    if (enablePurposeFilter) {
       dataViewState.columnFiltering.set([{ id: 'purpose', value: DEFAULT_PURPOSE_FILTER }]);
     }
-  }, [dataViewState, enableFilters, onDatasetsSelected]);
+  }, [dataViewState, enablePurposeFilter, onDatasetsSelected]);
 
   const page = dataViewState.pagination.state.pageIndex + 1;
   const pageSize = dataViewState.pagination.state.pageSize;
@@ -115,7 +118,7 @@ export function useDatasetsTable({
       : {}),
     // Management view only: nothing checked means every purpose except "generic". Pickers
     // (filters off) list everything unless `purposeFilter` narrows them.
-    ...(enableFilters
+    ...(enablePurposeFilter
       ? withOperators<FilesetFilter>({
           purpose: { $in: selectedPurposes.length > 0 ? selectedPurposes : VISIBLE_PURPOSES },
         })

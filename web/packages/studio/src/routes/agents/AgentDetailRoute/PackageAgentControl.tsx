@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { CopyButton } from '@nemo/common/src/components/CopyButton';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { Package } from '@nemo/icons/icons';
@@ -28,7 +29,6 @@ import {
 } from '@studio/api/agents/useDeploymentModes';
 import { useImageBuildsUnsupported } from '@studio/api/agents/useImageBuildsUnsupported';
 import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
-import { CopyButton } from '@studio/components/CopyButton';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
 import { useEffect, useState, type FC } from 'react';

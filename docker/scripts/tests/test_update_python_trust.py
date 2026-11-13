@@ -117,6 +117,68 @@ def test_replace_binary_detaches_shared_files_and_updates_record(tmp_path: Path,
         ]
 
 
+@pytest.mark.parametrize("referenced", [False, True])
+def test_rebuild_prunes_only_unreferenced_content_addressed_files(
+    tmp_path: Path, monkeypatch, referenced: bool
+) -> None:
+    cache = tmp_path / "cache"
+    blob = cache / "files-v0/95/old-wandb-core"
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(b"old Go executable")
+    archive = cache / "archive-v0/wandb"
+    metadata = archive / "wandb-0.31.0.dist-info/METADATA"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text("Name: wandb\nVersion: 0.31.0\n")
+    binary = archive / "wandb/bin/wandb-core"
+    binary.parent.mkdir(parents=True)
+    os.link(blob, binary)
+    record = metadata.parent / "RECORD"
+    record.write_text("wandb/bin/wandb-core,old-hash,17\n")
+    other = tmp_path / "other-consumer"
+    if referenced:
+        os.link(blob, other)
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(b"patched Go executable")
+    monkeypatch.setattr(sys, "argv", ["update-python-trust.py", "--root", str(tmp_path / "environment")])
+    monkeypatch.setattr(trust, "CACHE_ROOTS", (cache,))
+    monkeypatch.setattr(trust, "SOURCE_OUTPUT", tmp_path / "sources")
+    monkeypatch.setattr(trust, "python_environments", lambda _: [])
+    monkeypatch.setattr(trust, "rebuild_wandb", lambda *args: replacement)
+
+    trust.main()
+
+    assert binary.read_bytes() == replacement.read_bytes()
+    assert blob.exists() is referenced
+    assert metadata.exists()
+    if referenced:
+        assert other.read_bytes() == b"old Go executable"
+
+
+def test_content_addressed_cleanup_preserves_symlinks_and_referenced_files(tmp_path: Path) -> None:
+    files = tmp_path / "files-v0/ab"
+    files.mkdir(parents=True)
+    orphan = files / "orphan"
+    orphan.touch()
+    referenced = files / "referenced"
+    referenced.touch()
+    os.link(referenced, tmp_path / "installed")
+    external = tmp_path / "external"
+    external.write_bytes(b"preserve")
+    symlink = files / "symlink"
+    symlink.symlink_to(external)
+    directory = files / "directory"
+    directory.mkdir()
+
+    trust.prune_cache_files(tmp_path)
+
+    assert not orphan.exists()
+    assert referenced.exists()
+    assert symlink.is_symlink()
+    assert external.read_bytes() == b"preserve"
+    assert directory.is_dir()
+    trust.prune_cache_files(tmp_path / "missing-cache")
+
+
 def test_discovers_nested_gym_environments_without_resolving_python_symlinks(tmp_path: Path, monkeypatch) -> None:
     interpreter = tmp_path / "system-python"
     interpreter.touch()

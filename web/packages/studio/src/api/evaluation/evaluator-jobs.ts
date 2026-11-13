@@ -35,6 +35,11 @@ export const fetchEvaluatorJobs = async (
                 {
                   $or: [
                     {
+                      'spec.publication.intake.agent_name': {
+                        $in: [agentName, `${workspace}/${agentName}`],
+                      },
+                    },
+                    {
                       'spec.target.kind': { $eq: 'agent' },
                       'spec.target.agent.name': { $in: [agentName, `${workspace}/${agentName}`] },
                     },
