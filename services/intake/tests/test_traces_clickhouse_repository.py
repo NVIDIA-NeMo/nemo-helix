@@ -54,9 +54,13 @@ def _with_started_at_us(row: tuple[object, ...], started_at_us: int) -> tuple[ob
     return (*row, started_at_us)
 
 
-def test_order_by_whitelists_supported_trace_sort_keys():
-    assert _order_by("started_at") == "started_at ASC, id ASC"
-    assert _order_by("-started_at") == "started_at DESC, id ASC"
+@pytest.mark.parametrize("sort,direction", [("started_at", "ASC"), ("-started_at", "DESC")])
+@pytest.mark.parametrize("table_alias", [None, "traces"])
+def test_order_by_breaks_ties_with_complete_trace_identity(sort, direction, table_alias):
+    prefix = "traces." if table_alias else ""
+    assert _order_by(sort, table_alias=table_alias) == (
+        f"{prefix}started_at {direction}, {prefix}id ASC, {prefix}session_id ASC, {prefix}source_format ASC"
+    )
 
 
 def test_order_by_rejects_unsupported_trace_sort_keys():
@@ -92,6 +96,10 @@ async def test_summary_mode_reads_root_spans_without_metric_aggregates():
     assert "sumIf" not in client.queries[1]
     assert "groupUniqArrayIf" not in client.queries[1]
     assert "span_versions" not in client.queries[1]
+    assert (
+        "ORDER BY traces.started_at ASC, traces.id ASC, traces.session_id ASC, traces.source_format ASC"
+        in client.queries[1]
+    )
     assert "trace_roots.root_input" not in client.queries[1]
     assert "trace_roots.root_output" not in client.queries[1]
     assert "'' AS input" in client.queries[1]
