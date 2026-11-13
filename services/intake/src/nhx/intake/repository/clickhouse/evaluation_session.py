@@ -126,7 +126,7 @@ class ClickHouseEvaluationSessionRepository(EvaluationSessionRepository):
         base_parameters: dict[str, Any] = {
             "workspace": workspace,
             "evaluation_name": evaluation_name,
-            **_SESSION_USAGE.parameters,
+            **SESSION_USAGE.parameters,
             **created_after_parameters,
         }
 
@@ -385,7 +385,7 @@ def _metric_sort_page_refs_sql(
                     coalesce(usage.input_tokens, 0) + coalesce(usage.output_tokens, 0)
                 ) AS total_tokens
             FROM (
-                {_usage_by_session_sql(all_scoped_spans)}
+                {usage_by_session_sql(all_scoped_spans)}
             ) AS usage
         )
         SELECT
@@ -471,7 +471,7 @@ def _hydrate_by_refs_sql(
                 usage.cached_tokens AS cached_tokens,
                 usage.cost_usd AS cost_total_usd
             FROM (
-                {_usage_by_session_sql("current_page_spans")}
+                {usage_by_session_sql("current_page_spans")}
             ) AS usage
         ),
         session_scores AS (
@@ -542,15 +542,17 @@ def _page_ref_parameters(refs: list[_SessionPageRef]) -> dict[str, object]:
 
 
 _SESSION_USAGE_METRICS = ("input_tokens", "output_tokens", "cached_tokens", "cost_usd")
-_SESSION_USAGE = usage_sql(_SESSION_USAGE_METRICS, scaled=False)
+# Shared with the evaluation-comparison repository, which reads the same per-session totals.
+SESSION_USAGE = usage_sql(_SESSION_USAGE_METRICS, scaled=False)
 
 
-def _usage_by_session_sql(span_relation_sql: str) -> str:
+def usage_by_session_sql(span_relation_sql: str) -> str:
     """Sum each trace's winning usage tier, then add those totals up per session.
 
     ``span_relation_sql`` is a FROM item of current span rows (a table, CTE, or subquery) exposing
     ``workspace``, ``session_id``, ``source_format``, ``trace_id``, ``kind``, ``external_parent_span_id``,
-    ``attributes_bool``, ``attributes_number`` and ``is_deleted``.
+    ``attributes_bool``, ``attributes_number`` and ``is_deleted``. Shared by the session reads and
+    the evaluation-comparison repository.
     """
     return f"""
         SELECT
@@ -563,14 +565,14 @@ def _usage_by_session_sql(span_relation_sql: str) -> str:
                 session_id,
                 source_format,
                 trace_id,
-                {_SESSION_USAGE.trace_columns}
+                {SESSION_USAGE.trace_columns}
             FROM (
                 SELECT
                     spans.workspace AS workspace,
                     spans.session_id AS session_id,
                     spans.source_format AS source_format,
                     spans.trace_id AS trace_id,
-                    {_SESSION_USAGE.span_columns}
+                    {SESSION_USAGE.span_columns}
                 FROM {span_relation_sql} AS spans
                 WHERE spans.is_deleted = 0
             ) AS span_rows

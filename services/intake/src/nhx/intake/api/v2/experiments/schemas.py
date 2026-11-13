@@ -9,11 +9,13 @@ Response models are standalone: they translate from the stored entity via
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Self
 
 from nhx.common.entities.values import DatetimeFilter, Filter, NumberFilter, map_entity_field
 from nhx.intake.entities.experiments import ColumnLayout, Experiment, ExperimentGroup, ParetoConfig
+from nhx.intake.experiments.compare import PairedComparison
 from nhx.intake.repository.evaluation_session import EvaluationSessionRow
 from nhx.intake.spans.domain import (
     INTAKE_PREVIEW_PAYLOAD_CHAR_LIMIT,
@@ -356,6 +358,80 @@ class EvaluationResponse(BaseModel):
             updated_at=entity.updated_at,
             pinned_at=entity.pinned_at,
         )
+
+
+class EvaluationCompareResponse(BaseModel):
+    """Paired baseline-vs-candidate comparison of one metric across shared test cases.
+
+    Differences are signed ``candidate - baseline``. ``interval_low``/``interval_high``
+    bound a 95% bootstrap interval over the paired test-case mean differences, and
+    ``p_candidate_better`` is the fraction of resamples whose mean favors the candidate
+    under the metric's direction. All three are null when no test case is shared.
+    """
+
+    workspace: str
+    baseline: str = Field(description="Name of the baseline Evaluation.")
+    candidate: str = Field(description="Name of the candidate Evaluation.")
+    metric: str = Field(
+        description="The compared metric: 'evaluators.<name>', 'cost_usd', 'latency_ms', or 'tokens'.",
+    )
+    higher_is_better: bool = Field(
+        description=(
+            "Direction of the metric: true when a higher value is better (evaluator scores), "
+            "false when lower is better (cost, latency, tokens)."
+        ),
+    )
+    n_pairs: int = Field(description="Test cases present on both sides, i.e. the pairs compared.")
+    better: int = Field(description="Paired test cases where the candidate is better.")
+    same: int = Field(
+        description="Paired test cases within a 1e-9 absolute difference of the baseline.",
+    )
+    worse: int = Field(description="Paired test cases where the candidate is worse.")
+    mean_paired_difference: float | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description=(
+            "Mean of the per-test-case differences, signed candidate minus baseline. Null when no test case is shared."
+        ),
+    )
+    interval_low: float | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description="Lower bound of the 95% bootstrap interval of the mean paired difference.",
+    )
+    interval_high: float | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description="Upper bound of the 95% bootstrap interval of the mean paired difference.",
+    )
+    p_candidate_better: float | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description=(
+            "Fraction of bootstrap resamples whose mean paired difference favors the candidate "
+            "under the metric's direction. Resamples within 1e-9 of zero are ties and count as "
+            "neither better nor worse, so 1 minus this value is not the chance the candidate is worse. "
+            "Null when no test case is shared."
+        ),
+    )
+    interval_caveat: str | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description=(
+            "Plain-language caveat about the interval: absent pairs, or a small pair count, make it a weak estimate."
+        ),
+    )
+
+    @classmethod
+    def from_comparison(
+        cls,
+        *,
+        workspace: str,
+        baseline: str,
+        candidate: str,
+        comparison: PairedComparison,
+    ) -> EvaluationCompareResponse:
+        return cls(workspace=workspace, baseline=baseline, candidate=candidate, **asdict(comparison))
 
 
 class MetricStatFilters(BaseModel):
