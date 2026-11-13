@@ -2,21 +2,21 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nemo-model-metadata-plugin"
+name = "nemo-bedrock-plugin"
 version = "0.1.0"
-description = "Enriches Model entities with metadata from their providers and public model catalogs."
+description = "Model metadata for Amazon Bedrock models from Bedrock's foundation model catalog."
 requires-python = ">=3.11,<3.15"
 dependencies = ["httpx>=0.27.0,<1", "nemo-helix-plugin", "pydantic>=2.0.0"]
 
-[project.entry-points."nemo.controllers"]
-model-metadata = "nemo_model_metadata.controller:ModelMetadataController"
+[project.entry-points."nemo.models.metadata_sources"]
+bedrock = "nemo_bedrock_plugin.metadata:BedrockMetadataSource"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nemo_model_metadata"]
+packages = ["src/nemo_bedrock_plugin"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

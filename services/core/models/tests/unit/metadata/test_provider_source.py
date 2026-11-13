@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
-from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.models.metadata import MetadataSourceContext, MetadataTarget, SourceUnavailableError
 from nemo_helix_plugin.models.types import ModelCapability, ModelMetadata, ModelModality, ModelProvider
-from nemo_model_metadata.sources.base import MetadataTarget, SourceUnavailableError
-from nemo_model_metadata.sources.provider import ProviderModelsSource, parse_provider_model
+from nhx.core.models.metadata.provider_source import ProviderModelsSource, parse_provider_model
 
 PROVIDER_MODELS_PATH = "/apis/inference-gateway/v2/workspaces/default/provider/spark/-/v1/models"
 
@@ -61,12 +61,13 @@ def _provider() -> ModelProvider:
     )
 
 
-def _gateway(handler) -> AsyncInferenceGatewayClient:
-    return AsyncInferenceGatewayClient(
+def _ctx(handler) -> MetadataSourceContext:
+    client = AsyncNemoClient(
         base_url="http://platform",
         default_headers={"X-NMP-Principal-Id": "service:model-metadata"},
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
+    return MetadataSourceContext(http=httpx.AsyncClient(), client=client)
 
 
 async def test_provider_source_lists_models_once_per_cycle_with_platform_headers():
@@ -78,9 +79,10 @@ async def test_provider_source_lists_models_once_per_cycle_with_platform_headers
             200, json={"data": [{"id": "gemma-4-12b", "name": "Gemma 4 12B", "context_length": 262144}]}
         )
 
-    source = ProviderModelsSource(_gateway(handler))
-    first = await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()))
-    missing = await source.fetch(MetadataTarget(upstream_model_id="not-served", provider=_provider()))
+    source = ProviderModelsSource()
+    ctx = _ctx(handler)
+    first = await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx)
+    missing = await source.fetch(MetadataTarget(upstream_model_id="not-served", provider=_provider()), ctx)
 
     assert [request.url.path for request in requests] == [PROVIDER_MODELS_PATH]
     assert requests[0].headers["X-NMP-Principal-Id"] == "service:model-metadata"
@@ -94,16 +96,17 @@ async def test_provider_source_raises_when_listing_fails_and_retries_next_cycle(
     def handler(request: httpx.Request) -> httpx.Response:
         return responses.pop(0)
 
-    source = ProviderModelsSource(_gateway(handler))
+    source = ProviderModelsSource()
+    ctx = _ctx(handler)
     target = MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider())
 
     with pytest.raises(SourceUnavailableError):
-        await source.fetch(target)
+        await source.fetch(target, ctx)
     with pytest.raises(SourceUnavailableError):
-        await source.fetch(target)
+        await source.fetch(target, ctx)
     source.begin_cycle()
 
-    assert await source.fetch(target) is None
+    assert await source.fetch(target, ctx) is None
 
 
 @pytest.mark.parametrize("body", [{"object": "list"}, ["gemma-4-12b"], "<html>maintenance</html>"])
@@ -113,7 +116,31 @@ async def test_provider_source_raises_on_malformed_listing(body: object):
             return httpx.Response(200, text=body)
         return httpx.Response(200, json=body)
 
-    source = ProviderModelsSource(_gateway(handler))
+    source = ProviderModelsSource()
+    ctx = _ctx(handler)
 
     with pytest.raises(SourceUnavailableError):
-        await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()))
+        await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx)
+
+
+async def test_provider_source_treats_upstream_without_model_list_as_empty():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/ready"):
+            return httpx.Response(200, json={"workspace": "default", "name": "spark"})
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    source = ProviderModelsSource()
+    ctx = _ctx(handler)
+
+    assert await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx) is None
+
+
+async def test_provider_source_raises_when_gateway_does_not_know_provider_yet():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "Model provider not found for default/spark"})
+
+    source = ProviderModelsSource()
+    ctx = _ctx(handler)
+
+    with pytest.raises(SourceUnavailableError):
+        await source.fetch(MetadataTarget(upstream_model_id="gemma-4-12b", provider=_provider()), ctx)

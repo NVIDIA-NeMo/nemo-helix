@@ -612,6 +612,14 @@ models:
     provider_discovery_timeout_seconds: 180
     # Client retry count for provider autodiscovery requests. The controller loop already retries on each cycle; disabling client retries avoids multi-minute retry storms on slow upstreams. | default: 0
     provider_discovery_max_retries: 0
+  # Model metadata controller configuration
+  metadata:
+    # Seconds between metadata reconcile cycles. | default: 300.0
+    interval_seconds: 300.0
+    # Seconds before a model's metadata, or a lookup that found nothing, is fetched again. | default: 86400.0
+    refresh_interval_seconds: 86400.0
+    # Timeout for each metadata request. | default: 15.0
+    request_timeout_seconds: 15.0
   # Parallelism estimation heuristics (model size thresholds, TP/PP/DP/CP/EP costs, balance bonuses)
   parallelism:
     # Standard node configuration (e.g., DGX H100) | default: 8
