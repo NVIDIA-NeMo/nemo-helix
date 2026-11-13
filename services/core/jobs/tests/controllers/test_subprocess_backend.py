@@ -357,6 +357,29 @@ def test_schedule_passes_the_agent_wheel_through(mock_nemo_client, tmp_path, moc
     assert metadata.process.wait(timeout=5) == 0
 
 
+def test_schedule_passes_the_telemetry_opt_out_through(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(
+        test_step_pending,
+        ["/bin/sh", "-c", 'test "$NEMO_TELEMETRY_ENABLED" = "false"'],
+    )
+
+    with (
+        patch.dict(os.environ, {"PATH": "/bin", "NEMO_TELEMETRY_ENABLED": "false"}, clear=True),
+        patch("nhx.core.jobs.controllers.backends.subprocess.create_otel_logger", return_value=None),
+    ):
+        update = backend.schedule(step.step_spec.executor, step)
+
+    assert update.status == HelixJobStatus.PENDING
+    metadata = backend._process_registry.get(
+        SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
+    )
+    assert metadata is not None
+    assert metadata.process.wait(timeout=5) == 0
+
+
 def test_schedule_preserves_uds_otlp_metadata_in_runtime_env(mock_nemo_client, tmp_path, test_step_pending):
     platform_config = HelixConfig(  # type: ignore[abstract]
         service_discovery={"files": "unix:///tmp/nemo-helix.sock"},

@@ -42,35 +42,50 @@ navigation:
       - section: Agents
         path: ../../agents/index.mdx
         contents:
-          - page: Register Agents
-            path: ../../agents/register-agents.mdx
-          - page: Fabric 0.6 Upgrade and Adapter Support
-            slug: fabric-upgrade
-            path: ../../agents/fabric-upgrade.mdx
-          - page: Run Mini-SWE-Agent
-            slug: mini-swe-agent
-            path: ../../agents/mini-swe-agent.mdx
-          - page: Web Search with Tavily
-            slug: web-search-tavily
-            path: ../../agents/web-search-tavily.mdx
-          - section: Deploy Agents
-            path: ../../agents/deploy-agents.mdx
+          - section: Set Up Agents
+            skip-slug: true
             contents:
-              - page: Sandboxed Deployments
+              - page: Register
+                slug: register-agents
+                path: ../../agents/register-agents.mdx
+          - section: Run Agents
+            skip-slug: true
+            contents:
+              - page: Deployment Types
+                slug: deploy-agents
+                path: ../../agents/deploy-agents.mdx
+              - page: Sandbox Deployments
+                slug: deploy-agents/sandboxed-deployments
                 path: ../../agents/sandboxed-deployments.mdx
-          - page: Execute Agents as Jobs
-            path: ../../agents/execute-agent-jobs.mdx
-          - section: Traces and Insights
+              - page: Execute as Jobs
+                slug: execute-agents-as-jobs
+                path: ../../agents/execute-agent-jobs.mdx
+          - section: Insights
+            skip-slug: true
             contents:
-              - page: Collect Agent Traces
+              - page: Ingest Traces
+                slug: traces-and-insights/collect-agent-traces
                 path: ../../agents/traces-and-insights/collect-agent-traces.mdx
               - page: Insights from Traces
+                slug: traces-and-insights/insights-from-traces
                 path: ../../agents/traces-and-insights/insights-from-traces.mdx
+          - section: Evaluate Agents
+            skip-slug: true
+            contents:
+              - link: Evaluation
+                href: /documentation/evaluate-models/agent-eval
+              - link: Experiments
+                href: /documentation/evaluate-models/experiments
+          - section: Optimize Agents
+            skip-slug: true
+            contents:
+              - page: Overview
+                slug: optimize-agents
+                path: ../../agents/optimize-agents.mdx
               - page: Evaluate Agent Candidates
+                slug: traces-and-insights/evaluate-agent-candidates
                 path: ../../agents/traces-and-insights/evaluate-agent-candidates.mdx
-          - page: Optimize Agents
-            path: ../../agents/optimize-agents.mdx
-          - section: Agent Governance
+          - section: Secure Agents
             slug: governance
             path: ../../agents/governance/index.mdx
             contents:
@@ -84,6 +99,21 @@ navigation:
                 slug: cli-reference
               - page: Troubleshooting
                 path: ../../agents/governance/troubleshooting.mdx
+          - section: Examples & Integrations
+            skip-slug: true
+            contents:
+              - page: Run Mini-SWE-Agent
+                slug: mini-swe-agent
+                path: ../../agents/mini-swe-agent.mdx
+              - page: Web Search with Tavily
+                slug: web-search-tavily
+                path: ../../agents/web-search-tavily.mdx
+          - section: Migration & Compatibility
+            skip-slug: true
+            contents:
+              - page: Fabric 0.6 Upgrade and Adapter Support
+                slug: fabric-upgrade
+                path: ../../agents/fabric-upgrade.mdx
       - section: Evaluate Agents & Models
         slug: evaluate-models
         path: ../../evals/index.mdx

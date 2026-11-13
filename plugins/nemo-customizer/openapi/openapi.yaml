@@ -3626,6 +3626,14 @@ components:
           additionalProperties:
             type: string
           type: object
+        additional_args:
+          items:
+            type: string
+          type: array
+          title: Additional Args
+          description: Raw arguments appended to the engine serve command. For vLLM
+            this is the `vllm serve` argument vector, for example ['--max-model-len',
+            '8192'].
         disk_size:
           title: Disk Size
           description: Disk size for the deployment.

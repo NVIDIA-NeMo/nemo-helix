@@ -441,6 +441,37 @@ async def test_a_gym_failure_record_is_a_failed_trial_not_a_zero_score(tasks, tm
     assert failed.evidence.require("rollout_failures").ref == str(tmp_path / "gym_run" / "rollouts_failures.jsonl")
 
 
+async def test_a_routed_run_failure_is_a_failed_trial_that_names_its_cause(tasks, tmp_path, monkeypatch) -> None:
+    """What Gym 0.7 builds for a failed agent `/run` once the host routes failures: no reward, no response.
+
+    Gym's message is the transport error, which names only the status and URL; the cause is in the reply
+    the agent's server sent, here the Inference Gateway refusing a missing image.
+    """
+    cause = '{"detail":"Image file default/finance-ocr-test#images/missing.png not found."}'
+    failure = {
+        "_ng_failure_class": "agent_run_error",
+        "_ng_failure_type": "ClientResponseError",
+        "_ng_failure_message": "500, message='Internal Server Error', url='http://127.0.0.1:5106/run'",
+        "_ng_failure_http_status": 500,
+        "_ng_failure_response_body": cause,
+    }
+    _host_answering(monkeypatch, {0: {"reward": 1.0, "response": "answer-0"}, 1: failure})
+    runner = SandboxedGymAgentTaskRunner(config=SandboxedGymRuntimeConfig(rollout_url=ROLLOUT_URL))
+
+    trials = await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    by_task = {trial.task_id: trial for trial in trials}
+    scored, failed = by_task[tasks[0].id], by_task[tasks[1].id]
+    assert scored.status == AgentEvalTrialStatus.COMPLETED
+    assert scored.metadata["reward"] == 1.0
+    assert failed.status == AgentEvalTrialStatus.FAILED
+    assert failed.metadata["reward"] is None
+    assert failed.error is not None
+    assert failed.error.type == "ClientResponseError"
+    assert failed.error.message is not None
+    assert "missing.png not found" in failed.error.message
+
+
 async def test_a_kill_shaped_gym_record_keeps_its_diagnosis(tasks, tmp_path, monkeypatch) -> None:
     """Gym drops a kill-shaped failure so it can retry it on resume; nothing retries it here.
 
