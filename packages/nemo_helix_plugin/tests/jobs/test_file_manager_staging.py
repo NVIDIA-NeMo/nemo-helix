@@ -351,6 +351,52 @@ async def test_valid_empty_directory_and_file_symlink_selection(
     assert not _staging_dirs(upload_temporary_root)
 
 
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize(("ignore_patterns", "fails"), [(None, True), ("*.link", False)], ids=["selected", "ignored"])
+@pytest.mark.skipif(os.geteuid() == 0, reason="Root bypasses ordinary directory permissions")
+async def test_inaccessible_symlink_target_fails_unless_ignored(
+    tmp_path: Path, upload_temporary_root: Path, asynchronous: bool, ignore_patterns: str | None, fails: bool
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "summary.json").write_bytes(b"summary")
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    (blocked / "evidence").write_bytes(b"must not silently disappear")
+    (source / "evidence.link").symlink_to(blocked / "evidence")
+    fs = _RecordingFileSystem()
+    blocked.chmod(0)
+    try:
+        if fails:
+            with pytest.raises(PermissionError):
+                await _upload(_manager(asynchronous, fs), source, ignore_patterns)
+        else:
+            await _upload(_manager(asynchronous, fs), source, ignore_patterns)
+    finally:
+        blocked.chmod(0o700)
+
+    assert fs.uploads == ({} if fails else {"default/results#bundle/summary.json": b"summary"})
+    assert not _staging_dirs(upload_temporary_root)
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+async def test_dangling_and_looping_symlinks_are_skipped(
+    tmp_path: Path, upload_temporary_root: Path, asynchronous: bool
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "summary.json").write_bytes(b"summary")
+    (source / "dangling").symlink_to(tmp_path / "missing")
+    (source / "loop-a").symlink_to(source / "loop-b")
+    (source / "loop-b").symlink_to(source / "loop-a")
+    fs = _RecordingFileSystem()
+
+    await _upload(_manager(asynchronous, fs), source)
+
+    assert fs.uploads == {"default/results#bundle/summary.json": b"summary"}
+    assert not _staging_dirs(upload_temporary_root)
+
+
 @pytest.mark.parametrize("worker_fails", [False, True], ids=["worker-succeeds", "worker-fails"])
 async def test_cancelled_acquisition_drains_worker_before_cleanup(
     tmp_path: Path, upload_temporary_root: Path, monkeypatch: pytest.MonkeyPatch, worker_fails: bool

@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import errno
 import logging
 import shutil
+import stat
 import tempfile
 from abc import abstractmethod
 from asyncio import CancelledError, create_task, wait
@@ -90,8 +92,28 @@ def _list_local_files_sync(local_path: Path) -> list[str]:
     return [str(file_path.relative_to(local_path)) for file_path in local_path.rglob("*") if file_path.is_file()]
 
 
+_NOT_A_FILE_ERRNOS = frozenset({errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP})
+
+
+def _is_regular_file(path: Path) -> bool:
+    """Return whether ``path`` resolves to a regular file, raising unexpected status errors.
+
+    Missing targets and symlink loops are not files, as with ``Path.is_file()`` before Python 3.14.
+    Python 3.14 returns ``False`` for every error, which would silently drop an inaccessible file.
+    """
+    try:
+        return stat.S_ISREG(path.stat().st_mode)
+    except OSError as error:
+        if error.errno in _NOT_A_FILE_ERRNOS:
+            return False
+        raise
+
+
 def _list_selected_files(local_path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
-    """List files for staging from selected directories, propagating traversal errors."""
+    """List selected files for staging, propagating traversal and status errors.
+
+    Ignore patterns apply before each file's status check, so excluded entries cannot fail the upload.
+    """
 
     def raise_error(error: OSError) -> NoReturn:
         raise error
@@ -102,10 +124,9 @@ def _list_selected_files(local_path: Path, ignore_patterns: list[str] | str | No
     for directory, directories, names in walk(local_path, onerror=raise_error, followlinks=False):
         if ignored_directories:
             directories[:] = [name for name in directories if name not in ignored_directories]
-        for name in names:
-            path = Path(directory) / name
-            if path.is_file():
-                files.append(str(path.relative_to(local_path)))
+        candidates = [str((Path(directory) / name).relative_to(local_path)) for name in names]
+        selected = _filter_files_by_patterns(candidates, ignore_patterns)
+        files.extend(rel_path for rel_path in selected if _is_regular_file(local_path / rel_path))
     return files
 
 
@@ -132,9 +153,7 @@ def _stage_local_files(
         try:
             if not local_path.is_dir():
                 raise FileNotFoundError(f"Result directory no longer exists: {local_path}")
-            files = _filter_files_by_patterns(
-                _list_selected_files(local_path, ignore_patterns=ignore_patterns), ignore_patterns
-            )
+            files = _list_selected_files(local_path, ignore_patterns=ignore_patterns)
             if not local_path.is_dir():
                 raise FileNotFoundError(f"Result directory no longer exists: {local_path}")
             for rel_path in files:
