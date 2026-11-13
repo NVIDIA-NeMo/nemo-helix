@@ -55,6 +55,16 @@ Use `baseURL` instead of `workspace` when the caller already has an OpenAI-compa
 
 `AssistantChat` creates an assistant-ui `ExternalStoreRuntime` through `useAssistantChatRuntime`. Consumers pass props to `AssistantChat`; they do not need to instantiate the runtime directly. The runtime converts assistant-ui messages to OpenAI messages, calls `useChatCompletion`, streams deltas into the latest assistant message, and exposes edit, reload, cancel, and reset handlers to `AssistantChatThread`.
 
+### Thinking and tool calls
+
+Streamed reasoning (`reasoning_content` or `reasoning`) and `tool_calls` become reasoning and tool-call parts on the reply. Each run of adjacent reasoning and tool-call parts renders as one work group (`work/`), built on `MessagePrimitive.GroupedParts`:
+
+- while the reply is running the group is open, so each step shows live with its running title (**Running `pnpm test`**, **Reading `README.md`**). When the reply finishes the group collapses to its summary. If the reader opens or closes the group during the run, their choice stays. Saved replies render collapsed;
+- the group label reads "Thinking…" while its last step is still streaming, then the tool-call count, for example "Ran 3 tool calls", or "Thought" when there were no tool calls. When the NeMo Assistant records how long the reply took, the label adds it: "Ran 3 tool calls · worked for 42s";
+- expanding the group shows one row per step: a **Thought** with the reasoning text, or a tool call with its arguments (a `Bash` call shows its exact command) and its result or error. The row's icon and message come from the `toolCall/` helpers, such as **Ran `pnpm test`**, **Read `README.md`**, or **Used get_weather**, with the call's detail styled apart from the action. `Write`, `Edit`, and `MultiEdit` show as a file change with its line counts (**Wrote `MEMORY.md` +12 −0**) and the written content or the edit's arguments.
+
+Pass `toolCallPartComponent` to render tool calls your own way inside the group. The NeMo Assistant does this to unpack its synthetic thinking, grouped-tool, and collapsed work-details parts, folding repeated calls of one tool into a single step ("Read 3 files"). Job progress tool calls stay outside the group so their progress card remains visible.
+
 ### Failed replies
 
 When a request fails for a non-cancel reason the assistant message is marked `incomplete`/`error`. Its last text part is the human-readable explanation (`getFailedReplyExplanation`); any parts before it are the partial answer streamed before the failure. It renders as:
@@ -91,6 +101,7 @@ Related documentation:
 - Streaming assistant responses through `useChatCompletion` with `model`, `workspace`, or explicit `baseURL`.
 - Optional `PromptData` support for system prompt, temperature, and max tokens.
 - Optional OpenAI-compatible tool definitions on the completion request.
+- Streamed reasoning and tool calls shown as a work group that stays open while the reply runs (see [Thinking and tool calls](#thinking-and-tool-calls)).
 - User-message editing that re-runs inference from the edited prompt and drops stale downstream messages.
 - Stop/cancel for an in-flight stream, regenerate for assistant responses, and reset for clearing the current thread.
 - Basic assistant-ui runtime hooks for future copy, branch, and thread-list features.
@@ -104,9 +115,9 @@ Related documentation:
 - `AssistantChatThread.tsx` — thread viewport layout that wires message renderers and the composer together.
 - `AssistantMessage.tsx` / `UserMessage.tsx` — assistant/system and user message renderers (`AssistantMessage` also renders system messages).
 - `UserEditComposer.tsx` — the inline composer shown when editing a user message.
-- `AssistantChatMessageContent.tsx` — shared message-parts renderer (text, image, tool-call fallback, and the error banner) used by both message renderers.
+- `AssistantChatMessageContent.tsx` — shared message-parts renderer (text, image, the reasoning and tool-call work group, and the error banner) used by both message renderers.
 - `ChatErrorBanner.tsx` — the failed-reply banner with the explanation, plus the "Show details" row holding the raw error.
-- `work/` — `WorkStep` (a collapsible row) and `WorkCodeSnippet` (a labelled code block).
+- `work/` — the work group (`WorkGroup`), its Thought and tool-call steps, the step that folds repeated calls of one tool, and the `WorkStep` row and `WorkCodeSnippet` block they share. `workParts.ts` groups the parts and builds the group label. `toolCall/` holds the per-tool labels, icons, and message helpers the steps draw on.
 - `messageActions.tsx` — shared message-action styles and the copy-message button.
 - `describeChatError.ts` — rules that explain agent chat failures (`describeChatError`), `humanizeChatError`, and the generic error line. `messageUtils.ts` `getFailedReply` builds the failed reply from them.
 - `useMessageError.ts` — hooks returning the raw error and the explanation of a failed message, shared by the red bar, the body, the error banner, and its "Show details" row.
