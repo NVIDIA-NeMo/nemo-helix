@@ -148,7 +148,10 @@ describe('VirtualModelsDataView', () => {
     expect(items.map((item) => item.textContent)).toEqual(['View', 'Chat', 'Delete']);
     expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
     await user.click(await screen.findByText('Delete'));
-    await user.click(await screen.findByRole('button', { name: 'Delete' }));
+    expect(
+      await screen.findByRole('heading', { name: "Delete virtual model 'my-vm'?" })
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Delete Virtual Model' }));
 
     await waitFor(() => expect(deleted).toBe(true));
   });

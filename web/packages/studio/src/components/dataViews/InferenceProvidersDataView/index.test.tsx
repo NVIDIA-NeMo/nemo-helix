@@ -128,8 +128,11 @@ describe('InferenceProvidersDataView', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
 
     expect(
-      await screen.findByText(
-        "Deleting this inference provider will also delete its model entities unless another provider serves them or it is a model deployment's provider. Are you sure you want to proceed?"
+      await screen.findByRole('heading', { name: `Delete inference provider '${provider.name}'?` })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Its model entities are also deleted, unless another provider serves them or a model deployment uses this provider.'
       )
     ).toBeInTheDocument();
   });
@@ -146,7 +149,7 @@ describe('InferenceProvidersDataView', () => {
     await screen.findByText(provider.name);
     await user.click(screen.getByRole('button', { name: 'Open quick actions menu' }));
     await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
-    await user.click(await screen.findByRole('button', { name: 'Delete' }));
+    await user.click(await screen.findByRole('button', { name: 'Delete Inference Provider' }));
 
     await waitFor(() => {
       expect(invalidateQueries).toHaveBeenCalledWith({

@@ -11,6 +11,7 @@ import {
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex } from '@nvidia/foundations-react-core';
 import { CUSTOMIZER_ENABLED } from '@studio/constants/environment';
+import { DELETE_MODEL_DESCRIPTION } from '@studio/constants/models';
 import { canFineTuneModel } from '@studio/hooks/useModelCustomizationEligibility';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getNewCustomizationFormRoute, getWorkspaceBaseModelsRoute } from '@studio/routes/utils';
@@ -58,12 +59,9 @@ export const DetailsActions: FC<DetailsActionsProps> = ({ model, canDelete }) =>
           {deleteOpen && (
             <DeleteConfirmationModal
               open
-              title={`Delete model: ${model.name}`}
-              description="This permanently removes the model entity from the workspace. Related deployments and resources may be affected."
-              confirmationText={model.name}
-              simpleConfirm
-              successText={`Successfully deleted model ${model.name}`}
-              errorText="Failed to delete the model. Try again or check your permissions."
+              entity="model"
+              ids={[model.name]}
+              description={DELETE_MODEL_DESCRIPTION}
               onClose={() => setDeleteOpen(false)}
               onDelete={handleDelete}
             />

@@ -25,7 +25,6 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useDeferredUnmount } from '@nemo/common/src/hooks/useDeferredUnmount';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   getModelsListProvidersQueryKey,
   useModelsDeleteProvider,
@@ -61,7 +60,6 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
   onCreate,
   attributes,
 }) => {
-  const toast = useToast();
   const queryClient = useQueryClient();
 
   const {
@@ -113,7 +111,6 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
   const deleteProviderMutation = useModelsDeleteProvider({
     mutation: {
       onSuccess: () => {
-        toast.success('Inference provider deleted successfully.');
         queryClient.invalidateQueries({
           queryKey: getModelsListProvidersQueryKey(workspace),
         });
@@ -143,16 +140,11 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
     if (!modalProvider) {
       return false;
     }
-    try {
-      await deleteProviderMutation.mutateAsync({
-        workspace,
-        name: modalProvider.name,
-      });
-      return true;
-    } catch {
-      toast.error('Failed to delete inference provider');
-      return false;
-    }
+    await deleteProviderMutation.mutateAsync({
+      workspace,
+      name: modalProvider.name,
+    });
+    return true;
   };
 
   const handleModalClose = () => {
@@ -273,12 +265,11 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
       {modalOpen === 'delete' && modalProvider && (
         <DeleteConfirmationModal
           open
-          simpleConfirm
+          entity="inference provider"
+          ids={[modalProvider.name]}
+          description="Its model entities are also deleted, unless another provider serves them or a model deployment uses this provider."
           onDelete={handleDeleteProvider}
-          title={`Delete inference provider: ${modalProvider.name}`}
-          confirmationText={modalProvider.name}
           onClose={handleModalClose}
-          description="Deleting this inference provider will also delete its model entities unless another provider serves them or it is a model deployment's provider. Are you sure you want to proceed?"
         />
       )}
 
