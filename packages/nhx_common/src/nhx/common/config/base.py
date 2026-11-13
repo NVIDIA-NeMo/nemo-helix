@@ -340,6 +340,17 @@ class OIDCConfig(BaseSettings):
         "Set to 0 to disable caching.",
     )
 
+    clock_skew_leeway_seconds: int = Field(
+        default=30,
+        ge=0,
+        le=300,
+        description=(
+            "Seconds of clock difference allowed when checking a token's iat, nbf and exp claims. "
+            "Without it, a token issued a moment ago by an identity provider whose clock is slightly "
+            "ahead is rejected as not yet valid. Workload tokens and access keys use the same allowance."
+        ),
+    )
+
 
 class TokenSigningConfig(BaseSettings):
     """Shared NeMo auth-service token signing configuration."""
