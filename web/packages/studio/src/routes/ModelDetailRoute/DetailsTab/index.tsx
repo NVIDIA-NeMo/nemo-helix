@@ -5,7 +5,7 @@ import { isBaseModel } from '@nemo/common/src/utils/models';
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Grid, Stack } from '@nvidia/foundations-react-core';
 import type { ModelLineage } from '@studio/hooks/useModelLineage';
-import { getModelTabLink, ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
+import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { AdaptersSection } from '@studio/routes/ModelDetailRoute/DetailsTab/AdaptersSection';
 import {
   getAdapterFields,
@@ -19,6 +19,7 @@ import { InferenceSection } from '@studio/routes/ModelDetailRoute/DetailsTab/Inf
 import { DetailPanel } from '@studio/routes/ModelDetailRoute/DetailsTab/layout/DetailPanel';
 import { LineageSection } from '@studio/routes/ModelDetailRoute/DetailsTab/LineageSection';
 import { PromptSection } from '@studio/routes/ModelDetailRoute/DetailsTab/PromptSection';
+import { useModelTabRoute } from '@studio/routes/ModelDetailRoute/useModelTabRoute';
 import { getModelDetailRoute } from '@studio/routes/utils';
 import type { CustomizationJob } from '@studio/util/customizationBackend';
 import type { FC } from 'react';
@@ -32,6 +33,7 @@ export interface DetailsTabProps {
 }
 
 export const DetailsTab: FC<DetailsTabProps> = ({ model, adapter, lineage, jobRecord }) => {
+  const getTabRoute = useModelTabRoute();
   const workspace = model.workspace;
   const adapters = model.adapters ?? [];
   const baseCard = adapter
@@ -52,7 +54,7 @@ export const DetailsTab: FC<DetailsTabProps> = ({ model, adapter, lineage, jobRe
           isLoading: lineage.job.isLoading,
           status: jobRecord?.status,
           createdAt: jobRecord?.created_at,
-          to: getModelTabLink(ModelDetailTab.Training),
+          to: getTabRoute(ModelDetailTab.Training),
         };
 
   return (
@@ -62,7 +64,7 @@ export const DetailsTab: FC<DetailsTabProps> = ({ model, adapter, lineage, jobRe
         job={jobCard}
         fileset={lineage.fileset}
         deployment={lineage.deployment}
-        deploymentTo={getModelTabLink(ModelDetailTab.Deployment)}
+        deploymentTo={getTabRoute(ModelDetailTab.Deployment)}
         isAdapter={Boolean(adapter)}
       />
 

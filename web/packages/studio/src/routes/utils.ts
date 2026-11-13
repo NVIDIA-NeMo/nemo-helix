@@ -30,7 +30,7 @@ import type { NewAgentTab } from '@studio/routes/agents/AgentsListRoute/NewAgent
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import type { GuardrailChecksSubTab } from '@studio/routes/guardrails/GuardrailChecksTab/constants';
-import type { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
+import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { createSearchParams, generatePath, type RouteObject } from 'react-router';
 
 const gateRoutes = (enabled: boolean, routes: RouteObject | RouteObject[]) => {
@@ -170,20 +170,38 @@ export const getWorkspaceCustomizationJobDetailsRoute = (
   });
 };
 
+// Details is the page's default, so its URL has no tab segment.
+const toModelTabSegment = (tab?: ModelDetailTab) =>
+  tab === ModelDetailTab.Details ? undefined : tab;
+
 export const getModelDetailRoute = (
   workspace: string,
   modelName: string,
   options?: { adapterName?: string; tab?: ModelDetailTab }
 ) => {
-  const base = options?.adapterName
-    ? generatePath(ROUTES.workspace.modelAdapterDetail, {
-        workspace,
-        modelName,
-        adapterName: options.adapterName,
-      })
-    : generatePath(ROUTES.workspace.modelDetail, { workspace, modelName });
-  return options?.tab ? `${base}?${QUERY_PARAMETERS.tab}=${options.tab}` : base;
+  const modelTab = toModelTabSegment(options?.tab);
+  if (options?.adapterName) {
+    return generatePath(ROUTES.workspace.modelAdapterDetail, {
+      workspace,
+      modelName,
+      adapterName: options.adapterName,
+      modelTab,
+    });
+  }
+  return generatePath(ROUTES.workspace.modelDetail, { workspace, modelName, modelTab });
 };
+
+/** The model detail page of a catalog model. */
+export const getBaseModelDetailRoute = (
+  workspace: string,
+  modelName: string,
+  tab?: ModelDetailTab
+) =>
+  generatePath(ROUTES.workspace.baseModelsModel, {
+    workspace,
+    modelName,
+    modelTab: toModelTabSegment(tab),
+  });
 
 export const getWorkspaceCustomizationJobListRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.customizationJobList, { workspace });
