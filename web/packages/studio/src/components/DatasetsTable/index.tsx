@@ -58,20 +58,33 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({ getDatasetRoute, renderR
       ((dataset) => renderRowActions(dataset, { onDatasetDeleted: handleDatasetDeleted })),
   });
 
+  // Shares NewDatasetPanel with NewDatasetButton. Rendered beside every list state, at the same position, so it
+  // stays mounted: a creation finishing after Cancel is still reported, and a list refetch failing while the
+  // panel is open keeps its draft and upload retry state.
+  const panel = <NewDatasetPanel open={createPanelOpen} onClose={closeCreatePanel} />;
+
   if (isPending) {
-    return <Loading description="Loading datasets..." />;
+    return (
+      <>
+        <Loading description="Loading datasets..." />
+        {panel}
+      </>
+    );
   }
 
   if (error) {
     return (
-      <ErrorMessage
-        message="Failed to fetch datasets"
-        slotFooter={
-          <Button type="button" kind="tertiary" onClick={() => refetch()}>
-            Retry
-          </Button>
-        }
-      />
+      <>
+        <ErrorMessage
+          message="Failed to fetch datasets"
+          slotFooter={
+            <Button type="button" kind="tertiary" onClick={() => refetch()}>
+              Retry
+            </Button>
+          }
+        />
+        {panel}
+      </>
     );
   }
 
@@ -122,9 +135,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({ getDatasetRoute, renderR
           },
         }}
       />
-
-      {/* Shares NewDatasetPanel with NewDatasetButton; stays mounted so a creation finishing after Cancel is still reported. */}
-      <NewDatasetPanel open={createPanelOpen} onClose={closeCreatePanel} />
+      {panel}
     </>
   );
 };
