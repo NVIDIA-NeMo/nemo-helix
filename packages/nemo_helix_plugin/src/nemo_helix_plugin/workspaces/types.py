@@ -14,7 +14,7 @@ from typing import NotRequired, TypedDict
 
 from nemo_helix_plugin.auth.types import MAX_PRINCIPAL_ID_LENGTH
 from nemo_helix_plugin.schema import Page
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # Response types
@@ -25,6 +25,8 @@ class WorkspaceLimits(BaseModel):
     """Optional per-workspace resource limits (unset = platform default)."""
 
     max_concurrent_jobs: int | None = Field(default=None, ge=1)
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class Workspace(BaseModel):

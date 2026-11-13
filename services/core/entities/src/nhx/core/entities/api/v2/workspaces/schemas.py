@@ -24,7 +24,7 @@ class WorkspaceInput(BaseModel):
     description: Optional[str] = Field(None, description="Optional description of the workspace")
     limits: Optional[WorkspaceLimits] = Field(
         None,
-        description="Optional per-workspace limits. Only persisted when provided; requires workspace Admin.",
+        description="Optional per-workspace limits. Only persisted when provided; requires a platform admin.",
     )
 
     model_config = ConfigDict(regex_engine="python-re")

@@ -25250,7 +25250,7 @@ components:
           allOf:
           - $ref: '#/components/schemas/WorkspaceLimits'
           description: Optional per-workspace limits. Only persisted when provided;
-            requires workspace Admin.
+            requires a platform admin.
       type: object
       required:
       - name
