@@ -4,13 +4,15 @@
 import json
 from datetime import datetime, timezone
 from typing import Any
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
+from nemo_helix_plugin.models.metadata import MetadataSourceContext, MetadataTarget, SourceUnavailableError
 from nemo_helix_plugin.models.types import ModelCapability, ModelMetadata, ModelModality, ModelProvider
-from nemo_model_metadata.sources.base import MetadataTarget, SourceUnavailableError
-from nemo_model_metadata.sources.ngc import (
-    NgcSource,
+from nemo_ngc_plugin.config import NgcConfig
+from nemo_ngc_plugin.metadata import (
+    NgcMetadataSource,
     endpoint_name_candidates,
     parse_ngc_endpoint,
     parse_parameter_count,
@@ -57,6 +59,10 @@ ARTIFACT = {"artifact": {"name": "kimi-k3", "shortDescription": "Multimodal MoE 
 def _provider(host_url: str = "https://integrate.api.nvidia.com/v1") -> ModelProvider:
     now = datetime(2026, 11, 13, tzinfo=timezone.utc)
     return ModelProvider(name="build", workspace="default", host_url=host_url, created_at=now, updated_at=now)
+
+
+def _ctx(http: httpx.AsyncClient) -> MetadataSourceContext:
+    return MetadataSourceContext(http=http, client=MagicMock())
 
 
 def _routes(routes: dict[str, dict[str, Any]], seen: list[str]) -> httpx.MockTransport:
@@ -114,8 +120,8 @@ async def test_ngc_source_fetches_spec_and_description():
     routes = {f"/v2/endpoints/{ORG}/kimi-k3/spec": _spec(), f"/v2/endpoints/{ORG}/kimi-k3": ARTIFACT}
 
     async with httpx.AsyncClient(transport=_routes(routes, seen)) as http:
-        metadata = await NgcSource(http, BASE_URL, ORG).fetch(
-            MetadataTarget(upstream_model_id="moonshotai/kimi-k3", provider=_provider())
+        metadata = await NgcMetadataSource(NgcConfig(url=BASE_URL, org=ORG)).fetch(
+            MetadataTarget(upstream_model_id="moonshotai/kimi-k3", provider=_provider()), _ctx(http)
         )
 
     assert seen == [f"/v2/endpoints/{ORG}/kimi-k3/spec", f"/v2/endpoints/{ORG}/kimi-k3"]
@@ -129,8 +135,8 @@ async def test_ngc_source_tries_underscore_name_after_dotted_name_misses():
     routes = {f"/v2/endpoints/{ORG}/llama-3_1-8b-instruct/spec": _spec("meta/llama-3.1-8b-instruct")}
 
     async with httpx.AsyncClient(transport=_routes(routes, seen)) as http:
-        metadata = await NgcSource(http, BASE_URL, ORG).fetch(
-            MetadataTarget(upstream_model_id="meta/llama-3.1-8b-instruct", provider=_provider())
+        metadata = await NgcMetadataSource(NgcConfig(url=BASE_URL, org=ORG)).fetch(
+            MetadataTarget(upstream_model_id="meta/llama-3.1-8b-instruct", provider=_provider()), _ctx(http)
         )
 
     assert seen[:2] == [
@@ -146,8 +152,8 @@ async def test_ngc_source_rejects_endpoint_serving_a_different_model():
     routes = {f"/v2/endpoints/{ORG}/kimi-k3/spec": _spec("someone-else/kimi-k3")}
 
     async with httpx.AsyncClient(transport=_routes(routes, seen)) as http:
-        metadata = await NgcSource(http, BASE_URL, ORG).fetch(
-            MetadataTarget(upstream_model_id="moonshotai/kimi-k3", provider=_provider())
+        metadata = await NgcMetadataSource(NgcConfig(url=BASE_URL, org=ORG)).fetch(
+            MetadataTarget(upstream_model_id="moonshotai/kimi-k3", provider=_provider()), _ctx(http)
         )
 
     assert metadata is None
@@ -158,25 +164,20 @@ async def test_ngc_source_accepts_endpoint_without_model_default():
     routes = {f"/v2/endpoints/{ORG}/kimi-k3/spec": _spec(model_id=None)}
 
     async with httpx.AsyncClient(transport=_routes(routes, seen)) as http:
-        metadata = await NgcSource(http, BASE_URL, ORG).fetch(
-            MetadataTarget(upstream_model_id="moonshotai/kimi-k3", provider=_provider())
+        metadata = await NgcMetadataSource(NgcConfig(url=BASE_URL, org=ORG)).fetch(
+            MetadataTarget(upstream_model_id="moonshotai/kimi-k3", provider=_provider()), _ctx(http)
         )
 
     assert metadata is not None
     assert metadata.context_length == 1048576
 
 
-@pytest.mark.parametrize("provider", [None, _provider("https://api.openai.com/v1")])
-async def test_ngc_source_skips_providers_other_than_nvidia_build(provider: ModelProvider | None):
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise AssertionError("no request expected")
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        metadata = await NgcSource(http, BASE_URL, ORG).fetch(
-            MetadataTarget(upstream_model_id="moonshotai/kimi-k3", provider=provider)
-        )
-
-    assert metadata is None
+@pytest.mark.parametrize(
+    ("host_url", "expected"),
+    [("https://integrate.api.nvidia.com/v1", True), ("https://api.openai.com/v1", False)],
+)
+def test_ngc_source_handles_only_nvidia_build(host_url: str, expected: bool):
+    assert NgcMetadataSource(NgcConfig(url=BASE_URL, org=ORG)).handles(_provider(host_url)) is expected
 
 
 @pytest.mark.parametrize(
@@ -192,8 +193,8 @@ async def test_ngc_source_raises_when_ngc_cannot_answer(response: httpx.Response
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         with pytest.raises(SourceUnavailableError):
-            await NgcSource(http, BASE_URL, ORG).fetch(
-                MetadataTarget(upstream_model_id="moonshotai/kimi-k3", provider=_provider())
+            await NgcMetadataSource(NgcConfig(url=BASE_URL, org=ORG)).fetch(
+                MetadataTarget(upstream_model_id="moonshotai/kimi-k3", provider=_provider()), _ctx(http)
             )
 
 
@@ -205,8 +206,8 @@ async def test_ngc_source_treats_private_endpoint_as_not_found():
         return httpx.Response(403)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        metadata = await NgcSource(http, BASE_URL, ORG).fetch(
-            MetadataTarget(upstream_model_id="mistralai/mistral-large", provider=_provider())
+        metadata = await NgcMetadataSource(NgcConfig(url=BASE_URL, org=ORG)).fetch(
+            MetadataTarget(upstream_model_id="mistralai/mistral-large", provider=_provider()), _ctx(http)
         )
 
     assert metadata is None
@@ -217,8 +218,8 @@ async def test_ngc_source_returns_none_when_no_endpoint_matches():
     seen: list[str] = []
 
     async with httpx.AsyncClient(transport=_routes({}, seen)) as http:
-        metadata = await NgcSource(http, BASE_URL, ORG).fetch(
-            MetadataTarget(upstream_model_id="z-ai/glm-5.3", provider=_provider())
+        metadata = await NgcMetadataSource(NgcConfig(url=BASE_URL, org=ORG)).fetch(
+            MetadataTarget(upstream_model_id="z-ai/glm-5.3", provider=_provider()), _ctx(http)
         )
 
     assert metadata is None

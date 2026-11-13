@@ -3,18 +3,20 @@
 
 from typing import Any
 
-from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
 from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayClient
-from nemo_helix_plugin.models.types import ModelCapability, ModelMetadata, ModelProvider
-from nemo_model_metadata.config import SourceName
-from nemo_model_metadata.sources.base import MetadataSource, MetadataTarget, SourceUnavailableError
-from nemo_model_metadata.sources.parsing import (
+from nemo_helix_plugin.models.metadata import (
     MAX_DESCRIPTION_LENGTH,
     MAX_DISPLAY_NAME_LENGTH,
+    MetadataSourceContext,
+    MetadataTarget,
+    NemoModelMetadataSource,
+    SourceUnavailableError,
     as_positive_int,
     bounded_text,
     modalities,
 )
+from nemo_helix_plugin.models.types import ModelCapability, ModelMetadata, ModelProvider
 
 _CAPABILITY_PARAMETERS: dict[str, ModelCapability] = {
     "tools": ModelCapability.TOOL_CALLING,
@@ -56,40 +58,53 @@ def parse_provider_model(entry: dict[str, Any]) -> ModelMetadata | None:
     return metadata
 
 
-class ProviderModelsSource(MetadataSource):
-    """Reads the provider's own model list through the inference gateway, which supplies the provider's credentials."""
+class ProviderModelsSource(NemoModelMetadataSource):
+    """Reads the provider's own ``GET /v1/models`` through the inference gateway, which supplies its credentials.
 
-    name = SourceName.PROVIDER
+    Used for every provider that no plugin source handles.
+    """
 
-    def __init__(self, gateway_client: AsyncInferenceGatewayClient) -> None:
-        self._gateway_client = gateway_client
+    name = "provider"
+
+    def __init__(self) -> None:
         self._listings: dict[str, dict[str, dict[str, Any]] | SourceUnavailableError] = {}
+
+    def handles(self, provider: ModelProvider) -> bool:
+        return True
 
     def begin_cycle(self) -> None:
         self._listings.clear()
 
-    async def fetch(self, target: MetadataTarget) -> ModelMetadata | None:
-        if target.provider is None:
-            return None
-        listing = await self._listing(target.provider)
+    async def fetch(self, target: MetadataTarget, ctx: MetadataSourceContext) -> ModelMetadata | None:
+        listing = await self._listing(target.provider, AsyncInferenceGatewayClient.from_client(ctx.client))
         entry = listing.get(target.upstream_model_id)
         if entry is None:
             return None
         return parse_provider_model(entry)
 
-    async def _listing(self, provider: ModelProvider) -> dict[str, dict[str, Any]]:
+    async def _listing(
+        self, provider: ModelProvider, gateway_client: AsyncInferenceGatewayClient
+    ) -> dict[str, dict[str, Any]]:
         key = f"{provider.workspace}/{provider.name}"
         cached = self._listings.get(key)
         if cached is None:
-            cached = await self._fetch_listing(provider)
+            cached = await self._fetch_listing(provider, gateway_client)
             self._listings[key] = cached
         if isinstance(cached, SourceUnavailableError):
             raise cached
         return cached
 
-    async def _fetch_listing(self, provider: ModelProvider) -> dict[str, dict[str, Any]] | SourceUnavailableError:
+    async def _fetch_listing(
+        self, provider: ModelProvider, gateway_client: AsyncInferenceGatewayClient
+    ) -> dict[str, dict[str, Any]] | SourceUnavailableError:
         try:
-            body = await self._gateway_client.get_provider_models(workspace=provider.workspace, name=provider.name)
+            body = await gateway_client.get_provider_models(workspace=provider.workspace, name=provider.name)
+        except NotFoundError as exc:
+            if await _gateway_routes(provider, gateway_client):
+                return {}
+            return SourceUnavailableError(
+                f"Could not list models for provider {provider.workspace}/{provider.name}: {exc}"
+            )
         except NemoClientError as exc:
             return SourceUnavailableError(
                 f"Could not list models for provider {provider.workspace}/{provider.name}: {exc}"
@@ -100,3 +115,12 @@ class ProviderModelsSource(MetadataSource):
                 f"Provider {provider.workspace}/{provider.name} returned a model list without a data array"
             )
         return {entry["id"]: entry for entry in data if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
+
+
+async def _gateway_routes(provider: ModelProvider, gateway_client: AsyncInferenceGatewayClient) -> bool:
+    """Whether the gateway knows the provider, so a 404 came from an upstream without a model list."""
+    try:
+        await gateway_client.provider_ready(workspace=provider.workspace, name=provider.name)
+    except NemoClientError:
+        return False
+    return True
