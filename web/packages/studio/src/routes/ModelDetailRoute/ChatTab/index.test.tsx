@@ -8,7 +8,6 @@ import { ChatTab } from '@studio/routes/ModelDetailRoute/ChatTab';
 import { render, screen } from '@studio/tests/util/render';
 
 vi.mock('@studio/hooks/useModelChatAvailability');
-vi.mock('@studio/components/ModelChatTab', () => ({ ModelChatTab: () => <div>plain chat</div> }));
 vi.mock('@studio/components/ModelCompareChat/ComparePlayground', () => ({
   ComparePlayground: ({ models }: ComparePlaygroundProps) => (
     <ul>
@@ -59,18 +58,27 @@ describe('ChatTab', () => {
     expect(screen.getByRole('listitem')).toHaveTextContent('ws/my-model my-adapter locked');
   });
 
-  it('falls back to the plain chat until the model can be chatted with', () => {
+  it('offers to deploy a model that is not deployed instead of the playground', () => {
     mockAvailability({ modelChatStatus: 'disabled' });
     render(<ChatTab model={model} adapter={null} />);
 
-    expect(screen.getByText('plain chat')).toBeInTheDocument();
+    expect(screen.getByText('Chat Unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deploy this model' })).toBeInTheDocument();
     expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
   });
 
-  it('falls back to the plain chat while an adapter is not served', () => {
+  it('says a deployment is on its way while it starts', () => {
+    mockAvailability({ modelChatStatus: 'pending' });
+    render(<ChatTab model={model} adapter={null} />);
+
+    expect(screen.getByText('Model Deployment in Progress')).toBeInTheDocument();
+  });
+
+  it('offers to deploy the base model while an adapter is not served', () => {
     mockAvailability({ isAdapterUnserved: true });
     render(<ChatTab model={model} adapter={{ name: 'my-adapter' } as Adapter} />);
 
-    expect(screen.getByText('plain chat')).toBeInTheDocument();
+    expect(screen.getByText('Adapter is not currently served')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deploy base model' })).toBeInTheDocument();
   });
 });

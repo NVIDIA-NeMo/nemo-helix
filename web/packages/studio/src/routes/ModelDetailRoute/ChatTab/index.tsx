@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import { Flex } from '@nvidia/foundations-react-core';
 import { Loading } from '@studio/components/Layouts/Loading';
-import { ModelChatTab } from '@studio/components/ModelChatTab';
+import { ChatUnavailable } from '@studio/components/ModelChat/ChatUnavailable';
 import { ComparePlayground } from '@studio/components/ModelCompareChat/ComparePlayground';
 import { useCompareModels } from '@studio/hooks/useCompareModels';
 import { useModelChatAvailability } from '@studio/hooks/useModelChatAvailability';
@@ -16,7 +17,7 @@ export interface ChatTabProps {
 
 /**
  * The Playground's compare view, with this model locked in as the baseline. Until it can be
- * chatted with, falls back to the plain chat tab, which explains what to deploy.
+ * chatted with, explains what has to be deployed instead.
  */
 export const ChatTab: FC<ChatTabProps> = ({ model, adapter }) => {
   const { modelChatStatus, isLoading, isAdapterUnserved } = useModelChatAvailability(model, {
@@ -37,9 +38,14 @@ export const ChatTab: FC<ChatTabProps> = ({ model, adapter }) => {
 
   if (isAdapterUnserved || modelChatStatus !== 'enabled') {
     return (
-      <div className="mx-auto h-full w-full max-w-[768px]">
-        <ModelChatTab model={model} adapter={adapter} />
-      </div>
+      <Flex direction="col" justify="center" align="center" className="w-full flex-1">
+        <ChatUnavailable
+          status={modelChatStatus}
+          isAdapterUnserved={isAdapterUnserved}
+          deployModelRef={`${model.workspace}/${model.name}`}
+          deployModelLabel={adapter ? 'Deploy base model' : undefined}
+        />
+      </Flex>
     );
   }
 
