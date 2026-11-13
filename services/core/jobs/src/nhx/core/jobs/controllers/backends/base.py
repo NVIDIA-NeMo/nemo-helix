@@ -65,6 +65,7 @@ from nhx.core.jobs.app.constants import (
 )
 from nhx.core.jobs.app.lifecycle import active_ttl_anchor, ensure_aware, step_provider_profile
 from nhx.core.jobs.app.providers import ComputeResources
+from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable
 from nhx.core.jobs.entities import get_step_spec_name, is_final_platform_step
 from pydantic import BaseModel, model_validator
 
@@ -158,21 +159,39 @@ def find_reserved_managed_job_environment_variable_names(env_names: Iterable[str
 
 
 _VALID_ENVIRONMENT_VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_ENVIRONMENT_VARIABLE_NAME_UNSAFE_CHARS = re.compile(r"[=\x00]")
 
 
 def validate_no_reserved_managed_job_environment_variable_names(env_names: Iterable[str], *, source: str) -> None:
-    """Reject malformed or platform-reserved env names for managed jobs.
-
-    Names must be plain identifiers: secret-backed names are joined into NEMO_JOB_SECRETS
-    with ``,`` and ``=`` separators, so other characters could smuggle in extra entries.
-    """
-    env_names = list(env_names)
-    malformed = sorted({name for name in env_names if not _VALID_ENVIRONMENT_VARIABLE_NAME.fullmatch(name)})
-    if malformed:
-        raise ValueError(f"{source} must match {_VALID_ENVIRONMENT_VARIABLE_NAME.pattern}: {malformed}")
+    """Reject user-provided platform-managed env names for managed jobs."""
     conflicting = find_reserved_managed_job_environment_variable_names(env_names)
     if conflicting:
         raise ValueError(f"{source} must not use platform-reserved managed environment keys: {conflicting}")
+
+
+def validate_step_environment(environment: Iterable[HelixJobEnvironmentVariable], *, source: str) -> None:
+    """Reject platform-reserved step env names, unsafe names, and non-identifier secret-backed names.
+
+    Secret-backed names are joined into NEMO_JOB_SECRETS with ``,`` and ``=`` separators, so they must
+    be plain identifiers. Every name is later rendered as ``NAME=value`` (docker), so ``=`` or NUL in a
+    name could shift that boundary and spoof a reserved name such as NHX_PRINCIPAL.
+    """
+    environment = list(environment)
+    validate_no_reserved_managed_job_environment_variable_names((envvar.name for envvar in environment), source=source)
+    malformed = sorted(
+        {
+            envvar.name
+            for envvar in environment
+            if envvar.from_secret is not None and not _VALID_ENVIRONMENT_VARIABLE_NAME.fullmatch(envvar.name)
+        }
+    )
+    if malformed:
+        raise ValueError(f"{source} for secrets must match {_VALID_ENVIRONMENT_VARIABLE_NAME.pattern}: {malformed}")
+    unsafe = sorted(
+        {envvar.name for envvar in environment if _ENVIRONMENT_VARIABLE_NAME_UNSAFE_CHARS.search(envvar.name)}
+    )
+    if unsafe:
+        raise ValueError(f"{source} must not contain '=' or NUL: {unsafe}")
 
 
 NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR = "NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT"

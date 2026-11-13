@@ -104,6 +104,17 @@ def test_prepare_runtime_rejects_step_env_for_platform_injected_names(
     assert not any(tmp_path.iterdir())
 
 
+def test_prepare_runtime_rejects_plain_env_name_that_spoofs_reserved_name(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = test_step_pending.model_copy(deep=True)
+    step.step_spec.environment = [HelixJobEnvironmentVariable(name="NHX_PRINCIPAL=x", value="attacker")]
+
+    with pytest.raises(ValueError, match="must not contain"):
+        backend._prepare_runtime(step)
+
+
 def test_prepare_runtime_rejects_secret_env_name_that_injects_reserved_name(
     mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
 ):

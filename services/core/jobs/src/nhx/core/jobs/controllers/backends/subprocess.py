@@ -49,7 +49,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobUpdate,
     get_logs_endpoint_config_from_fileset,
     step_ttl_seconds_active,
-    validate_no_reserved_managed_job_environment_variable_names,
+    validate_step_environment,
 )
 from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     SubprocessOtelLogger,
@@ -529,10 +529,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         task_id = f"task-{uuid.uuid4().hex}"
         spec = step.step_spec
         if spec and spec.environment:
-            validate_no_reserved_managed_job_environment_variable_names(
-                (envvar.name for envvar in spec.environment),
-                source="Job step environment keys",
-            )
+            validate_step_environment(spec.environment, source="Job step environment keys")
         job_dir = self._root_dir / step.workspace / step.job
         job_attempt_dir = job_dir / str(step.attempt_id)
         work_dir = job_attempt_dir / step.name / task_id
