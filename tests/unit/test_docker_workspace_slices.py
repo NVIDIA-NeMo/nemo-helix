@@ -212,6 +212,23 @@ def test_safe_synthesizer_sentence_transformers_security_pin() -> None:
     assert specs == ["sentence-transformers==5.6.1"]
 
 
+def test_rl_generation_security_upgrade_precedes_prefetch_and_survives_source_copy() -> None:
+    text = (ROOT / "docker/rl/Dockerfile.nhx-rl-base").read_text()
+    upgrade = text.index("RUN uv add --optional vllm --no-sync")
+    assert upgrade < text.index("uv sync ${UV_SYNC_MODE} --extra vllm")
+    for requirement in (
+        "vllm==0.30.0",
+        "flashinfer-python==0.6.18.post1",
+        "flashinfer-cubin==0.6.18.post1",
+        "flashinfer-jit-cache==0.6.18.post1",
+    ):
+        assert f"'{requirement}'" in text
+    backup = text.index("cp pyproject.toml uv.lock /tmp/nhx-nemo-rl-lock/")
+    source_copy = text.index("--exclude=**/.git . /opt/nemo-rl")
+    restore = text.index("RUN cp /tmp/nhx-nemo-rl-lock/pyproject.toml /tmp/nhx-nemo-rl-lock/uv.lock /opt/nemo-rl/")
+    assert upgrade < backup < source_copy < restore
+
+
 def test_rl_virtualenv_patch_precedes_unreferenced_cache_cleanup() -> None:
     """Patch runtime environments and remove old archives, not just metadata."""
     text = (ROOT / "docker/rl/Dockerfile.nhx-rl-base").read_text()
