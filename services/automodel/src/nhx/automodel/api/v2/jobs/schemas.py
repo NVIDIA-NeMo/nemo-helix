@@ -8,7 +8,15 @@ from typing import Annotated, Any, Dict, Literal, Optional, Self, Union
 from nemo_helix_plugin.deployment import DeploymentParams
 from nemo_helix_plugin.integrations import IntegrationsSpec
 from nhx.automodel.entities.validators import validate_fileset_uri
-from nhx.automodel.entities.values import CheckpointSelection, FinetuningType, OutputNameType, Precision
+from nhx.automodel.entities.values import (
+    PARTIAL_TRAINING_TYPES,
+    CheckpointSelection,
+    FinetuningType,
+    OutputNameType,
+    Precision,
+    TrainingType,
+    base_training_type,
+)
 from nhx.common.entities.constants import (
     MAX_LENGTH_255,
     REGEX_WORD_CHARACTER_DOT_DASH,
@@ -280,6 +288,25 @@ class BackendParams(BaseModel):
     )
 
 
+class ModuleSelectorParams(BaseModel):
+    """One module, and everything under it, picked by exact path or by glob."""
+
+    path: Optional[str] = Field(
+        default=None, min_length=1, description="Exact module path, e.g. 'model.multi_modal_projector'."
+    )
+    glob: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        description="Case-sensitive shell-style pattern over module paths; '*' also crosses '.', e.g. '*.embed_tokens'.",
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> Self:
+        if (self.path is None) == (self.glob is None):
+            raise ValueError("A module selector takes exactly one of 'path' or 'glob'.")
+        return self
+
+
 class PipelineParams(BaseModel):
     """How work is scheduled across pipeline stages. Read only when pipeline_parallel_size > 1."""
 
@@ -472,6 +499,21 @@ class _TrainingBase(BaseModel):
             "header and any empty reasoning block such as '<think></think>'. Chat-format (messages) datasets only."
         ),
     )
+    freeze_modules: Optional[list[ModuleSelectorParams]] = Field(
+        default=None,
+        description=(
+            "Modules to freeze, each with everything under it. Partial training types only. A selector that "
+            "matches no module fails the job."
+        ),
+    )
+    unfreeze_modules: Optional[list[ModuleSelectorParams]] = Field(
+        default=None,
+        description=(
+            "Modules to make trainable, each with everything under it. Wins over freeze_modules and over the "
+            "frozen vision tower of vision-language jobs. Partial training types only. With peft, Automodel "
+            "0.7.0 trains these modules but does not save them in the adapter."
+        ),
+    )
 
     # --- Model ---
     max_seq_length: int = Field(
@@ -525,7 +567,7 @@ class _TrainingBase(BaseModel):
             batch, micro_batch = RETRIEVAL_BATCH_DEFAULTS["cross_encoder"]
         else:
             return self.model_copy(update={"recipe": recipe})
-        if getattr(self, "type", None) == "distillation":
+        if base_training_type(getattr(self, "type", "sft")) == TrainingType.DISTILLATION:
             raise ValueError("Knowledge distillation only supports the sft recipe.")
         updates: dict[str, object] = {"recipe": recipe}
         if "batch_size" not in self.model_fields_set:
@@ -546,6 +588,20 @@ class _TrainingBase(BaseModel):
             raise ValueError("packed_sequence_size requires sequence_packing=true.")
         return self
 
+    @model_validator(mode="after")
+    def _selectors_need_partial_type(self) -> Self:
+        # Selectors make training partial, so they belong to the partial types and nowhere else.
+        training_type = getattr(self, "type", "sft")
+        partial = training_type in PARTIAL_TRAINING_TYPES
+        if partial and not (self.freeze_modules or self.unfreeze_modules):
+            raise ValueError(f"training type {training_type} needs freeze_modules or unfreeze_modules")
+        if not partial and (self.freeze_modules or self.unfreeze_modules):
+            raise ValueError(
+                f"freeze_modules and unfreeze_modules need a partial training type "
+                f"({', '.join(PARTIAL_TRAINING_TYPES)}), not {training_type}"
+            )
+        return self
+
     @property
     def finetuning_type(self) -> FinetuningType:
         """Derived from peft config: presence → adapter type, absence → full-weight."""
@@ -557,9 +613,9 @@ class _TrainingBase(BaseModel):
 
 
 class SFTTraining(_TrainingBase):
-    """Supervised Fine-Tuning."""
+    """Supervised Fine-Tuning. ``partial_sft`` trains only the modules the selectors leave trainable."""
 
-    type: Literal["sft"] = "sft"
+    type: Literal["sft", "partial_sft"] = "sft"
 
 
 class DistillationTraining(_TrainingBase):
@@ -569,7 +625,7 @@ class DistillationTraining(_TrainingBase):
     Trains the student model to match the teacher's output distribution.
     """
 
-    type: Literal["distillation"] = "distillation"
+    type: Literal["distillation", "partial_distillation"] = "distillation"
     teacher_model: str = Field(
         description="Teacher model URN (e.g., 'workspace/model-name'). "
         "Must have the same vocabulary as the student model.",

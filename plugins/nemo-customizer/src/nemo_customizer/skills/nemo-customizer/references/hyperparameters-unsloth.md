@@ -147,10 +147,12 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `training_type` | `"sft"` | Only `"sft"` is implemented today. |
+| `training_type` | `"sft"` | `"sft"` or `"partial_sft"`, which trains only the modules `freeze_modules` / `unfreeze_modules` leave trainable. See **Module freezing** below. |
 | `finetuning_type` | `"lora"` | `"lora"` (adapter; default) or `"all_weights"` (full SFT — heavy, no quantization). |
 | `lora` | auto-filled when `finetuning_type` is `lora` | See LoRA subsection below. |
 | `use_gradient_checkpointing` | `"unsloth"` | `"unsloth"` (recommended), `"true"`, or `"false"`. Unsloth's variant is faster than HF's. |
+| `freeze_modules` | `null` | `partial_sft` only. List of `{"path": ...}` or `{"glob": ...}` selectors to freeze. |
+| `unfreeze_modules` | `null` | `partial_sft` only. Selectors to train in full; wins over `freeze_modules`. With LoRA, see the limits below. |
 
 **LoRA block (`training.lora`):**
 
@@ -165,12 +167,21 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 | `random_state` | `3407` | Reproducibility seed for the LoRA init. |
 | `use_dora` | `false` | DoRA (weight-decomposed LoRA). Better quality at low ranks; adds overhead. |
 | `loftq_config` | `null` | LoftQ init config for quantized bases. `null` disables. |
-| `modules_to_save` | `null` | Extra non-LoRA modules trained & saved in full, e.g. `["embed_tokens","lm_head"]` (vocab changes / continued pretraining). |
+| `modules_to_save` | `null` | Extra non-LoRA modules trained & saved in full, e.g. `["embed_tokens","lm_head"]` (vocab changes / continued pretraining). Same limits as `unfreeze_modules` with LoRA (below). |
 | `layers_to_transform` | `null` | Restrict LoRA to specific layer index(es). `null` = all layers. |
 | `layer_replication` | `null` | Layer-replication ranges for stacking, e.g. `[[0,16],[8,24]]`. |
 | `init_lora_weights` | `true` | Init scheme. `true` = PEFT default; `"gaussian"`/`"pissa"`/`"olora"`/`"loftq"` for advanced inits. |
 
 `lora` is auto-filled with these defaults when `finetuning_type: "lora"` and the user omits the block. Must be `null` / omitted when `finetuning_type: "all_weights"`.
+
+### Module freezing (`partial_sft`)
+
+Set `training_type: "partial_sft"` to train only some modules. It runs SFT with either `finetuning_type` and needs at least one of `freeze_modules` / `unfreeze_modules` (`sft` rejects them). The selectors follow Automodel's rules, so one spec picks the same modules on both backends: each is `{"path": "<exact module path>"}` or `{"glob": "<pattern>"}` (`*` also crosses `.`), covers the module's whole subtree, and fails the job if it matches nothing. `freeze_modules` apply first, then `unfreeze_modules`, which win. Module paths are the Hugging Face ones, for example the weight names in `model.safetensors.index.json` minus `.weight`.
+
+- **`all_weights`:** training starts with everything trainable. To train only some modules, freeze everything and unfreeze those: `"freeze_modules": [{"glob": "*"}], "unfreeze_modules": [{"glob": "*.layers.31.*"}]`.
+- **`lora`:** `freeze_modules` freezes the adapters inside the selected modules. `unfreeze_modules` become the adapter's `modules_to_save`, so they are trained and saved in full, with two limits:
+  - **Llama, Mistral, Gemma, and Qwen2/Qwen3 models accept only `embed_tokens` and `lm_head`.** Any other module fails the job. Use `all_weights` to train other modules.
+  - **vLLM can't serve such an adapter unmerged.** vLLM (v0.32) rejects adapters that carry full modules, so set `output.save_method` to `merged_16bit` and deploy the merged model.
 
 ### Unsloth `schedule`
 
@@ -275,5 +286,5 @@ Drop `rank` before lowering batch when OOM. Higher `alpha/rank` ratios amplify a
 
 ### Distillation
 
-Not supported by unsloth today (`training_type` is `Literal["sft"]`). Use automodel for distillation.
+Not supported by unsloth today (`training_type` is `"sft"` or `"partial_sft"`). Use automodel for distillation.
 

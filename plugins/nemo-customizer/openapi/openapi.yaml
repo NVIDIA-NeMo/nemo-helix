@@ -3062,6 +3062,24 @@ components:
 
         setting, and only the fields that are set reach the model. Support differs
         per model.'
+    AutomodelModuleSelector:
+      properties:
+        path:
+          title: Path
+          description: Exact module path, e.g. 'model.multi_modal_projector'.
+          type: string
+          minLength: 1
+        glob:
+          title: Glob
+          description: Case-sensitive shell-style pattern over module paths; '*' also
+            crosses '.', e.g. '*.embed_tokens'.
+          type: string
+          minLength: 1
+      additionalProperties: false
+      type: object
+      title: AutomodelModuleSelector
+      description: One module, and everything under it, picked by exact path or by
+        glob.
     AutomodelOptimizerSpec:
       properties:
         learning_rate:
@@ -3356,7 +3374,12 @@ components:
           enum:
           - sft
           - distillation
+          - partial_sft
+          - partial_distillation
           title: Training Type
+          description: Training algorithm. 'partial_sft' and 'partial_distillation'
+            train like 'sft' and 'distillation', but only the modules that freeze_modules
+            and unfreeze_modules leave trainable.
           default: sft
         recipe:
           type: string
@@ -3480,6 +3503,22 @@ components:
             such as ''<think></think>''. The model never generates them. Chat-format
             (messages) datasets only.'
           default: false
+        freeze_modules:
+          title: Freeze Modules
+          description: Modules to freeze, each with everything under it. Partial training
+            types only. A selector that matches no module fails the job.
+          items:
+            $ref: '#/components/schemas/AutomodelModuleSelector'
+          type: array
+        unfreeze_modules:
+          title: Unfreeze Modules
+          description: Modules to make trainable, each with everything under it. Wins
+            over freeze_modules and over the frozen vision tower of vision-language
+            jobs. Partial training types only. With LoRA, Automodel 0.7.0 trains these
+            modules but does not save them in the adapter.
+          items:
+            $ref: '#/components/schemas/AutomodelModuleSelector'
+          type: array
       additionalProperties: false
       type: object
       title: AutomodelTrainingSpec
@@ -6168,6 +6207,24 @@ components:
         entity, downloads its fileset to a local path, and hands that path
 
         to :func:`train_sft`.'
+    UnslothModuleSelector:
+      properties:
+        path:
+          title: Path
+          description: Exact module path, e.g. 'model.embed_tokens'.
+          type: string
+          minLength: 1
+        glob:
+          title: Glob
+          description: Case-sensitive shell-style pattern over module paths; '*' also
+            crosses '.', e.g. '*.layers.0.*'.
+          type: string
+          minLength: 1
+      additionalProperties: false
+      type: object
+      title: UnslothModuleSelector
+      description: One module, and everything under it, picked by exact path or by
+        glob.
     UnslothOptimizerSpec:
       properties:
         learning_rate:
@@ -6375,8 +6432,12 @@ components:
       properties:
         training_type:
           type: string
-          const: sft
+          enum:
+          - sft
+          - partial_sft
           title: Training Type
+          description: Training algorithm. 'partial_sft' trains like 'sft', but only
+            the modules that freeze_modules and unfreeze_modules leave trainable.
           default: sft
         finetuning_type:
           type: string
@@ -6398,6 +6459,23 @@ components:
           - 'false'
           title: Use Gradient Checkpointing
           default: unsloth
+        freeze_modules:
+          title: Freeze Modules
+          description: Modules to freeze, each with everything under it. partial_sft
+            only. A selector that matches no module fails the job.
+          items:
+            $ref: '#/components/schemas/UnslothModuleSelector'
+          type: array
+        unfreeze_modules:
+          title: Unfreeze Modules
+          description: 'Modules to train in full, each with everything under it. Wins
+            over freeze_modules. partial_sft only. With LoRA they become the adapter''s
+            modules_to_save: for Llama, Mistral, Gemma, and Qwen2/3 models Unsloth
+            allows only embed_tokens and lm_head, and vLLM serves the result only
+            after a merge.'
+          items:
+            $ref: '#/components/schemas/UnslothModuleSelector'
+          type: array
       additionalProperties: false
       type: object
       title: UnslothTrainingSpec

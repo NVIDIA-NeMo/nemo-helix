@@ -93,6 +93,13 @@ class PipelineConfig(BaseModel):
     patch_causal_lm_model: Optional[bool] = None
 
 
+class ModuleSelectorConfig(BaseModel):
+    """Exactly one of an exact module path or a glob, matched recursively by Automodel."""
+
+    path: Optional[str] = None
+    glob: Optional[str] = None
+
+
 class MTPConfig(BaseModel):
     """Multi-Token Prediction settings for checkpoints trained with MTP heads."""
 
@@ -294,6 +301,8 @@ class TrainingStepConfig(BaseModel):
         activation_checkpointing: bool = False
         mtp: Optional[MTPConfig] = None
         backend: Optional[BackendConfig] = None
+        freeze_modules: Optional[list[ModuleSelectorConfig]] = None
+        unfreeze_modules: Optional[list[ModuleSelectorConfig]] = None
 
     class ScheduleConfig(BaseModel):
         epochs: int = 1

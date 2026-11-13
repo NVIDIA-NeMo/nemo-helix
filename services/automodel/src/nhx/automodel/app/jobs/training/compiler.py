@@ -20,6 +20,7 @@ from nhx.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
     DistillationTraining,
     LoRAParams,
+    ModuleSelectorParams,
 )
 from nhx.automodel.app.constants import (
     DEFAULT_DATASET_PATH,
@@ -31,6 +32,7 @@ from nhx.automodel.app.jobs.training.schemas import (
     DistillationConfig,
     LoRAConfig,
     ModelConfig,
+    ModuleSelectorConfig,
     MTPConfig,
     PipelineConfig,
     RetrievalConfig,
@@ -38,7 +40,7 @@ from nhx.automodel.app.jobs.training.schemas import (
     TrainingStepConfig,
 )
 from nhx.automodel.config import config
-from nhx.automodel.entities.values import Precision, TrainingType
+from nhx.automodel.entities.values import Precision, TrainingType, base_training_type
 from nhx.automodel.images import AUTOMODEL_PYTHON_ENTRYPOINT, get_training_image
 from nhx.automodel.tasks.training.backends.registry import uses_custom_automodel_impl
 from nhx.common.jobs.exceptions import HelixJobCompilationError
@@ -154,7 +156,7 @@ def compile_training_step(
 
     """
     job_spec.validate_for_training()
-    if TrainingType(job_spec.training.type) == TrainingType.DPO:
+    if base_training_type(job_spec.training.type) == TrainingType.DPO:
         raise ValueError("DPO training is not supported by nhx-automodel")
     trust_remote_code = me.trust_remote_code or False
     chat_template = me.spec.chat_template if me.spec else None
@@ -171,7 +173,7 @@ def compile_training_step(
     try:
         reject_incompatible_checkpoint(
             traits,
-            training_type=TrainingType(training.type).value,
+            training_type=base_training_type(training.type).value,
             recipe=training_recipe.value,
             sequence_packing=bool(getattr(training, "sequence_packing", False)),
             expert_parallel_size=p.expert_parallel_size,
@@ -339,7 +341,7 @@ def _translate_training_config(
         me: The primary model entity.
         teacher_me: Teacher model entity, populated for distillation jobs.
     """
-    training_type = TrainingType(training.type)
+    training_type = base_training_type(training.type)
     lora = _translate_lora_config(training.peft, me) if isinstance(training.peft, LoRAParams) else None
 
     kd = None
@@ -365,6 +367,8 @@ def _translate_training_config(
         activation_checkpointing=training.activation_checkpointing,
         mtp=MTPConfig.model_validate(training.mtp.model_dump(mode="python")) if training.mtp else None,
         backend=BackendConfig.model_validate(training.backend.model_dump(mode="python")) if training.backend else None,
+        freeze_modules=_translate_module_selectors(training.freeze_modules),
+        unfreeze_modules=_translate_module_selectors(training.unfreeze_modules),
     )
 
 
@@ -381,6 +385,12 @@ def _reject_inapplicable_options(training: AnyTraining, recipe: TrainingRecipe, 
             "mask_generation_prompt applies only to chat-format data in the text sft recipe, not to "
             "vision-language models or the bi_encoder and cross_encoder recipes."
         )
+
+
+def _translate_module_selectors(selectors: list[ModuleSelectorParams] | None) -> list[ModuleSelectorConfig] | None:
+    if not selectors:
+        return None
+    return [ModuleSelectorConfig(path=selector.path, glob=selector.glob) for selector in selectors]
 
 
 def _translate_retrieval_config(training: AnyTraining) -> RetrievalConfig | None:

@@ -83,6 +83,8 @@ def _build_training_block(spec: dict[str, Any]) -> SFTTraining | DistillationTra
         "attn_implementation": training.get("attn_implementation", "sdpa"),
         "tokenizer_backend": training.get("tokenizer_backend"),
         "mask_generation_prompt": training.get("mask_generation_prompt", False),
+        "freeze_modules": training.get("freeze_modules"),
+        "unfreeze_modules": training.get("unfreeze_modules"),
         "seed": schedule.get("seed"),
         "retrieval": training.get("retrieval"),
         "parallelism": ParallelismParams(
@@ -110,16 +112,19 @@ def _build_training_block(spec: dict[str, Any]) -> SFTTraining | DistillationTra
         if source.get(key) is not None:
             common[target] = source[key]
 
-    training_type: Literal["sft", "distillation"] = training.get("training_type", "sft")
-    if training_type == "distillation":
+    training_type: Literal["sft", "distillation", "partial_sft", "partial_distillation"] = training.get(
+        "training_type", "sft"
+    )
+    if training_type in ("distillation", "partial_distillation"):
         return DistillationTraining(
             **common,
+            type=training_type,
             teacher_model=training["teacher_model"],
             teacher_precision=training.get("teacher_precision", "bf16"),
             distillation_ratio=training.get("distillation_ratio", 0.5),
             distillation_temperature=training.get("distillation_temperature", 1.0),
         )
-    return SFTTraining(**common)
+    return SFTTraining(**common, type=training_type)
 
 
 def _build_integrations(spec: dict[str, Any]) -> IntegrationsSpec | None:
