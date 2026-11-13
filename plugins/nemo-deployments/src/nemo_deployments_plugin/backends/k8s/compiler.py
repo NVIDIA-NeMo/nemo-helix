@@ -24,6 +24,7 @@ from nemo_deployments_plugin.backends.k8s.workload_identity import service_accou
 from nemo_deployments_plugin.backends.labels import (
     k8s_deployment_configmap_name,
     k8s_deployment_secret_name,
+    k8s_pod_volume_name,
     k8s_volume_resource_name,
 )
 from nemo_deployments_plugin.constants import (
@@ -113,7 +114,7 @@ def build_pod_volumes(*, workspace: str, mounts: list[VolumeMount]) -> list[Any]
     k8s = k8s_client_module()
     return [
         k8s.client.V1Volume(
-            name=mount.name,
+            name=k8s_pod_volume_name(mount.name),
             persistent_volume_claim=k8s.client.V1PersistentVolumeClaimVolumeSource(
                 claim_name=k8s_volume_resource_name(workspace, mount.name),
             ),
@@ -128,7 +129,7 @@ def build_volume_mounts(mounts: list[VolumeMount]) -> list[Any]:
     k8s = k8s_client_module()
     return [
         k8s.client.V1VolumeMount(
-            name=mount.name,
+            name=k8s_pod_volume_name(mount.name),
             mount_path=mount.mount_path,
             read_only=mount.read_only,
             sub_path=mount.sub_path,
