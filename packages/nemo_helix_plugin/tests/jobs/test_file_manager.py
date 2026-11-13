@@ -14,11 +14,19 @@ from nemo_helix_plugin.jobs.file_manager import AsyncFilesetFileManager, Fileset
 from pytest_mock import MockerFixture
 
 
+def _listing(asynchronous: bool, stage: bool) -> str:
+    """The listing helper an upload calls: staging lists selected files, direct uploads list everything."""
+    if stage:
+        return "_list_selected_files"
+    return "_list_local_files" if asynchronous else "_list_local_files_sync"
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stage", [False, True], ids=["direct", "staged"])
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize("failure_count", [0, 1, 2])
 async def test_directory_upload_attempts_remaining_files(
-    tmp_path: Path, mocker: MockerFixture, asynchronous: bool, failure_count: int
+    tmp_path: Path, mocker: MockerFixture, asynchronous: bool, failure_count: int, stage: bool
 ) -> None:
     """Retain later nested files and report original errors after all nonignored files are attempted."""
     paths = ["first.txt", "nested/second.txt", "nested/deeper/last.txt", "ignored.tmp"]
@@ -27,7 +35,7 @@ async def test_directory_upload_attempts_remaining_files(
         local.parent.mkdir(parents=True, exist_ok=True)
         local.write_text(path)
     # Fix traversal order so failures demonstrably precede successful nested uploads.
-    mocker.patch("nemo_helix_plugin.jobs.file_manager._list_local_files_sync", return_value=paths)
+    mocker.patch(f"nemo_helix_plugin.jobs.file_manager.{_listing(asynchronous, stage)}", return_value=paths)
     errors = [OSError(f"upload {index} failed") for index in range(failure_count)]
     effects = [*errors, *([None] * (3 - failure_count))]
     if asynchronous:
@@ -42,8 +50,8 @@ async def test_directory_upload_attempts_remaining_files(
     async def run_upload():
         """Exercise the public upload entry point for either manager."""
         if isinstance(manager, AsyncFilesetFileManager):
-            return await manager.upload(tmp_path, "bundle", ignore_patterns="*.tmp")
-        return manager.upload(tmp_path, "bundle", ignore_patterns="*.tmp")
+            return await manager.upload(tmp_path, "bundle", ignore_patterns="*.tmp", stage=stage)
+        return manager.upload(tmp_path, "bundle", ignore_patterns="*.tmp", stage=stage)
 
     if errors:
         with pytest.raises(OSError if failure_count == 1 else ExceptionGroup) as raised:
@@ -61,21 +69,24 @@ async def test_directory_upload_attempts_remaining_files(
     calls = upload.call_args_list
     assert [call.args[1] for call in calls] == [f"default/results#bundle/{path}" for path in paths[:3]]
     for call, relative in zip(calls, paths[:3], strict=True):
-        assert Path(call.args[0]) != tmp_path / relative
+        # A direct upload reads the source; a staged one reads its copy of the same relative path.
+        assert (Path(call.args[0]) == tmp_path / relative) is not stage
         assert Path(call.args[0]).parts[-len(Path(relative).parts) :] == Path(relative).parts
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stage", [False, True], ids=["direct", "staged"])
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, asyncio.CancelledError])
 async def test_directory_upload_stops_immediately_on_interruption(
-    tmp_path: Path, mocker: MockerFixture, asynchronous: bool, interruption: type[BaseException]
+    tmp_path: Path, mocker: MockerFixture, asynchronous: bool, interruption: type[BaseException], stage: bool
 ) -> None:
     """An interruption stops uploads even after an earlier ordinary upload failure."""
     for name in ("first", "second", "third"):
         (tmp_path / name).write_text(name)
     mocker.patch(
-        "nemo_helix_plugin.jobs.file_manager._list_local_files_sync", return_value=["first", "second", "third"]
+        f"nemo_helix_plugin.jobs.file_manager.{_listing(asynchronous, stage)}",
+        return_value=["first", "second", "third"],
     )
     stop = interruption()
     if asynchronous:
@@ -89,9 +100,9 @@ async def test_directory_upload_stops_immediately_on_interruption(
 
     with pytest.raises(interruption) as raised:
         if isinstance(manager, AsyncFilesetFileManager):
-            await manager.upload(tmp_path, "bundle")
+            await manager.upload(tmp_path, "bundle", stage=stage)
         else:
-            manager.upload(tmp_path, "bundle")
+            manager.upload(tmp_path, "bundle", stage=stage)
     assert raised.value is stop
     assert upload.call_count == 2
 

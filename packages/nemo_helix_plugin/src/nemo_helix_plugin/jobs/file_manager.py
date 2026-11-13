@@ -6,6 +6,7 @@ import shutil
 import tempfile
 from abc import abstractmethod
 from asyncio import CancelledError, create_task, wait
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from os import walk
 from pathlib import Path
@@ -77,8 +78,13 @@ async def _list_local_files(local_path: Path) -> list[str]:
     return files
 
 
-def _list_local_files_sync(local_path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
-    """List files from selected directories, propagating traversal errors."""
+def _list_local_files_sync(local_path: Path) -> list[str]:
+    """List all files in a local directory recursively."""
+    return [str(file_path.relative_to(local_path)) for file_path in local_path.rglob("*") if file_path.is_file()]
+
+
+def _list_selected_files(local_path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
+    """List files for staging from selected directories, propagating traversal errors."""
 
     def raise_error(error: OSError) -> NoReturn:
         raise error
@@ -123,7 +129,7 @@ def _stage_local_files(
             if not local_path.is_dir():
                 raise FileNotFoundError(f"Result directory no longer exists: {local_path}")
             files = _filter_files_by_patterns(
-                _list_local_files_sync(local_path, ignore_patterns=ignore_patterns), ignore_patterns
+                _list_selected_files(local_path, ignore_patterns=ignore_patterns), ignore_patterns
             )
             if not local_path.is_dir():
                 raise FileNotFoundError(f"Result directory no longer exists: {local_path}")
@@ -177,7 +183,9 @@ class FileManager(Protocol):
     def validate_storage(self) -> None: ...
 
     @abstractmethod
-    def upload(self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None) -> str: ...
+    def upload(
+        self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None, *, stage: bool = False
+    ) -> str: ...
 
     @abstractmethod
     def download_from_url(self, url: str, local_dir: str | Path | None = None) -> TmpDirPath: ...
@@ -195,7 +203,7 @@ class AsyncFileManager(Protocol):
 
     @abstractmethod
     async def upload(
-        self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None
+        self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None, *, stage: bool = False
     ) -> str: ...
 
     @abstractmethod
@@ -261,16 +269,26 @@ class FilesetFileManager(BaseFilesetFileManager):
                     f"Fileset [{self.fileset_name}] in workspace [{self.workspace}] does not exist."
                 )
 
-    def upload(self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None) -> str:
-        """Upload files, attempting every directory member before raising ordinary upload errors."""
+    def upload(
+        self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None, *, stage: bool = False
+    ) -> str:
+        """Upload files, attempting every directory member before raising ordinary upload errors.
+
+        With ``stage``, copy a directory's selected files first and upload that copy (see ``_stage_local_files``).
+        """
         full_remote_path = self._fileset_path(remote_path)
         if local_path.is_dir():
-            with tempfile.TemporaryDirectory(prefix="nemo-result-upload-") as staging_dir:
-                snapshot, files_to_upload = _stage_local_files(local_path, Path(staging_dir), ignore_patterns)
+            with ExitStack() as cleanup:
+                if stage:
+                    staging_dir = cleanup.enter_context(tempfile.TemporaryDirectory(prefix="nemo-result-upload-"))
+                    source, files_to_upload = _stage_local_files(local_path, Path(staging_dir), ignore_patterns)
+                else:
+                    source = local_path
+                    files_to_upload = _filter_files_by_patterns(_list_local_files_sync(local_path), ignore_patterns)
                 errors: list[Exception] = []
                 for rel_path in files_to_upload:
                     try:
-                        self._fs.put_file(str(snapshot / rel_path), f"{full_remote_path}/{rel_path}")
+                        self._fs.put_file(str(source / rel_path), f"{full_remote_path}/{rel_path}")
                     except Exception as error:
                         error.add_note(f"Failed to upload {local_path / rel_path} to {full_remote_path}/{rel_path}")
                         errors.append(error)
@@ -337,18 +355,29 @@ class AsyncFilesetFileManager(BaseFilesetFileManager):
                     f"Fileset [{self.fileset_name}] in workspace [{self.workspace}] does not exist."
                 )
 
-    async def _upload(self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None) -> str:
-        """Upload files, attempting every directory member before raising ordinary upload errors."""
+    async def _upload(
+        self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None, *, stage: bool = False
+    ) -> str:
+        """Upload files, attempting every directory member before raising ordinary upload errors.
+
+        With ``stage``, copy a directory's selected files first and upload that copy (see ``_stage_local_files``).
+        """
         full_remote_path = self._fileset_path(remote_path)
         if local_path.is_dir():
-            with tempfile.TemporaryDirectory(prefix="nemo-result-upload-") as staging_dir:
-                snapshot, files_to_upload = await _stage_local_files_async(
-                    local_path, Path(staging_dir), ignore_patterns
-                )
+            with ExitStack() as cleanup:
+                if stage:
+                    staging_dir = cleanup.enter_context(tempfile.TemporaryDirectory(prefix="nemo-result-upload-"))
+                    source, files_to_upload = await _stage_local_files_async(
+                        local_path, Path(staging_dir), ignore_patterns
+                    )
+                else:
+                    source = local_path
+                    all_files = await _list_local_files(local_path)
+                    files_to_upload = _filter_files_by_patterns(all_files, ignore_patterns)
                 errors: list[Exception] = []
                 for rel_path in files_to_upload:
                     try:
-                        await self._fs._put_file(str(snapshot / rel_path), f"{full_remote_path}/{rel_path}")
+                        await self._fs._put_file(str(source / rel_path), f"{full_remote_path}/{rel_path}")
                     except Exception as error:
                         error.add_note(f"Failed to upload {local_path / rel_path} to {full_remote_path}/{rel_path}")
                         errors.append(error)
@@ -390,8 +419,10 @@ class AsyncFilesetFileManager(BaseFilesetFileManager):
     async def validate_storage(self) -> None:
         await self._validate_storage()
 
-    async def upload(self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None) -> str:
-        return await self._upload(local_path, remote_path, ignore_patterns)
+    async def upload(
+        self, local_path: Path, remote_path: str, ignore_patterns: list[str] | str | None = None, *, stage: bool = False
+    ) -> str:
+        return await self._upload(local_path, remote_path, ignore_patterns, stage=stage)
 
     async def download_from_url(self, url: str, local_dir: str | Path | None = None) -> TmpDirPath:
         return await self._download_from_url(url, local_dir)
