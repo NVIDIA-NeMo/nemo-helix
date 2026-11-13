@@ -52,12 +52,14 @@ export const TraceDetailView: FC<TraceDetailViewProps> = ({
     isLoading,
   } = useGetTrace(workspace, traceId, {
     mode: 'detailed',
+    session_id: sessionId,
   });
 
   // The session already owns enough trace data to keep its explorer mounted
   // while the selected trace's full payload hydrates in the background.
-  const resolvedTrace = trace ?? traceSummary;
+  const resolvedTrace = trace?.session_id === sessionId ? trace : (traceSummary ?? trace);
   const traceNotFound = error?.response?.status === 404;
+  const traceAmbiguous = error?.response?.status === 409;
 
   const { setBreadcrumbs } = useBreadcrumbs();
   const traceBreadcrumbLabel = resolvedTrace ? getTraceDisplayName(resolvedTrace) : traceId;
@@ -106,8 +108,12 @@ export const TraceDetailView: FC<TraceDetailViewProps> = ({
         className="mx-auto mt-density-2xl"
         size="medium"
         slotMedia={<IconError width={65} height={65} />}
-        slotHeading="Error loading trace"
-        slotSubheading={error.message}
+        slotHeading={traceAmbiguous ? 'Trace ID is ambiguous' : 'Error loading trace'}
+        slotSubheading={
+          traceAmbiguous
+            ? 'This trace ID belongs to multiple sessions. Open the trace from its session to view the correct details.'
+            : error.message
+        }
       />
     );
   }
@@ -130,6 +136,12 @@ export const TraceDetailView: FC<TraceDetailViewProps> = ({
       {traceNotFound && (
         <Banner kind="inline" status="info">
           Trace details are still arriving. The activity received so far is shown below.
+        </Banner>
+      )}
+      {traceAmbiguous && (
+        <Banner kind="inline" status="warning">
+          This trace ID belongs to multiple sessions. Only summary data for the selected session is
+          shown.
         </Banner>
       )}
       {children(resolvedTrace)}

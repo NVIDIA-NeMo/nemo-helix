@@ -90,6 +90,8 @@ The graph and span details use a draggable divider. The divider is keyboard acce
 
 The Intake detail route is `/intake/sessions/:sessionId`; the Evaluation detail route is `/experiment/:experimentName/:evaluationName/sessions/:sessionId`. Both accept `traceId` and `spanId` query parameters for progressively deeper links and feed the same `SessionDetailView`. The sidebar loads the session's first summary-only page of up to 1,000 spans, combines each trace with its spans and tree in a `SessionTrajectory`, and renders every available hierarchy open and non-collapsible. Selecting a span fetches its full payload for the detail body. Clicking **Session** clears trace/span selection. Direct trace/span links remain available when the span lies outside the summary page.
 
+Trace and span detail requests include the selected session ID. The generated query key includes that scope, so reused trace and span IDs in different sessions keep separate cached details. A detail response from another session cannot replace the selected session's summary.
+
 Annotations for the whole trace are fetched once (`useListAnnotations` filtered by `session_id`) so each row can show feedback sentiment and annotation counts without per-span queries.
 
 ## Span templates
