@@ -20758,11 +20758,6 @@ components:
           description: Summary of what the model is for.
           type: string
           maxLength: 4000
-        family:
-          title: Family
-          description: Model family (e.g. 'llama', 'nemotron', 'gpt').
-          type: string
-          maxLength: 255
         capabilities:
           items:
             $ref: '#/components/schemas/ModelCapability'
@@ -20810,8 +20805,8 @@ components:
           format: date-time
       type: object
       title: ModelMetadata
-      description: Descriptive details about a model, gathered from its provider and
-        public model catalogs.
+      description: Descriptive details about a model, gathered from the services that
+        serve it.
     ModelMetadataContent:
       properties:
         tool_calling:

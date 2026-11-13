@@ -11,7 +11,6 @@ from pydantic import Field
 class SourceName(StrEnum):
     PROVIDER = "provider"
     NGC = "ngc"
-    MODELS_DEV = "models.dev"
 
 
 class ModelMetadataConfig(NemoConfig):
@@ -19,7 +18,7 @@ class ModelMetadataConfig(NemoConfig):
     plugin_description: ClassVar[str] = "Configuration for the model metadata enrichment controller."
 
     sources: list[SourceName] = Field(
-        default_factory=lambda: [SourceName.PROVIDER, SourceName.NGC, SourceName.MODELS_DEV],
+        default_factory=lambda: [SourceName.PROVIDER, SourceName.NGC],
         description=(
             "Metadata sources in priority order. A field is taken from the first source that has it. "
             "Remove a source to stop calling it, for example on air-gapped installs."
@@ -34,4 +33,3 @@ class ModelMetadataConfig(NemoConfig):
     request_timeout_seconds: float = Field(default=15.0, gt=0, description="Timeout for each metadata request.")
     ngc_url: str = Field(default="https://api.ngc.nvidia.com", description="NGC catalog API base URL.")
     ngc_org: str = Field(default="qc69jvmznzxy", description="NGC org that publishes the build.nvidia.com endpoints.")
-    models_dev_url: str = Field(default="https://models.dev/api.json", description="models.dev catalog URL.")

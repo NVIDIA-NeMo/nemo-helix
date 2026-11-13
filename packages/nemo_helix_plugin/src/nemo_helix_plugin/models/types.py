@@ -304,15 +304,10 @@ class ModelModality(StrEnum):
 
 
 class ModelMetadata(BaseModel):
-    """Descriptive details about a model, gathered from its provider and public model catalogs."""
+    """Descriptive details about a model, gathered from the services that serve it."""
 
     display_name: str | None = Field(default=None, description="Human-readable model name.", max_length=_MAX_LEN_255)
     description: str | None = Field(default=None, description="Summary of what the model is for.", max_length=4000)
-    family: str | None = Field(
-        default=None,
-        description="Model family (e.g. 'llama', 'nemotron', 'gpt').",
-        max_length=_MAX_LEN_255,
-    )
     capabilities: list[ModelCapability] = Field(
         default_factory=list, description="Capabilities the model supports, such as tool calling or reasoning."
     )
