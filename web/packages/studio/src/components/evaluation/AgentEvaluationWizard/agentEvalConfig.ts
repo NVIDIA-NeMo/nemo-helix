@@ -256,11 +256,17 @@ export const promptFitIssues = (prompt: string, columns: string[], forJudge = fa
 };
 
 /** Why ``spec`` cannot render against a dataset with ``columns``. A name resolves when it is a
- *  column or a ``field_mapping`` key, the namespace the evaluator renders with; a mapping
+ *  column or a ``field_mapping`` binding (``custom`` flattened, nulls dropped, as the SDK's
+ *  ``FieldMapping.mapping()`` does), the namespace the evaluator renders with; a mapping
  *  resolves when its path starts at a column. */
 export const configFitIssues = (spec: DatasetEvalSpec, columns: string[]): FitIssues => {
   const columnSet = new Set(columns);
-  const mapping = spec.field_mapping ?? {};
+  const { custom, ...known } = spec.field_mapping ?? {};
+  const mapping = Object.fromEntries(
+    Object.entries({ ...known, ...(custom as Record<string, unknown> | undefined) }).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string'
+    )
+  );
   const issues: string[] = [];
 
   const prompt = spec.prompt_template;
@@ -276,11 +282,9 @@ export const configFitIssues = (spec: DatasetEvalSpec, columns: string[]): FitIs
   }
 
   for (const [field, path] of Object.entries(mapping)) {
-    const column = typeof path === 'string' ? path.split(/[.[]/)[0] : '';
+    const column = path.split(/[.[]/)[0];
     if (!columnSet.has(column)) {
-      issues.push(
-        `Maps "${field}" to "${String(path)}", but the dataset has no "${column}" column.`
-      );
+      issues.push(`Maps "${field}" to "${path}", but the dataset has no "${column}" column.`);
     }
   }
 

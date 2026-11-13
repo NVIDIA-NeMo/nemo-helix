@@ -65,6 +65,14 @@ describe('configFitIssues', () => {
     expect(configFitIssues(modelConfig, ['messages'])).toEqual(NO_FIT_ISSUES);
   });
 
+  it('reads custom bindings and skips null ones, as the SDK flattens field_mapping', () => {
+    const spec: DatasetEvalSpec = {
+      ...withPrompt('{{ question }}'),
+      field_mapping: { custom: { question: 'prompt' }, reference: null },
+    };
+    expect(configFitIssues(spec, ['prompt'])).toEqual(NO_FIT_ISSUES);
+  });
+
   it('flags a field the dataset does not have, in either item syntax', () => {
     expect(configFitIssues(withPrompt('{{ item.missing }}'), ['present'])).toEqual({
       errors: ['Reads "missing", which is not a dataset column or a mapped field.'],
