@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,8 @@ from nemo_agents_plugin.fabric.adapters import (
     HARNESS_ADAPTER_IDS,
     UnknownAdapterError,
     accepted_adapter_ids,
+    adapter_reads_request_context,
+    context_unaware_harness,
     installed_adapter_ids,
     resolve_adapter_id,
     validate_harness_kinds,
@@ -156,3 +159,59 @@ def test_unknown_kind_message_does_not_suggest_a_custom_image(tmp_path: Path) ->
         resolve_adapter_id("acme.custom", tmp_path)
 
     assert adapters.CUSTOM_IMAGE_HINT not in str(error.value)
+
+
+@pytest.mark.parametrize("adapter_id", sorted(set(HARNESS_ADAPTER_IDS.values())))
+def test_no_stock_harness_adapter_reads_request_context(adapter_id: str) -> None:
+    assert not adapter_reads_request_context(adapter_id)
+
+
+@pytest.mark.parametrize("adapter_id", ["nvidia.fabric.nooa", "nvidia.fabric.openhands", "nvidia.fabric.cline"])
+def test_catalog_adapters_without_a_short_name_are_stock_too(adapter_id: str) -> None:
+    assert not adapter_reads_request_context(adapter_id)
+
+
+@pytest.mark.parametrize("adapter_id", ["nvidia.helix.compass.analyst", "acme.custom.native"])
+def test_plugin_and_user_adapters_are_assumed_to_read_request_context(adapter_id: str) -> None:
+    assert adapter_reads_request_context(adapter_id)
+
+
+def test_stock_adapter_audit_matches_the_installed_fabric() -> None:
+    """Fabric 0.6.0's stock adapters were each checked to ignore ``AgentRunRequest.context``.
+
+    A newer Fabric may teach one to read it, which the catalog lookup alone would
+    keep rejecting. When this fails, re-check the stock adapters' ``invoke`` for
+    ``request.context``, update ``adapter_reads_request_context``, and move the pin.
+    """
+    assert version("nemo-fabric").startswith("0.6."), version("nemo-fabric")
+
+
+def _config(**harnesses: str) -> AgentConfig:
+    return AgentConfig.model_validate(
+        {
+            "config_format": "nemo-agents-spec-v1",
+            "name": "agent",
+            "default_harness": next(iter(harnesses)),
+            "harnesses": {name: {"kind": kind} for name, kind in harnesses.items()},
+        }
+    )
+
+
+def test_context_unaware_harness_checks_only_the_default_harness() -> None:
+    assert context_unaware_harness(_config(main="hermes", spare="acme.custom.native")) == (
+        "main",
+        "nvidia.fabric.hermes",
+    )
+    assert context_unaware_harness(_config(main="acme.custom.native", spare="hermes")) is None
+
+
+def test_context_unaware_harness_leaves_workflow_configs_alone() -> None:
+    config = AgentConfig.model_validate(
+        {
+            "config_format": "nemo-agents-spec-v1",
+            "name": "agent",
+            "workflow": {"target_id": "nvidia.fabric.nooa.bench-agent"},
+        }
+    )
+
+    assert context_unaware_harness(config) is None
