@@ -1021,7 +1021,8 @@ class _AgentEvalSpecCommon(BaseModel):
         description="`.gitignore` patterns, one per item, for files to leave out of the saved result bundle, "
         "relative to the bundle root. `*.tmp` and `name` match files and directories at any depth, `name/` "
         "matches directories only, a leading or inner `/` anchors the pattern at the bundle root, and "
-        "`!pattern` re-includes a match. Omit to keep every file.",
+        "`!pattern` re-includes a match. As in Git, a file inside an excluded directory cannot be re-included "
+        '(`["a/", "!a/keep.txt"]` drops `a/keep.txt`); re-include the directory first. Omit to keep every file.',
     )
     publication: PublicationSpec | None = Field(
         default=None,
