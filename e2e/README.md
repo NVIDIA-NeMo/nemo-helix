@@ -255,9 +255,10 @@ They check that:
   up. In that run the verifier never answers, so collection overruns `collection_timeout_s`, and
   the step's log must say so: collection starts only when the host is ready.
 
-The tests skip unless `NHX_E2E_SANDBOXED_GYM=1`, and fail rather than skip when `NHX_E2E_KUBE_CONTEXT`
-is missing: they watch the cluster for the Gym host with `kubectl`, which is the only place its
-removal shows.
+The tests skip unless `NHX_E2E_SANDBOXED_GYM=1`. Once that is set they fail rather than skip when
+something they need is missing: `NHX_E2E_KUBE_CONTEXT`, read access to the cluster, or a model to
+call. They watch the cluster for the Gym host with `kubectl`, which is the only place its removal
+shows.
 
 **What the deployment needs:**
 
@@ -268,7 +269,12 @@ removal shows.
   API or `1.1.1.1`.
 - The `nhx-gym-host` image for the platform's image tag, pullable by sandbox pods.
 - A mock inference provider (`platformConfig.inference_gateway.mock_provider_prefix`, as in
-  `e2e/k8s/values/kind.yaml`), or a real model through the two `NHX_E2E_GYM_POLICY_*` variables.
+  `e2e/k8s/values/kind.yaml`), or a real model through `NHX_E2E_GYM_POLICY_ROUTE` and
+  `NHX_E2E_GYM_POLICY_MODEL`. Without either, the tests fail.
+- A model endpoint the Gym host can call. The host sends no credential unless
+  `NHX_E2E_GYM_POLICY_API_KEY_SECRET` names a platform secret holding one, and it refuses to start
+  when the endpoint answers `401`. A platform with auth on protects its Inference Gateway routes,
+  the mock model's included, so there the secret is required. CI runs with auth off.
 - For whoever runs the tests: `kubectl` access to list pods and BatchSandboxes in the release
   namespace and to read the `kubernetes` Service in `default`.
 
@@ -278,10 +284,12 @@ removal shows.
 | `NHX_E2E_KUBE_CONTEXT` | kubectl context of the cluster the platform runs on. Required: the tests never use the current context | (none) |
 | `NHX_E2E_KUBE_NAMESPACE` | Release namespace, which is also where OpenSandbox runs sandboxes | `nemo-helix` |
 | `NHX_E2E_INTERNAL_BASE_URL` | Platform API URL as the Gym host reaches it. Use the name `sandbox_policy_base_urls` allows, which is the Service's full DNS name in the example values | `http://nemo-helix-api:8080` |
-| `NHX_E2E_GYM_POLICY_ROUTE` / `NHX_E2E_GYM_POLICY_MODEL` | A real model's base URL and name, used instead of the mock. Set both | unset (mock model) |
+| `NHX_E2E_GYM_POLICY_ROUTE` / `NHX_E2E_GYM_POLICY_MODEL` | A real model's base URL (`http://` or `https://`) and name, used instead of the mock. Set both or neither; one alone fails the tests | unset (mock model) |
+| `NHX_E2E_GYM_POLICY_API_KEY_SECRET` | Platform secret holding the credential for the model endpoint, as `secret-name` or `workspace/secret-name`. The Gym host receives it through `env_secrets` | unset (no credential sent) |
 
 ```bash
-# Against a deployed cluster. Add --config e2e/quickstart/auth.yaml when it runs with auth.
+# Against a deployed cluster. When it runs with auth, add --config e2e/quickstart/auth.yaml for the
+# test client and set NHX_E2E_GYM_POLICY_API_KEY_SECRET for the Gym host.
 NHX_E2E_SANDBOXED_GYM=1 \
 NHX_E2E_KUBE_CONTEXT=my-cluster-context \
 NHX_E2E_KUBE_NAMESPACE=nemo-helix \

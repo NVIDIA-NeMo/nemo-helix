@@ -28,7 +28,8 @@ platformConfig:
     # them with NHX_E2E_INTERNAL_BASE_URL set to the same URL.
     sandbox_policy_base_urls:
       - 'http://{{ include "nhx-api.api-servicename" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.service.port }}'
-    # Matches e2e/k8s/values/batchsandbox-kind-template.yaml.
+    # Requests and limits of each Gym host, sized to fit beside the platform on a 4-CPU, 16 GB CI
+    # runner. The BatchSandbox template does not set them: OpenSandbox ignores its resources.
     sandbox_resources:
       cpu: "1"
       memory: 4Gi

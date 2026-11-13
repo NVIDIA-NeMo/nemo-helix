@@ -66,6 +66,7 @@ from nhx_evals_sdk.enums import ModelFormat
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.string_check import StringCheckMetric
 from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
+from nhx_evals_sdk.values import SecretRef
 from nhx_evals_sdk.values.results import EvaluationResult
 from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
 
@@ -915,6 +916,8 @@ SANDBOXED_GYM_JOB_TIMEOUT_SECONDS = 900.0
 SANDBOXED_GYM_TEST_TIMEOUT_SECONDS = 2100
 #: Evaluator's own words for a run that overran ``collection_timeout_s``, as its step logs them.
 COLLECTION_TIMEOUT_LOG_TEXT = "exceeded collection_timeout_s"
+#: The variable the Gym host reads the policy credential from, when a secret is named for it.
+GYM_POLICY_API_KEY_ENV = "GYM_POLICY_API_KEY"
 
 # The environment's resources server, which runs inside the Gym host. Besides scoring the greeting,
 # it checks one fact about the sandbox it runs in when a row's ``probe`` names one. The reward is
@@ -1145,7 +1148,7 @@ class _SandboxCluster:
         spec = self._get("service", "kubernetes", namespace="default")["spec"]
         return f"{spec['clusterIP']}:{spec['ports'][0]['port']}"
 
-    def gym_hosts(self, markers: frozenset[str]) -> dict[str, dict[str, Any]]:
+    def gym_hosts(self, markers: frozenset[str], known: frozenset[str] = frozenset()) -> dict[str, dict[str, Any]]:
         """A job's Gym host: the BatchSandboxes that name the job and their pods, by ``kind/name``.
 
         A sandbox carries its job's id in its metadata and its bootstrap environment, which is also how
@@ -1153,6 +1156,10 @@ class _SandboxCluster:
         label OpenSandbox gives the pods it creates and either belongs to one of those BatchSandboxes
         or names the job itself. The label matters: the job's own step pods name the job too. The
         server selects on it, so a busy namespace costs no more to read than an idle one.
+
+        ``known`` holds the ``kind/name`` of objects already identified as the host. They count for
+        as long as they exist, and a known BatchSandbox keeps claiming its pods after it is deleted:
+        OpenSandbox removes it first, and its pod can outlive it by the termination grace period.
         """
 
         def names_job(item: Mapping[str, Any]) -> bool:
@@ -1160,11 +1167,12 @@ class _SandboxCluster:
             return any(marker in manifest for marker in markers)
 
         found: dict[str, dict[str, Any]] = {}
-        sandboxes: set[str] = set()
+        sandboxes = {key.removeprefix("batchsandboxes/") for key in known if key.startswith("batchsandboxes/")}
         for sandbox in self._get("batchsandboxes").get("items") or []:
-            if names_job(sandbox):
-                sandboxes.add(sandbox["metadata"]["name"])
-                found[f"batchsandboxes/{sandbox['metadata']['name']}"] = sandbox
+            name = sandbox["metadata"]["name"]
+            if name in sandboxes or names_job(sandbox):
+                sandboxes.add(name)
+                found[f"batchsandboxes/{name}"] = sandbox
         for pod in self._get("pods", "--selector", SANDBOX_POD_LABEL).get("items") or []:
             metadata = pod.get("metadata") or {}
             sandbox_id = (metadata.get("labels") or {}).get(SANDBOX_POD_LABEL)
@@ -1173,8 +1181,9 @@ class _SandboxCluster:
                 # report a leak that is not one, so do not rely on the selector alone.
                 continue
             owners = {owner.get("name") for owner in metadata.get("ownerReferences") or []}
-            if sandbox_id in sandboxes or owners & sandboxes or names_job(pod):
-                found[f"pods/{metadata.get('name')}"] = pod
+            key = f"pods/{metadata.get('name')}"
+            if key in known or sandbox_id in sandboxes or owners & sandboxes or names_job(pod):
+                found[key] = pod
         return found
 
 
@@ -1194,7 +1203,7 @@ class _GymHostWatch:
     def _poll(self) -> None:
         while not self._stop.is_set():
             try:
-                hosts = self._cluster.gym_hosts(self.markers)
+                hosts = self._cluster.gym_hosts(self.markers, frozenset(self.seen))
             except Exception as error:
                 # Nothing may end the watch: the next read may still see the host, and a thread that died
                 # here would leave "no host was seen" as the only symptom. kubectl failures are RuntimeError.
@@ -1228,16 +1237,20 @@ def sandbox_cluster() -> _SandboxCluster:
     context, namespace = kube_target_from_env()
     cluster = _SandboxCluster(context=context, namespace=namespace)
     try:
-        # The two reads every later check depends on, made once here so a wrong context, a missing
-        # kubectl or a cluster without OpenSandbox fails by name before any job is submitted.
+        # Every kind of read the tests make, made once here: a wrong context, a missing kubectl, a
+        # cluster without OpenSandbox, or access that stops at the release namespace then fails by
+        # name before anything is uploaded or submitted.
         cluster.gym_hosts(frozenset())
+        cluster.api_server_address()
     except RuntimeError as error:
-        pytest.fail(f"the sandboxed Gym tests cannot read sandboxes on context {context!r}: {error}")
+        pytest.fail(f"the sandboxed Gym tests cannot read the cluster on context {context!r}: {error}")
     return cluster
 
 
 def _host_port(url: str) -> str:
     parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        pytest.fail(f"the policy route must be an http(s) URL naming a host, got {url!r}")
     return f"{parsed.hostname}:{parsed.port or (443 if parsed.scheme == 'https' else 80)}"
 
 
@@ -1257,12 +1270,25 @@ def _greeting_policy(client: NemoClient, workspace: str, greeting: str) -> tuple
     """The model route and name the agent calls: a mock that replies with ``greeting``, unless one is configured."""
     policy_route = os.environ.get("NHX_E2E_GYM_POLICY_ROUTE")
     policy_model = os.environ.get("NHX_E2E_GYM_POLICY_MODEL")
+    if bool(policy_route) != bool(policy_model):
+        pytest.fail(
+            "set both NHX_E2E_GYM_POLICY_ROUTE and NHX_E2E_GYM_POLICY_MODEL to use a real model, or neither to "
+            f"use the mock; got route {policy_route!r} and model {policy_model!r}"
+        )
     if policy_route and policy_model:
+        _host_port(policy_route)
         return policy_route, policy_model
     policy_model = short_unique_name("gym-greeting")
-    _create_ready_mock_model(
-        client, workspace=workspace, name=policy_model, mock_response_body=_chat_completion(greeting)
-    )
+    try:
+        _create_ready_mock_model(
+            client, workspace=workspace, name=policy_model, mock_response_body=_chat_completion(greeting)
+        )
+    except pytest.skip.Exception as skipped:
+        # These tests were asked for by name. Skipping here would report success having run nothing.
+        pytest.fail(
+            f"the sandboxed Gym tests need a model and the mock is unavailable ({skipped.msg}); enable mock "
+            "providers on the platform, or set NHX_E2E_GYM_POLICY_ROUTE and NHX_E2E_GYM_POLICY_MODEL"
+        )
     return _internal_model_route(workspace, policy_model), policy_model
 
 
@@ -1270,6 +1296,10 @@ def _greeting_target(
     workspace: str, fileset_name: str, policy: tuple[str, str], *, collection_timeout_s: float | None = None
 ) -> GymRunnerTarget:
     policy_route, policy_model = policy
+    # As it starts, the Gym host calls the policy endpoint with this key and refuses to start on a
+    # 401, so an endpoint that wants a credential needs a real one. It travels as a secret reference
+    # that the host reads from its environment: sandboxed jobs reject credentials in plain variables.
+    api_key_secret = os.environ.get("NHX_E2E_GYM_POLICY_API_KEY_SECRET")
     return GymRunnerTarget(
         source=GymAgentSource(
             component="simple_agent",
@@ -1281,9 +1311,10 @@ def _greeting_target(
         concurrency=2,
         startup_timeout_s=GYM_HOST_STARTUP_TIMEOUT_SECONDS,
         collection_timeout_s=collection_timeout_s,
+        env_secrets={GYM_POLICY_API_KEY_ENV: SecretRef(root=api_key_secret)} if api_key_secret else {},
         hydra_params={
             "policy_base_url": policy_route,
-            "policy_api_key": "not-used",
+            "policy_api_key": f"${{oc.env:{GYM_POLICY_API_KEY_ENV}}}" if api_key_secret else "not-used",
             "policy_model_name": policy_model,
         },
     )
@@ -1345,7 +1376,7 @@ def _assert_gym_host_removed(cluster: _SandboxCluster, watch: _GymHostWatch, job
     deadline = time.monotonic() + GYM_HOST_GONE_TIMEOUT_SECONDS
     while True:
         try:
-            left = sorted(cluster.gym_hosts(watch.markers))
+            left = sorted(cluster.gym_hosts(watch.markers, frozenset(watch.seen)))
         except RuntimeError as error:
             # A read that failed says nothing either way, so ask again rather than fail on it.
             state = f"unknown, because the cluster could not be read: {error}"

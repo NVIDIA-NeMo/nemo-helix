@@ -33,21 +33,14 @@ data:
           # node first, so a cluster without the Secret still starts sandboxes from loaded images.
           imagePullSecrets:
             - name: ghcr-pull
-          # Create-time default for the sandbox container. Requests must not exceed limits. These
-          # match platformConfig.evals.sandbox_resources in e2e/k8s/values/gym-sandbox.yaml, sized
-          # to fit beside the platform on a 4-CPU, 16 GB CI runner.
+          # OpenSandbox v0.2.1 copies only volumeMounts from the container named "sandbox" onto
+          # the sandbox's own container, and ignores every other container field here. A Gym host's
+          # size comes from platformConfig.evals.sandbox_resources (e2e/k8s/values/gym-sandbox.yaml).
           containers:
             - name: sandbox
               volumeMounts:
                 - name: dshm
                   mountPath: /dev/shm
-              resources:
-                requests:
-                  cpu: "1"
-                  memory: 4Gi
-                limits:
-                  cpu: "1"
-                  memory: 4Gi
           volumes:
             - name: dshm
               emptyDir:
