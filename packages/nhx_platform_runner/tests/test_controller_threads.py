@@ -20,9 +20,11 @@ from nhx.platform_runner.controller_threads import (
     start_sidecar_threads,
 )
 
-#: How long the test itself waits for something that should happen promptly before failing.
-_GUARD_S = 30.0
-#: Events a helper thread blocks on, opened at teardown so a failed test leaves no thread blocked.
+#: How long the test itself waits for something that should happen promptly before failing. Helpers
+#: never time out (see :func:`_gate`), so this only bounds how long a broken test takes to fail.
+_GUARD_S = 10.0
+#: Events a helper thread blocks on, opened at teardown so a failed test leaves no thread blocked. Only
+#: the test's own thread creates gates and opens them, so the list needs no lock.
 _GATES: list[threading.Event] = []
 
 
@@ -30,7 +32,8 @@ def _gate() -> threading.Event:
     """An event a helper thread blocks on, untimed, until the test sets it.
 
     Only the test may end the wait: a helper that gave up on its own would exit while the test still
-    expects it running, and the test would see it untracked.
+    expects it running, and the test would see it untracked. Call it from the test, before starting the
+    helper that waits on it.
     """
     gate = threading.Event()
     _GATES.append(gate)
