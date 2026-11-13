@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelSelection } from '@nemo/common/src/components/ModelSelectV2/types';
+import type { CreateJobRequestCustomFields } from '@nemo/sdk/generated/data-designer/schema';
 import type { AddColumnSelection } from '@studio/components/AddColumnPalette/types';
 import type { FilesetTemplate } from '@studio/components/CreateFilesetStart/types';
 import {
@@ -50,6 +51,9 @@ export interface JobBuilderSeed {
   rows: string;
   columns: BuilderColumn[];
   models: BuilderModel[];
+  /** Carried onto the submitted job unchanged; the builder has no fields for them. */
+  description?: string;
+  customFields?: CreateJobRequestCustomFields;
 }
 
 /**
