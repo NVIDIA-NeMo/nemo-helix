@@ -54,11 +54,19 @@ nemo files filesets create llama-nemotron-rerank-1b-v2 \
 nemo models create llama-nemotron-rerank-1b-v2 \
   --workspace default --exist-ok \
   --fileset default/llama-nemotron-rerank-1b-v2 \
+  --trust-remote-code \
   --custom-fields '{"hf_model_id":"nvidia/llama-nemotron-rerank-1b-v2"}'
 nemo models get llama-nemotron-rerank-1b-v2 --workspace default
 ```
 
-Do not submit until the model entity reports a non-null fileset.
+`--trust-remote-code` is required: the checkpoint ships its own model code (`model_type: llama_bidirec`
+with `auto_map`), so the model-spec job cannot read its config without it and the entity's `spec` stays
+empty. For an entity created without the flag, run
+`nemo models update llama-nemotron-rerank-1b-v2 --workspace default --trust-remote-code`.
+The platform accepts the flag only from an administrator or for a fileset source the platform
+config pre-approves; otherwise, ask an administrator to approve the source or set the flag.
+
+Do not submit until the model entity reports a non-null fileset and a populated `spec`.
 
 Stage 2:
 

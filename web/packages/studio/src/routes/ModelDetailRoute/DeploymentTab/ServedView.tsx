@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { CopyButton } from '@nemo/common/src/components/CopyButton';
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
@@ -12,7 +13,6 @@ import { useModelsGetLatestDeployment } from '@nemo/sdk/generated/platform/model
 import { useModelsGetProvider } from '@nemo/sdk/generated/platform/model-providers';
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Grid, Stack } from '@nvidia/foundations-react-core';
-import { CopyButton } from '@studio/components/CopyButton';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
 import {
   getConfigFields,

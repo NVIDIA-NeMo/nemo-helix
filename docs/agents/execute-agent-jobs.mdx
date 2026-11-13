@@ -370,7 +370,7 @@ platform adds its own fields under the reserved `nemo_helix` key: `job_id`,
 }
 ```
 
-The agent receives:
+The agent's Fabric adapter receives:
 
 ```json
 {
@@ -386,6 +386,21 @@ When the agent declares a [`context_schema`](#declare-how-an-agent-runs), the
 job's `context` is validated against it before the platform adds `nemo_helix`.
 A context that does not match fails the create request.
 
+### Which Agents Read the Context
+
+The context reaches the agent's Fabric adapter as `AgentRunRequest.context`.
+It is used only by an adapter written to read it; this could be one supplied by
+a separate plugin (such as Compass), or an adapter you wrote yourself (see
+[Bring Your Own Harness](/documentation/agents/register-agents#bring-your-own-harness)).
+
+The stock Fabric adapters do not read it. These include `claude`, `codex`,
+`deepagents`, `hermes`, `mini-swe-agent`, `nooa-bench-agent`, `pi`, and
+`remote-agent`, as well as any other adapter in Fabric's catalog. These pass the
+model only the prompt, so neither your context nor the `nemo_helix` fields
+would reach the agent. The API rejects job requests that include `context`
+for an agent whose default harness uses a stock adapter; in these cases, the
+parameters should be in `input` instead.
+
 <a id="declare-how-an-agent-runs"></a>
 
 ## Declare How an Agent Runs
@@ -398,7 +413,7 @@ use the API:
 
 | Field | Default | Description |
 | --- | --- | --- |
-| `context_schema` | None (any context) | A JSON Schema the job's `context` must match. Also accepted on an [inline agent](#inline-agents). |
+| `context_schema` | None (any context) | A JSON Schema the job's `context` must match. Also accepted on an [inline agent](#inline-agents). Rejected when the default harness uses a stock Fabric adapter, which never [reads the context](#which-agents-read-the-context). |
 | `default_input` | None | The prompt a job uses when it omits `input`. |
 | `post_run_actions` | `["agents.noop"]` | The [post-run action](#post-run-actions) kinds a job may choose. Must name at least one installed kind. |
 

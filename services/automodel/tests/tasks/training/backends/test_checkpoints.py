@@ -4,6 +4,8 @@
 """process_checkpoint merge, ONNX dispatch, and fileset layout."""
 
 import json
+import sys
+from functools import partial
 from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock
@@ -11,15 +13,18 @@ from unittest.mock import MagicMock
 import pytest
 from nhx.automodel.entities.values import FinetuningType
 from nhx.automodel.tasks.training.backends.checkpoints import (
+    _ONNX_TOLERANCES,
     ModelType,
     _build_export_module,
     _probe_bidirectional_mask,
     _restructure_encoder_output,
+    auto_torch_dtype,
     find_selected_checkpoints,
     merge_lora_cross_encoder_adapter,
     process_checkpoint,
     process_selected_checkpoints,
     sanitize_encoder_hf,
+    verify_onnx_matches_reference,
 )
 from nhx.automodel.tasks.training.schemas import (
     CheckpointFormat,
@@ -41,6 +46,7 @@ def merged_lora_config(tmp_path: Path) -> MagicMock:
     customizer_config.model.precision = None
     customizer_config.model.trust_remote_code = False
     customizer_config.model.has_vision_tower = False
+    customizer_config.model.override_custom_impl = False
     return customizer_config
 
 
@@ -59,6 +65,7 @@ def patched_checkpoint_io(mocker: MockerFixture) -> dict:
     return {
         "order": order,
         "merge_cross": mocker.patch(f"{CHECKPOINTS}.merge_lora_cross_encoder_adapter"),
+        "merge_causal": mocker.patch(f"{CHECKPOINTS}.merge_lora_adapter"),
         "merge_embed": mocker.patch(f"{CHECKPOINTS}.merge_lora_embedding_adapter"),
         "export_onnx": mocker.patch(f"{CHECKPOINTS}.export_onnx", side_effect=_record("export")),
         "sanitize": mocker.patch(f"{CHECKPOINTS}.sanitize_encoder_hf", side_effect=_record("sanitize")),
@@ -68,11 +75,20 @@ def patched_checkpoint_io(mocker: MockerFixture) -> dict:
 
 
 class TestCrossEncoderCheckpoint:
+    @pytest.mark.parametrize("causal_reranker", [False, True], ids=["classifier-head", "qwen3-causal-reranker"])
     def test_merges_cross_encoder_lora_and_exports_onnx(
-        self, merged_lora_config: MagicMock, patched_checkpoint_io: dict, tmp_path: Path
+        self, merged_lora_config: MagicMock, patched_checkpoint_io: dict, tmp_path: Path, causal_reranker: bool
     ) -> None:
+        """A causal reranker merges and traces as a causal LM; a score-head reranker keeps its head."""
         checkpoint_path = tmp_path / "adapter"
         output_path = tmp_path / "output"
+        (tmp_path / "base").mkdir()
+        base_config = (
+            {"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]}
+            if causal_reranker
+            else {"model_type": "llama_bidirec", "architectures": ["LlamaBidirectionalForSequenceClassification"]}
+        )
+        (tmp_path / "base" / "config.json").write_text(json.dumps(base_config))
         export = ExportConfig(primary="hf", opset=18)
         merged_lora_config.retrieval = RetrievalConfig(export=export)
 
@@ -83,12 +99,12 @@ class TestCrossEncoderCheckpoint:
             model_type=ModelType.CROSS_ENCODER,
         )
 
-        patched_checkpoint_io["merge_cross"].assert_called_once_with(
-            adapter_path=checkpoint_path,
-            base_model_path=str(tmp_path / "base"),
-            output_path=output_path,
-            trust_remote_code=False,
-        )
+        merged, skipped = ("merge_causal", "merge_cross") if causal_reranker else ("merge_cross", "merge_causal")
+        patched_checkpoint_io[merged].assert_called_once()
+        assert patched_checkpoint_io[merged].call_args.kwargs["adapter_path"] == checkpoint_path
+        assert patched_checkpoint_io[merged].call_args.kwargs["base_model_path"] == str(tmp_path / "base")
+        assert patched_checkpoint_io[merged].call_args.kwargs["trust_remote_code"] is False
+        patched_checkpoint_io[skipped].assert_not_called()
         patched_checkpoint_io["merge_embed"].assert_not_called()
 
         # The reranker must be traced as a cross-encoder, not pooled embeddings.
@@ -100,20 +116,35 @@ class TestCrossEncoderCheckpoint:
         assert call["cfg"] is export
         assert call["trust_remote_code"] is False
         assert call["load_trust_remote_code"] is False
+        assert call["causal_reranker"] is causal_reranker
         patched_checkpoint_io["sanitize"].assert_called_once_with(output_path, tmp_path / "base")
         assert patched_checkpoint_io["order"] == ["export", "sanitize", "restructure"]
 
 
 class TestLlmLoraMerged:
-    @pytest.mark.parametrize("has_vision_tower", [False, True])
-    def test_forwards_the_vision_tower(
+    @pytest.mark.parametrize(
+        ("has_vision_tower", "architecture", "override_custom_impl", "builtin_model_class"),
+        [
+            (False, "NemotronHForCausalLM", False, True),
+            (False, "NemotronHForCausalLM", True, False),
+            (True, "Qwen2_5_VLForConditionalGeneration", False, False),
+        ],
+        ids=["automodel-class-saves-builtin-names", "override-trains-the-hf-class", "hf-vision-class"],
+    )
+    def test_forwards_the_checkpoint_class(
         self,
         merged_lora_config: MagicMock,
         mocker: MockerFixture,
         tmp_path: Path,
         has_vision_tower: bool,
+        architecture: str,
+        override_custom_impl: bool,
+        builtin_model_class: bool,
     ) -> None:
         merged_lora_config.model.has_vision_tower = has_vision_tower
+        merged_lora_config.model.override_custom_impl = override_custom_impl
+        (tmp_path / "base").mkdir()
+        (tmp_path / "base" / "config.json").write_text(json.dumps({"architectures": [architecture]}))
         merge = mocker.patch(f"{CHECKPOINTS}.merge_lora_adapter")
         mocker.patch(f"{CHECKPOINTS}.fix_fsdp2_architecture")
         mocker.patch(f"{CHECKPOINTS}.extract_precision_from_model_config", return_value=None)
@@ -133,6 +164,7 @@ class TestLlmLoraMerged:
             output_path=output_path,
             trust_remote_code=False,
             has_vision_tower=has_vision_tower,
+            builtin_model_class=builtin_model_class,
         )
 
 
@@ -540,3 +572,66 @@ class TestProcessCheckpointSanitize:
         assert call["trust_remote_code"] is False
         patched_checkpoint_io["sanitize"].assert_called_once()
         assert patched_checkpoint_io["order"] == ["export", "sanitize", "restructure"]
+
+
+@pytest.mark.parametrize(
+    ("config", "weights_dtype", "expected"),
+    [
+        ({"dtype": "bfloat16"}, None, "bfloat16"),
+        ({"torch_dtype": "float16"}, None, "float16"),
+        ({}, "F16", "float16"),
+        ({}, None, "float32"),
+    ],
+    ids=["transformers-v5-dtype", "transformers-v4-torch-dtype", "stored-weights", "nothing-declared"],
+)
+def test_auto_torch_dtype_follows_transformers(
+    tmp_path: Path, config: dict[str, str], weights_dtype: str | None, expected: str
+) -> None:
+    """The config's declared dtype, else the stored weights' dtype, as transformers resolves "auto"."""
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    if weights_dtype is not None:
+        header = json.dumps({"w": {"dtype": weights_dtype, "shape": [1], "data_offsets": [0, 2]}}).encode()
+        (tmp_path / "model.safetensors").write_bytes(len(header).to_bytes(8, "little") + header + b"\0\0")
+
+    assert auto_torch_dtype(tmp_path) == expected
+
+
+@pytest.mark.parametrize(
+    ("reference", "onnx_output", "error"),
+    [
+        ([[-1.8398], [-0.2305]], [[-1.8281], [-0.2314]], None),
+        ([[-1.8398], [-0.2305]], [[-0.2305], [-1.8398]], "ONNX output diverges"),
+        ([[0.1, -0.05]], [[0.12, -0.05]], "ONNX output diverges"),
+        ([[float("inf")], [0.5]], [[0.0], [0.5]], "HuggingFace output has NaN or infinite"),
+        ([[1.0], [0.5]], [[float("nan")], [0.5]], "ONNX output has NaN or infinite"),
+    ],
+    ids=["fp16-qwen3-reranker-drift", "rows-swapped", "embedding-off-by-2e-2", "infinite-reference", "nan-onnx"],
+)
+def test_onnx_tolerance_scales_with_reference_magnitude(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reference: list, onnx_output: list, error: str | None
+) -> None:
+    """fp16 drift measured on Qwen3-Reranker-0.6B passes; tracing bugs, drift, and non-finite outputs do not."""
+    import types
+
+    import numpy as np
+
+    session = MagicMock()
+    session.get_inputs.return_value = [types.SimpleNamespace(name="input_ids")]
+    session.get_outputs.return_value = [types.SimpleNamespace(name="logits")]
+    session.run.return_value = [np.array(onnx_output, dtype=np.float16)]
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(InferenceSession=lambda *_, **__: session))
+    atol, rtol = _ONNX_TOLERANCES["fp16"]
+    verify = partial(
+        verify_onnx_matches_reference,
+        tmp_path / "model.onnx",
+        {"input_ids": np.zeros((1, 1))},
+        np.array(reference, dtype=np.float32),
+        atol=atol,
+        rtol=rtol,
+    )
+
+    if error is None:
+        verify()
+    else:
+        with pytest.raises(ValueError, match=error):
+            verify()

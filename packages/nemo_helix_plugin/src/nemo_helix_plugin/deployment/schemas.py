@@ -63,6 +63,13 @@ class DeploymentParams(BaseModel):
         default=None,
         description="Additional environment variables for the deployment.",
     )
+    additional_args: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Raw arguments appended to the engine serve command. For vLLM this is the "
+            "`vllm serve` argument vector, for example ['--max-model-len', '8192']."
+        ),
+    )
     disk_size: str | None = Field(default=None, description="Disk size for the deployment.")
     image_name: str | None = Field(
         default=None,

@@ -6,6 +6,7 @@ import {
   Robot,
   CubeStack,
   ChartBar,
+  Collection,
   Db,
   Beaker,
   FolderOpen,
@@ -82,6 +83,8 @@ export const ENTITY_ICONS = {
   experiments: Beaker,
   insightExperiments: Beaker,
   evalComparison: ScmCompare,
+  // A taskset is the stored group of tasks an evaluation run scores.
+  tasksets: Collection,
 
   // Observability
   optimizerInsights: Lightbulb,

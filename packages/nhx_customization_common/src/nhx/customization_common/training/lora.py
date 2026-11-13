@@ -8,6 +8,7 @@ Automodel and NeMo-RL both call this at ``lora_merged`` export. ``peft`` and
 plugins can import this package without them.
 """
 
+import json
 import logging
 import os
 import shutil
@@ -15,6 +16,24 @@ import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _has_builtin_model_class(base_model_path: str) -> bool:
+    """Whether transformers ships its own class for the checkpoint's model type."""
+    from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+
+    try:
+        model_type = json.loads((Path(base_model_path) / "config.json").read_text(encoding="utf-8")).get("model_type")
+    except (OSError, ValueError, AttributeError):
+        return False
+    return isinstance(model_type, str) and model_type in CONFIG_MAPPING
+
+
+def _drop_auto_map(config_path: Path) -> None:
+    """A checkpoint saved from transformers' own class ships no remote code to point at."""
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    if config.pop("auto_map", None) is not None:
+        config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
 
 def _merge_parent() -> Path:
@@ -37,6 +56,7 @@ def merge_lora_adapter(
     output_path: Path,
     trust_remote_code: bool,
     has_vision_tower: bool = False,
+    builtin_model_class: bool = False,
 ) -> None:
     """Merge LoRA adapter weights into the base model.
 
@@ -56,6 +76,10 @@ def merge_lora_adapter(
         output_path: Where to save the merged model
         trust_remote_code: Job flag for loading the *base* fileset.
         has_vision_tower: Load the image-text model class when the base has a vision tower.
+        builtin_model_class: The adapter uses the module names of transformers' own class for
+            this model type. When transformers has that class, load it instead of the
+            checkpoint's remote code, whose names can differ (Nemotron-H: ``backbone.*``
+            rather than ``model.*``) so that PEFT would not find the adapter's targets.
     """
     try:
         import torch  # ty: ignore[unresolved-import]
@@ -73,6 +97,11 @@ def merge_lora_adapter(
     else:
         model_cls = AutoModelForCausalLM
 
+    model_trust_remote_code = trust_remote_code
+    if builtin_model_class and trust_remote_code and _has_builtin_model_class(base_model_path):
+        model_trust_remote_code = False
+        logger.info("Loading the base with transformers' own class, whose module names the adapter uses")
+
     logger.info("Merging LoRA adapter from %s into base model %s", adapter_path, base_model_path)
     parent = _merge_parent()
     parent.mkdir(parents=True, exist_ok=True)
@@ -83,7 +112,7 @@ def merge_lora_adapter(
             base_model_path,
             torch_dtype=torch.bfloat16,
             device_map="auto",
-            trust_remote_code=trust_remote_code,
+            trust_remote_code=model_trust_remote_code,
         )
         logger.info("Loading LoRA adapter...")
         model = PeftModel.from_pretrained(model, str(adapter_path))
@@ -91,6 +120,8 @@ def merge_lora_adapter(
         model = model.merge_and_unload()
         logger.info("Saving merged model to %s...", tmp_path)
         model.save_pretrained(tmp_path, safe_serialization=True)
+        if model_trust_remote_code != trust_remote_code:
+            _drop_auto_map(tmp_path / "config.json")
         tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=trust_remote_code)
         if tokenizer is None:
             raise RuntimeError(f"AutoTokenizer.from_pretrained returned no tokenizer for {base_model_path}")

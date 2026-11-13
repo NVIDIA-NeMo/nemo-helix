@@ -17,6 +17,12 @@ from typing import Any
 
 from nemo_automodel._transformers.registry import ModelRegistry
 from nhx.automodel.app.constants import PAUSE_SENTINEL_FILE_NAME, PAUSE_SIGNAL
+from nhx.automodel.tasks.training.backends.checkpoints import auto_torch_dtype
+from nhx.automodel.tasks.training.backends.registry import (
+    causal_reranker_class,
+    causal_reranker_collator,
+    is_causal_reranker_checkpoint,
+)
 from nhx.automodel.tasks.training.backends.vlm import CONVERSATION_DATASET_TARGET, rewrite_fileset_rows
 from nhx.automodel.tasks.training.chat_templates import resolve_chat_template
 from nhx.automodel.tasks.training.datasets.preparation import (
@@ -171,7 +177,10 @@ def _compile_retrieval_config(
     # Retrieval recipes construct StatefulRNG from the seed internally, so they
     # take a bare seed rather than the LLM recipe's full rng config object.
     cfg["seed"] = seed
-    cfg["temperature"] = 0.02 if is_bi_encoder else 1.0
+    if retrieval_config.temperature is not None:
+        cfg["temperature"] = retrieval_config.temperature
+    else:
+        cfg["temperature"] = 0.02 if is_bi_encoder else 1.0
 
     _build_base_model(cfg, customizer_config)
     cfg["model"].update(
@@ -191,13 +200,28 @@ def _compile_retrieval_config(
         cfg["model"]["do_distributed_inbatch_negative"] = retrieval_config.do_distributed_inbatch_negative
     else:
         cfg["model"]["num_labels"] = 1
-        cfg["model"]["temperature"] = 1.0
+        if is_causal_reranker_checkpoint(customizer_config.model.path):
+            # Automodel scores this causal LM by its yes/no next-token logits. That reranker
+            # has no classifier head to pool for, and takes the recipe's temperature (above).
+            del cfg["model"]["pooling"]
+            if customizer_config.model.precision is None:
+                # Its from_pretrained passes every kwarg through the config loader, which stores
+                # "auto" as the config dtype; transformers then fails to resolve it. Send the dtype
+                # "auto" would have resolved to instead.
+                cfg["model"]["torch_dtype"] = auto_torch_dtype(customizer_config.model.path)
+        else:
+            cfg["model"]["temperature"] = 1.0
     if customizer_config.model.attn_implementation:
         cfg["model"]["attn_implementation"] = customizer_config.model.attn_implementation
 
     cfg["tokenizer"] = {
         "_target_": "nemo_automodel._transformers.auto_tokenizer.NeMoAutoTokenizer.from_pretrained",
         "pretrained_model_name_or_path": customizer_config.model.path,
+        # Default to the checkpoint's Hugging Face tokenizer, the one Retriever/Ranking NIM and vLLM
+        # serve with. Automodel's own default prefers a tokenizer registered for the model type, which
+        # the checkpoint may not ship: Nemotron 3 Embed is model type ministral3, mapped to Mistral's
+        # tekken.json, but carries only tokenizer.json.
+        "tokenizer_backend": customizer_config.model.tokenizer_backend or "nemo_wrapped_auto",
     }
 
     _build_distributed(
@@ -293,6 +317,13 @@ def _compile_llm_config(
     _build_checkpoint(cfg, customizer_config, workspace_dir)
 
     _configure_datasets(cfg, customizer_config, prepared, effective_seq_length, seed, recipe, None)
+    if customizer_config.model.tokenizer_backend is not None:
+        # Only when asked: without this block Automodel builds its default tokenizer, as it always
+        # has. The recipe builds one tokenizer from it for both the training and validation loaders.
+        cfg["dataset"]["tokenizer"] = {
+            "pretrained_model_name_or_path": customizer_config.model.path,
+            "tokenizer_backend": customizer_config.model.tokenizer_backend,
+        }
 
     cfg["dataloader"] = {
         "_target_": "torchdata.stateful_dataloader.StatefulDataLoader",
@@ -305,6 +336,7 @@ def _compile_llm_config(
     }
 
     _build_peft(cfg, customizer_config)
+    _keep_full_weight_kd_student_in_fp32(cfg, customizer_config)
 
     cfg["loss_fn"] = {
         "_target_": "nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy",
@@ -370,7 +402,6 @@ def _compile_vlm_config(
         "trust_remote_code": trust_remote_code,
     }
     freeze_config: dict[str, bool] = {
-        "freeze_embeddings": True,
         "freeze_vision_tower": True,
         "freeze_language_model": False,
     }
@@ -538,7 +569,7 @@ def _build_base_model(cfg: dict[str, Any], customizer_config: TrainingStepConfig
     if mtp is not None:
         # Automodel reads these off the model block as model constructor arguments, and
         # support differs per model (``mtp_use_repeated_layer`` is Nemotron-H only in
-        # r0.6.0). Forward only what the caller set, so an unset field keeps the
+        # r0.7.0). Forward only what the caller set, so an unset field keeps the
         # checkpoint's own value instead of reaching a model that does not accept it.
         for field_name, model_key in _MTP_MODEL_KEYS.items():
             value = getattr(mtp, field_name)
@@ -855,6 +886,12 @@ def _build_integrations(
         framework="automodel",
     )
     if wandb_config:
+        # Automodel passes its own ``settings=`` to ``wandb.init``, so a ``settings`` entry here
+        # would raise a duplicate-keyword TypeError. A self-hosted server reaches the workers as
+        # WANDB_BASE_URL instead, which the launcher sets from ``_wandb_base_url``.
+        settings = wandb_config.pop("settings", None) or {}
+        if base_url := settings.get("base_url"):
+            cfg["_wandb_base_url"] = base_url
         cfg["wandb"] = wandb_config
         logger.info(f"WandB enabled: project={wandb_config.get('project')}")
 
@@ -1163,6 +1200,9 @@ def _configure_chat_dataset(
         "seq_length": seq_length,
         "padding": "do_not_pad" if not pp_enabled else "max_length",
     }
+    if customizer_config.dataset.mask_generation_prompt:
+        cfg["dataset"]["mask_generation_prompt"] = True
+        cfg["validation_dataset"]["mask_generation_prompt"] = True
 
     # Add chat template if available
     if chat_template:
@@ -1187,6 +1227,10 @@ def _configure_sft_dataset(
     seq_length: int,
 ) -> None:
     """Configure ColumnMappedTextInstructionDataset for SFT/custom format."""
+    if customizer_config.dataset.mask_generation_prompt:
+        raise ValueError(
+            "mask_generation_prompt applies to chat-format (messages) data; this dataset has prompt/completion rows."
+        )
     logger.info(
         f"Configuring SFT dataset with columns: question={question_col}, answer={answer_col}, seq_length={seq_length}"
     )
@@ -1250,11 +1294,17 @@ def _configure_retrieval_dataset(
     """
 
     model_type = "bi_encoder" if recipe == TrainingRecipe.BI_ENCODER else "cross_encoder"
-    collator_target = (
-        "nemo_automodel.components.datasets.llm.BiEncoderCollator"
-        if recipe == TrainingRecipe.BI_ENCODER
-        else "nemo_automodel.components.datasets.llm.CrossEncoderCollator"
+    causal_reranker = (
+        causal_reranker_class(customizer_config.model.path) if recipe == TrainingRecipe.CROSS_ENCODER else None
     )
+    if recipe == TrainingRecipe.BI_ENCODER:
+        collator_target = "nemo_automodel.components.datasets.llm.BiEncoderCollator"
+    elif causal_reranker is not None:
+        # The reranker's own prompt, so training reads the yes/no logits where the model and vLLM's
+        # template for it expect them. Resolved here so an unknown reranker fails before data loads.
+        collator_target = causal_reranker_collator(causal_reranker)
+    else:
+        collator_target = "nemo_automodel.components.datasets.llm.CrossEncoderCollator"
     logger.info(
         "Configuring %s dataset with train_n_passages=%s",
         model_type,
@@ -1263,12 +1313,15 @@ def _configure_retrieval_dataset(
 
     def collator_config(*, validation: bool = False) -> dict[str, Any]:
         if recipe == TrainingRecipe.CROSS_ENCODER:
-            return {
+            reranker: dict[str, Any] = {
                 "_target_": collator_target,
                 "rerank_max_length": retrieval_config.passage_max_length,
-                "prompt_template": "question:{query} \n \n passage:{passage}",
                 "pad_to_multiple_of": 8,
             }
+            if causal_reranker is None:
+                # A causal reranker's collator writes its own prompt and takes no prompt_template.
+                reranker["prompt_template"] = "question:{query} \n \n passage:{passage}"
+            return reranker
         result: dict[str, Any] = {
             "_target_": collator_target,
             "q_max_len": retrieval_config.query_max_length,
@@ -1354,6 +1407,21 @@ def _verify_tokenizer_compatibility(student_path: str, teacher_path: str, trust_
         # Log but don't fail for other tokenizer loading issues
         # (e.g., network issues, missing files) - the training will fail later with a clearer error
         logger.warning(f"Could not verify tokenizer compatibility: {e}")
+
+
+def _keep_full_weight_kd_student_in_fp32(cfg: dict[str, Any], customizer_config: TrainingStepConfig) -> None:
+    """Store a full-weight distillation student in fp32 when the job sets no precision.
+
+    torch.optim optimizers keep no fp32 master copy, so bf16 parameters mean bf16 updates and
+    Adam state. Automodel r0.6.0's KD recipe stored such a student in fp32; v0.7.0 dropped that.
+    """
+    if (
+        customizer_config.training.training_type == TrainingType.DISTILLATION
+        and "peft" not in cfg
+        and customizer_config.model.precision is None
+        and str(cfg["optimizer"]["_target_"]).startswith("torch.optim.")
+    ):
+        cfg["model"]["torch_dtype"] = "float32"
 
 
 def _configure_kd(cfg: dict[str, Any], customizer_config: TrainingStepConfig, trust_remote_code: bool = False) -> None:

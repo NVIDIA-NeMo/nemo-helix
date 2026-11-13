@@ -37,8 +37,12 @@ DALI_FILE_REMOVALS = {
 MINIMUM_PYTHON_PACKAGE_VERSIONS = {
     "bitsandbytes": "0.49.2",
     "mamba-ssm": "2.3.0",
+    "mlflow-skinny": "3.16.1",
+    "nemo-automodel": "0.7.0",
     "notebook": "7.6.3",
     "peft": "0.20.0",
+    "pillow": "13.0.0",
+    "transformers": "5.18.0",
     "virtualenv": "21.14.9",
     "wandb": "0.28.2",
 }
