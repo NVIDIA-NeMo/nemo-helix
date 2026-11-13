@@ -81,6 +81,8 @@ def _build_training_block(spec: dict[str, Any]) -> SFTTraining | DistillationTra
         "max_seq_length": training.get("max_seq_length", 2048),
         "precision": training.get("precision"),
         "attn_implementation": training.get("attn_implementation", "sdpa"),
+        "tokenizer_backend": training.get("tokenizer_backend"),
+        "mask_generation_prompt": training.get("mask_generation_prompt", False),
         "seed": schedule.get("seed"),
         "retrieval": training.get("retrieval"),
         "parallelism": ParallelismParams(

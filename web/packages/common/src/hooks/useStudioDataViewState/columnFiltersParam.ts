@@ -6,6 +6,15 @@ import type { TanstackTable } from '@nemo/common/src/components/DataView/interna
 /** The URL search param `useStudioDataViewState` syncs column filters through. */
 export const FILTERS_SEARCH_PARAM = 'filters';
 
+/** Every URL search param `useStudioDataViewState` keeps table state in. */
+export const DATA_VIEW_SEARCH_PARAMS = {
+  page: 'page',
+  pageSize: 'page_size',
+  sort: 'sort',
+  search: 's',
+  filters: FILTERS_SEARCH_PARAM,
+} as const;
+
 /** The `filters` param value for a set of column filters, as the hook writes it. */
 export const encodeColumnFiltersParam = (filters: TanstackTable.ColumnFiltersState): string =>
   encodeURIComponent(JSON.stringify(filters));

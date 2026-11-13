@@ -283,7 +283,7 @@ describe('BulkDeleteModal', () => {
       });
     });
 
-    it('disables Cancel and Delete buttons while deletion is in progress', async () => {
+    it('disables Delete but keeps Cancel enabled while deletion is in progress', async () => {
       let resolveDelete!: () => void;
       mockMutateAsync.mockReturnValue(
         new Promise<void>((resolve) => {
@@ -300,8 +300,8 @@ describe('BulkDeleteModal', () => {
       const clickPromise = user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
 
       await waitFor(() => {
-        expect(within(dialog).getByRole('button', { name: /cancel/i })).toBeDisabled();
         expect(within(dialog).getByRole('button', { name: /delete/i })).toBeDisabled();
+        expect(within(dialog).getByRole('button', { name: /cancel/i })).toBeEnabled();
       });
 
       // Resolve to allow the modal to close and avoid act() warnings

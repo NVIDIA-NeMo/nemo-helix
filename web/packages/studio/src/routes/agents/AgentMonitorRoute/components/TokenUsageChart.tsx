@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { chartTooltipProps } from '@nemo/common/src/components/charts/ChartTooltip';
 import { Card, Checkbox, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { LineChartSkeleton } from '@studio/components/charts/LineChartSkeleton';
 import type { RunSummary } from '@studio/routes/agents/AgentMonitorRoute/telemetry';
@@ -159,14 +160,7 @@ export const TokenUsageChart: FC<Props> = ({ runs, isPending, height = 320 }) =>
           return rt != null ? formatLabel(rt) : '';
         }}
         cursor={{ fill: 'var(--background-color-accent-gray-subtle)' }}
-        contentStyle={{
-          fontSize: 12,
-          backgroundColor: 'var(--background-color-component-tooltip)',
-          borderColor: 'var(--border-color-base)',
-          color: 'var(--text-color-base)',
-        }}
-        labelStyle={{ color: 'var(--text-color-base)' }}
-        itemStyle={{ color: 'var(--text-color-base)' }}
+        {...chartTooltipProps}
       />
       {gapIds.map((gapId) => (
         <ReferenceLine

@@ -48,7 +48,7 @@ docker buildx bake \
 > **Prebuilt wheels (local builds).** The image installs `mamba-ssm` +
 > `causal-conv1d` from the shared `causal-conv1d-wheel` / `mamba-ssm-wheel`
 > bake contexts, using the `cu13.4` wheels built on NGC PyTorch 26.09
-> (automodel keeps the `cu13.3` wheels in the same images). A **local** bake must
+> (automodel and Customizer tasks install the same `cu13.4` builds). A **local** bake must
 > build those wheels first — prepend `USE_LOCAL_WHEELS=1` (or point
 > `WHEELS_REGISTRY`/`WHEELS_TAG` at prebuilt wheels), otherwise bake tries to
 > pull `${WHEELS_REGISTRY}/causal-conv1d-wheel:${WHEELS_TAG}` and fails. To

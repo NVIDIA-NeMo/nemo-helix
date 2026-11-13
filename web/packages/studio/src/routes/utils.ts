@@ -23,6 +23,7 @@ import {
   MODEL_DETAILS_ENABLED,
   MODEL_EVALUATION_FORM_ENABLED,
   OPTIMIZER_ENABLED,
+  TASKSETS_ENABLED,
   VIRTUAL_MODELS_ROUTE_ENABLED,
 } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
@@ -62,6 +63,9 @@ export const gateEvaluationRoutes = (routes: RouteObject | RouteObject[]) =>
 
 export const gateEvaluationBenchmarksRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(EVALS_ENABLED && EVALS_BENCHMARKS_ENABLED, routes);
+
+export const gateTasksetRoutes = (routes: RouteObject | RouteObject[]) =>
+  gateRoutes(EVALS_ENABLED && TASKSETS_ENABLED, routes);
 
 export const gateExperimentRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(EXPERIMENT_ENABLED, routes);
@@ -425,6 +429,21 @@ export const getNewCustomizationFormRoute = (workspace: string, options?: { mode
 
 export const getNewFilesetRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.filesetNew, { workspace });
+};
+
+export const getTasksetsRoute = (workspace: string) =>
+  generatePath(ROUTES.workspace.tasksets, { workspace });
+
+/** A taskset's page, optionally with one member task's drawer open. */
+export const getTasksetDetailRoute = (
+  workspace: string,
+  tasksetName: string,
+  options?: { task?: string }
+) => {
+  const base = generatePath(ROUTES.workspace.tasksetDetail, { workspace, tasksetName });
+  return options?.task
+    ? `${base}?${createSearchParams({ [QUERY_PARAMETERS.task]: options.task })}`
+    : base;
 };
 
 export const getSecretsRoute = (workspace: string) => {

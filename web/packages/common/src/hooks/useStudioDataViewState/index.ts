@@ -5,6 +5,7 @@ import * as DataView from '@nemo/common/src/components/DataView/internal';
 import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
 import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '@nemo/common/src/constants/pagination';
 import {
+  DATA_VIEW_SEARCH_PARAMS,
   decodeColumnFiltersParam,
   FILTERS_SEARCH_PARAM,
 } from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
@@ -164,11 +165,14 @@ export const useStudioDataViewState = <FilterType = Record<string, unknown>>(
     return isNaN(parsed) || parsed < 1 ? defaultValue : parsed;
   };
 
-  const urlPage = parsePageParam(searchParams.get('page'), defaultPage);
-  const urlPageSize = parsePageParam(searchParams.get('page_size'), defaultPageSize);
+  const urlPage = parsePageParam(searchParams.get(DATA_VIEW_SEARCH_PARAMS.page), defaultPage);
+  const urlPageSize = parsePageParam(
+    searchParams.get(DATA_VIEW_SEARCH_PARAMS.pageSize),
+    defaultPageSize
+  );
 
   // Parse sort from URL, falling back to defaultSort
-  const sortParam = searchParams.get('sort');
+  const sortParam = searchParams.get(DATA_VIEW_SEARCH_PARAMS.sort);
   const defaultSortEntries = defaultSort ?? EMPTY_SORT;
   const urlSorting = useMemo(() => {
     const decoded = decodeSorting(sortParam, multiSort);
@@ -202,36 +206,36 @@ export const useStudioDataViewState = <FilterType = Record<string, unknown>>(
           // Handle page
           if (page !== undefined) {
             if (page === defaultPage) {
-              next.delete('page');
+              next.delete(DATA_VIEW_SEARCH_PARAMS.page);
             } else {
-              next.set('page', String(page));
+              next.set(DATA_VIEW_SEARCH_PARAMS.page, String(page));
             }
           }
 
           // Handle page_size
           if (pageSize !== undefined) {
             if (pageSize === defaultPageSize) {
-              next.delete('page_size');
+              next.delete(DATA_VIEW_SEARCH_PARAMS.pageSize);
             } else {
-              next.set('page_size', String(pageSize));
+              next.set(DATA_VIEW_SEARCH_PARAMS.pageSize, String(pageSize));
             }
           }
 
           // Handle sort
           if (sort !== undefined) {
             if (sort === null || sort === defaultSortString) {
-              next.delete('sort');
+              next.delete(DATA_VIEW_SEARCH_PARAMS.sort);
             } else {
-              next.set('sort', sort);
+              next.set(DATA_VIEW_SEARCH_PARAMS.sort, sort);
             }
           }
 
           // Handle search
           if (search !== undefined) {
             if (search === '') {
-              next.delete('s');
+              next.delete(DATA_VIEW_SEARCH_PARAMS.search);
             } else {
-              next.set('s', search);
+              next.set(DATA_VIEW_SEARCH_PARAMS.search, search);
             }
           }
 
@@ -253,7 +257,7 @@ export const useStudioDataViewState = <FilterType = Record<string, unknown>>(
   );
 
   // Parse search and filters from URL
-  const urlSearch = searchParams.get('s') ?? '';
+  const urlSearch = searchParams.get(DATA_VIEW_SEARCH_PARAMS.search) ?? '';
   const urlFiltersParam = searchParams.get(FILTERS_SEARCH_PARAM);
   const urlColumnFilters = useMemo<DataView.TanstackTable.ColumnFiltersState>(
     () => decodeColumnFiltersParam(urlFiltersParam),
