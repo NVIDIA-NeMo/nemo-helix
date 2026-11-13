@@ -905,7 +905,7 @@ type PrimitivePropsWithRef$1<E extends React$1.ElementType> = React$1.ComponentP
   asChild?: boolean;
 };
 //#endregion
-//#region ../../node_modules/.pnpm/@nvidia+foundations-react-core@1.19.0_@types+react-dom@19.2.3_@types+react@19.2.14__@ty_e6b7e3dc6aefef577a16d193a23e5c52/node_modules/@nvidia/foundations-react-core/dist/sanitize-href-hVQjmGx5.d.ts
+//#region ../../node_modules/.pnpm/@nvidia+foundations-react-core@1.21.0_@types+react-dom@19.2.3_@types+react@19.2.14__@ty_e143e0c6b544f39812942ec6b511f7a3/node_modules/@nvidia/foundations-react-core/dist/sanitize-href-hVQjmGx5.d.ts
 /**
  * Common attributes
  * @see {@link https://react.dev/reference/react-dom/components/common}
@@ -1189,7 +1189,7 @@ type SafeHrefProp<T extends {
   href: string;
 };
 //#endregion
-//#region ../../node_modules/.pnpm/@nvidia+foundations-react-core@1.19.0_@types+react-dom@19.2.3_@types+react@19.2.14__@ty_e6b7e3dc6aefef577a16d193a23e5c52/node_modules/@nvidia/foundations-react-core/dist/index.d.ts
+//#region ../../node_modules/.pnpm/@nvidia+foundations-react-core@1.21.0_@types+react-dom@19.2.3_@types+react@19.2.14__@ty_e143e0c6b544f39812942ec6b511f7a3/node_modules/@nvidia/foundations-react-core/dist/index.d.ts
 declare const text$1: (props?: ({
   fontFamily?: "sans" | "mono" | null | undefined;
   fontWeight?: "light" | "regular" | "semibold" | "bold" | null | undefined;
@@ -1234,7 +1234,6 @@ interface TextProps extends PrimitivePropsWithRef<"span"> {
  * @llm `display/*` kinds are reserved for hero and marketing surfaces; use `title/*` for standard in-app headings.
  *
  * @example
- * <caption>Kinds Text</caption>
  * Pick a `kind` from one of the five families: `display/*` for the largest hero text, `title/*` for headings, `body/*` for prose, `label/*` for short UI labels, and `mono/*` for code or technical identifiers. Each family offers multiple sizes and weights — see the `kind` type for the full set.
  * ```tsx
  * <Stack gap="density-md">
@@ -1249,7 +1248,6 @@ interface TextProps extends PrimitivePropsWithRef<"span"> {
  * ```
  *
  * @example
- * <caption>Custom Styled Text</caption>
  * Reach for the granular fontFamily, fontWeight, fontSize, lineHeight, and fontStyle props as an escape hatch when no predefined kind matches the design.
  * ```tsx
  * <Text
@@ -1264,7 +1262,6 @@ interface TextProps extends PrimitivePropsWithRef<"span"> {
  * ```
  *
  * @example
- * <caption>Underlined Text</caption>
  * Add the underline prop on top of any kind to flag inline emphasis like links or highlighted terms without changing the type style.
  * ```tsx
  * <Text kind="body/regular/md" underline>
@@ -1273,14 +1270,12 @@ interface TextProps extends PrimitivePropsWithRef<"span"> {
  * ```
  *
  * @example
- * <caption>Inherit Kind Text</caption>
  * Use kind="inherit" when Text is nested inside an element that already defines the type style (e.g. inside another Text or a styled heading) and you only need the Text primitive's other props.
  * ```tsx
  * <Text kind="inherit">Inherits parent typography</Text>
  * ```
  *
  * @example
- * <caption>As Child Text</caption>
  * Use asChild to apply Text styling to a semantic HTML element like h1–h6 without adding an extra wrapper.
  * ```tsx
  * <Text asChild kind="title/lg">
@@ -1289,7 +1284,6 @@ interface TextProps extends PrimitivePropsWithRef<"span"> {
  * ```
  *
  * @example
- * <caption>HTML</caption>
  * ```html
  * <span class="nv-text nv-text--label-regular-md">Text content</span>
  * ```
@@ -1339,7 +1333,6 @@ interface AnchorProps extends PrimitivePropsWithRef<"a">, Pick<TextProps, "fontW
  * @see {@link Breadcrumbs}
  *
  * @example
- * <caption>Basic Anchor</caption>
  * ```tsx
  * <Flex gap="2">
  * 	<Anchor href="/" kind="inline">
@@ -1352,7 +1345,6 @@ interface AnchorProps extends PrimitivePropsWithRef<"a">, Pick<TextProps, "fontW
  * ```
  *
  * @example
- * <caption>Custom Link Component</caption>
  * Use asChild to render framework specific link components with our styling
  * ```tsx
  * <Anchor asChild>
@@ -1361,7 +1353,6 @@ interface AnchorProps extends PrimitivePropsWithRef<"a">, Pick<TextProps, "fontW
  * ```
  *
  * @example
- * <caption>External Link Anchor</caption>
  * Use `external` to open the link in a new tab, secure it with `rel="noopener noreferrer"`, and append an external-link icon plus an accessible "(opens in a new tab)" suffix, all in one prop.
  * ```tsx
  * <Anchor href="https://example.com" external>
@@ -1370,7 +1361,6 @@ interface AnchorProps extends PrimitivePropsWithRef<"a">, Pick<TextProps, "fontW
  * ```
  *
  * @example
- * <caption>Disabled Anchor</caption>
  * A disabled anchor will render as a span instead of an anchor tag
  * ```tsx
  * <Anchor disabled href="/">
@@ -1379,7 +1369,6 @@ interface AnchorProps extends PrimitivePropsWithRef<"a">, Pick<TextProps, "fontW
  * ```
  *
  * @example
- * <caption>As Button</caption>
  * For an Anchor that looks like a link but triggers an action
  * ```tsx
  * <Anchor asChild>
@@ -1390,7 +1379,6 @@ interface AnchorProps extends PrimitivePropsWithRef<"a">, Pick<TextProps, "fontW
  * ```
  *
  * @example
- * <caption>HTML</caption>
  * ```html
  * <a
  *   href="https://example.com"
@@ -1481,7 +1469,6 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  * @see {@link Anchor}
  *
  * @example
- * <caption>Basic Button</caption>
  * ```tsx
  * <Flex direction="col" gap="2">
  * 	<Button kind="primary" color="brand">
@@ -1495,7 +1482,6 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  * ```
  *
  * @example
- * <caption>With Icon Button</caption>
  * ```tsx
  * <Button>
  * 	<Document />
@@ -1504,7 +1490,6 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  * ```
  *
  * @example
- * <caption>Icon Only Button</caption>
  * ```tsx
  * <Button aria-label="Add document">
  * 	<Document />
@@ -1512,35 +1497,30 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  * ```
  *
  * @example
- * <caption>Primary Action Button</caption>
  * Preferred default for primary actions: primary & brand. Use the primary action button for the most important action in a context. It should be used sparingly and only for the most important actions(submit, create, deploy, save, etc)
  * ```tsx
  * <Button color="brand">Create cluster</Button>
  * ```
  *
  * @example
- * <caption>Secondary Action Button</caption>
  * Preferred default for secondary actions: secondary & neutral. Use the secondary action button for actions that are not the most important in a context. It should be used for actions that are not the most important in a context(cancel, close, etc)
  * ```tsx
  * <Button kind="secondary">Deploy to GPU</Button>
  * ```
  *
  * @example
- * <caption>Tertiary Or Inline Action Button</caption>
  * Preferred default for tertiary/inline actions: tertiary & neutral. For example - edit, configure, kebab menu triggers, etc
  * ```tsx
  * <Button kind="tertiary">View logs</Button>
  * ```
  *
  * @example
- * <caption>Destructive Action Button</caption>
  * Preferred default for destructive actions: primary & danger. Use the destructive action button for actions that are destructive and cannot be undone. For status-changing or reversible actions (remove from list, unassign, archive), use secondary + neutral. Reserve `color="danger"` for irreversible destructive actions.
  * ```tsx
  * <Button color="danger">Delete cluster</Button>
  * ```
  *
  * @example
- * <caption>Button As Link</caption>
  * ```tsx
  * <Button asChild>
  * 	<a href="https://example.com">Link</a>
@@ -1548,7 +1528,6 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  * ```
  *
  * @example
- * <caption>Button Loading Methods</caption>
  * Loading buttons with an unchanged label, a changing label, an icon-only action, no indicator, and a custom arrow spinner.
  * ```tsx
  * <Flex direction="col" align="start" gap="4">
@@ -1596,7 +1575,6 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  * ```
  *
  * @example
- * <caption>Button With Truncation</caption>
  * Button text should be short and concise, and if not text will wrap to the next line to ensure users can read the text. If you prefer to truncate the text you should set the `title` prop.
  * ```tsx
  * <Button title="Download the full results as a CSV file">
@@ -1605,7 +1583,6 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  * ```
  *
  * @example
- * <caption>HTML</caption>
  * ```html
  * <div style="display: flex; gap: 8px;">
  *   <button
@@ -1624,7 +1601,6 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  * ```
  *
  * @example
- * <caption>Open State HTML Structure</caption>
  * Note: we apply `:active` styles when the button element has `data-state="open"`. This is to handle cases such as Dropdown components where the button is used as a trigger. You can add `data-state="open"` to the button to force active styles when necessary. In situations where you don't want this you can apply `data-active-state="disabled"` to the button to prevent the active styles from being applied.
  * ```html
  * <div style="display: flex; gap: var(--spacing-density-md);">
@@ -1647,463 +1623,6 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  * ```
  */
 declare const Button: react__default.ForwardRefExoticComponent<Omit<ButtonProps, "ref"> & react__default.RefAttributes<HTMLButtonElement>>;
-declare const badge: (props?: ({
-  kind?: "outline" | "solid" | null | undefined;
-  color?: "blue" | "green" | "red" | "yellow" | "purple" | "teal" | "gray" | null | undefined;
-  size?: "small" | "medium" | "large" | null | undefined;
-} & ClassProp) | undefined) => string;
-type BadgeVariantProps = VariantProps<typeof badge>;
-interface BadgeProps extends Omit<PrimitivePropsWithRef<"span">, "color"> {
-  /**
-   * Semantic color used to convey meaning at a glance.
-   * @defaultValue "blue"
-   */
-  color?: BadgeVariantProps["color"];
-  /**
-   * Visual treatment of the badge.
-   * - "outline" - De-emphasized contexts such as card metadata or secondary information.
-   * - "solid" - Prominent status badges in detail views, side panels, and status bars.
-   * @defaultValue "outline"
-   */
-  kind?: BadgeVariantProps["kind"];
-  /**
-   * Controls the badge's padding and text size. Reach for `small` in very dense layouts, and `large` for prominent status in detail views.
-   * @defaultValue "medium"
-   */
-  size?: BadgeVariantProps["size"];
-}
-interface CardContentProps extends ComponentPropsWithRef<"div"> {}
-/**
- * The body region of a composed card. Holds text, tags, and other primary content beneath any media.
- * @param props - {@link CardContentProps}
- */
-declare const CardContent: react__default.ForwardRefExoticComponent<Omit<CardContentProps, "ref"> & react__default.RefAttributes<HTMLDivElement>>;
-declare const cardMedia: (props?: ({
-  mediaTheme?: "light" | "dark" | null | undefined;
-} & ClassProp) | undefined) => string;
-interface CardMediaProps extends SlottablePropsWithRef<"div"> {
-  /**
-   * Forces the theme of overlaid `slotHeader` content so it contrasts with the media beneath.
-   * - "dark" - For light or bright media; renders overlaid content in the dark theme.
-   * - "light" - For dark media; renders overlaid content in the light theme.
-   */
-  mediaTheme?: VariantProps<typeof cardMedia>["mediaTheme"];
-  /** Overlays content (typically the card title and actions) on top of the media. */
-  slotHeader?: react__default.ReactNode;
-}
-/**
- * The media region of a composed card. Typically holds an image or video rendered above the content, with an optional overlaid header.
- * @param props - {@link CardMediaProps}
- */
-declare const CardMedia: react__default.ForwardRefExoticComponent<Omit<CardMediaProps, "ref"> & react__default.RefAttributes<HTMLDivElement>>;
-declare const cardRoot: (props?: ({
-  density?: "compact" | "standard" | "spacious" | null | undefined;
-  interactive?: boolean | null | undefined;
-  kind?: "solid" | "gradient" | "float" | null | undefined;
-  layout?: "horizontal" | "vertical" | null | undefined;
-  selected?: boolean | null | undefined;
-} & ClassProp) | undefined) => string;
-interface CardRootProps extends PrimitivePropsWithRef<"div">, DensityVariantProps {
-  /**
-   * Adds hover and focus affordances to signal the card is clickable. Do not enable on non-clickable cards — it creates false affordance.
-   * @defaultValue false
-   */
-  interactive?: boolean;
-  /**
-   * Visual treatment of the card.
-   * - "solid" - General-purpose treatment with padded content and a hard border between media and content. Use for most cards.
-   * - "gradient" - Same as "solid" but the media fades into the content. Use for promotional or hero-style cards.
-   * - "float" - Pairs with `slotMedia` to render the media as a bordered tile while the content sits on the page background without padding. Use when the card should visually lift off the surface.
-   * @defaultValue "solid"
-   */
-  kind?: VariantProps<typeof cardRoot>["kind"];
-  /**
-   * Orientation of the media and content.
-   * - "vertical" - Media stacks above the content. Use when the media is the focal point and cards display in a grid.
-   * - "horizontal" - Media sits to the left of the content. Use when the content outweighs the media and cards stack in a list.
-   * @defaultValue "vertical"
-   */
-  layout?: VariantProps<typeof cardRoot>["layout"];
-  /**
-   * Applies the selected visual state, e.g. when the card represents the current choice in a list.
-   * @defaultValue false
-   */
-  selected?: boolean;
-}
-interface CardProps extends CardRootProps, Pick<CardMediaProps, "mediaTheme"> {
-  /** Header content rendered above the body. When paired with `slotMedia`, it overlays the media instead. */
-  slotHeader?: react__default.ReactNode;
-  /** Media content rendered above the body, typically an image or video. Pair with `mediaTheme` when also using `slotHeader` so overlaid content remains readable. */
-  slotMedia?: react__default.ReactNode;
-  /** Native HTML attributes forwarded to the internal composed components. */
-  attributes?: {
-    CardContent?: NativeElementAttributes<"div", typeof CardContent>;
-    CardMedia?: NativeElementAttributes<"div", typeof CardMedia>;
-  };
-}
-/**
- * A container that groups content, actions, and optional media about a single subject. Cards are fluid and grow to fill their container.
- * @param props - {@link CardProps}
- *
- * @llm The Card already has padding, so do not add padding to the Card component or to it's children.
- * @llm Card is for single-subject entity display (one cluster, one user, one model). Do not use Card as a general container on dashboards — use Panel instead. Card's interaction states and internal structure add unintended visual layering when used as a generic wrapper.
- * @llm Cards are fluid and grow to fill their container — do not set fixed widths. Control sizing through the parent layout (e.g. a responsive Grid). Apply `className="h-fit"` when a card should shrink to its content height.
- * @llm Identity test for Card vs Panel: if the container represents "a thing" with its own name and attributes, use Card; if it represents "a region of content", use Panel.
- * @llm Pair `selected` with a visible affordance for what selection means — a bulk-action toolbar, a selection-count indicator, or a primary action — so users understand the consequence of selecting a card.
- * @llm A Card is EITHER a single click target (set `interactive` and render via `asChild` as a link, button or label with containing hidden input) OR carries inline action buttons on its surface — never both. Combining them creates competing click targets and ambiguous focus order.
- * @llm When a Card is `interactive`, do not place other interactive elements (Button, Anchor, Menu, etc.) inside it. Nested click targets break the "whole card is one click" affordance.
- *
- * @see {@link Panel}
- * @see {@link Grid}
- *
- * @example
- * <caption>Basic Card That Fits Its Content</caption>
- * ```tsx
- * <Card className="h-fit">
- * 	<Badge kind="solid" color="gray">
- * 		Badge
- * 	</Badge>
- * 	<Text kind="body/bold/2xl">Header</Text>
- * 	<Text kind="body/regular/md">Lorem ipsum dolor sit amet</Text>
- * </Card>
- * ```
- *
- * @example
- * <caption>With Header Card</caption>
- * The header slot is rendered absolutely over the media. Use it to add a persistent label or badge above the body content. If there is no media, the header will be rendered above the body content. It is a flex container with a preset gap.
- * ```tsx
- * <Card
- * 	slotHeader={
- * 		<Flex gap="inherit">
- * 			<Badge>New</Badge>
- * 			<Badge>Alt</Badge>
- * 		</Flex>
- * 	}
- * >
- * 	Card body content
- * </Card>
- * ```
- *
- * @example
- * <caption>With Media Card</caption>
- * Use when the card needs a visual hero area like an image or video above or alongside the content. If the media rendered is dark or light, and you're using `slotHeader` in conjunction with it, you may want to set `mediaTheme` to ensure text and components are readable. This will set light/dark theme in the header slot to ensure sufficient contrast.
- * ```tsx
- * <Card
- * 	slotHeader={<span>Featured</span>}
- * 	slotMedia={<MediaImg />}
- * 	mediaTheme="light"
- * >
- * 	Card content below media
- * </Card>
- * ```
- *
- * @example
- * <caption>Model Card Example</caption>
- * Canonical browse-collection card anatomy for a single entity (model catalog, dataset gallery, template library, related-item strip). Slot order: header `Badge` (resource type) → publisher → title → description → topic `Tag` row (`outline` / `gray`) → footer stats (`text-placeholder`, left-aligned, never `justify="between"`). Every card in the collection must share this same slot structure — see the entity-cards pattern guide.
- * ```tsx
- * <Card slotHeader={<Badge kind="solid">Model</Badge>}>
- * 	<Flex direction="col" gap="density-sm">
- * 		<Text className="text-secondary" kind="label/regular/sm">
- * 			NVIDIA
- * 		</Text>
- * 		<Text kind="body/bold/xl">Nemotron 3 Super 120B</Text>
- * 		<Text kind="body/regular/md">
- * 			120B-parameter reasoning model optimized for enterprise RAG.
- * 		</Text>
- * 	</Flex>
- * 	<Flex gap="2" wrap="wrap">
- * 		<Tag kind="outline" color="gray" readOnly>
- * 			Reasoning
- * 		</Tag>
- * 		<Tag kind="outline" color="gray" readOnly>
- * 			English
- * 		</Tag>
- * 		<Tag kind="outline" color="gray" readOnly>
- * 			RAG
- * 		</Tag>
- * 	</Flex>
- * 	<Text className="text-placeholder" kind="label/regular/sm">
- * 		Updated 3d · 12.4k · 120B
- * 	</Text>
- * </Card>
- * ```
- *
- * @example
- * <caption>Interactive Card</caption>
- * Use when the entire card should be a clickable target, such as navigation or selection. Render as an `<a>` for navigation or a button for actions. Do not place other interactive elements (Button, Anchor, Menu, etc.) on the card surface — competing click targets are ambiguous. If you need inline actions per card instead, omit `interactive` and use the `With Actions` pattern below.
- * ```tsx
- * <Card asChild interactive>
- * 	<button type="button" onClick={handleClick}>
- * 		<Flex direction="col" gap="1">
- * 			<Text className="text-secondary" kind="label/bold/sm">
- * 				DeepSeek
- * 			</Text>
- * 			<Text kind="label/bold/md">DeepSeek-V3.1</Text>
- * 			<Text kind="body/regular/sm">
- * 				DeepSeek V3.1 Instruct is a hybrid AI model with fast reasoning, 128K
- * 				context, and strong tool use.
- * 			</Text>
- * 		</Flex>
- * 	</button>
- * </Card>
- * ```
- *
- * @example
- * <caption>With Actions</caption>
- * Use when the user needs to perform actions without navigating to a detail view, or when multiple distinct actions are available per card. The card itself is not a click target in this pattern — do not also enable `interactive`.
- * ```tsx
- * <Card>
- * 	Card content... Right aligned actions:
- * 	<Flex gap="2" justify="end" wrap="wrap">
- * 		<Button kind="tertiary">Export</Button>
- * 		<Button kind="secondary">Share</Button>
- * 	</Flex>
- * 	Or you can have actions stretch across the card:
- * 	<Flex gap="2" justify="end" wrap="wrap">
- * 		<Button kind="tertiary" style={{ flex: 1 }}>
- * 			Export
- * 		</Button>
- * 		<Button kind="secondary" style={{ flex: 1 }}>
- * 			Share
- * 		</Button>
- * 	</Flex>
- * 	Or for just a single action:
- * 	<Button color="brand" style={{ width: "100%" }}>
- * 		Share
- * 	</Button>
- * </Card>
- * ```
- *
- * @example
- * <caption>Cards In Responsive Grid</caption>
- * It's common to use cards in a responsive grid. Using the grid component, set a minimum column width and let the cards automatically resize to fill the available space.
- * ```tsx
- * <Grid colMinWidth="250px" gap="2">
- * 	<Card>Card 1</Card>
- * 	<Card>Card 2</Card>
- * 	<Card>Card 3</Card>
- * </Grid>
- * ```
- *
- * @example
- * <caption>Composed</caption>
- * ```tsx
- * <Flex direction="col" gap="1">
- * 	<CardRoot interactive={false} kind="solid">
- * 		<CardMedia mediaTheme="light" slotHeader={<Badge>Featured</Badge>}>
- * 			<MediaImg />
- * 		</CardMedia>
- * 		<CardContent>Composed card with media</CardContent>
- * 	</CardRoot>
- * 	<CardRoot>
- * 		<CardContent>
- * 			<div className="nv-card-content-header">
- * 				<Badge>Featured</Badge>
- * 			</div>
- * 			Composed card without media
- * 		</CardContent>
- * 	</CardRoot>
- * </Flex>
- * ```
- *
- * @example
- * <caption>HTML</caption>
- * ```html
- * <div class="nv-card-root nv-card-root--kind-solid nv-card-root--layout-vertical">
- *   <div class="nv-card-media">
- *     <img src="./images/placeholder.png" alt="New York City skyline" />
- *     <div class="nv-card-media-header">
- *       <span class="nv-badge nv-badge--kind-solid">Featured</span>
- *     </div>
- *   </div>
- *   <div class="nv-card-content">
- *     <h3 class="nv-text nv-text--body-bold-xl">New York City</h3>
- *     <p class="nv-text nv-text--body-regular-md">The City that Never Sleeps</p>
- *   </div>
- * </div>
- * ```
- */
-declare const Card$1: react__default.ForwardRefExoticComponent<Omit<CardProps, "ref"> & react__default.RefAttributes<HTMLDivElement>>;
-declare const label$1: (props?: ({
-  disabled?: boolean | null | undefined;
-  required?: boolean | null | undefined;
-  size?: "small" | "medium" | "large" | null | undefined;
-} & ClassProp) | undefined) => string;
-interface LabelProps extends PrimitivePropsWithRef<"label"> {
-  /** ID of the form control this label is associated with. */
-  htmlFor?: string;
-  /** Styles the label as disabled, for use only with disabled form controls. */
-  disabled?: boolean;
-  /** Renders the required indicator after the label text. Presentational only — also set `required` (or `aria-required`) on the control so assistive tech announces it. */
-  required?: boolean;
-  /**
-   * Typographic size of the label.
-   * @defaultValue "medium"
-   */
-  size?: VariantProps<typeof label$1>["size"];
-}
-/**
- * A text label for a form control. Prefer FormField for end-user forms; this primitive is intended for composing custom field layouts.
- * @param props - {@link LabelProps}
- *
- * @llm The required indicator belongs on the label that names the field, and only once. Inside a `FormField`, set `required` there instead — it already renders the indicator on the field label.
- * @llm `required` on Label is presentational. Assistive tech hears required state from the control, so set `required` (or `aria-required`) there too.
- *
- * @example
- * <caption>Basic Label</caption>
- * Use when labeling a form input to provide accessible context for the control.
- * ```tsx
- * <Label htmlFor="email">Email Address</Label>
- * ```
- *
- * @example
- * <caption>Disabled Label</caption>
- * Use when the associated input is disabled to visually communicate the inactive state.
- * ```tsx
- * <Label htmlFor="email" disabled aria-disabled="true">
- * 	Email Address
- * </Label>
- * ```
- *
- * @example
- * <caption>Required Label</caption>
- * Renders the required indicator after the label text. It is presentational, so set `required` on the control as well — that is what assistive tech announces.
- * ```tsx
- * <Flex direction="col" gap="2">
- * 	<Label htmlFor="required-email" required>
- * 		Email Address
- * 	</Label>
- * 	<TextInput
- * 		id="required-email"
- * 		name="email"
- * 		placeholder="name@example.com"
- * 		required
- * 		type="email"
- * 	/>
- * </Flex>
- * ```
- *
- * @example
- * <caption>Small Label</caption>
- * Use in compact layouts or alongside small-sized inputs where space is limited.
- * ```tsx
- * <Label htmlFor="email" size="small">
- * 	Email Address
- * </Label>
- * ```
- *
- * @example
- * <caption>Label With Icon</caption>
- * Use when the label needs an inline help affordance. Label accepts arbitrary children so an icon or tooltip can sit alongside the text.
- * ```tsx
- * <Label htmlFor="email">
- * 	Email Address
- * 	<Tooltip slotContent="We use this to send account confirmations.">
- * 		<InfoCircle />
- * 	</Tooltip>
- * </Label>
- * ```
- *
- * @example
- * <caption>HTML</caption>
- * ```html
- * <label for="email" class="nv-label">
- *   Email Address
- * </label>
- * <div class="nv-input-shell">
- *   <input
- *     type="email"
- *     id="email"
- *     placeholder="name@example.com"
- *   />
- * </div>
- * ```
- *
- * @example
- * <caption>HTML Required</caption>
- * Add `nv-label--required` for the required indicator, and keep `required` on the control it names.
- * ```html
- * <label for="required-email" class="nv-label nv-label--required">
- *   Email Address
- * </label>
- * <div class="nv-input-shell">
- *   <input
- *     type="email"
- *     id="required-email"
- *     placeholder="name@example.com"
- *     required
- *   />
- * </div>
- * ```
- */
-declare const Label: react__default.ForwardRefExoticComponent<Omit<LabelProps, "ref"> & react__default.RefAttributes<HTMLLabelElement>>;
-/** Checked state of a checkbox, including the tri-state `"indeterminate"` value. */
-type CheckedState = boolean | "indeterminate";
-interface CheckboxInputProps extends Omit<ComponentPropsWithRef<"input">, "defaultChecked" | "checked" | "type"> {
-  /**
-   * Initial checked state when the checkbox is uncontrolled, including the tri-state
-   * `"indeterminate"` value.
-   */
-  defaultChecked?: CheckedState;
-  /**
-   * Controlled checked state; pair with `onCheckedChange` to handle updates.
-   */
-  checked?: CheckedState;
-  /**
-   * Called when the checked state changes.
-   */
-  onCheckedChange?: (checked: CheckedState) => void;
-  /**
-   * Renders the checkbox in an error state.
-   */
-  error?: boolean;
-  /**
-   * Disables interaction with the checkbox.
-   */
-  disabled?: boolean;
-  /**
-   * Form field name submitted with the checkbox value as a name/value pair.
-   */
-  name?: string;
-  /**
-   * Requires the checkbox to be checked for form submission.
-   */
-  required?: boolean;
-  /**
-   * ID of the form element to associate with, allowing the checkbox to be rendered outside that form.
-   */
-  form?: string;
-}
-/**
- * The `<input type="checkbox">` element of a composed checkbox, including indeterminate-state handling and form integration.
- * @param props - {@link CheckboxInputProps}
- */
-declare const CheckboxInput: react__default.ForwardRefExoticComponent<Omit<CheckboxInputProps, "ref"> & react__default.RefAttributes<HTMLInputElement>>;
-declare const checkboxRoot: (props?: ({
-  labelSide?: "right" | "left" | null | undefined;
-} & ClassProp) | undefined) => string;
-interface CheckboxRootProps extends PrimitivePropsWithRef<"div"> {
-  /**
-   * Side of the checkbox the label is rendered on.
-   * @defaultValue "right"
-   */
-  labelSide?: VariantProps<typeof checkboxRoot>["labelSide"];
-}
-interface PropsFromRoot$4 extends Omit<CheckboxRootProps, AttributesFor<"input"> | "ref"> {}
-interface PropsFromInput$3 extends Pick<CheckboxInputProps, Extract<keyof CheckboxInputProps, AttributesFor<"input">> | "onCheckedChange" | "error"> {}
-interface CheckboxProps extends PropsFromRoot$4, PropsFromInput$3 {
-  /**
-   * Label rendered next to the checkbox and automatically associated with it for clicks and assistive tech.
-   */
-  slotLabel?: react__default.ReactNode;
-  /**
-   * Native HTML attributes forwarded to the internal composed components.
-   */
-  attributes?: {
-    CheckboxInput?: NativeElementAttributes<"input", typeof CheckboxInput>;
-    Label?: NativeElementAttributes<"label", typeof Label>;
-  };
-}
 declare const inputShell: (props?: ({
   kind?: "flat" | "floating" | null | undefined;
   layout?: "horizontal" | "vertical" | null | undefined;
@@ -2152,6 +1671,48 @@ interface WithInputShellStatus {
  * @param props - {@link ButtonProps}
  */
 declare const InputDismissButton: React$1.ForwardRefExoticComponent<Omit<ButtonProps, "ref"> & React$1.RefAttributes<HTMLButtonElement>>;
+/** Checked state of a checkbox, including the tri-state `"indeterminate"` value. */
+type CheckedState = boolean | "indeterminate";
+interface CheckboxInputProps extends Omit<ComponentPropsWithRef<"input">, "defaultChecked" | "checked" | "type"> {
+  /**
+   * Initial checked state when the checkbox is uncontrolled, including the tri-state
+   * `"indeterminate"` value.
+   */
+  defaultChecked?: CheckedState;
+  /**
+   * Controlled checked state; pair with `onCheckedChange` to handle updates.
+   */
+  checked?: CheckedState;
+  /**
+   * Called when the checked state changes.
+   */
+  onCheckedChange?: (checked: CheckedState) => void;
+  /**
+   * Renders the checkbox in an error state.
+   */
+  error?: boolean;
+  /**
+   * Disables interaction with the checkbox.
+   */
+  disabled?: boolean;
+  /**
+   * Form field name submitted with the checkbox value as a name/value pair.
+   */
+  name?: string;
+  /**
+   * Requires the checkbox to be checked for form submission.
+   */
+  required?: boolean;
+  /**
+   * ID of the form element to associate with, allowing the checkbox to be rendered outside that form.
+   */
+  form?: string;
+}
+/**
+ * The `<input type="checkbox">` element of a composed checkbox, including indeterminate-state handling and form integration.
+ * @param props - {@link CheckboxInputProps}
+ */
+declare const CheckboxInput: react__default.ForwardRefExoticComponent<Omit<CheckboxInputProps, "ref"> & react__default.RefAttributes<HTMLInputElement>>;
 declare const dividerElement: (props?: ({
   orientation?: "horizontal" | "vertical" | null | undefined;
   width?: "small" | "medium" | "large" | null | undefined;
@@ -2198,7 +1759,6 @@ interface DividerProps extends DividerElementProps, Pick<PrimitiveComponentProps
  * @see {@link Stack}
  *
  * @example
- * <caption>Basic Divider</caption>
  * ```tsx
  * <Flex className="w-full" direction="col" gap="3">
  * 	<Divider />
@@ -2208,7 +1768,6 @@ interface DividerProps extends DividerElementProps, Pick<PrimitiveComponentProps
  * ```
  *
  * @example
- * <caption>With Text</caption>
  * ```tsx
  * <Flex align="center" gap="density-lg">
  * 	<Divider />
@@ -2218,13 +1777,11 @@ interface DividerProps extends DividerElementProps, Pick<PrimitiveComponentProps
  * ```
  *
  * @example
- * <caption>Vertical Divider</caption>
  * ```tsx
  * <Divider orientation="vertical" />
  * ```
  *
  * @example
- * <caption>Composed</caption>
  * ```tsx
  * <DividerRoot paddingY="2">
  * 	<DividerElement orientation="horizontal" width="medium" />
@@ -2232,7 +1789,6 @@ interface DividerProps extends DividerElementProps, Pick<PrimitiveComponentProps
  * ```
  *
  * @example
- * <caption>HTML</caption>
  * ```html
  * <div class="nv-divider-root">
  *   <div
@@ -2473,9 +2029,9 @@ interface MenuRootProps extends PrimitivePropsWithRef<"menu">, DensityVariantPro
   filterable?: boolean;
 }
 type ExcludedInputAttributes = Exclude<AttributesFor<"input">, "size">;
-interface PropsFromRoot$3 extends WithInputShellStatus, Omit<InputShellProps, ExcludedInputAttributes> {}
-interface PropsFromInput$2 extends Pick<ComponentPropsWithRef<"input">, ExcludedInputAttributes> {}
-interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
+interface PropsFromRoot$4 extends WithInputShellStatus, Omit<InputShellProps, ExcludedInputAttributes> {}
+interface PropsFromInput$3 extends Pick<ComponentPropsWithRef<"input">, ExcludedInputAttributes> {}
+interface TextInputProps extends PropsFromRoot$4, PropsFromInput$3 {
   /**
    * Renders a dismiss button that clears the input and returns focus to it.
    * @defaultValue `true` when `type="search"`, otherwise `false`
@@ -2516,7 +2072,6 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * @see {@link InputShell}
  *
  * @example
- * <caption>Basic Text Input</caption>
  * ```tsx
  * <Flex direction="col" gap="density-md">
  * 	<TextInput aria-label="Greeting" defaultValue="Hello, world!" />
@@ -2525,7 +2080,6 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * ```
  *
  * @example
- * <caption>With Slots Text Input</caption>
  * Use slotStart for affordance icons (e.g. a magnifying glass for search) and slotEnd for trailing hints like result counts or unit labels.
  * ```tsx
  * <TextInput
@@ -2537,7 +2091,6 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * ```
  *
  * @example
- * <caption>Search Text Input</caption>
  * Standard search input: `type="search"` and `dismissible` so users can quickly clear the query. Pair with a leading magnifying-glass icon in `slotStart`. Provide `aria-label` when the input is not inside a FormField.
  * ```tsx
  * <TextInput
@@ -2550,7 +2103,6 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * ```
  *
  * @example
- * <caption>Dismissible Text Input</caption>
  * Use when the user needs a quick way to clear the field, such as search inputs.
  * ```tsx
  * <TextInput
@@ -2561,21 +2113,18 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * ```
  *
  * @example
- * <caption>Read Only Text Input</caption>
  * Use readOnly (instead of disabled) when the value should remain visible, focusable, and copyable but not editable — common in summary or review screens.
  * ```tsx
  * <TextInput aria-label="Read-only value" readOnly value="Read-only value" />
  * ```
  *
  * @example
- * <caption>Disabled Text Input</caption>
  * Use when the field value is locked by external conditions and cannot be changed.
  * ```tsx
  * <TextInput aria-label="Disabled value" disabled defaultValue="Cannot edit" />
  * ```
  *
  * @example
- * <caption>Size Text Input</caption>
  * Match the input size to surrounding controls — small for dense tables/toolbars, large for hero search bars or onboarding forms.
  * ```tsx
  * <Stack gap="density-md">
@@ -2586,7 +2135,6 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * ```
  *
  * @example
- * <caption>Status Text Input</caption>
  * Set `status` to drive validation styling manually — `error` for failed validation or `success` to confirm a passing value. Reach for `withValidation` when native HTML constraints can drive the state automatically.
  * ```tsx
  * <Stack gap="density-md">
@@ -2604,7 +2152,6 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * ```
  *
  * @example
- * <caption>With Validation Text Input</caption>
  * Use withValidation to drive success/error styling automatically from native HTML constraints (`required`, `pattern`, `type="email"`, etc.) via `:user-valid` and `:user-invalid` — no controlled state needed.
  * ```tsx
  * <TextInput
@@ -2616,7 +2163,6 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * ```
  *
  * @example
- * <caption>Date Text Input</caption>
  * Use type="date" or type="datetime-local" to render a calendar button that opens the browser's native picker via `showPicker()`.
  * ```tsx
  * <Stack gap="density-md">
@@ -2626,14 +2172,12 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * ```
  *
  * @example
- * <caption>Time Text Input</caption>
  * Use for time selection with a native picker button. Set step={60} to hide seconds.
  * ```tsx
  * <TextInput aria-label="Time" type="time" step={60} />
  * ```
  *
  * @example
- * <caption>With Form Field Text Input</caption>
  * Wrap in FormField to attach a label and helper text. FormField pipes `id`, `name`, and validation status into the input via context, and automatically renders the required indicator when the wrapped input has `required` set.
  * ```tsx
  * <FormField
@@ -2646,7 +2190,6 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * ```
  *
  * @example
- * <caption>Controlled Text Input</caption>
  * Use controlled mode when state lives outside the input — e.g. when syncing with form libraries or URL state.
  * ```tsx
  * () => {
@@ -2662,7 +2205,6 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * ```
  *
  * @example
- * <caption>Debounced Text Input</caption>
  * Combine with `useDebounce` to throttle expensive work like API calls or filtering driven by the input value.
  * ```tsx
  * () => {
@@ -2682,7 +2224,6 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * ```
  *
  * @example
- * <caption>Composed</caption>
  * Drop down to InputShell + a raw `<input>` when you need full control over slot content, ARIA, or non-standard layouts that TextInput's API doesn't expose.
  * ```tsx
  * <InputShell>
@@ -2692,7 +2233,6 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  * ```
  *
  * @example
- * <caption>HTML</caption>
  * ```html
  * <label class="nv-input-shell nv-text-input-root">
  *   <input type="text" aria-label="Username" placeholder="Enter your username" />
@@ -2739,6 +2279,10 @@ interface MenuSectionProps extends PrimitivePropsWithRef<"div"> {
  */
 declare const MenuSection: React$1.ForwardRefExoticComponent<Omit<MenuSectionProps, "ref"> & React$1.RefAttributes<HTMLDivElement>>;
 interface BaseMenuItem extends Pick<MenuItemProps, "children" | "filterValue" | "disabled" | "onSelect" | "slotStart" | "slotEnd" | "danger"> {
+  /**
+   * Stable identity for the entry, used as its React key instead of its position. Set it when entries can be added, removed, or reordered, or when the label or `value` can change while it stays the same item. Not rendered as a DOM `id`.
+   */
+  id?: string;
   /** String used to match this entry when the menu is filterable. Pass `null` to opt the entry out of filtering. */
   filterValue?: string | null;
 }
@@ -2770,6 +2314,10 @@ interface MenuRadioItemEntry extends Omit<BaseMenuItem, "danger">, Pick<RadioGro
   };
 }
 interface MenuRadioGroupEntry extends Pick<RadioGroupRootProps, "defaultValue" | "value" | "onValueChange" | "disabled" | "required" | "error"> {
+  /**
+   * Stable identity for the group, used as its React key. Defaults to `name`. Not rendered as a DOM `id`.
+   */
+  id?: string;
   /** Shared form `name` for the radios in this group; required for form submission. */
   name: string;
   /** Discriminator selecting a radio group of mutually exclusive items. */
@@ -2792,6 +2340,10 @@ interface MenuRadioGroupEntry extends Pick<RadioGroupRootProps, "defaultValue" |
 interface MenuSectionEntry {
   /** Discriminator selecting a grouping of menu items under a shared heading. */
   kind?: "section";
+  /**
+   * Stable identity for the section, used as its React key instead of its position. Set it when entries can be added, removed, or reordered, or when the heading can change while it stays the same section. Not rendered as a DOM `id`.
+   */
+  id?: string;
   /** Heading rendered above the section, also serving as the group's accessible name. */
   slotHeading?: ReactNode;
   /** Sections do not accept inline children; provide section contents via `items`. */
@@ -2810,6 +2362,10 @@ interface MenuDividerItemEntry {
   /** Discriminator selecting a non-interactive divider between items. */
   kind: "divider";
   /**
+   * Stable identity for the divider, used as its React key instead of its position. Set it when entries can be added, removed, or reordered. Not rendered as a DOM `id`.
+   */
+  id?: string;
+  /**
    * Thickness of the divider line.
    * @defaultValue "small"
    */
@@ -2820,6 +2376,405 @@ interface MenuDividerItemEntry {
   };
   /** Dividers are not filterable. */
   filterValue?: never;
+}
+declare const badge: (props?: ({
+  kind?: "outline" | "solid" | null | undefined;
+  color?: "blue" | "green" | "red" | "yellow" | "purple" | "teal" | "gray" | null | undefined;
+  size?: "small" | "medium" | "large" | null | undefined;
+} & ClassProp) | undefined) => string;
+type BadgeVariantProps = VariantProps<typeof badge>;
+interface BadgeProps extends Omit<PrimitivePropsWithRef<"span">, "color"> {
+  /**
+   * Semantic color used to convey meaning at a glance.
+   * @defaultValue "blue"
+   */
+  color?: BadgeVariantProps["color"];
+  /**
+   * Visual treatment of the badge.
+   * - "outline" - De-emphasized contexts such as card metadata or secondary information.
+   * - "solid" - Prominent status badges in detail views, side panels, and status bars.
+   * @defaultValue "outline"
+   */
+  kind?: BadgeVariantProps["kind"];
+  /**
+   * Controls the badge's padding and text size. Reach for `small` in very dense layouts, and `large` for prominent status in detail views.
+   * @defaultValue "medium"
+   */
+  size?: BadgeVariantProps["size"];
+}
+interface CardContentProps extends ComponentPropsWithRef<"div"> {}
+/**
+ * The body region of a composed card. Holds text, tags, and other primary content beneath any media.
+ * @param props - {@link CardContentProps}
+ */
+declare const CardContent: react__default.ForwardRefExoticComponent<Omit<CardContentProps, "ref"> & react__default.RefAttributes<HTMLDivElement>>;
+declare const cardMedia: (props?: ({
+  mediaTheme?: "light" | "dark" | null | undefined;
+} & ClassProp) | undefined) => string;
+interface CardMediaProps extends SlottablePropsWithRef<"div"> {
+  /**
+   * Forces the theme of overlaid `slotHeader` content so it contrasts with the media beneath.
+   * - "dark" - For light or bright media; renders overlaid content in the dark theme.
+   * - "light" - For dark media; renders overlaid content in the light theme.
+   */
+  mediaTheme?: VariantProps<typeof cardMedia>["mediaTheme"];
+  /** Overlays content (typically the card title and actions) on top of the media. */
+  slotHeader?: react__default.ReactNode;
+}
+/**
+ * The media region of a composed card. Typically holds an image or video rendered above the content, with an optional overlaid header.
+ * @param props - {@link CardMediaProps}
+ */
+declare const CardMedia: react__default.ForwardRefExoticComponent<Omit<CardMediaProps, "ref"> & react__default.RefAttributes<HTMLDivElement>>;
+declare const cardRoot: (props?: ({
+  density?: "compact" | "standard" | "spacious" | null | undefined;
+  interactive?: boolean | null | undefined;
+  kind?: "solid" | "gradient" | "float" | null | undefined;
+  layout?: "horizontal" | "vertical" | null | undefined;
+  selected?: boolean | null | undefined;
+} & ClassProp) | undefined) => string;
+interface CardRootProps extends PrimitivePropsWithRef<"div">, DensityVariantProps {
+  /**
+   * Adds hover and focus affordances to signal the card is clickable. Do not enable on non-clickable cards — it creates false affordance.
+   * @defaultValue false
+   */
+  interactive?: boolean;
+  /**
+   * Visual treatment of the card.
+   * - "solid" - General-purpose treatment with padded content and a hard border between media and content. Use for most cards.
+   * - "gradient" - Same as "solid" but the media fades into the content. Use for promotional or hero-style cards.
+   * - "float" - Pairs with `slotMedia` to render the media as a bordered tile while the content sits on the page background without padding. Use when the card should visually lift off the surface.
+   * @defaultValue "solid"
+   */
+  kind?: VariantProps<typeof cardRoot>["kind"];
+  /**
+   * Orientation of the media and content.
+   * - "vertical" - Media stacks above the content. Use when the media is the focal point and cards display in a grid.
+   * - "horizontal" - Media sits to the left of the content. Use when the content outweighs the media and cards stack in a list.
+   * @defaultValue "vertical"
+   */
+  layout?: VariantProps<typeof cardRoot>["layout"];
+  /**
+   * Applies the selected visual state, e.g. when the card represents the current choice in a list.
+   * @defaultValue false
+   */
+  selected?: boolean;
+}
+interface CardProps extends CardRootProps, Pick<CardMediaProps, "mediaTheme"> {
+  /** Header content rendered above the body. When paired with `slotMedia`, it overlays the media instead. */
+  slotHeader?: react__default.ReactNode;
+  /** Media content rendered above the body, typically an image or video. Pair with `mediaTheme` when also using `slotHeader` so overlaid content remains readable. */
+  slotMedia?: react__default.ReactNode;
+  /** Native HTML attributes forwarded to the internal composed components. */
+  attributes?: {
+    CardContent?: NativeElementAttributes<"div", typeof CardContent>;
+    CardMedia?: NativeElementAttributes<"div", typeof CardMedia>;
+  };
+}
+/**
+ * A container that groups content, actions, and optional media about a single subject. Cards are fluid and grow to fill their container.
+ * @param props - {@link CardProps}
+ *
+ * @llm The Card already has padding, so do not add padding to the Card component or to it's children.
+ * @llm Card is for single-subject entity display (one cluster, one user, one model). Do not use Card as a general container on dashboards — use Panel instead. Card's interaction states and internal structure add unintended visual layering when used as a generic wrapper.
+ * @llm Cards are fluid and grow to fill their container — do not set fixed widths. Control sizing through the parent layout (e.g. a responsive Grid). Apply `className="h-fit"` when a card should shrink to its content height.
+ * @llm Identity test for Card vs Panel: if the container represents "a thing" with its own name and attributes, use Card; if it represents "a region of content", use Panel.
+ * @llm Pair `selected` with a visible affordance for what selection means — a bulk-action toolbar, a selection-count indicator, or a primary action — so users understand the consequence of selecting a card.
+ * @llm A Card is EITHER a single click target (set `interactive` and render via `asChild` as a link, button or label with containing hidden input) OR carries inline action buttons on its surface — never both. Combining them creates competing click targets and ambiguous focus order.
+ * @llm When a Card is `interactive`, do not place other interactive elements (Button, Anchor, Menu, etc.) inside it. Nested click targets break the "whole card is one click" affordance.
+ *
+ * @see {@link Panel}
+ * @see {@link Grid}
+ *
+ * @example
+ * ```tsx
+ * <Card className="h-fit">
+ * 	<Badge kind="solid" color="gray">
+ * 		Badge
+ * 	</Badge>
+ * 	<Text kind="body/bold/2xl">Header</Text>
+ * 	<Text kind="body/regular/md">Lorem ipsum dolor sit amet</Text>
+ * </Card>
+ * ```
+ *
+ * @example
+ * The header slot is rendered absolutely over the media. Use it to add a persistent label or badge above the body content. If there is no media, the header will be rendered above the body content. It is a flex container with a preset gap.
+ * ```tsx
+ * <Card
+ * 	slotHeader={
+ * 		<Flex gap="inherit">
+ * 			<Badge>New</Badge>
+ * 			<Badge>Alt</Badge>
+ * 		</Flex>
+ * 	}
+ * >
+ * 	Card body content
+ * </Card>
+ * ```
+ *
+ * @example
+ * Use when the card needs a visual hero area like an image or video above or alongside the content. If the media rendered is dark or light, and you're using `slotHeader` in conjunction with it, you may want to set `mediaTheme` to ensure text and components are readable. This will set light/dark theme in the header slot to ensure sufficient contrast.
+ * ```tsx
+ * <Card
+ * 	slotHeader={<span>Featured</span>}
+ * 	slotMedia={<MediaImg />}
+ * 	mediaTheme="light"
+ * >
+ * 	Card content below media
+ * </Card>
+ * ```
+ *
+ * @example
+ * Canonical browse-collection card anatomy for a single entity (model catalog, dataset gallery, template library, related-item strip). Slot order: header `Badge` (resource type) → publisher → title → description → topic `Tag` row (`outline` / `gray`) → footer stats (`text-placeholder`, left-aligned, never `justify="between"`). Every card in the collection must share this same slot structure — see the entity-cards pattern guide.
+ * ```tsx
+ * <Card slotHeader={<Badge kind="solid">Model</Badge>}>
+ * 	<Flex direction="col" gap="density-sm">
+ * 		<Text className="text-secondary" kind="label/regular/sm">
+ * 			NVIDIA
+ * 		</Text>
+ * 		<Text kind="body/bold/xl">Nemotron 3 Super 120B</Text>
+ * 		<Text kind="body/regular/md">
+ * 			120B-parameter reasoning model optimized for enterprise RAG.
+ * 		</Text>
+ * 	</Flex>
+ * 	<Flex gap="2" wrap="wrap">
+ * 		<Tag kind="outline" color="gray" readOnly>
+ * 			Reasoning
+ * 		</Tag>
+ * 		<Tag kind="outline" color="gray" readOnly>
+ * 			English
+ * 		</Tag>
+ * 		<Tag kind="outline" color="gray" readOnly>
+ * 			RAG
+ * 		</Tag>
+ * 	</Flex>
+ * 	<Text className="text-placeholder" kind="label/regular/sm">
+ * 		Updated 3d · 12.4k · 120B
+ * 	</Text>
+ * </Card>
+ * ```
+ *
+ * @example
+ * Use when the entire card should be a clickable target, such as navigation or selection. Render as an `<a>` for navigation or a button for actions. Do not place other interactive elements (Button, Anchor, Menu, etc.) on the card surface — competing click targets are ambiguous. If you need inline actions per card instead, omit `interactive` and use the `With Actions` pattern below.
+ * ```tsx
+ * <Card asChild interactive>
+ * 	<button type="button" onClick={handleClick}>
+ * 		<Flex direction="col" gap="1">
+ * 			<Text className="text-secondary" kind="label/bold/sm">
+ * 				DeepSeek
+ * 			</Text>
+ * 			<Text kind="label/bold/md">DeepSeek-V3.1</Text>
+ * 			<Text kind="body/regular/sm">
+ * 				DeepSeek V3.1 Instruct is a hybrid AI model with fast reasoning, 128K
+ * 				context, and strong tool use.
+ * 			</Text>
+ * 		</Flex>
+ * 	</button>
+ * </Card>
+ * ```
+ *
+ * @example
+ * Use when the user needs to perform actions without navigating to a detail view, or when multiple distinct actions are available per card. The card itself is not a click target in this pattern — do not also enable `interactive`.
+ * ```tsx
+ * <Card>
+ * 	Card content... Right aligned actions:
+ * 	<Flex gap="2" justify="end" wrap="wrap">
+ * 		<Button kind="tertiary">Export</Button>
+ * 		<Button kind="secondary">Share</Button>
+ * 	</Flex>
+ * 	Or you can have actions stretch across the card:
+ * 	<Flex gap="2" justify="end" wrap="wrap">
+ * 		<Button kind="tertiary" style={{ flex: 1 }}>
+ * 			Export
+ * 		</Button>
+ * 		<Button kind="secondary" style={{ flex: 1 }}>
+ * 			Share
+ * 		</Button>
+ * 	</Flex>
+ * 	Or for just a single action:
+ * 	<Button color="brand" style={{ width: "100%" }}>
+ * 		Share
+ * 	</Button>
+ * </Card>
+ * ```
+ *
+ * @example
+ * It's common to use cards in a responsive grid. Using the grid component, set a minimum column width and let the cards automatically resize to fill the available space.
+ * ```tsx
+ * <Grid colMinWidth="250px" gap="2">
+ * 	<Card>Card 1</Card>
+ * 	<Card>Card 2</Card>
+ * 	<Card>Card 3</Card>
+ * </Grid>
+ * ```
+ *
+ * @example
+ * ```tsx
+ * <Flex direction="col" gap="1">
+ * 	<CardRoot interactive={false} kind="solid">
+ * 		<CardMedia mediaTheme="light" slotHeader={<Badge>Featured</Badge>}>
+ * 			<MediaImg />
+ * 		</CardMedia>
+ * 		<CardContent>Composed card with media</CardContent>
+ * 	</CardRoot>
+ * 	<CardRoot>
+ * 		<CardContent>
+ * 			<div className="nv-card-content-header">
+ * 				<Badge>Featured</Badge>
+ * 			</div>
+ * 			Composed card without media
+ * 		</CardContent>
+ * 	</CardRoot>
+ * </Flex>
+ * ```
+ *
+ * @example
+ * ```html
+ * <div class="nv-card-root nv-card-root--kind-solid nv-card-root--layout-vertical">
+ *   <div class="nv-card-media">
+ *     <img src="./images/placeholder.png" alt="New York City skyline" />
+ *     <div class="nv-card-media-header">
+ *       <span class="nv-badge nv-badge--kind-solid">Featured</span>
+ *     </div>
+ *   </div>
+ *   <div class="nv-card-content">
+ *     <h3 class="nv-text nv-text--body-bold-xl">New York City</h3>
+ *     <p class="nv-text nv-text--body-regular-md">The City that Never Sleeps</p>
+ *   </div>
+ * </div>
+ * ```
+ */
+declare const Card$1: react__default.ForwardRefExoticComponent<Omit<CardProps, "ref"> & react__default.RefAttributes<HTMLDivElement>>;
+declare const label$1: (props?: ({
+  disabled?: boolean | null | undefined;
+  required?: boolean | null | undefined;
+  size?: "small" | "medium" | "large" | null | undefined;
+} & ClassProp) | undefined) => string;
+interface LabelProps extends PrimitivePropsWithRef<"label"> {
+  /** ID of the form control this label is associated with. */
+  htmlFor?: string;
+  /** Styles the label as disabled, for use only with disabled form controls. */
+  disabled?: boolean;
+  /** Renders the required indicator after the label text. Presentational only — also set `required` (or `aria-required`) on the control so assistive tech announces it. */
+  required?: boolean;
+  /**
+   * Typographic size of the label.
+   * @defaultValue "medium"
+   */
+  size?: VariantProps<typeof label$1>["size"];
+}
+/**
+ * A text label for a form control. Prefer FormField for end-user forms; this primitive is intended for composing custom field layouts.
+ * @param props - {@link LabelProps}
+ *
+ * @llm The required indicator belongs on the label that names the field, and only once. Inside a `FormField`, set `required` there instead — it already renders the indicator on the field label.
+ * @llm `required` on Label is presentational. Assistive tech hears required state from the control, so set `required` (or `aria-required`) there too.
+ *
+ * @example
+ * Use when labeling a form input to provide accessible context for the control.
+ * ```tsx
+ * <Label htmlFor="email">Email Address</Label>
+ * ```
+ *
+ * @example
+ * Use when the associated input is disabled to visually communicate the inactive state.
+ * ```tsx
+ * <Label htmlFor="email" disabled aria-disabled="true">
+ * 	Email Address
+ * </Label>
+ * ```
+ *
+ * @example
+ * Renders the required indicator after the label text. It is presentational, so set `required` on the control as well — that is what assistive tech announces.
+ * ```tsx
+ * <Flex direction="col" gap="2">
+ * 	<Label htmlFor="required-email" required>
+ * 		Email Address
+ * 	</Label>
+ * 	<TextInput
+ * 		id="required-email"
+ * 		name="email"
+ * 		placeholder="name@example.com"
+ * 		required
+ * 		type="email"
+ * 	/>
+ * </Flex>
+ * ```
+ *
+ * @example
+ * Use in compact layouts or alongside small-sized inputs where space is limited.
+ * ```tsx
+ * <Label htmlFor="email" size="small">
+ * 	Email Address
+ * </Label>
+ * ```
+ *
+ * @example
+ * Use when the label needs an inline help affordance. Label accepts arbitrary children so an icon or tooltip can sit alongside the text.
+ * ```tsx
+ * <Label htmlFor="email">
+ * 	Email Address
+ * 	<Tooltip slotContent="We use this to send account confirmations.">
+ * 		<InfoCircle />
+ * 	</Tooltip>
+ * </Label>
+ * ```
+ *
+ * @example
+ * ```html
+ * <label for="email" class="nv-label">
+ *   Email Address
+ * </label>
+ * <div class="nv-input-shell">
+ *   <input
+ *     type="email"
+ *     id="email"
+ *     placeholder="name@example.com"
+ *   />
+ * </div>
+ * ```
+ *
+ * @example
+ * Add `nv-label--required` for the required indicator, and keep `required` on the control it names.
+ * ```html
+ * <label for="required-email" class="nv-label nv-label--required">
+ *   Email Address
+ * </label>
+ * <div class="nv-input-shell">
+ *   <input
+ *     type="email"
+ *     id="required-email"
+ *     placeholder="name@example.com"
+ *     required
+ *   />
+ * </div>
+ * ```
+ */
+declare const Label: react__default.ForwardRefExoticComponent<Omit<LabelProps, "ref"> & react__default.RefAttributes<HTMLLabelElement>>;
+declare const checkboxRoot: (props?: ({
+  labelSide?: "left" | "right" | null | undefined;
+} & ClassProp) | undefined) => string;
+interface CheckboxRootProps extends PrimitivePropsWithRef<"div"> {
+  /**
+   * Side of the checkbox the label is rendered on.
+   * @defaultValue "right"
+   */
+  labelSide?: VariantProps<typeof checkboxRoot>["labelSide"];
+}
+interface PropsFromRoot$3 extends Omit<CheckboxRootProps, AttributesFor<"input"> | "ref"> {}
+interface PropsFromInput$2 extends Pick<CheckboxInputProps, Extract<keyof CheckboxInputProps, AttributesFor<"input">> | "onCheckedChange" | "error"> {}
+interface CheckboxProps extends PropsFromRoot$3, PropsFromInput$2 {
+  /**
+   * Label rendered next to the checkbox and automatically associated with it for clicks and assistive tech.
+   */
+  slotLabel?: react__default.ReactNode;
+  /**
+   * Native HTML attributes forwarded to the internal composed components.
+   */
+  attributes?: {
+    CheckboxInput?: NativeElementAttributes<"input", typeof CheckboxInput>;
+    Label?: NativeElementAttributes<"label", typeof Label>;
+  };
 }
 interface DropdownContentProps extends MenuRootProps, Pick<PortalProps, "portal" | "portalContainer"> {
   /** Called when focus moves back to the trigger after closing. Call `event.preventDefault()` to suppress the focus shift. */
@@ -3140,7 +3095,6 @@ interface PopoverProps extends PopoverContentProps, Pick<PopoverRootProps, "id" 
  * @llm Popover content must be self-contained — users should be able to understand and act on it without navigating elsewhere. Escalate to SidePanel or Modal if the content needs significant scrolling or multi-step interaction.
  *
  * @example
- * <caption>Basic Popover</caption>
  * Use when you need to show supplementary information triggered by a button click without navigating away.
  * ```tsx
  * <Popover slotContent={<p>Additional context about this item.</p>}>
@@ -3149,7 +3103,6 @@ interface PopoverProps extends PopoverContentProps, Pick<PopoverRootProps, "id" 
  * ```
  *
  * @example
- * <caption>Positioning Popover</caption>
  * Combine `side` (`top` | `bottom` | `left` | `right`) and `align` (`start` | `center` | `end`) to control where the popover renders relative to its trigger. Override the defaults when the trigger sits near a viewport edge or sibling content would otherwise overlap.
  * ```tsx
  * <Popover
@@ -3162,7 +3115,6 @@ interface PopoverProps extends PopoverContentProps, Pick<PopoverRootProps, "id" 
  * ```
  *
  * @example
- * <caption>With Chevron Popover</caption>
  * Add `AnimatedChevron` inside the trigger to give a visual hint that the button toggles an open/closed surface.
  * ```tsx
  * <Popover slotContent={<p>Additional context about this item.</p>}>
@@ -3174,7 +3126,6 @@ interface PopoverProps extends PopoverContentProps, Pick<PopoverRootProps, "id" 
  * ```
  *
  * @example
- * <caption>With Rich Content Popover</caption>
  * Compose layout primitives inside `slotContent` to render rich, structured content like profile cards. Keep the content focused — avoid overcrowding the popover.
  * ```tsx
  * <Popover
@@ -3210,7 +3161,6 @@ interface PopoverProps extends PopoverContentProps, Pick<PopoverRootProps, "id" 
  * ```
  *
  * @example
- * <caption>Modal Popover</caption>
  * Use when the popover content requires focused interaction and should prevent access to the rest of the page.
  * ```tsx
  * <Popover
@@ -3227,7 +3177,6 @@ interface PopoverProps extends PopoverContentProps, Pick<PopoverRootProps, "id" 
  * ```
  *
  * @example
- * <caption>With Anchor Popover</caption>
  * Use `PopoverAnchor` when the popover should position against an element other than the trigger — for example, a row in a table where the action button lives in a different cell.
  * ```tsx
  * <PopoverRoot>
@@ -3246,7 +3195,6 @@ interface PopoverProps extends PopoverContentProps, Pick<PopoverRootProps, "id" 
  * ```
  *
  * @example
- * <caption>Composed</caption>
  * Use composed primitives when you need full control over the popover trigger and content layout.
  * ```tsx
  * <PopoverRoot>
@@ -3260,7 +3208,6 @@ interface PopoverProps extends PopoverContentProps, Pick<PopoverRootProps, "id" 
  * ```
  *
  * @example
- * <caption>HTML</caption>
  * ```html
  * <button
  *   type="button"
@@ -3365,7 +3312,7 @@ interface FormFieldLabelGroupProps extends PrimitivePropsWithRef<"div"> {}
  */
 declare const FormFieldLabelGroup: React$1.ForwardRefExoticComponent<Omit<FormFieldLabelGroupProps, "ref"> & React$1.RefAttributes<HTMLDivElement>>;
 declare const formFieldRoot: (props?: ({
-  labelPosition?: "left" | "top" | null | undefined;
+  labelPosition?: "top" | "left" | null | undefined;
   required?: boolean | null | undefined;
 } & ClassProp) | undefined) => string;
 type FormFieldRootVariantProps = VariantProps<typeof formFieldRoot>;
@@ -3856,7 +3803,6 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * @see {@link FormField}
  *
  * @example
- * <caption>Basic Select</caption>
  * Use object items for more control over the displayed label and value. String items are convenient for simple cases.
  * ```tsx
  * <Flex direction="col" gap="density-md">
@@ -3875,7 +3821,6 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * ```
  *
  * @example
- * <caption>Rich Item Content Select</caption>
  * Pass `slotStart` / `slotEnd` on an item for leading or trailing icons, or use `children` directly for richer multi-line content. Set `filterValue` whenever `children` is non-string so type-ahead still works. Use slotStart and slotEnd on the Select itself to add leading/trailing icons.
  * ```tsx
  * <Select
@@ -3911,7 +3856,6 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * ```
  *
  * @example
- * <caption>Custom Render Value Select</caption>
  * Use renderValue when the trigger needs richer or differently formatted content than the matching item's children.
  * ```tsx
  * <Select
@@ -3924,7 +3868,6 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * ```
  *
  * @example
- * <caption>Grouped Items Select</caption>
  * Use when options logically belong to categories that help users scan the list.
  * ```tsx
  * <Select
@@ -3937,7 +3880,6 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * ```
  *
  * @example
- * <caption>Multi Tag Select</caption>
  * Set multipleMode="tags" so users can see and remove individual selections. Backspace on the focused trigger removes the last selection.
  * ```tsx
  * <Select
@@ -3950,7 +3892,6 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * ```
  *
  * @example
- * <caption>Floating Trigger Select</caption>
  * Use triggerKind='floating' when the Select sits on top of dense content (e.g. a toolbar) and should not render the default input border or background.
  * ```tsx
  * <Select
@@ -3961,7 +3902,6 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * ```
  *
  * @example
- * <caption>Size Select</caption>
  * Default to `medium` to match NVIDIA's uniform control-height rule. Use `size="small"` only when an explicit dense-layout requirement calls for it. The menu density derives from size by default; override it with the density prop when needed.
  * ```tsx
  * <Flex direction="col" gap="2">
@@ -3972,14 +3912,12 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * ```
  *
  * @example
- * <caption>Read Only Select</caption>
  * Use readOnly (instead of disabled) when the value should remain visible and copyable but the user cannot open the menu or change the selection — common in review or summary screens.
  * ```tsx
  * <Select items={["Apple", "Banana"]} readOnly defaultValue="Apple" />
  * ```
  *
  * @example
- * <caption>With Form Field Select</caption>
  * Wrap Select in FormField to attach a label, helper text, and validation status that stay in sync with the trigger via context.
  * ```tsx
  * <FormField
@@ -3991,7 +3929,6 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * ```
  *
  * @example
- * <caption>In Form Select</caption>
  * Pass a name prop so the Select renders a hidden native <select> that participates in standard form submission — works without JavaScript.
  * ```tsx
  * <form>
@@ -4007,7 +3944,6 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * ```
  *
  * @example
- * <caption>Controlled Select</caption>
  * Use controlled mode when the selection state lives outside the Select — for example, when syncing with form libraries, URL state, or another component.
  * ```tsx
  * () => {
@@ -4023,7 +3959,6 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * ```
  *
  * @example
- * <caption>Composed</caption>
  * Use the composed primitives when you need full control over trigger rendering, content layout, or custom items.
  * ```tsx
  * <SelectRoot defaultValue="b">
@@ -4039,7 +3974,6 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * ```
  *
  * @example
- * <caption>HTML</caption>
  * ```html
  * <div style="display: flex; flex-direction: column; gap: 6px;">
  *   <label class="nv-label" for="car-select">Choose a car:</label>
@@ -4094,6 +4028,31 @@ interface PaginationRootProps extends PrimitivePropsWithRef<"div"> {
    * Submits `page` and `pageSize` through the associated form instead of updating internal state. Use the pagination parsing helpers to resolve repeated fields from shared forms.
    */
   action?: PaginationAction;
+}
+declare const tagRoot: (props?: ({
+  color?: "blue" | "green" | "red" | "yellow" | "purple" | "teal" | "gray" | null | undefined;
+  density?: "compact" | "standard" | "spacious" | null | undefined;
+  kind?: "outline" | "solid" | null | undefined;
+  selected?: boolean | null | undefined;
+} & ClassProp) | undefined) => string;
+type TagRootVariants = VariantProps<typeof tagRoot>;
+interface TagProps extends Omit<PrimitivePropsWithRef<"button">, "color">, Omit<TagRootVariants, "density">, DensityVariantProps {
+  /**
+   * The visual style of the tag.
+   * @defaultValue "solid"
+   */
+  kind?: TagRootVariants["kind"];
+  /**
+   * Accent color of the tag.
+   * @defaultValue "blue"
+   */
+  color?: TagRootVariants["color"];
+  /**
+   * Renders the tag as a non-interactive `<span>` instead of a `<button>`. Use when placing a tag inside another interactive element like a clickable card.
+   */
+  readOnly?: boolean;
+  /** Marks the tag as selected, applying the selected style and removing the hover state. */
+  selected?: TagRootVariants["selected"];
 }
 interface SliderInputProps extends Omit<ComponentPropsWithoutRef<"input">, "type"> {}
 /**
@@ -4192,13 +4151,11 @@ interface SliderProps$1 extends PropsFromRoot$2, PropsFromInput$1, PropsFromStep
  * @see {@link RangeSlider}
  *
  * @example
- * <caption>Basic Slider</caption>
  * ```tsx
  * <Slider defaultValue={50} aria-label="Volume" />
  * ```
  *
  * @example
- * <caption>With Step Marks Slider</caption>
  * Use step marks to show discrete positions and help users pick precise values.
  * ```tsx
  * <Slider
@@ -4210,7 +4167,6 @@ interface SliderProps$1 extends PropsFromRoot$2, PropsFromInput$1, PropsFromStep
  * ```
  *
  * @example
- * <caption>Custom Range Slider</caption>
  * Use custom min/max/step when the default 0–100 range does not match the domain.
  * ```tsx
  * <Slider
@@ -4224,14 +4180,12 @@ interface SliderProps$1 extends PropsFromRoot$2, PropsFromInput$1, PropsFromStep
  * ```
  *
  * @example
- * <caption>Disabled Slider</caption>
  * Use when the slider value is locked and cannot be changed.
  * ```tsx
  * <Slider defaultValue={30} disabled aria-label="Locked" />
  * ```
  *
  * @example
- * <caption>Vertical Slider</caption>
  * Use vertical orientation for controls like volume faders or equalizer bands.
  * ```tsx
  * <Slider
@@ -4244,7 +4198,6 @@ interface SliderProps$1 extends PropsFromRoot$2, PropsFromInput$1, PropsFromStep
  * ```
  *
  * @example
- * <caption>With Step Interval Slider</caption>
  * Use stepInterval to space the visible step markers at a coarser interval than the slider's underlying step value, so users can drag with fine precision while still seeing key reference points.
  * ```tsx
  * <Slider
@@ -4259,7 +4212,6 @@ interface SliderProps$1 extends PropsFromRoot$2, PropsFromInput$1, PropsFromStep
  * ```
  *
  * @example
- * <caption>With Custom Steps Slider</caption>
  * Use customSteps when the meaningful tick positions are non-uniform or only certain anchor values matter (e.g. quality presets, named breakpoints). It overrides both step and stepInterval for marker placement.
  * ```tsx
  * <Slider
@@ -4274,7 +4226,6 @@ interface SliderProps$1 extends PropsFromRoot$2, PropsFromInput$1, PropsFromStep
  * ```
  *
  * @example
- * <caption>With Formatted Steps Slider</caption>
  * Use stepFormatFn to render step labels in a domain-specific format like currency, percentages, units, or descriptive words (e.g. Mute / Quiet / Loud). Works with both orientations.
  * ```tsx
  * <Slider
@@ -4290,7 +4241,6 @@ interface SliderProps$1 extends PropsFromRoot$2, PropsFromInput$1, PropsFromStep
  * ```
  *
  * @example
- * <caption>With Form Name Slider</caption>
  * Set name to submit the slider value as a standard form field — the underlying native range input participates in form submission with no extra wiring.
  * ```tsx
  * <Slider
@@ -4303,7 +4253,6 @@ interface SliderProps$1 extends PropsFromRoot$2, PropsFromInput$1, PropsFromStep
  * ```
  *
  * @example
- * <caption>With Text Input Slider</caption>
  * Pair a Slider with a TextInput by sharing controlled state — useful when users need both quick coarse adjustment via the slider and precise numeric entry via the input. Track the numeric value alongside a string buffer so the user can type freely, then clamp the buffer into the slider's range on blur.
  * ```tsx
  * () => {
@@ -4354,7 +4303,6 @@ interface SliderProps$1 extends PropsFromRoot$2, PropsFromInput$1, PropsFromStep
  * ```
  *
  * @example
- * <caption>Composed</caption>
  * Use the composed primitives when you need full control over the slider track, input, and step label layout.
  * ```tsx
  * <SliderRoot orientation="horizontal" aria-label="Custom slider">
@@ -4370,7 +4318,6 @@ interface SliderProps$1 extends PropsFromRoot$2, PropsFromInput$1, PropsFromStep
  * ```
  *
  * @example
- * <caption>HTML</caption>
  * The track fill reads the `--slider-percent` custom property on the root, which CSS cannot derive from the input's value. Leave it unset — as above — unless JS keeps it in sync on every `input` event, or the fill will freeze at its authored width while the thumb moves: `root.style.setProperty("--slider-percent", ((value - min) / (max - min)) * 100 + "%")`.
  * ```html
  * <span class="nv-slider-root">
@@ -4451,7 +4398,7 @@ interface StatusMessageProps extends StatusMessageRootProps {
 declare const tableRoot: (props?: ({
   density?: "compact" | "standard" | "spacious" | null | undefined;
   layout?: "auto" | "fixed" | null | undefined;
-  align?: "center" | "right" | "left" | null | undefined;
+  align?: "center" | "left" | "right" | null | undefined;
   hoverableRows?: boolean | null | undefined;
   cellHeight?: "dense" | "default" | null | undefined;
 } & ClassProp) | undefined) => string;
@@ -4491,31 +4438,6 @@ interface TableToolbarProps extends react__default.ComponentPropsWithoutRef<"sec
   showBulkActionsToolbar?: boolean;
   /** Content rendered inside the bulk actions toolbar when `showBulkActionsToolbar` is true. */
   slotBulkActions?: react__default.ReactNode;
-}
-declare const tagRoot: (props?: ({
-  color?: "blue" | "green" | "red" | "yellow" | "purple" | "teal" | "gray" | null | undefined;
-  density?: "compact" | "standard" | "spacious" | null | undefined;
-  kind?: "outline" | "solid" | null | undefined;
-  selected?: boolean | null | undefined;
-} & ClassProp) | undefined) => string;
-type TagRootVariants = VariantProps<typeof tagRoot>;
-interface TagProps extends Omit<PrimitivePropsWithRef<"button">, "color">, Omit<TagRootVariants, "density">, DensityVariantProps {
-  /**
-   * The visual style of the tag.
-   * @defaultValue "solid"
-   */
-  kind?: TagRootVariants["kind"];
-  /**
-   * Accent color of the tag.
-   * @defaultValue "blue"
-   */
-  color?: TagRootVariants["color"];
-  /**
-   * Renders the tag as a non-interactive `<span>` instead of a `<button>`. Use when placing a tag inside another interactive element like a clickable card.
-   */
-  readOnly?: boolean;
-  /** Marks the tag as selected, applying the selected style and removing the hover state. */
-  selected?: TagRootVariants["selected"];
 }
 declare const textAreaElement: (props?: ({
   resizeable?: "auto" | "manual" | null | undefined;
@@ -4557,7 +4479,6 @@ interface TextAreaProps extends PropsFromRoot, PropsFromTextArea {
  * @see {@link FormField}
  *
  * @example
- * <caption>Basic Text Area</caption>
  * ```tsx
  * <TextArea
  * 	aria-label="Description"
@@ -4566,7 +4487,6 @@ interface TextAreaProps extends PropsFromRoot, PropsFromTextArea {
  * ```
  *
  * @example
- * <caption>Controlled Text Area</caption>
  * Controlled mode lets you manage value externally, useful for syncing with form libraries, character counters, or external validation.
  * ```tsx
  * () => {
@@ -4582,28 +4502,24 @@ interface TextAreaProps extends PropsFromRoot, PropsFromTextArea {
  * ```
  *
  * @example
- * <caption>With Placeholder Text Area</caption>
  * Use placeholder to hint at the expected format. Do not use it as a substitute for a label or required helper text.
  * ```tsx
  * <TextArea placeholder="Enter a description..." />
  * ```
  *
  * @example
- * <caption>Auto Resize Text Area</caption>
  * Use when the textarea should grow with content up to a max height, avoiding scrollbars for short entries. Override `--max-auto-height` (default 400px) to change the cap.
  * ```tsx
  * <TextArea resizeable="auto" placeholder="Start typing..." />
  * ```
  *
  * @example
- * <caption>Manual Resize Text Area</caption>
  * Use when the user should control the textarea height manually via a drag handle in the bottom-right corner.
  * ```tsx
  * <TextArea resizeable="manual" placeholder="Drag to resize" />
  * ```
  *
  * @example
- * <caption>Size Text Area</caption>
  * Default to `medium`. Reserve `small` for dense-table or toolbar contexts where vertical space is constrained — avoid it in regular forms. Use `large` only when surrounding controls already step up to a larger scale.
  * ```tsx
  * <Flex direction="col" gap="density-md">
@@ -4614,7 +4530,6 @@ interface TextAreaProps extends PropsFromRoot, PropsFromTextArea {
  * ```
  *
  * @example
- * <caption>Status Text Area</caption>
  * Set `status` to drive validation styling manually — `error` for failed validation (pair with helper text on the wrapping FormField) or `success` to confirm a passing value. Reach for `withValidation` when native HTML constraints can drive the state automatically.
  * ```tsx
  * <Flex direction="col" gap="density-md">
@@ -4632,7 +4547,6 @@ interface TextAreaProps extends PropsFromRoot, PropsFromTextArea {
  * ```
  *
  * @example
- * <caption>With Validation Text Area</caption>
  * Set `withValidation` to drive status styling from the browser's native `:user-valid` / `:user-invalid` pseudo-classes — no JS state required. Combine with `required`, `minLength`, `maxLength`, etc.
  * ```tsx
  * <TextArea
@@ -4643,7 +4557,6 @@ interface TextAreaProps extends PropsFromRoot, PropsFromTextArea {
  * ```
  *
  * @example
- * <caption>Disabled Text Area</caption>
  * Use when the field is unavailable due to external state (e.g. permissions). Prefer `readOnly` when the value should still be selectable.
  * ```tsx
  * <TextArea
@@ -4654,7 +4567,6 @@ interface TextAreaProps extends PropsFromRoot, PropsFromTextArea {
  * ```
  *
  * @example
- * <caption>Read Only Text Area</caption>
  * Use when the value should remain visible and copyable but cannot be edited — common in review or summary screens.
  * ```tsx
  * <TextArea
@@ -4665,7 +4577,6 @@ interface TextAreaProps extends PropsFromRoot, PropsFromTextArea {
  * ```
  *
  * @example
- * <caption>With Slots Text Area</caption>
  * Use `slotStart` / `slotEnd` to attach affordances like icons or action buttons. Use `mb-auto` / `mt-auto` utilities to anchor slot content to the top or bottom of a multi-line field.
  * ```tsx
  * <TextArea
@@ -4680,7 +4591,6 @@ interface TextAreaProps extends PropsFromRoot, PropsFromTextArea {
  * ```
  *
  * @example
- * <caption>Vertical Layout Text Area</caption>
  * Use `layout="vertical"` to stack slot content above and below the textarea — ideal for chat composers, comment boxes, or toolbars that need full-width controls.
  * ```tsx
  * <TextArea
@@ -4710,7 +4620,6 @@ interface TextAreaProps extends PropsFromRoot, PropsFromTextArea {
  * ```
  *
  * @example
- * <caption>With Form Field Text Area</caption>
  * Wrap TextArea in FormField to attach a label, helper text, and validation status that stay in sync with the field via context.
  * ```tsx
  * <FormField
@@ -4722,7 +4631,6 @@ interface TextAreaProps extends PropsFromRoot, PropsFromTextArea {
  * ```
  *
  * @example
- * <caption>Composed</caption>
  * Use the composed primitives when you need full control over the shell and textarea element layout — for example, to mix the textarea with sibling buttons inside the same shell.
  * ```tsx
  * <InputShell>
@@ -4735,7 +4643,6 @@ interface TextAreaProps extends PropsFromRoot, PropsFromTextArea {
  * ```
  *
  * @example
- * <caption>HTML</caption>
  * ```html
  * <div class="nv-input-shell nv-text-area-root">
  *   <textarea
