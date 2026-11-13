@@ -121,6 +121,8 @@ ENV USERNAME=nvs \
 # DuckDB extension cache (aws, httpfs) for S3 log storage
 COPY --chown=1000:1000 --from=builder /root/.duckdb /home/nvs/.duckdb
 COPY --from=builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
+# COPY merges directories: do not retain the runtime base's seeded pip metadata.
+RUN rm -rf /app/.venv
 COPY --chown=1000:1000 --from=builder /app/.venv /app/.venv
 COPY --chown=1000:1000 --from=builder /app/.source-distributions/nhx-api/ /usr/share/nemo-helix/source-distributions/nhx-api/
 ENV VIRTUAL_ENV=/app/.venv \
@@ -135,12 +137,15 @@ RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/r
     --mount=type=bind,source=docker/removals/files/base/cve-cleanup-runtime.txt,target=/tmp/file-removals.txt,readonly \
     sh /bin/cve-cleanup.sh && \
     python /tmp/remove-listed-files.py /tmp/file-removals.txt
-# Trust updates and the runtime-base overlay happen after the builder's pip
-# guard. Remove only stale metadata, then validate the final application's pip
-# code/metadata pair after all package-mutating image steps.
-RUN --mount=type=bind,source=docker/scripts/cleanup-pip-metadata.py,target=/tmp/cleanup-pip-metadata.py,readonly \
-    /app/.venv/bin/python /tmp/cleanup-pip-metadata.py && \
-    /app/.venv/bin/python -m pip --version
+# Recheck after trust updates, runtime copying, and final cleanup.
+RUN /app/.venv/bin/python - <<'PY_PIP_INTEGRITY'
+import importlib.metadata
+from pathlib import Path
+import pip
+root = Path(pip.__file__).parent.parent
+assert list(root.glob("pip-*.dist-info")) == [root / f"pip-{pip.__version__}.dist-info"]
+assert importlib.metadata.version("pip") == pip.__version__
+PY_PIP_INTEGRITY
 ARG NHX_PLATFORM_VERSION=dev
 ARG NHX_CODE_REVISION=
 ENV NHX_PLATFORM_VERSION=${NHX_PLATFORM_VERSION}

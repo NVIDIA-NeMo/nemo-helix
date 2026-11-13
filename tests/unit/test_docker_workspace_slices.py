@@ -3,7 +3,10 @@
 
 """Regression tests for reduced uv workspaces used by Docker image builds."""
 
+import os
 import re
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -177,6 +180,32 @@ def test_gym_locks_resolve_fixed_virtualenv(project: str) -> None:
     lock = _load_pyproject(ROOT / "docker/locks" / project / "uv.lock")
     virtualenv = next(package for package in lock["package"] if package["name"] == "virtualenv")
     assert Version(virtualenv["version"]) >= Version("21.14.13")
+
+
+@pytest.mark.parametrize("versions", [("26.2.2",), ("26.2.2", "26.3"), ("26.3",)])
+def test_final_api_pip_guard_rejects_duplicate_or_mismatched_metadata(
+    tmp_path: Path, versions: tuple[str, ...]
+) -> None:
+    text = (ROOT / "docker/Dockerfile.nhx-api").read_text()
+    clear = text.index("RUN rm -rf /app/.venv")
+    copy = text.index("COPY --chown=1000:1000 --from=builder /app/.venv /app/.venv")
+    guard = text.index("RUN /app/.venv/bin/python - <<'PY_PIP_INTEGRITY'")
+    assert clear < copy < text.index("sh /bin/cve-cleanup.sh") < guard
+    program = text.split("<<'PY_PIP_INTEGRITY'\n", 1)[1].split("\nPY_PIP_INTEGRITY", 1)[0]
+    package = tmp_path / "pip"
+    package.mkdir()
+    (package / "__init__.py").write_text("__version__ = '26.2.2'\n")
+    for version in versions:
+        metadata = tmp_path / f"pip-{version}.dist-info"
+        metadata.mkdir()
+        (metadata / "METADATA").write_text(f"Name: pip\nVersion: {version}\n")
+    result = subprocess.run(
+        [sys.executable, "-S", "-c", program],
+        env={**os.environ, "PYTHONPATH": str(tmp_path)},
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) is (versions == ("26.2.2",)), result.stderr
 
 
 def test_ngc_notebook_is_replaced_before_system_copy_cleanup() -> None:
