@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isForbiddenError } from '@nemo/common/src/api/common/utils';
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
@@ -20,13 +21,11 @@ import { matchPath, useNavigate } from 'react-router';
 
 type PersonalWorkspaceStatus = 'ready' | 'forbidden' | 'failed';
 
-const isForbidden = (error: unknown) => isAxiosError(error) && error.response?.status === 403;
-
 const checkAccess = (workspace: string): Promise<PersonalWorkspaceStatus> =>
   entitiesGetWorkspace(workspace).then(
     () => 'ready',
     (error) => {
-      if (isForbidden(error)) return 'forbidden';
+      if (isForbiddenError(error)) return 'forbidden';
       logger.error(`Failed to look up workspace ${workspace}`, error);
       return 'failed';
     }
@@ -61,7 +60,7 @@ async function ensurePersonalWorkspace(
     if (isAxiosError(error) && error.response?.status === 409) {
       return checkAccess(workspace);
     }
-    if (isForbidden(error)) return 'forbidden';
+    if (isForbiddenError(error)) return 'forbidden';
     logger.error(`Failed to create workspace ${workspace}`, error);
     return 'failed';
   }
@@ -86,12 +85,14 @@ export const AuthSuccessRoute: FC = () => {
         toast.error(`Couldn't set up your personal workspace ${workspace}.`);
       }
 
-      // WorkspaceProvider starts its access check before the workspace exists, so its 403 is
-      // already cached (and not retried) by now. Refetch it before navigating, otherwise the
-      // first login lands on the "no access to this workspace" screen until a manual reload.
-      await queryClient.invalidateQueries({
-        queryKey: getEntitiesGetWorkspaceQueryKey(workspace),
-      });
+      if (status === 'ready') {
+        // WorkspaceProvider starts its access check before the workspace exists, so its 403 is
+        // already cached (and not retried) by now. Refetch it before navigating, otherwise the
+        // first login lands on the "no access to this workspace" screen until a manual reload.
+        await queryClient.invalidateQueries({
+          queryKey: getEntitiesGetWorkspaceQueryKey(workspace),
+        });
+      }
 
       const path = profile.state?.path;
       if (status !== 'ready' && (!path || landsInWorkspace(path, workspace))) {

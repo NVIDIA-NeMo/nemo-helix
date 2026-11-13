@@ -157,6 +157,7 @@ describe('AuthSuccessRoute', () => {
     it('lands on the default workspace when workspace creation is forbidden', async () => {
       mockGetWorkspace.mockRejectedValue(axiosErrorWithStatus(403));
       mockCreateWorkspace.mockRejectedValue(axiosErrorWithStatus(403));
+      const invalidateQueries = vi.spyOn(QueryClient.prototype, 'invalidateQueries');
 
       renderRoute();
 
@@ -165,6 +166,9 @@ describe('AuthSuccessRoute', () => {
       });
       expect(toast.error).not.toHaveBeenCalled();
       expect(logger.error).not.toHaveBeenCalled();
+      expect(invalidateQueries).not.toHaveBeenCalledWith({
+        queryKey: getEntitiesGetWorkspaceQueryKey('alray'),
+      });
     });
 
     it('lands on the default workspace when the workspace exists but is not readable', async () => {
