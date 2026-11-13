@@ -15,11 +15,11 @@ import { mockUseNavigate } from '@studio/tests/util/mockUseParams';
 import { render } from '@studio/tests/util/render';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { QueryClient } from '@tanstack/react-query';
-import { waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { AxiosError, AxiosHeaders } from 'axios';
 
 vi.mock('@nemo/common/src/utils/logger', () => ({
-  logger: { warn: vi.fn() },
+  logger: { error: vi.fn() },
 }));
 
 vi.mock('@nemo/sdk/generated/platform/entity-store', () => ({
@@ -153,7 +153,8 @@ describe('AuthSuccessRoute', () => {
       await waitFor(() => {
         expect(navigate).toHaveBeenCalledWith(defaultRoute);
       });
-      expect(logger.warn).toHaveBeenCalled();
+      expect(screen.queryByTestId('mock-toast-error')).not.toBeInTheDocument();
+      expect(logger.error).not.toHaveBeenCalled();
     });
 
     it('lands on the default workspace when the workspace exists but is not readable', async () => {
@@ -166,6 +167,42 @@ describe('AuthSuccessRoute', () => {
         expect(navigate).toHaveBeenCalledWith(defaultRoute);
       });
       expect(mockGetWorkspace).toHaveBeenCalledTimes(2);
+      expect(screen.queryByTestId('mock-toast-error')).not.toBeInTheDocument();
+    });
+
+    it.each([
+      {
+        scenario: 'the lookup fails',
+        setup: () => mockGetWorkspace.mockRejectedValue(axiosErrorWithStatus(500)),
+      },
+      {
+        scenario: 'the create fails',
+        setup: () => {
+          mockGetWorkspace.mockRejectedValue(axiosErrorWithStatus(404));
+          mockCreateWorkspace.mockRejectedValue(axiosErrorWithStatus(500));
+        },
+      },
+      {
+        scenario: 'the access check after a create conflict fails',
+        setup: () => {
+          mockGetWorkspace
+            .mockRejectedValueOnce(axiosErrorWithStatus(403))
+            .mockRejectedValueOnce(axiosErrorWithStatus(500));
+          mockCreateWorkspace.mockRejectedValue(axiosErrorWithStatus(409));
+        },
+      },
+    ])('reports an unexpected failure when $scenario', async ({ setup }) => {
+      setup();
+
+      renderRoute();
+
+      expect(await screen.findByTestId('mock-toast-error')).toHaveTextContent(
+        "Couldn't set up your personal workspace alray."
+      );
+      await waitFor(() => {
+        expect(navigate).toHaveBeenCalledWith(defaultRoute);
+      });
+      expect(logger.error).toHaveBeenCalled();
     });
 
     it('ignores a return path into the personal workspace', async () => {
