@@ -312,6 +312,8 @@ job = evaluator.submit(
 
 For the first row, the request carries `fileset://default/cord-v2#validation/images/00000.png`. The job downloads only the JSONL, and the gateway fetches each image as its request arrives, so saved results hold the short reference rather than the image bytes.
 
+The training walkthrough that produces this fileset, deploys the adapter, and scores these 20 receipts is [Fine-Tune Nemotron 3.5 Super VL on CORD-v2](/documentation/customizer-reference/tutorials/super-vl-cord-lora).
+
 - The template's indices follow the row shown in the comment: `messages[0]` is the user turn, `content[0]` is its image part, and `content[1]` is its text part. Rows with a different shape need different indices.
 - The request must go through the Inference Gateway, as a `ModelRef` target's requests do. A model server called directly reads only `data:` and `http(s)` URLs.
 - The template names the fileset, so a copy of the dataset under another name needs the template changed.

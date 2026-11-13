@@ -437,6 +437,46 @@ nemo files list weather-env --workspace default
 
 Job JSON: [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments#submit-the-job). Sandboxed Gym is configured on the platform (`NHX_RL_SANDBOXED_GYM_DEFAULT`), not in the job payload. Cluster setup: [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox).
 
+## CLEVR-CoGenT
+
+CLEVR-CoGenT is the vision GRPO example. The server lives in the repository at `scripts/grpo-examples/servers/vlm`. Build the package from the Gym checkout the RL image pins (`--nemo-rl-root`), not from a newer Gym, or the vendored copy shadows the image.
+
+```bash
+uv run --no-project --with datasets --with pillow \
+  python scripts/grpo-examples/prepare_clevr_cogent.py \
+  --out-dir ./clevr-cogent \
+  --train-size 32 \
+  --validation-size 16 \
+  --prompt qwen
+```
+
+`--prompt nemotron-omni` is the Super VL prompt. `--prompt qwen` is the prompt for `Qwen/Qwen3-VL-8B-Instruct`, the 1-GPU profile in [Vision-language models](/documentation/customizer-reference/grpo-and-reward-environments#vision-language-models).
+
+Package the server with the conversion environment's Python, not `uv run` against the project environment:
+
+```bash
+.venv-conversion/bin/python scripts/grpo-examples/gym_to_env_package.py \
+  --server-dir scripts/grpo-examples/servers/vlm \
+  --gym-root <gym-checkout> \
+  --nemo-rl-root <nemo-rl-checkout> \
+  --config clevr_cogent.yaml \
+  --format wheels-v1 \
+  --arch x86_64 \
+  --out-dir ./clevr-cogent-env
+```
+
+Add `--config clevr_cogent_tool.yaml` for the tool agent. That agent needs `inline_tool_output_images: true` on the policy model server and `max_rollout_turns` of 2 on the job.
+
+```bash
+.venv-conversion/bin/pi-to-gym-conversion --validate-only ./clevr-cogent-env
+nemo files filesets create clevr-cogent-env --workspace default --purpose environment --exist-ok
+nemo files upload ./clevr-cogent-env/ clevr-cogent-env --workspace default
+nemo files filesets create clevr-cogent --workspace default --purpose dataset --exist-ok
+nemo files upload ./clevr-cogent/ clevr-cogent --workspace default
+```
+
+The trailing slash uploads the directory contents. Job JSON for the 16x4 Super VL reference and the 1-GPU Qwen3-VL-8B profile is in [Vision-language models](/documentation/customizer-reference/grpo-and-reward-environments#vision-language-models).
+
 ## Next Steps
 
 - Submit the job and tune its hyperparameters in [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments).

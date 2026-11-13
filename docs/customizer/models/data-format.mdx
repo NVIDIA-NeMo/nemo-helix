@@ -115,6 +115,43 @@ Each line in your JSONL file must contain a JSON object with these required fiel
 }
 ```
 
+### OpenAI Chat Model with Images
+
+A vision-language job uses the same `messages` row. `content` is either a string or a list of parts. A string is one text part, so an existing chat fileset still loads.
+
+- **Text part:** `{"type": "text", "text": "..."}`.
+- **Image part:** `{"type": "image_url", "image_url": {"url": "..."}}`.
+- **`url`:** a fileset-relative path, such as `train/images/00000.png`, or a `data:` URL for PNG, JPEG, GIF, or WebP of at most 25 MiB. An `http(s)` URL, an absolute path, and `file://` are rejected at training time.
+- **Assistant label:** one text part. For finance train and validation rows, that string is a `<think>` trace followed by the answer. Test rows used for scoring keep the answer only.
+
+Training reads the relative path. Inference and Evaluator requests use `fileset://<workspace>/<fileset>#<path>`. The gateway downloads the file and inlines it. See [Run Inference](/documentation/models-and-inference/run-inference) for the request forms.
+
+#### Example Dataset Entry
+
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "image_url", "image_url": {"url": "train/images/00000.png"}},
+        {"type": "text", "text": "Describe this image."}
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": "<s_menu><s_nm>BLACK COFFEE</s_nm></s_menu>"
+    }
+  ]
+}
+```
+
+Upload the directory that already holds the JSONL and a sibling `images/` directory. A trailing slash on the upload path puts the files at the fileset root. Without it, the files nest one level down and the relative image paths no longer resolve. A retried upload of thousands of images can leave duplicates, so use a new fileset name when the data changes. A very large image fileset is slow to download when the job starts; a few hundred rows is enough to try the path.
+
+`nemo customization dataset prepare` has no image format. Prepare CORD-v2 or the finance filesets with the steps in [Fine-Tune Nemotron 3.5 Super VL on CORD-v2](/documentation/customizer-reference/tutorials/super-vl-cord-lora), or with the Customizer skill's import helpers.
+
+For Evaluator, the reference template must resolve to a string, for example `` `{{ item.messages[-1].content }}` ``. A list label fails with "The reference must be a string."
+
 ### OpenAI Chat With Tool
 
 #### Required Schema
