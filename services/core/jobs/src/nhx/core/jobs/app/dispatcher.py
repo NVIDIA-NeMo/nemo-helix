@@ -755,6 +755,62 @@ class JobDispatcher:
                     "reach a terminal state before deleting."
                 )
 
+    async def cancel_job_group(self, identifier: str, workspace: str) -> JobGroupResponse | None:
+        """Request cancellation of a job group: one write of the group's cancel intent.
+
+        Cancelling a group of thousands of jobs is one operation for the caller, not a
+        cancel call per member. The caller signals intent once -- this records the stored
+        ``CANCELLING`` status on the group entity in a single write -- and the per-member
+        teardown happens asynchronously, off the caller's request path (see
+        :meth:`cancel_group_members`, which the endpoint fans out as a background task).
+
+        ``CANCELLING`` is a top-down intent written only here. The bottom-up member
+        status roll-up (:meth:`_persist_group_status_for_member`) never writes the
+        non-terminal ``CANCELLING`` value, so a single member cancelling cannot flip the
+        whole group; and once every member reaches a terminal state, that same roll-up
+        settles the group to the terminal ``CANCELLED``.
+
+        Idempotent and safe to repeat: an already-cancelling group is left as-is; a group
+        that has already settled into a terminal state is not reopened.
+
+        Teardown durability is best-effort: the endpoint fans the sweep out as an in-process
+        background task, which is not durable. If the process is lost between the intent write
+        and the sweep, the members (never touched by this write -- only the group row is) run
+        to their natural terminal state and the member-status roll-up then overwrites the
+        group's ``CANCELLING`` with that real terminal status. So a dropped sweep surfaces as
+        the group finishing un-cancelled, not as a permanently stuck ``CANCELLING`` marker;
+        recovery (if the caller still wants it cancelled) is an explicit re-request, as there
+        is no server-side reaper yet. The durable teardown rides the later admission-controller
+        work.
+        """
+        resolved = await self._resolve_job_group(identifier, workspace)
+        if resolved is None:
+            return None
+        async with _get_job_mutation_lock(f"group:{resolved.name}", workspace):
+            try:
+                group = await self.store.get(JobGroup, resolved.name, workspace=workspace)
+            except EntityNotFoundError:
+                return None
+            if group.id != resolved.id:
+                # A same-name group was deleted and recreated between the resolve and the lock;
+                # do not cancel the replacement under the original's identity.
+                return None
+            if group.status.is_terminal():
+                raise JobOperationConflictError(
+                    f"Cannot cancel job group '{group.name}': it has already finished (status '{group.status.value}')."
+                )
+            if group.status != JobGroupStatus.CANCELLING:
+                group.status = JobGroupStatus.CANCELLING
+                group = await self.store.update(group)
+            operations_counter.add(1, attributes={"operation": "cancel_job_group"})
+            logger.info(
+                "Requested JobGroup cancellation",
+                extra={"group": group.name, "workspace": workspace},
+            )
+            return self._build_job_group_response(
+                group, member_count=await self._count_group_members(group.id, workspace)
+            )
+
     async def _resolve_job_group(self, identifier: str, workspace: str) -> Optional[JobGroup]:
         """Resolve a job group by ID, falling back to its name within the workspace."""
         try:
@@ -932,6 +988,15 @@ class JobDispatcher:
             except EntityNotFoundError:
                 return
             new_status = await self._rolled_up_group_status(group_id, workspace)
+            if group.status == JobGroupStatus.CANCELLING and not new_status.is_terminal():
+                # A top-down cancel intent is already stored on the group. Until the cancel
+                # sweep drives members terminal, a benign member transition (e.g. CREATED ->
+                # PENDING) rolls up to a non-terminal RUNNING/PENDING -- which must NOT clobber
+                # the stored CANCELLING, or the group would briefly report running while a
+                # cancel is in flight. Only a TERMINAL roll-up (all members settled) may move
+                # the group off CANCELLING -- to CANCELLED, or to the real terminal status if
+                # the sweep never reached the members.
+                return
             if new_status == JobGroupStatus.CANCELLING:
                 # Non-terminal CANCELLING is the in-flight cancel INTENT, owned by the separate
                 # group-cancellation work: a single member cancelling while others still run must
