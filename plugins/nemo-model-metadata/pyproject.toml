@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nemo-model-metadata-plugin"
+version = "0.1.0"
+description = "Enriches Model entities with metadata from their providers and public model catalogs."
+requires-python = ">=3.11,<3.15"
+dependencies = ["httpx>=0.27.0,<1", "nemo-helix-plugin", "pydantic>=2.0.0"]
+
+[project.entry-points."nemo.controllers"]
+model-metadata = "nemo_model_metadata.controller:ModelMetadataController"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemo_model_metadata"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["src"]

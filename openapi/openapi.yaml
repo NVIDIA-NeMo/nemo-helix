@@ -13843,6 +13843,11 @@ components:
           - $ref: '#/components/schemas/ModelSpec'
           description: Detailed specification for the model - Automatically generated
             by the platform at creation when fileset provided.
+        metadata:
+          allOf:
+          - $ref: '#/components/schemas/ModelMetadata'
+          description: Descriptive model details such as capabilities, modalities,
+            and context length.
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -20047,6 +20052,16 @@ components:
       type: object
       title: ModelCacheConfig
       description: Configuration for model caching.
+    ModelCapability:
+      type: string
+      enum:
+      - tool_calling
+      - reasoning
+      - structured_output
+      - embedding
+      - reranking
+      title: ModelCapability
+      description: A capability a model advertises beyond plain text generation.
     ModelDeployment:
       properties:
         id:
@@ -20501,6 +20516,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/ModelSpec'
           description: Detailed specification for the model
+        metadata:
+          allOf:
+          - $ref: '#/components/schemas/ModelMetadata'
+          description: Descriptive model details such as capabilities, modalities,
+            and context length.
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -20692,6 +20712,72 @@ components:
       required:
       - data
       title: ModelEntitysPage
+    ModelMetadata:
+      properties:
+        display_name:
+          title: Display Name
+          description: Human-readable model name.
+          type: string
+          maxLength: 255
+        description:
+          title: Description
+          description: Summary of what the model is for.
+          type: string
+          maxLength: 4000
+        family:
+          title: Family
+          description: Model family (e.g. 'llama', 'nemotron', 'gpt').
+          type: string
+          maxLength: 255
+        capabilities:
+          items:
+            $ref: '#/components/schemas/ModelCapability'
+          type: array
+          title: Capabilities
+          description: Capabilities the model supports, such as tool calling or reasoning.
+        input_modalities:
+          items:
+            $ref: '#/components/schemas/ModelModality'
+          type: array
+          title: Input Modalities
+          description: Content types the model accepts.
+        output_modalities:
+          items:
+            $ref: '#/components/schemas/ModelModality'
+          type: array
+          title: Output Modalities
+          description: Content types the model produces.
+        parameter_count:
+          title: Parameter Count
+          description: Total number of model parameters.
+          type: integer
+          minimum: 0.0
+        context_length:
+          title: Context Length
+          description: Maximum context window, in tokens.
+          type: integer
+          minimum: 0.0
+        max_output_tokens:
+          title: Max Output Tokens
+          description: Maximum tokens in a single response.
+          type: integer
+          minimum: 0.0
+        sources:
+          items:
+            type: string
+          type: array
+          title: Sources
+          description: Metadata sources that contributed these values. Empty means
+            the metadata was set by hand, and automatic enrichment leaves it unchanged.
+        refreshed_at:
+          title: Refreshed At
+          description: When the metadata was last fetched.
+          type: string
+          format: date-time
+      type: object
+      title: ModelMetadata
+      description: Descriptive details about a model, gathered from its provider and
+        public model catalogs.
     ModelMetadataContent:
       properties:
         tool_calling:
@@ -20704,6 +20790,16 @@ components:
         Contains tool calling configuration that is merged into the ModelSpec
 
         during checkpoint analysis.'
+    ModelModality:
+      type: string
+      enum:
+      - text
+      - image
+      - audio
+      - video
+      - pdf
+      title: ModelModality
+      description: A kind of content a model accepts or produces.
     ModelParameters:
       properties:
         base_url:
@@ -24296,6 +24392,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/ModelSpec'
           description: Detailed specification for the model
+        metadata:
+          allOf:
+          - $ref: '#/components/schemas/ModelMetadata'
+          description: Descriptive model details such as capabilities, modalities,
+            and context length.
         fileset:
           title: Fileset
           description: 'A set of checkpoint files, configs, and other auxiliary info

@@ -182,6 +182,7 @@ def _model_to_model_entity(
         project=model.project,
         description=model.description,
         spec=spec,
+        metadata=model.metadata,
         fileset=model.fileset,
         finetuning_type=model.finetuning_type,
         base_model=model.base_model,
@@ -407,6 +408,7 @@ class ModelEntityService:
             project=request.project,
             description=request.description,
             spec=request.spec,
+            metadata=request.metadata,
             finetuning_type=request.finetuning_type,
             fileset=request.fileset,
             base_model=str(request.base_model) if request.base_model else None,
@@ -565,6 +567,8 @@ class ModelEntityService:
             model.description = update_data["description"]
         if "spec" in update_data:
             model.spec = update_data["spec"]
+        if "metadata" in update_data:
+            model.metadata = request.metadata
         if "fileset" in update_data:
             await get_fileset_and_files_list(self.files, workspace, update_data["fileset"])
             model.fileset = update_data["fileset"]

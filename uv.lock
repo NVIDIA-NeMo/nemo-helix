@@ -42,6 +42,7 @@ members = [
     "nemo-helix-ext",
     "nemo-helix-plugin",
     "nemo-helix-tools",
+    "nemo-model-metadata-plugin",
     "nemo-nb",
     "nemo-optimization-plugin",
     "nemo-rl-plugin",
@@ -5746,6 +5747,11 @@ nemo-helix-plugin = [
     { name = "pyyaml" },
     { name = "typer" },
 ]
+nemo-model-metadata-plugin = [
+    { name = "httpx" },
+    { name = "nemo-helix-plugin" },
+    { name = "pydantic" },
+]
 nemo-optimization-plugin = [
     { name = "matplotlib" },
     { name = "nemo-agent-optimization-plugin" },
@@ -6307,6 +6313,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'nemo-garak-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-helix-ext'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.27.0,<1" },
+    { name = "httpx", marker = "extra == 'nemo-model-metadata-plugin'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=0.27.2" },
     { name = "httpx", marker = "extra == 'nemo-switchyard'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'nhx-customization-common'", specifier = ">=0.27.0" },
@@ -6580,6 +6587,7 @@ requires-dist = [
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-garak-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-guardrails-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-helix-ext'", editable = "packages/nemo_helix_plugin" },
+    { name = "nemo-helix-plugin", marker = "extra == 'nemo-model-metadata-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-optimization-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-rl-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-safe-synthesizer-plugin'", editable = "packages/nemo_helix_plugin" },
@@ -6866,6 +6874,7 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'nemo-garak-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-helix-ext'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.12.0" },
+    { name = "pydantic", marker = "extra == 'nemo-model-metadata-plugin'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'nemo-optimization-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-rl-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-unsloth-plugin'", specifier = ">=2.10.6" },
@@ -7091,7 +7100,7 @@ requires-dist = [
     { name = "yara-python", marker = "extra == 'guardrails-service'", specifier = "==4.5.4" },
     { name = "yara-python", marker = "extra == 'services'", specifier = "==4.5.4" },
 ]
-provides-extras = ["all", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "garak-service", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-agents-plugin-mini-swe-agent", "nemo-agents-plugin-nooa", "nemo-anonymizer-plugin", "nemo-automodel-plugin", "nemo-builder-plugin", "nemo-compass-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evals-plugin", "nemo-garak-plugin", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "nhx-evals-sdk", "nhx-sandbox", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
+provides-extras = ["all", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "garak-service", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-agents-plugin-mini-swe-agent", "nemo-agents-plugin-nooa", "nemo-anonymizer-plugin", "nemo-automodel-plugin", "nemo-builder-plugin", "nemo-compass-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evals-plugin", "nemo-garak-plugin", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-model-metadata-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "nhx-evals-sdk", "nhx-sandbox", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
 
 [[package]]
 name = "nemo-helix-ext"
@@ -7313,6 +7322,23 @@ requires-dist = [
 test = [
     { name = "pytest", specifier = ">=8.3.3" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
+]
+
+[[package]]
+name = "nemo-model-metadata-plugin"
+version = "0.1.0"
+source = { editable = "plugins/nemo-model-metadata" }
+dependencies = [
+    { name = "httpx" },
+    { name = "nemo-helix-plugin" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27.0,<1" },
+    { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
+    { name = "pydantic", specifier = ">=2.0.0" },
 ]
 
 [[package]]
@@ -7809,6 +7835,7 @@ agents-deepagents-e2e-services = [
     { name = "nemo-helix", extra = ["services"] },
     { name = "nemo-helix-plugin" },
     { name = "nemo-helix-tavily-plugin" },
+    { name = "nemo-model-metadata-plugin" },
     { name = "nemo-optimization-plugin" },
     { name = "nemo-rl-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
@@ -7858,6 +7885,7 @@ core-services = [
     { name = "nemo-helix", extra = ["services"] },
     { name = "nemo-helix-plugin" },
     { name = "nemo-helix-tavily-plugin" },
+    { name = "nemo-model-metadata-plugin" },
     { name = "nemo-optimization-plugin" },
     { name = "nemo-rl-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
@@ -7969,6 +7997,7 @@ enabled-plugins = [
     { name = "nemo-garak-plugin" },
     { name = "nemo-guardrails-plugin" },
     { name = "nemo-helix-tavily-plugin" },
+    { name = "nemo-model-metadata-plugin" },
     { name = "nemo-optimization-plugin" },
     { name = "nemo-rl-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
@@ -7992,6 +8021,7 @@ functional-services = [
     { name = "nemo-helix", extra = ["services"] },
     { name = "nemo-helix-plugin" },
     { name = "nemo-helix-tavily-plugin" },
+    { name = "nemo-model-metadata-plugin" },
     { name = "nemo-optimization-plugin" },
     { name = "nemo-rl-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
@@ -8099,6 +8129,7 @@ agents-deepagents-e2e-services = [
     { name = "nemo-helix", extras = ["services"], editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-tavily-plugin" },
+    { name = "nemo-model-metadata-plugin", editable = "plugins/nemo-model-metadata" },
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
     { name = "nemo-rl-plugin", editable = "plugins/nemo-rl" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
@@ -8146,6 +8177,7 @@ core-services = [
     { name = "nemo-helix", extras = ["services"], editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-tavily-plugin" },
+    { name = "nemo-model-metadata-plugin", editable = "plugins/nemo-model-metadata" },
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
     { name = "nemo-rl-plugin", editable = "plugins/nemo-rl" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
@@ -8260,6 +8292,7 @@ enabled-plugins = [
     { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
     { name = "nemo-helix-tavily-plugin" },
+    { name = "nemo-model-metadata-plugin", editable = "plugins/nemo-model-metadata" },
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
     { name = "nemo-rl-plugin", editable = "plugins/nemo-rl" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
@@ -8284,6 +8317,7 @@ functional-services = [
     { name = "nemo-helix", extras = ["services"], editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-tavily-plugin" },
+    { name = "nemo-model-metadata-plugin", editable = "plugins/nemo-model-metadata" },
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
     { name = "nemo-rl-plugin", editable = "plugins/nemo-rl" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
