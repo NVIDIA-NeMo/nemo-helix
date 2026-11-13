@@ -18,7 +18,7 @@ from nemo_helix_plugin.inference_middleware import (
     InferenceResponse,
     NemoInferenceMiddleware,
 )
-from nemo_helix_plugin.inference_middleware_models import VirtualModel
+from nemo_helix_plugin.inference_middleware_models import MiddlewareCall, VirtualModel, VirtualModelInferenceConfig
 from nemo_helix_plugin.models.types import ModelProvider, ModelProviderStatus, ServedModelMapping
 from nhx.core.inference_gateway.api.dependencies import (
     global_middleware_registry,
@@ -303,6 +303,115 @@ def test_get_model_lora_composite_404_until_adapter_is_routable(app: FastAPI, cl
     assert response.json()["detail"] == (
         "Routing table lookup failed: Model entity not found for base model ws/base with adapter ws/adder"
     )
+
+
+def _routing_middleware() -> MiddlewareCall:
+    return MiddlewareCall(name="router", config_type="route_config", config={})
+
+
+def test_get_model_lora_middleware_does_not_require_public_name(app: FastAPI, client: TestClient):
+    """A VirtualModel with no default entity is ready when middleware can route.
+
+    Chat leaves the public composite in place and lets request middleware select
+    another entity. GET must not wait on that public name when a declared model
+    is already routable.
+    """
+    vm = VirtualModel(
+        workspace="ws",
+        name="base",
+        default_model_entity=None,
+        autoprovisioned=False,
+        request_middleware=[_routing_middleware()],
+        models=[VirtualModelInferenceConfig(model="ws/routed-target")],
+    )
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([vm])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws/routed-target")
+
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 200
+    assert response.json()["id"] == "ws/base&adapters/ws/adder"
+
+
+def test_get_model_lora_middleware_accepts_adapter_on_declared_model(app: FastAPI, client: TestClient):
+    """Middleware may keep the adapter suffix on a declared model.
+
+    The public composite is absent. The adapter composite of the declared model
+    is what chat would resolve, so that entry makes the route ready.
+    """
+    vm = VirtualModel(
+        workspace="ws",
+        name="base",
+        default_model_entity=None,
+        autoprovisioned=False,
+        request_middleware=[_routing_middleware()],
+        models=[VirtualModelInferenceConfig(model="ws/base")],
+    )
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([vm])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws/base&adapters/ws/adder")
+
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 200
+
+
+def test_get_model_lora_middleware_404_when_no_entity_resolves(app: FastAPI, client: TestClient):
+    """Middleware that declares models still 404s when none of them can be proxied."""
+    vm = VirtualModel(
+        workspace="ws",
+        name="base",
+        default_model_entity=None,
+        autoprovisioned=False,
+        request_middleware=[_routing_middleware()],
+        models=[VirtualModelInferenceConfig(model="ws/routed-target")],
+    )
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([vm])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: ModelCache()
+
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Routing table lookup failed: Model entity not found for ws/routed-target"
+
+
+def test_get_model_lora_middleware_without_models_is_ready(app: FastAPI, client: TestClient):
+    """Middleware that declares no models answers the request itself.
+
+    There is no model-entity cache entry to wait on, and the public composite
+    is not required.
+    """
+    vm = VirtualModel(
+        workspace="ws",
+        name="base",
+        default_model_entity=None,
+        autoprovisioned=False,
+        request_middleware=[_routing_middleware()],
+    )
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([vm])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: ModelCache()
+
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 200
+
+
+def test_get_model_lora_without_default_or_middleware_requires_public_name(app: FastAPI, client: TestClient):
+    """With nothing to select another entity, the public composite is the route."""
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_custom_vm("ws", "base")])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: ModelCache()
+
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 404
+
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws/base&adapters/ws/adder")
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 200
 
 
 def test_get_model_lora_compound_bare_name_in_path(app: FastAPI, client: TestClient):

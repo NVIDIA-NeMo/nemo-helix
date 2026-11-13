@@ -49,6 +49,24 @@ func TestForEachLogLineCarriageReturnReplacesLine(t *testing.T) {
 	}
 }
 
+func TestForEachLogLineCarriageReturnAtEOFEmitsSnapshot(t *testing.T) {
+	// A progress line that ends on \r, with no newline before the process
+	// exits, is still a line. The snapshot before that \r has to be logged.
+	got := readLogLines("done\r")
+	want := []string{"done"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("lines = %#v, want %#v", got, want)
+	}
+
+	// An earlier snapshot is still discarded when a later one follows. Only
+	// the snapshot left in place at EOF is logged.
+	got = readLogLines("progress\rdone\r")
+	want = []string{"done"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("lines = %#v, want %#v", got, want)
+	}
+}
+
 func TestForEachLogLineCarriageReturnNewlineIsOneBreak(t *testing.T) {
 	got := readLogLines("hello\r\n\r\nworld\r\n")
 	want := []string{"hello", "", "world"}

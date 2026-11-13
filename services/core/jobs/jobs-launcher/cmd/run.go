@@ -407,8 +407,9 @@ const maxLogLineBytes = 64 * 1024
 // forEachLogLine calls fn for each line from r until EOF or a read error.
 // It never stops early, so the child process cannot block on a full pipe.
 //
-// A bare \r discards the text before it, as a progress bar redraw does.
-// Only the text left on the line at the next \n is logged. \r\n is one break.
+// A bare \r discards the text before it when another snapshot follows, as a
+// progress bar redraw does. The text still pending at the next \n, or at EOF
+// when nothing follows the \r, is logged. \r\n is one break.
 func forEachLogLine(r io.Reader, fn func(line string)) {
 	br := bufio.NewReaderSize(r, 32*1024)
 	pending := make([]byte, 0, 256)
@@ -438,9 +439,16 @@ func forEachLogLine(r io.Reader, fn func(line string)) {
 				emit(pending)
 				continue
 			}
-			if readErr == nil {
-				_ = br.UnreadByte()
+			if readErr != nil {
+				// No later snapshot replaces this one. A program that finishes
+				// on a carriage return, with no newline, would otherwise lose
+				// its last line.
+				if len(pending) > 0 {
+					emit(pending)
+				}
+				return
 			}
+			_ = br.UnreadByte()
 			// The following snapshot overwrites this one. Keep reading so the
 			// pipe drains, and log whichever snapshot a newline leaves in place.
 			pending = pending[:0]

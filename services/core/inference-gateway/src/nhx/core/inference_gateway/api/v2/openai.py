@@ -174,26 +174,71 @@ async def openai_get_model(
     )
 
 
-def _raise_unless_adapter_route_ready(
-    model_cache: ModelCache, virtual_model: VirtualModel, workspace: str, model_name: str
-) -> None:
-    """Raise the same 404 chat completions would for a LoRA composite with no routable entity."""
-    default_entity = virtual_model.default_model_entity
-    adapter_parts = parse_adapters_suffix(model_name)
-    if adapter_parts is None:
-        raise_model_entity_not_found(workspace, model_name)
-    _, adapter_workspace, adapter_name = adapter_parts
-    entity_id = (
-        format_adapter_composite(default_entity, adapter_workspace, adapter_name)
-        if default_entity
-        else f"{workspace}/{model_name}"
-    )
+def _entity_is_routable(model_cache: ModelCache, entity_id: str) -> bool:
+    """True when chat completions could proxy ``entity_id``."""
+    try:
+        ref = parse_model_entity_ref(entity_id)
+    except (TypeError, ValueError):
+        return False
+    entity = model_cache.get_from_model_entity(ref.workspace, ref.name)
+    return entity is not None and bool(entity.model_providers)
+
+
+def _require_routable_entity(model_cache: ModelCache, entity_id: str) -> None:
+    """Raise the 404 chat completions would when ``entity_id`` cannot be proxied."""
     ref = parse_model_entity_ref(entity_id)
     entity = model_cache.get_from_model_entity(ref.workspace, ref.name)
     if entity is None:
         raise_model_entity_not_found(ref.workspace, ref.name)
     if not entity.model_providers:
         raise_no_providers_for_model_entity(ref.workspace, ref.name)
+
+
+def _raise_unless_adapter_route_ready(
+    model_cache: ModelCache, virtual_model: VirtualModel, workspace: str, model_name: str
+) -> None:
+    """Raise the same 404 chat completions would for a LoRA composite with no routable entity.
+
+    The check follows the inference path in :func:`virtual_model_proxy`. When
+    ``default_model_entity`` is set, chat splices that entity with the adapter
+    suffix before middleware runs, so that composite has to be routable.
+
+    When it is unset, chat leaves the public name in place and request middleware
+    selects the entity, or answers the request itself. The public composite is
+    then not required. The route is ready when any model the VirtualModel
+    declares, the adapter composite of that model, or the public name can be
+    proxied. Middleware that declares no models owns the response, so there is
+    no cache entry to wait on. When none of those entities can be resolved, this
+    raises the same not-found error chat would.
+    """
+    adapter_parts = parse_adapters_suffix(model_name)
+    if adapter_parts is None:
+        raise_model_entity_not_found(workspace, model_name)
+    _, adapter_workspace, adapter_name = adapter_parts
+
+    default_entity = virtual_model.default_model_entity
+    if default_entity:
+        _require_routable_entity(
+            model_cache,
+            format_adapter_composite(default_entity, adapter_workspace, adapter_name),
+        )
+        return
+
+    if not virtual_model.request_middleware:
+        _require_routable_entity(model_cache, f"{workspace}/{model_name}")
+        return
+
+    # Middleware selects the entity after the public name is seeded. A declared
+    # model, that model with this request's adapter suffix, or the public name
+    # itself is enough. The public name is not required.
+    candidates = [f"{workspace}/{model_name}"]
+    for inference_config in virtual_model.models:
+        candidates.append(inference_config.model)
+        candidates.append(format_adapter_composite(inference_config.model, adapter_workspace, adapter_name))
+    if any(_entity_is_routable(model_cache, candidate) for candidate in candidates):
+        return
+    if virtual_model.models:
+        _require_routable_entity(model_cache, virtual_model.models[0].model)
 
 
 # Use individual decorators with explicit ordering to ensure deterministic OpenAPI generation
