@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 from nemo_helix_plugin.models.types import ModelCapability, ModelMetadata, ModelModality, ModelProvider
-from nemo_model_metadata.sources.base import MetadataTarget
+from nemo_model_metadata.sources.base import MetadataTarget, SourceUnavailableError
 from nemo_model_metadata.sources.ngc import (
     NgcSource,
     endpoint_name_candidates,
@@ -179,16 +179,50 @@ async def test_ngc_source_skips_providers_other_than_nvidia_build(provider: Mode
     assert metadata is None
 
 
-async def test_ngc_source_returns_none_when_ngc_is_unreachable():
+@pytest.mark.parametrize(
+    "response",
+    [httpx.ConnectError("unreachable"), httpx.Response(503), httpx.Response(429), httpx.Response(200, text="<html>")],
+    ids=["unreachable", "server-error", "rate-limited", "not-json"],
+)
+async def test_ngc_source_raises_when_ngc_cannot_answer(response: httpx.Response | httpx.ConnectError):
     def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("unreachable")
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        with pytest.raises(SourceUnavailableError):
+            await NgcSource(http, BASE_URL, ORG).fetch(
+                MetadataTarget(upstream_model_id="moonshotai/kimi-k3", provider=_provider())
+            )
+
+
+async def test_ngc_source_treats_private_endpoint_as_not_found():
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(403)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         metadata = await NgcSource(http, BASE_URL, ORG).fetch(
-            MetadataTarget(upstream_model_id="moonshotai/kimi-k3", provider=_provider())
+            MetadataTarget(upstream_model_id="mistralai/mistral-large", provider=_provider())
         )
 
     assert metadata is None
+    assert seen == [f"/v2/endpoints/{ORG}/mistral-large/spec"]
+
+
+async def test_ngc_source_returns_none_when_no_endpoint_matches():
+    seen: list[str] = []
+
+    async with httpx.AsyncClient(transport=_routes({}, seen)) as http:
+        metadata = await NgcSource(http, BASE_URL, ORG).fetch(
+            MetadataTarget(upstream_model_id="z-ai/glm-5.3", provider=_provider())
+        )
+
+    assert metadata is None
+    assert len(seen) == 3
 
 
 @pytest.mark.parametrize(

@@ -3,8 +3,17 @@
 
 from nemo_helix_plugin.models.types import ModelModality
 
+MAX_DISPLAY_NAME_LENGTH = 255
+MAX_DESCRIPTION_LENGTH = 4000
+
 _KNOWN_MODALITIES = {modality.value for modality in ModelModality}
 _MODALITY_ALIASES = {"file": ModelModality.PDF}
+
+
+def bounded_text(value: object, max_length: int) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()[:max_length]
 
 
 def as_positive_int(value: object) -> int | None:

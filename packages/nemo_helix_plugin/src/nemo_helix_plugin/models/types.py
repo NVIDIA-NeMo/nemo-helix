@@ -33,7 +33,7 @@ from enum import Enum, StrEnum
 from typing import Any, Literal, NotRequired, Self, TypedDict
 
 from nemo_helix_plugin.inference_middleware import BackendFormat
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AnyUrl, AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Inlined constants
@@ -325,7 +325,7 @@ class ModelMetadata(BaseModel):
             "and automatic enrichment leaves it unchanged."
         ),
     )
-    refreshed_at: datetime | None = Field(default=None, description="When the metadata was last fetched.")
+    refreshed_at: AwareDatetime | None = Field(default=None, description="When the metadata was last fetched.")
 
 
 class LinearLayerSpec(BaseModel):

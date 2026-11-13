@@ -557,11 +557,12 @@ class ModelEntityService:
             schema=True,
         )
 
-        # Apply updates (only non-None values). ``backend_format`` is nullable by
-        # contract, so preserve an explicit null when the client wants to clear it.
+        # Apply updates (only non-None values). ``backend_format`` and ``metadata`` are nullable by
+        # contract, so preserve an explicit null when the client wants to clear them.
         update_data = request.model_dump(exclude_none=True)
-        if "backend_format" in request.model_fields_set:
-            update_data["backend_format"] = request.backend_format
+        for nullable_field in ("backend_format", "metadata"):
+            if nullable_field in request.model_fields_set:
+                update_data[nullable_field] = getattr(request, nullable_field)
 
         if "description" in update_data:
             model.description = update_data["description"]

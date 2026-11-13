@@ -14,7 +14,7 @@ class SourceName(StrEnum):
 
 
 class ModelMetadataConfig(NemoConfig):
-    plugin_name: ClassVar[str] = "model-metadata"
+    plugin_name: ClassVar[str] = "model_metadata"
     plugin_description: ClassVar[str] = "Configuration for the model metadata enrichment controller."
 
     sources: list[SourceName] = Field(

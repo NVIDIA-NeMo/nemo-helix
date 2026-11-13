@@ -16,13 +16,15 @@ A background controller (`model-metadata`) checks every Model entity that lists 
 
 ## Behavior
 
-- Metadata with an empty `sources` list counts as set by hand, and the controller never overwrites it.
+- Metadata with an empty `sources` list counts as set by hand, and the controller never overwrites it. Send `"metadata": null` in a `PATCH` to clear it and hand the model back to the controller.
 - Fetched metadata is refreshed after `refresh_interval_seconds`. A model no source knows is retried after the same interval.
+- When a source cannot answer (network error, rate limit, server error), the model is left as it is and retried on the next cycle.
+- A model's providers are tried in order; the first one that yields metadata is used.
 - Models without a provider, such as fileset-only checkpoints, are skipped.
 
 ## Configuration
 
-Set under `platformConfig.model-metadata` in Helm, or with `NHX_MODEL_METADATA_*` environment variables.
+Set under `platformConfig.model_metadata` in Helm, or with `NEMO_MODEL_METADATA_*` environment variables, for example `NEMO_MODEL_METADATA_SOURCES='["provider"]'`.
 
 | Field | Default | Meaning |
 | --- | --- | --- |

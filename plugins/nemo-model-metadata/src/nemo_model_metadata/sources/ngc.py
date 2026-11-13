@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-import logging
 import re
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -10,12 +9,13 @@ from urllib.parse import quote, urlparse
 import httpx
 from nemo_helix_plugin.models.types import ModelCapability, ModelMetadata
 from nemo_model_metadata.config import SourceName
-from nemo_model_metadata.sources.base import MetadataSource, MetadataTarget
-from nemo_model_metadata.sources.parsing import as_positive_int, modalities
-
-logger = logging.getLogger(__name__)
+from nemo_model_metadata.sources.base import MetadataSource, MetadataTarget, SourceUnavailableError
+from nemo_model_metadata.sources.parsing import MAX_DESCRIPTION_LENGTH, as_positive_int, bounded_text, modalities
 
 NVIDIA_BUILD_HOST = "integrate.api.nvidia.com"
+
+# NGC answers 403 rather than 404 for endpoints that exist but are retired or private.
+_NOT_PUBLIC_STATUSES = frozenset({401, 403, 404})
 
 _CAPABILITY_FLAGS: dict[str, ModelCapability] = {
     "functionCalling": ModelCapability.TOOL_CALLING,
@@ -23,7 +23,6 @@ _CAPABILITY_FLAGS: dict[str, ModelCapability] = {
     "structuredOutput": ModelCapability.STRUCTURED_OUTPUT,
 }
 
-_MAX_DESCRIPTION_LENGTH = 4000
 
 _PARAMETER_SUFFIXES = {"K": 10**3, "M": 10**6, "B": 10**9, "T": 10**12}
 _PARAMETER_PATTERN = re.compile(r"^(\d+(?:\.\d+)?)\s*([KMBT])$", re.IGNORECASE)
@@ -77,10 +76,8 @@ def parse_ngc_endpoint(spec: dict[str, Any], artifact: dict[str, Any] | None) ->
     if not isinstance(flags, dict):
         flags = {}
     capabilities = [capability for flag, capability in _CAPABILITY_FLAGS.items() if flags.get(flag) is True]
-    description = (artifact or {}).get("shortDescription")
-
     metadata = ModelMetadata(
-        description=description[:_MAX_DESCRIPTION_LENGTH] if isinstance(description, str) and description else None,
+        description=bounded_text((artifact or {}).get("shortDescription"), MAX_DESCRIPTION_LENGTH),
         capabilities=capabilities,
         input_modalities=modalities(specifications.get("inputModalities")),
         output_modalities=modalities(specifications.get("outputModalities")),
@@ -119,15 +116,17 @@ class NgcSource(MetadataSource):
         return None
 
     async def _get_json(self, url: str) -> dict[str, Any] | None:
+        """Return the JSON object at ``url``, or ``None`` when NGC has no such endpoint."""
         try:
             response = await self._http.get(url)
         except httpx.HTTPError as exc:
-            logger.debug("NGC request to %s failed: %s", url, exc)
+            raise SourceUnavailableError(f"NGC request to {url} failed: {exc}") from exc
+        if response.status_code in _NOT_PUBLIC_STATUSES:
             return None
         if response.status_code != 200:
-            return None
+            raise SourceUnavailableError(f"NGC request to {url} returned HTTP {response.status_code}")
         try:
             body: object = response.json()
-        except ValueError:
-            return None
+        except ValueError as exc:
+            raise SourceUnavailableError(f"NGC returned invalid JSON for {url}") from exc
         return body if isinstance(body, dict) else None

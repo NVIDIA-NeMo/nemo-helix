@@ -1,17 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import logging
 from typing import Any
 
-import httpx
-from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayClient
 from nemo_helix_plugin.models.types import ModelCapability, ModelMetadata, ModelProvider
 from nemo_model_metadata.config import SourceName
-from nemo_model_metadata.sources.base import MetadataSource, MetadataTarget
-from nemo_model_metadata.sources.parsing import as_positive_int, modalities
-
-logger = logging.getLogger(__name__)
+from nemo_model_metadata.sources.base import MetadataSource, MetadataTarget, SourceUnavailableError
+from nemo_model_metadata.sources.parsing import (
+    MAX_DESCRIPTION_LENGTH,
+    MAX_DISPLAY_NAME_LENGTH,
+    as_positive_int,
+    bounded_text,
+    modalities,
+)
 
 _CAPABILITY_PARAMETERS: dict[str, ModelCapability] = {
     "tools": ModelCapability.TOOL_CALLING,
@@ -39,11 +42,9 @@ def parse_provider_model(entry: dict[str, Any]) -> ModelMetadata | None:
             if capability is not None and capability not in capabilities:
                 capabilities.append(capability)
 
-    name = entry.get("name")
-    description = entry.get("description")
     metadata = ModelMetadata(
-        display_name=name if isinstance(name, str) and name else None,
-        description=description if isinstance(description, str) and description else None,
+        display_name=bounded_text(entry.get("name"), MAX_DISPLAY_NAME_LENGTH),
+        description=bounded_text(entry.get("description"), MAX_DESCRIPTION_LENGTH),
         capabilities=capabilities,
         input_modalities=modalities(architecture.get("input_modalities")),
         output_modalities=modalities(architecture.get("output_modalities")),
@@ -60,9 +61,9 @@ class ProviderModelsSource(MetadataSource):
 
     name = SourceName.PROVIDER
 
-    def __init__(self, models_client: AsyncModelsClient) -> None:
-        self._models_client = models_client
-        self._listings: dict[str, dict[str, dict[str, Any]]] = {}
+    def __init__(self, gateway_client: AsyncInferenceGatewayClient) -> None:
+        self._gateway_client = gateway_client
+        self._listings: dict[str, dict[str, dict[str, Any]] | SourceUnavailableError] = {}
 
     def begin_cycle(self) -> None:
         self._listings.clear()
@@ -79,21 +80,24 @@ class ProviderModelsSource(MetadataSource):
     async def _listing(self, provider: ModelProvider) -> dict[str, dict[str, Any]]:
         key = f"{provider.workspace}/{provider.name}"
         cached = self._listings.get(key)
-        if cached is not None:
-            return cached
-        listing: dict[str, dict[str, Any]] = {}
-        url = f"{self._models_client.get_provider_route_openai_url(provider)}/models"
+        if cached is None:
+            cached = await self._fetch_listing(provider)
+            self._listings[key] = cached
+        if isinstance(cached, SourceUnavailableError):
+            raise cached
+        return cached
+
+    async def _fetch_listing(self, provider: ModelProvider) -> dict[str, dict[str, Any]] | SourceUnavailableError:
         try:
-            response = await self._models_client.http_client.get(url)
-            response.raise_for_status()
-            body: object = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.debug("Could not list models for provider %s: %s", key, exc)
-            body = None
+            body = await self._gateway_client.get_provider_models(workspace=provider.workspace, name=provider.name)
+        except NemoClientError as exc:
+            return SourceUnavailableError(
+                f"Could not list models for provider {provider.workspace}/{provider.name}: {exc}"
+            )
         data = body.get("data") if isinstance(body, dict) else None
+        listing: dict[str, dict[str, Any]] = {}
         if isinstance(data, list):
             for entry in data:
                 if isinstance(entry, dict) and isinstance(entry.get("id"), str):
                     listing[entry["id"]] = entry
-        self._listings[key] = listing
         return listing

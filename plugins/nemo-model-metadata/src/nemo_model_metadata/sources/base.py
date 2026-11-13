@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from nemo_helix_plugin.models.types import ModelMetadata, ModelProvider
 
 
+class SourceUnavailableError(Exception):
+    """The source could not answer, so a missing result says nothing about the model."""
+
+
 @dataclass(frozen=True)
 class MetadataTarget:
     """A model as its upstream provider knows it."""
@@ -23,4 +27,7 @@ class MetadataSource(ABC):
 
     @abstractmethod
     async def fetch(self, target: MetadataTarget) -> ModelMetadata | None:
-        """Return what this source knows about the model, or ``None`` when it knows nothing."""
+        """Return what this source knows about the model, or ``None`` when it knows nothing.
+
+        Raise :class:`SourceUnavailableError` when the source could not be asked.
+        """
