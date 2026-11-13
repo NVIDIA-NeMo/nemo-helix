@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ActionMenuItem } from '@nemo/common/src/components/ActionsMenu';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
 import type * as DataView from '@nemo/common/src/components/DataView/internal';
 import {
@@ -12,7 +11,10 @@ import {
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
-import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
+import {
+  type QuickActionItem,
+  QuickActionsMenuRoot,
+} from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
@@ -386,7 +388,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
               deploymentStatuses.get(row.id),
               parentModel ?? row
             );
-            const deployEntries: ActionMenuItem[] = deployAction
+            const deployEntries: QuickActionItem[] = deployAction
               ? [{ label: deployAction.label, onSelect: () => navigate(deployAction.href) }]
               : [];
 
@@ -395,7 +397,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
             // rather than disabled when nothing matched -- a model can be registered
             // outside a customization run, and then there is no job to show.
             const jobName = jobsByOutputName.get(row.name);
-            const jobEntries: ActionMenuItem[] = jobName
+            const jobEntries: QuickActionItem[] = jobName
               ? [
                   {
                     label: 'Job details',
@@ -405,62 +407,59 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
                 ]
               : [];
 
-            if (isAdapter && parentModel) {
-              return (
-                <QuickActionsMenuRoot
-                  actions={[
-                    {
-                      label: 'Model details',
-                      onSelect: () => {
-                        const adapter = adapterMap.get(parentModel.id)?.get(row.name);
-                        onRowClick?.(parentModel, 'model-details', adapter);
-                      },
-                    },
-                    ...jobEntries,
-                    ...deployEntries,
-                  ]}
-                  deleteAction={{
-                    label: 'Delete Adapter',
-                    onSelect: () =>
-                      setDeleteTarget({
-                        kind: 'adapter',
-                        adapterName: row.name,
-                        modelName: parentModel.name,
-                      }),
-                  }}
-                />
-              );
-            }
-
-            return (
-              <QuickActionsMenuRoot
-                actions={[
-                  {
-                    label: 'Model details',
-                    onSelect: () => onRowClick?.(row, 'model-details'),
-                  },
-                  {
-                    label: 'Chat Playground',
-                    onSelect: () => onRowClick?.(row, 'chat-playground'),
-                  },
-                  ...jobEntries,
-                  ...deployEntries,
-                  ...(INTAKE_ENABLED
-                    ? [
-                        {
-                          label: 'View Intake',
-                          onSelect: () => {
-                            navigate(getIntakeTracesRoute(workspace));
-                          },
+            const { actions, deleteAction } =
+              isAdapter && parentModel
+                ? {
+                    actions: [
+                      {
+                        label: 'Model details',
+                        onSelect: () => {
+                          const adapter = adapterMap.get(parentModel.id)?.get(row.name);
+                          onRowClick?.(parentModel, 'model-details', adapter);
                         },
-                      ]
-                    : []),
-                ]}
-                deleteAction={{
-                  onSelect: () => setDeleteTarget({ kind: 'model', name: row.name }),
-                }}
-              />
-            );
+                      },
+                      ...jobEntries,
+                      ...deployEntries,
+                    ],
+                    deleteAction: {
+                      label: 'Delete Adapter' as const,
+                      onSelect: () =>
+                        setDeleteTarget({
+                          kind: 'adapter',
+                          adapterName: row.name,
+                          modelName: parentModel.name,
+                        }),
+                    },
+                  }
+                : {
+                    actions: [
+                      {
+                        label: 'Model details',
+                        onSelect: () => onRowClick?.(row, 'model-details'),
+                      },
+                      {
+                        label: 'Chat Playground',
+                        onSelect: () => onRowClick?.(row, 'chat-playground'),
+                      },
+                      ...jobEntries,
+                      ...deployEntries,
+                      ...(INTAKE_ENABLED
+                        ? [
+                            {
+                              label: 'View Intake',
+                              onSelect: () => {
+                                navigate(getIntakeTracesRoute(workspace));
+                              },
+                            },
+                          ]
+                        : []),
+                    ],
+                    deleteAction: {
+                      onSelect: () => setDeleteTarget({ kind: 'model', name: row.name }),
+                    },
+                  };
+
+            return <QuickActionsMenuRoot actions={actions} deleteAction={deleteAction} />;
           },
         }),
       ],

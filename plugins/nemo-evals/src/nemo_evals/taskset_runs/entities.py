@@ -73,6 +73,9 @@ class TasksetRunEntity(EntityBase):
 
     __entity_type__: ClassVar[str] = "taskset_run"
 
+    plan_fileset_id: str | None = Field(
+        default=None, description="Immutable Files allocation ID; absent on legacy runs."
+    )
     plan_ref: str = Field(
         description=(
             "Files ref (workspace/fileset#plan.json) of the frozen execution plan. "

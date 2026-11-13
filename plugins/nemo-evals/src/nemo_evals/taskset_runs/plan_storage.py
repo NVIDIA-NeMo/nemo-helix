@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 
 from filesets import parse_fileset_ref
+from nemo_evals.schema_migrations import migrate_schema_fileset_receipt
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -66,6 +67,7 @@ class StoredPlan:
 
     ref: str
     digest: str
+    fileset_id: str
 
 
 async def store_plan(files_client: AsyncFilesClient, plan: TasksetRunPlan) -> StoredPlan:
@@ -91,11 +93,13 @@ async def store_plan(files_client: AsyncFilesClient, plan: TasksetRunPlan) -> St
     body = plan.model_dump_json().encode("utf-8")
     ref = f"{plan.workspace}/{name}#plan.json"
     try:
-        await files_client.create_fileset(
-            workspace=plan.workspace,
-            body=CreateFilesetRequest(name=name, description=f"Frozen plan for {plan.workspace}/{plan.run_id}."),
-            exist_ok=False,
-        )
+        allocated = (
+            await files_client.create_fileset(
+                workspace=plan.workspace,
+                body=CreateFilesetRequest(name=name, description=f"Frozen plan for {plan.workspace}/{plan.run_id}."),
+                exist_ok=False,
+            )
+        ).data()
     except PermissionDeniedError as exc:
         raise PlanStoragePermissionDeniedError(f"failed to create plan fileset {plan.workspace}/{name}", exc) from exc
     except Exception as exc:
@@ -103,12 +107,12 @@ async def store_plan(files_client: AsyncFilesClient, plan: TasksetRunPlan) -> St
     try:
         await files_client.upload_file(workspace=plan.workspace, name=name, path="plan.json", content=body)
     except PermissionDeniedError as exc:
-        await delete_fileset_ref(files_client, ref)
+        await delete_fileset_ref(files_client, ref, fileset_id=allocated.id)
         raise PlanStoragePermissionDeniedError(f"failed to upload plan to {ref}", exc) from exc
     except Exception as exc:
-        await delete_fileset_ref(files_client, ref)
+        await delete_fileset_ref(files_client, ref, fileset_id=allocated.id)
         raise PlanStorageError(f"failed to upload plan to {ref}") from exc
-    return StoredPlan(ref=ref, digest=sha256(body).hexdigest())
+    return StoredPlan(ref=ref, digest=sha256(body).hexdigest(), fileset_id=allocated.id)
 
 
 async def read_verified_bytes(files_client: AsyncFilesClient, plan_ref: str, *, expected_digest: str) -> bytes:
@@ -158,7 +162,7 @@ async def load_plan(files_client: AsyncFilesClient, plan_ref: str, *, expected_d
     return TasksetRunPlan.model_validate_json(body)
 
 
-async def delete_fileset_ref(files_client: AsyncFilesClient, ref: str) -> None:
+async def delete_fileset_ref(files_client: AsyncFilesClient, ref: str, *, fileset_id: str | None) -> None:
     """Clean up owned storage without replacing a request's original outcome.
 
     Args:
@@ -173,6 +177,9 @@ async def delete_fileset_ref(files_client: AsyncFilesClient, ref: str) -> None:
     """
     try:
         workspace, name, _ = parse_fileset_ref(ref, workspace_fallback=None)
-        await files_client.delete_fileset(workspace=workspace, name=name)
+        receipt = await migrate_schema_fileset_receipt(ref, fileset_id=fileset_id, files_client=files_client)
+        if receipt is None:
+            return
+        await files_client.delete_fileset_by_id(workspace=workspace, fileset_id=receipt.fileset_id)
     except Exception:
         logger.warning("Failed to clean up fileset %s; storage may be leaked", ref, exc_info=True)

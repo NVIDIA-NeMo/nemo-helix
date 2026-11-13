@@ -3,11 +3,8 @@
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
 import { getSafeSynthesizerListJobsQueryKey } from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
-import {
-  type GenerateJob,
-  type GenerateJobsPage,
-  HelixJobStatus,
-} from '@nemo/sdk/generated/safe-synthesizer/schema';
+import type { GenerateJob, GenerateJobsPage } from '@nemo/sdk/generated/safe-synthesizer/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/safe-synthesizer/schema/HelixJobStatus';
 import { GenerateJobsDataView } from '@studio/components/dataViews/SafeSynthesizerJobsDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';

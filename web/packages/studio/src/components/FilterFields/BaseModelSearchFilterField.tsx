@@ -5,7 +5,7 @@
 
 import { useBaseModels } from '@nemo/common/src/api/entity-store/useBaseModels';
 import { ControlledSearchableSelect } from '@nemo/common/src/components/form/ControlledSearchableSelect';
-import { ModelEntitySortField } from '@nemo/sdk/generated/platform/schema';
+import { ModelEntitySortField } from '@nemo/sdk/generated/platform/schema/ModelEntitySortField';
 import { SearchBaseModels } from '@studio/components/FilterFields/SearchBaseModels';
 import { type Dispatch, type FC, type SetStateAction, useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';

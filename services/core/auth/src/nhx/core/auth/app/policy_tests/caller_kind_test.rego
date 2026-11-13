@@ -35,19 +35,19 @@ caller_kind_test_data := {
 	"endpoints": {
 		# Service-only route: only service principals are allowed.
 		"/apis/jobs/v2/workspaces/{workspace}/internal-jobs/{name}": {
-			"get": {"permissions": ["jobs.read"], "callers": ["service_principal"]},
+			"get": {"direct": {"actor_perms": ["jobs.read"]}, "callers": ["service_principal"]},
 		},
 		# Mixed route: both humans and services are allowed.
 		"/apis/models/v2/workspaces/{workspace}/models/{name}": {
-			"get": {"permissions": ["models.read"], "callers": ["principal", "service_principal"]},
+			"get": {"direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]}, "callers": ["principal", "service_principal"]},
 		},
 		# No `callers` key: legacy PRINCIPAL-default behavior.
 		"/apis/models/v2/workspaces/{workspace}/models": {
-			"get": {"permissions": ["models.list"]},
+			"get": {"direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]}},
 		},
 		# Principal-only route: only human principals are allowed (callers: ["principal"]).
 		"/apis/models/v2/workspaces/{workspace}/human-only/{name}": {
-			"get": {"permissions": ["models.read"], "callers": ["principal"]},
+			"get": {"direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]}, "callers": ["principal"]},
 		},
 	},
 	"workspaces": {
@@ -69,7 +69,7 @@ caller_kind_test_data := {
 
 # A normal human principal (with the required permission) is DENIED on a service-only route.
 test_service_only_route_denies_human_principal if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {
 			"principal_id": "user@example.com",
 			"method": "GET",
@@ -85,7 +85,7 @@ test_service_only_route_denies_human_principal if {
 
 # A service principal is ALLOWED on the same service-only route.
 test_service_only_route_allows_service_principal if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {
 			"principal_id": "service:jobs-controller",
 			"method": "GET",
@@ -103,7 +103,7 @@ test_service_only_route_allows_service_principal if {
 # clawed back here (only non-admin humans are denied, per
 # test_service_only_route_denies_human_principal above).
 test_service_only_route_allows_platform_admin if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {
 			"principal_id": "platform-admin@example.com",
 			"method": "GET",
@@ -121,7 +121,7 @@ test_service_only_route_allows_platform_admin if {
 
 # A human principal is ALLOWED on a route that lists both caller kinds.
 test_mixed_route_allows_human_principal if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {
 			"principal_id": "user@example.com",
 			"method": "GET",
@@ -137,7 +137,7 @@ test_mixed_route_allows_human_principal if {
 
 # A service principal is ALLOWED on the same mixed route.
 test_mixed_route_allows_service_principal if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {
 			"principal_id": "service:customizer",
 			"method": "GET",
@@ -155,7 +155,7 @@ test_mixed_route_allows_service_principal if {
 
 # A human principal with the required permission is ALLOWED on a principal-only route.
 test_principal_only_route_allows_human_principal if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {
 			"principal_id": "user@example.com",
 			"method": "GET",
@@ -172,7 +172,7 @@ test_principal_only_route_allows_human_principal if {
 # A service principal is DENIED on the same principal-only route — even though ServiceSystem
 # grants "*" — closing the previously one-directional caller enforcement.
 test_principal_only_route_denies_service_principal if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {
 			"principal_id": "service:customizer",
 			"method": "GET",
@@ -212,7 +212,7 @@ test_principal_only_route_helper_false_for_mixed if {
 
 # A human principal with the required permission is ALLOWED (the new deny does not fire).
 test_no_callers_key_allows_human_principal if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {
 			"principal_id": "user@example.com",
 			"method": "GET",
@@ -228,7 +228,7 @@ test_no_callers_key_allows_human_principal if {
 
 # A service principal is ALLOWED on the no-callers route (unchanged from today).
 test_no_callers_key_allows_service_principal if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {
 			"principal_id": "service:customizer",
 			"method": "GET",

@@ -1601,7 +1601,7 @@ backends, this also deletes the underlying files.
 **Usage:**
 
 ```shell
-nemo files filesets delete [OPTIONS] NAME
+nemo files filesets delete [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -1610,6 +1610,7 @@ nemo files filesets delete [OPTIONS] NAME
 
 **Options:**
 
+* `--id`: Delete the exact fileset allocation by ID.
 * `--workspace`
 
 **Help:**
@@ -1634,7 +1635,7 @@ nemo files filesets list [OPTIONS]
 * `--workspace`
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
-* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: -created_at, created_at, -updated_at, updated_at, -name, name]
+* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: -created_at, created_at, -updated_at, updated_at, -name, name, -storage_type, storage_type]
 * `--all-pages`: Fetch all pages
 
 **Filter Options:**
@@ -3497,7 +3498,7 @@ nemo inference prompts list [OPTIONS]
 * `--workspace`
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
-* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: -created_at, created_at, -updated_at, updated_at, -name, name]
+* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: created_at, -created_at, updated_at, -updated_at, name, -name]
 * `--all-pages`: Fetch all pages
 
 **Filter Options:**
@@ -4321,6 +4322,7 @@ nemo jobs list [OPTIONS]
 **Options:**
 
 * `--workspace`
+* `--type, -t TYPE`: Only list jobs of this type: a plugin (e.g. 'evals', all its job types) or one job type (e.g. 'evals.evaluate'). Repeat for several. Lists through each job type's own route, so it can't be combined with a source filter or sort.
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
 * `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: created_at, -created_at, updated_at, -updated_at, source, -source]
@@ -5219,7 +5221,7 @@ nemo models list [OPTIONS]
 * `--workspace`
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
-* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: -created_at, created_at, -updated_at, updated_at, -name, name]
+* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: created_at, -created_at, updated_at, -updated_at, name, -name]
 * `--verbose`: Whether to include full spec details
 * `--all-pages`: Fetch all pages
 
@@ -5919,7 +5921,7 @@ nemo workspaces list [OPTIONS]
 - Object (JSON): `{"name":{"$like":"value"}}` with operators `$eq`, `$like`, `$lt`, `$lte`, `$gt`, `$gte`, `$in`, `$nin`, `$and`, `$or`, `$not`
 * `--page <INTEGER>`: Page number
 * `--page-size <INTEGER>`: Items per page
-* `--sort <CHOICE>`: Sort field [possible values: -created_at, created_at, -updated_at, updated_at, -name, name]
+* `--sort <CHOICE>`: Sort field [possible values: created_at, -created_at, updated_at, -updated_at, name, -name]
 * `--all-pages`: Fetch all pages
 
 **Help:**
@@ -6253,6 +6255,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List agent jobs (evaluations, executions, packaging),...
 * `evaluate`: Evaluate an agent workflow against a dataset as a...
 * `execute`: Execute an agent to completion as a scheduled platform job.
 * `package-agent`: Build a container image for an agent stored on the platform.
@@ -6286,6 +6289,7 @@ nemo agents optimize [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `run-strategy`: Optimize a platform agent with an installed optimization...
 
 ##### nemo agents optimize list-strategies
@@ -6342,6 +6346,45 @@ nemo agents optimize prepare-fileset [OPTIONS]
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+##### nemo agents optimize list-jobs
+
+List this plugin's jobs, newest first. Job types: run-strategy.
+
+**Usage:**
+
+```shell
+nemo agents optimize list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: run-strategy. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 ##### nemo agents optimize run-strategy
 
@@ -7307,6 +7350,48 @@ nemo agents sessions close [OPTIONS] NAME
 
 * `--help, -h`: Show this message and exit.
 
+#### nemo agents list-jobs
+
+List agent jobs (evaluations, executions, packaging), newest first.
+
+`--agent` lists an agent's runs: `nemo agents list-jobs --agent calc`.
+
+**Usage:**
+
+```shell
+nemo agents list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, e.g. evaluate, execute or package-agent. Repeat for several. Default: all.
+* `--agent, -a AGENT`: Only list runs of this agent: NAME in the listing workspace, or WORKSPACE/NAME. Repeat for several. Lists execute jobs, the only jobs that record their agent. With `--workspace` -, use WORKSPACE/NAME.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
+
 #### nemo agents evaluate
 
 Evaluate an agent workflow against a dataset as a scheduled platform job.
@@ -7629,6 +7714,7 @@ nemo data-designer [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `create`: Generate a synthetic dataset
 * `retrieval-generate`: Generate retrieval Q&A JSONL from a document corpus...
 * `retrieval-prepare`: Convert retrieval SDG output to eval_beir and training...
@@ -8005,6 +8091,45 @@ Function Spec flags are generated from the RetrievalPreviewSpec Pydantic schema.
 
 Some spec fields cannot be represented as CLI flags: `generate.file_extensions`, `generate.bundle_strategy`, `generate.query_counts`, `generate.reasoning_counts`, `generate.resume`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
+
+#### nemo data-designer list-jobs
+
+List this plugin's jobs, newest first. Job types: create, retrieval-generate, retrieval-prepare, retrieval-run.
+
+**Usage:**
+
+```shell
+nemo data-designer list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: create, retrieval-generate, retrieval-prepare, retrieval-run. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 #### nemo data-designer create
 
@@ -8644,6 +8769,7 @@ nemo garak [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `audit`: Run a garak scan against a configured target.
 
 #### nemo garak info
@@ -8948,6 +9074,45 @@ nemo garak targets delete [OPTIONS] NAME
 
 * `--help, -h`: Show this message and exit.
 
+#### nemo garak list-jobs
+
+List this plugin's jobs, newest first. Job types: audit.
+
+**Usage:**
+
+```shell
+nemo garak list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: audit. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
+
 #### nemo garak audit
 
 Run a garak scan against a configured target.
@@ -9031,6 +9196,7 @@ nemo anonymizer [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `run`: Anonymize a dataset of records
 
 #### nemo anonymizer validate
@@ -9099,6 +9265,45 @@ Function Spec flags are generated from the PreviewRequest Pydantic schema. Prece
 
 Some spec fields cannot be represented as CLI flags: `config.detect.entity_labels`, `config.detect.excluded_entity_labels`, `config.replace`, `model_configs`, `selected_models.detection`, `selected_models.replace`, `selected_models.rewrite`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
+
+#### nemo anonymizer list-jobs
+
+List this plugin's jobs, newest first. Job types: run.
+
+**Usage:**
+
+```shell
+nemo anonymizer list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: run. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 #### nemo anonymizer run
 
@@ -9195,6 +9400,7 @@ nemo evals [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `agent-evaluate`: Run agent evaluation over tasks against a model, agent,...
 * `evaluate`: Run evals SDK metrics against inline rows or FilesetRef...
 * `retrieve-eval`: Evaluate dense retrieval over a BEIR corpus with nDCG,...
@@ -9501,6 +9707,45 @@ nemo evals tasksets build-images [OPTIONS] REF
 
 * `--help, -h`: Show this message and exit.
 
+#### nemo evals list-jobs
+
+List this plugin's jobs, newest first. Job types: agent-evaluate, evaluate, retrieve-eval.
+
+**Usage:**
+
+```shell
+nemo evals list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: agent-evaluate, evaluate, retrieve-eval. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
+
 #### nemo evals agent-evaluate
 
 Run agent evaluation over tasks against a model, agent, or runner.
@@ -9722,6 +9967,7 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `automodel.jobs`: Automodel SFT, retrieval, and knowledge-distillation...
 * `rl.jobs`: NeMo-RL DPO and GRPO training jobs on the platform...
 * `unsloth.jobs`: Unsloth SFT (LoRA / full / merged) training jobs on the...
@@ -10140,6 +10386,45 @@ nemo customization unsloth explain [OPTIONS]
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+#### nemo customization list-jobs
+
+List this plugin's jobs, newest first. Job types: automodel.jobs, rl.jobs, unsloth.jobs.
+
+**Usage:**
+
+```shell
+nemo customization list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: automodel.jobs, rl.jobs, unsloth.jobs. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 #### nemo customization automodel.jobs
 
@@ -10714,7 +10999,47 @@ nemo safe-synthesizer [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `generate`: Generate synthetic data using Safe Synthesizer.
+
+#### nemo safe-synthesizer list-jobs
+
+List this plugin's jobs, newest first. Job types: generate.
+
+**Usage:**
+
+```shell
+nemo safe-synthesizer list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: generate. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 #### nemo safe-synthesizer generate
 

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from nhx.customization_common.training.errors.classifier import classify_output
+from nhx.customization_common.training.errors.exceptions import TrainingEnvironmentError
 from nhx.rl.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME
 from nhx.rl.app.jobs.training.schemas import TrainingResult, TrainingStepConfig
 from nhx.rl.tasks.training.distributed import DistributedContext
@@ -39,6 +40,57 @@ def _runner(tmp_path: Path, synced: list[str], completed: list[str]) -> Training
     setattr(runner, "_preprocessing_phase", lambda: None)
     setattr(runner, "_compile_config_phase", lambda: MagicMock())
     return runner
+
+
+def test_a_mismatched_nemo_gym_wheel_stops_before_preprocessing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wheel check runs on the coordinator before conversions, Ray, or the sandbox host."""
+    signaled: list[str] = []
+    runner = TrainingRunner.__new__(TrainingRunner)
+    runner._config = cast(TrainingStepConfig, SimpleNamespace(gym=SimpleNamespace(environment_path="/job/environment")))
+    runner._dist_ctx = cast(DistributedContext, SimpleNamespace(is_coordinator=True, signal=signaled.append))
+    runner._backend = MagicMock()
+
+    def mismatch(environment_root: Path, image_gym_root: Path | None = None) -> bool:
+        del environment_root, image_gym_root
+        raise RuntimeError(
+            "Gym version incompatible: the environment's nemo-gym wheel does not match the Gym "
+            "in this image. Rebuild the wheelhouse."
+        )
+
+    monkeypatch.setattr(
+        "sandboxed_gym.runtime.gym_host_runtime.require_packaged_nemo_gym_matches_image",
+        mismatch,
+    )
+
+    with pytest.raises(TrainingEnvironmentError, match="Rebuild the wheelhouse") as raised:
+        runner._preprocessing_phase()
+
+    assert raised.value.cause == "gym_version_mismatch"
+    assert raised.value.rerunnable is False
+    assert signaled == []
+    cast(MagicMock, runner._backend).run_preprocessing.assert_not_called()
+
+
+def test_preprocessing_without_an_environment_does_not_compare_wheels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    signaled: list[str] = []
+    compared: list[Path] = []
+    runner = TrainingRunner.__new__(TrainingRunner)
+    runner._config = cast(TrainingStepConfig, SimpleNamespace(seed=1))
+    runner._dist_ctx = cast(DistributedContext, SimpleNamespace(is_coordinator=True, signal=signaled.append))
+    runner._backend = MagicMock()
+    monkeypatch.setattr(
+        "sandboxed_gym.runtime.gym_host_runtime.require_packaged_nemo_gym_matches_image",
+        lambda environment_root, image_gym_root=None: compared.append(environment_root),
+    )
+
+    runner._preprocessing_phase()
+
+    assert compared == []
+    assert signaled == ["preprocessing_complete"]
 
 
 def test_a_paused_run_releases_workers_and_skips_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

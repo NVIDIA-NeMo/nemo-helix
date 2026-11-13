@@ -43,11 +43,9 @@ export const DASHBOARD_ROUTE_ENABLED = ASSISTANT_STUDIO_ENABLED || DASHBOARD_SAN
 export const EVALS_ENABLED = featureFlags.evalsEnabled !== false;
 export const EVALS_BENCHMARKS_ENABLED = featureFlags.evalsBenchmarksEnabled !== false;
 export const EXPERIMENT_ENABLED = featureFlags.experiment !== false;
-export const FILESET_DETAILS_ENABLED = featureFlags.filesetDetailsEnabled !== false;
 export const INFERENCE_PROVIDER_ENABLED = featureFlags.inferenceProviderEnabled !== false;
 export const INTAKE_ENABLED = featureFlags.intakeEnabled !== false;
 export const MEMBERS_ENABLED = featureFlags.membersEnabled !== false;
-export const MODEL_COMPARE_ENABLED = featureFlags.modelCompareEnabled !== false;
 export const MODEL_DETAILS_ENABLED = featureFlags.modelDetailsEnabled !== false;
 export const MODEL_EVALUATION_FORM_ENABLED = featureFlags.modelEvaluationFormEnabled !== false;
 export const MONITOR_ENABLED = featureFlags.monitorEnabled !== false;

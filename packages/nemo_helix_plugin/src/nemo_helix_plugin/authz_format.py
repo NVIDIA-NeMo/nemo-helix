@@ -109,7 +109,7 @@ def validate_static_authz_data(data: dict[str, Any]) -> None:
     """Validate permission, scope, and caller-kind string formats in loaded static authz data.
 
     Call after parsing ``static-authz.yaml``. Validates ``roles[*].permissions``,
-    ``endpoints[*][*].{permissions,scopes,callers}``. Raises the same exceptions as the granular
+    explicit ``endpoints[*][*].{direct,delegated,scopes,callers}``. Raises the same exceptions as the granular
     validators above (and ``ValueError`` for an unknown caller kind) — catching a hand-edited
     bad value at load/build time rather than letting it fail silently in policy checks.
     """
@@ -130,19 +130,36 @@ def validate_static_authz_data(data: dict[str, Any]) -> None:
                 )
 
     endpoints = authz.get("endpoints")
+    if "endpoints" in authz and not isinstance(endpoints, dict):
+        raise ValueError("endpoints must map paths to explicit HTTP method contracts")
     if isinstance(endpoints, dict):
         for path, methods in endpoints.items():
             if not isinstance(methods, dict):
-                continue
+                raise ValueError(f"endpoints[{path!r}] must map HTTP methods to explicit contracts")
             for method_name, op in methods.items():
                 if not isinstance(op, dict):
-                    continue
-                perms = op.get("permissions")
-                if isinstance(perms, list):
-                    validate_permission_strings(
-                        [p for p in perms if isinstance(p, str)],
-                        context=f"endpoints[{path!r}].{method_name}.permissions",
+                    raise ValueError(f"endpoints[{path!r}].{method_name} must be an explicit contract")
+                if "on_behalf_of" in op:
+                    raise ValueError("Use explicit direct/delegated authorization branches instead of on_behalf_of")
+                explicit = "direct" in op or "delegated" in op
+                if "permissions" in op:
+                    raise ValueError(
+                        "Endpoint permissions shorthand is unsupported; declare explicit direct/delegated branches"
                     )
+                if not explicit and op.get("deny") is not True:
+                    raise ValueError(f"endpoints[{path!r}].{method_name} requires an explicit direct/delegated branch")
+                for branch_name in ("direct", "delegated"):
+                    if branch_name not in op:
+                        continue
+                    branch = op[branch_name]
+                    context = f"endpoints[{path!r}].{method_name}.{branch_name}"
+                    allowed_keys = {"actor_perms"} if branch_name == "direct" else {"actor_perms", "subject_perms"}
+                    if not isinstance(branch, dict) or "actor_perms" not in branch or not set(branch) <= allowed_keys:
+                        raise ValueError(f"{context} requires actor_perms and permits only {sorted(allowed_keys)}")
+                    for key, required in branch.items():
+                        if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
+                            raise ValueError(f"{context}.{key} must be a list of permission strings")
+                        validate_permission_strings(required, context=f"{context}.{key}")
                 sc_list = op.get("scopes")
                 if isinstance(sc_list, list):
                     validate_nhx_scope_strings_for_config(

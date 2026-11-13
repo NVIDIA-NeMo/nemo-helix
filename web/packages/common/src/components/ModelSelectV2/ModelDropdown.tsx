@@ -4,6 +4,7 @@
 import { ModelDropdownList } from '@nemo/common/src/components/ModelSelectV2/ModelDropdownList';
 import { ModelDropdownSearch } from '@nemo/common/src/components/ModelSelectV2/ModelDropdownSearch';
 import type {
+  ModelSelectParamsProps,
   ModelSelectProps,
   ModelSelection,
   ModelType,
@@ -36,7 +37,7 @@ const isCustomModel = (model: ModelEntity): boolean => !isBaseModel(model);
 
 type ModelDropdownProps = Omit<
   ModelSelectProps,
-  'showParams' | 'inferenceParams' | 'onInferenceParamsChange' | 'onOpenChange' | 'aria-label'
+  keyof ModelSelectParamsProps | 'onOpenChange' | 'aria-label'
 > & {
   open: boolean;
   onOpenChange: (open: boolean) => void;

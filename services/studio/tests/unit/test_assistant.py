@@ -1038,9 +1038,7 @@ async def test_stream_claude_hides_startup_oserror(monkeypatch: pytest.MonkeyPat
 
 
 def test_mcp_initialize_and_tools_list(monkeypatch: pytest.MonkeyPatch):
-    service_client = service_client_with_feature_flags(
-        monkeypatch, {"customizer_enabled": False, "model_compare_enabled": False}
-    )
+    service_client = service_client_with_feature_flags(monkeypatch, {"customizer_enabled": False})
     session_id = str(uuid.uuid4())
 
     initialize_response = service_client.post(
@@ -1074,12 +1072,10 @@ def test_mcp_initialize_and_tools_list(monkeypatch: pytest.MonkeyPatch):
     studio_link_tool = next(tool for tool in tools if tool["name"] == "studio_link")
     assert "Default to using this for Studio-related responses" in studio_link_tool["description"]
     assert "After creating an agent, use destination='agent_chat'" in studio_link_tool["description"]
-    assert "chat with or try a model" not in studio_link_tool["description"]
     destination_description = studio_link_tool["inputSchema"]["properties"]["destination"]["description"]
     supported_destinations = supported_destinations_from_description(destination_description)
     assert "base_models" in supported_destinations
     assert "evaluation_results" in supported_destinations
-    assert "model_chat" not in supported_destinations
     assert "customizations" not in supported_destinations
     assert "settings" in supported_destinations
 
@@ -1089,7 +1085,6 @@ def test_mcp_tools_list_includes_feature_flag_enabled_destinations(monkeypatch: 
         monkeypatch,
         {
             "customizer_enabled": "preview",
-            "model_compare_enabled": True,
         },
     )
     session_id = str(uuid.uuid4())
@@ -1264,7 +1259,7 @@ def test_studio_link_destinations_cover_registered_workspace_routes():
         "experimentDetail": "experiment_detail",
         "experimentGroupDetail": "experiment_group",
         "filesetDetail": "fileset",
-        "filesetDetails": "fileset_panel",
+        "filesetDetails": "fileset",
         "filesetFile": "fileset_file",
         "filesetNew": "fileset_new",
         "filesets": "filesets",
@@ -1519,7 +1514,7 @@ def test_mcp_studio_link_returns_agent_chat_markdown(service_client: TestClient)
 
 
 def test_mcp_studio_link_returns_model_chat_markdown(monkeypatch: pytest.MonkeyPatch):
-    service_client = service_client_with_feature_flags(monkeypatch, {"model_compare_enabled": True})
+    service_client = service_client_with_feature_flags(monkeypatch, {})
     session_id = str(uuid.uuid4())
 
     response = service_client.post(
@@ -1557,7 +1552,7 @@ def test_mcp_studio_link_rejects_disabled_feature_flag_destination(service_clien
             "method": "tools/call",
             "params": {
                 "name": "studio_link",
-                "arguments": {"destination": "model_chat"},
+                "arguments": {"destination": "guardrails"},
             },
         },
     )
@@ -1565,8 +1560,8 @@ def test_mcp_studio_link_rejects_disabled_feature_flag_destination(service_clien
     assert response.status_code == 200
     result_text = response.json()["result"]["content"][0]["text"]
     result = json.loads(result_text)
-    assert result["error"] == "Studio destination is disabled by feature flag: model_chat"
-    assert "model_chat" not in result["available_destinations"]
+    assert result["error"] == "Studio destination is disabled by feature flag: guardrails"
+    assert "guardrails" not in result["available_destinations"]
     assert "base_models" in result["available_destinations"]
 
 
@@ -1609,9 +1604,12 @@ def test_mcp_studio_link_returns_fileset_file_markdown(service_client: TestClien
     assert json.loads(result_text) == {
         "workspace": "default",
         "destination": "fileset_file",
-        "path": "/workspaces/default/filesets/training%20data/file/nested%2Fexamples.jsonl",
+        "path": "/workspaces/default/filesets/training%20data/files?file=nested%2Fexamples.jsonl",
         "url": None,
-        "markdown": "[File nested/examples.jsonl](/workspaces/default/filesets/training%20data/file/nested%2Fexamples.jsonl)",
+        "markdown": (
+            "[File nested/examples.jsonl]"
+            "(/workspaces/default/filesets/training%20data/files?file=nested%2Fexamples.jsonl)"
+        ),
     }
 
 
@@ -2101,7 +2099,7 @@ def test_platform_route_stream_uses_deployed_assistant(monkeypatch: pytest.Monke
     assert "never nest evaluation links under /dashboard/evaluations/" in captured["studio_system_prompt"]
     assert "destination='evaluation_results'" in captured["studio_system_prompt"]
     assert "/workspaces/{workspace}/evaluation/results" in captured["studio_system_prompt"]
-    assert "The model_chat destination is not enabled in this Studio instance" in captured["studio_system_prompt"]
+    assert "use destination='model_chat'" in captured["studio_system_prompt"]
     assert "Direct Studio link requests are mandatory tool-use requests" in captured["studio_system_prompt"]
     assert "Never answer a Studio link request by saying you cannot generate URLs" in captured["studio_system_prompt"]
     assert (

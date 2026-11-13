@@ -482,6 +482,12 @@ target — which is what a "did the hardening help?" answer depends on. Edits to
 reach an existing manifest only through `POST /manifests/{name}/refresh`, which `apply-mitigation`
 calls for you. The stored settings (egress, secrets, port) are what persist — not the rendered YAML.
 
+Agent-source manifests retain their associated fileset ID for cleanup during refresh or
+deletion. Older name-only manifests capture the current ID during edits, refresh, or
+deletion; this cannot recover the original allocation if its name was already reused.
+Once recorded, the ID remains authoritative. Uploaded project bundles retain their
+existing ownership behavior.
+
 ---
 
 ## Studio UI

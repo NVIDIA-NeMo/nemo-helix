@@ -3,11 +3,8 @@
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
 import { getDataDesignerListCreateJobsQueryKey } from '@nemo/sdk/generated/data-designer/data-designer';
-import {
-  type CreateJob,
-  type CreateJobsPage,
-  HelixJobStatus,
-} from '@nemo/sdk/generated/data-designer/schema';
+import type { CreateJob, CreateJobsPage } from '@nemo/sdk/generated/data-designer/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/data-designer/schema/HelixJobStatus';
 import { DataDesignerJobsDataView } from '@studio/components/dataViews/DataDesignerJobsDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';

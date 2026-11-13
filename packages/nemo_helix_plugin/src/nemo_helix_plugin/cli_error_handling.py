@@ -331,7 +331,8 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
         _print_api_request_context(console, error)
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.NemoResponseValidationError):
-        console.print(f"[bold red]API response error:[/] {escape(_format_api_error(error))}")
+        # The body is a successful payload, so its ``detail``/``message`` fields are data, not an error message.
+        console.print(f"[bold red]API response error:[/] {escape(str(error))}")
         _print_api_request_context(console, error)
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.NemoClientError):

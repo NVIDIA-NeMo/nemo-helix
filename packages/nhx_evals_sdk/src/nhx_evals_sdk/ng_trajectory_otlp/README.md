@@ -16,7 +16,7 @@ from nhx_evals_sdk.ng_trajectory_otlp import rollout_to_resource_spans
 
 # A record is one line of the rollouts JSONL Gym wrote; this is the smallest one that converts.
 record = {"response": {"output_text": "Answer."}}
-resource_spans = rollout_to_resource_spans(record, rollout_id="task-1:0", task_id="task-1")
+resource_spans = rollout_to_resource_spans(record, run_id="run-1", rollout_id="task-1:0", task_id="task-1")
 ```
 
 It returns generated `ResourceSpans` messages.
@@ -38,9 +38,9 @@ it can be extracted into its own distribution the day a producer outside the eva
 tests import only this subpackage, which is what keeps that honest. Adding an SDK import here would
 quietly take it away.
 
-`rollout_id` is load-bearing. Span ids are derived from it so that converting a record twice yields
+`run_id` and `rollout_id` are load-bearing. Span ids are derived from their structural pair so that converting a record twice yields
 the same ids and a re-publish replaces spans rather than duplicating them — which means two rollouts
-sharing an id collide, and a consumer keyed on span identity keeps only the last. A task id is not
+sharing both ids collide, and a consumer keyed on span identity keeps only the last. A task id is not
 enough: one task can be attempted repeatedly, and Gym does not always record which attempt a record
 belongs to.
 
@@ -51,3 +51,5 @@ belongs to.
 * **Reconstruct concurrency.** One rollout is one linear exchange as recorded; parallel tool calls
   are not distinguishable in the source.
 * **Report usage Gym did not state.** Absent token counts stay absent rather than becoming zero.
+
+Independent executions must use distinct run IDs. Publication preserves retained OTLP IDs.

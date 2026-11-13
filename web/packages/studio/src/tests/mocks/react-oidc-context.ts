@@ -4,14 +4,14 @@
 // Export individual mock functions so tests can access them
 export const mockSigninRedirect = vi.fn();
 export const mockSignoutRedirect = vi.fn();
-export const mockRemoveUser = vi.fn();
-export const mockClearStaleState = vi.fn();
-export const mockSigninSilent = vi.fn();
-export const mockSigninPopup = vi.fn();
-export const mockSignoutSilent = vi.fn();
-export const mockSignoutPopup = vi.fn();
-export const mockQuerySessionStatus = vi.fn();
-export const mockRevokeTokens = vi.fn();
+const mockRemoveUser = vi.fn();
+const mockClearStaleState = vi.fn();
+const mockSigninSilent = vi.fn();
+const mockSigninPopup = vi.fn();
+const mockSignoutSilent = vi.fn();
+const mockSignoutPopup = vi.fn();
+const mockQuerySessionStatus = vi.fn();
+const mockRevokeTokens = vi.fn();
 
 // Create the mock auth state at module level so it's accessible to vi.mock
 const mockAuthState = {

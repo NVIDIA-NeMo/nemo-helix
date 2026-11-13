@@ -6,11 +6,11 @@ import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { Collapse, ChevronUpDown, IconError } from '@nemo/icons/icons';
 import { useListAnnotations } from '@nemo/sdk/generated/platform/annotations';
-import {
-  AnnotationSortField,
-  type EvaluationSessionResponse,
-  type FeedbackAnnotationInputValue,
+import type {
+  EvaluationSessionResponse,
+  FeedbackAnnotationInputValue,
 } from '@nemo/sdk/generated/platform/schema';
+import { AnnotationSortField } from '@nemo/sdk/generated/platform/schema/AnnotationSortField';
 import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { SpanListView } from '@studio/components/IntakeDetail/TraceSpanListView';
 import type { NoteRequest } from '@studio/components/IntakeDetail/traceSpanShared';

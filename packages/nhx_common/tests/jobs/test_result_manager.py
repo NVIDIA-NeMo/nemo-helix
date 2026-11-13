@@ -44,6 +44,7 @@ def test_result_remote_path_nests_under_base():
         job_name="my-job",
         workspace="ws",
         attempt_id="att-1",
+        fileset_name="test-fileset",
         files_client=FilesClient.from_client(sdk),
         jobs_client=JobsClient.from_client(sdk),
     )
@@ -51,29 +52,26 @@ def test_result_remote_path_nests_under_base():
     assert mgr._result_remote_path("att-1", "summary", base="jobs/my-job") == "jobs/my-job/results/att-1/summary"
 
 
-def test_create_result_nests_under_job_when_output_location_set(tmp_path, mock_sync_file_manager):
-    """When the job has an output_location, results nest under jobs/<job_name>/results/…; else flat."""
+def test_create_result_nests_under_the_job_base_path(tmp_path, mock_sync_file_manager):
+    """A job with an output_location nests results under jobs/<job_name>/results/…; else flat."""
     test_file = tmp_path / "artifact.bin"
     test_file.write_bytes(b"x")
 
-    mock_jobs = MagicMock(spec=JobsClient)
-    mock_jobs.create_job_result.return_value = _resp(MagicMock())
-
     sdk = _sync_client()
-    mgr = rm.ResultManager(
-        job_name="test-job",
-        workspace="test-ws",
-        attempt_id="att-1",
-        files_client=FilesClient.from_client(sdk),
-        jobs_client=mock_jobs,
-    )
-
-    for output_location, expected in [
-        ("shared-fs", "jobs/test-job/results/att-1/summary"),
+    for artifact_base_path, expected in [
+        ("jobs/test-job", "jobs/test-job/results/att-1/summary"),
         (None, "results/att-1/summary"),
     ]:
-        mock_jobs.get_job.return_value = _resp(
-            MagicMock(attempt_id="att-1", fileset="shared-fs", output_location=output_location)
+        mock_jobs = MagicMock(spec=JobsClient)
+        mock_jobs.create_job_result.return_value = _resp(MagicMock())
+        mgr = rm.ResultManager(
+            job_name="test-job",
+            workspace="test-ws",
+            attempt_id="att-1",
+            fileset_name="test-fileset",
+            artifact_base_path=artifact_base_path,
+            files_client=FilesClient.from_client(sdk),
+            jobs_client=mock_jobs,
         )
         with (
             patch.object(mgr, "_create_file_manager", return_value=mock_sync_file_manager),
@@ -93,16 +91,13 @@ def test_create_result_returns_existing_on_conflict_sync(tmp_path, mock_sync_fil
     mock_jobs = MagicMock(spec=JobsClient)
     mock_jobs.create_job_result.side_effect = _conflict_error()
     mock_jobs.get_job_result.return_value = _resp(existing_result)
-    # Job retrieval provides the fileset name.
-    mock_jobs.get_job.return_value = _resp(
-        MagicMock(attempt_id="att-123", fileset="test-fileset", output_location=None)
-    )
 
     sdk = _sync_client()
     mgr = rm.ResultManager(
         job_name="test-job",
         workspace="test-ws",
         attempt_id="att-123",
+        fileset_name="test-fileset",
         files_client=FilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )
@@ -119,9 +114,6 @@ def test_create_result_wraps_transport_errors_sync(tmp_path, mock_sync_file_mana
     test_file.write_bytes(b"test content")
     request = httpx.Request("POST", "http://test/apis/jobs/v2/workspaces/test-ws/jobs/test-job/results/my-result")
     mock_jobs = MagicMock(spec=JobsClient)
-    mock_jobs.get_job.return_value = _resp(
-        MagicMock(attempt_id="att-123", fileset="test-fileset", output_location=None)
-    )
     mock_jobs.create_job_result.side_effect = NemoTransportError(
         httpx.ConnectError("Connection refused", request=request)
     )
@@ -130,6 +122,7 @@ def test_create_result_wraps_transport_errors_sync(tmp_path, mock_sync_file_mana
         job_name="test-job",
         workspace="test-ws",
         attempt_id="att-123",
+        fileset_name="test-fileset",
         files_client=FilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )
@@ -153,15 +146,13 @@ async def test_create_result_returns_existing_on_conflict_async(tmp_path, mock_a
     mock_jobs.create_job_result = AsyncMock(side_effect=_conflict_error())
     mock_jobs.get_job_result = AsyncMock(return_value=_resp(existing_result))
     # Job retrieval provides the fileset name.
-    mock_jobs.get_job = AsyncMock(
-        return_value=_resp(MagicMock(attempt_id="att-123", fileset="test-fileset", output_location=None))
-    )
 
     sdk = _async_client()
     mgr = rm.AsyncResultManager(
         job_name="test-job",
         workspace="test-ws",
         attempt_id="att-123",
+        fileset_name="test-fileset",
         files_client=AsyncFilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )
@@ -179,9 +170,6 @@ async def test_create_result_wraps_transport_errors_async(tmp_path, mock_async_f
     test_file.write_bytes(b"test content")
     request = httpx.Request("POST", "http://test/apis/jobs/v2/workspaces/test-ws/jobs/test-job/results/my-result")
     mock_jobs = MagicMock(spec=AsyncJobsClient)
-    mock_jobs.get_job = AsyncMock(
-        return_value=_resp(MagicMock(attempt_id="att-123", fileset="test-fileset", output_location=None))
-    )
     mock_jobs.create_job_result = AsyncMock(
         side_effect=NemoTransportError(httpx.ConnectError("Connection refused", request=request))
     )
@@ -190,6 +178,7 @@ async def test_create_result_wraps_transport_errors_async(tmp_path, mock_async_f
         job_name="test-job",
         workspace="test-ws",
         attempt_id="att-123",
+        fileset_name="test-fileset",
         files_client=AsyncFilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )

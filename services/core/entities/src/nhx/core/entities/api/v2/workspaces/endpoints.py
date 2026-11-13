@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.workspaces.constants import SAMPLE_WORKSPACE_PREFIX
 from nemo_helix_plugin.workspaces.types import WorkspaceDeletionStatus
-from nhx.common.api.common import DeleteResponse, GenericSortField, Page, PaginationData
+from nhx.common.api.common import DeleteResponse, ErrorResponse, GenericSortField, Page, PaginationData
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.models import Principal
@@ -391,6 +391,7 @@ async def list_workspaces(
     response_model=Workspace,
     tags=[API_TAG],
     summary="Get workspace by ID",
+    responses={404: {"model": ErrorResponse, "description": "Workspace not found"}},
     description=textwrap.dedent("""
         Get a specific workspace by ID.
 
@@ -420,6 +421,7 @@ async def get_workspace(
     response_model=Workspace,
     tags=[API_TAG],
     summary="Update workspace",
+    responses={404: {"model": ErrorResponse, "description": "Workspace not found"}},
     description=textwrap.dedent("""
         Update a workspace's description and/or limits.
 
@@ -477,6 +479,7 @@ async def update_workspace(
     response_model=DeleteResponse,
     tags=[API_TAG],
     summary="Delete workspace",
+    responses={404: {"model": ErrorResponse, "description": "Workspace not found"}},
     description=textwrap.dedent("""
         Delete a workspace.
 
@@ -573,6 +576,7 @@ async def _may_read_workspace_deletion(auth_client: AuthClient, workspace: Works
     response_model=WorkspaceDeletionStatus,
     tags=[API_TAG],
     summary="Get workspace deletion status",
+    responses={404: {"model": ErrorResponse, "description": "Workspace deletion not found or not accessible"}},
     description=textwrap.dedent("""
         Read the cleanup stage for a workspace whose name is still reserved.
 
@@ -796,6 +800,7 @@ async def add_workspace_member(
     response_model=WorkspaceMember,
     tags=[API_TAG],
     summary="Update workspace member roles",
+    responses={404: {"model": ErrorResponse, "description": "Workspace not found"}},
     description=textwrap.dedent("""
         Update the roles for a workspace member.
 
@@ -966,6 +971,7 @@ async def update_workspace_member(
     response_model=DeleteResponse,
     tags=[API_TAG],
     summary="Remove workspace member",
+    responses={404: {"model": ErrorResponse, "description": "Workspace or member not found"}},
     description=textwrap.dedent("""
         Remove a member from the workspace by revoking all their roles.
 

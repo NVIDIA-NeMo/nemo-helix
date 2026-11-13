@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isNotFoundError } from '@nemo/common/src/api/common/utils';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useModelsGetModel } from '@nemo/sdk/generated/platform/models';
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
@@ -62,15 +63,19 @@ const BASE_KEY = 'base';
 export const useModelLineage = (
   workspace: string,
   modelName: string,
-  adapterName?: string
+  adapterName?: string,
+  options?: { fallbackWorkspace?: string }
 ): ModelLineage => {
-  const {
-    data: model,
-    isLoading,
-    isError,
-  } = useModelsGetModel(workspace, modelName, undefined, {
+  const primary = useModelsGetModel(workspace, modelName, undefined, {
     query: { enabled: Boolean(workspace && modelName), retry: false },
   });
+  const fallbackWorkspace =
+    options?.fallbackWorkspace !== workspace ? options?.fallbackWorkspace : undefined;
+  const isFallback = Boolean(fallbackWorkspace) && isNotFoundError(primary.error);
+  const fallback = useModelsGetModel(fallbackWorkspace ?? '', modelName, undefined, {
+    query: { enabled: isFallback && Boolean(modelName), retry: false },
+  });
+  const { data: model, isLoading, isError } = isFallback ? fallback : primary;
 
   const adapter = adapterName
     ? (model?.adapters?.find((candidate) => candidate.name === adapterName) ?? null)

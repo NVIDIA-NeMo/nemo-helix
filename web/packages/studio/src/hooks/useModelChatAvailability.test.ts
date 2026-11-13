@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useModelsGetModel } from '@nemo/sdk/generated/platform/models';
-import {
-  type Adapter,
-  FinetuningType,
-  ModelDeploymentStatus,
-  type ModelEntity,
-} from '@nemo/sdk/generated/platform/schema';
+import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import { FinetuningType } from '@nemo/sdk/generated/platform/schema/FinetuningType';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 import { useModelChatAvailability } from '@studio/hooks/useModelChatAvailability';
 import { useModelDeploymentStatus } from '@studio/hooks/useModelDeploymentStatus';
 import { useModelIsServed } from '@studio/hooks/useModelIsServed';

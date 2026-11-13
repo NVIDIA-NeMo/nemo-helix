@@ -260,6 +260,16 @@ class NemoJob(_NamedPlugin):
                 scheduler execution. The plugin-service route adapter passes
                 ``False``.
 
+        An override may also declare either of two keywords, which the job route passes only to an
+        override that declares them:
+
+        - ``authorize``: the caller's scope-preserving
+          :class:`~nemo_helix_plugin.dependencies.RequestAuthorizer`, or ``None`` outside the
+          platform. Check each source as the caller before copying it into the spec.
+        - ``defer``: registers an async write, given the canonical spec and returning the spec to
+          store, that the route runs once :meth:`compile` has also passed, never on a dry run.
+          Use it for a submission's writes, so a refused submission leaves nothing behind.
+
         Returns:
             A :attr:`spec_schema` instance.
         """

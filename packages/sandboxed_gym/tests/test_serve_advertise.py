@@ -17,7 +17,7 @@ def started_session(monkeypatch):
     session.descriptor.return_value.model_dump_json.return_value = "{}"
     monkeypatch.setattr(serve_module.SandboxedGymOrchestrator, "start", lambda self, cfg: session)
     monkeypatch.setattr(serve_module, "build_proxy_app", lambda _session: MagicMock())
-    monkeypatch.setattr(serve_module.uvicorn, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(serve_module, "run_uvicorn", lambda *args, **kwargs: None)
     monkeypatch.setattr(serve_module, "get_node_ip", lambda: "10.0.0.9")
     return session
 

@@ -3,19 +3,19 @@
 
 import { generateDefaultName } from '@nemo/common/src/utils/generateDefaultName';
 import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
-import {
-  type AutomodelJobInput,
-  type AutomodelJobsJobRequest,
-  RlGRPOTrainingFinetuningType,
-  type RlDPOTraining,
-  type RlGRPOTraining,
-  type RlJobInput,
-  type RlJobsJobRequest,
-  type UnslothJobInput,
-  type IntegrationsSpec,
-  type UnslothJobsJobRequest,
-  type CustomizationJobTemplate,
+import type {
+  AutomodelJobInput,
+  AutomodelJobsJobRequest,
+  RlDPOTraining,
+  RlGRPOTraining,
+  RlJobInput,
+  RlJobsJobRequest,
+  UnslothJobInput,
+  IntegrationsSpec,
+  UnslothJobsJobRequest,
+  CustomizationJobTemplate,
 } from '@nemo/sdk/generated/customizer/schema';
+import { RlGRPOTrainingFinetuningType } from '@nemo/sdk/generated/customizer/schema/RlGRPOTrainingFinetuningType';
 import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customizer/zod/automodel-jobs';
 import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod/rl-jobs';
 import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customizer/zod/unsloth-jobs';

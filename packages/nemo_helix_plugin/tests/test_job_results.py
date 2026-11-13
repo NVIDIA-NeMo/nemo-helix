@@ -313,6 +313,7 @@ def test_result_manager_factory_explicit_workspace_overrides_client_workspace() 
         attempt_id="attempt-1",
         workspace="explicit-ws",
         files_client=files_client,
+        fileset_name="job-fileset",
         jobs_client=JobsClient.from_client(files_client),
     )
 
@@ -328,6 +329,7 @@ def test_result_manager_factory_ignores_job_env_and_uses_client_workspace(monkey
         job_name="j",
         attempt_id="attempt-1",
         files_client=files_client,
+        fileset_name="job-fileset",
         jobs_client=JobsClient.from_client(files_client),
     )
 
@@ -345,6 +347,7 @@ async def test_async_result_manager_factory_ignores_job_env_and_uses_client_work
         job_name="j",
         attempt_id="attempt-1",
         files_client=files_client,
+        fileset_name="job-fileset",
         jobs_client=AsyncJobsClient.from_client(files_client),
     )
 
@@ -357,7 +360,9 @@ class TestHelixJobResults:
         client = NemoClient(base_url="http://platform.test", workspace="ws")
         with patch("nemo_helix_plugin.job_results.result_manager_factory") as factory:
             factory.return_value = MagicMock()
-            sink = HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="attempt-1")
+            sink = HelixJobResults(
+                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset_name="job-fileset"
+            )
         assert isinstance(sink, JobResults)
 
     def test_platform_job_results_uses_typed_client_transport(self) -> None:
@@ -366,7 +371,9 @@ class TestHelixJobResults:
 
         with patch("nemo_helix_plugin.job_results.result_manager_factory") as factory:
             factory.return_value = MagicMock()
-            HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="attempt-1")
+            HelixJobResults(
+                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset_name="job-fileset"
+            )
 
         files_client = factory.call_args.kwargs["files_client"]
         jobs_client = factory.call_args.kwargs["jobs_client"]
@@ -385,7 +392,9 @@ class TestHelixJobResults:
             url="fileset://ws/fs#results/A1/metrics",
         )
         with patch("nemo_helix_plugin.job_results.result_manager_factory", return_value=manager) as factory:
-            sink = HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="A1")
+            sink = HelixJobResults(
+                job_name="j", workspace="ws", client=client, attempt_id="A1", fileset_name="job-fileset"
+            )
             ref = sink.save("metrics", local, ignore_patterns=["cache.db"])
 
         factory.assert_called_once()
@@ -411,7 +420,9 @@ class TestHelixJobResults:
         manager = MagicMock()
         manager.create_result.return_value = _platform_record()
         with patch("nemo_helix_plugin.job_results.result_manager_factory", return_value=manager):
-            sink = HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="attempt-1")
+            sink = HelixJobResults(
+                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset_name="job-fileset"
+            )
             sink.save("artifacts", payload_dir, ignore_patterns=["cache.db", "cache/"])
         call = manager.create_result.call_args
         assert call.kwargs["artifact_local_path"] == payload_dir
@@ -422,58 +433,17 @@ class TestHelixJobResults:
         manager = MagicMock()
         manager.create_result.side_effect = RuntimeError("boom")
         with patch("nemo_helix_plugin.job_results.result_manager_factory", return_value=manager):
-            sink = HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="attempt-1")
+            sink = HelixJobResults(
+                job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset_name="job-fileset"
+            )
             with pytest.raises(RuntimeError, match="boom"):
                 sink.save("metrics", Path("/tmp/whatever"))
-
-
-def test_result_manager_fetches_metadata_from_typed_task_client() -> None:
-    """Task result publishing receives ``NemoClient`` handles, not generated SDKs."""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/apis/jobs/v2/workspaces/test-ws/jobs/test-job"
-        return httpx.Response(
-            200,
-            json={
-                "id": "job-1",
-                "attempt_id": "att-123",
-                "name": "test-job",
-                "workspace": "test-ws",
-                "source": "unit",
-                "platform_spec": {
-                    "steps": [
-                        {
-                            "name": "step-1",
-                            "executor": {"provider": "cpu", "container": {}},
-                        }
-                    ]
-                },
-                "fileset": "test-fileset",
-                "output_location": "shared-fs",
-                "status": "created",
-            },
-            request=request,
-        )
-
-    http_client = httpx.Client(transport=httpx.MockTransport(handler))
-    client = NemoClient(base_url="http://platform.test", workspace="test-ws", http_client=http_client)
-    manager = ResultManager(
-        job_name="test-job",
-        workspace="test-ws",
-        attempt_id="att-123",
-        files_client=FilesClient.from_client(client),
-        jobs_client=JobsClient.from_client(client),
-    )
-
-    assert manager._fetch_job_metadata() == ("att-123", "test-fileset", "shared-fs")
 
 
 def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(tmp_path: Path) -> None:
     artifact = tmp_path / "metrics.json"
     artifact.write_text("{}")
     jobs_client = MagicMock()
-    current_job = MagicMock(attempt_id="attempt-b", fileset="results", output_location=None)
-    jobs_client.get_job.return_value.data.return_value = current_job
     jobs_client.create_job_result.return_value.data.return_value = _platform_record(
         url="fileset://ws/results#results/attempt-a/metrics"
     )
@@ -484,6 +454,7 @@ def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(
         job_name="job-a",
         workspace="ws",
         attempt_id="attempt-a",
+        fileset_name="results",
         files_client=MagicMock(),
         jobs_client=jobs_client,
     )
@@ -495,3 +466,73 @@ def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(
     jobs_client.create_job_result.assert_called_once()
     call = jobs_client.create_job_result.call_args
     assert call.kwargs["body"].attempt_id == "attempt-a"
+
+
+class TestRestrictedPolicyResultSave:
+    """A provider-bound sandbox saves results without reading the job record.
+
+    OpenShell sandboxes with gateway provider bindings get the restricted platform
+    policy: they may post results, but ``GET /jobs/{job}`` is denied. ``ctx.results.save``
+    must therefore work from the ``NEMO_JOB_*`` env alone.
+    """
+
+    def test_save_never_reads_the_job_record(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from nemo_helix_plugin.tasks import dispatcher as dispatcher_module
+
+        artifact = tmp_path / "summary.json"
+        artifact.write_text("{}")
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            path = request.url.path
+            if request.method == "GET" and path.endswith("/filesets/job-fileset/files"):
+                return httpx.Response(200, json={"data": []}, request=request)
+            if request.method == "PUT" and "/filesets/job-fileset/-/" in path:
+                return httpx.Response(
+                    200, json={"file_ref": "f", "file_url": "u", "path": "p", "size": 2}, request=request
+                )
+            if request.method == "POST" and path.endswith("/jobs/job-a/results/summary"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "name": "summary",
+                        "job": "job-a",
+                        "workspace": "ws",
+                        "attempt_id": "attempt-a",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "updated_at": "2026-01-01T00:00:00Z",
+                        "artifact_url": "ws/job-fileset#jobs/job-a/results/attempt-a/summary",
+                        "artifact_storage_type": "fileset",
+                    },
+                    request=request,
+                )
+            return httpx.Response(404, json={"detail": f"{request.method} {path} is not permitted"}, request=request)
+
+        for name, value in {
+            "NEMO_JOB_WORKSPACE": "ws",
+            "NEMO_JOB_ID": "job-a",
+            "NEMO_JOB_ATTEMPT_ID": "attempt-a",
+            "NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH": str(tmp_path / "e"),
+            "NEMO_JOB_FILESET": "job-fileset",
+            "NEMO_JOB_ARTIFACT_BASE_PATH": "jobs/job-a",
+        }.items():
+            monkeypatch.setenv(name, value)
+
+        client = NemoClient(
+            base_url="http://platform.test",
+            workspace="ws",
+            http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+            owns_http_client=True,
+        )
+        try:
+            ref = dispatcher_module.build_ctx_from_env(client).results.save("summary", artifact)
+        finally:
+            client.close()
+
+        assert [(r.method, r.url.path) for r in requests] == [
+            ("GET", "/apis/files/v2/workspaces/ws/filesets/job-fileset/files"),
+            ("PUT", "/apis/files/v2/workspaces/ws/filesets/job-fileset/-/jobs/job-a/results/attempt-a/summary"),
+            ("POST", "/apis/jobs/v2/workspaces/ws/jobs/job-a/results/summary"),
+        ]
+        assert ref.artifact_url == "ws/job-fileset#jobs/job-a/results/attempt-a/summary"

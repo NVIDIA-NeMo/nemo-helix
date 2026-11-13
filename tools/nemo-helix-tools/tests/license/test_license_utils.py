@@ -704,3 +704,36 @@ class TestPypiMetadata:
             )
             == ""
         )
+
+
+def test_sanitize_osv_json_strips_paths_and_vulnerability_data(tmp_path):
+    import json
+
+    from nemo_helix_tools.license.generator import _sanitize_osv_json
+
+    osv_file = tmp_path / "osv.json"
+    osv_file.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "source": {"path": "/home/me/uv.lock", "type": "lockfile"},
+                        "packages": [
+                            {
+                                "package": {"name": "a", "version": "1", "ecosystem": "PyPI"},
+                                "licenses": ["MIT"],
+                                "groups": [{"ids": ["GHSA-x"]}],
+                                "vulnerabilities": [{"id": "GHSA-x", "modified": "2026-01-01"}],
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    _sanitize_osv_json(osv_file)
+
+    result = json.loads(osv_file.read_text())["results"][0]
+    assert result["source"] == {"type": "lockfile"}
+    assert result["packages"] == [{"package": {"name": "a", "version": "1", "ecosystem": "PyPI"}, "licenses": ["MIT"]}]

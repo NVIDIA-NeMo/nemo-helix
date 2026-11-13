@@ -25,7 +25,7 @@ from nemo_helix_plugin.authz import (
     perm,
     validate_caller_strings,
 )
-from nemo_helix_plugin.authz_discovery import _iter_composed_routes, _method_from_dict
+from nemo_helix_plugin.authz_discovery import _iter_composed_routes
 from nemo_helix_plugin.service import NemoService, RouterSpec
 
 _READ = Permission("x", "", "read", "Read x")
@@ -278,7 +278,7 @@ def test_extra_permissions_default_empty() -> None:
     assert _Svc().extra_permissions() == []
 
 
-def test_authz_endpoint_method_callers_roundtrip() -> None:
+def test_authz_endpoint_method_serializes_explicit_contracts() -> None:
     contrib = AuthzContribution(
         endpoints={
             "/apis/x/v2/thing": {
@@ -299,9 +299,15 @@ def test_authz_endpoint_method_callers_roundtrip() -> None:
     assert post["callers"] == ["service_principal"]
     assert "callers" not in get
 
-    # Round-trip through the parse chokepoint.
-    assert _method_from_dict(post).callers == ["service_principal"]
-    assert _method_from_dict(get).callers is None
+    assert post == {
+        "direct": {"actor_perms": ["x.create"]},
+        "scopes": ["x:write"],
+        "callers": ["service_principal"],
+    }
+    assert get == {
+        "direct": {"actor_perms": ["x.read"]},
+        "delegated": {"actor_perms": [], "subject_perms": ["x.read"]},
+    }
 
 
 def test_validate_caller_strings() -> None:
@@ -309,3 +315,20 @@ def test_validate_caller_strings() -> None:
     validate_caller_strings(["principal", "service_principal"], context="t")
     with pytest.raises(ValueError, match="Invalid caller kind"):
         validate_caller_strings(["anon"], context="t")
+
+
+@pytest.mark.parametrize("permissions", [[], ["x.read", "x.list"]])
+@pytest.mark.parametrize("callers", [None, ["principal"], ["service_principal"], ["principal", "service_principal"]])
+def test_contribution_serialization_has_one_explicit_permission_mapping(
+    permissions: list[str], callers: list[str] | None
+) -> None:
+    spec = AuthzEndpointMethod(permissions=permissions, callers=callers)
+    contribution = AuthzContribution(endpoints={"/apis/x/v2/items": {"get": spec}})
+    declaration = contribution.to_dict()["endpoints"]["/apis/x/v2/items"]["get"]
+    assert "permissions" not in declaration
+    assert declaration["direct"] == {"actor_perms": permissions}
+    if callers == ["service_principal"]:
+        assert "delegated" not in declaration
+    else:
+        assert declaration["delegated"] == {"actor_perms": [], "subject_perms": permissions}
+    assert spec.permissions == permissions

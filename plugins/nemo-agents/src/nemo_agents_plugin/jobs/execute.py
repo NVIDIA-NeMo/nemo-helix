@@ -90,6 +90,7 @@ from nemo_helix_plugin.jobs.api_factory import (
 from nemo_helix_plugin.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -170,6 +171,7 @@ _RESERVED_ENV_VAR_NAMES = frozenset(
         NEMO_JOB_TASK_ENVVAR,
         NEMO_JOB_WORKSPACE_ENVVAR,
         NEMO_JOB_FILESET_ENVVAR,
+        NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
         NEMO_JOB_SECRETS_ENVVAR,
         # Agent execution env (mirrors the deployment container's reserved set).
         "NHX_WORKSPACE",

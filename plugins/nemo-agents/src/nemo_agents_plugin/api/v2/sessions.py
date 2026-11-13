@@ -251,12 +251,7 @@ async def delete_session(
     )
 
     try:
-        await entity_client.delete(
-            AgentSession,
-            name=name,
-            workspace=workspace,
-            expected_db_version=session.db_version,
-        )
+        await entity_client.delete_by_id(AgentSession, session.id, expected_db_version=session.db_version)
     except NemoEntityNotFoundError as exc:
         raise session_not_found(workspace, name) from exc
     except NemoEntityConflictError as exc:

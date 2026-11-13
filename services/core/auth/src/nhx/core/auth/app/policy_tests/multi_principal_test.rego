@@ -40,11 +40,11 @@ multi_principal_mock_roles := {
 multi_principal_mock_endpoints := {
     "/apis/models/v2/workspaces/{workspace}/models/{name}": {
         "get": {
-            "permissions": ["models.read"],
+            "direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]},
             "scopes": ["models:read"]
         },
         "delete": {
-            "permissions": ["models.delete"],
+            "direct": {"actor_perms": ["models.delete"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.delete"]},
             "scopes": ["models:write"]
         }
     }
@@ -52,7 +52,7 @@ multi_principal_mock_endpoints := {
 
 # Test: User can access via principal_id
 test_access_via_principal_id if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user-id-123",
         "method": "GET",
         "path": "/apis/models/v2/workspaces/workspace-a/models/my-model"
@@ -66,7 +66,7 @@ test_access_via_principal_id if {
 
 # Test: User can access via email (different workspace)
 test_access_via_email if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user-id-123",
         "principal_email": "user@example.com",
         "method": "GET",
@@ -81,7 +81,7 @@ test_access_via_email if {
 
 # Test: User can access via group membership
 test_access_via_group if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user-id-123",
         "principal_email": "user@example.com",
         "principal_groups": ["engineering-team", "qa-team"],
@@ -97,7 +97,7 @@ test_access_via_group if {
 
 # Test: User denied when none of the principals have access
 test_denied_when_no_principal_has_access if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user-id-123",
         "principal_email": "user@example.com",
         "principal_groups": ["engineering-team"],
@@ -115,7 +115,7 @@ test_denied_when_no_principal_has_access if {
 test_group_higher_permissions if {
     # User via principal_id can only read (Viewer)
     # But via group membership has delete permission (Admin)
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user-id-123",
         "principal_groups": ["engineering-team"],
         "method": "DELETE",
@@ -130,7 +130,7 @@ test_group_higher_permissions if {
 
 # Test: Cannot delete in workspace where only Viewer
 test_viewer_cannot_delete if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user-id-123",
         "method": "DELETE",
         "path": "/apis/models/v2/workspaces/workspace-a/models/my-model"
@@ -172,7 +172,7 @@ test_has_permissions_via_group if {
 
 # Test: Multi-principal list allowed
 test_filters_combine_all_workspaces if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user-id-123",
         "principal_email": "user@example.com",
         "principal_groups": ["engineering-team"],
@@ -184,7 +184,7 @@ test_filters_combine_all_workspaces if {
     with data.authz.endpoints as {
         "/apis/models/v2/workspaces/{workspace}/models": {
             "get": {
-                "permissions": ["models.list"],
+                "direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]},
                 "scopes": ["models:read"]
             }
         }

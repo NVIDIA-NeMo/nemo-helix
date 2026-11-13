@@ -191,22 +191,24 @@ class TestUpdateTarget:
 class TestDeleteTarget:
     def test_returns_204(self, client, mock_entity_client) -> None:
         mock_entity_client.get = AsyncMock(return_value=_make_target("tgt-1"))
-        mock_entity_client.delete = AsyncMock(return_value=None)
+        mock_entity_client.delete_by_id = AsyncMock(return_value=None)
         resp = client.delete("/apis/garak/v2/workspaces/default/targets/tgt-1")
         assert resp.status_code == 204
-        mock_entity_client.delete.assert_awaited_once_with(
+        mock_entity_client.delete_by_id.assert_awaited_once_with(
             AuditTarget,
-            name="tgt-1",
-            workspace="default",
+            mock_entity_client.get.return_value.id,
+            expected_db_version=mock_entity_client.get.return_value.db_version,
         )
 
     def test_404_when_missing(self, client, mock_entity_client) -> None:
-        mock_entity_client.delete = AsyncMock(side_effect=NemoEntityNotFoundError("nope"))
+        mock_entity_client.get = AsyncMock(side_effect=NemoEntityNotFoundError("nope"))
         resp = client.delete("/apis/garak/v2/workspaces/default/targets/missing")
         assert resp.status_code == 404
+        mock_entity_client.delete_by_id.assert_not_awaited()
 
     def test_409_when_changed(self, client, mock_entity_client) -> None:
-        mock_entity_client.delete = AsyncMock(side_effect=NemoEntityConflictError("changed"))
+        mock_entity_client.get = AsyncMock(return_value=_make_target("tgt-1"))
+        mock_entity_client.delete_by_id = AsyncMock(side_effect=NemoEntityConflictError("changed"))
         resp = client.delete("/apis/garak/v2/workspaces/default/targets/tgt-1")
         assert resp.status_code == 409
 

@@ -24,6 +24,7 @@ from nemo_helix_plugin.config import NHX_CONFIG_WARNINGS_DISABLED_ENV_VAR
 from nemo_helix_plugin.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -53,6 +54,7 @@ RESERVED_JOB_ENVIRONMENT_VARIABLE_NAMES: frozenset[str] = frozenset(
         # Job runtime (from nemo_helix_plugin.jobs.constants)
         CONFIG_TASK_STORAGE_PATH_ENVVAR,
         EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+        NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
         NEMO_JOB_ATTEMPT_ID_ENVVAR,
         NEMO_JOB_FILESET_ENVVAR,
         NEMO_JOB_ID_ENVVAR,
@@ -628,6 +630,16 @@ class OpenShellJobExecutionProfileConfig(JobExecutionProfileConfig):
             "Entrypoint for job steps that do not declare one. The OpenShell supervisor ignores "
             "the image ENTRYPOINT, so the sandbox command must name the binary explicitly. "
             "When unset, defaults to `nemo-helix`, resolved on the PATH from the image ENV."
+        ),
+    )
+    num_gpus: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "GPUs requested for a gpu step of this profile that does not declare its own "
+            "resources.num_gpus; a gpu step with neither asks for one. cpu steps never request "
+            "a GPU, as on the docker and k8s backends. A GPU sandbox keeps the k8s default "
+            "/dev/shm, since OpenShell has no shm sizing; a step's shm_size is ignored."
         ),
     )
     egress_proxy: str | None = Field(

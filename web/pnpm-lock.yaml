@@ -774,9 +774,6 @@ importers:
       '@axe-core/playwright':
         specifier: ^4.12.1
         version: 4.12.1(playwright-core@1.58.2)
-      '@huggingface/hub':
-        specifier: ^1.0.0
-        version: 1.1.2
       '@nemo/testing':
         specifier: workspace:*
         version: link:../testing
@@ -1567,13 +1564,6 @@ packages:
     resolution: {integrity: sha512-Jsv6UOWYTrEFJ/01ZrnwVXs7KDvP8XIo115i++5PWvNkNvkrsTfGiLS6w+eJ57CYtUtDQalUWovCZDHFJ8u1VQ==}
     peerDependencies:
       react-hook-form: ^7.0.0
-
-  '@huggingface/hub@1.1.2':
-    resolution: {integrity: sha512-Jf4GhvVj9ABDw4Itb3BV1T7f22iewuZva476qTicQ4kOTbosuUuFDhsVH7ZH6rVNgg20Ll9kaNBF5CXjySIT+w==}
-    engines: {node: '>=18'}
-
-  '@huggingface/tasks@0.18.12':
-    resolution: {integrity: sha512-hUEYhXJzJCUhLSBNglW+Sji5fuzMnpBimp3kbdcGor+MaN9xb+qrcLnMC7X8aOcZaZdCErwYYIqz2oSP2EM4Bg==}
 
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
@@ -8987,12 +8977,6 @@ snapshots:
     dependencies:
       '@standard-schema/utils': 0.3.0
       react-hook-form: 7.71.2(react@19.2.7)
-
-  '@huggingface/hub@1.1.2':
-    dependencies:
-      '@huggingface/tasks': 0.18.12
-
-  '@huggingface/tasks@0.18.12': {}
 
   '@humanfs/core@0.19.1': {}
 
