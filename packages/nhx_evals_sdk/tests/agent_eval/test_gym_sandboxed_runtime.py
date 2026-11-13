@@ -468,6 +468,7 @@ async def test_a_routed_run_failure_is_a_failed_trial_that_names_its_cause(tasks
     assert failed.metadata["reward"] is None
     assert failed.error is not None
     assert failed.error.type == "ClientResponseError"
+    assert failed.error.message is not None
     assert "missing.png not found" in failed.error.message
 
 

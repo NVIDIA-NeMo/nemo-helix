@@ -45,7 +45,11 @@ from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_values
 from pydantic import BaseModel, ConfigDict, Field
 from sandboxed_gym.host.models import DEFAULT_HOST_TTL_S
-from sandboxed_gym.runtime.gym_host_runtime import ROUTE_FAILURES_TO_SIDECAR_ENV_KEY, UV_OFFLINE_ENV_KEY
+from sandboxed_gym.runtime.gym_host_runtime import UV_OFFLINE_ENV_KEY
+
+#: The host's ``ROUTE_FAILURES_TO_SIDECAR_ENV_KEY``, spelled out rather than imported: the nemo-helix wheel
+#: depends on the published nemo-sandboxed-gym 0.2.0, which predates it. A test keeps the two equal.
+ROUTE_FAILURES_TO_SIDECAR_ENV_KEY = "NHX_GYM_ROUTE_FAILURES_TO_SIDECAR"
 
 #: Env-var names that look like a credential. Used to refuse a sandboxed run that would hand one to
 #: user-supplied environment code through `env_vars`; `env_secrets` is the supported route.
