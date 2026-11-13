@@ -23,9 +23,10 @@ export function useWorkspaceSecrets(workspace: string, enabled: boolean): Worksp
 
   useEffect(() => {
     // After a failed page `hasNextPage` stays true, so without the `isError` guard this would
-    // retry in a tight loop.
-    if (hasNextPage && !isFetchingNextPage && !isError) void fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage]);
+    // retry in a tight loop. `enabled` stops only automatic fetches, not this imperative call, so
+    // a panel that closes mid-load must not keep paging.
+    if (enabled && hasNextPage && !isFetchingNextPage && !isError) void fetchNextPage();
+  }, [enabled, hasNextPage, isFetchingNextPage, isError, fetchNextPage]);
 
   return {
     names: data?.pages.flatMap((page) => page.data.map((secret) => secret.name)) ?? [],

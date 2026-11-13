@@ -10,7 +10,7 @@ import { getDatasetDetailRoute } from '@studio/routes/utils';
 import { render, screen } from '@studio/tests/util/render';
 import { fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
-import { delay, http, HttpResponse } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { useState } from 'react';
 
 // DOM contract (see the panel implementation): tabs HuggingFace/NGC/GitHub/S3/Upload; textboxes
@@ -434,11 +434,15 @@ describe('CreateDatasetPanel', () => {
 
   it('creates a public GitHub dataset without a token, showing Creating… while pending', async () => {
     const { posts } = recordRequests();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     server.use(
       http.post(FILESETS_URL, async ({ request }) => {
         const body = (await request.json()) as Body;
         posts.push(body);
-        await delay(300);
+        await gate;
         return HttpResponse.json(filesetRecord(body.name as string));
       })
     );
@@ -449,6 +453,8 @@ describe('CreateDatasetPanel', () => {
 
     await user.click(createButton());
     expect(await screen.findByRole('button', { name: 'Creating…' })).toBeDisabled();
+    expect(onCreated).not.toHaveBeenCalled();
+    release();
     await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
     expect(posts).toHaveLength(1);
     expect(posts[0]).toMatchObject({
