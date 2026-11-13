@@ -104,7 +104,7 @@ def build_job_run_telemetry(
     output_tokens = _token_count(details, "output_tokens")
     event = JobRunEvent(
         job_type=_job_type_bucket(source),
-        tool_category=job_tool_category(source.strip().lower().replace("_", "-"), plugins),
+        tool_category=job_tool_category(source.strip().lower().replace("_", "-").replace(" ", "-"), plugins),
         token_counts_source="job-summary" if input_tokens >= 0 or output_tokens >= 0 else "unknown",
         task_status=_STATUS_MAP.get(status, TaskStatusEnum.UNDEFINED),
         duration_sec=_duration_sec(created_at, updated_at),
