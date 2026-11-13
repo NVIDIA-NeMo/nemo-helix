@@ -23,7 +23,6 @@ from nhx.automodel.api.v2.jobs.schemas import (
     DistillationTraining,
     ExportParams,
     LoRAParams,
-    ModuleSelectorParams,
     OutputResponse,
     RetrievalParams,
     SFTTraining,
@@ -144,7 +143,6 @@ def test_compile_training_step_carries_pass2_fields() -> None:
             sequence_packing_max_samples=256,
             max_seq_length=2048,
             mask_generation_prompt=True,
-            freeze_modules=[ModuleSelectorParams(glob="*.layers.0.*")],
         ),
         output=_output(),
     )
@@ -152,8 +150,6 @@ def test_compile_training_step_carries_pass2_fields() -> None:
     cfg = step.config if hasattr(step, "config") else step["config"]
 
     assert cfg["dataset"]["mask_generation_prompt"] is True
-    assert cfg["training"]["freeze_modules"] == [{"path": None, "glob": "*.layers.0.*"}]
-    assert cfg["training"]["unfreeze_modules"] is None
     assert cfg["model"]["tokenizer_backend"] is None
     assert cfg["optimizer"]["optimizer_name"] == "AdamW"
     assert cfg["optimizer"]["lr_decay_style"] == "linear"

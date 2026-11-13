@@ -456,47 +456,6 @@ def test_backend_rope_fusion_defaults_off_and_accepts_a_stored_null() -> None:
 
 
 @pytest.mark.parametrize(
-    ("training", "error"),
-    [
-        (
-            {
-                "finetuning_type": "all_weights",
-                "freeze_modules": [{"glob": "*.layers.0.*"}],
-                "unfreeze_modules": [{"path": "lm_head"}],
-            },
-            None,
-        ),
-        ({"finetuning_type": "lora", "freeze_modules": [{"glob": "*.layers.0.*"}]}, None),
-        ({"finetuning_type": "lora", "unfreeze_modules": [{"path": "lm_head"}]}, "all_weights"),
-        ({"finetuning_type": "lora_merged", "unfreeze_modules": [{"path": "lm_head"}]}, "all_weights"),
-        (
-            {"finetuning_type": "all_weights", "freeze_modules": [{"path": "lm_head", "glob": "*.lm_head"}]},
-            "exactly one",
-        ),
-        ({"finetuning_type": "all_weights", "freeze_modules": [{}]}, "exactly one"),
-        ({"finetuning_type": "all_weights", "freeze_modules": [{"path": ""}]}, "at least 1"),
-    ],
-    ids=[
-        "full-weights-both",
-        "lora-freeze",
-        "lora-unfreeze",
-        "lora-merged-unfreeze",
-        "path-and-glob",
-        "neither",
-        "empty-path",
-    ],
-)
-def test_module_selectors(training: dict[str, object], error: str | None) -> None:
-    """unfreeze_modules needs full weights: a LoRA adapter cannot carry the module weights it would train."""
-    payload = {"model": "qwen", "dataset": {"training": "default/train"}, "training": training}
-    if error is None:
-        AutomodelJobInput.model_validate(payload)
-    else:
-        with pytest.raises(ValidationError, match=error):
-            AutomodelJobInput.model_validate(payload)
-
-
-@pytest.mark.parametrize(
     ("training", "match"),
     [
         ({"tokenizer_backend": "huggingface"}, "tokenizer_backend"),

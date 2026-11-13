@@ -28,8 +28,6 @@ from nhx.automodel.tasks.training.backends.config import (
 )
 from nhx.automodel.tasks.training.datasets.preparation import PreparedDataset
 from nhx.automodel.tasks.training.schemas import (
-    FinetuningType,
-    ModuleSelectorConfig,
     Precision,
     RetrievalConfig,
     TrainingRecipe,
@@ -109,8 +107,6 @@ def mock_customizer_config() -> MagicMock:
     config.model.name = "test/model"
     config.model.tokenizer_backend = None
     config.dataset.mask_generation_prompt = False
-    config.training.freeze_modules = None
-    config.training.unfreeze_modules = None
     return config
 
 
@@ -800,35 +796,6 @@ def test_causal_lm_writes_a_dataset_tokenizer_only_when_requested(
 
 
 @pytest.mark.parametrize(
-    ("freeze_modules", "unfreeze_modules", "expected"),
-    [
-        (None, None, None),
-        (
-            [ModuleSelectorConfig(glob="*.layers.0.*")],
-            [ModuleSelectorConfig(path="lm_head")],
-            {"freeze_modules": [{"glob": "*.layers.0.*"}], "unfreeze_modules": [{"path": "lm_head"}]},
-        ),
-    ],
-    ids=["unset", "selectors"],
-)
-def test_causal_lm_freeze_config_carries_only_requested_selectors(
-    tmp_path: Path,
-    freeze_modules: list[ModuleSelectorConfig] | None,
-    unfreeze_modules: list[ModuleSelectorConfig] | None,
-    expected: dict[str, Any] | None,
-) -> None:
-    config = _lora_step_config()
-    config.training.finetuning_type = FinetuningType.ALL_WEIGHTS
-    config.training.lora = None
-    config.training.freeze_modules = freeze_modules
-    config.training.unfreeze_modules = unfreeze_modules
-
-    compiled = _compile_causal_lm(config, tmp_path)
-
-    assert compiled.get("freeze_config") == expected
-
-
-@pytest.mark.parametrize(
     ("training_type", "peft", "precision", "optimizer", "expected"),
     [
         (TrainingType.DISTILLATION, False, None, "torch.optim.Adam", "float32"),
@@ -1411,23 +1378,6 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
     assert "_injected_fake" not in loaded[0]
     assert loaded[1]["_injected_fake"] is True
     assert loaded[1]["conversation"][0]["content"][0]["type"] == "image"
-
-
-def test_vlm_module_selectors_layer_over_the_frozen_vision_tower(tmp_path: Path) -> None:
-    """Automodel applies the booleans, then freeze_modules, then unfreeze_modules, which wins."""
-    rows = [{"messages": [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}]}]
-    config = _vision_training_config(tmp_path, rows)
-    config.training.finetuning_type = FinetuningType.ALL_WEIGHTS
-    config.training.lora = None
-    config.training.unfreeze_modules = [ModuleSelectorConfig(path="model.multi_modal_projector")]
-
-    compiled = _compile_vision(config, tmp_path)
-
-    assert compiled["freeze_config"] == {
-        "freeze_vision_tower": True,
-        "freeze_language_model": False,
-        "unfreeze_modules": [{"path": "model.multi_modal_projector"}],
-    }
 
 
 def test_prompt_completion_on_a_vision_checkpoint_is_still_the_vlm_recipe(tmp_path: Path) -> None:

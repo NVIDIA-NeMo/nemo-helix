@@ -280,25 +280,6 @@ class BackendParams(BaseModel):
     )
 
 
-class ModuleSelectorParams(BaseModel):
-    """One module, and everything under it, picked by exact path or by glob."""
-
-    path: Optional[str] = Field(
-        default=None, min_length=1, description="Exact module path, e.g. 'model.multi_modal_projector'."
-    )
-    glob: Optional[str] = Field(
-        default=None,
-        min_length=1,
-        description="Case-sensitive shell-style pattern over module paths; '*' also crosses '.', e.g. '*.embed_tokens'.",
-    )
-
-    @model_validator(mode="after")
-    def _exactly_one(self) -> Self:
-        if (self.path is None) == (self.glob is None):
-            raise ValueError("A module selector takes exactly one of 'path' or 'glob'.")
-        return self
-
-
 class PipelineParams(BaseModel):
     """How work is scheduled across pipeline stages. Read only when pipeline_parallel_size > 1."""
 
@@ -491,17 +472,6 @@ class _TrainingBase(BaseModel):
             "header and any empty reasoning block such as '<think></think>'. Chat-format (messages) datasets only."
         ),
     )
-    freeze_modules: Optional[list[ModuleSelectorParams]] = Field(
-        default=None,
-        description="Modules to freeze, each with everything under it. A selector that matches no module fails the job.",
-    )
-    unfreeze_modules: Optional[list[ModuleSelectorParams]] = Field(
-        default=None,
-        description=(
-            "Modules to make trainable, each with everything under it. Wins over freeze_modules and over the "
-            "frozen vision tower of vision-language jobs. Requires full-weight training."
-        ),
-    )
 
     # --- Model ---
     max_seq_length: int = Field(
@@ -574,14 +544,6 @@ class _TrainingBase(BaseModel):
         # against packing=false is silently ignored -- and the run is slower than asked for.
         if self.packed_sequence_size is not None and not self.sequence_packing:
             raise ValueError("packed_sequence_size requires sequence_packing=true.")
-        return self
-
-    @model_validator(mode="after")
-    def _unfreeze_needs_all_weights(self) -> Self:
-        # A LoRA adapter holds only low-rank weights: unfrozen module weights would be
-        # saved outside it and dropped when the adapter is merged or served.
-        if self.unfreeze_modules and self.peft is not None:
-            raise ValueError("unfreeze_modules requires full-weight training (no peft).")
         return self
 
     @property

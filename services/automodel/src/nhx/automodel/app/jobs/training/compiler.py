@@ -20,7 +20,6 @@ from nhx.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
     DistillationTraining,
     LoRAParams,
-    ModuleSelectorParams,
 )
 from nhx.automodel.app.constants import (
     DEFAULT_DATASET_PATH,
@@ -32,7 +31,6 @@ from nhx.automodel.app.jobs.training.schemas import (
     DistillationConfig,
     LoRAConfig,
     ModelConfig,
-    ModuleSelectorConfig,
     MTPConfig,
     PipelineConfig,
     RetrievalConfig,
@@ -367,8 +365,6 @@ def _translate_training_config(
         activation_checkpointing=training.activation_checkpointing,
         mtp=MTPConfig.model_validate(training.mtp.model_dump(mode="python")) if training.mtp else None,
         backend=BackendConfig.model_validate(training.backend.model_dump(mode="python")) if training.backend else None,
-        freeze_modules=_translate_module_selectors(training.freeze_modules),
-        unfreeze_modules=_translate_module_selectors(training.unfreeze_modules),
     )
 
 
@@ -385,12 +381,6 @@ def _reject_inapplicable_options(training: AnyTraining, recipe: TrainingRecipe, 
             "mask_generation_prompt applies only to chat-format data in the text sft recipe, not to "
             "vision-language models or the bi_encoder and cross_encoder recipes."
         )
-
-
-def _translate_module_selectors(selectors: list[ModuleSelectorParams] | None) -> list[ModuleSelectorConfig] | None:
-    if not selectors:
-        return None
-    return [ModuleSelectorConfig(path=selector.path, glob=selector.glob) for selector in selectors]
 
 
 def _translate_retrieval_config(training: AnyTraining) -> RetrievalConfig | None:

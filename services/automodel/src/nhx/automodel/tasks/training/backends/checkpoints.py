@@ -321,52 +321,6 @@ def sanitize_encoder_hf(output_path: Path, base_model_path: Path) -> None:
     )
 
 
-# Helix trains embedders with mean pooling and L2 normalization (config.py: pooling "avg", l2_normalize).
-_SENTENCE_TRANSFORMER_MODULES = [
-    {"idx": 0, "name": "0", "path": "", "type": "sentence_transformers.models.Transformer"},
-    {"idx": 1, "name": "1", "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
-    {"idx": 2, "name": "2", "path": "2_Normalize", "type": "sentence_transformers.models.Normalize"},
-]
-_SENTENCE_TRANSFORMER_BASE_FILES = ("config_sentence_transformers.json", "sentence_bert_config.json")
-
-
-def write_sentence_transformer_modules(output_path: Path, base_model_path: Path) -> None:
-    """Declare an embedder's trained pooling (mean, then L2 normalize) when its HF tree lacks it.
-
-    vLLM, Sentence Transformers, and TEI read pooling from ``modules.json`` and ``1_Pooling/``.
-    Without them vLLM pools a decoder's last token, which the model was not trained for.
-    Automodel writes these for full-weight saves; a merged LoRA has none. The base's prompts
-    and ``max_seq_length`` files are kept.
-    """
-    output_path = Path(output_path)
-    base_model_path = Path(base_model_path)
-    if (output_path / "modules.json").exists():
-        return
-    config = json.loads((output_path / "config.json").read_text())
-    hidden_size = config.get("hidden_size") or (config.get("text_config") or {}).get("hidden_size")
-    if not isinstance(hidden_size, int):
-        logger.warning("Not writing Sentence Transformers modules: no hidden_size in %s", output_path / "config.json")
-        return
-
-    pooling = {
-        "word_embedding_dimension": hidden_size,
-        "pooling_mode_cls_token": False,
-        "pooling_mode_mean_tokens": True,
-        "pooling_mode_max_tokens": False,
-        "pooling_mode_mean_sqrt_len_tokens": False,
-        "pooling_mode_weightedmean_tokens": False,
-        "pooling_mode_lasttoken": False,
-        "include_prompt": True,
-    }
-    (output_path / "1_Pooling").mkdir(exist_ok=True)
-    (output_path / "1_Pooling" / "config.json").write_text(json.dumps(pooling, indent=2) + "\n")
-    (output_path / "modules.json").write_text(json.dumps(_SENTENCE_TRANSFORMER_MODULES, indent=2) + "\n")
-    for name in _SENTENCE_TRANSFORMER_BASE_FILES:
-        if (base_model_path / name).is_file():
-            shutil.copy2(base_model_path / name, output_path / name)
-    logger.info("Wrote Sentence Transformers modules (mean pooling, L2 normalize) to %s", output_path)
-
-
 def merge_lora_embedding_adapter(
     adapter_path: Path,
     base_model_path: str,
@@ -983,8 +937,6 @@ def process_checkpoint(
         )
         if not job_trust_remote_code:
             sanitize_encoder_hf(output_path, Path(base_model_path))
-        if is_embedding:
-            write_sentence_transformer_modules(output_path, Path(base_model_path))
         _restructure_encoder_output(output_path, export_cfg.primary)
 
     # Determine precision: use explicit config value, or extract from base model

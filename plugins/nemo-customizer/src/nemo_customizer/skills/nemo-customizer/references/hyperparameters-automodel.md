@@ -126,8 +126,6 @@ Full template:
 | `attn_implementation` | `sdpa` | `sdpa` (PyTorch native) \| `flash_attention_2` \| `eager` |
 | `tokenizer_backend` | `null` | **Leave unset** unless the tokenizer fails to load. See **Tokenizer backend** below |
 | `mask_generation_prompt` | `false` | Chat (messages) data only. `true` stops training on the role header and empty `<think></think>` the chat template writes before each reply. See below |
-| `freeze_modules` | `null` | List of `{"path": ...}` or `{"glob": ...}` selectors to freeze. See **Module freezing** below |
-| `unfreeze_modules` | `null` | Selectors to make trainable; wins over `freeze_modules`. **`all_weights` only** |
 | `teacher_model` | — | **Model entity ref** (not HF id). Required for distillation; see below |
 | `distillation_ratio` | `0.5` | KD blend (0–1) |
 | `distillation_temperature` | `1.0` | KD temperature |
@@ -173,17 +171,6 @@ At inference, the chat template writes the assistant role header, and for hybrid
 - **Loss and validation loss read lower**, because the hard-to-predict template tokens no longer count.
 
 Chat-format (messages) data only. Prompt/completion data fails the job, and vision-language and retrieval recipes are rejected at submission.
-
-### Module freezing (`freeze_modules` / `unfreeze_modules`)
-
-Each entry is `{"path": "<exact module path>"}` or `{"glob": "<pattern>"}`, where `*` also crosses `.`. A selected module's whole subtree is frozen or unfrozen. Automodel applies Helix's built-in settings first (for VLM jobs, the frozen vision tower), then `freeze_modules`, then `unfreeze_modules`, which wins on overlap. A selector that matches no module fails the job, so check the module names first (for example, the weight names in `model.safetensors.index.json`, minus the trailing `.weight`).
-
-- **`freeze_modules`** works with every `finetuning_type`. Under LoRA it freezes the adapters inside the selected modules.
-- **`unfreeze_modules`** requires `all_weights`. A LoRA adapter holds only low-rank weights, so trained module weights would be dropped when it is merged or served.
-
-Examples:
-- Train a VLM's projector along with the language model: `"unfreeze_modules": [{"path": "model.multi_modal_projector"}]`.
-- Keep the embeddings fixed during full fine-tuning: `"freeze_modules": [{"glob": "*.embed_tokens"}]`.
 
 ### Automodel `schedule`
 

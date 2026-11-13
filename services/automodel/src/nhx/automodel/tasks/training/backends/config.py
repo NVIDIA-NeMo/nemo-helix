@@ -223,8 +223,6 @@ def _compile_retrieval_config(
         # tekken.json, but carries only tokenizer.json.
         "tokenizer_backend": customizer_config.model.tokenizer_backend or "nemo_wrapped_auto",
     }
-    if freeze_config := _module_selector_freeze_config(customizer_config):
-        cfg["freeze_config"] = freeze_config
 
     _build_distributed(
         cfg,
@@ -338,8 +336,6 @@ def _compile_llm_config(
     }
 
     _build_peft(cfg, customizer_config)
-    if freeze_config := _module_selector_freeze_config(customizer_config):
-        cfg["freeze_config"] = freeze_config
     _keep_full_weight_kd_student_in_fp32(cfg, customizer_config)
 
     cfg["loss_fn"] = {
@@ -405,14 +401,12 @@ def _compile_vlm_config(
         "pretrained_model_name_or_path": customizer_config.model.path,
         "trust_remote_code": trust_remote_code,
     }
-    freeze_config: dict[str, Any] = {
+    freeze_config: dict[str, bool] = {
         "freeze_vision_tower": True,
         "freeze_language_model": False,
     }
     if traits.has_audio_tower:
         freeze_config["freeze_audio_tower"] = True
-    # Automodel applies the booleans first, then freeze_modules, then unfreeze_modules, which wins.
-    freeze_config.update(_module_selector_freeze_config(customizer_config))
     cfg["freeze_config"] = freeze_config
 
     _build_distributed(
@@ -1413,19 +1407,6 @@ def _verify_tokenizer_compatibility(student_path: str, teacher_path: str, trust_
         # Log but don't fail for other tokenizer loading issues
         # (e.g., network issues, missing files) - the training will fail later with a clearer error
         logger.warning(f"Could not verify tokenizer compatibility: {e}")
-
-
-def _module_selector_freeze_config(customizer_config: TrainingStepConfig) -> dict[str, list[dict[str, str]]]:
-    """The job's freeze_modules / unfreeze_modules in Automodel's freeze_config form."""
-    training = customizer_config.training
-    freeze_config: dict[str, list[dict[str, str]]] = {}
-    for key, selectors in (
-        ("freeze_modules", training.freeze_modules),
-        ("unfreeze_modules", training.unfreeze_modules),
-    ):
-        if selectors:
-            freeze_config[key] = [selector.model_dump(exclude_none=True) for selector in selectors]
-    return freeze_config
 
 
 def _keep_full_weight_kd_student_in_fp32(cfg: dict[str, Any], customizer_config: TrainingStepConfig) -> None:

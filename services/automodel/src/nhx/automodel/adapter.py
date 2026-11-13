@@ -83,8 +83,6 @@ def _build_training_block(spec: dict[str, Any]) -> SFTTraining | DistillationTra
         "attn_implementation": training.get("attn_implementation", "sdpa"),
         "tokenizer_backend": training.get("tokenizer_backend"),
         "mask_generation_prompt": training.get("mask_generation_prompt", False),
-        "freeze_modules": training.get("freeze_modules"),
-        "unfreeze_modules": training.get("unfreeze_modules"),
         "seed": schedule.get("seed"),
         "retrieval": training.get("retrieval"),
         "parallelism": ParallelismParams(

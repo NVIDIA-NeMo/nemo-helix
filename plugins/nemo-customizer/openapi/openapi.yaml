@@ -3062,24 +3062,6 @@ components:
 
         setting, and only the fields that are set reach the model. Support differs
         per model.'
-    AutomodelModuleSelector:
-      properties:
-        path:
-          title: Path
-          description: Exact module path, e.g. 'model.multi_modal_projector'.
-          type: string
-          minLength: 1
-        glob:
-          title: Glob
-          description: Case-sensitive shell-style pattern over module paths; '*' also
-            crosses '.', e.g. '*.embed_tokens'.
-          type: string
-          minLength: 1
-      additionalProperties: false
-      type: object
-      title: AutomodelModuleSelector
-      description: One module, and everything under it, picked by exact path or by
-        glob.
     AutomodelOptimizerSpec:
       properties:
         learning_rate:
@@ -3498,22 +3480,6 @@ components:
             such as ''<think></think>''. The model never generates them. Chat-format
             (messages) datasets only.'
           default: false
-        freeze_modules:
-          title: Freeze Modules
-          description: Modules to freeze, each with everything under it. A selector
-            that matches no module fails the job.
-          items:
-            $ref: '#/components/schemas/AutomodelModuleSelector'
-          type: array
-        unfreeze_modules:
-          title: Unfreeze Modules
-          description: Modules to make trainable, each with everything under it. Wins
-            over freeze_modules and over the frozen vision tower of vision-language
-            jobs. Requires finetuning_type all_weights, because a LoRA adapter cannot
-            carry full module weights.
-          items:
-            $ref: '#/components/schemas/AutomodelModuleSelector'
-          type: array
       additionalProperties: false
       type: object
       title: AutomodelTrainingSpec

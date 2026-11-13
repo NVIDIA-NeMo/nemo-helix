@@ -33,7 +33,6 @@ __all__ = [
     "ExportSpec",
     "LoRAParams",
     "MTPSpec",
-    "ModuleSelector",
     "OptimizerSpec",
     "OutputRequest",
     "OutputResponse",
@@ -87,25 +86,6 @@ class LoRAParams(AutomodelSchema):
                 "lora.target_modules and lora.exclude_modules are mutually exclusive; "
                 "name the modules to adapt, or the ones to skip, but not both."
             )
-        return self
-
-
-class ModuleSelector(AutomodelSchema):
-    """One module, and everything under it, picked by exact path or by glob."""
-
-    path: str | None = Field(
-        default=None, min_length=1, description="Exact module path, e.g. 'model.multi_modal_projector'."
-    )
-    glob: str | None = Field(
-        default=None,
-        min_length=1,
-        description="Case-sensitive shell-style pattern over module paths; '*' also crosses '.', e.g. '*.embed_tokens'.",
-    )
-
-    @model_validator(mode="after")
-    def _exactly_one(self) -> Self:
-        if (self.path is None) == (self.glob is None):
-            raise ValueError("A module selector takes exactly one of 'path' or 'glob'.")
         return self
 
 
@@ -347,18 +327,6 @@ class TrainingSpec(AutomodelSchema):
             "Chat-format (messages) datasets only."
         ),
     )
-    freeze_modules: list[ModuleSelector] | None = Field(
-        default=None,
-        description="Modules to freeze, each with everything under it. A selector that matches no module fails the job.",
-    )
-    unfreeze_modules: list[ModuleSelector] | None = Field(
-        default=None,
-        description=(
-            "Modules to make trainable, each with everything under it. Wins over freeze_modules and over the "
-            "frozen vision tower of vision-language jobs. Requires finetuning_type all_weights, because a LoRA "
-            "adapter cannot carry full module weights."
-        ),
-    )
 
     @model_validator(mode="after")
     def _training_type_fields(self) -> Self:
@@ -368,11 +336,6 @@ class TrainingSpec(AutomodelSchema):
             raise ValueError("distillation only supports the sft recipe")
         if self.finetuning_type.startswith("lora") and self.lora is None:
             self.lora = LoRAParams()
-        if self.unfreeze_modules and self.finetuning_type != "all_weights":
-            raise ValueError(
-                "unfreeze_modules requires finetuning_type all_weights: a LoRA adapter holds only the low-rank "
-                "weights, so trained module weights would be dropped when it is merged or served."
-            )
         return self
 
 
