@@ -34,7 +34,7 @@ from nemo_helix_plugin.job_results import (
 )
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
 from nemo_helix_plugin.jobs.constants import NEMO_JOB_WORKSPACE_ENVVAR
-from nemo_helix_plugin.jobs.file_manager import _filter_files_by_patterns
+from nemo_helix_plugin.jobs.file_manager import _filter_files_by_patterns, _stage_local_files
 from nemo_helix_plugin.jobs.result_manager import (
     AsyncResultManager,
     ResultManager,
@@ -260,6 +260,11 @@ class TestSaveDirectory:
         saved = {path.relative_to(dst).as_posix() for path in dst.rglob("*") if path.is_file()}
         assert saved == files - excluded
         assert set(_filter_files_by_patterns(sorted(files), patterns)) == saved
+        staging_root = tmp_path / "staging"
+        staging_root.mkdir()
+        snapshot, selected = _stage_local_files(src, staging_root, patterns)
+        assert set(selected) == saved
+        assert {path.relative_to(snapshot).as_posix() for path in snapshot.rglob("*") if path.is_file()} == saved
 
 
 class TestSaveOverwriteAcrossKinds:
@@ -410,6 +415,7 @@ class TestHelixJobResults:
             result_name="metrics",
             artifact_local_path=local,
             ignore_patterns=["cache.db"],
+            stage=False,
         )
         assert ref == ResultRef(name="metrics", artifact_url="fileset://ws/fs#results/A1/metrics")
 
@@ -423,9 +429,10 @@ class TestHelixJobResults:
             sink = HelixJobResults(
                 job_name="j", workspace="ws", client=client, attempt_id="attempt-1", fileset_name="job-fileset"
             )
-            sink.save("artifacts", payload_dir, ignore_patterns=["cache.db", "cache/"])
+            sink.save("artifacts", payload_dir, ignore_patterns=["cache.db", "cache/"], stage=True)
         call = manager.create_result.call_args
         assert call.kwargs["artifact_local_path"] == payload_dir
+        assert call.kwargs["stage"] is True
         assert call.kwargs["ignore_patterns"] == ["cache.db", "cache/"]
 
     def test_save_propagates_manager_errors(self) -> None:
@@ -438,6 +445,29 @@ class TestHelixJobResults:
             )
             with pytest.raises(RuntimeError, match="boom"):
                 sink.save("metrics", Path("/tmp/whatever"))
+
+
+def test_result_manager_forwards_staging_to_the_file_manager(tmp_path: Path) -> None:
+    artifact = tmp_path / "bundle"
+    artifact.mkdir()
+    jobs_client = MagicMock()
+    jobs_client.create_job_result.return_value.data.return_value = _platform_record()
+    file_manager = MagicMock()
+    file_manager.upload.return_value = "fileset://ws/results#results/attempt-a/bundle"
+    file_manager.storage_type.return_value = "fileset"
+    manager = ResultManager(
+        job_name="job-a",
+        workspace="ws",
+        attempt_id="attempt-a",
+        files_client=MagicMock(),
+        jobs_client=jobs_client,
+        fileset_name="results",
+    )
+
+    with patch.object(manager, "_create_file_manager", return_value=file_manager):
+        manager.create_result("bundle", artifact, stage=True)
+
+    assert file_manager.upload.call_args.kwargs["stage"] is True
 
 
 def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(tmp_path: Path) -> None:
@@ -463,6 +493,7 @@ def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(
         manager.create_result("metrics", artifact)
 
     assert file_manager.upload.call_args.kwargs["remote_path"] == "results/attempt-a/metrics"
+    assert file_manager.upload.call_args.kwargs["stage"] is False
     jobs_client.create_job_result.assert_called_once()
     call = jobs_client.create_job_result.call_args
     assert call.kwargs["body"].attempt_id == "attempt-a"
