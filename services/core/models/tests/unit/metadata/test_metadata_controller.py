@@ -245,3 +245,48 @@ def test_load_plugin_sources_skips_sources_that_fail_to_load(monkeypatch: pytest
 async def test_http_client_does_not_request_zstd():
     async with build_http_client(MetadataControllerConfig()) as http:
         assert "zstd" not in http.headers["Accept-Encoding"]
+
+
+async def test_reconcile_model_backs_off_while_source_keeps_failing(monkeypatch: pytest.MonkeyPatch):
+    controller, _ = _controller([FailingSource(None)])
+    clock = [1000.0]
+    monkeypatch.setattr(controller_module, "monotonic", lambda: clock[0])
+    interval = MetadataControllerConfig().interval_seconds
+    waits = []
+    for _ in range(4):
+        await controller.reconcile_model(_model())
+        waits.append(controller._retry_after["default/llama"] - clock[0])
+
+    assert waits == [0.0, interval, 3 * interval, 7 * interval]
+
+
+async def test_reconcile_model_caps_backoff_at_refresh_interval(monkeypatch: pytest.MonkeyPatch):
+    controller, _ = _controller([FailingSource(None)])
+    monkeypatch.setattr(controller_module, "monotonic", lambda: 0.0)
+    for _ in range(20):
+        await controller.reconcile_model(_model())
+
+    assert controller._retry_after["default/llama"] == MetadataControllerConfig().refresh_interval_seconds
+
+
+async def test_reconcile_model_resets_backoff_after_success():
+    source = FailingSource(None)
+    controller, _ = _controller([source])
+    await controller.reconcile_model(_model())
+    await controller.reconcile_model(_model())
+    controller._plugin_sources = [FakeSource(ModelMetadata(context_length=8192))]
+
+    await controller.reconcile_model(_model())
+
+    assert "default/llama" not in controller._consecutive_failures
+    assert "default/llama" not in controller._retry_after
+
+
+async def test_reconcile_reports_progress_after_each_model():
+    controller, _ = _controller([FakeSource(ModelMetadata(context_length=8192))])
+    controller.list_models_to_refresh = AsyncMock(return_value=[_model(), _model().model_copy(update={"name": "b"})])
+    progress = MagicMock()
+
+    await controller.reconcile(on_progress=progress)
+
+    assert progress.call_count == 2
