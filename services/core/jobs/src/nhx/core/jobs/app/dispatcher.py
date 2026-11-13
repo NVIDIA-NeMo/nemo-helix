@@ -62,6 +62,7 @@ from nhx.core.jobs.app.schemas import (
     HelixJobSpec,
 )
 from nhx.core.jobs.config import config as jobs_config
+from nhx.core.jobs.controllers.backends.base import validate_step_environment
 from nhx.core.jobs.entities import (
     STEP_SPEC_NAME_CONFIG_KEY,
     HelixJob,
@@ -119,6 +120,10 @@ class JobStatusUpdateSkippedError(Exception):
 
 class JobSecretValidationError(ValueError):
     """Exception raised when a job's secret references cannot be validated."""
+
+
+class JobEnvironmentValidationError(JobSecretValidationError):
+    """Exception raised when a job step's environment names are reserved or malformed."""
 
 
 class JobOutputLocationError(ValueError):
@@ -287,6 +292,12 @@ class JobDispatcher:
     # =========================================================================
 
     async def validate_job_secrets(self, job_spec: HelixJobSpec, job_workspace: str) -> None:
+        # Reject reserved or malformed env names at submit time rather than at schedule time.
+        for step in job_spec.steps:
+            try:
+                validate_step_environment(step.environment or [], source="Job step environment keys")
+            except ValueError as exc:
+                raise JobEnvironmentValidationError(str(exc)) from exc
         # Ensure that any referenced secrets in steps exist and the user has access (user-scoped client).
         for step in job_spec.steps:
             if step.gateway_providers:

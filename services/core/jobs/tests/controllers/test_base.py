@@ -16,7 +16,12 @@ from nhx.common.jobs.constants import EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, PERSIS
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
 from nhx.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider
-from nhx.core.jobs.app.schemas import HelixJobStepSpec, StepLifecycle
+from nhx.core.jobs.app.schemas import (
+    HelixJobEnvironmentVariable,
+    HelixJobSecretEnvironmentVariableRef,
+    HelixJobStepSpec,
+    StepLifecycle,
+)
 from nhx.core.jobs.controllers.backends.base import (
     JOB_LOGS_ENDPOINT_ENVVAR,
     NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
@@ -34,6 +39,7 @@ from nhx.core.jobs.controllers.backends.base import (
     resolve_task_image,
     step_ttl_seconds_active,
     validate_no_reserved_managed_job_environment_variable_names,
+    validate_step_environment,
 )
 from nhx.core.jobs.controllers.backends.test import MockKubernetesCPUJobBackend
 from pydantic import ValidationError
@@ -77,6 +83,48 @@ class TestManagedJobReservedEnvironment:
                 [JOB_LOGS_ENDPOINT_ENVVAR],
                 source="Job step environment keys",
             )
+
+    @pytest.mark.parametrize("name", ["NHX_PRINCIPAL", "NEMO_JOB_SECRETS"])
+    def test_step_validation_rejects_platform_injected_identity_and_secret_names(self, name):
+        assert find_reserved_managed_job_environment_variable_names([name]) == [name]
+        with pytest.raises(ValueError, match=name):
+            validate_no_reserved_managed_job_environment_variable_names([name], source="Job step environment keys")
+
+    @pytest.mark.parametrize(
+        "name",
+        ["X=default/a,NHX_PRINCIPAL", "A,B", "A=B", "1BAD", "BAD-NAME", "", "A B"],
+    )
+    def test_step_validation_rejects_malformed_secret_names(self, name):
+        environment = [
+            HelixJobEnvironmentVariable(name=name, from_secret=HelixJobSecretEnvironmentVariableRef(name="s"))
+        ]
+        with pytest.raises(ValueError, match="must match"):
+            validate_step_environment(environment, source="Job step environment keys")
+
+    @pytest.mark.parametrize("name", ["my-var", "foo.bar"])
+    def test_step_validation_allows_non_identifier_plain_value_names(self, name):
+        validate_step_environment(
+            [HelixJobEnvironmentVariable(name=name, value="x")], source="Job step environment keys"
+        )
+
+    @pytest.mark.parametrize(
+        "name",
+        ["A=B", 'NHX_PRINCIPAL={"id":"service:jobs","x":"', "NEMO_JOB_SECRETS=A=ws/k", "A\x00B"],
+    )
+    def test_step_validation_rejects_plain_value_names_that_could_spoof_reserved_names(self, name):
+        with pytest.raises(ValueError, match="must not contain"):
+            validate_step_environment(
+                [HelixJobEnvironmentVariable(name=name, value="x")], source="Job step environment keys"
+            )
+
+    @pytest.mark.parametrize("name", ["NHX_PRINCIPAL", "NEMO_JOB_SECRETS"])
+    def test_step_validation_rejects_reserved_names_for_plain_and_secret_entries(self, name):
+        for entry in (
+            HelixJobEnvironmentVariable(name=name, value="x"),
+            HelixJobEnvironmentVariable(name=name, from_secret=HelixJobSecretEnvironmentVariableRef(name="s")),
+        ):
+            with pytest.raises(ValueError, match=name):
+                validate_step_environment([entry], source="Job step environment keys")
 
     def test_profile_env_rejects_access_token(self):
         with pytest.raises(ValidationError, match="NHX_ACCESS_TOKEN"):
