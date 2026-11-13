@@ -5,11 +5,14 @@ from types import SimpleNamespace
 
 import pytest
 from nhx.customization_common.schemas.checkpoint import (
+    VLM_LORA_EXCLUDE_MODULES,
     CheckpointTraits,
+    excludes_mamba_out_proj,
     lora_uses_default_targets,
     reject_incompatible_checkpoint,
     traits_from_model_spec,
     traits_from_step_model,
+    vlm_lora_exclude_modules,
 )
 
 
@@ -18,6 +21,29 @@ def test_the_api_proj_backfill_is_not_a_caller_filter() -> None:
     assert lora_uses_default_targets(["*proj"], None)
     assert not lora_uses_default_targets(["*.q_proj"], None)
     assert not lora_uses_default_targets(None, ["*lm_head*"])
+
+
+def test_a_caller_exclude_is_unioned_with_the_vision_patterns() -> None:
+    merged = vlm_lora_exclude_modules(["*.out_proj"])
+
+    assert merged[: len(VLM_LORA_EXCLUDE_MODULES)] == list(VLM_LORA_EXCLUDE_MODULES)
+    assert merged[-1] == "*.out_proj"
+
+
+def test_nemotron_h_adds_mamba_out_proj_when_the_caller_sets_nothing() -> None:
+    assert excludes_mamba_out_proj("NemotronH_Omni_Reasoning_V3")
+    assert not excludes_mamba_out_proj("Qwen3VLForConditionalGeneration")
+    assert not excludes_mamba_out_proj("nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16")
+
+    merged = vlm_lora_exclude_modules(None, checkpoint_model_name="NemotronH_Omni_Reasoning_V3")
+
+    assert merged[-1] == "*.out_proj"
+    assert (
+        vlm_lora_exclude_modules(["*.out_proj"], checkpoint_model_name="NemotronH_Omni_Reasoning_V3").count(
+            "*.out_proj"
+        )
+        == 1
+    )
 
 
 def test_a_spec_without_the_vision_field_stays_text_and_keeps_moe() -> None:

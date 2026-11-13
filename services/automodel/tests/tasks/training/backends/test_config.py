@@ -1380,6 +1380,52 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
     assert loaded[1]["conversation"][0]["content"][0]["type"] == "image"
 
 
+def test_a_caller_exclude_keeps_the_vision_patterns(tmp_path: Path) -> None:
+    """`*.out_proj` must not replace the compiler's vision-tower freeze."""
+    rows = [{"prompt": "say hi", "completion": "hi"}]
+    config = _vision_training_config(tmp_path, rows)
+    assert config.training.lora is not None
+    config.training.lora.exclude_modules = ["*.out_proj"]
+
+    compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["peft"]["exclude_modules"] == [
+        "*vision_tower*",
+        "*vision_model*",
+        "*vision_projector*",
+        "*visual*",
+        "*image_encoder*",
+        "*multi_modal_projector*",
+        "*audio*",
+        "*sound*",
+        "*mlp1*",
+        "*lm_head*",
+        "*.out_proj",
+    ]
+    assert "target_modules" not in compiled["peft"]
+
+
+def test_nemotron_h_vision_excludes_mamba_out_proj_when_unset(tmp_path: Path) -> None:
+    rows = [{"prompt": "say hi", "completion": "hi"}]
+    config = _vision_training_config(tmp_path, rows, checkpoint_model_name="NemotronH_Omni_Reasoning_V3")
+
+    compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["peft"]["exclude_modules"][-1] == "*.out_proj"
+
+
+def test_a_named_target_list_is_not_replaced_on_a_vision_checkpoint(tmp_path: Path) -> None:
+    rows = [{"prompt": "say hi", "completion": "hi"}]
+    config = _vision_training_config(tmp_path, rows)
+    assert config.training.lora is not None
+    config.training.lora.target_modules = ["*.q_proj"]
+
+    compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["peft"]["target_modules"] == ["*.q_proj"]
+    assert "exclude_modules" not in compiled["peft"]
+
+
 def test_prompt_completion_on_a_vision_checkpoint_is_still_the_vlm_recipe(tmp_path: Path) -> None:
     from nhx.automodel.tasks.training.backends.vlm import make_conversation_dataset
 

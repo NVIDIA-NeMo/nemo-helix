@@ -14,10 +14,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-# Applied only when the caller named neither target_modules nor exclude_modules.
-# ``*proj`` is the API backfill for that same unset case, so it is not a caller filter.
-# ``*vision_projector*``, ``*audio*``, and ``*sound*`` match the Nemotron 3.5 Super VL
-# PEFT example. The other vision names cover towers that do not use those module names.
+# Always kept on a vision LoRA job. A caller exclude list is unioned with these
+# patterns; it does not replace them. ``*proj`` is the API backfill for an unset
+# target list, so it is not a caller filter. ``*vision_projector*``, ``*audio*``,
+# and ``*sound*`` match the Nemotron 3.5 Super VL PEFT example. The other vision
+# names cover towers that do not use those module names.
 VLM_LORA_EXCLUDE_MODULES = [
     "*vision_tower*",
     "*vision_model*",
@@ -58,6 +59,35 @@ def lora_uses_default_targets(target_modules: list[str] | None, exclude_modules:
     if not target_modules:
         return True
     return list(target_modules) == ["*proj"]
+
+
+def excludes_mamba_out_proj(checkpoint_model_name: str | None) -> bool:
+    """True for a NemotronH architecture, whose fused Mamba ``out_proj`` cannot take LoRA.
+
+    A hub id contains ``/`` and is not an architecture class, so it does not match.
+    """
+    if not checkpoint_model_name or "/" in checkpoint_model_name:
+        return False
+    return checkpoint_model_name.startswith("NemotronH")
+
+
+def vlm_lora_exclude_modules(
+    caller_exclude: list[str] | None,
+    *,
+    checkpoint_model_name: str | None = None,
+) -> list[str]:
+    """Vision-tower patterns, the caller's patterns, and Mamba ``out_proj`` when required.
+
+    Setting ``exclude_modules`` used to skip the vision list. A Nemotron job that
+    set only ``*.out_proj`` then adapted the vision tower.
+    """
+    merged = list(VLM_LORA_EXCLUDE_MODULES)
+    if excludes_mamba_out_proj(checkpoint_model_name):
+        merged.append("*.out_proj")
+    for pattern in caller_exclude or []:
+        if pattern not in merged:
+            merged.append(pattern)
+    return merged
 
 
 def _fields_set(spec: Any) -> set[str]:
