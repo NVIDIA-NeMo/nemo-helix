@@ -665,9 +665,13 @@ def _order_by(sort: str, *, table_alias: str | None = None) -> str:
     if table_alias is not None:
         column = f"{table_alias}.{column}"
         id_column = f"{table_alias}.id"
+        session_column = f"{table_alias}.session_id"
+        source_column = f"{table_alias}.source_format"
     else:
         id_column = "id"
-    return f"{column} {direction}, {id_column} ASC"
+        session_column = "session_id"
+        source_column = "source_format"
+    return f"{column} {direction}, {id_column} ASC, {session_column} ASC, {source_column} ASC"
 
 
 def _row_to_trace(row: dict[str, Any]) -> IntakeTrace:
