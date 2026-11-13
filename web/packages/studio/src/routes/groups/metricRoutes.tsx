@@ -13,12 +13,22 @@ import type { RouteObject } from 'react-router';
 const MetricListRoute = lazy(() =>
   import('@studio/routes/MetricListRoute').then((module) => ({ default: module.MetricListRoute }))
 );
+const MetricDetailRoute = lazy(() =>
+  import('@studio/routes/MetricDetailRoute').then((module) => ({
+    default: module.MetricDetailRoute,
+  }))
+);
 
 export const metricRoutes: RouteObject[] = gateMetricsRoutes([
   {
     path: ROUTES.workspace.metrics,
     element: <MetricListRoute />,
     errorElement: <RouteErrorPanel title="Metrics" />,
+  },
+  {
+    path: ROUTES.workspace.metricDetail,
+    element: <MetricDetailRoute />,
+    errorElement: <RouteErrorPanel title="Metric" />,
   },
 ]);
 
