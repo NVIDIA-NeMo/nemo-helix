@@ -321,6 +321,34 @@ def sanitize_encoder_hf(output_path: Path, base_model_path: Path) -> None:
     )
 
 
+# Sentence Transformers files a merged embedder takes from its base, besides the module folders.
+_SENTENCE_TRANSFORMER_FILES = ("modules.json", "config_sentence_transformers.json", "sentence_bert_config.json")
+
+
+def copy_sentence_transformer_files(output_path: Path, base_model_path: Path) -> None:
+    """Give an embedder that has no Sentence Transformers files its base checkpoint's.
+
+    vLLM, Sentence Transformers, and TEI read an embedder's pooling from ``modules.json`` and the
+    module folders it lists, such as ``1_Pooling/``. Without them vLLM pools a decoder's last
+    token. Automodel writes them on full-weight saves; Helix's LoRA merge saves weights only.
+    Training pools the way the base's files say (Helix leaves pooling to Automodel, which reads
+    them), so the base's files describe the merged model too.
+    """
+    output_path = Path(output_path)
+    base_model_path = Path(base_model_path)
+    if (output_path / "modules.json").exists() or not (base_model_path / "modules.json").is_file():
+        return
+    modules = json.loads((base_model_path / "modules.json").read_text(encoding="utf-8"))
+    for name in _SENTENCE_TRANSFORMER_FILES:
+        if (base_model_path / name).is_file():
+            shutil.copy2(base_model_path / name, output_path / name)
+    for module in modules if isinstance(modules, list) else []:
+        folder = module.get("path") if isinstance(module, dict) else None
+        if folder and (base_model_path / folder).is_dir():
+            shutil.copytree(base_model_path / folder, output_path / folder, dirs_exist_ok=True)
+    logger.info("Copied the base checkpoint's Sentence Transformers files to %s", output_path)
+
+
 def merge_lora_embedding_adapter(
     adapter_path: Path,
     base_model_path: str,
@@ -609,6 +637,8 @@ def _build_export_module(
         if score_token_ids is not None:
             return _CausalRerankerForExport(inner, *score_token_ids)
         return _CrossEncoderForExport(inner)
+    if cfg.pooling is None or cfg.normalize is None:
+        raise ValueError("An embedding export needs its pooling and normalize resolved (_with_trained_pooling).")
     return _EmbeddingForExport(inner, pooling=cfg.pooling, normalize=cfg.normalize)
 
 
@@ -783,6 +813,45 @@ def _resolve_export_config(customizer_config: TrainingStepConfig) -> ExportConfi
     return export if isinstance(export, ExportConfig) else ExportConfig()
 
 
+_ONNX_POOLINGS = ("avg", "cls", "last")
+
+
+def _automodel_bi_encoder_pooling(model_path: Path) -> tuple[str, bool]:
+    """The pooling and L2 normalization Automodel's bi-encoder uses for this checkpoint when given none.
+
+    Training image only: it imports ``nemo_automodel`` and ``transformers``.
+    """
+    from nemo_automodel._transformers.retrieval import _resolve_bi_encoder_options
+    from nemo_automodel._transformers.sentence_transformer_export import _load_sentence_transformer_wrapper_options
+    from transformers import PretrainedConfig
+
+    config = PretrainedConfig.from_dict(json.loads((model_path / "config.json").read_text(encoding="utf-8")))
+    saved = _load_sentence_transformer_wrapper_options(str(model_path), {})
+    return _resolve_bi_encoder_options(config, saved, None, None)
+
+
+def _with_trained_pooling(export_cfg: ExportConfig, base_model_path: Path) -> ExportConfig:
+    """Fill an unset ONNX ``pooling`` or ``normalize`` with what the embedder trained with.
+
+    Helix leaves both to Automodel, which picks them for the base checkpoint; asking it the same
+    question gives the training choice without a second copy of that rule here.
+    """
+    if export_cfg.pooling is not None and export_cfg.normalize is not None:
+        return export_cfg
+    pooling, normalize = _automodel_bi_encoder_pooling(base_model_path)
+    if export_cfg.pooling is None and pooling not in _ONNX_POOLINGS:
+        raise ValueError(
+            f"The embedder trains with {pooling!r} pooling, which the ONNX export does not support "
+            f"({', '.join(_ONNX_POOLINGS)})."
+        )
+    return export_cfg.model_copy(
+        update={
+            "pooling": export_cfg.pooling or pooling,
+            "normalize": normalize if export_cfg.normalize is None else export_cfg.normalize,
+        }
+    )
+
+
 def _restructure_encoder_output(output_path: Path, primary: str) -> None:
     """Put *primary* at the fileset root; nest the other under ``alternates/``.
 
@@ -923,6 +992,8 @@ def process_checkpoint(
 
     if (is_embedding or is_cross_encoder) and checkpoint_format != CheckpointFormat.HF_PEFT:
         export_cfg = _resolve_export_config(customizer_config)
+        if is_embedding:
+            export_cfg = _with_trained_pooling(export_cfg, Path(base_model_path))
         # Full-SFT copy still has Automodel auto_map until sanitize runs.
         load_trust_remote_code = True if finetuning_type == FinetuningType.ALL_WEIGHTS else job_trust_remote_code
         export_onnx(
@@ -937,6 +1008,8 @@ def process_checkpoint(
         )
         if not job_trust_remote_code:
             sanitize_encoder_hf(output_path, Path(base_model_path))
+        if is_embedding:
+            copy_sentence_transformer_files(output_path, Path(base_model_path))
         _restructure_encoder_output(output_path, export_cfg.primary)
 
     # Determine precision: use explicit config value, or extract from base model

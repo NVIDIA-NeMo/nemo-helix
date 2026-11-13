@@ -64,11 +64,20 @@ def _automodel_cross_encoder_class(config: dict[str, Any]) -> type | None:
     return None
 
 
+def _automodel_bi_encoder_pooling(_model_path: object) -> tuple[str, bool]:
+    """Automodel's bi-encoder pooling for both supported bases, whose files say mean then normalize."""
+    return "avg", True
+
+
 @pytest.fixture(autouse=True)
-def automodel_cross_encoder_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without ``nemo_automodel``, answer the registry's dispatch question the way Automodel would."""
+def automodel_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without ``nemo_automodel``, answer the questions Helix asks Automodel the way it would."""
     if importlib.util.find_spec("nemo_automodel") is None:
         monkeypatch.setattr(
             "nhx.automodel.tasks.training.backends.registry._automodel_cross_encoder_class",
             _automodel_cross_encoder_class,
+        )
+        monkeypatch.setattr(
+            "nhx.automodel.tasks.training.backends.checkpoints._automodel_bi_encoder_pooling",
+            _automodel_bi_encoder_pooling,
         )

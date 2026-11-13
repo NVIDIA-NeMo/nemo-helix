@@ -161,10 +161,21 @@ class ExportParams(BaseModel):
         default="eager",
         description="Attention backend for the traced model. The exporter cannot trace SDPA/GQA.",
     )
-    pooling: Literal["avg", "cls", "last"] = Field(
-        default="avg", description="Embedding pooling over hidden states. Ignored for cross_encoder."
+    pooling: Literal["avg", "cls", "last"] | None = Field(
+        default=None,
+        description=(
+            "ONNX embedding pooling. Unset uses the pooling the embedder trained with: the base checkpoint's "
+            "Sentence Transformers pooling, else its config's 'pooling', else avg. Set it only to override, "
+            "and match training. Ignored for cross_encoder."
+        ),
     )
-    normalize: bool = Field(default=True, description="L2-normalize pooled embeddings. Ignored for cross_encoder.")
+    normalize: bool | None = Field(
+        default=None,
+        description=(
+            "L2-normalize ONNX embeddings. Unset follows training: normalize unless the base checkpoint's "
+            "Sentence Transformers files leave it out. Ignored for cross_encoder."
+        ),
+    )
     dimensions: bool = Field(
         default=False,
         description="Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.",

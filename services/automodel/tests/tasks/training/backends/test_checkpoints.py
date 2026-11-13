@@ -18,7 +18,9 @@ from nhx.automodel.tasks.training.backends.checkpoints import (
     _build_export_module,
     _probe_bidirectional_mask,
     _restructure_encoder_output,
+    _with_trained_pooling,
     auto_torch_dtype,
+    copy_sentence_transformer_files,
     find_selected_checkpoints,
     merge_lora_cross_encoder_adapter,
     process_checkpoint,
@@ -70,6 +72,7 @@ def patched_checkpoint_io(mocker: MockerFixture) -> dict:
         "export_onnx": mocker.patch(f"{CHECKPOINTS}.export_onnx", side_effect=_record("export")),
         "sanitize": mocker.patch(f"{CHECKPOINTS}.sanitize_encoder_hf", side_effect=_record("sanitize")),
         "restructure": mocker.patch(f"{CHECKPOINTS}._restructure_encoder_output", side_effect=_record("restructure")),
+        "st_modules": mocker.patch(f"{CHECKPOINTS}.copy_sentence_transformer_files", side_effect=_record("st_modules")),
         "copytree": mocker.patch(f"{CHECKPOINTS}.copytree"),
     }
 
@@ -532,7 +535,7 @@ class TestProcessCheckpointSanitize:
         assert export_call.call_args.kwargs["load_trust_remote_code"] is True
         assert export_call.call_args.kwargs["trust_remote_code"] is False
         assert sanitize_call.call_args.args == (output_path, tmp_path / "base")
-        assert patched_checkpoint_io["order"] == ["export", "sanitize", "restructure"]
+        assert patched_checkpoint_io["order"] == ["export", "sanitize", "st_modules", "restructure"]
 
     def test_full_sft_trusted_skips_sanitize(self, patched_checkpoint_io: dict, tmp_path: Path) -> None:
         config = self._full_sft_config(tmp_path, trust_remote_code=True)
@@ -570,8 +573,12 @@ class TestProcessCheckpointSanitize:
         call = patched_checkpoint_io["export_onnx"].call_args.kwargs
         assert call["load_trust_remote_code"] is False
         assert call["trust_remote_code"] is False
+        # Unset export pooling became what Automodel trained the base with.
+        assert (call["cfg"].pooling, call["cfg"].normalize) == ("avg", True)
         patched_checkpoint_io["sanitize"].assert_called_once()
-        assert patched_checkpoint_io["order"] == ["export", "sanitize", "restructure"]
+        # The merged LoRA has no Sentence Transformers files; serving needs its pooling declared.
+        patched_checkpoint_io["st_modules"].assert_called_once_with(tmp_path / "output", tmp_path / "base")
+        assert patched_checkpoint_io["order"] == ["export", "sanitize", "st_modules", "restructure"]
 
 
 @pytest.mark.parametrize(
@@ -635,3 +642,64 @@ def test_onnx_tolerance_scales_with_reference_magnitude(
     else:
         with pytest.raises(ValueError, match=error):
             verify()
+
+
+@pytest.mark.parametrize(
+    ("base_has_files", "output_has_modules", "copied"),
+    [(True, False, True), (True, True, False), (False, False, False)],
+    ids=["merged-lora", "automodel-full-weights", "base-without-files"],
+)
+def test_embedder_takes_its_bases_sentence_transformer_files(
+    tmp_path: Path, base_has_files: bool, output_has_modules: bool, copied: bool
+) -> None:
+    """vLLM pools by modules.json; without it a merged LoRA was served with last-token pooling."""
+    base, output = tmp_path / "base", tmp_path / "output"
+    (base / "1_Pooling").mkdir(parents=True)
+    output.mkdir()
+    files = {
+        "modules.json": json.dumps([{"path": ""}, {"path": "1_Pooling"}, {"path": "2_Normalize"}]),
+        "1_Pooling/config.json": '{"pooling_mode_mean_tokens": true}',
+        "config_sentence_transformers.json": '{"prompts": {"query": "query: "}}',
+        "sentence_bert_config.json": '{"max_seq_length": 32768}',
+    }
+    if base_has_files:
+        for name, text in files.items():
+            (base / name).write_text(text)
+    if output_has_modules:
+        (output / "modules.json").write_text("automodel")
+
+    copy_sentence_transformer_files(output, base)
+
+    if copied:
+        for name, text in files.items():
+            assert (output / name).read_text() == text
+    else:
+        assert not (output / "1_Pooling").exists()
+        assert (output / "modules.json").exists() is output_has_modules
+
+
+@pytest.mark.parametrize(
+    ("pooling", "normalize", "expected"),
+    [(None, None, ("last", False)), ("cls", True, ("cls", True)), (None, True, ("last", True))],
+    ids=["follows-training", "explicit-override", "partly-set"],
+)
+def test_onnx_export_pools_like_training(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    pooling: Literal["avg", "cls", "last"] | None,
+    normalize: bool | None,
+    expected: tuple[str, bool],
+) -> None:
+    """Unset ONNX pooling takes what Automodel trained the base with; an explicit value wins."""
+    monkeypatch.setattr(f"{CHECKPOINTS}._automodel_bi_encoder_pooling", lambda _path: ("last", False))
+
+    resolved = _with_trained_pooling(ExportConfig(pooling=pooling, normalize=normalize), tmp_path)
+
+    assert (resolved.pooling, resolved.normalize) == expected
+
+
+def test_onnx_export_refuses_a_pooling_it_cannot_trace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(f"{CHECKPOINTS}._automodel_bi_encoder_pooling", lambda _path: ("weighted_avg", True))
+
+    with pytest.raises(ValueError, match="'weighted_avg' pooling"):
+        _with_trained_pooling(ExportConfig(), tmp_path)

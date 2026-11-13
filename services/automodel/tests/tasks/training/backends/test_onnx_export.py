@@ -109,8 +109,12 @@ def _parity_config(**overrides) -> ExportConfig:
     The references below run in float32 on CPU, so these tests pin the graph to
     fp32 rather than taking the fp16 job default; fp16 only agrees to the
     tolerance ``export_onnx`` itself applies, which is too loose to catch a
-    pooling or layout regression.
+    pooling or layout regression. Embedding pooling defaults to avg with
+    normalization, what ``process_checkpoint`` resolves for these checkpoints and
+    what the references below compute.
     """
+    overrides.setdefault("pooling", "avg")
+    overrides.setdefault("normalize", True)
     return ExportConfig(precision="fp32", **overrides)
 
 

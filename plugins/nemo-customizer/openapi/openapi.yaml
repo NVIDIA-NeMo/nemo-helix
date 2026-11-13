@@ -2594,19 +2594,22 @@ components:
           description: Attention backend for tracing. The exporter cannot trace SDPA/GQA.
           default: eager
         pooling:
+          title: Pooling
+          description: 'ONNX embedding pooling. Unset uses the pooling the embedder
+            trained with: the base checkpoint''s Sentence Transformers pooling, else
+            its config''s ''pooling'', else avg. Set it only to override, and match
+            training. Ignored for cross_encoder.'
           type: string
           enum:
           - avg
           - cls
           - last
-          title: Pooling
-          description: Embedding pooling. Ignored for cross_encoder.
-          default: avg
         normalize:
-          type: boolean
           title: Normalize
-          description: L2-normalize embeddings. Ignored for cross_encoder.
-          default: true
+          description: 'L2-normalize ONNX embeddings. Unset follows training: normalize
+            unless the base checkpoint''s Sentence Transformers files leave it out.
+            Ignored for cross_encoder.'
+          type: boolean
         dimensions:
           type: boolean
           title: Dimensions

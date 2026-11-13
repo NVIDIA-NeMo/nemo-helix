@@ -1169,6 +1169,9 @@ def test_bi_encoder_compile_forwards_distributed_inbatch_negative(tmp_path: Path
     # writing it explicitly keeps the objective readable in the compiled config
     # rather than leaving it to the upstream default.
     assert compiled["model"]["do_distributed_inbatch_negative"] is requested
+    # Pooling and normalization are Automodel's choice for the base checkpoint.
+    assert "pooling" not in compiled["model"]
+    assert "l2_normalize" not in compiled["model"]
 
 
 def test_cross_encoder_compile_omits_distributed_inbatch_negative(tmp_path: Path) -> None:

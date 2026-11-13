@@ -190,26 +190,27 @@ def _compile_retrieval_config(
                 if is_bi_encoder
                 else "nemo_automodel._transformers.auto_model.NeMoAutoModelCrossEncoder.from_pretrained"
             ),
-            "pooling": "avg",
             "use_liger_kernel": True,
             "use_sdpa_patching": True,
         }
     )
     if is_bi_encoder:
-        cfg["model"]["l2_normalize"] = True
+        # No pooling or l2_normalize: Automodel then takes them from the base checkpoint's
+        # Sentence Transformers files, else its config's ``pooling``, else avg and normalize. The
+        # ONNX export and the merged LoRA's Sentence Transformers files follow the same choice.
         cfg["model"]["do_distributed_inbatch_negative"] = retrieval_config.do_distributed_inbatch_negative
     else:
         cfg["model"]["num_labels"] = 1
         if is_causal_reranker_checkpoint(customizer_config.model.path):
             # Automodel scores this causal LM by its yes/no next-token logits. That reranker
             # has no classifier head to pool for, and takes the recipe's temperature (above).
-            del cfg["model"]["pooling"]
             if customizer_config.model.precision is None:
                 # Its from_pretrained passes every kwarg through the config loader, which stores
                 # "auto" as the config dtype; transformers then fails to resolve it. Send the dtype
                 # "auto" would have resolved to instead.
                 cfg["model"]["torch_dtype"] = auto_torch_dtype(customizer_config.model.path)
         else:
+            cfg["model"]["pooling"] = "avg"
             cfg["model"]["temperature"] = 1.0
     if customizer_config.model.attn_implementation:
         cfg["model"]["attn_implementation"] = customizer_config.model.attn_implementation
