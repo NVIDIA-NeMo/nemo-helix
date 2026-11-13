@@ -635,6 +635,22 @@ def test_a_job_cannot_switch_uv_back_online_under_a_derived_offline_run(tmp_path
         )
 
 
+def test_an_evaluation_host_returns_failed_rollouts_instead_of_failing_the_batch() -> None:
+    """Without it, Gym raises on the first failed agent `/run`, and one bad row costs the job every rollout."""
+    from sandboxed_gym.runtime.gym_host_runtime import ROUTE_FAILURES_TO_SIDECAR_ENV_KEY
+
+    payload = serve_config(target(), capable_plan(), job_id="job-1")
+
+    assert payload["host_env"][ROUTE_FAILURES_TO_SIDECAR_ENV_KEY] == "1"
+
+
+def test_a_job_cannot_set_failure_routing_itself() -> None:
+    from sandboxed_gym.runtime.gym_host_runtime import ROUTE_FAILURES_TO_SIDECAR_ENV_KEY
+
+    with pytest.raises(SandboxUnavailableError, match=ROUTE_FAILURES_TO_SIDECAR_ENV_KEY):
+        serve_config(target(env_vars={ROUTE_FAILURES_TO_SIDECAR_ENV_KEY: "0"}), capable_plan(), job_id="job-1")
+
+
 def test_a_job_may_set_uv_offline_when_the_deployment_does_not_derive_it(tmp_path: Path) -> None:
     persistent = stage_manifest(tmp_path, WHEELS_V1_MANIFEST)
 

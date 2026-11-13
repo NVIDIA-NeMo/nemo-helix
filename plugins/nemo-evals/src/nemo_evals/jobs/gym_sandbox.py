@@ -45,7 +45,7 @@ from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_values
 from pydantic import BaseModel, ConfigDict, Field
 from sandboxed_gym.host.models import DEFAULT_HOST_TTL_S
-from sandboxed_gym.runtime.gym_host_runtime import UV_OFFLINE_ENV_KEY
+from sandboxed_gym.runtime.gym_host_runtime import ROUTE_FAILURES_TO_SIDECAR_ENV_KEY, UV_OFFLINE_ENV_KEY
 
 #: Env-var names that look like a credential. Used to refuse a sandboxed run that would hand one to
 #: user-supplied environment code through `env_vars`; `env_secrets` is the supported route.
@@ -433,6 +433,15 @@ def serve_config(
             f"`env_vars` sets {UV_OFFLINE_ENV_KEY}, but the deployment runs this wheels-v1 environment offline "
             "and owns that setting; remove it from the target"
         )
+    if ROUTE_FAILURES_TO_SIDECAR_ENV_KEY in env:
+        raise SandboxUnavailableError(
+            f"`env_vars` sets {ROUTE_FAILURES_TO_SIDECAR_ENV_KEY}, but Evals owns that setting: every evaluation "
+            "reports a failed rollout as a failed trial; remove it from the target"
+        )
+    # A failed rollout comes back as Gym's failure row, which the runner turns into a FAILED trial carrying
+    # its cause, and the rest of the batch is still scored. Without it Gym raises on the first failed `/run`
+    # and the job loses every rollout. Evals' hosts only: GRPO provisions its own, which keep Gym's default.
+    env[ROUTE_FAILURES_TO_SIDECAR_ENV_KEY] = "1"
 
     return {
         "job_id": job_id,
