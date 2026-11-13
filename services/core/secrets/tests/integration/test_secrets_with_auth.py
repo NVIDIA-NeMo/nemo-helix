@@ -8,7 +8,7 @@ These tests verify:
 - Viewer can read secret metadata (list, get) but not access value or create/update/delete
 - Editor/Admin can create, update, delete secrets but cannot access the secret value
 - HelixAdmin can manage secrets but cannot directly access the secret value
-- Only service principals can retrieve secret values via /access (delegation pattern)
+- Only service principals acting on behalf of a user with secrets.read can retrieve secret values via /access
 
 Uses the create_test_client pattern for fast in-memory testing.
 """
@@ -561,8 +561,8 @@ class TestHelixAdminSecretsAccess:
 class TestServiceCredentialsSecretsAccess:
     """Test that service credentials can access secret values."""
 
-    def test_service_credentials_can_access_secret_value(self, client: NemoClient):
-        """Test that service credentials can access the secret value via /access endpoint."""
+    def test_service_credentials_without_on_behalf_of_cannot_access_secret_value(self, client: NemoClient):
+        """Test that bare service credentials are denied the secret value via /access endpoint."""
         admin_client = _as_user(client, TEST_ADMIN_EMAIL)
         secrets = _secrets(admin_client)
         admin_secrets = secrets
@@ -574,12 +574,11 @@ class TestServiceCredentialsSecretsAccess:
             workspace="default",
         ).data()
 
+        # A bare service principal must not read secret values: the workspace-scoped check needs an on-behalf-of user.
         service_client = _as_user(client, SERVICE_PRINCIPAL)
         service_secrets = _secrets(service_client)
-        result = service_secrets.access_secret(name=secret_name, workspace="default").data()
-
-        assert result.name == secret_name
-        assert result.value == secret_value
+        with pytest.raises(ClientPermissionDeniedError):
+            service_secrets.access_secret(name=secret_name, workspace="default")
 
     def test_service_credentials_can_list_secrets(self, client: NemoClient):
         """Test that service credentials can list secrets."""
@@ -820,11 +819,11 @@ class TestDelegatedSecretAccess:
         assert result.name == secret_name
         assert result.value == secret_value
 
-    def test_delegated_access_without_on_behalf_of_uses_caller_permissions(self, client: NemoClient):
-        """Test that without on-behalf-of header, caller's own permissions are used.
+    def test_access_without_on_behalf_of_is_denied(self, client: NemoClient):
+        """Test that a service principal without the on-behalf-of header is denied.
 
         HelixAdmin cannot directly access secret values (denied by OPA policy).
-        Service principals can access directly without delegation.
+        Service principals are also denied without delegation.
         """
         workspace_name = short_unique_name("no-del")
         secret_name = short_unique_name("secret")
@@ -844,11 +843,10 @@ class TestDelegatedSecretAccess:
         with pytest.raises(ClientPermissionDeniedError):
             platform_admin_secrets.access_secret(name=secret_name, workspace=workspace_name)
 
-        # Service principal can access directly without delegation
+        # Service principal without delegation is denied: no workspace-scoped permission can be checked
         service_client = _as_user(client, SERVICE_PRINCIPAL)
-        result = _secrets(service_client).access_secret(name=secret_name, workspace=workspace_name).data()
-        assert result.name == secret_name
-        assert result.value == secret_value
+        with pytest.raises(ClientPermissionDeniedError):
+            _secrets(service_client).access_secret(name=secret_name, workspace=workspace_name)
 
     def test_service_can_access_on_behalf_of_service(self, client: NemoClient):
         """Test service principal accessing secret on behalf of another service."""
