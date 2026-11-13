@@ -346,12 +346,13 @@ defaults to the run's `work_dir` (`AgentEvalRunConfig.work_dir`); pass
 Use the in-memory result for programmatic follow-up and the bundle for
 inspection, sharing, or rescoring. Platform jobs persist the bundle and create
 a queryable record under `evaluator.agent_eval_results`. A job spec's
-`result_ignore_patterns` leaves matching files out of the saved bundle: `*.ext`
-and `name` match files at any depth, `name/` and `name*/` match directory names
-at any depth, and `dir/sub/` matches that directory at the bundle root, with
-each folder name a glob such as `sub*`. Local saves and hosted uploads use the
-same matching rules. Filename patterns do not remove directories; directory
-patterns do not remove regular files. Omit the setting to keep every file.
+`result_ignore_patterns` leaves matching files out of the saved bundle. Each item
+is one `.gitignore` pattern relative to the bundle root, matched the way Git does
+in local saves and hosted uploads: `*.ext` and `name` match files and directories
+at any depth, `name/` and `name*/` match directories only, a leading or inner `/`
+anchors at the bundle root, and `!pattern` re-includes a match (for example,
+`["*.tmp", "!*.tmp/"]` excludes `.tmp` files only). Omit the setting to keep
+every file.
 
 A platform job hands back an `AgentEvaluatorJobResource`, which is not the
 dataset-driven job handle: it offers `name`, `job`, `get_job_status()`,

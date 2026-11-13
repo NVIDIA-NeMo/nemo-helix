@@ -6,7 +6,7 @@
 import hashlib
 import json
 from datetime import datetime
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Literal, Self
 
 from nemo_evals.api.fields import TasksetRef
@@ -23,7 +23,7 @@ from nemo_evals.taskset_runs.entities import (
 from nemo_evals.taskset_runs.progress import TasksetRunProgress
 from nemo_evals.taskset_runs.specs import TASK_BUNDLE_FILES
 from nemo_evals.taskset_runs.trials import TrialCounts, TrialProgress
-from nemo_helix_plugin.jobs.ignore_patterns import matches_ignore_patterns
+from nemo_helix_plugin.jobs.ignore_patterns import compile_ignore_rules
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -212,11 +212,8 @@ class TasksetRunInput(BaseModel):
     @model_validator(mode="after")
     def _require_aggregation_inputs(self) -> Self:
         """Reject exclusions that prevent aggregation before scheduling task Jobs."""
-        excluded = [
-            name
-            for name in TASK_BUNDLE_FILES
-            if matches_ignore_patterns(Path(name), self.spec.result_ignore_patterns or [])
-        ]
+        rules = compile_ignore_rules(self.spec.result_ignore_patterns)
+        excluded = [name for name in TASK_BUNDLE_FILES if rules is not None and rules.excludes(PurePosixPath(name))]
         if excluded:
             raise ValueError(
                 "spec.result_ignore_patterns excludes required Kubernetes aggregation inputs: " + ", ".join(excluded)

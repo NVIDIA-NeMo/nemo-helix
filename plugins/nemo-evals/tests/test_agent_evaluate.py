@@ -527,6 +527,13 @@ def test_agent_eval_spec_rejects_an_empty_result_ignore_pattern() -> None:
         AgentEvalSpec(tasks=[_task_spec()], target=_runner_target("openai/gpt-5.4"), result_ignore_patterns=[""])
 
 
+@pytest.mark.parametrize("pattern", ["keep\n*", "keep\r*"])
+def test_agent_eval_spec_rejects_a_multiline_result_ignore_pattern(pattern: str) -> None:
+    """Each item is one .gitignore line, so a newline cannot smuggle in extra rules."""
+    with pytest.raises(ValidationError, match="result_ignore_patterns"):
+        AgentEvalSpec(tasks=[_task_spec()], target=_runner_target("openai/gpt-5.4"), result_ignore_patterns=[pattern])
+
+
 def test_agent_eval_job_keeps_every_bundle_file_by_default(tmp_path: Path, mocker: MockerFixture) -> None:
     """Preserve all evidence unless the caller opts into exclusions."""
     mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_EvidenceWritingEvaluator())

@@ -279,10 +279,16 @@ async def test_source_root_removed_during_listing_cannot_publish_an_empty_result
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
 @pytest.mark.skipif(os.geteuid() == 0, reason="Root bypasses ordinary directory permissions")
 @pytest.mark.parametrize(
-    ("directory", "ignore_patterns"), [("nested", None), ("cache", "cache"), ("cache.tmp", "*.tmp")]
+    ("directory", "ignore_patterns"),
+    # File-only patterns (`!name/` re-includes directories) leave the unreadable directory in the walk.
+    [("nested", None), ("cache", ["cache", "!cache/"]), ("cache.tmp", ["*.tmp", "!*.tmp/"])],
 )
 async def test_unreadable_subdirectory_fails_before_upload(
-    tmp_path: Path, upload_temporary_root: Path, asynchronous: bool, directory: str, ignore_patterns: str | None
+    tmp_path: Path,
+    upload_temporary_root: Path,
+    asynchronous: bool,
+    directory: str,
+    ignore_patterns: list[str] | None,
 ) -> None:
     source = tmp_path / "source"
     blocked = source / directory
@@ -607,7 +613,7 @@ def visited_directories(monkeypatch: pytest.MonkeyPatch) -> set[Path]:
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
 @pytest.mark.parametrize("directory", ["cache", "nested/cache"], ids=["root", "nested"])
-@pytest.mark.parametrize("ignore_patterns", ["cache/", ["cache/"]], ids=["string", "list"])
+@pytest.mark.parametrize("ignore_patterns", ["cache/", ["cache/"], "cache"], ids=["string", "list", "name"])
 @pytest.mark.skipif(os.geteuid() == 0, reason="Root bypasses ordinary directory permissions")
 async def test_ignored_unreadable_directory_does_not_block_upload(
     tmp_path: Path,
@@ -633,10 +639,24 @@ async def test_ignored_unreadable_directory_does_not_block_upload(
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
-@pytest.mark.parametrize(("pattern", "directory"), [("cache", "cache"), ("*.tmp", "cache.tmp")])
-async def test_file_patterns_do_not_prune_directories(
-    tmp_path: Path, upload_temporary_root: Path, asynchronous: bool, pattern: str, directory: str
+@pytest.mark.parametrize(
+    ("pattern", "directory", "keeps_directory"),
+    [
+        ("cache", "cache", False),
+        ("*.tmp", "cache.tmp", False),
+        (["cache", "!cache/"], "cache", True),
+        (["*.tmp", "!*.tmp/"], "cache.tmp", True),
+    ],
+)
+async def test_name_patterns_match_files_and_directories(
+    tmp_path: Path,
+    upload_temporary_root: Path,
+    asynchronous: bool,
+    pattern: list[str] | str,
+    directory: str,
+    keeps_directory: bool,
 ) -> None:
+    """As in .gitignore, a name pattern prunes matching directories unless `!name/` re-includes them."""
     source = tmp_path / "source"
     (source / directory).mkdir(parents=True)
     (source / directory / "keep.txt").write_bytes(b"selected")
@@ -647,10 +667,10 @@ async def test_file_patterns_do_not_prune_directories(
 
     await _upload(_manager(asynchronous, fs), source, pattern)
 
-    assert fs.uploads == {
-        "default/results#bundle/summary.json": b"summary",
-        f"default/results#bundle/{directory}/keep.txt": b"selected",
-    }
+    expected = {"default/results#bundle/summary.json": b"summary"}
+    if keeps_directory:
+        expected[f"default/results#bundle/{directory}/keep.txt"] = b"selected"
+    assert fs.uploads == expected
     assert not _staging_dirs(upload_temporary_root)
 
 

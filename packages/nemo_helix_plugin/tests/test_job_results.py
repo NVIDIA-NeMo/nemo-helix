@@ -171,10 +171,10 @@ class TestSaveDirectory:
             "plugins.sha",
         ]
 
-    def test_save_directory_keeps_filename_glob_behavior(self, tmp_path: Path, root: Path) -> None:
-        """Filename globs continue excluding matching files at every depth."""
+    def test_save_directory_name_glob_matches_files_and_directories(self, tmp_path: Path, root: Path) -> None:
+        """As in .gitignore, a name glob excludes matching files and directories at every depth."""
         src = tmp_path / "payload"
-        for relative in ("cache.tmp", "nested/cache.tmp", "keep.txt"):
+        for relative in ("cache.tmp", "nested/cache.tmp", "logs.tmp/keep.txt", "keep.txt"):
             (src / relative).parent.mkdir(parents=True, exist_ok=True)
             (src / relative).write_text(relative)
 
@@ -184,6 +184,20 @@ class TestSaveDirectory:
         assert (dst / "keep.txt").is_file()
         assert not (dst / "cache.tmp").exists()
         assert not (dst / "nested/cache.tmp").exists()
+        assert not (dst / "logs.tmp").exists()
+
+    def test_invalid_patterns_keep_the_previous_result(self, tmp_path: Path, root: Path) -> None:
+        """Patterns are validated before the existing result is replaced."""
+        src = tmp_path / "payload"
+        src.mkdir()
+        (src / "keep.txt").write_text("K")
+        results = LocalJobResults(root=root)
+        results.save("artifacts", src)
+
+        with pytest.raises(ValueError, match="single lines"):
+            results.save("artifacts", src, ignore_patterns=["keep\n*"])
+
+        assert (root / "artifacts" / "keep.txt").read_text() == "K"
 
     def test_save_directory_overwrites(self, tmp_path: Path, root: Path) -> None:
         src1 = tmp_path / "p1"
@@ -204,7 +218,27 @@ class TestSaveDirectory:
         [
             (None, set()),
             ([], set()),
-            ("*.tmp", {"cache.tmp", "nested/cache.tmp"}),
+            (
+                "*.tmp",
+                {
+                    "cache.tmp",
+                    "nested/cache.tmp",
+                    "logs.tmp/keep.txt",
+                    "nested/logs.tmp/keep.txt",
+                    "home/.tmp/plugins/catalog.json",
+                    "deep/home/.tmp/plugins/catalog.json",
+                },
+            ),
+            (["*.tmp", "!*.tmp/"], {"cache.tmp", "nested/cache.tmp"}),
+            (
+                ["nested/*", "!nested/cache.tmp"],
+                {
+                    "nested/logs.tmp/keep.txt",
+                    "nested/plugins-clone/catalog.json",
+                    "nested/evidence/trace.json",
+                    "nested/.hidden",
+                },
+            ),
             (
                 ["plugins*/"],
                 {
@@ -218,7 +252,7 @@ class TestSaveDirectory:
             (["/home/.tmp/plugins*/"], {"home/.tmp/plugins/catalog.json"}),
             (["/plugins/"], {"plugins/catalog.json"}),
             (["/evidence/"], {"evidence/trace.json"}),
-            (["nested/*.tmp"], {"nested/cache.tmp"}),
+            (["nested/*.tmp"], {"nested/cache.tmp", "nested/logs.tmp/keep.txt"}),
             (
                 ["catalog.json"],
                 {
@@ -233,7 +267,7 @@ class TestSaveDirectory:
         ],
     )
     def test_local_and_hosted_saves_keep_the_same_files(self, tmp_path: Path, root: Path, patterns, excluded) -> None:
-        """Cover file-only globs, directory anchoring, and path globs in both save paths."""
+        """Cover path conversion, directory pruning, re-inclusion, and empty patterns in both save paths."""
         files = {
             "cache.tmp",
             "nested/cache.tmp",

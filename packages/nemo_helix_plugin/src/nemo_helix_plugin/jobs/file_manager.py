@@ -10,14 +10,14 @@ from abc import abstractmethod
 from asyncio import CancelledError, create_task, wait
 from dataclasses import dataclass, field
 from os import walk
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import NoReturn, Protocol
 
 import anyio
 from anyio.to_thread import run_sync
 from filesets import AsyncFilesetFileSystem, FilesetFileSystem, build_fileset_ref, parse_fileset_ref
 from nemo_helix_plugin.files.types import CreateFilesetRequest
-from nemo_helix_plugin.jobs.ignore_patterns import matches_ignore_patterns
+from nemo_helix_plugin.jobs.ignore_patterns import compile_ignore_rules
 from nemo_helix_plugin.jobs.schemas import FileStorageType
 
 logger = logging.getLogger(__name__)
@@ -45,28 +45,21 @@ def _filter_files_by_patterns(
     """
     Filter a list of relative file paths by ignore patterns.
 
-    Uses pathlib.Path.match() for glob pattern matching.
-
     Args:
         relative_paths: List of relative path strings
-        ignore_patterns: Glob patterns for files to ignore. Supports:
-            - "*.ext" - match files by extension (at any depth)
-            - "name" - match files by name (at any depth)
-            - "dir/" - match all files inside directories named "dir" at any depth;
-              the folder name may be a glob, such as "dir*/"
-            - "dir/sub/" - match all files inside "dir/sub" at the root of the listed paths;
-              each folder name may be a glob, such as "dir/sub*/"
+        ignore_patterns: Patterns in Git ignore (``.gitignore``) syntax, relative to the
+            root of the listed paths. For example, ``*.tmp`` and ``name`` match files and
+            directories at any depth, ``dir/`` matches directories only, ``/dir/`` and
+            ``a/b`` start at the root, and ``!pattern`` re-includes a match.
 
     Returns:
         Filtered list of relative path strings (files not matching any pattern)
     """
-    if ignore_patterns is None:
+    rules = compile_ignore_rules(ignore_patterns)
+    if rules is None:
         return relative_paths
 
-    if isinstance(ignore_patterns, str):
-        ignore_patterns = [ignore_patterns]
-
-    return [p for p in relative_paths if not matches_ignore_patterns(Path(p), ignore_patterns)]
+    return [p for p in relative_paths if not rules.excludes(PurePosixPath(Path(p).as_posix()))]
 
 
 async def _list_local_files(local_path: Path) -> list[str]:
@@ -110,18 +103,16 @@ def _list_selected_files(local_path: Path, ignore_patterns: list[str] | str | No
     def raise_error(error: OSError) -> NoReturn:
         raise error
 
-    patterns = [ignore_patterns] if isinstance(ignore_patterns, str) else ignore_patterns or []
+    rules = compile_ignore_rules(ignore_patterns)
+
+    def excluded(relative: Path, *, is_directory: bool = False) -> bool:
+        return rules is not None and rules.excludes(PurePosixPath(relative.as_posix()), is_directory=is_directory)
+
     files: list[str] = []
     for directory, directories, names in walk(local_path, onerror=raise_error, followlinks=False):
-        directories[:] = [
-            name
-            for name in directories
-            if not matches_ignore_patterns(
-                (Path(directory) / name).relative_to(local_path), patterns, is_directory=True
-            )
-        ]
-        candidates = [str((Path(directory) / name).relative_to(local_path)) for name in names]
-        selected = _filter_files_by_patterns(candidates, ignore_patterns)
+        relative_directory = Path(directory).relative_to(local_path)
+        directories[:] = [name for name in directories if not excluded(relative_directory / name, is_directory=True)]
+        selected = [str(relative_directory / name) for name in names if not excluded(relative_directory / name)]
         files.extend(rel_path for rel_path in selected if _is_regular_file(local_path / rel_path))
     return files
 

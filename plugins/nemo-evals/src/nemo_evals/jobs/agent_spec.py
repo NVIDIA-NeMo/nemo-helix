@@ -1016,12 +1016,13 @@ class _AgentEvalSpecCommon(BaseModel):
         default_factory=dict,
         description="Caller-supplied tags recorded on the run's metadata (e.g. benchmark, mode, backend).",
     )
-    result_ignore_patterns: list[Annotated[str, Field(min_length=1)]] = Field(
+    result_ignore_patterns: list[Annotated[str, Field(min_length=1, pattern=r"^[^\r\n]*$")]] = Field(
         default_factory=list,
-        description="Files to leave out of the saved result bundle. `*.ext` and `name` match files at any "
-        "depth, `name/` matches directories with that name at any depth (folder globs allowed), "
-        "and `dir/sub/` matches that directory at "
-        "the bundle root, with each folder name a glob such as `sub*`. Omit to keep every file.",
+        description="`.gitignore` patterns, one per item, for files to leave out of the saved result bundle, "
+        "relative to the bundle root. `*.tmp` and `name` match files and directories at any depth, `name/` "
+        "matches directories only, a leading or inner `/` anchors the pattern at the bundle root, and "
+        "`!pattern` re-includes a match. As in Git, a file inside an excluded directory cannot be re-included "
+        '(`["a/", "!a/keep.txt"]` drops `a/keep.txt`); re-include the directory first. Omit to keep every file.',
     )
     publication: PublicationSpec | None = Field(
         default=None,

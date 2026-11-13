@@ -545,7 +545,16 @@ def test_run_rejects_excluded_aggregation_inputs(run_body, pattern, as_json):
             TasksetRunInput.model_validate(run_body)
 
 
-@pytest.mark.parametrize("patterns", [[], ["/evidence/"], ["*.tmp", "evidence/"], ["nested/metadata.json"]])
+@pytest.mark.parametrize(
+    "patterns",
+    [
+        [],
+        ["/evidence/"],
+        ["*.tmp", "evidence/"],
+        ["nested/metadata.json"],
+        ["*", "!metadata.json", "!trials.jsonl", "!scores.jsonl"],
+    ],
+)
 def test_run_accepts_exclusions_that_keep_aggregation_inputs(run_body, patterns):
     run_body["spec"]["result_ignore_patterns"] = patterns
     assert TasksetRunInput.model_validate(run_body).spec.result_ignore_patterns == patterns

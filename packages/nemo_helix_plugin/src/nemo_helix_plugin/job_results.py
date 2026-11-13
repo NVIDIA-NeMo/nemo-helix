@@ -28,14 +28,15 @@ import logging
 import os
 import shutil
 from abc import ABC, abstractmethod
-from pathlib import Path
+from collections.abc import Callable
+from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR, NEMO_JOB_FILESET_ENVVAR
-from nemo_helix_plugin.jobs.ignore_patterns import matches_ignore_patterns
+from nemo_helix_plugin.jobs.ignore_patterns import _IgnoreRules, compile_ignore_rules
 from nemo_helix_plugin.jobs.schemas import HelixJobResultResponse
 from pydantic import BaseModel
 
@@ -135,8 +136,8 @@ class LocalJobResults(JobResults):
     job that already wrote into ``ctx.storage.persistent / "results"``
     can register the path without copying.
 
-    Directories are copied recursively; ``ignore_patterns`` uses the same
-    matching rules as hosted uploads so callers can skip cache files (matches
+    Directories are copied recursively; ``ignore_patterns`` uses Git ignore
+    syntax, as hosted uploads do, so callers can skip cache files (matches
     the evaluator's ``ignore_patterns=["cache.db", "cache/"]`` usage).
     ``stage`` is accepted for API parity and ignored: the local copy is the published result.
     """
@@ -155,16 +156,18 @@ class LocalJobResults(JobResults):
         src = Path(local_path)
         if not src.exists():
             raise FileNotFoundError(f"Cannot save result {name!r}: {src} does not exist.")
+        # Validate patterns before _copy clears the previous result.
+        rules = compile_ignore_rules(ignore_patterns)
         self._root.mkdir(parents=True, exist_ok=True)
         dst = self._root / name
         if dst.resolve() != src.resolve():
-            _copy(src, dst, ignore_patterns)
+            _copy(src, dst, rules)
         artifact_url = f"file://{dst.resolve()}"
         logger.info("Saved result %r to %s", name, artifact_url)
         return ResultRef(name=name, artifact_url=artifact_url)
 
 
-def _copy(src: Path, dst: Path, ignore_patterns: list[str] | str | None) -> None:
+def _copy(src: Path, dst: Path, rules: _IgnoreRules | None) -> None:
     """Blocking file / directory copy used by :class:`LocalJobResults`.
 
     Module-level so tests can exercise it directly when useful. Any
@@ -178,26 +181,24 @@ def _copy(src: Path, dst: Path, ignore_patterns: list[str] | str | None) -> None
         else:
             dst.unlink()
     if src.is_dir():
-        ignore = _make_ignore(ignore_patterns, src)
-        shutil.copytree(src, dst, ignore=ignore)
+        shutil.copytree(src, dst, ignore=_make_ignore(rules, src))
     else:
         shutil.copyfile(src, dst)
 
 
-def _make_ignore(patterns: list[str] | str | None, root: Path):
+def _make_ignore(rules: _IgnoreRules | None, root: Path) -> Callable[[str, list[str]], set[str]] | None:
     """Build a copytree callback using the hosted uploader's root-relative matching rules."""
-    if patterns is None:
+    if rules is None:
         return None
-    normalized = [patterns] if isinstance(patterns, str) else patterns
+    matcher = rules  # The closure sees the narrowed type.
 
     def ignore(directory: str, names: list[str]) -> set[str]:
         """Prune matching directories and exclude matching files at their bundle-relative paths."""
         return {
             name
             for name in names
-            if matches_ignore_patterns(
-                Path(directory, name).relative_to(root),
-                normalized,
+            if matcher.excludes(
+                PurePosixPath(Path(directory, name).relative_to(root).as_posix()),
                 is_directory=Path(directory, name).is_dir(),
             )
         }
