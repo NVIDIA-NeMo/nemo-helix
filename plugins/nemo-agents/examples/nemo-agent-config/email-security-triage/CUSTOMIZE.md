@@ -79,10 +79,10 @@ runtime:
 ```
 
 deepagents grants its whole filesystem tool surface **by default**, plus the `task`
-sub-agent-spawn tool. Leave `blocked` empty and an ambiguous prompt can become an
-unbounded filesystem search. Keep this list unless your agent genuinely needs a
-tool on it, and re-check it when you bump deepagents — a new built-in is granted
-silently.
+sub-agent-spawn tool. With `enabled` omitted, leaving `blocked` empty can turn an
+ambiguous prompt into an unbounded filesystem search. Keep this list unless your
+agent needs a tool on it, and re-check it when you bump deepagents — a new built-in
+is granted silently.
 
 Two behaviours worth knowing:
 
@@ -93,9 +93,11 @@ Two behaviours worth knowing:
   force-inserts a gated `general-purpose` sub-agent reachable only through `task`.
   That is why `task` is on the list. Do not drop it.
 
-`nemo-agents-spec-v1`'s `ToolsConfig` exposes `blocked` and nothing else, and is
-`extra="forbid"` — an allow-list is not expressible. `runtime.timeout_seconds` is
-the only other brake: `runtime.max_turns` is ignored by the deepagents adapter.
+Alternatively, set `tools.enabled: []` to deny all tools, including future
+built-ins, or list only the tool names the agent needs. Omitted or `null` preserves
+defaults subject to `blocked`; a name in both lists is invalid.
+`runtime.timeout_seconds` also limits execution; `runtime.max_turns` is ignored by
+the deepagents adapter.
 
 **One knob that validates but does nothing.** `models.default.settings` is a
 free-form dict on `ModelConfig`, and it reaches the adapter — but `build_chat_model`

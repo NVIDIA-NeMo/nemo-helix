@@ -143,10 +143,8 @@ tools:
   # list makes the adapter force-insert a gated `general-purpose` subagent
   # reachable only through `task`.
   #
-  # Deny-list only: nemo-agents-spec-v1's ToolsConfig exposes `blocked` and
-  # nothing else and is extra="forbid", so an allow-list is not expressible here.
-  # A future deepagents bump that adds a built-in grants it silently — revisit
-  # this list on upgrade.
+  # With `enabled` omitted, new built-ins are granted unless blocked here.
+  # Revisit this list on upgrade, or set `enabled: []` to deny all tools.
   #
   # Blocking gates at call time (the tool returns "Tool '<name>' is blocked by the
   # configured tools policy."); it does not remove tools from the schema, and

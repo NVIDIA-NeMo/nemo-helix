@@ -40,8 +40,14 @@ mcp:
   servers: {}
 
 tools:
+  enabled: null
   blocked: []
 ```
+
+Omit `tools.enabled` or set it to `null` to preserve default tool availability,
+subject to `blocked`. Set it to `[]` to deny all tools, or list tool names to allow
+only those tools. A tool name cannot appear in both lists. Tool policy support
+depends on the harness.
 
 `instructions.system` is the shared system prompt path for Claude, Codex,
 DeepAgents, and Hermes. Adapter-specific options stay under
