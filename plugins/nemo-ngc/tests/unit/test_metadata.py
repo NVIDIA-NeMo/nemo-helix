@@ -182,8 +182,15 @@ def test_ngc_source_handles_only_nvidia_build(host_url: str, expected: bool):
 
 @pytest.mark.parametrize(
     "response",
-    [httpx.ConnectError("unreachable"), httpx.Response(503), httpx.Response(429), httpx.Response(200, text="<html>")],
-    ids=["unreachable", "server-error", "rate-limited", "not-json"],
+    [
+        httpx.ConnectError("unreachable"),
+        httpx.Response(503),
+        httpx.Response(429),
+        httpx.Response(200, text="<html>"),
+        httpx.Response(200, json=[]),
+        httpx.Response(200, json=None),
+    ],
+    ids=["unreachable", "server-error", "rate-limited", "not-json", "json-array", "json-null"],
 )
 async def test_ngc_source_raises_when_ngc_cannot_answer(response: httpx.Response | httpx.ConnectError):
     def handler(request: httpx.Request) -> httpx.Response:
