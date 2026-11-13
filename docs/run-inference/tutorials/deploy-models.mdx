@@ -880,7 +880,6 @@ The speculative config turns on multi-token prediction (MTP). The released check
 
 Add `--speculative-config` only for a checkpoint that has the MTP layer, with LoRA disabled:
 
-- Not every checkpoint with this architecture has the layer. Nemotron 3.5 Bolt shares the architecture but has no MTP layer, so do not add `--speculative-config` for it.
 - A fine-tuned checkpoint may not have the MTP layer. Automodel's Nemotron 3.5 Super VL recipes set `num_nextn_predict_layers: 0`, which builds the model without that layer, so a checkpoint saved from that training contains no MTP weights. If your fine-tuned checkpoint kept the MTP layer, you can add `--speculative-config`.
 - With LoRA, the MTP layer comes from the base model and does not include the adapter's changes. NVIDIA's finance cookbook serves its adapters without MTP.
 

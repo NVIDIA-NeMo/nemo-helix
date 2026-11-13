@@ -73,7 +73,7 @@ All of [`examples/llm_finetune/nemotron/`](https://github.com/NVIDIA-NeMo/Automo
 
 ### Qwen3-VL-8B-Instruct on one GPU
 
-For a vision job without a cluster, use `Qwen/Qwen3-VL-8B-Instruct` on one 48 GB GPU. CORD ran on this checkpoint on the platform. The Finance and CLEVR settings were first run on a smaller model and are republished here, so their numbers are not Qwen3-VL-8B results.
+For a vision job without a cluster, use `Qwen/Qwen3-VL-8B-Instruct` on one 48 GB GPU. CORD ran on this checkpoint on the platform. Use the finance and CLEVR settings below for a 1-GPU experiment on this same checkpoint.
 
 - **CORD:** rank 16, alpha 32, `max_seq_length` 2048, global batch 8, micro batch 1, learning rate 1e-5, one epoch, first 300 train and 30 validation rows, deploy `gpu` 1 and `--max-model-len 8192`.
 - **Finance OCR:** rank 16, alpha 32, global batch 4, about 200 rows, `attn_implementation` `sdpa`.
