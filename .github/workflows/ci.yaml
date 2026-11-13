@@ -784,7 +784,7 @@ jobs:
           path: report.xml
 
   python-unit-test:
-    name: Python unit tests (py${{ matrix.python-version }}, ${{ matrix.shard }}/3)
+    name: Python unit tests (py${{ matrix.python-version }}, ${{ matrix.group }})
     needs: [policy-wasm]
     runs-on: ubuntu-latest
     permissions:
@@ -796,8 +796,9 @@ jobs:
         # the only one that answers "does the code work here". Packaging and install are
         # covered elsewhere; running them is not the same as running the tests.
         python-version: ["3.12", "3.13", "3.14"]
-        # Hash-split test files (tests/shards.py); each shard also skips importing the others.
-        shard: [1, 2, 3]
+        # Path-based groups balanced by JUnit durations (tests/unit_groups.py); each group
+        # also skips importing the others' test files.
+        group: [core, plugins, misc]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -821,7 +822,7 @@ jobs:
           EXTRA: cpu
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           PYTEST_WORKERS: "4"
-          PYTEST_EXTRA: --test-shard=${{ matrix.shard }}/3
+          PYTEST_EXTRA: --unit-group=${{ matrix.group }}
           # coverage-comment reads only py3.12; tracing the other legs only slows them.
           PYTEST_COVERAGE: ${{ matrix.python-version == '3.12' }}
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
@@ -829,7 +830,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-unit-test-results-py${{ matrix.python-version }}-shard${{ matrix.shard }}
+          name: python-unit-test-results-py${{ matrix.python-version }}-${{ matrix.group }}
           retention-days: 30
           include-hidden-files: true
           path: |
@@ -843,13 +844,13 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-unit-crash-dumps-py${{ matrix.python-version }}-shard${{ matrix.shard }}
+          name: python-unit-crash-dumps-py${{ matrix.python-version }}-${{ matrix.group }}
           retention-days: 30
           if-no-files-found: ignore
           path: crash-dumps/
 
   # The `main-and-release-checks` ruleset requires a check named exactly "Python unit tests".
-  # Now that the job is a matrix, its legs report "Python unit tests (py3.12, 1/3)" and friends, and
+  # Now that the job is a matrix, its legs report "Python unit tests (py3.12, core)" and friends, and
   # nothing carries the bare name -- the required check would sit on "Expected — Waiting for
   # status to be reported" forever. This job reports that name, and is red whenever any leg is.
   # Removing it means updating the ruleset, which needs repository admin.
@@ -1896,10 +1897,10 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          # One interpreter's shards, so the coverage table stays a single number. The combine
-          # step below renders "N/A" unless every shard's data is present.
-          pattern: python-unit-test-results-py3.12-shard*
-          path: unit-coverage/shards
+          # One interpreter's groups, so the coverage table stays a single number. The combine
+          # step below renders "N/A" unless every group's data is present.
+          pattern: python-unit-test-results-py3.12-*
+          path: unit-coverage/groups
       - name: Download integration test coverage
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -1913,14 +1914,14 @@ jobs:
           python-version: "3.13"
           enable-cache: false
       - name: Combine unit coverage
-        # Never report one shard's coverage as coverage of the whole suite.
+        # Never report one group's coverage as coverage of the whole suite.
         continue-on-error: true
         shell: bash
         run: |
-          for shard in 1 2 3; do
-            test -s "unit-coverage/shards/python-unit-test-results-py3.12-shard${shard}/.coverage"
+          for group in core plugins misc; do
+            test -s "unit-coverage/groups/python-unit-test-results-py3.12-${group}/.coverage"
           done
-          uvx --from coverage==7.15.3 coverage combine --keep unit-coverage/shards/*/.coverage
+          uvx --from coverage==7.15.3 coverage combine --keep unit-coverage/groups/*/.coverage
           uvx --from coverage==7.15.3 coverage xml -o unit-coverage/coverage.xml
       - name: Combine integration coverage
         # Never report one group's coverage as coverage of the whole suite.
