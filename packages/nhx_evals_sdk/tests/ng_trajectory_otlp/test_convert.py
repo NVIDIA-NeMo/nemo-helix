@@ -279,7 +279,7 @@ def test_a_captured_call_reports_its_own_tokens_including_the_cached_ones() -> N
 
     assert attributes["gen_ai.usage.input_tokens"] == 5
     assert attributes["gen_ai.usage.output_tokens"] == 2
-    assert attributes["gen_ai.usage.cache_read.input_tokens"] == 3
+    assert attributes["llm.token_count.prompt_details.cache_read"] == 3
     assert attributes["nemo.gym.latency_ttft_ms"] == pytest.approx(12.5)
 
 
@@ -381,3 +381,95 @@ def test_run_identity_keeps_traces_distinct_and_parents_valid(first, second, cap
 def test_conversion_requires_a_run_identity():
     with pytest.raises(ValueError, match="run_id must be nonempty"):
         _spans({}, run_id="")
+
+
+@pytest.mark.parametrize("count", [0, 3, None])
+def test_captured_usage_details_preserve_reported_counts(count: int | None) -> None:
+    usage = {
+        "input_tokens": 9,
+        "output_tokens": 5,
+        "total_tokens": count,
+        "input_tokens_details": {"cached_tokens": count, "cache_write_tokens": count},
+        "output_tokens_details": {"reasoning_tokens": count},
+    }
+    span = _spans({"response": {}}, model_calls=[_capture(response={"usage": usage})])[1]
+    attributes = _attributes(span)
+    for key in (
+        "gen_ai.usage.total_tokens",
+        "llm.token_count.prompt_details.cache_read",
+        "llm.token_count.prompt_details.cache_write",
+        "llm.token_count.completion_details.reasoning",
+    ):
+        if count is None:
+            assert key not in attributes
+        else:
+            assert attributes[key] == count
+    assert attributes["gen_ai.usage.input_tokens"] == 9
+    assert attributes["gen_ai.usage.output_tokens"] == 5
+
+
+@pytest.mark.parametrize("count", [None, 0, 7])
+def test_gym_normalized_capture_owns_usage_over_raw_provider_dialect(count: int | None) -> None:
+    call = _capture(response={"usage": {"input_tokens": 2, "cache_read_input_tokens": 3}})
+    call.update(
+        tokens_in=count,
+        tokens_out=count,
+        tokens_total=count,
+        cached_tokens=count,
+        cache_creation_tokens=count,
+        tokens_reasoning=count,
+    )
+    spans = _spans({"ng_model_call_capture": {"calls": [call]}})
+    assert len(spans) == 2
+    attributes = _attributes(spans[1])
+    for field in (
+        "gen_ai.usage.input_tokens",
+        "gen_ai.usage.output_tokens",
+        "gen_ai.usage.total_tokens",
+        "llm.token_count.prompt_details.cache_read",
+        "llm.token_count.prompt_details.cache_write",
+        "llm.token_count.completion_details.reasoning",
+    ):
+        if count is None:
+            assert field not in attributes
+        else:
+            assert attributes[field] == count
+
+
+def test_normalized_capture_keeps_each_counter_distinct() -> None:
+    call = _capture(response={"usage": {"input_tokens": 999, "output_tokens": 999}})
+    call.update(
+        tokens_in=31, tokens_out=11, tokens_total=42, cached_tokens=7, cache_creation_tokens=3, tokens_reasoning=5
+    )
+    spans = _spans({"response": {}}, model_calls=[call])
+    attributes = _attributes(spans[1])
+    assert attributes["gen_ai.usage.input_tokens"] == 31
+    assert attributes["gen_ai.usage.output_tokens"] == 11
+    assert attributes["gen_ai.usage.total_tokens"] == 42
+    assert attributes["llm.token_count.prompt_details.cache_read"] == 7
+    assert attributes["llm.token_count.prompt_details.cache_write"] == 3
+    assert attributes["llm.token_count.completion_details.reasoning"] == 5
+    assert "gen_ai.usage.input_tokens" not in _attributes(spans[0])
+
+
+@pytest.mark.parametrize("value", [None, -1, True, 1.5, "7"])
+def test_normalized_unknown_or_invalid_counters_do_not_fall_back_to_raw_usage(value: Any) -> None:
+    call = _capture(response={"usage": {"input_tokens": 99, "output_tokens": 99}})
+    call["tokens_in"] = value
+    attributes = _attributes(_spans({"response": {}}, model_calls=[call])[1])
+    assert "gen_ai.usage.input_tokens" not in attributes
+    assert "gen_ai.usage.output_tokens" not in attributes
+
+
+@pytest.mark.parametrize("capture", [None, {}, {"calls": []}, {"calls": [None]}, {"calls": "invalid"}])
+def test_empty_or_malformed_embedded_capture_preserves_explicit_calls(capture: Any) -> None:
+    spans = _spans({"ng_model_call_capture": capture}, model_calls=[_capture()])
+    assert len(spans) == 2
+    assert _attributes(spans[1])["gen_ai.usage.input_tokens"] == 5
+
+
+def test_embedded_capture_replaces_explicit_calls_without_counting_both() -> None:
+    embedded = [_capture(tokens_in=7, tokens_out=2), _capture(tokens_in=11, tokens_out=3)]
+    spans = _spans({"ng_model_call_capture": {"calls": embedded}}, model_calls=[_capture()])
+    assert [_attributes(span)["gen_ai.usage.input_tokens"] for span in spans[1:]] == [7, 11]
+    assert spans[1].span_id != spans[2].span_id

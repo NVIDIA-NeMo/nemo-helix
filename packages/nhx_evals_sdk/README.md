@@ -55,6 +55,24 @@ metric = ExactMatchMetric.from_template(
 result = evaluate_offline_sync(metric=metric, dataset=[{"expected": "4", "prediction": "4"}])
 ```
 
+## Gym captured usage in OTLP
+
+`ng_trajectory_otlp.rollout_to_resource_spans` renders captured model calls using
+Intake-compatible usage attributes for input, output, reported total, cache read,
+cache write, and reasoning tokens. A captured call with `tokens_in` or `tokens_out`
+uses Gym's normalized counters; missing or unknown normalized counters stay absent
+even when raw provider usage is present. This avoids reinterpreting provider cache
+accounting after Gym has normalized it.
+
+Legacy captures without normalized input/output fields read `response.usage`,
+including `input_tokens_details.cached_tokens`,
+`input_tokens_details.cache_write_tokens`, and
+`output_tokens_details.reasoning_tokens`. Explicit zero counts are preserved;
+missing totals are not calculated from input and output tokens. Nonempty embedded
+`ng_model_call_capture.calls` lists of mappings take precedence over the separate
+`model_calls` argument. Empty or malformed embedded captures leave that argument
+in effect.
+
 ## Docker Compose sandbox provider
 
 `compose.py` is the stable public facade for the production Docker Compose
