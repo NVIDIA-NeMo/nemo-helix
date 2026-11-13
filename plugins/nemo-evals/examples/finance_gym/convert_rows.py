@@ -27,7 +27,7 @@ import argparse
 import json
 import shutil
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 #: The cookbook's tasks, by the capability whose adapter answers them.
@@ -47,6 +47,14 @@ _URL_SCHEMES = ("fileset://", "http://", "https://", "data:")
 def token_limit(task: str) -> int:
     """The cookbook's new-token limit for ``task``."""
     return 256 if task in SHORT_ANSWER_TASKS else 512
+
+
+def _dataset_path(path: str, where: str) -> str:
+    """``path``, an image path relative to the dataset, refused if it is absolute or climbs out with ``..``."""
+    parts = PurePosixPath(path)
+    if parts.is_absolute() or ".." in parts.parts:
+        raise ValueError(f"{where}: an image path must stay inside the dataset ({path})")
+    return path
 
 
 def _text(content: Any) -> str:
@@ -69,7 +77,7 @@ def _input_content(content: Any, image_fileset: str | None, where: str) -> str |
             if not url.startswith(_URL_SCHEMES):
                 if image_fileset is None:
                     raise ValueError(f"{where}: an image is a relative path ({url}); pass --image-fileset")
-                url = f"fileset://{image_fileset}#{url}"
+                url = f"fileset://{image_fileset}#{_dataset_path(url, where)}"
             # Gym's Responses types require `detail` on an image part.
             parts.append({"type": "input_image", "image_url": url, "detail": "auto"})
         else:
@@ -137,12 +145,22 @@ def convert(source: Path, image_fileset: str | None) -> tuple[list[dict[str, Any
 
 
 def copy_images(source_root: Path, images: list[str], destination: Path) -> None:
-    """Copy each image from ``source_root`` to ``destination``, keeping its relative path."""
+    """Copy each image from ``source_root`` to ``destination``, keeping its relative path.
+
+    An image is refused if its path, or a symlink on the way, leads outside either directory: a dataset could
+    otherwise put files outside ``destination``, or copy files from elsewhere into what is uploaded.
+    """
+    source_dir, destination_dir = source_root.resolve(), destination.resolve()
     for relative in images:
+        _dataset_path(relative, str(source_root))
         found = source_root / relative
+        target = destination / relative
+        if not found.resolve().is_relative_to(source_dir):
+            raise ValueError(f"{found}: links outside the dataset")
+        if not target.resolve().is_relative_to(destination_dir):
+            raise ValueError(f"{target}: links outside {destination}")
         if not found.is_file():
             raise ValueError(f"{found}: an image the rows use is missing")
-        target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(found, target)
 

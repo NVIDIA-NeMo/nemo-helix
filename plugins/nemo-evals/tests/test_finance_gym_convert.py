@@ -192,3 +192,27 @@ def test_a_missing_image_stops_the_conversion(tmp_path: Path) -> None:
                 str(tmp_path / "o"),
             ]
         )
+
+
+@pytest.mark.parametrize("image", ["../settings.png", "images/../../settings.png", "/etc/settings.png"])
+def test_an_image_path_that_leaves_the_dataset_is_refused(image: str) -> None:
+    with pytest.raises(ValueError, match="must stay inside the dataset"):
+        convert_rows.gym_row(_row("TAT-DQA/span", image=image), 0, "default/finance-images", "test.jsonl:3")
+
+
+@pytest.mark.parametrize("escape", ["source", "destination"])
+def test_an_image_copy_through_a_symlink_out_of_its_directory_is_refused(tmp_path: Path, escape: str) -> None:
+    dataset, upload, elsewhere = tmp_path / "data", tmp_path / "upload", tmp_path / "elsewhere"
+    (dataset / "images").mkdir(parents=True)
+    elsewhere.mkdir()
+    (elsewhere / "a.png").write_bytes(b"not the dataset's")
+    if escape == "source":
+        (dataset / "images/a.png").symlink_to(elsewhere / "a.png")
+    else:
+        (dataset / "images/a.png").write_bytes(b"a.png")
+        upload.mkdir()
+        (upload / "images").symlink_to(elsewhere, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="links outside"):
+        convert_rows.copy_images(dataset, ["images/a.png"], upload)
+    assert (elsewhere / "a.png").read_bytes() == b"not the dataset's"

@@ -159,6 +159,24 @@ def test_a_task_with_no_trial_still_counts_against_coverage(tmp_path: Path) -> N
     assert (len(rows), expected) == (1, 2)
 
 
+def test_a_job_with_no_trial_counts_all_its_rows_against_coverage(tmp_path: Path) -> None:
+    ocr = _bundle(tmp_path / "ocr", "run-ocr", [("TAT-DQA/span", "visual_ocr", CORRECT)])
+    reasoning = _bundle(
+        tmp_path / "reasoning",
+        "run-reasoning",
+        [("TAT-DQA/arithmetic", "reasoning", CORRECT), ("TAT-DQA/count", "reasoning", CORRECT)],
+    )
+    (reasoning / "agent-eval-results/scores.jsonl").write_text("", encoding="utf-8")
+    output = tmp_path / "report.json"
+
+    finance_report.main([str(ocr), str(reasoning), "--output", str(output)])
+
+    result = json.loads(output.read_text(encoding="utf-8"))
+    assert (result["expected_samples"], result["evaluated_samples"]) == (3, 1)
+    assert result["coverage"] == pytest.approx(1 / 3)
+    assert sorted(result["by_capability"]) == ["visual_ocr"]
+
+
 def test_the_same_job_twice_is_refused(tmp_path: Path) -> None:
     root = _bundle(tmp_path / "ocr", "run-ocr", [("TAT-DQA/span", "visual_ocr", CORRECT)])
 

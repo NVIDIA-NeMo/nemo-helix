@@ -19,7 +19,7 @@ The report has the shape of ``metrics()`` in the cookbook's ``evaluation.py`` (N
 
 - Each row's task and capability come from the Gym row, as ``convert_rows.py`` writes them.
 - A failed trial is not scored, as the cookbook skips a failed request, but it counts toward
-  ``expected_samples``: ``coverage`` is the rows scored over all rows.
+  ``expected_samples``, as does a row with no trial: ``coverage`` is the rows scored over all rows.
 - ``hit_max_new_tokens`` is a count of rows.
 - ``numeric_relative_tolerance`` is ``--tolerance``, since the bundles don't record it.
 """
@@ -90,7 +90,12 @@ def bundle_rows(path: Path) -> tuple[list[dict[str, Any]], int, set[str]]:
     extras = {task["id"]: (task.get("metadata") or {}).get("gym_row_extras") or {} for task in files["tasks.jsonl"]}
     scores = [record for record in files["scores.jsonl"] if record.get("metric_type") == METRIC_TYPE]
     if not scores:
-        raise ValueError(f"{path}: no {METRIC_TYPE} scores; is this a Gym job's results bundle?")
+        # A job with no trial at all still counts, as every row it was asked to score. Scores from another
+        # metric, or tasks convert_rows.py didn't write, mean it isn't a finance Gym job.
+        finance_rows = bool(extras) and all("task" in row and "capability" in row for row in extras.values())
+        if files["scores.jsonl"] or not finance_rows:
+            raise ValueError(f"{path}: no {METRIC_TYPE} scores; is this a Gym job's results bundle?")
+        return [], len(extras), set()
     rows: list[dict[str, Any]] = []
     tried: set[str] = set()
     for record in scores:

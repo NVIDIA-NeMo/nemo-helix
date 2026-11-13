@@ -124,7 +124,7 @@ The commands assume the `default` workspace and a data directory in `$DATA`.
 - `task_accuracy` and `answer_f1` are the cookbook's headline scores. `closed_trace_rate`,
   `python_syntax_rate`, `coverage` and `hit_max_new_tokens` are diagnostics.
 - A failed trial isn't scored, as the cookbook skips a failed request, but it counts in `expected_samples`, so
-  `coverage` falls below 1.
+  `coverage` falls below 1. So does a row with no trial, even from a job that produced none.
 - `hit_max_new_tokens` counts rows that used their whole token limit. With thinking on, a model that writes a long
   trace runs out of tokens before it answers, and those rows score 0.
 - Each job's own summary also has every component's mean, as `gym_reward.<component>`, over that capability.
