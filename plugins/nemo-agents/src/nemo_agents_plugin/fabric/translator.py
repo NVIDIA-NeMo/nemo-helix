@@ -19,6 +19,7 @@ from nemo_agents_plugin.fabric.gateway_credentials import (
     platform_gateway_credential_env,
 )
 from nemo_helix_plugin.config import PLATFORM_BASE_URL_ENV_VARS
+from pydantic import ValidationError
 
 # Platform location forwarded into the agent process for SDK-backed child tools:
 # the platform base-URL vars (owned by nemo_helix_plugin as
@@ -299,7 +300,10 @@ def _mcp_config(config: AgentConfig) -> Any:
 def _tools_config(config: AgentConfig) -> Any:
     if config.tools is None:
         return None
-    return fabric.ToolsConfig(enabled=config.tools.enabled, blocked=config.tools.blocked)
+    try:
+        return fabric.ToolsConfig(enabled=config.tools.enabled, blocked=config.tools.blocked)
+    except ValidationError as error:
+        raise FabricTranslationError(str(error)) from error
 
 
 def _apply_telemetry(fabric_config: Any, config: AgentConfig, model: ModelConfig) -> None:
