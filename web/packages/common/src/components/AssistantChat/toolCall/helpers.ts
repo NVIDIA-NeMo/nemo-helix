@@ -122,7 +122,7 @@ const getRepeatedSubtleToolMessage = (toolName: string, count: number): string =
   }
 };
 
-const getFileName = (path: string): string => {
+export const getFileName = (path: string): string => {
   const segments = path.split(/[\\/]/).filter(Boolean);
   return segments.at(-1) ?? path;
 };
@@ -353,6 +353,14 @@ export const getSubtleToolDetail = (
   }
 
   return compactSubtleDetail(getToolSummary(toolName, args)) ?? message;
+};
+
+export const getBashCommand = (args: AssistantToolArgs): string | undefined => {
+  const command = args.command;
+  if (typeof command === 'string' && command) {
+    return command;
+  }
+  return undefined;
 };
 
 export const getToolInvocation = (toolName: string, args: AssistantToolArgs): string => {
