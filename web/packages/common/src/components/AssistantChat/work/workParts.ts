@@ -3,12 +3,21 @@
 
 import type { CodeSnippetLanguage } from '@nvidia/foundations-react-core';
 
+const JSON_NUMBER_PATTERN = /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+
+const numberTokens = (text: string): string => (text.match(JSON_NUMBER_PATTERN) ?? []).join(',');
+
 export const formatToolPayload = (
   value: unknown
 ): { readonly language: CodeSnippetLanguage; readonly text: string } => {
   if (typeof value === 'string') {
     try {
-      return { language: 'json', text: JSON.stringify(JSON.parse(value), null, 2) };
+      const formatted = JSON.stringify(JSON.parse(value), null, 2);
+      // JSON.parse rounds big integers and rewrites literals like 1.0, so show those payloads as sent.
+      if (numberTokens(formatted) !== numberTokens(value)) {
+        return { language: 'json', text: value };
+      }
+      return { language: 'json', text: formatted };
     } catch {
       return { language: 'text', text: value };
     }
