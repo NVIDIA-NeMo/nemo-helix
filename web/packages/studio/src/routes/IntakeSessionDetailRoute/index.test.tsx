@@ -463,6 +463,7 @@ describe('IntakeSessionDetailRoute', () => {
 
   it('restores a span deep link without first loading the root span detail', async () => {
     const detailSpanIds: string[] = [];
+    const detailRequests: URL[] = [];
     const spanListRequests: URL[] = [];
     server.use(
       http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
@@ -483,7 +484,8 @@ describe('IntakeSessionDetailRoute', () => {
           },
         });
       }),
-      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ params }) => {
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ params, request }) => {
+        detailRequests.push(new URL(request.url));
         const spanId = String(params['spanId']);
         detailSpanIds.push(spanId);
         const span = mockSpanById(spanId);
@@ -507,6 +509,9 @@ describe('IntakeSessionDetailRoute', () => {
       )
     ).toBe(true);
     expect(detailSpanIds).not.toContain('span-root-001');
+    expect(
+      detailRequests.every((url) => url.searchParams.get('session_id') === 'session-agent-run-001')
+    ).toBe(true);
   });
 
   it('preserves a directly linked span outside the loaded summary page', async () => {
@@ -515,6 +520,7 @@ describe('IntakeSessionDetailRoute', () => {
     const outsidePageSpanGate = new Promise<void>((resolve) => {
       resolveOutsidePageSpan = resolve;
     });
+    const detailRequests: URL[] = [];
     const outsidePageSpan = {
       ...mockSpanById('span-llm-001')!,
       span_id: 'span-outside-page-001',
@@ -534,14 +540,18 @@ describe('IntakeSessionDetailRoute', () => {
           pagination: { ...mockSpansPage.pagination, total_results: 1001, total_pages: 2 },
         });
       }),
-      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), async ({ params }) => {
-        if (params['spanId'] === outsidePageSpan.span_id) {
-          await outsidePageSpanGate;
-          return HttpResponse.json(outsidePageSpan);
+      http.get(
+        mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'),
+        async ({ params, request }) => {
+          detailRequests.push(new URL(request.url));
+          if (params['spanId'] === outsidePageSpan.span_id) {
+            await outsidePageSpanGate;
+            return HttpResponse.json(outsidePageSpan);
+          }
+          const span = mockSpanById(String(params['spanId']));
+          return span ? HttpResponse.json(span) : new HttpResponse(null, { status: 404 });
         }
-        const span = mockSpanById(String(params['spanId']));
-        return span ? HttpResponse.json(span) : new HttpResponse(null, { status: 404 });
-      })
+      )
     );
 
     renderSessionDetail(
@@ -553,6 +563,9 @@ describe('IntakeSessionDetailRoute', () => {
     expect(await screen.findByLabelText('Loading linked span')).toBeInTheDocument();
     resolveOutsidePageSpan();
     expect((await screen.findAllByText('Outside page span')).length).toBeGreaterThan(0);
+    expect(
+      detailRequests.every((url) => url.searchParams.get('session_id') === 'session-agent-run-001')
+    ).toBe(true);
 
     await user.click(screen.getByText('Graph'));
     await user.click(screen.getByText('Grouped'));

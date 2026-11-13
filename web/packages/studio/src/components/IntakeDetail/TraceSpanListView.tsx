@@ -70,6 +70,7 @@ export const SpanListView: FC<SpanListViewProps> = ({
             <TraceSpanAccordionContent
               workspace={workspace}
               spanId={span.span_id}
+              sessionId={span.session_id}
               summarySpan={span}
               annotationCount={annotationCountBySpan.get(span.span_id)}
               focusNoteNonce={noteFocusNonce(noteRequest, span.span_id)}

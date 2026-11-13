@@ -208,3 +208,104 @@ def test_traces_read_picks_earliest_root_when_trace_has_multiple_roots(client: T
     assert trace["id"] == "00000000000000000000000000000101"
     assert trace["name"] == "earliest-root"
     assert trace["root_span_id"] == "0000000000000101"
+
+
+def test_reused_trace_and_span_ids_remain_scoped_to_their_sessions(client: TestClient, make_otlp_request):
+    """Distinct start times preserve both physical index rows, even when OTLP IDs collide."""
+    trace_id = "1234567890abcdef1234567890abcdef"
+    base_ns = int(datetime.now(timezone.utc).replace(microsecond=0).timestamp() * 1_000_000_000)
+    evaluations = ["collision-evaluation-a", "collision-evaluation-b"]
+    for evaluation in evaluations:
+        _create_evaluation(client, evaluation)
+
+    def ingest(index: int, tokens: int) -> None:
+        session = f"collision-session-{index}"
+        attributes = {
+            "gen_ai.conversation.id": session,
+            "nemo.evaluation.name": evaluations[index],
+            "nemo.test_case.name": "shared-case",
+            "gen_ai.agent.name": f"agent-{index}",
+            "gen_ai.agent.version": f"version-{index}",
+        }
+        started_at = base_ns + index * 10_000_000_000
+        body = make_otlp_request(
+            [
+                {
+                    "name": f"root-{index}",
+                    "span_id": "0000000000000001",
+                    "start_time_unix_nano": started_at,
+                    "end_time_unix_nano": started_at + 2_000_000_000,
+                    "attributes": {**attributes, "openinference.span.kind": "AGENT"},
+                },
+                {
+                    "name": f"llm-{index}",
+                    "span_id": "0000000000000002",
+                    "parent_span_id": "0000000000000001",
+                    "start_time_unix_nano": started_at + 1_000_000_000,
+                    "end_time_unix_nano": started_at + 2_000_000_000,
+                    "attributes": {
+                        **attributes,
+                        "openinference.span.kind": "LLM",
+                        "gen_ai.usage.input_tokens": tokens,
+                    },
+                },
+            ],
+            trace_id=trace_id,
+        )
+        response = client.post(
+            "/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces",
+            content=body,
+            headers={"Content-Type": "application/x-protobuf"},
+        )
+        assert response.status_code == 200, response.text
+
+    def assert_reads(expected_tokens: list[int]) -> None:
+        response = client.get(f"/apis/intake/v2/workspaces/default/traces/{trace_id}")
+        assert response.status_code == 409, response.text
+        ambiguous_span = client.get("/apis/intake/v2/workspaces/default/spans/0000000000000002")
+        assert ambiguous_span.status_code == 409, ambiguous_span.text
+        listed = client.get("/apis/intake/v2/workspaces/default/traces", params={"filter[id]": trace_id})
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["pagination"]["total_results"] == 2
+        batch_traces = {trace["session_id"]: trace for trace in listed.json()["data"]}
+        batched = client.get("/apis/intake/v2/workspaces/default/evaluations")
+        assert batched.status_code == 200, batched.text
+        batch_evaluations = {evaluation["name"]: evaluation for evaluation in batched.json()["data"]}
+        for index, tokens in enumerate(expected_tokens):
+            session = f"collision-session-{index}"
+            response = client.get(
+                f"/apis/intake/v2/workspaces/default/traces/{trace_id}",
+                params={"session_id": session},
+            )
+            assert response.status_code == 200, response.text
+            trace = response.json()
+            assert trace["session_id"] == session
+            assert trace["name"] == f"root-{index}"
+            assert trace["span_count"] == 2
+            assert trace["input_tokens"] == tokens
+            span_response = client.get(
+                "/apis/intake/v2/workspaces/default/spans/0000000000000002", params={"session_id": session}
+            )
+            assert span_response.status_code == 200, span_response.text
+            assert span_response.json()["session_id"] == session
+            assert span_response.json()["name"] == f"llm-{index}"
+            assert batch_traces[session]["input_tokens"] == tokens
+            evaluation_response = client.get(f"/apis/intake/v2/workspaces/default/evaluations/{evaluations[index]}")
+            assert evaluation_response.status_code == 200, evaluation_response.text
+            evaluation = evaluation_response.json()
+            assert evaluation["run_count"] == 1
+            assert evaluation["tokens"]["sum"] == tokens
+            assert evaluation["agent_names"] == [f"agent-{index}"]
+            assert evaluation["agent_versions"] == [f"version-{index}"]
+            for field in ("run_count", "tokens", "agent_names", "agent_versions"):
+                assert batch_evaluations[evaluations[index]][field] == evaluation[field]
+
+    ingest(0, 11)
+    ingest(1, 29)
+    assert_reads([11, 29])
+    ingest(0, 47)
+    assert_reads([47, 29])
+    missing = client.get(
+        f"/apis/intake/v2/workspaces/default/traces/{trace_id}", params={"session_id": "another-session"}
+    )
+    assert missing.status_code == 404

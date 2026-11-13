@@ -11,6 +11,7 @@ import pytest
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseExternalData, ClickHouseQuery
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
 from nhx.intake.repository.clickhouse.trace import TRACE_COLUMNS, ClickHouseTraceRepository, _order_by
+from nhx.intake.repository.trace import TraceAmbiguousError
 from nhx.intake.spans.domain import TraceListFilter
 
 _TRACE_PAGE_COLUMNS = [*TRACE_COLUMNS, "started_at_us"]
@@ -81,7 +82,10 @@ async def test_summary_mode_reads_root_spans_without_metric_aggregates():
     assert "trace_roots.root_status AS status" in client.queries[0]
     assert "trace_roots.root_input" not in client.queries[0]
     assert "trace_roots.root_output" not in client.queries[0]
-    assert "LIMIT 1 BY trace_roots.workspace, trace_roots.source_format, trace_roots.trace_id" in client.queries[0]
+    assert (
+        "LIMIT 1 BY trace_roots.workspace, trace_roots.session_id, trace_roots.source_format, trace_roots.trace_id"
+        in client.queries[0]
+    )
     assert "span_versions" not in client.queries[0]
     assert "trace_roots.trace_id IN %(trace_ids)s" in client.queries[0]
     assert client.parameters[0]["trace_ids"] == ["trace-a", "trace-b"]
@@ -164,11 +168,14 @@ async def test_preview_mode_bounds_payloads_and_adds_trace_aggregate_block():
     assert "trace_page_refs" not in client.queries[2]
     assert "IN %(page_trace_keys)s" in client.queries[2]
     assert "trace_id IN %(page_trace_ids)s" in client.queries[2]
-    assert "LIMIT 1 BY trace_roots.workspace, trace_roots.source_format, trace_roots.trace_id" in client.queries[2]
+    assert (
+        "LIMIT 1 BY trace_roots.workspace, trace_roots.session_id, trace_roots.source_format, trace_roots.trace_id"
+        in client.queries[2]
+    )
     assert "indexOf(%(page_trace_keys)s" not in client.queries[2]
     assert client.external_data[2] is None
     assert client.parameters[2]["page_trace_ids"] == ["trace-a"]
-    assert client.parameters[2]["page_trace_keys"] == [("otel", "trace-a")]
+    assert client.parameters[2]["page_trace_keys"] == [("otel", "trace-a", "session-a")]
     assert "root_started_at >= fromUnixTimestamp64Micro(%(page_started_at_min_us)s)" in client.queries[2]
     assert "root_started_at <= fromUnixTimestamp64Micro(%(page_started_at_max_us)s)" in client.queries[2]
     assert client.parameters[2]["page_started_at_min_us"] == 1767225600123456
@@ -205,7 +212,10 @@ async def test_detailed_mode_adds_trace_aggregate_block():
     assert "trace_roots.root_output" not in client.queries[1]
     assert "AS trace_spans" in client.queries[2]
     assert "span_versions.trace_id IN %(page_trace_ids)s" in client.queries[2]
-    assert "(span_versions.source_format, span_versions.trace_id) IN %(page_trace_keys)s" in client.queries[2]
+    assert (
+        "(span_versions.source_format, span_versions.trace_id, span_versions.session_id) IN %(page_trace_keys)s"
+        in client.queries[2]
+    )
     assert "FROM spans AS span_versions FINAL" in client.queries[2]
     assert "argMax(span_versions." not in client.queries[2]
     assert "span_versions.attributes_string AS attributes_string" in client.queries[2]
@@ -332,7 +342,7 @@ async def test_non_summary_reconciles_hydration_misses_and_restores_page_order(c
     assert result.pagination.total_pages == 1
     record = caplog.records[-1]
     assert record.message == "Trace page hydration omitted refs returned by the page query"
-    assert getattr(record, "dropped_trace_refs") == [("otel", "trace-b")]
+    assert getattr(record, "dropped_trace_refs") == [("otel", "trace-b", "session-a")]
 
 
 @pytest.mark.asyncio
@@ -624,8 +634,50 @@ async def test_trace_metrics_reads_tokens_from_final_spans():
     # The rollup CTE must be scoped by source_format too, not just trace_id, so a
     # trace_id shared across ingest formats does not drag in unrelated spans.
     assert (
-        "(span_versions.source_format, span_versions.trace_id) IN (SELECT source_format, trace_id FROM roots)" in query
+        "(span_versions.source_format, span_versions.trace_id, span_versions.session_id) IN (SELECT source_format, trace_id, session_id FROM roots)"
+        in query
     )
     # Joined on the full trace identity, matching the trace hydration query.
     assert "roots.workspace = rollups.workspace" in query
     assert "roots.source_format = rollups.source_format" in query
+
+
+@pytest.mark.asyncio
+async def test_unscoped_trace_lookup_rejects_colliding_sessions():
+    client = _Client([_QueryResult([("session-a",), ("session-b",)], ["session_id"])])
+    with pytest.raises(TraceAmbiguousError):
+        await _repository(client).get_trace(workspace="workspace-a", trace_id="shared", mode="summary")
+    assert client.parameters == [{"workspace": "workspace-a", "trace_id": "shared"}]
+    assert "SELECT DISTINCT session_id" in client.queries[0]
+    assert "workspace = %(workspace)s" in client.queries[0]
+
+
+@pytest.mark.asyncio
+async def test_scoped_trace_lookup_never_falls_back_to_another_session():
+    client = _Client()
+    trace = await _repository(client).get_trace(
+        workspace="workspace-a", trace_id="shared", session_id="session-b", mode="summary"
+    )
+    assert trace is None
+    assert all(parameters["session_id"] == "session-b" for parameters in client.parameters)
+    assert all("trace_roots.session_id = %(session_id)s" in query for query in client.queries)
+
+
+@pytest.mark.asyncio
+async def test_unscoped_unique_trace_lookup_scopes_subsequent_reads():
+    client = _Client([_QueryResult([("session-a",)], ["session_id"])])
+    assert await _repository(client).get_trace(workspace="workspace-a", trace_id="shared", mode="summary") is None
+    assert all(parameters["session_id"] == "session-a" for parameters in client.parameters[1:])
+
+
+def test_hydration_keeps_colliding_session_rows_independent():
+    from nhx.intake.repository.clickhouse.trace import _reconcile_hydrated_page, _TracePageRef
+
+    refs = [_TracePageRef("otel", "shared", session, 1) for session in ("session-a", "session-b")]
+    rows = [
+        {"source_format": "otel", "id": "shared", "session_id": "session-b", "span_count": 7},
+        {"source_format": "otel", "id": "shared", "session_id": "session-a", "span_count": 2},
+    ]
+    hydrated, dropped = _reconcile_hydrated_page(refs, rows)
+    assert [row["span_count"] for row in hydrated] == [2, 7]
+    assert dropped == []

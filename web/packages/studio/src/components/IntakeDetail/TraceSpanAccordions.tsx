@@ -136,9 +136,12 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
     data: linkedSpanDetail,
     error: linkedSpanError,
     isLoading: isLinkedSpanLoading,
-  } = useGetSpan(workspace, linkedSpanId ?? '', {
-    query: { enabled: shouldFetchLinkedSpan },
-  });
+  } = useGetSpan(
+    workspace,
+    linkedSpanId ?? '',
+    { session_id: trace.session_id },
+    { query: { enabled: shouldFetchLinkedSpan } }
+  );
   const linkedSpanMatchesTrace =
     linkedSpanDetail === undefined ||
     ((linkedSpanDetail.trace_id === undefined || linkedSpanDetail.trace_id === trace.id) &&

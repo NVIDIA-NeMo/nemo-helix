@@ -66,6 +66,7 @@ export const TraceSelectedSpanPanel: FC<TraceSelectedSpanPanelProps> = ({
             <TraceSpanAccordionContent
               workspace={workspace}
               spanId={selectedSpan.span_id}
+              sessionId={selectedSpan.session_id}
               summarySpan={selectedSpan}
               expandToken={expandToken}
               collapseToken={collapseToken}

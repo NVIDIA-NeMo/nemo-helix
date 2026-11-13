@@ -12,6 +12,7 @@ import { type FC, useMemo } from 'react';
 interface TraceSpanAccordionContentProps {
   workspace: string;
   spanId: string;
+  sessionId: string;
   summarySpan?: Span;
   /** Forwarded to the span's sections so a toolbar can expand/collapse them all. */
   expandToken?: number;
@@ -26,16 +27,26 @@ interface TraceSpanAccordionContentProps {
 export const TraceSpanAccordionContent: FC<TraceSpanAccordionContentProps> = ({
   workspace,
   spanId,
+  sessionId,
   summarySpan,
   expandToken,
   collapseToken,
   annotationCount,
   focusNoteNonce,
 }) => {
-  const { data: detailSpan, error, isLoading } = useGetSpan(workspace, spanId);
+  const {
+    data: detailSpan,
+    error,
+    isLoading,
+  } = useGetSpan(workspace, spanId, {
+    session_id: sessionId,
+  });
   const span = useMemo(
-    () => (detailSpan ? mergeSpanDetails(summarySpan, detailSpan) : summarySpan),
-    [detailSpan, summarySpan]
+    () =>
+      detailSpan?.session_id === sessionId
+        ? mergeSpanDetails(summarySpan, detailSpan)
+        : summarySpan,
+    [detailSpan, sessionId, summarySpan]
   );
 
   if (isLoading && !detailSpan) {

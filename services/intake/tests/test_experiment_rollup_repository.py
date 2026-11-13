@@ -283,3 +283,12 @@ def test_score_rollup_cte_builders_compose_the_pipeline():
     assert "coalesce(sum(scores.value), 0) / test_cases.session_count AS value" in test_case_scores
     assert "LEFT JOIN session_scores AS scores" in test_case_scores
     assert "INNER JOIN evaluators ON evaluators.evaluation_name = test_cases.evaluation_name" in test_case_scores
+
+
+def test_metric_span_deduplication_preserves_session_identity():
+    from nhx.intake.repository.clickhouse.evaluation_rollup import _current_session_span_metrics_sql
+
+    query = _current_session_span_metrics_sql("spans")
+    assert "GROUP BY workspace, session_id, source_format, trace_id, external_span_id, id" in query
+    assert "session_id AS dedup_session_id" in query
+    assert "argMax(session_id" not in query

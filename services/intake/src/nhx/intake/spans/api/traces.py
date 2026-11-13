@@ -11,6 +11,7 @@ from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.filter import FilterOperator
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
+from nhx.intake.repository.trace import TraceAmbiguousError
 from nhx.intake.spans.api.dependencies import SpansServiceDep, require_workspace_access, validate_list_query_params
 from nhx.intake.spans.api.query_filters import (
     filter_comparisons,
@@ -91,7 +92,10 @@ async def list_traces(
 
 @router.get(
     "/v2/workspaces/{workspace}/traces/{id}",
-    responses={404: {"model": ErrorResponse, "description": "Trace not found"}},
+    responses={
+        404: {"model": ErrorResponse, "description": "Trace not found"},
+        409: {"description": "Trace ID belongs to multiple sessions; supply session_id."},
+    },
     response_model=Trace,
     response_model_exclude_none=True,
     tags=[API_TAG],
@@ -100,6 +104,9 @@ async def get_trace(
     workspace: str,
     id: str,
     service: SpansServiceDep,
+    session_id: str | None = Query(
+        default=None, description="Session containing the trace. Required for ambiguous trace IDs."
+    ),
     mode: TraceMode = Query(
         default="detailed",
         description=(
@@ -109,7 +116,12 @@ async def get_trace(
     ),
 ) -> Trace:
     try:
-        trace = await service.get_trace(workspace=workspace, trace_id=id, mode=mode)
+        trace = await service.get_trace(workspace=workspace, trace_id=id, mode=mode, session_id=session_id)
+    except TraceAmbiguousError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Trace {workspace}/{id} belongs to multiple sessions; supply session_id",
+        ) from exc
     except TraceNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Trace {workspace}/{id} not found")
     return Trace.from_domain(trace, mode=mode)
