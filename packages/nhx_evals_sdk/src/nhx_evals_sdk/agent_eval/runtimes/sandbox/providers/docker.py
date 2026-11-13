@@ -97,7 +97,7 @@ class DockerSandboxProvider:
         argv: list[str],
         *,
         timeout_s: float | None,
-        stdin: bytes | None = None,
+        stdin: bytes | Path | None = None,
     ) -> tuple[int, str, str]:
         """Run a ``docker`` CLI command. Returns (return_code, stdout, stderr).
 
@@ -105,15 +105,20 @@ class DockerSandboxProvider:
         Enforces the timeout with ``asyncio.wait_for`` and kills the whole process group so
         no child lingers. Raises :class:`TimeoutError` on timeout.
         """
-        proc = await create_subprocess_exec(
-            *argv,
-            stdin=asyncio.subprocess.PIPE if stdin is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-        )
+        # File transfers stream from an open descriptor rather than buffering
+        # an arbitrarily large upload in memory. The child owns its descriptor
+        # after spawn, so the parent's copy can close before communicate().
+        with stdin.open("rb") if isinstance(stdin, Path) else contextlib.nullcontext() as input_file:
+            proc = await create_subprocess_exec(
+                *argv,
+                stdin=input_file if input_file is not None else asyncio.subprocess.PIPE if stdin is not None else None,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+            )
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(input=stdin), timeout=timeout_s)
+            payload = stdin if isinstance(stdin, bytes) else None
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(input=payload), timeout=timeout_s)
         except (asyncio.TimeoutError, TimeoutError) as exc:
             with contextlib.suppress(ProcessLookupError):
                 killpg(getpgid(proc.pid), signal.SIGKILL)
@@ -197,7 +202,19 @@ class DockerSandboxProvider:
             result = await self.exec(handle, f"mkdir -p {shlex.quote(parent)}")
             if not result.ok:
                 raise RuntimeError(f"docker upload: mkdir {parent!r} failed: {result.stderr}")
-        await self._cp(f"{source_path}", f"{container.name}:{target_path}")
+        # `docker cp` creates root-owned files. A private (0600) seed then
+        # becomes unreadable to a non-root agent. Write as the image's user,
+        # preserving the source's ordinary permission and executable bits.
+        target = shlex.quote(target_path)
+        mode = source_path.stat().st_mode & 0o777
+        command = f"umask 077; cat > {target} && chmod {mode:o} {target}"
+        code, _out, err = await self._run(
+            [self._docker, "exec", "-i", container.name, "sh", "-c", command],
+            timeout_s=self._default_timeout_s,
+            stdin=source_path,
+        )
+        if code != 0:
+            raise RuntimeError(f"docker upload {target_path!r} failed (code={code}): {err.strip()}")
 
     async def upload_dir(self, handle: SandboxHandle, source_dir: Path, target_dir: str) -> None:
         container = _container(handle)

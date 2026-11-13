@@ -41,6 +41,7 @@ class TrialClaims(ModelPolicy):
     intake_workspace: str = Field(min_length=1, max_length=256)
     evaluation: str | None = Field(default=None, max_length=256)
     task: str | None = Field(default=None, max_length=256)
+    runtime_job: str | None = Field(default=None, max_length=256, description="Issuing Job, set by the runtime API.")
 
     def service_attributes(self) -> dict[str, JsonValue]:
         return self.model_dump(mode="json", exclude_none=True)

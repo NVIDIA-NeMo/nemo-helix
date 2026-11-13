@@ -184,7 +184,8 @@ func newLauncherOTLPLogExporter(ctx context.Context, endpointURL string) (log.Ex
 	if err != nil {
 		return nil, err
 	}
-	if _, err := authConfig.source.Headers(ctx); err != nil {
+	headers, err := authConfig.session.Headers(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("configure %s for OTLP logs: %w", authConfig.description, err)
 	}
 	logOTLPLogAuthMechanism(authConfig.mechanism, authConfig.reason)
@@ -193,11 +194,7 @@ func newLauncherOTLPLogExporter(ctx context.Context, endpointURL string) (log.Ex
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: otlpHTTPLogExportTimeout}
 	}
-	httpClient.Transport = &authHeadersTransport{
-		source:          authConfig.source,
-		authDescription: authConfig.description,
-		base:            httpClient.Transport,
-	}
+	httpClient = authConfig.session.HTTPClient(httpClient)
 
 	options := []otlploghttp.Option{
 		otlploghttp.WithEndpointURL(endpointURL),
@@ -206,7 +203,7 @@ func newLauncherOTLPLogExporter(ctx context.Context, endpointURL string) (log.Ex
 		// third-party telemetry; application logs construct platform auth headers in Go.
 		// Passing explicit empty headers prevents the upstream exporter from
 		// applying OTEL_EXPORTER_OTLP_LOGS_HEADERS here.
-		otlploghttp.WithHeaders(map[string]string{}),
+		otlploghttp.WithHeaders(headers),
 		otlploghttp.WithHTTPClient(httpClient),
 	}
 
@@ -214,66 +211,23 @@ func newLauncherOTLPLogExporter(ctx context.Context, endpointURL string) (log.Ex
 }
 
 type launcherOTLPLogAuthConfig struct {
-	source      requestHeaderSource
+	session     *nhxclient.Session
 	description string
 	mechanism   string
 	reason      string
 }
 
 func newLauncherOTLPLogAuthConfig(ctx context.Context) (launcherOTLPLogAuthConfig, error) {
-	if os.Getenv(workloadIdentityTokenFileEnv) != "" {
-		// True auth: exchange the workload subject token and send the resulting bearer token.
-		tokenSource, err := newOTLPLogWorkloadAuthTokenSource(ctx)
-		if err != nil {
-			return launcherOTLPLogAuthConfig{}, fmt.Errorf("configure workload identity auth for OTLP logs: %w", err)
-		}
-		return launcherOTLPLogAuthConfig{
-			source:      tokenSource,
-			description: "workload identity auth",
-			mechanism:   "workload_identity_token_exchange",
-			reason:      "workload_token_file_configured",
-		}, nil
-	}
-
-	// Service identity default: when workload identity is not enabled, identify the
-	// launcher as service:jobs without touching user OTEL_* headers.
-	return launcherOTLPLogAuthConfig{
-		source:      serviceIdentityPrincipalHeaderSource{},
-		description: "service identity principal headers",
-		mechanism:   "service_identity_principal_headers",
-		reason:      "workload_token_file_not_configured",
-	}, nil
-}
-
-type requestHeaderSource interface {
-	Headers(context.Context) (map[string]string, error)
-}
-
-type authHeadersTransport struct {
-	source          requestHeaderSource
-	authDescription string
-	base            http.RoundTripper
-}
-
-func (t *authHeadersTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	headers, err := t.source.Headers(req.Context())
+	session, err := nhxclient.SessionFromContext(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("refresh %s for OTLP logs: %w", t.authDescription, err)
+		return launcherOTLPLogAuthConfig{}, fmt.Errorf("configure workload identity auth for OTLP logs: %w", err)
 	}
-
-	clonedReq := req.Clone(req.Context())
-	clonedReq.Header = req.Header.Clone()
-	for key, value := range headers {
-		clonedReq.Header.Set(key, value)
+	if session.WorkloadIdentity() {
+		return launcherOTLPLogAuthConfig{session: session, description: "workload identity auth",
+			mechanism: "workload_identity_token_exchange", reason: "workload_token_file_configured"}, nil
 	}
-	return t.baseTransport().RoundTrip(clonedReq)
-}
-
-func (t *authHeadersTransport) baseTransport() http.RoundTripper {
-	if t.base != nil {
-		return t.base
-	}
-	return http.DefaultTransport
+	return launcherOTLPLogAuthConfig{session: session, description: "service identity principal headers",
+		mechanism: "service_identity_principal_headers", reason: "workload_token_file_not_configured"}, nil
 }
 
 func logOTLPLogAuthMechanism(mechanism string, reason string) {
@@ -282,12 +236,6 @@ func logOTLPLogAuthMechanism(mechanism string, reason string) {
 		"auth_mechanism", mechanism,
 		"reason", reason,
 	)
-}
-
-type serviceIdentityPrincipalHeaderSource struct{}
-
-func (serviceIdentityPrincipalHeaderSource) Headers(context.Context) (map[string]string, error) {
-	return map[string]string{"X-NHX-Principal-Id": serviceJobsPrincipal}, nil
 }
 
 func otlpHTTPLogExporter(ctx context.Context, opts ...otlploghttp.Option) (log.Exporter, error) {

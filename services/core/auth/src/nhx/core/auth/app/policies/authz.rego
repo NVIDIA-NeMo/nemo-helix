@@ -394,6 +394,11 @@ principal_only_route if {
 deny_request if {
 	principal_only_route
 	request_caller_kind == "service_principal"
+
+	# A verified delegated service still represents a principal on business
+	# routes. The selected delegated contract checks that subject's grants;
+	# direct service credentials retain the principal-only restriction.
+	extract_on_behalf_of_principal_id == ""
 }
 
 # True when any applicable principal has HelixAdmin in the system workspace (see allow_request).

@@ -31,6 +31,7 @@ from harbor.trial.hooks import TrialHookEvent
 from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
 from nemo_evals.gateway.spans import export_request, trial_root_span
 from nemo_evals.gateway.tokens import TOKEN_LIFETIME_SEC, TrialClaims, unsigned_token
+from nemo_evals.harbor.credential_errors import public_lifetime_limit
 from nemo_evals.intake.mapping import session_id_for
 from nemo_helix_plugin.auth.access_keys.client import AsyncAccessKeysClient
 from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateRequest
@@ -62,11 +63,13 @@ class TrialCredentialIssuer:
         evaluation_name: str | None = None,
         policy: ModelPolicy = _OPEN,
         records_calls: bool = False,
+        runtime_job: str | None = None,
         http_client: Callable[[], httpx.AsyncClient] | None = None,
     ) -> None:
         """``http_client`` makes the HTTP client each Harbor job uses on its own event loop; by default, one like
         ``client``'s own."""
         self.records_calls = records_calls
+        self._runtime_job = runtime_job
         self._client = client
         self._http_client = http_client or self._loop_local_client
         self._run_id = run_id
@@ -82,7 +85,9 @@ class TrialCredentialIssuer:
     async def _issued_to(self, job: Job, api_key_envs: list[str]) -> AsyncGenerator[None]:
         # The job runs on its own event loop, so the platform client gets a transport bound to it.
         async with self._http_client() as http_client:
-            trials = _JobTrials(self._client.with_http_client(http_client), job, self._claims)
+            trials = _JobTrials(
+                self._client.with_http_client(http_client), job, self._claims, runtime_job=self._runtime_job
+            )
             try:
                 auth_enabled = (await asyncio.to_thread(discover_nhx_config, self._client.base_url)).auth_enabled
                 # Harbor plans its trials in Job.create and keeps the configs it will run in a private attribute.
@@ -119,8 +124,16 @@ class TrialCredentialIssuer:
 class _JobTrials:
     """The tokens issued to one Harbor job's trials, ended as Harbor finishes with each trial."""
 
-    def __init__(self, client: AsyncNemoClient, job: Job, claims: Callable[[TrialConfig], TrialClaims]) -> None:
+    def __init__(
+        self,
+        client: AsyncNemoClient,
+        job: Job,
+        claims: Callable[[TrialConfig], TrialClaims],
+        *,
+        runtime_job: str | None = None,
+    ) -> None:
         self._client = client
+        self._runtime_job = runtime_job
         self._claims = claims
         self._retry = job.config.retry
         self._trials: dict[str, TrialClaims] = {}
@@ -141,26 +154,40 @@ class _JobTrials:
             if not auth_enabled:
                 return unsigned_token(trial)
             async with self._key_requests:
-                key = (
-                    await AsyncAccessKeysClient.from_client(self._client).create_access_key(
-                        body=AccessKeyCreateRequest(
-                            name=f"{ACCESS_KEY_NAME_PREFIX}{trial.session}"[:128],
-                            description="Inference Gateway key for one evaluation trial; revoked when the trial ends.",
-                            expires_in_seconds=TOKEN_LIFETIME_SEC,
-                            scope=[ACCESS_KEY_SCOPE],
-                            service_attributes=trial.service_attributes(),
+                from nemo_evals.jobs.runtime_client import EvalsRuntimeClient
+
+                if self._runtime_job is not None:
+                    key = (
+                        await EvalsRuntimeClient.from_client(self._client).issue_trial_key(
+                            workspace=trial.intake_workspace,
+                            job=self._runtime_job,
+                            body=trial,
                         )
-                    )
-                ).data()
+                    ).data()
+                else:
+                    key = (
+                        await AsyncAccessKeysClient.from_client(self._client).create_access_key(
+                            body=AccessKeyCreateRequest(
+                                name=f"{ACCESS_KEY_NAME_PREFIX}{trial.session}"[:128],
+                                description="Inference Gateway key for one evaluation trial; revoked when the trial ends.",
+                                expires_in_seconds=TOKEN_LIFETIME_SEC,
+                                scope=[ACCESS_KEY_SCOPE],
+                                service_attributes=trial.service_attributes(),
+                            )
+                        )
+                    ).data()
             self._live_keys[config.trial_name] = key.jti
             return key.token
 
         results = await asyncio.gather(*(issue_one(config) for config in configs), return_exceptions=True)
         failures = [result for result in results if isinstance(result, BaseException)]
         if failures:
-            raise RuntimeError(
-                f"could not issue {len(failures)} of {len(configs)} trials their own Inference Gateway key"
-            ) from failures[0]
+            message = f"could not issue {len(failures)} of {len(configs)} trials their own Inference Gateway key"
+            if limit := public_lifetime_limit(failures[0]):
+                # Kubernetes termination diagnostics retain only the traceback
+                # tail, so the final error must carry the public policy limit.
+                message += ": " + limit
+            raise RuntimeError(message) from failures[0]
         for config, token in zip(configs, results, strict=True):
             assert isinstance(token, str)
             variable = f"NEMO_TRIAL_KEY_{uuid.uuid4().hex.upper()}"
@@ -253,7 +280,15 @@ class _JobTrials:
             return
         try:
             async with self._key_requests, asyncio.timeout(REQUEST_TIMEOUT_SEC):
-                await AsyncAccessKeysClient.from_client(self._client).revoke_access_key(jti=jti)
+                from nemo_evals.jobs.runtime_client import EvalsRuntimeClient
+
+                if self._runtime_job is not None:
+                    trial = self._trials[name]
+                    await EvalsRuntimeClient.from_client(self._client).revoke_trial_key(
+                        workspace=trial.intake_workspace, job=self._runtime_job, jti=jti
+                    )
+                else:
+                    await AsyncAccessKeysClient.from_client(self._client).revoke_access_key(jti=jti)
         except Exception:
             logger.warning("Could not revoke a trial's access key %s", jti, exc_info=True)
             return

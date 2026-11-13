@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Mapping
 
 from nemo_helix_plugin.discovery import discover_entry_points
@@ -280,6 +280,21 @@ class AccountResolver:
                 subject_account_id=account_id,
                 subject_aliases=aliases,
             )
+
+        # These descriptors come from the authenticated service middleware, not
+        # request headers. Account storage deliberately retains the workload's
+        # existing identity; caller kind instead describes this verified token.
+        # Do not discard its actor/subject distinction when resolving accounts.
+        if (
+            isinstance(principal_descriptor, Mapping)
+            and isinstance(on_behalf_descriptor, Mapping)
+            and principal_descriptor.get("kind") == "workload_access_token"
+            and principal_descriptor.get("subject_claim") == "act.sub"
+            and principal_descriptor.get("subject") == auth_input.get("principal_id")
+            and on_behalf_descriptor.get("subject") == auth_input.get("on_behalf_of_principal_id")
+            and bool(auth_input.get("on_behalf_of_principal_id"))
+        ):
+            context = replace(context, caller_kind="service_principal")
 
         return context
 

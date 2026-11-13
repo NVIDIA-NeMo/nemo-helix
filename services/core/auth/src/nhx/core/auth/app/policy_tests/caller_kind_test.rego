@@ -16,9 +16,7 @@ import data.authz
 
 caller_kind_test_data := {
 	"roles": {
-		"Viewer": {
-			"permissions": ["models.read", "models.list", "jobs.read", "jobs.list"],
-		},
+		"Viewer": {"permissions": ["models.read", "models.list", "jobs.read", "jobs.list"]},
 		"Editor": {
 			"includes": ["Viewer"],
 			"permissions": ["models.create", "jobs.create"],
@@ -28,40 +26,26 @@ caller_kind_test_data := {
 			"permissions": ["iam.read", "iam.create"],
 		},
 		# Default role for service:* principals with no explicit bindings.
-		"ServiceSystem": {
-			"permissions": ["*"],
-		},
+		"ServiceSystem": {"permissions": ["*"]},
 	},
 	"endpoints": {
 		# Service-only route: only service principals are allowed.
-		"/apis/jobs/v2/workspaces/{workspace}/internal-jobs/{name}": {
-			"get": {"direct": {"actor_perms": ["jobs.read"]}, "callers": ["service_principal"]},
-		},
+		"/apis/jobs/v2/workspaces/{workspace}/internal-jobs/{name}": {"get": {"direct": {"actor_perms": ["jobs.read"]}, "callers": ["service_principal"]}},
 		# Mixed route: both humans and services are allowed.
-		"/apis/models/v2/workspaces/{workspace}/models/{name}": {
-			"get": {"direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]}, "callers": ["principal", "service_principal"]},
-		},
+		"/apis/models/v2/workspaces/{workspace}/models/{name}": {"get": {"direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]}, "callers": ["principal", "service_principal"]}},
 		# No `callers` key: legacy PRINCIPAL-default behavior.
-		"/apis/models/v2/workspaces/{workspace}/models": {
-			"get": {"direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]}},
-		},
+		"/apis/models/v2/workspaces/{workspace}/models": {"get": {"direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]}}},
 		# Principal-only route: only human principals are allowed (callers: ["principal"]).
-		"/apis/models/v2/workspaces/{workspace}/human-only/{name}": {
-			"get": {"direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]}, "callers": ["principal"]},
-		},
+		"/apis/models/v2/workspaces/{workspace}/human-only/{name}": {"get": {"direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]}, "callers": ["principal"]}},
 	},
 	"workspaces": {
 		"system": {},
 		"ws1": {},
 	},
 	"principals": {
-		"platform-admin@example.com": {
-			"workspaces": {"system": ["HelixAdmin"]},
-		},
+		"platform-admin@example.com": {"workspaces": {"system": ["HelixAdmin"]}},
 		# Human user with permissions sufficient for every endpoint under test.
-		"user@example.com": {
-			"workspaces": {"ws1": ["Viewer"]},
-		},
+		"user@example.com": {"workspaces": {"ws1": ["Viewer"]}},
 	},
 }
 
@@ -69,12 +53,11 @@ caller_kind_test_data := {
 
 # A normal human principal (with the required permission) is DENIED on a service-only route.
 test_service_only_route_denies_human_principal if {
-	result := data.authz.allow
-		with input as {
-			"principal_id": "user@example.com",
-			"method": "GET",
-			"path": "/apis/jobs/v2/workspaces/ws1/internal-jobs/job-1",
-		}
+	result := data.authz.allow with input as {
+		"principal_id": "user@example.com",
+		"method": "GET",
+		"path": "/apis/jobs/v2/workspaces/ws1/internal-jobs/job-1",
+	}
 		with data.authz.roles as caller_kind_test_data.roles
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 		with data.authz.workspaces as caller_kind_test_data.workspaces
@@ -85,12 +68,11 @@ test_service_only_route_denies_human_principal if {
 
 # A service principal is ALLOWED on the same service-only route.
 test_service_only_route_allows_service_principal if {
-	result := data.authz.allow
-		with input as {
-			"principal_id": "service:jobs-controller",
-			"method": "GET",
-			"path": "/apis/jobs/v2/workspaces/ws1/internal-jobs/job-1",
-		}
+	result := data.authz.allow with input as {
+		"principal_id": "service:jobs-controller",
+		"method": "GET",
+		"path": "/apis/jobs/v2/workspaces/ws1/internal-jobs/job-1",
+	}
 		with data.authz.roles as caller_kind_test_data.roles
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 		with data.authz.workspaces as caller_kind_test_data.workspaces
@@ -103,12 +85,11 @@ test_service_only_route_allows_service_principal if {
 # clawed back here (only non-admin humans are denied, per
 # test_service_only_route_denies_human_principal above).
 test_service_only_route_allows_platform_admin if {
-	result := data.authz.allow
-		with input as {
-			"principal_id": "platform-admin@example.com",
-			"method": "GET",
-			"path": "/apis/jobs/v2/workspaces/ws1/internal-jobs/job-1",
-		}
+	result := data.authz.allow with input as {
+		"principal_id": "platform-admin@example.com",
+		"method": "GET",
+		"path": "/apis/jobs/v2/workspaces/ws1/internal-jobs/job-1",
+	}
 		with data.authz.roles as caller_kind_test_data.roles
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 		with data.authz.workspaces as caller_kind_test_data.workspaces
@@ -121,12 +102,11 @@ test_service_only_route_allows_platform_admin if {
 
 # A human principal is ALLOWED on a route that lists both caller kinds.
 test_mixed_route_allows_human_principal if {
-	result := data.authz.allow
-		with input as {
-			"principal_id": "user@example.com",
-			"method": "GET",
-			"path": "/apis/models/v2/workspaces/ws1/models/m-1",
-		}
+	result := data.authz.allow with input as {
+		"principal_id": "user@example.com",
+		"method": "GET",
+		"path": "/apis/models/v2/workspaces/ws1/models/m-1",
+	}
 		with data.authz.roles as caller_kind_test_data.roles
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 		with data.authz.workspaces as caller_kind_test_data.workspaces
@@ -137,12 +117,11 @@ test_mixed_route_allows_human_principal if {
 
 # A service principal is ALLOWED on the same mixed route.
 test_mixed_route_allows_service_principal if {
-	result := data.authz.allow
-		with input as {
-			"principal_id": "service:customizer",
-			"method": "GET",
-			"path": "/apis/models/v2/workspaces/ws1/models/m-1",
-		}
+	result := data.authz.allow with input as {
+		"principal_id": "service:customizer",
+		"method": "GET",
+		"path": "/apis/models/v2/workspaces/ws1/models/m-1",
+	}
 		with data.authz.roles as caller_kind_test_data.roles
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 		with data.authz.workspaces as caller_kind_test_data.workspaces
@@ -155,12 +134,11 @@ test_mixed_route_allows_service_principal if {
 
 # A human principal with the required permission is ALLOWED on a principal-only route.
 test_principal_only_route_allows_human_principal if {
-	result := data.authz.allow
-		with input as {
-			"principal_id": "user@example.com",
-			"method": "GET",
-			"path": "/apis/models/v2/workspaces/ws1/human-only/m-1",
-		}
+	result := data.authz.allow with input as {
+		"principal_id": "user@example.com",
+		"method": "GET",
+		"path": "/apis/models/v2/workspaces/ws1/human-only/m-1",
+	}
 		with data.authz.roles as caller_kind_test_data.roles
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 		with data.authz.workspaces as caller_kind_test_data.workspaces
@@ -172,12 +150,11 @@ test_principal_only_route_allows_human_principal if {
 # A service principal is DENIED on the same principal-only route — even though ServiceSystem
 # grants "*" — closing the previously one-directional caller enforcement.
 test_principal_only_route_denies_service_principal if {
-	result := data.authz.allow
-		with input as {
-			"principal_id": "service:customizer",
-			"method": "GET",
-			"path": "/apis/models/v2/workspaces/ws1/human-only/m-1",
-		}
+	result := data.authz.allow with input as {
+		"principal_id": "service:customizer",
+		"method": "GET",
+		"path": "/apis/models/v2/workspaces/ws1/human-only/m-1",
+	}
 		with data.authz.roles as caller_kind_test_data.roles
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 		with data.authz.workspaces as caller_kind_test_data.workspaces
@@ -188,23 +165,21 @@ test_principal_only_route_denies_service_principal if {
 
 # principal_only_route is TRUE for a route that lists only "principal".
 test_principal_only_route_helper_true_for_principal_only if {
-	authz.principal_only_route
-		with input as {
-			"principal_id": "service:customizer",
-			"method": "GET",
-			"path": "/apis/models/v2/workspaces/ws1/human-only/m-1",
-		}
+	authz.principal_only_route with input as {
+		"principal_id": "service:customizer",
+		"method": "GET",
+		"path": "/apis/models/v2/workspaces/ws1/human-only/m-1",
+	}
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 }
 
 # principal_only_route is FALSE for a mixed route (which also lists "service_principal").
 test_principal_only_route_helper_false_for_mixed if {
-	not authz.principal_only_route
-		with input as {
-			"principal_id": "service:customizer",
-			"method": "GET",
-			"path": "/apis/models/v2/workspaces/ws1/models/m-1",
-		}
+	not authz.principal_only_route with input as {
+		"principal_id": "service:customizer",
+		"method": "GET",
+		"path": "/apis/models/v2/workspaces/ws1/models/m-1",
+	}
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 }
 
@@ -212,12 +187,11 @@ test_principal_only_route_helper_false_for_mixed if {
 
 # A human principal with the required permission is ALLOWED (the new deny does not fire).
 test_no_callers_key_allows_human_principal if {
-	result := data.authz.allow
-		with input as {
-			"principal_id": "user@example.com",
-			"method": "GET",
-			"path": "/apis/models/v2/workspaces/ws1/models",
-		}
+	result := data.authz.allow with input as {
+		"principal_id": "user@example.com",
+		"method": "GET",
+		"path": "/apis/models/v2/workspaces/ws1/models",
+	}
 		with data.authz.roles as caller_kind_test_data.roles
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 		with data.authz.workspaces as caller_kind_test_data.workspaces
@@ -228,12 +202,11 @@ test_no_callers_key_allows_human_principal if {
 
 # A service principal is ALLOWED on the no-callers route (unchanged from today).
 test_no_callers_key_allows_service_principal if {
-	result := data.authz.allow
-		with input as {
-			"principal_id": "service:customizer",
-			"method": "GET",
-			"path": "/apis/models/v2/workspaces/ws1/models",
-		}
+	result := data.authz.allow with input as {
+		"principal_id": "service:customizer",
+		"method": "GET",
+		"path": "/apis/models/v2/workspaces/ws1/models",
+	}
 		with data.authz.roles as caller_kind_test_data.roles
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 		with data.authz.workspaces as caller_kind_test_data.workspaces
@@ -246,33 +219,60 @@ test_no_callers_key_allows_service_principal if {
 
 # service_only_route is TRUE for a route that lists only "service_principal".
 test_service_only_route_helper_true_for_service_only if {
-	authz.service_only_route
-		with input as {
-			"principal_id": "user@example.com",
-			"method": "GET",
-			"path": "/apis/jobs/v2/workspaces/ws1/internal-jobs/job-1",
-		}
+	authz.service_only_route with input as {
+		"principal_id": "user@example.com",
+		"method": "GET",
+		"path": "/apis/jobs/v2/workspaces/ws1/internal-jobs/job-1",
+	}
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 }
 
 # service_only_route is FALSE for a mixed route that also lists "principal".
 test_service_only_route_helper_false_for_mixed if {
-	not authz.service_only_route
-		with input as {
-			"principal_id": "user@example.com",
-			"method": "GET",
-			"path": "/apis/models/v2/workspaces/ws1/models/m-1",
-		}
+	not authz.service_only_route with input as {
+		"principal_id": "user@example.com",
+		"method": "GET",
+		"path": "/apis/models/v2/workspaces/ws1/models/m-1",
+	}
 		with data.authz.endpoints as caller_kind_test_data.endpoints
 }
 
 # service_only_route is FALSE when the route has no `callers` key.
 test_service_only_route_helper_false_for_absent_callers if {
-	not authz.service_only_route
-		with input as {
-			"principal_id": "user@example.com",
-			"method": "GET",
-			"path": "/apis/models/v2/workspaces/ws1/models",
-		}
+	not authz.service_only_route with input as {
+		"principal_id": "user@example.com",
+		"method": "GET",
+		"path": "/apis/models/v2/workspaces/ws1/models",
+	}
 		with data.authz.endpoints as caller_kind_test_data.endpoints
+}
+
+# Delegated workloads retain the represented principal's business-route access.
+# This does not let actor-side ServiceSystem grants replace subject grants.
+test_principal_route_allows_delegated_service_with_subject_permission if {
+	result := data.authz.allow with input as {
+		"principal_id": "service:customizer",
+		"on_behalf_of_principal_id": "user@example.com",
+		"method": "GET",
+		"path": "/apis/models/v2/workspaces/ws1/human-only/m-1",
+	}
+		with data.authz.roles as caller_kind_test_data.roles
+		with data.authz.endpoints as caller_kind_test_data.endpoints
+		with data.authz.workspaces as caller_kind_test_data.workspaces
+		with data.authz.principals as caller_kind_test_data.principals
+	result.allowed
+}
+
+test_principal_route_denies_delegated_service_without_subject_permission if {
+	result := data.authz.allow with input as {
+		"principal_id": "service:customizer",
+		"on_behalf_of_principal_id": "unbound-user@example.com",
+		"method": "GET",
+		"path": "/apis/models/v2/workspaces/ws1/human-only/m-1",
+	}
+		with data.authz.roles as caller_kind_test_data.roles
+		with data.authz.endpoints as caller_kind_test_data.endpoints
+		with data.authz.workspaces as caller_kind_test_data.workspaces
+		with data.authz.principals as caller_kind_test_data.principals
+	not result.allowed
 }

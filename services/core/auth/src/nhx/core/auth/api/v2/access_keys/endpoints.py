@@ -134,12 +134,18 @@ def get_workspaces_client(
 
 
 def _caller_access_key_scope(auth_client: AuthClient) -> list[str] | None:
-    """The caller's own Scoped Access Key scope restriction, if any."""
+    """The creator's key scope ceiling, retained by signed workload delegation."""
     resolved = auth_client.resolved_bearer_token
-    if resolved is None or resolved.token_kind != "access_key":
+    if resolved is None:
         return None
-    services = sorted({scope.split(":", 1)[0] for scope in resolved.scopes if ":" in scope})
-    return services or None
+    if resolved.token_kind == "access_key":
+        scopes = resolved.scopes
+    else:
+        scopes = auth_client.principal.credential_scopes
+        if scopes is None:
+            return None
+    services = sorted({scope.split(":", 1)[0] for scope in scopes if ":" in scope})
+    return services or ([] if auth_client.principal.credential_scopes is not None else None)
 
 
 def _acting_service(auth_client: AuthClient) -> str | None:

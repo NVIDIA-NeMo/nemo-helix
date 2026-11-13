@@ -181,7 +181,8 @@ async def test_install_provisions_curl_uv_and_the_fabric_venv_in_order(tmp_path:
     _ran(environment, "apt-get install -y curl ca-certificates")
     prepare = _ran(environment, "mkdir -p")
     assert "/logs/agent" in prepare and "/tmp/nemo-fabric-venv" in prepare
-    assert "chown -R agent:agent" in prepare
+    assert "! -user agent -o ! -group agent" in prepare
+    assert "-exec chown -h agent:agent" in prepare
     install = _ran(environment, "astral.sh/uv")
     assert "uv python install 3.12" in install
     assert "uv venv /tmp/nemo-fabric-venv --python 3.12 --clear" in install

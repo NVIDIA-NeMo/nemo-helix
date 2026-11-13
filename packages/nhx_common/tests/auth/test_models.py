@@ -7,6 +7,7 @@ import json
 import os
 
 import pytest
+from nemo_helix_plugin.jobs.types import AuthContext as JobAuthContext
 from nhx.common.auth.exceptions import InvalidPrincipalHeader
 from nhx.common.auth.models import (
     MAX_EMAIL_LENGTH,
@@ -17,6 +18,15 @@ from nhx.common.auth.models import (
     AuthContext,
     Principal,
 )
+
+
+@pytest.mark.parametrize("scopes", [None, [], ["evaluator:write", "inference:write"]])
+def test_job_wire_context_preserves_credential_scope_ceiling(scopes):
+    original = Principal(id="creator", credential_scopes=scopes)
+    server = AuthContext.from_principal(original)
+    wire = JobAuthContext.model_validate_json(server.model_dump_json())
+    restored = AuthContext.model_validate_json(wire.model_dump_json()).to_principal()
+    assert restored.credential_scopes == scopes
 
 
 class TestPrincipalFromHeaders:
@@ -527,6 +537,17 @@ class TestPrincipalFromEnvVar:
 
 class TestAuthContextPrincipalRoundTrip:
     """AuthContext should preserve delegation fields for persistence and SDK rehydration."""
+
+    @pytest.mark.parametrize("scopes", [None, ["evaluator:write", "inference:read"]])
+    def test_scope_ceiling_survives_core_and_plugin_context_roundtrip(self, scopes: list[str] | None) -> None:
+        from nemo_helix_plugin.auth import AuthContext as PluginAuthContext
+
+        principal = Principal(id="user@example.com", credential_scopes=scopes)
+        core = AuthContext.from_principal(principal)
+        plugin = PluginAuthContext.model_validate(core.model_dump(mode="python"))
+        restored = AuthContext.model_validate(plugin.model_dump(mode="python"))
+        assert plugin == core
+        assert restored.to_principal().credential_scopes == scopes
 
     def test_from_principal_and_to_principal_round_trip(self):
         p = Principal(

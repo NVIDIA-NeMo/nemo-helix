@@ -9,6 +9,7 @@ from typing import ClassVar
 
 from fastapi import APIRouter
 from nemo_evals.api.v2 import image_builds as image_builds_routes
+from nemo_evals.api.v2 import job_runtime as job_runtime_routes
 from nemo_evals.api.v2 import live as live_routes
 from nemo_evals.api.v2 import metrics as metrics_routes
 from nemo_evals.api.v2 import results as results_routes
@@ -78,6 +79,7 @@ class EvaluatorPluginService(NemoService):
             }
 
         return [
+            RouterSpec(router=job_runtime_routes.router, tag="Evals Job Runtime", prefix="/v2/workspaces/{workspace}"),
             RouterSpec(
                 router=router,
                 tag="Evals Plugin",
