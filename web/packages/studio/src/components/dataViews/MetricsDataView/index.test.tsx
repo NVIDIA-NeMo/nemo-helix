@@ -7,14 +7,26 @@ import { ROUTES } from '@studio/constants/routes';
 import { server } from '@studio/mocks/node';
 import { getMetricsRoute } from '@studio/routes/utils';
 import { XL_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
-import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { act, renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { useState } from 'react';
 
 vi.mock('@studio/api/metrics/useMetricScoreHistory', () => ({
   METRIC_HISTORY_LIMIT: 200,
   useMetricScoreHistory: () => ({ results: [], isPending: false }),
 }));
+
+const page = (data: unknown[]) => ({
+  data,
+  pagination: {
+    page: 1,
+    page_size: 50,
+    current_page_size: data.length,
+    total_pages: 1,
+    total_results: data.length,
+  },
+});
 
 const metric = (name: string, metric_type: string) => ({
   id: name,
@@ -76,5 +88,40 @@ describe('MetricsDataView', () => {
         ),
       { timeout: XL_SELECTOR_TIMEOUT }
     );
+  });
+
+  it('deletes from the workspace the metric was selected in', async () => {
+    const deleted: string[] = [];
+    server.use(
+      http.get(`${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace/metrics`, () =>
+        HttpResponse.json(page([metric('judge', 'llm-judge')]))
+      ),
+      http.delete(
+        `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace/metrics/:name`,
+        ({ params }) => {
+          deleted.push(`${params.workspace}/${params.name}`);
+          return new HttpResponse(null, { status: 204 });
+        }
+      )
+    );
+    let switchWorkspace: (workspace: string) => void = () => {};
+    const Harness = () => {
+      const [workspace, setWorkspace] = useState('default');
+      switchWorkspace = setWorkspace;
+      return <MetricsDataView workspace={workspace} />;
+    };
+    const user = userEvent.setup();
+    renderRoute(<Harness />, {
+      history: getMetricsRoute('default'),
+      routes: [{ path: ROUTES.workspace.metrics, element: <Harness /> }],
+    });
+
+    await screen.findByText('judge');
+    await user.click(screen.getByRole('button', { name: 'Open quick actions menu' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+    act(() => switchWorkspace('other'));
+    await user.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(deleted).toEqual(['default/judge']));
   });
 });

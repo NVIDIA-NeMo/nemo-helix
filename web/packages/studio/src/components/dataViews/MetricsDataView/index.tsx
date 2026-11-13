@@ -50,7 +50,7 @@ export interface MetricsDataViewProps {
 export const MetricsDataView: FC<MetricsDataViewProps> = ({ workspace, onCreate }) => {
   const openRow = useRowNavigation();
   const queryClient = useQueryClient();
-  const [pendingDelete, setPendingDelete] = useState<Metric>();
+  const [pendingDelete, setPendingDelete] = useState<{ workspace: string; metric: Metric }>();
   const { mutateAsync: deleteMetric } = useEvalsDeleteMetric();
 
   const dataViewState = useStudioDataViewState<MetricFilter>({
@@ -119,11 +119,13 @@ export const MetricsDataView: FC<MetricsDataViewProps> = ({ workspace, onCreate 
   const handleDelete = async () => {
     if (!pendingDelete) return false;
     try {
-      await deleteMetric({ workspace, name: pendingDelete.name });
+      await deleteMetric({ workspace: pendingDelete.workspace, name: pendingDelete.metric.name });
     } catch {
       return false;
     }
-    await queryClient.invalidateQueries({ queryKey: getEvalsListMetricsQueryKey(workspace) });
+    await queryClient.invalidateQueries({
+      queryKey: getEvalsListMetricsQueryKey(pendingDelete.workspace),
+    });
     return true;
   };
 
@@ -209,7 +211,7 @@ export const MetricsDataView: FC<MetricsDataViewProps> = ({ workspace, onCreate 
       cell: ({ row }) => (
         <QuickActionsMenuRoot
           actions={[]}
-          deleteAction={{ onSelect: () => setPendingDelete(row.original) }}
+          deleteAction={{ onSelect: () => setPendingDelete({ workspace, metric: row.original }) }}
         />
       ),
     }),
@@ -255,7 +257,7 @@ export const MetricsDataView: FC<MetricsDataViewProps> = ({ workspace, onCreate 
           open
           simpleConfirm
           onDelete={handleDelete}
-          title={`Delete: ${pendingDelete.name}`}
+          title={`Delete: ${pendingDelete.metric.name}`}
           description="Evaluations that already ran keep their scores. New runs can no longer reference this metric."
           onClose={() => setPendingDelete(undefined)}
         />
