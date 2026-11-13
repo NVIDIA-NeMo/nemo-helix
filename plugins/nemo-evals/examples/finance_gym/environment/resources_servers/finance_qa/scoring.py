@@ -38,20 +38,28 @@ def chat_message(response: Mapping[str, Any]) -> dict[str, str]:
     ``<think>`` block the model wrote in its content, as the cookbook's prompt asks. It goes back in front of the
     content, where the cookbook's split still finds it.
     """
-    content: list[str] = []
-    reasoning: list[str] = []
+    message_text = ""
+    reasoning_texts: list[str] = []
     for item in response.get("output") or []:
-        kind = item.get("type")
-        if kind == "message":
-            content.extend(part["text"] for part in item.get("content") or [] if part.get("text"))
-        elif kind == "reasoning":
-            parts = [*(item.get("summary") or []), *(item.get("content") or [])]
-            reasoning.extend(part["text"] for part in parts if isinstance(part.get("text"), str))
-    own, *written = reasoning or [""]
-    return {
-        "content": "".join(f"<think>{text}</think>" for text in written) + "".join(content),
-        "reasoning_content": own,
-    }
+        if item.get("type") == "message":
+            for part in item.get("content") or []:
+                if part.get("text"):
+                    message_text += part["text"]
+        elif item.get("type") == "reasoning":
+            parts = list(item.get("summary") or []) + list(item.get("content") or [])
+            for part in parts:
+                # Keep empty texts too: an empty <think></think> block the model wrote still goes back.
+                if part.get("text") is not None:
+                    reasoning_texts.append(part["text"])
+
+    if not reasoning_texts:
+        return {"content": message_text, "reasoning_content": ""}
+
+    own_reasoning = reasoning_texts[0]
+    written_blocks = ""
+    for text in reasoning_texts[1:]:
+        written_blocks += f"<think>{text}</think>"
+    return {"content": written_blocks + message_text, "reasoning_content": own_reasoning}
 
 
 def score(*, task: str, expected_answer: str, response: Mapping[str, Any], tolerance: float = 0.05) -> dict[str, float]:
