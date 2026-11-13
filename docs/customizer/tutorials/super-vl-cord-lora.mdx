@@ -11,16 +11,16 @@ description: ""
   </a>
 </div>
 
-Train a LoRA adapter on receipt images, deploy it with vLLM, and score the official validation split. The dataset row is an OpenAI chat message whose user turn is an image part plus a text part. See [OpenAI Chat Model with Images](/documentation/customizer-reference/models/dataset-format#openai-chat-model-with-images) and [Nemotron Vision-Language Models](/documentation/customizer-reference/models/nemotron-vl).
+Train a LoRA adapter on receipt images, deploy it, and score the validation split. Row format: [OpenAI Chat Model with Images](/documentation/customizer-reference/models/dataset-format#openai-chat-model-with-images). Model notes: [Nemotron Vision-Language Models](/documentation/customizer-reference/models/nemotron-vl).
 
-The walkthrough is written once. `PROFILE` selects the hardware:
+`PROFILE` selects the hardware:
 
-- `super-vl` is the upstream Super VL recipe: 8x 80 GB Hopper or Blackwell GPUs, rank 64. Platform scores for this profile are not yet measured.
-- `qwen3-vl-8b` is the path that ran on the platform: `Qwen/Qwen3-VL-8B-Instruct` on one 48 GB GPU, rank 16, a 300/30-row subset. It exercises the same feature. It is not a Super VL result.
+- `super-vl`: upstream recipe, 8x 80 GB, rank 64, 4 epochs (400 steps on 800 rows at global batch 8). Not yet measured on the platform.
+- `qwen3-vl-8b`: `Qwen/Qwen3-VL-8B-Instruct`, one 48 GB GPU, rank 16, 300/30 rows. Not a Super VL result.
 
 <Tip>
 
-Set `PROFILE = "qwen3-vl-8b"` when you do not have a cluster. One 48 GB GPU is enough.
+Set `PROFILE = "qwen3-vl-8b"` without a cluster. LoRA fits one 48 GB GPU.
 
 </Tip>
 
@@ -48,8 +48,8 @@ PROFILES = {
         "lora_rank": 64,
         "lora_alpha": 128,
         "max_seq_length": 8192,
-        "epochs": 1,
-        "max_steps": 400,
+        "epochs": 4,
+        "max_steps": None,
         "global_batch_size": 8,
         "learning_rate": 2e-4,
         "num_gpus_per_node": 8,
@@ -187,7 +187,7 @@ print(f"Wrote {train_count} train rows and {validation_count} validation rows to
 
 ## 4. Upload the fileset
 
-The trailing slash on the remote path uploads the directory contents. Without it, the files nest under `cord-v2/` and the relative image paths no longer resolve. Use a new fileset name if you change the data. A retried upload of thousands of images can leave duplicates.
+The trailing slash uploads the directory contents. Without it, image paths nest under `cord-v2/` and no longer resolve.
 
 ```python
 dataset_name = profile["dataset_name"]
@@ -253,7 +253,7 @@ while True:
 
 ## 6. Dry-run, then train
 
-The vision-language compiler freezes the vision tower, so leave `lora.exclude_modules` unset. vLLM's "no matching PunicaWrapper" lines for vision modules are harmless.
+Leave `lora.exclude_modules` unset. The compiler freezes the vision tower and excludes the fused Mamba `*.out_proj` on this checkpoint. vLLM's "no matching PunicaWrapper" lines for vision modules are harmless.
 
 ```python
 job_suffix = uuid.uuid4().hex[:4]
@@ -294,8 +294,6 @@ Path("job.json").write_text(spec.model_dump_json(indent=2), encoding="utf-8")
 print("Wrote job.json. Dry-run with: nemo customization automodel --job-json ./job.json --workspace default --dry-run")
 
 ```
-
-Write that JSON to `job.json` and dry-run before submitting. A dry run checks the spec, the model and dataset, and the first rows of each file. It creates nothing.
 
 ```bash
 nemo customization automodel --job-json ./job.json --workspace default --dry-run
@@ -382,9 +380,7 @@ print(response)
 
 ## 8. Score the first 20 validation receipts
 
-Exact match is `StringCheckMetric` with `equals`. Similarity is `SequenceSimilarityMetric`. Evaluator's ExactMatch and F1 strip punctuation, which erases the `json2token` tags, so they are not the recipe scores. The reference template must resolve to a string.
-
-Upstream reference, first 20 receipts, greedy, adapter merged, step 199: 8/20 exact, mean similarity 0.954, median 0.997. A platform Super VL score is not yet measured. The Qwen3-VL-8B run on this path was not scored.
+Use `StringCheckMetric` (`equals`) and `SequenceSimilarityMetric`. Evaluator's ExactMatch and F1 strip the `json2token` tags. Scores are on [Nemotron Vision-Language Models](/documentation/customizer-reference/models/nemotron-vl#measured-uplift).
 
 ```python
 from nemo_evals.sdk import Evaluator, FilesetRef

@@ -462,7 +462,7 @@ Image prompts train through the same GRPO job. The rollout rows carry the image,
 
 `training.vllm_expert_parallel_size` sets expert parallel on the colocated vLLM engine. It defaults to 1. A value greater than 1 must divide the total GPU count and must not exceed the GPUs on one node. Training `expert_parallel_size` has the same one-node limit. Leave `PYTORCH_CUDA_ALLOC_CONF` unset; `expandable_segments:True` breaks the weight refit. Sequence packing is rejected for vision-language and multimodal runs. Rebuild the environment package from the Gym version the RL image pins. A package built against a different Gym checkout can shadow the image copy even when both report the same version.
 
-**Super VL, upstream reference.** 16 nodes of 4x GB200. This is not an 8-GPU shape. Training expert parallel 4, vLLM tensor parallel 4 and expert parallel 4. On valA (256 samples) accuracy was 0.57 at step 0, 0.77 at step 10, and 0.84 at step 20, and `gen_kl_error` stayed about 0.006 to 0.009. Resume was checked. Source: the [NeMo RL Super VL guide](https://github.com/NVIDIA-NeMo/RL/blob/super-3.5-automodel/docs/guides/models/nemotron/nemotron-3.5-super-vl.md). A platform Super VL run is not yet measured.
+**Super VL, upstream reference.** 16 nodes of 4x GB200. Do not scale this to 8 GPUs. valA (256 samples): 0.57 / 0.77 / 0.84 at steps 0 / 10 / 20, `gen_kl_error` about 0.006 to 0.009. Not yet measured on the platform. [Guide](https://github.com/NVIDIA-NeMo/RL/blob/super-3.5-automodel/docs/guides/models/nemotron/nemotron-3.5-super-vl.md).
 
 ```json
 {
@@ -494,7 +494,7 @@ Image prompts train through the same GRPO job. The rollout rows carry the image,
 
 Prepare the rows with `--prompt nemotron-omni`. `skip_tokenizer_init` stays unset; NeMo RL fills it for `NemotronH_Omni_Reasoning_V3`.
 
-A 1-GPU run of this CLEVR job with `Qwen/Qwen3-VL-8B-Instruct` is on [Qwen Models](/documentation/customizer-reference/models/qwen#qwen3-vl-8b-instruct). It is a separate checkpoint from Super VL.
+The 1-GPU job for `Qwen/Qwen3-VL-8B-Instruct` is on [Qwen Models](/documentation/customizer-reference/models/qwen#qwen3-vl-8b-instruct).
 
 ## Key hyperparameters
 

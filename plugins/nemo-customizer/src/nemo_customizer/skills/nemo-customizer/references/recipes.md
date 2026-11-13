@@ -45,9 +45,11 @@ Nemotron 3.5 Lightning 30B-A3B and Nemotron 3 Nano 30B-A3B share the `NemotronH`
 
 The Automodel Super VL recipes load the released BF16 checkpoint, `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16`. Keep the recipe's training values and point the job at the user's model entity for that checkpoint.
 
+The CORD recipe's `step_scheduler.max_steps` of 400 is the training length. `ci.max_steps` of 2 is the smoke cap step 5 says to drop. Here `max_steps` only shortens a run (`min(max_steps, epochs × steps_per_epoch)`, and `epochs` defaults to 1), so submit `epochs` 4 and leave `max_steps` unset: 800 rows at global batch 8 is 100 steps per epoch.
+
 | Profile | Source | What to submit |
 |---|---|---|
-| Super VL CORD-v2 LoRA | Upstream Automodel reference. Not yet measured on the platform. | BF16 checkpoint, `trust_remote_code`, rank 64, alpha 128, vision tower frozen by the compiler, expert parallel 8, tensor parallel 1, 8x 80 GB, global batch 8, `max_steps` 400, learning rate 2e-4, full fileset. Deploy with the Super VL LoRA flags, `--max-lora-rank 64`, `--max-loras 2`, `disk_size` at least `300Gi`, 4 GPUs. |
+| Super VL CORD-v2 LoRA | Upstream Automodel reference. Not yet measured on the platform. | BF16 checkpoint, `trust_remote_code`, rank 64, alpha 128, vision tower frozen by the compiler, expert parallel 8, tensor parallel 1, 8x 80 GB, global batch 8, `epochs` 4, learning rate 2e-4, full fileset. Do not set `max_steps`. Deploy with the Super VL LoRA flags, `--max-lora-rank 64`, `--max-loras 2`, `disk_size` at least `300Gi`, 4 GPUs. |
 | Super VL finance LoRA | Upstream cookbook hardware. Headline scores were not captured. | Same 8-GPU shape, or 4x GB200. One adapter per fileset: `finance-ocr`, `finance-reasoning`, `finance-code`. |
 | Super VL CLEVR GRPO | Upstream NeMo RL guide. Do not scale it to 8 GPUs. | 16 nodes of 4x GB200, training expert parallel 4, vLLM tensor parallel 4 and expert parallel 4, `limit_mm_per_prompt.image` 2, prompt `nemotron-omni`, `hf_config_overrides.num_nextn_predict_layers` 0. valA accuracy 0.57 / 0.77 / 0.84 at steps 0 / 10 / 20. |
 All of [`examples/llm_finetune/nemotron/`](https://github.com/NVIDIA-NeMo/Automodel/tree/r0.7.0/examples/llm_finetune/nemotron) also covers Llama-Nemotron 8B / 49B.
@@ -73,7 +75,7 @@ All of [`examples/llm_finetune/nemotron/`](https://github.com/NVIDIA-NeMo/Automo
 
 ### Qwen3-VL-8B-Instruct on one GPU
 
-For a vision job without a cluster, use `Qwen/Qwen3-VL-8B-Instruct` on one 48 GB GPU. CORD ran on this checkpoint on the platform. Use the finance and CLEVR settings below for a 1-GPU experiment on this same checkpoint.
+For a vision LoRA job without a cluster, use `Qwen/Qwen3-VL-8B-Instruct` on one 48 GB GPU. Full-weight SFT does not fit that GPU. CORD ran on this checkpoint on the platform. Use the finance and CLEVR settings below for a 1-GPU experiment on this same checkpoint.
 
 - **CORD:** rank 16, alpha 32, `max_seq_length` 2048, global batch 8, micro batch 1, learning rate 1e-5, one epoch, first 300 train and 30 validation rows, deploy `gpu` 1 and `--max-model-len 8192`.
 - **Finance OCR:** rank 16, alpha 32, global batch 4, about 200 rows, `attn_implementation` `sdpa`.

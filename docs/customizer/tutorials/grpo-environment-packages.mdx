@@ -439,7 +439,7 @@ Job JSON: [GRPO and Reward Environments](/documentation/customizer-reference/grp
 
 ## CLEVR-CoGenT
 
-CLEVR-CoGenT is the vision GRPO example. The server lives in the repository at `scripts/grpo-examples/servers/vlm`. Build the package from the Gym checkout the RL image pins (`--nemo-rl-root`), not from a newer Gym, or the vendored copy shadows the image.
+Vision GRPO example. The server is `scripts/grpo-examples/servers/vlm`. Build the package from the Gym checkout the RL image pins (`--nemo-rl-root`); a newer Gym shadows the image copy. `--prompt nemotron-omni` is Super VL. `--prompt qwen` is [Qwen3-VL-8B-Instruct](/documentation/customizer-reference/models/qwen#qwen3-vl-8b-instruct).
 
 ```bash
 uv run --no-project --with datasets --with pillow \
@@ -449,8 +449,6 @@ uv run --no-project --with datasets --with pillow \
   --validation-size 16 \
   --prompt qwen
 ```
-
-`--prompt nemotron-omni` is the Super VL prompt. `--prompt qwen` is the prompt for `Qwen/Qwen3-VL-8B-Instruct`, the 1-GPU checkpoint in [Qwen Models](/documentation/customizer-reference/models/qwen#qwen3-vl-8b-instruct).
 
 Package the server with the conversion environment's Python, not `uv run` against the project environment:
 
@@ -475,7 +473,7 @@ nemo files filesets create clevr-cogent --workspace default --purpose dataset --
 nemo files upload ./clevr-cogent/ clevr-cogent --workspace default
 ```
 
-The trailing slash uploads the directory contents. Job JSON for the 16x4 Super VL reference is in [Vision-language models](/documentation/customizer-reference/grpo-and-reward-environments#vision-language-models). The 1-GPU Qwen3-VL-8B job is in [Qwen Models](/documentation/customizer-reference/models/qwen#qwen3-vl-8b-instruct).
+The trailing slash uploads the directory contents. Super VL job: [Vision-language models](/documentation/customizer-reference/grpo-and-reward-environments#vision-language-models). Qwen job: [Qwen Models](/documentation/customizer-reference/models/qwen#qwen3-vl-8b-instruct).
 
 ## Next Steps
 

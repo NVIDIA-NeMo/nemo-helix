@@ -84,17 +84,17 @@ Deployment configurations on this page that use the multi-LLM NIM (`nvcr.io/nim/
 | Default Name | Qwen/Qwen3-VL-8B-Instruct |
 | Hugging Face | [Qwen/Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) |
 
-This is the one-GPU vision checkpoint. It fits one 48GB GPU, so it works without a cluster. It is not a Nemotron 3.5 Super VL result. For the 8-GPU Super VL profile, see [Nemotron Vision-Language Models](/documentation/customizer-reference/models/nemotron-vl).
+LoRA fits one 48GB GPU. Full-weight SFT does not. This is not a Super VL result; that profile is on [Nemotron Vision-Language Models](/documentation/customizer-reference/models/nemotron-vl).
 
 ### Training Options
 
-- **CORD-v2 LoRA**: 1x 48GB GPU, rank 16, alpha 32. The verified run used the first 300 training rows and 30 validation rows. Walkthrough: [Fine-Tune Nemotron 3.5 Super VL on CORD-v2](/documentation/customizer-reference/tutorials/super-vl-cord-lora) with `PROFILE = "qwen3-vl-8b"`.
-- **Finance OCR LoRA**: 1x 48GB GPU, rank 16, alpha 32, `attn_implementation` `sdpa`. This job checks the vision fine-tune path. It was not deployed or scored.
-- **CLEVR-CoGenT GRPO**: 1x 48GB GPU. Prepare 32 training rows and 16 validation rows with `--prompt qwen`. The tool agent needs `inline_tool_output_images: true` on the policy model server and `max_rollout_turns` of 2. See [Vision-language models](/documentation/customizer-reference/grpo-and-reward-environments#vision-language-models).
+- **CORD-v2 LoRA.** Rank 16, alpha 32, first 300 training rows and 30 validation rows. Walkthrough: [Fine-Tune Nemotron 3.5 Super VL on CORD-v2](/documentation/customizer-reference/tutorials/super-vl-cord-lora) with `PROFILE = "qwen3-vl-8b"`.
+- **Finance OCR LoRA.** Same shape as CORD, with global batch 4, `attn_implementation` `sdpa`, and dataset `default/finance-ocr-small`. Not deployed or scored.
+- **CLEVR-CoGenT GRPO.** 32 training rows and 16 validation rows, `--prompt qwen`, `inline_tool_output_images` true, `max_rollout_turns` 2.
 
 ### Deployment Configuration
 
-- **vLLM**: 1x 48GB GPU, `--max-model-len 8192`.
+vLLM, 1x 48GB, `--max-model-len 8192`.
 
 ### CORD-v2 LoRA job
 
@@ -117,25 +117,6 @@ This is the one-GPU vision checkpoint. It fits one 48GB GPU, so it works without
     "gpu": 1,
     "additional_args": ["--max-model-len", "8192"]
   }
-}
-```
-
-### Finance OCR LoRA job
-
-```json
-{
-  "model": "default/qwen3-vl-8b-instruct",
-  "dataset": {"training": "default/finance-ocr-small"},
-  "training": {
-    "training_type": "sft",
-    "finetuning_type": "lora",
-    "lora": {"rank": 16, "alpha": 32},
-    "max_seq_length": 2048,
-    "attn_implementation": "sdpa"
-  },
-  "schedule": {"epochs": 1},
-  "batch": {"global_batch_size": 4, "micro_batch_size": 1},
-  "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1, "tensor_parallel_size": 1}
 }
 ```
 
