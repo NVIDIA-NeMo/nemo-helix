@@ -692,7 +692,8 @@ class _AgentEvalJobBase(NemoJob):
                 result.metadata.target.config["url"] = endpoint.url
 
         files = self._write_result_files(result, ctx.storage.persistent)
-        artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)
+        # Stage the bundle: agent runtimes can still change files under its evidence while it uploads.
+        artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir, stage=True)
         ctx.results.save(SUMMARY_RESULT_NAME, files.summary)
 
         outcome = agent_eval_outcome(result)

@@ -14,7 +14,7 @@ from functools import partial
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
-from typing import cast
+from typing import NoReturn, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -68,10 +68,12 @@ async def _upload(
     manager: file_manager.FilesetFileManager | file_manager.AsyncFilesetFileManager,
     source: Path,
     ignore_patterns: list[str] | str | None = None,
+    *,
+    stage: bool = True,
 ) -> str:
     if isinstance(manager, file_manager.AsyncFilesetFileManager):
-        return await manager.upload(source, "bundle", ignore_patterns)
-    return manager.upload(source, "bundle", ignore_patterns)
+        return await manager.upload(source, "bundle", ignore_patterns, stage=stage)
+    return manager.upload(source, "bundle", ignore_patterns, stage=stage)
 
 
 def test_staged_directory_survives_source_cleanup_and_keeps_hidden_user_files(tmp_path: Path) -> None:
@@ -106,7 +108,7 @@ def test_disappearing_clone_lock_restarts_complete_acquisition(tmp_path: Path, m
     lock.write_text("transient clone state")
     staging = tmp_path / "staging"
     staging.mkdir()
-    list_files = file_manager._list_local_files_sync
+    list_files = file_manager._list_selected_files
     listings = 0
 
     def list_then_finish_clone(path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
@@ -119,7 +121,7 @@ def test_disappearing_clone_lock_restarts_complete_acquisition(tmp_path: Path, m
 
     # Schedule a real unlink at the traversal/open boundary, without replacing
     # pathlib, shutil, open, or any product service/client.
-    monkeypatch.setattr(file_manager, "_list_local_files_sync", list_then_finish_clone)
+    monkeypatch.setattr(file_manager, "_list_selected_files", list_then_finish_clone)
     snapshot, files = file_manager._stage_local_files(source, staging, None)
 
     assert listings == 2
@@ -136,7 +138,7 @@ def test_persistently_disappearing_required_file_fails_instead_of_being_omitted(
     required = source / "trials.jsonl"
     staging = tmp_path / "staging"
     staging.mkdir()
-    list_files = file_manager._list_local_files_sync
+    list_files = file_manager._list_selected_files
     listings = 0
 
     def list_then_remove_required(path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
@@ -147,7 +149,7 @@ def test_persistently_disappearing_required_file_fails_instead_of_being_omitted(
         required.unlink()
         return files
 
-    monkeypatch.setattr(file_manager, "_list_local_files_sync", list_then_remove_required)
+    monkeypatch.setattr(file_manager, "_list_selected_files", list_then_remove_required)
     with pytest.raises(FileNotFoundError, match="trials.jsonl"):
         file_manager._stage_local_files(source, staging, None)
 
@@ -206,7 +208,7 @@ async def test_directory_upload_retries_disappearing_lock_and_cleans_staging(
     lock = source / "artifacts/.fabric/codex/custom-provider-home/.tmp/clone/.git/shallow.lock"
     lock.parent.mkdir(parents=True)
     lock.write_bytes(b"runtime lock")
-    list_files = file_manager._list_local_files_sync
+    list_files = file_manager._list_selected_files
     listings = 0
 
     def finish_clone_after_listing(path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
@@ -217,7 +219,7 @@ async def test_directory_upload_retries_disappearing_lock_and_cleans_staging(
             lock.unlink()
         return listed
 
-    monkeypatch.setattr(file_manager, "_list_local_files_sync", finish_clone_after_listing)
+    monkeypatch.setattr(file_manager, "_list_selected_files", finish_clone_after_listing)
     fs = _RecordingFileSystem()
     await _upload(_manager(asynchronous, fs), source, "*.log")
 
@@ -268,7 +270,7 @@ async def test_source_root_removed_during_listing_cannot_publish_an_empty_result
         path.rmdir()
         return []
 
-    monkeypatch.setattr(file_manager, "_list_local_files_sync", remove_during_listing)
+    monkeypatch.setattr(file_manager, "_list_selected_files", remove_during_listing)
     fs = _RecordingFileSystem()
     with pytest.raises(FileNotFoundError):
         await _upload(_manager(asynchronous, fs), source)
@@ -413,7 +415,7 @@ async def test_upload_error_preserves_origin_without_reacquiring(
     (source / "evidence").write_bytes(b"evidence")
     error = OSError("remote upload failed")
     fs = _RecordingFileSystem()
-    list_files = file_manager._list_local_files_sync
+    list_files = file_manager._list_selected_files
     listings = 0
 
     def count_listing(path: Path, ignore_patterns: list[str] | str | None = None) -> list[str]:
@@ -425,7 +427,7 @@ async def test_upload_error_preserves_origin_without_reacquiring(
         fs.local_paths.append(Path(local))
         raise error
 
-    monkeypatch.setattr(file_manager, "_list_local_files_sync", count_listing)
+    monkeypatch.setattr(file_manager, "_list_selected_files", count_listing)
     monkeypatch.setattr(fs, "put_file", fail_upload)
     with pytest.raises(OSError) as raised:
         await _upload(_manager(asynchronous, fs), source)
@@ -502,9 +504,9 @@ async def test_failed_upload_is_not_registered_as_complete(
     monkeypatch.setattr(manager, "_create_file_manager", lambda _name: file_sink)
     with pytest.raises(OSError) as raised:
         if isinstance(manager, AsyncResultManager):
-            await manager.create_result("bundle", source)
+            await manager.create_result("bundle", source, stage=True)
         else:
-            manager.create_result("bundle", source)
+            manager.create_result("bundle", source, stage=True)
     assert raised.value is error
     jobs_client.create_job_result.assert_not_called()
     assert not list(upload_temporary_root.iterdir())
@@ -519,7 +521,7 @@ async def test_directory_upload_stops_at_first_remote_failure(
     source.mkdir()
     for name in ("first", "second"):
         (source / name).write_text(name)
-    monkeypatch.setattr(file_manager, "_list_local_files_sync", lambda _path, ignore_patterns=None: ["first", "second"])
+    monkeypatch.setattr(file_manager, "_list_selected_files", lambda _path, ignore_patterns=None: ["first", "second"])
     fs = _RecordingFileSystem()
     error = OSError("first upload failed")
     attempts: list[str] = []
@@ -693,4 +695,30 @@ async def test_release_directory_patterns_retain_literal_matching(
     await _upload(_manager(asynchronous, fs), source, [pattern])
 
     assert fs.uploads == {f"default/results#bundle/{directory}/keep.txt": b"selected"}
+    assert not list(upload_temporary_root.iterdir())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+async def test_unstaged_directory_upload_reads_the_source_directly(
+    tmp_path: Path, upload_temporary_root: Path, monkeypatch: pytest.MonkeyPatch, asynchronous: bool
+) -> None:
+    source = tmp_path / "source"
+    (source / "nested").mkdir(parents=True)
+    (source / "summary.json").write_bytes(b"summary")
+    (source / "nested/evidence").write_bytes(b"evidence")
+    (source / "debug.log").write_bytes(b"ignored")
+
+    def unexpected_staging(*_args: object, **_kwargs: object) -> NoReturn:
+        raise AssertionError("an unstaged upload must not stage")
+
+    monkeypatch.setattr(file_manager, "_stage_local_files", unexpected_staging)
+    fs = _RecordingFileSystem()
+
+    await _upload(_manager(asynchronous, fs), source, "*.log", stage=False)
+
+    assert fs.uploads == {
+        "default/results#bundle/summary.json": b"summary",
+        "default/results#bundle/nested/evidence": b"evidence",
+    }
+    assert sorted(fs.local_paths) == sorted([source / "summary.json", source / "nested/evidence"])
     assert not list(upload_temporary_root.iterdir())
