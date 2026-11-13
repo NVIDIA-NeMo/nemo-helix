@@ -201,6 +201,9 @@ def test_safe_synthesizer_generation_stack_uses_patched_upstream_release() -> No
     assert "nemo-safe-synthesizer[engine,cu129]==0.1.17" in dockerfile.read_text()
     assert "https://wheels.vllm.ai/0.32.0/cu129" in dockerfile.read_text()
     assert _package_specs(dockerfile, "vllm") == ["vllm==0.32.0+cu129"]
+    assert _package_specs(dockerfile, "setuptools") == ["setuptools>=83.0.0"]
+    constraints = ROOT / "plugins/nemo-safe-synthesizer/constraints.txt"
+    assert _package_specs(constraints, "setuptools") == ["setuptools>=83.0.0"]
     for name in ("flashinfer-python", "flashinfer-cubin"):
         assert _package_specs(dockerfile, name) == [f"{name}==0.7.0.post1"]
     assert _package_specs(dockerfile, "flashinfer-jit-cache") == ["flashinfer-jit-cache==0.7.0.post1+cu129"]
@@ -221,6 +224,7 @@ def test_rl_generation_security_upgrade_precedes_prefetch_and_survives_source_co
         "flashinfer-python==0.6.18.post1",
         "flashinfer-cubin==0.6.18.post1",
         "flashinfer-jit-cache==0.6.18.post1",
+        "nvidia-cutlass-dsl[cu13]==4.7.1",
     ):
         assert f"'{requirement}'" in text
     backup = text.index("cp pyproject.toml uv.lock /tmp/nhx-nemo-rl-lock/")
