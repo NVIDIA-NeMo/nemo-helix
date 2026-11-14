@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Sandboxed Gym evaluation, for the Kind sandboxed Gym e2e (the gym_sandbox_e2e tests in
+# e2e/test_evaluator_plugin.py). Layer it on kind.yaml, on a cluster that already has OpenSandbox
+# (e2e/k8s/scripts/install_opensandbox_kind.sh). The chart's opensandbox.* defaults already point at
+# that install.
+#
+# This turns on sandboxed execution for every Gym target on the cluster, so the colocated Gym e2e
+# (the other gym_e2e tests) needs a cluster without it.
+
+# Injects the OpenSandbox connection into Jobs pods and renders the sandbox ingress NetworkPolicy.
+sandboxClusterCapable: true
+
+platformConfig:
+  evals:
+    sandboxed_gym_default: true
+    sandbox_cluster_capable: true
+    # The claim the Jobs execution profiles stage onto; Evaluator refuses a FileSet-backed job when
+    # the two differ. kind.yaml keeps it ReadWriteOnce, which one node can share between the job's
+    # steps and the Gym host.
+    sandbox_job_storage_pvc_claim: '{{ include "nhx-core.persistentVolumeClaim" . }}'
+    # sandbox_runtime_image is left unset: the default is nhx-gym-host from the platform's own
+    # image registry and tag, which is the image the CI run built.
+    #
+    # The only destination a Gym host may reach, besides the two Evaluator adds itself (the episode
+    # broker and the job pod's DNS resolvers): the platform API, where the tests' mock model is
+    # served. The tests reach it by this name, so run them with NHX_E2E_INTERNAL_BASE_URL set to
+    # the same URL.
+    sandbox_policy_base_urls:
+      - 'http://{{ include "nhx-api.api-servicename" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.service.port }}'
+    # Requests and limits of each Gym host, sized to fit beside the platform on a 4-CPU, 16 GB CI
+    # runner. The BatchSandbox template does not set them: OpenSandbox ignores its resources.
+    sandbox_resources:
+      cpu: "1"
+      memory: 4Gi

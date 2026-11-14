@@ -217,6 +217,22 @@ Before accepting custom environment jobs, verify:
 4. The Gym host can reach each configured model URL but cannot reach an unlisted destination.
 5. A completed and a failed run both destroy their Gym hosts.
 
+The repository's sandboxed Gym end-to-end tests check part of items 4 and 5 against a running
+deployment. They submit a small custom environment whose verifier probes the network and storage
+from inside the Gym host:
+
+- Item 4, for one model URL: the one the tests call, which is the platform API unless they are given
+  a real model. They also check that the Kubernetes API, a public address, and a public name are
+  unreachable. They do not read `sandbox_policy_base_urls`, so to check another configured model
+  URL, run them again with `NHX_E2E_GYM_POLICY_ROUTE` set to it, `NHX_E2E_GYM_POLICY_MODEL` set to a
+  model it serves, and the endpoint's key as the section linked below describes.
+- Item 5, for a run that completes and a run that fails after its Gym host is ready. They watch the
+  cluster for the host's removal.
+
+They need a source checkout and `kubectl` access to the cluster. See
+[Sandboxed Gym evaluation](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/e2e/README.md#sandboxed-gym-evaluation)
+for the settings and the command.
+
 ## Related
 
 <Cards>

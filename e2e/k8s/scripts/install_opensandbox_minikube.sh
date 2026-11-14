@@ -29,6 +29,12 @@
 #   OPENSANDBOX_UMBRELLA_VERSION    Umbrella tarball that contains the server chart (default: 0.2.2)
 #   KUBE_NAMESPACE               Job / Helm-release namespace (default: default). Alias: NHX_NAMESPACE
 #   MINIKUBE_PROFILE             kubectl/helm --context (default: minikube). Does not change the current kubeconfig context.
+#   KUBE_CONTEXT                 kubectl/helm --context for a cluster that is not minikube; overrides MINIKUBE_PROFILE.
+#                                For kind, use install_opensandbox_kind.sh, which sets this and the next two.
+#   BATCHSANDBOX_TEMPLATE        BatchSandbox template ConfigMap to apply (default: e2e/k8s/values/batchsandbox-minikube-template.yaml)
+#   PULL_SECRET_CHECK            What to do when a pull Secret the template names is missing from KUBE_NAMESPACE:
+#                                `error` (default) stops the install before it changes the cluster, `warn`
+#                                continues, for a cluster whose nodes already hold the sandbox images.
 #   SKIP_VERIFY=1                Skip k8s/helm/examples/opensandbox/verify/shared-kernel.sh
 #   HELM_TIMEOUT                 Helm --wait timeout (default: 10m)
 set -euo pipefail
@@ -44,6 +50,8 @@ KUBE_NAMESPACE="${KUBE_NAMESPACE:-${NHX_NAMESPACE:-default}}"
 NHX_NAMESPACE="${KUBE_NAMESPACE}"
 MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
 export KUBE_CONTEXT="${KUBE_CONTEXT:-${MINIKUBE_PROFILE}}"
+BATCHSANDBOX_TEMPLATE="${BATCHSANDBOX_TEMPLATE:-${REPO_ROOT}/e2e/k8s/values/batchsandbox-minikube-template.yaml}"
+PULL_SECRET_CHECK="${PULL_SECRET_CHECK:-error}"
 HELM_TIMEOUT="${HELM_TIMEOUT:-10m}"
 API_SECRET="opensandbox-server-api-key"
 OPENSANDBOX_CONTROLLER_VERSION="${OPENSANDBOX_CONTROLLER_VERSION:-0.2.0}"
@@ -75,17 +83,87 @@ for tool in kubectl helm openssl python3 curl tar; do
     fi
 done
 
+if [ ! -f "${BATCHSANDBOX_TEMPLATE}" ]; then
+    log_error "BATCHSANDBOX_TEMPLATE does not exist or is not a file: ${BATCHSANDBOX_TEMPLATE}"
+    exit 1
+fi
+
+case "${PULL_SECRET_CHECK}" in
+    error|warn) ;;
+    *)
+        log_error "PULL_SECRET_CHECK must be error or warn, got: ${PULL_SECRET_CHECK}"
+        exit 1
+        ;;
+esac
+
 if ! kubectl get node >/dev/null 2>&1; then
-    log_error "kubectl cannot reach a cluster. Start minikube first:"
+    log_error "kubectl cannot reach a cluster on context ${KUBE_CONTEXT}. For minikube, start it first:"
     log_error "  ./e2e/k8s/scripts/setup_local_minikube_gpu.sh"
     exit 1
 fi
+
+# The pull Secrets a BatchSandbox template names, one per line, read from the template rather than
+# repeated here. Only block-style `- name:` items under imagePullSecrets: are read. Any other item
+# form, or an inline value other than [], fails here, since reading it as no Secrets would skip the
+# check below. So does a name that is not a valid Secret name. The list ends at the first line
+# indented less than the key, or level with it and not a `-` item, so a later key, an outer list
+# item or a `---` is not taken for one of its items.
+template_pull_secrets() {
+    awk '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*imagePullSecrets:/ {
+            value = $0
+            sub(/^[[:space:]]*imagePullSecrets:[[:space:]]*/, "", value)
+            sub(/(^|[[:space:]]+)#.*$/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+            if (value != "" && value != "[]") {
+                printf "%s:%d: imagePullSecrets is not a block list of - name: items\n", FILENAME, NR > "/dev/stderr"
+                failed = 1
+                exit
+            }
+            in_list = (value == "")
+            key_indent = $0
+            sub(/[^[:space:]].*/, "", key_indent)
+            key_indent = length(key_indent)
+            next
+        }
+        in_list && /^[[:space:]]*$/ { next }
+        in_list {
+            indent = $0
+            sub(/[^[:space:]].*/, "", indent)
+            indent = length(indent)
+            if (indent < key_indent || (indent == key_indent && $0 !~ /^[[:space:]]*-/)) {
+                in_list = 0
+            }
+        }
+        in_list && /^[[:space:]]*-[[:space:]]*name:/ {
+            sub(/^[[:space:]]*-[[:space:]]*name:[[:space:]]*/, "")
+            sub(/[[:space:]]+#.*$/, "")
+            gsub(/["\047[:space:]]/, "")
+            if ($0 !~ /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/ || length($0) > 253) {
+                printf "%s:%d: not a valid Secret name: \"%s\"\n", FILENAME, NR, $0 > "/dev/stderr"
+                failed = 1
+                exit
+            }
+            print
+            next
+        }
+        in_list {
+            printf "%s:%d: imagePullSecrets entry is not a - name: item\n", FILENAME, NR > "/dev/stderr"
+            failed = 1
+            exit
+        }
+        END { if (failed) exit 1 }
+    ' "$1"
+}
 
 download_tarball() {
     local url="$1"
     local dest="$2"
     log_info "Downloading ${url}"
-    curl -fsSL -L -o "${dest}" "${url}"
+    # The kind CI lane downloads both charts on every run; a transient GitHub failure should not fail it.
+    curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 --max-time 300 \
+      -o "${dest}" "${url}"
 }
 
 resolve_charts() {
@@ -133,6 +211,31 @@ resolve_charts() {
     log_info "Using published tarballs (controller ${OPENSANDBOX_CONTROLLER_VERSION}, server from umbrella ${OPENSANDBOX_UMBRELLA_VERSION})"
 }
 
+# Checked before anything is applied, so `error` mode leaves the cluster as it was. A namespace that
+# does not exist yet has no Secrets, so each name counts as missing.
+if ! PULL_SECRETS="$(template_pull_secrets "${BATCHSANDBOX_TEMPLATE}")"; then
+    log_error "Could not read imagePullSecrets in ${BATCHSANDBOX_TEMPLATE}."
+    log_error "Write it as a block list of '- name: <secret>' items, or as [] for none."
+    exit 1
+fi
+MISSING_PULL_SECRETS=()
+while IFS= read -r pull_secret; do
+    if [ -n "${pull_secret}" ] && ! kubectl get secret "${pull_secret}" -n "${KUBE_NAMESPACE}" >/dev/null 2>&1; then
+        MISSING_PULL_SECRETS+=("${pull_secret}")
+    fi
+done <<< "${PULL_SECRETS}"
+if [ "${#MISSING_PULL_SECRETS[@]}" -gt 0 ]; then
+    if [ "${PULL_SECRET_CHECK}" = "warn" ]; then
+        log_warn "${BATCHSANDBOX_TEMPLATE} names pull Secret(s) missing from ${KUBE_NAMESPACE}: ${MISSING_PULL_SECRETS[*]}."
+        log_warn "Sandbox images that need those credentials start only if already on the node; public images still pull."
+    else
+        log_error "${BATCHSANDBOX_TEMPLATE} names pull Secret(s) missing from ${KUBE_NAMESPACE}: ${MISSING_PULL_SECRETS[*]}."
+        log_error "Run the cluster setup script first (setup_local_minikube_gpu.sh, or setup_local_kind_cpu.sh with"
+        log_error "GITHUB_TOKEN set), create the Secret, or edit imagePullSecrets in the template."
+        exit 1
+    fi
+fi
+
 resolve_charts
 
 log_info "Installing shared-kernel OpenSandbox (control plane: ${CONTROL_PLANE_NS}, jobs: ${KUBE_NAMESPACE}, context: ${KUBE_CONTEXT})"
@@ -141,14 +244,7 @@ kubectl create namespace "${CONTROL_PLANE_NS}" --dry-run=client -o yaml | kubect
 kubectl create namespace "${KUBE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
 log_info "Applying BatchSandbox template ConfigMap..."
-kubectl apply -f "${REPO_ROOT}/e2e/k8s/values/batchsandbox-minikube-template.yaml"
-
-if ! kubectl get secret nvcrimagepullsecret -n "${KUBE_NAMESPACE}" >/dev/null 2>&1; then
-    log_error "Secret nvcrimagepullsecret is missing in ${KUBE_NAMESPACE}."
-    log_error "The BatchSandbox template hard-codes that name. Run setup_local_minikube_gpu.sh first,"
-    log_error "or create the pull Secret, or edit imagePullSecrets in ${REPO_ROOT}/e2e/k8s/values/batchsandbox-minikube-template.yaml."
-    exit 1
-fi
+kubectl apply -f "${BATCHSANDBOX_TEMPLATE}"
 
 if kubectl get secret "${API_SECRET}" -n "${CONTROL_PLANE_NS}" >/dev/null 2>&1; then
     log_info "Reusing existing ${API_SECRET} in ${CONTROL_PLANE_NS}"

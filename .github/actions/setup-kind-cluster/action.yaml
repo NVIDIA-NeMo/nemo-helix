@@ -38,13 +38,21 @@ inputs:
     required: false
     default: ""
   kind-enable-network-policies:
-    description: Create Kind without the default CNI and install Calico for NetworkPolicy enforcement
+    description: >
+      Create Kind without its default CNI and install Calico in its place. The default CNI (kindnet)
+      already enforces NetworkPolicy, so this changes the provider, not whether policies apply.
     required: false
     default: "false"
   kind-enable-gateway:
     description: Install Gateway API, run cloud-provider-kind, and create the test Gateway
     required: false
     default: "true"
+  install-opensandbox:
+    description: >
+      Install shared-kernel OpenSandbox before NeMo Helix, for lanes whose jobs run in sandboxes.
+      Pass the matching Helm values (such as e2e/k8s/values/gym-sandbox.yaml) in helm-extra-args.
+    required: false
+    default: "false"
   wait-for-api:
     description: Wait for the Gateway-routed API endpoint after installing NeMo Helix
     required: false
@@ -157,6 +165,35 @@ runs:
         kubectl wait --for=condition=Established crd/httproutes.gateway.networking.k8s.io --timeout=2m
         kubectl get gatewayclass cloud-provider-kind
         kubectl -n "${NAMESPACE}" get gateway "${KUBE_GATEWAY_NAME}"
+
+    # Before NeMo Helix, so the API-key Secret is in the release namespace when the first job starts.
+    # The script ends by creating and deleting a plain sandbox, so a cluster that cannot run one at
+    # all fails here. Egress policy and PVC mounts are first exercised by the tests.
+    - name: Install OpenSandbox
+      if: ${{ inputs['install-opensandbox'] == 'true' }}
+      shell: bash
+      env:
+        KIND_CLUSTER_NAME: ${{ inputs['kind-cluster-name'] }}
+        KUBE_NAMESPACE: ${{ inputs['kube-namespace'] }}
+      # The verification deletes its sandbox even when it fails, and nothing uploads its port-forward
+      # log, so on failure print the pods, events and that log here, as Install NeMo Helix does for
+      # Helm. Pods and BatchSandboxes are listed apart so the pods still print without the CRD.
+      run: |
+        if ! e2e/k8s/scripts/install_opensandbox_kind.sh; then
+          for namespace in "${KUBE_NAMESPACE}" opensandbox-system; do
+            echo "--- kubectl get pods,batchsandboxes -n ${namespace} ---"
+            kubectl get pods -n "${namespace}" -o wide || true
+            kubectl get batchsandboxes -n "${namespace}" -o wide || true
+            echo "--- recent events in ${namespace} ---"
+            kubectl get events -n "${namespace}" --sort-by='.lastTimestamp' | tail -n 50 || true
+          done
+          for log in /tmp/osb-pf-*.log; do
+            [ -e "${log}" ] || continue
+            echo "--- ${log} ---"
+            cat "${log}" || true
+          done
+          exit 1
+        fi
 
     - name: Pre-pull GHCR images into kind
       if: ${{ inputs['install-nemo-helix'] == 'true' }}

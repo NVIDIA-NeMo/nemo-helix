@@ -13,6 +13,7 @@ SYSTEM_NS="${SYSTEM_NS:-opensandbox-system}"
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 LOCAL_PORT="${LOCAL_PORT:-0}"  # 0 = pick a free port
 READY_TIMEOUT_S="${READY_TIMEOUT_S:-300}"
+# e2e/k8s/scripts/install_opensandbox_kind.sh reads this default to pull it first; keep it a literal.
 SANDBOX_IMAGE="${SANDBOX_IMAGE:-docker.io/library/busybox:1.36}"
 SANDBOX_TIMEOUT_S="${SANDBOX_TIMEOUT_S:-600}"
 
@@ -108,7 +109,8 @@ require_profile() {
 }
 
 preflight_control_plane() {
-  info "context: $(kubectl config current-context)"
+  # `kubectl config current-context` ignores --context, so name the pinned context when there is one.
+  info "context: ${KUBE_CONTEXT:-$(command kubectl config current-context)}"
   kubectl get deploy -n "${SYSTEM_NS}" "${SERVER_DEPLOY}" >/dev/null \
     || die "deployment ${SERVER_DEPLOY} not found in ${SYSTEM_NS}"
   kubectl rollout status "deploy/${SERVER_DEPLOY}" -n "${SYSTEM_NS}" --timeout=60s \

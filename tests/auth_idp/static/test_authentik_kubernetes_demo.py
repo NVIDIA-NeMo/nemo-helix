@@ -302,7 +302,10 @@ def test_builder_e2e_moves_to_opt_in_workflow_with_both_auth_modes() -> None:
     run = steps["Run builder e2e tests"]["run"]
     assert "e2e/test_builder.py" in run
     assert "features+=(--feature auth --config e2e/quickstart/auth.yaml)" in run
-    assert "if tests == 0 or skipped:" in run
+    assert (
+        "uv run --no-cache .github/scripts/check_junit_no_skips.py \\\n"
+        '  report-kubernetes-builder-e2e.xml --label "builder e2e"\n'
+    ) in run
     assert steps["Finalize Kind builder e2e"]["if"] == "always()"
 
 

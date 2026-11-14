@@ -132,6 +132,8 @@ jobs:
           enable-cache: false
       - name: Run test-gate check unit tests
         run: uv run --no-cache .github/scripts/tests/test_check_test_gates.py
+      - name: Run JUnit no-skips check unit tests
+        run: uv run --no-cache .github/scripts/tests/test_check_junit_no_skips.py
       - name: Check for test gates no workflow sets
         run: uv run --no-cache .github/scripts/check_test_gates.py
 
