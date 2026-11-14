@@ -1106,6 +1106,26 @@ def test_docker_job_rejects_reserved_step_auth_env_vars(docker_job, test_job_ste
         docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
 
 
+@pytest.mark.parametrize(
+    ("name", "from_secret", "match"),
+    [
+        ("NHX_PRINCIPAL", None, "NHX_PRINCIPAL"),
+        ("NEMO_JOB_SECRETS", None, "NEMO_JOB_SECRETS"),
+        ('NHX_PRINCIPAL={"id":"service:jobs","x":"', None, "must not contain"),
+        ("X=default/a,NHX_PRINCIPAL", HelixJobSecretEnvironmentVariableRef(name="b"), "must match"),
+    ],
+)
+def test_docker_job_rejects_platform_injected_and_malformed_step_env_names(
+    docker_job, test_job_step, name, from_secret, match
+):
+    test_job_step.step_spec.environment.append(
+        HelixJobEnvironmentVariable(name=name, value=None if from_secret else "attacker", from_secret=from_secret)
+    )
+
+    with pytest.raises(ValueError, match=match):
+        docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
+
+
 def test_docker_job_injects_workload_identity_volume_when_token_exchange_enabled(
     docker_job, docker_client_mock, test_job_step_with_auth_context
 ):

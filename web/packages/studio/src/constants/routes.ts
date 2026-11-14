@@ -41,6 +41,7 @@ export const ROUTE_PARAMS = {
   jobName: 'jobName',
   /** Benchmark entity name segment under evaluation/benchmarks/:name */
   benchmarkName: 'benchmarkName',
+  tasksetName: 'tasksetName',
   experimentName: 'experimentName',
   insightId: 'insightId',
   evaluationName: 'evaluationName',
@@ -86,6 +87,9 @@ export const ROUTES = {
     evaluationBenchmarks: `/workspaces/:${P.workspace}/evaluation/benchmarks`,
     evaluationBenchmarkDetails: `/workspaces/:${P.workspace}/evaluation/benchmarks/:${P.benchmarkName}`,
     evaluationResults: `/workspaces/:${P.workspace}/evaluation/results`,
+    /** Read-only taskset library (gated by VITE_FF_TASKSETS_ENABLED). */
+    tasksets: `/workspaces/:${P.workspace}/evaluation/tasksets`,
+    tasksetDetail: `/workspaces/:${P.workspace}/evaluation/tasksets/:${P.tasksetName}`,
     evaluationResultDetails: `/workspaces/:${P.workspace}/evaluation/results/:${P.evaluationJobId}`,
     /** Empty landing page for the EXPERIMENT feature (gated by VITE_FF_EXPERIMENT). */
     experiment: `/workspaces/:${P.workspace}/experiment`,
@@ -97,8 +101,17 @@ export const ROUTES = {
     /** Nested under fine-tune so the Fine-tuning nav item stays active. */
     modelDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}`,
     modelAdapterDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}/adapters/:${P.adapterName}`,
+    /** Filesets scoped to `purpose: dataset`. */
+    datasets: `/workspaces/:${P.workspace}/datasets`,
+    /** The fileset detail page for a dataset, kept under the Datasets section. */
+    datasetDetail: `/workspaces/:${P.workspace}/datasets/:${P.filesetName}`,
+    datasetDetailTab: `/workspaces/:${P.workspace}/datasets/:${P.filesetName}/:${P.filesetTab}`,
     filesets: `/workspaces/:${P.workspace}/filesets`,
-    filesetNew: `/workspaces/:${P.workspace}/filesets/new`,
+    /**
+     * Create Fileset form. `~new`, not `new`, so it can't shadow a fileset named
+     * `new` at `filesetDetail` (same reasoning as `deploymentsNew`).
+     */
+    filesetNew: `/workspaces/:${P.workspace}/filesets/~new`,
     /**
      * Unified fileset detail page. One route serves all purposes — the page
      * branches on `fileset.purpose` to render Model/Dataset/Generic card content.

@@ -25,6 +25,10 @@ import {
   updateAssistantChatArtifactsFromInputSelection,
   updateAssistantChatArtifactsFromSelections,
 } from '@studio/routes/agents/AssistantChatRoute/artifacts';
+import {
+  ASSISTANT_RUN_INTERRUPTED_ERROR,
+  describeAssistantRunError,
+} from '@studio/routes/agents/AssistantChatRoute/describeAssistantRunError';
 import { getAssistantPartsFromAssistantEvent } from '@studio/routes/agents/AssistantChatRoute/stream';
 import {
   getStudioUiNavigationSuggestion,
@@ -596,9 +600,7 @@ export const useAssistantChatRuntime = (options?: UseAssistantChatRuntimeOptions
           queryKey: getAssistantHistorySessionsQueryKey(workspace ?? 'default'),
         });
         if (!doneReceived && !signal.aborted) {
-          throw new Error(
-            'Connection to NeMo Assistant was interrupted. Your response may still be processing — check History to see the result.'
-          );
+          throw new Error(ASSISTANT_RUN_INTERRUPTED_ERROR);
         }
       } finally {
         if (isCurrentRun()) {
@@ -629,6 +631,7 @@ export const useAssistantChatRuntime = (options?: UseAssistantChatRuntimeOptions
     submitPrompt,
   } = useCustomAssistantChatRuntime({
     initialMessages: options?.initialMessages,
+    describeError: describeAssistantRunError,
     onBeforeRun: requestStudioNavigationDecision,
     onError,
     onRun: handleRun,

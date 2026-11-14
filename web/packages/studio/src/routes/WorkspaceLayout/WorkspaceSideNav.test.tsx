@@ -13,6 +13,7 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_CUSTOMIZER_ENABLED', 'true');
   vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'true');
   vi.stubEnv('VITE_FF_MONITOR_ENABLED', 'true');
+  vi.stubEnv('VITE_FF_TASKSETS_ENABLED', 'true');
 });
 
 /** The Models children, in the order a user walks the funnel. Virtual Models trails them. */
@@ -95,12 +96,16 @@ describe('WorkspaceSideNav', () => {
     expect(screen.queryByText('Evaluate')).not.toBeInTheDocument();
   });
 
-  it('links Agents to its entity list page and exposes Model Catalog under Models', () => {
+  it('links Agents and Datasets to their entity list pages and exposes Model Catalog under Models', () => {
     renderSideNav('/workspaces/test-workspace/base-models');
 
     expect(screen.getByRole('link', { name: 'Agents' })).toHaveAttribute(
       'href',
       '/workspaces/test-workspace/agents'
+    );
+    expect(screen.getByRole('link', { name: 'Datasets' })).toHaveAttribute(
+      'href',
+      '/workspaces/test-workspace/datasets'
     );
     // Models is a pure disclosure, not a link to a page of its own.
     expect(screen.queryByRole('link', { name: 'Models' })).not.toBeInTheDocument();
@@ -147,28 +152,47 @@ describe('WorkspaceSideNav', () => {
     expect(labels).toEqual(MODEL_FUNNEL);
   });
 
+  it('places Tasksets in the Evaluations group, not under Models', () => {
+    renderSideNav();
+
+    // "Evaluations" is both a Models child link and the group heading; the heading comes last.
+    const heading = screen.getAllByText('Evaluations').at(-1);
+    const tasksets = screen.getByRole('link', { name: 'Tasksets' });
+    const follows = (a: Node | undefined, b: Node) =>
+      Boolean(a && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(heading, tasksets)).toBe(true);
+    expect(follows(tasksets, screen.getByText('Data'))).toBe(true);
+  });
+
   it('starts every parent expanded regardless of the current route', () => {
     renderSideNav('/workspaces/test-workspace/agents/monitor');
 
-    for (const parent of ['Agents', 'Models', 'Datasets']) {
+    for (const parent of ['Agents', 'Models']) {
       expect(disclosure(parent)).toHaveAttribute('aria-expanded', 'true');
     }
   });
 
-  it('keeps a manually collapsed Datasets collapsed after the route moves elsewhere', async () => {
+  it('lists the data tools beside Datasets rather than under it', () => {
+    renderSideNav();
+
+    expect(screen.queryByRole('button', { name: /datasets/i })).not.toBeInTheDocument();
+    for (const label of ['Datasets', 'Data Designer', 'Safe Synthesizer']) {
+      expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it('keeps a manually collapsed Models collapsed after the route moves elsewhere', async () => {
     const user = userEvent.setup();
     renderSideNav();
 
-    // Datasets has no landing page of its own, so its whole row is the disclosure control and a
-    // plain click on the label collapses it.
-    expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'true');
-    await user.click(disclosure('Datasets'));
-    expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'false');
+    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'true');
+    await user.click(disclosure('Models'));
+    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'false');
 
     // The manual collapse is the user's preference now; navigating elsewhere does not undo it.
     await user.click(screen.getByRole('link', { name: 'Agents' }));
     expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'true');
-    expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'false');
+    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('keeps a chevron-collapsed parent collapsed when the route comes back to it', async () => {

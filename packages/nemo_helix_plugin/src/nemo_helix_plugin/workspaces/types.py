@@ -14,11 +14,19 @@ from typing import NotRequired, TypedDict
 
 from nemo_helix_plugin.auth.types import MAX_PRINCIPAL_ID_LENGTH
 from nemo_helix_plugin.schema import Page
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # Response types
 # ---------------------------------------------------------------------------
+
+
+class WorkspaceLimits(BaseModel):
+    """Optional per-workspace resource limits (unset = platform default)."""
+
+    max_concurrent_jobs: int | None = Field(default=None, ge=1)
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class Workspace(BaseModel):
@@ -27,6 +35,7 @@ class Workspace(BaseModel):
     id: str = Field(description="System-generated UUID")
     name: str = Field(description="Workspace name (user-provided)")
     description: str | None = None
+    limits: WorkspaceLimits | None = None
     created_at: datetime
     created_by: str | None = None
     updated_at: datetime
@@ -72,12 +81,14 @@ class CreateWorkspaceRequest(BaseModel):
 
     name: str
     description: str | None = None
+    limits: WorkspaceLimits | None = None
 
 
 class UpdateWorkspaceRequest(BaseModel):
     """Schema for updating a workspace."""
 
     description: str | None = None
+    limits: WorkspaceLimits | None = None
 
 
 class CreateWorkspaceMemberRequest(BaseModel):

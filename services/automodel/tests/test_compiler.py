@@ -142,12 +142,15 @@ def test_compile_training_step_carries_pass2_fields() -> None:
             sequence_packing=True,
             sequence_packing_max_samples=256,
             max_seq_length=2048,
+            mask_generation_prompt=True,
         ),
         output=_output(),
     )
     step = compile_training_step(job_output, base_env=[], me=_make_mock_model_entity())
     cfg = step.config if hasattr(step, "config") else step["config"]
 
+    assert cfg["dataset"]["mask_generation_prompt"] is True
+    assert cfg["model"]["tokenizer_backend"] is None
     assert cfg["optimizer"]["optimizer_name"] == "AdamW"
     assert cfg["optimizer"]["lr_decay_style"] == "linear"
     assert cfg["optimizer"]["eps"] == 1e-6
@@ -231,8 +234,10 @@ def test_compile_training_step_carries_retrieval_config() -> None:
                 passage_prefix="passage: ",
                 query_max_length=256,
                 do_distributed_inbatch_negative=True,
+                temperature=0.05,
                 export=ExportParams(primary="hf", opset=18),
             ),
+            tokenizer_backend="transformers_auto",
         ),
         output=_output(output_type=OutputNameType.MODEL),
     )
@@ -240,6 +245,8 @@ def test_compile_training_step_carries_retrieval_config() -> None:
     step = compile_training_step(job_output, base_env=[], me=_make_mock_model_entity())
     cfg = step.config if hasattr(step, "config") else step["config"]
 
+    assert cfg["model"]["tokenizer_backend"] == "transformers_auto"
+    assert cfg["retrieval"]["temperature"] == 0.05
     assert cfg["retrieval"]["train_n_passages"] == 7
     assert cfg["retrieval"]["query_prefix"] == "query: "
     assert cfg["retrieval"]["passage_prefix"] == "passage: "
@@ -410,13 +417,35 @@ def test_compile_training_step_rejects_registered_text_moe_without_expert_parall
         )
 
 
-def test_compile_training_step_rejects_distillation_on_a_vision_checkpoint() -> None:
+@pytest.mark.parametrize(
+    ("has_vision_tower", "training", "match"),
+    [
+        (
+            True,
+            DistillationTraining.model_validate({"recipe": "sft", "teacher_model": "default/teacher"}),
+            "distillation",
+        ),
+        (True, SFTTraining(recipe="sft", tokenizer_backend="nemo_wrapped_auto"), "tokenizer_backend"),
+        (True, SFTTraining(recipe="sft", mask_generation_prompt=True), "mask_generation_prompt"),
+        (False, SFTTraining(recipe="bi_encoder", mask_generation_prompt=True), "mask_generation_prompt"),
+    ],
+    ids=[
+        "vlm-distillation",
+        "vlm-tokenizer-backend",
+        "vlm-mask-generation-prompt",
+        "bi-encoder-mask-generation-prompt",
+    ],
+)
+def test_compile_training_step_rejects_options_the_recipe_would_ignore(
+    has_vision_tower: bool, training: SFTTraining | DistillationTraining, match: str
+) -> None:
+    """These fail at submission rather than once the training job has started."""
     from nemo_helix_plugin.models.types import ModelSpec
     from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     me = _make_mock_model_entity()
     me.spec = ModelSpec.model_construct(
-        has_vision_tower=True,
+        has_vision_tower=has_vision_tower,
         has_audio_tower=False,
         num_experts=None,
         head_type="causal_lm",
@@ -427,11 +456,11 @@ def test_compile_training_step_rejects_distillation_on_a_vision_checkpoint() -> 
     job_output = CustomizationJobOutput(
         model="default/test-target",
         dataset="default/my-dataset",
-        training=DistillationTraining.model_validate({"recipe": "sft", "teacher_model": "default/teacher"}),
+        training=training,
         output=_output(output_type=OutputNameType.MODEL),
     )
 
-    with pytest.raises(HelixJobCompilationError, match="distillation"):
+    with pytest.raises(HelixJobCompilationError, match=match):
         compile_training_step(job_output, base_env=[], me=me)
 
 

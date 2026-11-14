@@ -54,12 +54,15 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     capture_filename,
     ensure_fresh_output,
     failures_path_for,
+    gym_scoring_metrics,
+    natively_scored_components,
     read_run_aggregations,
     require_full_coverage,
     trials_from_rollouts,
 )
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
+from nhx_evals_sdk.metrics.protocol import Metric
 from nhx_evals_sdk.values.results import AggregateScore
 from pydantic import BaseModel, ConfigDict, Field
 from sandboxed_gym.host.models import MIN_PROXY_CUTOFF_S, render_host_error
@@ -203,6 +206,15 @@ class SandboxedGymAgentTaskRunner:
         self._injected_collector = collect is not None
         self._collect_rollouts: RolloutCollector = collect or self._collect
         self._run_aggregations: dict[str, Any] | None = None
+        self._component_names: frozenset[str] = frozenset()
+
+    def scoring_metrics(self, task: AgentEvalTask, trials: Sequence[AgentEvalTrial]) -> list[Metric]:
+        """Add the reward components this task's trials reported as optional ``gym_reward`` outputs.
+
+        Satisfies :class:`~nhx_evals_sdk.agent_eval.trials.TrialAwareMetricsProvider`: a multi-reward
+        resources-server's components are known only once rollouts exist.
+        """
+        return gym_scoring_metrics(task, trials)
 
     def run_aggregate_scores(self) -> Sequence[AggregateScore]:
         """Gym's ``agent_metrics`` as typed aggregate scores, namespaced ``runner.gym.<metric>``.
@@ -211,7 +223,7 @@ class SandboxedGymAgentTaskRunner:
         returns rollout records writes no such file. Implemented anyway so this runner satisfies the
         same protocol as the CLI one and starts reporting if the host grows the sidecar.
         """
-        return aggregate_scores_from_gym(self._run_aggregations)
+        return aggregate_scores_from_gym(self._run_aggregations, scored_natively=self._component_names)
 
     def runner_info(self) -> RunnerInfo:
         """Identify the runner and the host it collected from.
@@ -336,6 +348,7 @@ class SandboxedGymAgentTaskRunner:
     ) -> list[AgentEvalTrial]:
         run_id = config.run_id if config is not None and config.run_id else str(uuid4())
         self._run_aggregations = None  # reset per run so a reused runner never leaks prior numbers
+        self._component_names: frozenset[str] = frozenset()
         cfg = self._config
 
         if config is not None and config.work_dir is not None:
@@ -381,4 +394,5 @@ class SandboxedGymAgentTaskRunner:
             rollouts_path, tasks, index_to_task_id, run_id=run_id, reward_key=cfg.reward_key, capture_dir=capture_dir
         )
         require_full_coverage(tasks, covered_task_ids={trial.task_id for trial in trials}, rollouts_path=rollouts_path)
+        self._component_names = natively_scored_components(tasks, trials)
         return trials

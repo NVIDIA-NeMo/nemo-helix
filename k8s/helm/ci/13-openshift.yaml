@@ -7,7 +7,8 @@
 
 podSecurityContext:
   runAsNonRoot: true
-  fsGroup: 1000
+  # OpenShift assigns the fsGroup from the namespace range and rejects a fixed one.
+  fsGroup: null
   seccompProfile:
     type: RuntimeDefault
 
@@ -16,6 +17,20 @@ securityContext:
   capabilities:
     drop:
       - ALL
+
+# OpenShift assigns the UID/GID/fsGroup from the namespace range, so drop the fixed
+# ones the chart sets on the API and controller pods by default.
+api:
+  podSecurityContext:
+    runAsUser: null
+    runAsGroup: null
+    fsGroup: null
+core:
+  controller:
+    podSecurityContext:
+      runAsUser: null
+      runAsGroup: null
+      fsGroup: null
 
 # Embedded PostgreSQL: run as non-root so postgres pods pass OpenShift SCC
 postgresql:

@@ -374,6 +374,9 @@ importers:
       openapi-fetch:
         specifier: ^0.13.3
         version: 0.13.3
+      p-limit:
+        specifier: 'catalog:'
+        version: 6.2.0
       papaparse:
         specifier: ^5.5.3
         version: 5.5.3
@@ -453,9 +456,6 @@ importers:
       msw:
         specifier: 'catalog:'
         version: 2.13.3(@types/node@25.5.0)(typescript@7.0.2)
-      p-limit:
-        specifier: 'catalog:'
-        version: 6.2.0
       react-dropzone:
         specifier: 'catalog:'
         version: 14.4.1(react@19.2.7)
@@ -813,9 +813,6 @@ importers:
       '@types/postcss-prefix-selector':
         specifier: ^1.16.3
         version: 1.16.3
-      '@types/qs':
-        specifier: 'catalog:'
-        version: 6.15.0
       '@types/react':
         specifier: 'catalog:'
         version: 19.2.14
@@ -834,9 +831,6 @@ importers:
       blob-polyfill:
         specifier: ^9.0.20240710
         version: 9.0.20240710
-      globals:
-        specifier: ^17.7.0
-        version: 17.9.0
       happy-dom:
         specifier: 'catalog:'
         version: 20.10.6
@@ -858,9 +852,6 @@ importers:
       prettier:
         specifier: ^3.2.5
         version: 3.8.1
-      qs:
-        specifier: 'catalog:'
-        version: 6.15.2
       rolldown:
         specifier: ^1.1.4
         version: 1.2.2
@@ -912,9 +903,6 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.12)(happy-dom@20.10.6)(jsdom@29.1.1)(msw@2.13.3(@types/node@25.5.0)(typescript@7.0.2))(vite@8.0.16(@types/node@25.5.0)(esbuild@0.28.1)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.1))
-      vitest-fail-on-console:
-        specifier: 'catalog:'
-        version: 0.10.1(@vitest/utils@4.1.12)(vite@8.0.16(@types/node@25.5.0)(esbuild@0.28.1)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.1))(vitest@4.1.12)
 
 packages:
 
@@ -15933,13 +15921,6 @@ snapshots:
       chalk: 5.6.2
       vite: 8.0.16(@types/node@25.5.0)(esbuild@0.28.1)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.8.3)
       vitest: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.12)(happy-dom@20.10.6)(jsdom@29.1.1)(msw@2.13.3(@types/node@25.5.0)(typescript@7.0.2))(vite@8.0.16(@types/node@25.5.0)(esbuild@0.28.1)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.8.3))
-
-  vitest-fail-on-console@0.10.1(@vitest/utils@4.1.12)(vite@8.0.16(@types/node@25.5.0)(esbuild@0.28.1)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.1))(vitest@4.1.12):
-    dependencies:
-      '@vitest/utils': 4.1.12
-      chalk: 5.6.2
-      vite: 8.0.16(@types/node@25.5.0)(esbuild@0.28.1)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.1)
-      vitest: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.12)(happy-dom@20.10.6)(jsdom@29.1.1)(msw@2.13.3(@types/node@25.5.0)(typescript@7.0.2))(vite@8.0.16(@types/node@25.5.0)(esbuild@0.28.1)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.1))
 
   vitest-location-mock@1.0.4:
     dependencies:

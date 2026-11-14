@@ -44,6 +44,7 @@ const Check: FC<{ ok: boolean; label: string }> = ({ ok, label }) => (
 
 interface DatasetPanelProps {
   slotLabel?: ReactNode;
+  slotHelp?: ReactNode;
   acceptedFileTypes?: AcceptedFileType[];
   /** Off where the row is rendered into a prompt rather than mapped. */
   showMapping?: boolean;
@@ -55,6 +56,7 @@ interface DatasetPanelProps {
 
 export const DatasetPanel: FC<DatasetPanelProps> = ({
   slotLabel,
+  slotHelp,
   acceptedFileTypes = [...MAPPABLE_FILE_TYPES],
   showMapping = true,
   children,
@@ -138,7 +140,10 @@ export const DatasetPanel: FC<DatasetPanelProps> = ({
           invalidFileMode="disable"
           filesetPurpose={FilesetPurpose.dataset}
           autoSelectFirstAcceptable
-          formFieldProps={slotLabel ? { slotLabel } : undefined}
+          formFieldProps={{
+            ...(slotLabel ? { slotLabel } : {}),
+            ...(slotHelp ? { slotHelp } : {}),
+          }}
           onFileSelected={() => {
             if (showMapping) {
               setValue('fieldMapping', EMPTY_FIELD_MAPPING);

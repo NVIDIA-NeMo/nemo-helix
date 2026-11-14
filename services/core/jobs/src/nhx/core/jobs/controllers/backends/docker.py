@@ -63,6 +63,7 @@ from nhx.common.jobs.constants import (
     DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,
     DEFAULT_TASK_STORAGE_PATH,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -119,7 +120,7 @@ from nhx.core.jobs.controllers.backends.base import (
     resolve_task_image,
     staleness_error_message,
     step_ttl_seconds_active,
-    validate_no_reserved_managed_job_environment_variable_names,
+    validate_step_environment,
 )
 from nhx.core.jobs.controllers.backends.exceptions import (
     FailedToScheduleError,
@@ -878,10 +879,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
 
         # Profile-level env vars first (e.g. HOME=/tmp); system, step, and shared env override these
         env = self._execution_profile_config.env.copy()
-        validate_no_reserved_managed_job_environment_variable_names(
-            (envvar.name for envvar in step_spec.environment or []),
-            source="Job step environment keys",
-        )
+        validate_step_environment(step_spec.environment or [], source="Job step environment keys")
 
         # identify the task using a uuid.  In docker, there's only one task per step.
         # because parallelism and completions are not supported.
@@ -894,6 +892,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 NEMO_JOB_TASK_ENVVAR: task_id,
                 NEMO_JOB_WORKSPACE_ENVVAR: step.workspace,
                 NEMO_JOB_FILESET_ENVVAR: step.fileset,
+                NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR: step.artifact_base_path or "",
                 EPHEMERAL_TASK_STORAGE_PATH_ENVVAR: DEFAULT_TASK_STORAGE_PATH,
                 CONFIG_TASK_STORAGE_PATH_ENVVAR: DEFAULT_CONFIG_STORAGE_PATH,
                 NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR: DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,

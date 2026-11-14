@@ -21,7 +21,15 @@ from nhx.core.files.app.backends.s3 import (
     S3UnavailableError,
     _raise_for_s3_error,
 )
+from nhx.core.files.config import FilesConfig
 from nhx.core.files.exceptions import NotFoundError
+
+
+@pytest.fixture(autouse=True)
+def strict_s3_metadata(monkeypatch):
+    """Keep backend transport unit tests independent of process-local TTL state."""
+    config = FilesConfig(s3_metadata_cache_ttl_seconds=0)
+    monkeypatch.setattr("nhx.core.files.config.files_config", lambda: config)
 
 
 def _make_client_error(code: str, message: str = "Test error") -> ClientError:
@@ -174,22 +182,34 @@ class TestS3StorageImplInit:
         assert impl._full_key(path) == expected
 
     @pytest.mark.parametrize(
-        ("prefix", "path", "expected"),
+        ("prefix", "path"),
         [
-            (
-                "test-prefix",
-                "models/model.bin",
-                "cache/s3/test-bucket/test-prefix/models/model.bin",
-            ),
-            ("test-prefix", None, "cache/s3/test-bucket/test-prefix"),
-            ("", "file.txt", "cache/s3/test-bucket/file.txt"),
+            ("test-prefix", "models/model.bin"),
+            ("test-prefix", None),
+            ("", "file.txt"),
+            ("", None),
         ],
     )
-    async def test_get_cache_path_key(self, prefix, path, expected):
-        """Test cache path key generation."""
+    async def test_get_cache_path_key(self, prefix, path):
+        """S3 cache paths use a new namespace and resolve object metadata."""
         config = S3StorageConfig(bucket="test-bucket", prefix=prefix, use_sdk_auth=True)
         impl = S3StorageImpl(config, {})
-        assert await impl.get_cache_path_key(path) == expected
+        async with mock_s3_client(impl) as client:
+            client.head_object.return_value = {"ContentLength": 10, "ETag": '"opaque/../etag"'}
+            key = await impl.get_cache_path_key(path)
+            assert key is not None and key.startswith("cache/s3-v2/")
+            assert ".." not in key and "opaque" not in key
+            if path is None:
+                client.head_object.assert_not_awaited()
+            else:
+                client.head_object.assert_awaited_once_with(Bucket="test-bucket", Key=impl._full_key(path))
+
+    async def test_cache_root_isolates_s3_endpoints(self):
+        """Equal bucket names on different S3 servers must not share content."""
+        config = S3StorageConfig(bucket="bucket", use_sdk_auth=True)
+        first = S3StorageImpl(config, {})
+        second = S3StorageImpl(config.model_copy(update={"endpoint_url": "https://other-s3"}), {})
+        assert await first.get_cache_path_key() != await second.get_cache_path_key()
 
     def test_config_owns_storage_data(self):
         """Deleting an S3 fileset removes objects under our prefix, so we own the data."""

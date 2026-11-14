@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from nhx.common.api.filter import FilterOperation
-from nhx.core.entities.entities import Workspace, WorkspaceDeletionStage
+from nhx.core.entities.entities import Workspace, WorkspaceDeletionStage, WorkspaceLimits
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -21,6 +21,7 @@ class WorkspaceRepositoryInterface(ABC):
         *,
         name: str,
         description: str | None = None,
+        limits: WorkspaceLimits | None = None,
         created_by: str | None = None,
         session: AsyncSession | None = None,
     ) -> Workspace:
@@ -67,6 +68,7 @@ class WorkspaceRepositoryInterface(ABC):
         *,
         name: str,
         description: str | None = None,
+        limits: WorkspaceLimits | None = None,
         updated_by: str | None = None,
         session: AsyncSession | None = None,
     ) -> Optional[Workspace]:

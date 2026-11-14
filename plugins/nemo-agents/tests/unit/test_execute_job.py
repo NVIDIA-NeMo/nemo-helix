@@ -157,12 +157,16 @@ class _TypedFilesResponse:
         return self._body
 
 
-def _agent_config(**environment: str) -> dict[str, Any]:
+# A plugin adapter that reads AgentRunRequest.context; every stock adapter drops it.
+_CONTEXT_READING_KIND = "nvidia.helix.compass.analyst"
+
+
+def _agent_config(*, harness_kind: str = "hermes", **environment: str) -> dict[str, Any]:
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "calc",
         "default_harness": "hermes",
-        "harnesses": {"hermes": {"kind": "hermes"}},
+        "harnesses": {"hermes": {"kind": harness_kind}},
         "models": {"default": {"provider": "openai", "model": "openai/gpt-5.4"}},
     }
     if environment:
@@ -171,9 +175,14 @@ def _agent_config(**environment: str) -> dict[str, Any]:
 
 
 def _agent(
-    name: str = "calc", workspace: str = "default", config_format: str = "nemo-agents-spec-v1", **fields: Any
+    name: str = "calc",
+    workspace: str = "default",
+    config_format: str = "nemo-agents-spec-v1",
+    *,
+    harness_kind: str = "hermes",
+    **fields: Any,
 ) -> Agent:
-    config = _agent_config() if config_format == "nemo-agents-spec-v1" else {"workflow": {}}
+    config = _agent_config(harness_kind=harness_kind) if config_format == "nemo-agents-spec-v1" else {"workflow": {}}
     return Agent(name=name, workspace=workspace, config=config, config_format=config_format, **fields)
 
 
@@ -225,9 +234,10 @@ def test_job_config_rejects_reserved_context_key() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("installed_adapter_manifests")
 async def test_to_spec_keeps_caller_context_on_the_step_config() -> None:
     entity_client = AsyncMock()
-    entity_client.get.return_value = _agent()
+    entity_client.get.return_value = _agent(harness_kind=_CONTEXT_READING_KIND)
 
     spec = await ExecuteAgentJob.to_spec(
         ExecuteAgentJobConfig(agent="calc", input="hello", context={"evaluation_id": "eval-1"}),
@@ -574,8 +584,8 @@ _SINCE_SCHEMA: dict[str, Any] = {
 }
 
 
-def _inline_agent(**fields: Any) -> AgentInline:
-    return AgentInline(config=_agent_config(), config_format="nemo-agents-spec-v1", **fields)
+def _inline_agent(*, harness_kind: str = "hermes", **fields: Any) -> AgentInline:
+    return AgentInline(config=_agent_config(harness_kind=harness_kind), config_format="nemo-agents-spec-v1", **fields)
 
 
 async def _step_config_for(agent: Agent | AgentInline, **request: Any) -> ExecuteAgentStepConfig:
@@ -607,9 +617,11 @@ async def test_to_spec_rejects_a_malformed_date_time(since: str) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("installed_adapter_manifests")
 @pytest.mark.parametrize("since", ["2026-10-01T00:00:00Z", "2026-10-01T08:30:00.123456789-07:00"])
 async def test_to_spec_accepts_a_context_matching_the_schema(since: str) -> None:
-    step_config = await _step_config_for(_agent(context_schema=_SINCE_SCHEMA), input="hello", context={"since": since})
+    agent = _agent(harness_kind=_CONTEXT_READING_KIND, context_schema=_SINCE_SCHEMA)
+    step_config = await _step_config_for(agent, input="hello", context={"since": since})
 
     assert step_config.request.context == {"since": since}
 
@@ -620,6 +632,51 @@ async def test_to_spec_validates_an_omitted_context_against_the_schema() -> None
 
     with pytest.raises(ValueError, match="'since' is a required property"):
         await _step_config_for(_agent(context_schema=schema), input="hello")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("harness_kind", ["hermes", "nvidia.fabric.hermes", "claude", "deepagents", "pi"])
+@pytest.mark.parametrize("make_agent", [_agent, _inline_agent], ids=["entity", "inline"])
+async def test_to_spec_rejects_context_for_a_stock_adapter(harness_kind: str, make_agent: Any) -> None:
+    """A stock adapter never hands the context to the model, so the run would spend its tokens blind."""
+    with pytest.raises(ValueError, match=r"does not read the request context, so 'context' would never reach"):
+        await _step_config_for(make_agent(harness_kind=harness_kind), input="hello", context={"run": "r1"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("installed_adapter_manifests")
+async def test_to_spec_rejects_context_for_a_stock_adapter_named_only_in_fabrics_catalog() -> None:
+    """``nvidia.fabric.nooa`` has no short harness name; Fabric's catalog still marks it stock."""
+    with pytest.raises(ValueError, match=r"\(nvidia\.fabric\.nooa\), which does not read the request context"):
+        await _step_config_for(_inline_agent(harness_kind="nvidia.fabric.nooa"), input="hello", context={"run": "r1"})
+
+
+@pytest.mark.asyncio
+async def test_to_spec_rejects_context_for_a_stock_adapter_in_a_custom_image() -> None:
+    """A custom image skips the adapter scan, but a stock harness kind still names a stock adapter."""
+    with pytest.raises(ValueError, match=r"\(nvidia\.fabric\.hermes\), which does not read the request context"):
+        await _step_config_for(
+            _inline_agent(), input="hello", context={"run": "r1"}, image="registry.example.com/acme/agent:1"
+        )
+
+
+@pytest.mark.asyncio
+async def test_to_spec_accepts_context_for_an_unknown_adapter_in_a_custom_image() -> None:
+    step_config = await _step_config_for(
+        _inline_agent(harness_kind="acme.custom.native"),
+        input="hello",
+        context={"run": "r1"},
+        image="registry.example.com/acme/agent:1",
+    )
+
+    assert step_config.request.context == {"run": "r1"}
+
+
+@pytest.mark.asyncio
+async def test_to_spec_accepts_a_stock_adapter_without_context() -> None:
+    step_config = await _step_config_for(_agent(), input="hello")
+
+    assert step_config.request.context == {}
 
 
 @pytest.mark.parametrize(

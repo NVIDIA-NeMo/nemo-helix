@@ -17,7 +17,7 @@ Concrete impls living in this codebase:
   results as platform artefacts.
 
 The API is deliberately narrow: a single ``save(name, local_path, *,
-ignore_patterns=None) -> ResultRef``. Read paths (``get`` / ``list``)
+ignore_patterns=None, stage=False) -> ResultRef``. Read paths (``get`` / ``list``)
 are not on the Protocol — task code that needs to enumerate results
 goes through the typed Jobs client.
 """
@@ -25,6 +25,7 @@ goes through the typed Jobs client.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -33,6 +34,7 @@ from typing import Protocol
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.constants import NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR, NEMO_JOB_FILESET_ENVVAR
 from nemo_helix_plugin.jobs.ignore_patterns import matches_ignore_patterns
 from nemo_helix_plugin.jobs.schemas import HelixJobResultResponse
 from pydantic import BaseModel
@@ -59,6 +61,8 @@ class _ResultManager(Protocol):
         result_name: str,
         artifact_local_path: str | Path,
         ignore_patterns: list[str] | str | None = None,
+        *,
+        stage: bool = False,
     ) -> HelixJobResultResponse: ...
 
 
@@ -66,9 +70,11 @@ def result_manager_factory(
     job_name: str,
     *,
     attempt_id: str,
-    workspace: str | None = None,
     files_client: FilesClient,
+    fileset_name: str,
+    workspace: str | None = None,
     jobs_client: JobsClient | None = None,
+    artifact_base_path: str | None = None,
 ) -> _ResultManager:
     from nemo_helix_plugin.jobs.result_manager import result_manager_factory as create_result_manager
 
@@ -78,7 +84,22 @@ def result_manager_factory(
         workspace=workspace,
         files_client=files_client,
         jobs_client=jobs_client,
+        fileset_name=fileset_name,
+        artifact_base_path=artifact_base_path,
     )
+
+
+def job_storage_context_from_env() -> tuple[str, str | None]:
+    """Fileset and artifact base path for the job this task serves.
+
+    Task entrypoints that build their own context read the same platform env as
+    ``build_ctx_from_env``. The result sink cannot read the job record for this,
+    so the values have to come from here.
+    """
+    fileset_name = os.environ.get(NEMO_JOB_FILESET_ENVVAR, "").strip()
+    if not fileset_name:
+        raise RuntimeError(f"{NEMO_JOB_FILESET_ENVVAR} not set; running outside the platform?")
+    return fileset_name, os.environ.get(NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR, "").strip() or None
 
 
 class JobResults(ABC):
@@ -91,7 +112,13 @@ class JobResults(ABC):
         local_path: str | Path,
         *,
         ignore_patterns: list[str] | str | None = None,
-    ) -> ResultRef: ...
+        stage: bool = False,
+    ) -> ResultRef:
+        """Publish ``local_path`` as result ``name``.
+
+        Set ``stage`` when other processes may still change a directory's files: the platform copies the
+        selected files to a temporary directory beside it first and uploads that copy.
+        """
 
 
 class LocalJobResults(JobResults):
@@ -111,6 +138,7 @@ class LocalJobResults(JobResults):
     Directories are copied recursively; ``ignore_patterns`` uses the same
     matching rules as hosted uploads so callers can skip cache files (matches
     the evaluator's ``ignore_patterns=["cache.db", "cache/"]`` usage).
+    ``stage`` is accepted for API parity and ignored: the local copy is the published result.
     """
 
     def __init__(self, root: Path) -> None:
@@ -122,6 +150,7 @@ class LocalJobResults(JobResults):
         local_path: str | Path,
         *,
         ignore_patterns: list[str] | str | None = None,
+        stage: bool = False,
     ) -> ResultRef:
         src = Path(local_path)
         if not src.exists():
@@ -196,6 +225,9 @@ class HelixJobResults(JobResults):
         client: Typed root client used for both file uploads and the jobs-results
             registration.
         attempt_id: Concrete platform attempt that produces these results.
+        fileset_name: Fileset holding the job's artifacts.
+        artifact_base_path: Folder inside ``fileset_name`` the job's artifacts nest under;
+            ``None`` means the job owns the whole fileset.
     """
 
     def __init__(
@@ -205,6 +237,8 @@ class HelixJobResults(JobResults):
         workspace: str,
         client: NemoClient,
         attempt_id: str,
+        fileset_name: str,
+        artifact_base_path: str | None = None,
     ) -> None:
         self._manager: _ResultManager
         self._configure_manager(
@@ -212,6 +246,8 @@ class HelixJobResults(JobResults):
             workspace=workspace,
             client=client,
             attempt_id=attempt_id,
+            fileset_name=fileset_name,
+            artifact_base_path=artifact_base_path,
         )
 
     def _configure_manager(
@@ -221,6 +257,8 @@ class HelixJobResults(JobResults):
         workspace: str,
         client: NemoClient,
         attempt_id: str,
+        fileset_name: str,
+        artifact_base_path: str | None,
     ) -> None:
         self._manager = result_manager_factory(
             job_name=job_name,
@@ -228,6 +266,8 @@ class HelixJobResults(JobResults):
             attempt_id=attempt_id,
             files_client=FilesClient.from_client(client),
             jobs_client=JobsClient.from_client(client),
+            fileset_name=fileset_name,
+            artifact_base_path=artifact_base_path,
         )
         self._job_name = job_name
         self._workspace = workspace
@@ -238,11 +278,13 @@ class HelixJobResults(JobResults):
         local_path: str | Path,
         *,
         ignore_patterns: list[str] | str | None = None,
+        stage: bool = False,
     ) -> ResultRef:
         record = self._manager.create_result(
             result_name=name,
             artifact_local_path=local_path,
             ignore_patterns=ignore_patterns,
+            stage=stage,
         )
         logger.info(
             "Saved result %r to %s for job %r in workspace %r",
@@ -259,4 +301,5 @@ __all__ = [
     "LocalJobResults",
     "HelixJobResults",
     "ResultRef",
+    "job_storage_context_from_env",
 ]

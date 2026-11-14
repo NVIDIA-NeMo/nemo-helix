@@ -46,20 +46,6 @@ vi.mock('@studio/routes/FilesetListRoute/ActionMenu', () => ({
   )),
 }));
 
-vi.mock('@studio/components/BulkDeleteModal', () => ({
-  BulkDeleteModal: vi.fn(({ items, open, onClose }) =>
-    open ? (
-      <div data-testid="bulk-delete-modal">
-        <span>Bulk Delete Modal</span>
-        <span data-testid="selected-datasets-count">{items.length}</span>
-        <button onClick={() => onClose?.()} data-testid="confirm-bulk-delete">
-          Confirm Delete
-        </button>
-      </div>
-    ) : null
-  ),
-}));
-
 // Mock the route utils
 vi.mock('@studio/routes/utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@studio/routes/utils')>();
@@ -180,7 +166,9 @@ describe('FilesetListRoute', () => {
           timeout: LG_SELECTOR_TIMEOUT,
         })
       ).toHaveTextContent('Filesets');
-      expect(screen.getByRole('button', { name: 'Create Dataset' })).toBeInTheDocument();
+      // Datasets are created from the Datasets page.
+      expect(screen.getByRole('button', { name: 'Create Model Fileset' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Create Dataset' })).not.toBeInTheDocument();
     });
   });
 

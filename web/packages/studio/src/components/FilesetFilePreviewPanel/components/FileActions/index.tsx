@@ -9,6 +9,7 @@ import { useDatasetFileDelete } from '@studio/api/datasets/useDatasetFileDelete'
 import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileSplitsModal';
 import { RenameFileModal } from '@studio/components/FilesTable/RenameFileModal';
 import type { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
+import { getDeleteFilesDescription } from '@studio/constants/filesets';
 import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { useWorkers } from '@studio/providers/workers/useWorkers';
 import LargeFileWorker from '@studio/workers/LargeFileWorker?worker';
@@ -42,7 +43,7 @@ export const FileActions: FC<Props> = ({
   const bearerToken = useOidcBearerToken();
   const { createWorker } = useWorkers();
 
-  const { mutateAsync: deleteFile, error: deleteError } = useDatasetFileDelete();
+  const { mutateAsync: deleteFile } = useDatasetFileDelete();
 
   const downloadFile = async () => {
     const worker = new LargeFileWorker();
@@ -115,11 +116,10 @@ export const FileActions: FC<Props> = ({
       {openModal === 'delete' && modalFile && (
         <DeleteConfirmationModal
           open
+          entity="file"
+          ids={[file.path]}
+          description={getDeleteFilesDescription(1)}
           onDelete={handleDeleteFile}
-          simpleConfirm
-          title="Delete File"
-          confirmationText={file.path}
-          errorText={deleteError?.message}
           onClose={() => setOpenModal(undefined)}
         />
       )}

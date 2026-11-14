@@ -338,8 +338,9 @@ uv run --frozen pytest e2e/test_evaluator_plugin.py \
     -m gym_sandbox_e2e -v -rs --no-cov
 ```
 
-On a cluster with no route to the internet the public-address and public-name checks pass without
-proving anything; the Kubernetes API check is the one that holds everywhere.
+On a cluster with no route to the internet the tests fail before they submit anything: the API pod
+cannot reach `1.1.1.1:443` or `example.com:443`, so a sandbox failing to reach them would prove
+nothing.
 
 **On a local kind cluster.** The scripts CI uses also run locally, from the repository root. Every
 step must use one namespace: the cluster setup puts the platform Secrets and the Gateway there,
@@ -380,6 +381,17 @@ The job then pulls `nhx-gym-host` onto the node. That image comes from `build-gy
 of its own that builds the `docker-gym-host` bake group, so a failure there stops only this lane.
 The colocated Gym tests stay in `kind-gym-e2e`: turning on `sandboxed_gym_default` sandboxes every
 Gym target on a cluster.
+
+### Feature: Taskset runs (Kubernetes)
+
+`e2e/test_taskset_runs.py` submits the 2-task Harbor dataset in `e2e/data/taskset_runs_dataset/` with `nemo evals runs submit --harbor-dir`, waits for the run, and checks its task Jobs through the Jobs API, its rewards (1 and 0), and the downloaded merged bundle. It then resubmits by `--taskset` and checks that no image was rebuilt. The cluster needs the taskset run controller, Builder with `system/`-qualified registry and signing secrets, and OpenSandbox. With auth on, pass a token that can create workspaces with `--access-token` or `NHX_E2E_ACCESS_TOKEN`; without one the test stops at once and prints the `nemo auth login` to run. The test writes the run and task Job IDs to `taskset-runs-e2e-<uuid>.json` under `$E2E_SERVICES_LOG_DIR` (default `.pytest_cache/taskset-runs-e2e/`) after every step, and cancels its runs on teardown. Set `NHX_E2E_WORKSPACE` to reuse a workspace and its images, and `NHX_E2E_KUBE_CONTEXT` to add the leftover-sandbox check and sandbox diagnostics on failure (it needs cluster-wide read on `batchsandboxes`).
+
+```bash
+uv run pytest e2e/test_taskset_runs.py --cluster-url http://127.0.0.1:18080 --feature taskset-runs -v
+# Auth on:
+uv run pytest e2e/test_taskset_runs.py --cluster-url https://nemo-helix.example.com --feature taskset-runs \
+  --access-token "$(nemo --context <context> auth token)" -v
+```
 
 ### Custom Registry and Tag (Docker)
 
