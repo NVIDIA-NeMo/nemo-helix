@@ -456,6 +456,67 @@ def test_backend_rope_fusion_defaults_off_and_accepts_a_stored_null() -> None:
 
 
 @pytest.mark.parametrize(
+    ("training", "error"),
+    [
+        (
+            {
+                "training_type": "partial_sft",
+                "finetuning_type": "all_weights",
+                "freeze_modules": [{"glob": "*.layers.0.*"}],
+                "unfreeze_modules": [{"path": "lm_head"}],
+            },
+            None,
+        ),
+        ({"training_type": "partial_sft", "freeze_modules": [{"glob": "*.layers.0.*"}]}, None),
+        ({"training_type": "partial_sft", "unfreeze_modules": [{"path": "lm_head"}]}, None),
+        (
+            {
+                "training_type": "partial_distillation",
+                "teacher_model": "default/teacher",
+                "finetuning_type": "lora_merged",
+                "unfreeze_modules": [{"path": "lm_head"}],
+            },
+            None,
+        ),
+        ({"training_type": "partial_sft"}, "needs freeze_modules or unfreeze_modules"),
+        ({"training_type": "partial_distillation", "freeze_modules": [{"path": "lm_head"}]}, "teacher_model"),
+        ({"freeze_modules": [{"glob": "*.layers.0.*"}]}, "need training_type partial_sft"),
+        (
+            {"training_type": "distillation", "teacher_model": "default/teacher", "unfreeze_modules": [{"path": "x"}]},
+            "need training_type partial_distillation",
+        ),
+        (
+            {"training_type": "partial_sft", "freeze_modules": [{"path": "lm_head", "glob": "*.lm_head"}]},
+            "exactly one",
+        ),
+        ({"training_type": "partial_sft", "freeze_modules": [{}]}, "exactly one"),
+        ({"training_type": "partial_sft", "freeze_modules": [{"path": ""}]}, "at least 1"),
+    ],
+    ids=[
+        "partial-full-weights-both",
+        "partial-lora-freeze",
+        "partial-lora-unfreeze",
+        "partial-distillation-lora-merged",
+        "partial-without-selectors",
+        "partial-distillation-without-teacher",
+        "selectors-on-sft",
+        "selectors-on-distillation",
+        "path-and-glob",
+        "neither",
+        "empty-path",
+    ],
+)
+def test_module_selectors(training: dict[str, object], error: str | None) -> None:
+    """Selectors belong to the partial training types, which need at least one."""
+    payload = {"model": "qwen", "dataset": {"training": "default/train"}, "training": training}
+    if error is None:
+        AutomodelJobInput.model_validate(payload)
+    else:
+        with pytest.raises(ValidationError, match=error):
+            AutomodelJobInput.model_validate(payload)
+
+
+@pytest.mark.parametrize(
     ("training", "match"),
     [
         ({"tokenizer_backend": "huggingface"}, "tokenizer_backend"),

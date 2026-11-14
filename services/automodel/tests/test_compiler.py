@@ -23,6 +23,7 @@ from nhx.automodel.api.v2.jobs.schemas import (
     DistillationTraining,
     ExportParams,
     LoRAParams,
+    ModuleSelectorParams,
     OutputResponse,
     RetrievalParams,
     SFTTraining,
@@ -143,6 +144,8 @@ def test_compile_training_step_carries_pass2_fields() -> None:
             sequence_packing_max_samples=256,
             max_seq_length=2048,
             mask_generation_prompt=True,
+            type="partial_sft",
+            freeze_modules=[ModuleSelectorParams(glob="*.layers.0.*")],
         ),
         output=_output(),
     )
@@ -150,6 +153,10 @@ def test_compile_training_step_carries_pass2_fields() -> None:
     cfg = step.config if hasattr(step, "config") else step["config"]
 
     assert cfg["dataset"]["mask_generation_prompt"] is True
+    # partial_sft trains as sft; the selectors make it partial.
+    assert cfg["training"]["training_type"] == "sft"
+    assert cfg["training"]["freeze_modules"] == [{"path": None, "glob": "*.layers.0.*"}]
+    assert cfg["training"]["unfreeze_modules"] is None
     assert cfg["model"]["tokenizer_backend"] is None
     assert cfg["optimizer"]["optimizer_name"] == "AdamW"
     assert cfg["optimizer"]["lr_decay_style"] == "linear"
@@ -284,8 +291,13 @@ def test_sft_training_encoder_defaults_do_not_override_explicit_hparams() -> Non
     assert training.warmup_steps == 1
 
 
-def test_distillation_with_resolved_recipe_rejects_encoder_recipes() -> None:
-    training = DistillationTraining.model_validate({"recipe": "auto", "teacher_model": "default/teacher"})
+@pytest.mark.parametrize(
+    "selectors",
+    [{}, {"type": "partial_distillation", "freeze_modules": [{"glob": "*.layers.0.*"}]}],
+    ids=["distillation", "partial-distillation"],
+)
+def test_distillation_with_resolved_recipe_rejects_encoder_recipes(selectors: dict[str, object]) -> None:
+    training = DistillationTraining.model_validate({"recipe": "auto", "teacher_model": "default/teacher", **selectors})
     with pytest.raises(ValueError, match="only supports the sft recipe"):
         training.with_resolved_recipe("bi_encoder")
     resolved = training.with_resolved_recipe("sft")
