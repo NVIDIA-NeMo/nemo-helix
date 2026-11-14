@@ -65,7 +65,8 @@ a profile the config adds doesn't inherit executor_defaults.
     cleanup_completed_jobs_immediately: true
     ttl_seconds_before_active: {{ $.Values.builder.ttlSecondsBeforeActive | int }}
     {{- with $.Values.builder.maxConcurrentBuilds }}
-    # Jobs starts a step on this profile only while fewer than this many run on it, and queues the rest.
+    # Jobs starts a step on this profile only while fewer than this many run on it, and queues the rest. Jobs counts
+    # each profile apart, so only build steps count here: eval, customizer and other jobs run on other profiles.
     max_active_jobs: {{ . | int }}
     {{- end }}
     storage:
