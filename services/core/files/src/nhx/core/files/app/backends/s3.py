@@ -9,11 +9,13 @@ import base64
 import hashlib
 import json
 import logging
+from collections import OrderedDict
 from concurrent.futures import CancelledError
 from contextlib import asynccontextmanager, closing
 from copy import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from io import BufferedReader, RawIOBase
+from time import monotonic
 from typing import Any, AsyncIterator, NoReturn
 
 import aioboto3
@@ -159,6 +161,21 @@ class _ObjectSnapshot:
     kms_encrypted: bool = False
 
 
+@dataclass(frozen=True)
+class _MetadataEntry:
+    """A successful HEAD result, aged from the start of its freshness check."""
+
+    checked_at: float
+    snapshot: _ObjectSnapshot
+
+
+# Process-local, bounded LRU. Credential fingerprints isolate upstream access
+# scopes; mutation invalidation covers all scopes and overlapping fileset prefixes.
+_METADATA_CACHE_MAX_SIZE = 4096
+_metadata_cache: OrderedDict[tuple[str, str, str], _MetadataEntry] = OrderedDict()
+_metadata_generation = 0
+
+
 @dataclass
 class S3StorageImpl(StorageImpl):
     config: S3StorageConfig
@@ -224,6 +241,40 @@ class S3StorageImpl(StorageImpl):
         directory boundary (``foo/``).
         """
         return key == self.config.prefix or key.startswith(self._storage_boundary())
+
+    def _metadata_source(self) -> str:
+        """Identify a bucket independently of fileset prefixes and credentials."""
+        # Region is a routing/signing hint, not bucket identity. Invalidating
+        # across aliases is safe even when they use different region settings.
+        return json.dumps([self.config.endpoint_url, self.config.bucket])
+
+    async def _metadata_cache_key(self, path: str) -> tuple[str, str, str] | None:
+        """Scope metadata to resolved credentials, without retaining secret text."""
+        if self.config.use_sdk_auth:
+            credentials = await self._session._session.get_credentials()
+            if credentials is None:
+                return None
+            frozen = await credentials.get_frozen_credentials()
+            auth = [frozen.access_key, frozen.secret_key, frozen.token]
+        else:
+            # Validate required secrets before allowing a metadata cache hit.
+            self._get_client_kwargs()
+            auth = [self.secrets.get("access_key_id"), self.secrets.get("secret_access_key")]
+        # Keep lookups isolated by routing hints (which may select different
+        # AWS partitions), while invalidation deliberately spans region aliases.
+        fingerprint = hashlib.sha256(json.dumps([auth, self.config.region]).encode()).hexdigest()
+        return self._metadata_source(), self._full_key(path), fingerprint
+
+    def _invalidate_metadata(self, path: str | None = None) -> None:
+        """Invalidate this object (or prefix), including pending freshness checks."""
+        global _metadata_generation
+        _metadata_generation += 1
+        source = self._metadata_source()
+        for key in list(_metadata_cache):
+            if key[0] == source and (
+                key[1] == self._full_key(path) if path is not None else key[1].startswith(self.config.prefix or "")
+            ):
+                del _metadata_cache[key]
 
     @asynccontextmanager
     async def _client(self) -> AsyncIterator[S3Client]:
@@ -324,6 +375,8 @@ class S3StorageImpl(StorageImpl):
                         # only with the same ETag guard, never to an unpinned GET.
                         current_url = await presign({k: v for k, v in params.items() if k != "VersionId"})
                         continue
+                    if e.status in (404, 412):
+                        self._invalidate_metadata(path)
                     if e.status == 412:
                         raise StorageObjectChangedError(
                             "Upstream object changed during download; retry the request"
@@ -367,6 +420,7 @@ class S3StorageImpl(StorageImpl):
             if isinstance(error, ClientError):
                 _raise_for_s3_error(error, f"uploading {path}")
             raise error from None
+        self._invalidate_metadata(path)
         return FileInfo(path=path, size=content_length)
 
     async def validate_storage(self):
@@ -390,9 +444,24 @@ class S3StorageImpl(StorageImpl):
         return FileInfo(path=path, size=storage._snapshot.size)
 
     async def for_download(self, path: str) -> S3StorageImpl:
-        """HEAD the current object and return an independent, pinned download view."""
+        """Resolve metadata within its TTL and return a pinned download view."""
         if self._snapshot is not None and self._snapshot.path == path:
             return self
+        from nhx.core.files.config import files_config
+
+        ttl = files_config().s3_metadata_cache_ttl_seconds
+        key = await self._metadata_cache_key(path) if ttl > 0 else None
+        checked_at = monotonic()
+        if key is not None:
+            entry = _metadata_cache.get(key)
+            if entry is not None:
+                if checked_at - entry.checked_at < ttl:
+                    _metadata_cache.move_to_end(key)
+                    storage = copy(self)
+                    storage._snapshot = replace(entry.snapshot, path=path)
+                    return storage
+                del _metadata_cache[key]
+        generation = _metadata_generation
         async with self._client() as client:
             try:
                 head = await client.head_object(Bucket=self.config.bucket, Key=self._full_key(path))
@@ -411,6 +480,16 @@ class S3StorageImpl(StorageImpl):
             version_id=version_id if version_id and version_id != "null" else None,
             kms_encrypted=head.get("ServerSideEncryption") in ("aws:kms", "aws:kms:dsse"),
         )
+        if (
+            key is not None
+            and generation == _metadata_generation
+            and (storage._snapshot.etag or storage._snapshot.version_id)
+            and not storage._snapshot.kms_encrypted
+        ):
+            _metadata_cache[key] = _MetadataEntry(checked_at, storage._snapshot)
+            _metadata_cache.move_to_end(key)
+            while len(_metadata_cache) > _METADATA_CACHE_MAX_SIZE:
+                _metadata_cache.popitem(last=False)
         return storage
 
     async def delete(self, path: str) -> FileInfo:
@@ -425,6 +504,7 @@ class S3StorageImpl(StorageImpl):
 
                 # Delete the object
                 await client.delete_object(Bucket=self.config.bucket, Key=full_key)
+                self._invalidate_metadata(path)
 
                 logger.info(f"Deleted file {path} from S3 bucket {self.config.bucket}")
                 return file_info
@@ -444,6 +524,9 @@ class S3StorageImpl(StorageImpl):
         touched. A failure after one page and before the next may leave some
         owned keys deleted; a later retry lists again and deletes the rest.
         """
+        # Invalidate before and after: partial bulk deletes can change objects
+        # even when a later page fails, and concurrent HEADs must not refill them.
+        self._invalidate_metadata()
         prefix = self.config.prefix or ""
 
         async with self._client() as client:
@@ -465,6 +548,8 @@ class S3StorageImpl(StorageImpl):
                 logger.info(f"Deleted all files with prefix '{prefix}' from S3 bucket {self.config.bucket}")
             except ClientError as e:
                 _raise_for_s3_error(e, f"deleting all files from bucket {self.config.bucket}")
+            finally:
+                self._invalidate_metadata()
 
     async def get_cache_path_key(self, path: str | None = None) -> str | None:
         """Key cached content by source, object key, and freshly resolved identity.
