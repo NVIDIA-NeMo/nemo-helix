@@ -307,9 +307,13 @@ failure message carries its last state as seen there: pod phase, conditions, and
   ```
 
 - For whoever runs the tests: `kubectl` access to list pods and BatchSandboxes in the release
-  namespace and to read the `kubernetes` Service in `default`. The tests recognise the release's
+  namespace, to `exec` into the platform API pod, and to read the `kubernetes` Service in
+  `default`. The tests recognise the release's
   namespace by its API pods' `app.kubernetes.io/component` label, which must be the chart default
   `nhx-api` or the legacy `nmp-api`; a release with any other `api.componentLabel` fails that check.
+- Outbound internet access from the cluster. Before the sandbox is checked against `1.1.1.1:443` and
+  `example.com:443`, the API pod must reach both; otherwise the test fails, since a sandbox that
+  cannot reach them would prove nothing.
 
 | Variable | Description | Default |
 |---|---|---|

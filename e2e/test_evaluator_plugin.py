@@ -917,6 +917,19 @@ UNLISTED_PUBLIC_ADDRESS = "1.1.1.1:443"
 #: A public name that no egress allowlist names. Under dns+nft a public address opens only once an
 #: allowed name resolves to it, so the probes by address cannot show that other names stay closed.
 UNLISTED_PUBLIC_NAME = "example.com:443"
+#: Run in a platform API pod: connects to each ``host:port`` in argv[1] (a JSON list) and prints the
+#: ones it could not reach, with their errors, as a JSON object.
+_CONTROL_PROBE_SOURCE = """\
+import json, socket, sys
+failed = {}
+for target in json.loads(sys.argv[1]):
+    host, _, port = target.rpartition(":")
+    try:
+        socket.create_connection((host, int(port)), timeout=10).close()
+    except OSError as error:
+        failed[target] = f"{type(error).__name__}: {error}"
+print(json.dumps(failed))
+"""
 #: Long enough for a host to start on a small CI node, where the default 240s is tight.
 GYM_HOST_STARTUP_TIMEOUT_SECONDS = 600
 SANDBOXED_GYM_JOB_TIMEOUT_SECONDS = 900.0
@@ -1188,6 +1201,32 @@ class _SandboxCluster:
     def runs_platform_api(self) -> bool:
         """Whether the namespace has a platform API pod, by the labels the chart gives them."""
         return bool(self._get("pods", "--selector", PLATFORM_API_POD_SELECTOR).get("items"))
+
+    def unreachable_from_platform_api(self, targets: Sequence[str]) -> dict[str, str]:
+        """The ``host:port`` targets a running platform API pod cannot connect to, each with its error.
+
+        The chart restricts only the API's ingress, so the API pod is the cluster's control for a
+        destination a sandbox is expected to be denied: a target it cannot reach either says nothing
+        about the sandbox's egress rules.
+        """
+        pods = self._get("pods", "--selector", PLATFORM_API_POD_SELECTOR).get("items") or []
+        running = [pod["metadata"]["name"] for pod in pods if (pod.get("status") or {}).get("phase") == "Running"]
+        if not running:
+            raise RuntimeError(f"no running platform API pod ({PLATFORM_API_POD_SELECTOR})")
+        cmd = ["kubectl", "--context", self.context, "--namespace", self.namespace, "exec", running[0], "--"]
+        cmd += ["python", "-c", _CONTROL_PROBE_SOURCE, json.dumps(list(targets))]
+        try:
+            result = subprocess.run(
+                cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120, check=False
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError(f"`kubectl exec {running[0]}` did not complete: {error}") from error
+        if result.returncode != 0:
+            raise RuntimeError(f"`kubectl exec {running[0]}` failed: {result.stderr.strip()}")
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"`kubectl exec {running[0]}` did not print JSON: {error}") from error
 
     def gym_hosts(self, markers: frozenset[str], known: frozenset[str] = frozenset()) -> dict[str, dict[str, Any]]:
         """A job's Gym host: the BatchSandboxes that name the job and their pods, by ``kind/name``.
@@ -1572,6 +1611,17 @@ def test_gym_wheels_v1_environment_runs_with_only_its_extras_vendored(
     NHX_E2E_GYM_POLICY_MODEL to use a real model instead of the mock.
     """
     greeting = "hello there"
+    # A public destination the cluster cannot reach at all would pass for one the sandbox is denied.
+    public_targets = [UNLISTED_PUBLIC_ADDRESS, UNLISTED_PUBLIC_NAME]
+    try:
+        unreachable = sandbox_cluster.unreachable_from_platform_api(public_targets)
+    except RuntimeError as error:
+        pytest.fail(f"could not check the public probe targets from outside the sandbox: {error}")
+    if unreachable:
+        pytest.fail(
+            f"the platform API pod cannot reach {unreachable}, so the sandbox failing to reach them would "
+            "prove nothing about its egress rules; these tests need a cluster with outbound internet access"
+        )
     fileset_name = _upload_greeting_environment(evaluator_client, evaluator_workspace, tmp_path / "package")
     policy = _greeting_policy(client, evaluator_workspace, greeting)
     rows = [
