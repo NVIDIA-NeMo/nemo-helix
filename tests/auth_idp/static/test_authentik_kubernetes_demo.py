@@ -2094,3 +2094,24 @@ def test_authentik_helm_demo_does_not_inject_legacy_workload_token_envs() -> Non
     assert "NEMO_WORKLOAD_TOKEN" not in combined
     assert "NEMO_WORKLOAD_TOKEN_FILE" not in combined
     assert WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR not in combined
+
+
+def _deep_contains(outer: object, inner: object) -> bool:
+    if isinstance(inner, dict):
+        return isinstance(outer, dict) and all(k in outer and _deep_contains(outer[k], v) for k, v in inner.items())
+    return outer == inner
+
+
+def test_authentik_taskset_runs_overlay_extends_the_demo_and_the_kind_values() -> None:
+    """The nightly's auth-workload overlay repeats the demo's lists (Helm replaces lists) and the kind row's values."""
+    overlay = yaml.safe_load(Path("e2e/k8s/values/authentik-taskset-runs.yaml").read_text())["nemo-helix"]
+    demo = yaml.safe_load((HELM_DIR / "values.yaml").read_text())["nemo-helix"]
+
+    assert overlay["api"]["services"] == [*demo["api"]["services"], "evals", "builder"]
+    assert overlay["core"]["controller"]["controllers"] == [
+        *demo["core"]["controller"]["controllers"],
+        "evals-taskset-runs",
+        "builder-queue",
+    ]
+    for kind_values in ("e2e/k8s/values/builder.yaml", "e2e/k8s/values/taskset-runs.yaml"):
+        assert _deep_contains(overlay, yaml.safe_load(Path(kind_values).read_text())), kind_values
