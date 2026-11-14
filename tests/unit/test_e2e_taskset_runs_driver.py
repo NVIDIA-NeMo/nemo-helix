@@ -9,7 +9,7 @@ them; the checker tests prove each assertion can still fail.
 The checker inputs are built by the factories below, as the CLI prints them, and parsed through the same boundary as
 the e2e (``parse_status``, ``parse_results``, ``read_bundle``). A test can't build an input the platform's models
 reject, and a model change breaks the factories on the PR that makes it. Their values follow a green run on a
-deployed namespace (run-238e586d56bcfd4b, in AALGO-1034's evidence).
+deployed namespace.
 """
 
 import json
@@ -43,6 +43,8 @@ from e2e.taskset_runs_driver import (
     RunDriver,
     Snapshot,
     check_bundle,
+    check_cancelled_while_queued,
+    check_foreign_job_cancel,
     check_run,
     check_scores,
     check_snapshot,
@@ -714,6 +716,8 @@ def test_parse_results_rejects_an_unknown_key_in_a_task() -> None:
     body["tasks"][0]["surprise"] = 1
     with pytest.raises(AssertionError, match=r"\[verifier\] `runs results --json` doesn't match TasksetRunResults"):
         parse_results(body)
+    with pytest.raises(AssertionError, match=r"\[cancel\] `runs results --json`"):
+        parse_results(body, "cancel")
 
 
 def test_parse_results_ignores_an_unknown_key_in_a_result_record() -> None:
@@ -887,3 +891,119 @@ def test_checkers_reject_empty_inputs(tmp_path: Path) -> None:
         check_snapshot({}, fresh=False)
     with pytest.raises(AssertionError, match=r"\[reuse\]"):
         check_snapshot_unchanged({}, {})
+
+
+def test_wait_for_returns_once_done_and_fails_with_the_last_value(tmp_path: Path) -> None:
+    clock = Clock()
+    driver, _ = make_driver(tmp_path, lambda args, timeout: done(), clock)
+    values = iter(["pending", "active"])
+
+    assert driver.wait_for("cancel", "active", lambda: next(values), lambda v: v == "active", cap=60) == "active"
+    with pytest.raises(AssertionError, match=r"\[cancel\] Job active didn't happen within 10 s; last: pending"):
+        driver.wait_for("cancel", "Job active", lambda: "pending", lambda v: v == "active", cap=10)
+
+
+def test_pause_refuses_to_outlive_the_budget(tmp_path: Path) -> None:
+    clock = Clock()
+    driver, _ = make_driver(tmp_path, lambda args, timeout: done(), clock, time_left=15)
+
+    driver.pause(10)
+    assert clock() == 1010
+    with pytest.raises(AssertionError, match=r"\[budget\]"):
+        driver.pause(10)
+
+
+# --- Cancel-path checkers -------------------------------------------------------------------------------------------
+
+
+def _queued_cancelled() -> dict[str, Any]:
+    """``runs status --json`` of a one-task run cancelled while it waited for a slot."""
+    body = status_body(phase="cancelled", result_state="none")
+    body["bundle"] = None
+    body["tasks"] = [
+        {
+            "index": 0,
+            "name": "taskset-cancel-quick",
+            "task": {"task": "task-0", "task_index": 0, "phase": "cancelled"},
+            "state": "cancelled",
+        }
+    ]
+    return body
+
+
+def _summary(*, tasks: int, trials: int) -> dict[str, Any]:
+    return {"task_count": tasks, "trial_count": trials, "score_count": 2 * trials, "error_count": 0}
+
+
+def _foreign_cancel() -> dict[str, Any]:
+    """``runs results --json`` of a 2-task run whose task-0 Job was cancelled from outside."""
+
+    def task(index: int, phase: str, error: str | None) -> dict[str, Any]:
+        row = {"task": f"task-{index}", "task_index": index, "phase": phase, "job": f"{RUN}-task-{index}"}
+        return {
+            "index": index,
+            "name": f"taskset-cancel-slow-{index + 1}",
+            "task": row | ({"error": error} if error else {}),
+            "state": phase,
+        }
+
+    survivor = task(1, "succeeded", None) | {
+        "result": _record(f"{RUN}-task-1", reward=1.0, format_ok=1.0) | {"summary": _summary(tasks=1, trials=1)}
+    }
+    return {
+        "run": status_body()["run"],
+        "tasks": [task(0, "failed", "job_cancelled"), survivor],
+        "result": _record(RUN, reward=1.0, format_ok=1.0) | {"summary": _summary(tasks=2, trials=1)},
+    }
+
+
+def test_check_cancelled_while_queued_accepts_a_cancel_before_any_job() -> None:
+    check_cancelled_while_queued(parse_status(_queued_cancelled()), [])
+
+
+def test_check_cancelled_while_queued_rejects_a_created_job() -> None:
+    with pytest.raises(AssertionError, match=r"\[cancel\] a task Job was created"):
+        check_cancelled_while_queued(
+            parse_status(_queued_cancelled()), [JobView(name=f"{RUN}-task-0", status="cancelled")]
+        )
+
+
+def test_check_cancelled_while_queued_rejects_a_run_that_ran() -> None:
+    status = _queued_cancelled()
+    status["run"]["phase"] = "completed"
+    with pytest.raises(AssertionError, match=r"\[cancel\] queued run is completed"):
+        check_cancelled_while_queued(parse_status(status), [])
+
+
+def test_check_foreign_job_cancel_accepts_one_failed_task() -> None:
+    check_foreign_job_cancel(parse_results(_foreign_cancel()), f"{RUN}-task-0")
+
+
+def test_check_foreign_job_cancel_rejects_a_cancelled_sibling() -> None:
+    results = _foreign_cancel()
+    results["tasks"][1]["task"].update(phase="cancelled", error="job_cancelled")
+    with pytest.raises(AssertionError, match=rf"\[cancel\] task Job {RUN}-task-1 is cancelled"):
+        check_foreign_job_cancel(parse_results(results), f"{RUN}-task-0")
+
+
+def test_check_foreign_job_cancel_rejects_trials_from_the_cancelled_task() -> None:
+    results = _foreign_cancel()
+    results["result"]["summary"]["trial_count"] = 2
+    with pytest.raises(AssertionError, match=r"\[cancel\] the run's result has \(tasks, trials, errors\) \(2, 2, 0\)"):
+        check_foreign_job_cancel(parse_results(results), f"{RUN}-task-0")
+
+
+def test_check_foreign_job_cancel_rejects_a_survivor_that_timed_out() -> None:
+    results = _foreign_cancel()  # a timed-out oracle: the task still succeeds, its trial scores 0 with an error
+    survivor = results["tasks"][1]["result"]
+    survivor["scores"]["scores"][0]["mean"] = 0.0
+    survivor["summary"]["error_count"] = 1
+    with pytest.raises(AssertionError, match=r"\[cancel\] surviving task taskset-cancel-slow-2: reward 0.0 with 1"):
+        check_foreign_job_cancel(parse_results(results), f"{RUN}-task-0")
+
+
+def test_cancel_checkers_reject_empty_inputs() -> None:
+    with pytest.raises(AssertionError, match=r"\[cancel\]"):
+        check_cancelled_while_queued(parse_status(_queued_cancelled() | {"tasks": []}), [])
+    with pytest.raises(AssertionError, match=r"\[cancel\]"):
+        check_foreign_job_cancel(parse_results(_foreign_cancel() | {"tasks": []}), "j")

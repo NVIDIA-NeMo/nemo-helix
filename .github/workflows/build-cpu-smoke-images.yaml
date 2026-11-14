@@ -1,0 +1,206 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The CPU smoke images (nhx-api, nhx-tasks, nhx-builder-tasks, nhx-kaniko, ...) for one commit, tagged with its SHA.
+# The same steps as ci.yaml's build-cpu-smoke-images, driven by inputs instead of the caller's event, so a scheduled
+# caller builds and publishes exactly what a dispatched one does.
+
+name: Build CPU smoke images
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: The commit the images are named for; their tag unless image_tag is set.
+        required: true
+        type: string
+      checkout_ref:
+        description: >-
+          Commit to check out and build. Empty builds the caller's own checkout, which for a pull request is its
+          merge commit: the code every other PR build tagged with the head SHA builds.
+        required: false
+        type: string
+        default: ""
+      image_tag:
+        description: Tag for the images instead of source_sha; they're also tagged with source_sha.
+        required: false
+        type: string
+        default: ""
+      publish:
+        description: Push the images to GHCR.
+        required: true
+        type: boolean
+    outputs:
+      image_registry:
+        description: Registry the images are in.
+        value: ${{ jobs.build.outputs.image_registry }}
+      image_tag:
+        description: The images' tag, image_tag or source_sha.
+        value: ${{ jobs.build.outputs.image_tag }}
+      publish_images:
+        description: "'true' when the images were pushed."
+        value: ${{ jobs.build.outputs.publish_images }}
+
+permissions:
+  contents: read
+
+env:
+  # Keep the CI uv binary aligned with the Flox development environment.
+  UV_VERSION: "0.13.4"
+  # Jobs here provision their own toolchain, so Make bypasses Flox activation.
+  TOOLCHAIN: system
+
+jobs:
+  build:
+    name: Build CPU smoke images
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_registry: ${{ steps.bake-vars.outputs.image_registry }}
+      image_tag: ${{ steps.bake-vars.outputs.image_tag }}
+      publish_images: ${{ steps.bake-vars.outputs.publish_images }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.checkout_ref }}
+
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
+        with:
+          disable_swap: "true"
+          remove_haskell: "true"
+          remove_java: "true"
+          remove_ruby: "true"
+          remove_swift: "true"
+          prune_docker: "true"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          name: nhx-builder
+          driver: docker-container
+          cleanup: true
+
+      - name: Resolve bake cache branch
+        id: cache-branch
+        uses: ./.github/actions/bake-cache-branch
+        with:
+          base-ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.base_ref || github.ref_name }}
+          event-name: ${{ github.event_name }}
+
+      - name: Configure bake variables
+        id: bake-vars
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          PUBLISH: ${{ inputs.publish }}
+          CACHE_SOURCE_BRANCH: ${{ steps.cache-branch.outputs.source-branch }}
+          CACHE_TARGET_BRANCH: ${{ steps.cache-branch.outputs.target-branch }}
+        run: |
+          set -euo pipefail
+
+          image_registry="ghcr.io/${GITHUB_REPOSITORY,,}"
+          source_sha="${SOURCE_SHA}"
+          bake_tag="${IMAGE_TAG:-$source_sha}"
+          fastembed_cache_dir="${RUNNER_TEMP}/fastembed-cache"
+          # From the input only: a called workflow inherits its caller's event, so reading it here would make a
+          # scheduled caller build without publishing.
+          publish_images="${PUBLISH}"
+
+          {
+            printf 'IMAGE_REGISTRY=%s\n' "$image_registry"
+            printf 'BASE_REGISTRY=%s\n' "$image_registry"
+            printf 'CACHE_REGISTRY=%s\n' "$image_registry"
+            printf 'BAKE_TAG=%s\n' "$bake_tag"
+            printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
+            printf 'FASTEMBED_CACHE_CONTEXT=%s\n' "$fastembed_cache_dir"
+            printf 'FASTEMBED_CACHE_DIR=%s\n' "$fastembed_cache_dir"
+            printf 'DOCKER_BAKE_ALLOW_FS_READ=%s\n' "$fastembed_cache_dir"
+            printf 'FASTEMBED_MODEL_REPO=%s\n' "qdrant/all-MiniLM-L6-v2-onnx"
+            printf 'FASTEMBED_MODEL_REVISION=%s\n' "main"
+            printf 'PUBLISH_IMAGES=%s\n' "$publish_images"
+            printf 'BAKE_CACHE_SOURCE_BRANCH=%s\n' "$CACHE_SOURCE_BRANCH"
+            printf 'BAKE_CACHE_TARGET_BRANCH=%s\n' "$CACHE_TARGET_BRANCH"
+          } >> "$GITHUB_ENV"
+          {
+            printf 'image_registry=%s\n' "$image_registry"
+            printf 'image_tag=%s\n' "$bake_tag"
+            printf 'publish_images=%s\n' "$publish_images"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare fastembed model cache directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${FASTEMBED_CACHE_DIR}"
+          touch "${FASTEMBED_CACHE_DIR}/.cache-context"
+
+      - name: Restore fastembed model cache
+        id: fastembed-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ runner.temp }}/fastembed-cache
+          key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
+
+      - name: Install uv for fastembed model cache
+        if: steps.fastembed-cache.outputs.cache-hit != 'true'
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          cache-dependency-glob: uv.lock
+
+      - name: Populate fastembed model cache
+        if: steps.fastembed-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          HF_HUB_DISABLE_UPDATE_CHECK=1 uv run --no-project --with 'huggingface-hub>=1.0.1,<2.0.0' hf download \
+            "${FASTEMBED_MODEL_REPO}" \
+            --revision "${FASTEMBED_MODEL_REVISION}" \
+            --cache-dir "${FASTEMBED_CACHE_DIR}" \
+            --format quiet
+          find "${FASTEMBED_CACHE_DIR}/models--qdrant--all-MiniLM-L6-v2-onnx/snapshots" \
+            -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .
+
+      - name: Log in to GHCR
+        if: env.PUBLISH_IMAGES == 'true' || env.BAKE_CACHE_TARGET_BRANCH != ''
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Print Docker bake graph
+        shell: bash
+        run: |
+          target=docker-cpu
+          if [ "${PUBLISH_IMAGES}" = "true" ]; then
+            target=docker-cpu-ci
+          fi
+          make docker-print TARGET="${target}"
+
+      - name: Build CPU images
+        if: env.PUBLISH_IMAGES != 'true'
+        shell: bash
+        run: make docker-load TARGET=docker-cpu
+
+      - name: Build and publish CPU images
+        if: env.PUBLISH_IMAGES == 'true'
+        shell: bash
+        run: make docker-push TARGET=docker-cpu-ci
+
+      - name: Save fastembed model cache
+        if: steps.fastembed-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/fastembed-cache
+          key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
+
