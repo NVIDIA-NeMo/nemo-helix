@@ -33,10 +33,10 @@ def chat_message(response: Mapping[str, Any]) -> dict[str, str]:
     drops the provider's ``reasoning_content``. With it, Gym wraps that reasoning in ``<think>`` tags in front of
     the content, then moves every ``<think>`` block into one reasoning item, a summary part each, in order.
 
-    So the first part is the model's own reasoning, which becomes ``reasoning_content``: the cookbook puts it
-    back inside ``<think>`` before splitting the answer off at the first ``</think>``. Any later part was a
-    ``<think>`` block the model wrote in its content, as the cookbook's prompt asks. It goes back in front of the
-    content, where the cookbook's split still finds it.
+    So the first part, unless it's empty, is the model's own reasoning, which becomes ``reasoning_content``: the
+    cookbook puts it back inside ``<think>`` before splitting the answer off at the first ``</think>``. Any other
+    part was a ``<think>`` block the model wrote in its content, as the cookbook's prompt asks. It goes back in front
+    of the content, where the cookbook's split still finds it.
 
     Limitation: Gym keeps the blocks' order but not where they sat, so every written block goes back in front of
     the content. That rebuilds the provider's message when the model writes its blocks before its answer, as the
@@ -63,9 +63,16 @@ def chat_message(response: Mapping[str, Any]) -> dict[str, str]:
     if not reasoning_texts:
         return {"content": message_text, "reasoning_content": ""}
 
-    own_reasoning = reasoning_texts[0]
+    # Gym wraps the model's own reasoning only when there is some. So an empty first part was an empty block the
+    # model wrote, and every part goes back into the content.
+    if reasoning_texts[0]:
+        own_reasoning = reasoning_texts[0]
+        written_texts = reasoning_texts[1:]
+    else:
+        own_reasoning = ""
+        written_texts = reasoning_texts
     written_blocks = ""
-    for text in reasoning_texts[1:]:
+    for text in written_texts:
         written_blocks += f"<think>{text}</think>"
     return {"content": written_blocks + message_text, "reasoning_content": own_reasoning}
 

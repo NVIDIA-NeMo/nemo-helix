@@ -153,6 +153,10 @@ def _case(rng: random.Random) -> tuple[str, str, dict[str, Any], dict[str, Any],
         # A reasoning parser split the trace into its own output item.
         field = "summary" if form == 0 else "content"
         response = _response([prediction], reasoning=reasoning, field=field, tokens=tokens)
+        if not reasoning:
+            # Gym wraps the model's own reasoning only when there is some, so an empty part was an empty block the
+            # model wrote.
+            return task, reference, response, {"content": f"<think></think>{prediction}"}, tokens
         return task, reference, response, {"content": prediction, "reasoning_content": reasoning}, tokens
     text = {
         2: f"{reasoning}\n</think>\n{prediction}",
@@ -188,6 +192,8 @@ def test_the_scorer_agrees_with_the_cookbook_through_gyms_reasoning_parser() -> 
                 f"<think>\n{trace}\n</think>\n{prediction}",
                 f"<think>{trace}</think>\n\n{prediction}",
                 f"<think>{trace}</think><think>{other}</think>{prediction}",
+                f"<think></think><think>{trace}</think>{prediction}",
+                f"<think></think>{prediction}",
                 prediction,
                 f"<think>\n{trace} and then",
                 "",
