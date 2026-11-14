@@ -150,6 +150,20 @@ async def _count_active_admins(
     return count
 
 
+async def _can_set_workspace_limits(auth_client: AuthClient, workspace: str | None) -> bool:
+    """Whether the caller may set workspace limits.
+
+    Editor already holds ``workspaces.update``, so limits get their own Admin check.
+    Pass ``workspace=None`` on create, where the creator is auto-granted Admin and so an
+    Admin check proves nothing: only platform admins and services may set limits then.
+    """
+    if not auth_client.auth_enabled or auth_client.principal.caller_kind == "service_principal":
+        return True
+    if await auth_client.has_role("system", "HelixAdmin"):
+        return True
+    return workspace is not None and await auth_client.has_role(workspace, "Admin")
+
+
 async def _delete_all_role_bindings(entity_repository: EntityRepository, workspace: str) -> list[Entity]:
     """Delete all role bindings in a workspace.
 
@@ -229,6 +243,12 @@ async def create_workspace(
             detail=f"Workspace names beginning with '{SAMPLE_WORKSPACE_PREFIX}' are reserved for the sample flow",
         )
 
+    if workspace.limits is not None and not await _can_set_workspace_limits(auth_client, None):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Setting workspace limits when creating a workspace requires a platform admin",
+        )
+
     existing = await workspace_repository.get_workspace_by_name(name=workspace.name)
     if existing:
         raise HTTPException(
@@ -240,6 +260,7 @@ async def create_workspace(
         new_workspace = await workspace_repository.create_workspace(
             name=workspace.name,
             description=workspace.description,
+            limits=workspace.limits,
             created_by=auth_client.principal.effective_id,
         )
     except IntegrityError as e:
@@ -402,13 +423,16 @@ async def get_workspace(
     summary="Update workspace",
     responses={404: {"model": ErrorResponse, "description": "Workspace not found"}},
     description=textwrap.dedent("""
-        Update a workspace's description.
+        Update a workspace's description and/or limits.
+
+        Setting `limits` requires the Admin role on the workspace. Omitted fields are unchanged.
 
         Example:
         ```
         PUT /apis/entities/v2/workspaces/ml-team
         {
-            "description": "Updated description for ML Team"
+            "description": "Updated description for ML Team",
+            "limits": {"max_concurrent_jobs": 50}
         }
         ```
     """),
@@ -420,10 +444,16 @@ async def update_workspace(
     auth_client: AuthClientDep,
 ) -> Workspace:
     """Update workspace."""
+    if workspace_data.limits is not None and not await _can_set_workspace_limits(auth_client, name):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Setting workspace limits requires the Admin role on the workspace",
+        )
     try:
         workspace = await repository.update_workspace(
             name=name,
             description=workspace_data.description,
+            limits=workspace_data.limits,
             updated_by=auth_client.principal.effective_id,
         )
         if workspace is None:

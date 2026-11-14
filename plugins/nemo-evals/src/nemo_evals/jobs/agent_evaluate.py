@@ -744,11 +744,12 @@ class _AgentEvalJobBase(NemoJob):
                 result.metadata.target.config["url"] = endpoint.url
 
         files = self._write_result_files(result, ctx.storage.persistent)
+        # Stage the bundle: agent runtimes can still change files under its evidence while it uploads.
         artifact = None
         bundle_error: Exception | None = None
         try:
             artifact = ctx.results.save(
-                DEFAULT_RESULT_NAME, files.bundle_dir, ignore_patterns=spec.result_ignore_patterns
+                DEFAULT_RESULT_NAME, files.bundle_dir, ignore_patterns=spec.result_ignore_patterns, stage=True
             )
         except Exception as error:
             error.add_note(f"Failed to save result {DEFAULT_RESULT_NAME!r}")

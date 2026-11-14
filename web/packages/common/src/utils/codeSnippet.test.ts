@@ -56,6 +56,10 @@ describe('getLanguageFromFilePath', () => {
     expect(getLanguageFromFilePath('lib.rs')).toBe('rust');
   });
 
+  it('maps jsonl files to json', () => {
+    expect(getLanguageFromFilePath('data/train.jsonl')).toBe('json');
+  });
+
   it('detects languages from React file extensions', () => {
     expect(getLanguageFromFilePath('Component.tsx')).toBe('tsx');
     expect(getLanguageFromFilePath('Component.jsx')).toBe('jsx');

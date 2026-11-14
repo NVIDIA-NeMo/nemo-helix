@@ -80,13 +80,13 @@ export const flagDefinitions = {
   experiment: previewFlag('VITE_FF_EXPERIMENT', true),
   flagOverridesEnabled: booleanFlag('VITE_FF_FLAG_OVERRIDES_ENABLED', false),
   guardrailsEnabled: previewFlag('VITE_FF_GUARDRAILS_ENABLED'),
-  inferenceProviderEnabled: previewFlag('VITE_FF_INFERENCE_PROVIDER_ENABLED', true),
   intakeEnabled: previewFlag('VITE_FF_INTAKE_ENABLED', true),
   membersEnabled: previewFlag('VITE_FF_MEMBERS_ENABLED', true),
   modelDetailsEnabled: previewFlag('VITE_FF_MODEL_DETAILS_ENABLED'),
   modelEvaluationFormEnabled: previewFlag('VITE_FF_MODEL_EVALUATION_FORM_ENABLED', true),
   monitorEnabled: previewFlag('VITE_FF_MONITOR_ENABLED'),
   optimizerEnabled: previewFlag('VITE_FF_OPTIMIZER_ENABLED', true),
+  tasksetsEnabled: previewFlag('VITE_FF_TASKSETS_ENABLED'),
 } as const;
 
 // --- Types ---

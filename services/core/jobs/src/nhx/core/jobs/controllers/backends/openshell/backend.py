@@ -49,6 +49,7 @@ from nhx.common.config import get_platform_config, nhx_user_data_dir
 from nhx.common.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -79,6 +80,7 @@ from nhx.core.jobs.controllers.backends.base import (
     get_job_runtime_shared_envvars,
     get_logs_endpoint_from_fileset,
     step_ttl_seconds_active,
+    validate_step_environment,
 )
 from nhx.core.jobs.controllers.backends.openshell.policy import (
     DEFAULT_EGRESS_BINARIES,
@@ -354,6 +356,7 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
                 NEMO_JOB_TASK_ENVVAR: task_id,
                 NEMO_JOB_WORKSPACE_ENVVAR: step.workspace,
                 NEMO_JOB_FILESET_ENVVAR: step.fileset,
+                NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR: step.artifact_base_path or "",
                 EPHEMERAL_TASK_STORAGE_PATH_ENVVAR: _TASK_STORAGE_PATH,
                 CONFIG_TASK_STORAGE_PATH_ENVVAR: _CONFIG_STORAGE_PATH,
                 NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR: _STEP_CONFIG_FILE_PATH,
@@ -376,6 +379,7 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
             env.update(auth_context.to_principal().get_env_var())
 
         # Step env vars (non-secret values).
+        validate_step_environment(step_spec.environment or [], source="Job step environment keys")
         for envvar in step_spec.environment or []:
             if envvar.value is not None:
                 env[envvar.name] = envvar.value

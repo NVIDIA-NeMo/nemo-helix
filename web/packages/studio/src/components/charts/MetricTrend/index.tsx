@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { chartTooltipProps } from '@nemo/common/src/components/charts/ChartTooltip';
 import {
   type DeltaTone,
   deltaTone,
@@ -192,14 +193,7 @@ export const MetricTrend: FC<MetricTrendProps> = ({
                 <Tooltip
                   cursor={{ stroke: 'var(--border-color-base)', strokeWidth: 1 }}
                   formatter={(value: number) => [formatValue(value), active.label]}
-                  contentStyle={{
-                    fontSize: 12,
-                    backgroundColor: 'var(--background-color-component-tooltip)',
-                    borderColor: 'var(--border-color-base)',
-                    color: 'var(--text-color-base)',
-                  }}
-                  labelStyle={{ color: 'var(--text-color-base)' }}
-                  itemStyle={{ color: 'var(--text-color-base)' }}
+                  {...chartTooltipProps}
                 />
                 <Area
                   type="linear"

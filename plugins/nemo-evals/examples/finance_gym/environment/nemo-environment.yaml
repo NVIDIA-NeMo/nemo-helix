@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+format: native-v1
+config_paths:
+  - resources_servers/finance_qa/configs/finance_qa.yaml
+metadata:
+  name: finance-qa
+  description: Financial document QA (TAT-DQA, BizBench) scored as the Nemotron finance cookbook scores it.

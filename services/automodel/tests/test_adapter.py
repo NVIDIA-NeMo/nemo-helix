@@ -69,14 +69,18 @@ def test_adapter_plumbs_retrieval_spec() -> None:
                     "query_prefix": "query:",
                     "passage_prefix": "passage:",
                     "do_distributed_inbatch_negative": True,
+                    "temperature": 0.05,
                     "export": {"dimensions": True, "opset": 18},
                 },
+                "tokenizer_backend": "transformers_auto",
             },
             "output": {"name": "out", "type": "model", "fileset": "out-fs"},
         },
     )
     assert isinstance(spec.training, SFTTraining)
+    assert spec.training.tokenizer_backend == "transformers_auto"
     assert spec.training.retrieval is not None
+    assert spec.training.retrieval.temperature == 0.05
     assert spec.training.retrieval.train_n_passages == 7
     assert spec.training.retrieval.query_prefix == "query:"
     assert spec.training.retrieval.passage_prefix == "passage:"
@@ -136,6 +140,7 @@ def test_adapter_plumbs_pass2_hyperparameters() -> None:
                 "finetuning_type": "lora",
                 "attn_implementation": "flash_attention_2",
                 "lora": {"rank": 8, "exclude_modules": ["*.out_proj"], "use_triton": False},
+                "mask_generation_prompt": True,
             },
             "optimizer": {"adam_eps": 1e-6, "optimizer": "AdamW", "lr_decay_style": "linear"},
             "batch": {"sequence_packing": True, "sequence_packing_max_samples": 256},
@@ -143,6 +148,7 @@ def test_adapter_plumbs_pass2_hyperparameters() -> None:
         },
     )
     assert isinstance(spec.training, SFTTraining)
+    assert spec.training.mask_generation_prompt is True
     assert spec.training.adam_eps == 1e-6
     assert spec.training.optimizer == "AdamW"
     assert spec.training.lr_decay_style == "linear"
@@ -168,6 +174,8 @@ def test_adapter_pass2_defaults_when_omitted() -> None:
     assert spec.training.optimizer == "auto"
     assert spec.training.lr_decay_style == "cosine"
     assert spec.training.attn_implementation == "sdpa"
+    assert spec.training.tokenizer_backend is None
+    assert spec.training.mask_generation_prompt is False
     assert spec.training.sequence_packing_max_samples == 1000
     assert spec.training.peft is not None
     assert spec.training.peft.exclude_modules is None

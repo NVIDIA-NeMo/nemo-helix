@@ -43,13 +43,13 @@ export const DASHBOARD_ROUTE_ENABLED = ASSISTANT_STUDIO_ENABLED || DASHBOARD_SAN
 export const EVALS_ENABLED = featureFlags.evalsEnabled !== false;
 export const EVALS_BENCHMARKS_ENABLED = featureFlags.evalsBenchmarksEnabled !== false;
 export const EXPERIMENT_ENABLED = featureFlags.experiment !== false;
-export const INFERENCE_PROVIDER_ENABLED = featureFlags.inferenceProviderEnabled !== false;
 export const INTAKE_ENABLED = featureFlags.intakeEnabled !== false;
 export const MEMBERS_ENABLED = featureFlags.membersEnabled !== false;
 export const MODEL_DETAILS_ENABLED = featureFlags.modelDetailsEnabled !== false;
 export const MODEL_EVALUATION_FORM_ENABLED = featureFlags.modelEvaluationFormEnabled !== false;
 export const MONITOR_ENABLED = featureFlags.monitorEnabled !== false;
 export const OPTIMIZER_ENABLED = featureFlags.optimizerEnabled !== false;
+export const TASKSETS_ENABLED = featureFlags.tasksetsEnabled !== false;
 export const GUARDRAILS_ENABLED = featureFlags.guardrailsEnabled !== false;
 export const VIRTUAL_MODELS_ROUTE_ENABLED = GUARDRAILS_ENABLED || AGENT_OPTIMIZATIONS_ENABLED;
 export const FLAG_OVERRIDES_ENABLED = featureFlags.flagOverridesEnabled === true;

@@ -36,7 +36,13 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
     resolve_environment,
 )
-from nemo_agents_plugin.fabric.adapters import CUSTOM_IMAGE_HINT, UnknownAdapterError, validate_harness_kinds
+from nemo_agents_plugin.fabric.adapters import (
+    CONTEXT_UNAWARE_HINT,
+    CUSTOM_IMAGE_HINT,
+    UnknownAdapterError,
+    context_unaware_harness,
+    validate_harness_kinds,
+)
 from nemo_agents_plugin.fabric.invocation import (
     AgentConfigInvocationRequest,
     FabricDirectories,
@@ -90,6 +96,7 @@ from nemo_helix_plugin.jobs.api_factory import (
 from nemo_helix_plugin.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -170,6 +177,7 @@ _RESERVED_ENV_VAR_NAMES = frozenset(
         NEMO_JOB_TASK_ENVVAR,
         NEMO_JOB_WORKSPACE_ENVVAR,
         NEMO_JOB_FILESET_ENVVAR,
+        NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
         NEMO_JOB_SECRETS_ENVVAR,
         # Agent execution env (mirrors the deployment container's reserved set).
         "NHX_WORKSPACE",
@@ -483,9 +491,13 @@ class ExecuteAgentJob(NemoJob):
         # kinds inside that image instead.
         try:
             # Off the event loop: the first check scans installed manifests and may run ADAPTER_PYTHON.
-            await asyncio.to_thread(_validate_agent_config, merged.config, check_adapters=not request.image)
+            agent_config = await asyncio.to_thread(
+                _validate_agent_config, merged.config, check_adapters=not request.image
+            )
         except UnknownAdapterError as error:
             raise UnknownAdapterError(f"{error} {CUSTOM_IMAGE_HINT}") from error
+        if request.context:
+            _reject_context_the_adapter_drops(agent_config, agent_label=source.ref or source.name)
 
         workdir = None
         if request.workdir is not None:
@@ -1148,6 +1160,22 @@ def _configure_intake_telemetry(
         return
 
     configure_intake_atif_export(agent_config, workspace=workspace, base_url=base_url)
+
+
+def _reject_context_the_adapter_drops(agent_config: AgentConfig, *, agent_label: str) -> None:
+    """Fail the create request when the agent's adapter would never see the job's context.
+
+    The run would otherwise complete normally on a model that never saw the
+    parameters, spending its tokens on an answer the caller can't use.
+    """
+    unaware = context_unaware_harness(agent_config)
+    if unaware is None:
+        return
+    harness_name, adapter_id = unaware
+    raise ValueError(
+        f"Agent '{agent_label}' runs harness {harness_name!r} ({adapter_id}), which does not read the request "
+        f"context, so 'context' would never reach the agent. {CONTEXT_UNAWARE_HINT}"
+    )
 
 
 def _validate_agent_config(config: dict, *, check_adapters: bool = True) -> AgentConfig:

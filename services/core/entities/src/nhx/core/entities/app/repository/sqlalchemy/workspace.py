@@ -12,7 +12,7 @@ from nhx.common.api.filter import FilterOperation
 from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
 from nhx.core.entities.app.repository.sqlalchemy.models import DBWorkspace, _utcnow
 from nhx.core.entities.app.repository.workspace import WorkspaceRepositoryInterface
-from nhx.core.entities.entities import Workspace, WorkspaceDeletionStage
+from nhx.core.entities.entities import Workspace, WorkspaceDeletionStage, WorkspaceLimits
 from nhx.core.entities.utils.identifiers import generate_entity_id
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -28,6 +28,13 @@ def _stored_deletion_error(deletion_error: str) -> str:
     if len(message) <= _DELETION_ERROR_MAX_LENGTH:
         return message
     return message[: _DELETION_ERROR_MAX_LENGTH - 3] + "..."
+
+
+def _stored_limits(limits: WorkspaceLimits | None) -> dict | None:
+    """Serialize only explicitly-set limits so defaults are never persisted."""
+    if limits is None:
+        return None
+    return limits.model_dump(exclude_none=True)
 
 
 class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
@@ -50,6 +57,7 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
         *,
         name: str,
         description: str | None = None,
+        limits: WorkspaceLimits | None = None,
         created_by: str | None = None,
         session: AsyncSession | None = None,
     ) -> Workspace:
@@ -61,6 +69,7 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
                 id=workspace_id,
                 name=name,
                 description=description,
+                limits=_stored_limits(limits),
                 created_by=created_by,
             )
             sess.add(db_workspace)
@@ -128,6 +137,7 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
         *,
         name: str,
         description: str | None = None,
+        limits: WorkspaceLimits | None = None,
         updated_by: str | None = None,
         session: AsyncSession | None = None,
     ) -> Optional[Workspace]:
@@ -141,6 +151,9 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
 
             if description is not None:
                 db_workspace.description = description
+
+            if limits is not None:
+                db_workspace.limits = _stored_limits(limits)
 
             if updated_by is not None:
                 db_workspace.updated_by = updated_by

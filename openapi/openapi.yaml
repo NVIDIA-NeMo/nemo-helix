@@ -1411,8 +1411,11 @@ paths:
       tags:
       - Entity Store
       summary: Update workspace
-      description: "Update a workspace's description.\n\nExample:\n```\nPUT /apis/entities/v2/workspaces/ml-team\n\
-        {\n    \"description\": \"Updated description for ML Team\"\n}\n```"
+      description: "Update a workspace's description and/or limits.\n\nSetting `limits`\
+        \ requires the Admin role on the workspace. Omitted fields are unchanged.\n\
+        \nExample:\n```\nPUT /apis/entities/v2/workspaces/ml-team\n{\n    \"description\"\
+        : \"Updated description for ML Team\",\n    \"limits\": {\"max_concurrent_jobs\"\
+        : 50}\n}\n```"
       operationId: update_workspace_apis_entities_v2_workspaces__name__put
       parameters:
       - name: name
@@ -25169,6 +25172,10 @@ components:
           title: Description
           description: Optional description
           type: string
+        limits:
+          allOf:
+          - $ref: '#/components/schemas/WorkspaceLimits'
+          description: Optional per-workspace resource limits
         created_at:
           type: string
           format: date-time
@@ -25239,11 +25246,33 @@ components:
           title: Description
           description: Optional description of the workspace
           type: string
+        limits:
+          allOf:
+          - $ref: '#/components/schemas/WorkspaceLimits'
+          description: Optional per-workspace limits. Only persisted when provided;
+            requires a platform admin.
       type: object
       required:
       - name
       title: WorkspaceInput
       description: Schema for creating a new workspace.
+    WorkspaceLimits:
+      properties:
+        max_concurrent_jobs:
+          title: Max Concurrent Jobs
+          description: Maximum number of jobs the workspace may have admitted concurrently.
+            When unset, the Jobs service default applies.
+          type: integer
+          minimum: 1.0
+      additionalProperties: false
+      type: object
+      title: WorkspaceLimits
+      description: 'Optional per-workspace resource limits.
+
+
+        A field left unset means "use the platform default"; the consumer applies
+
+        that default, it is never written back to the workspace record.'
     WorkspaceMember:
       properties:
         principal:
@@ -25333,6 +25362,11 @@ components:
           title: Description
           description: Updated description
           type: string
+        limits:
+          allOf:
+          - $ref: '#/components/schemas/WorkspaceLimits'
+          description: Updated per-workspace limits. Omit to leave unchanged; requires
+            workspace Admin.
       type: object
       title: WorkspaceUpdate
       description: Schema for updating a workspace.

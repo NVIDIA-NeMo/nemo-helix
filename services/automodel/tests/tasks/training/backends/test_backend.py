@@ -256,8 +256,8 @@ class TestExecuteTrainingWallClock:
 
 
 class TestExecuteTrainingTrackerRun:
-    def test_torchrun_continues_the_jobs_mlflow_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """MLflow starts its run inside the workers, so the run ID reaches them through the environment."""
+    def test_torchrun_gets_the_tracker_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Trackers start inside the workers, so the MLflow run ID and the W&B server reach them as env vars."""
         mlflow_config = {"tracking_uri": "http://mlflow", "experiment_name": "exp", "tags": {"job_uid": "uid"}}
         launched: dict[str, dict[str, str]] = {}
         proc = Proc()
@@ -276,7 +276,10 @@ class TestExecuteTrainingTrackerRun:
         config = MagicMock()
         config.parallelism.num_nodes = 1
         config.training_timeout = None
-        library = LibraryConfig(config_dict={"mlflow": mlflow_config}, config_path=Path("/tmp/automodel_config.yaml"))
+        library = LibraryConfig(
+            config_dict={"mlflow": mlflow_config, "_wandb_base_url": "https://wandb.internal"},
+            config_path=Path("/tmp/automodel_config.yaml"),
+        )
         try:
             AutomodelBackend(job_ctx=MagicMock()).execute_training(config, library, RecordingProgress(1.0, 2.0))
         finally:
@@ -284,3 +287,4 @@ class TestExecuteTrainingTrackerRun:
                 signal.signal(sig, handler)
 
         assert launched["env"]["MLFLOW_RUN_ID"] == "run-1"
+        assert launched["env"]["WANDB_BASE_URL"] == "https://wandb.internal"
