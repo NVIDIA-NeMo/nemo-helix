@@ -3,12 +3,10 @@
 
 from __future__ import annotations
 
-import builtins
 import logging
-from collections.abc import Mapping, Sequence
-from types import ModuleType
 from unittest.mock import patch
 
+import nhx.common.auth as nhx_common_auth
 import pytest
 from nemo_helix_plugin.auth import AuthContext, is_service_principal_id
 from nemo_helix_plugin.auth.workload_identity import (
@@ -118,19 +116,10 @@ def test_workload_identity_token_exchange_enabled_raises_distinct_config_error()
         ("service-account:deployments", False),
     ],
 )
-def test_service_principal_id_fallback_without_nhx_common(principal_id: str, expected: bool) -> None:
-    real_import = builtins.__import__
+def test_service_principal_id_fallback_without_nhx_common(
+    monkeypatch: pytest.MonkeyPatch, principal_id: str, expected: bool
+) -> None:
+    # Without nhx_common the shared service-principal parser can't be imported.
+    monkeypatch.delattr(nhx_common_auth, "is_service_principal")
 
-    def import_without_nhx_common(
-        name: str,
-        globals: Mapping[str, object] | None = None,
-        locals: Mapping[str, object] | None = None,
-        fromlist: Sequence[str] | None = (),
-        level: int = 0,
-    ) -> ModuleType:
-        if name == "nhx.common.auth":
-            raise ImportError(name)
-        return real_import(name, globals, locals, fromlist, level)
-
-    with patch("builtins.__import__", side_effect=import_without_nhx_common):
-        assert is_service_principal_id(principal_id) is expected
+    assert is_service_principal_id(principal_id) is expected

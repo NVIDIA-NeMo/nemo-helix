@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import contextlib
-import importlib.util
 import logging
 import os
 import subprocess
 from datetime import datetime, timezone
+from importlib.util import find_spec
+from os import getpgid
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Annotated, NoReturn
@@ -16,6 +17,7 @@ from typing import Annotated, NoReturn
 import httpx
 import psutil
 import typer
+from httpx import get as http_get
 from nemo_helix_ext.cli.core.help_formatter import create_typer_app
 from nemo_helix_ext.cli.docker_preflight import require_docker_for_default_local
 from nemo_helix_ext.local.install import services_extra_install_command
@@ -49,6 +51,7 @@ from nhx.platform_runner.config import (
     DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS,
     HelixAppConfig,
 )
+from psutil import Process
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +86,7 @@ def services_callback(ctx: typer.Context) -> None:
 
 def _require_services_extra() -> None:
     """Ensure the ``[all]`` extra (e.g. ``pyleak``) is installed."""
-    if importlib.util.find_spec("pyleak") is not None:
+    if find_spec("pyleak") is not None:
         return
     typer.echo(
         "Running local Helix services needs extra components that aren't installed yet.\n"
@@ -112,7 +115,7 @@ def _child_exited(proc: subprocess.Popen[bytes] | None) -> bool:
 def _status_is_ready(url: str, timeout: float) -> bool:
     """True when ``/status`` returns HTTP 200 within ``timeout`` seconds."""
     try:
-        response = httpx.get(url, timeout=timeout)
+        response = http_get(url, timeout=timeout)
     except httpx.RequestError:
         return False
     return response.status_code == 200
@@ -203,8 +206,8 @@ def _saved_process_group(proc: subprocess.Popen[bytes]) -> tuple[int, float] | N
     a recycled pid. ``ProcessLookupError`` means the pid is already gone.
     """
     try:
-        pgid = os.getpgid(proc.pid)
-        created = psutil.Process(proc.pid).create_time()
+        pgid = getpgid(proc.pid)
+        created = Process(proc.pid).create_time()
     except (ProcessLookupError, psutil.Error):
         return None
     except OSError:

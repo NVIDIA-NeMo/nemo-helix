@@ -14,11 +14,11 @@
 ARG PYTHON_VERSION=3.13
 ARG PYTHON_IMAGE=python:${PYTHON_VERSION}-slim-trixie
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.13.4
-ARG SAFE_SYNTHESIZER_RUNTIME_PACKAGE="nemo-safe-synthesizer[engine,cu129]==0.1.15"
+ARG SAFE_SYNTHESIZER_RUNTIME_PACKAGE="nemo-safe-synthesizer[engine,cu129]==0.1.17"
 ARG FLASHINFER_CUBIN_INDEX_URL="https://flashinfer.ai/whl/"
 ARG FLASHINFER_CU129_INDEX_URL="https://flashinfer.ai/whl/cu129"
 ARG PYTORCH_CU129_INDEX_URL="https://download.pytorch.org/whl/cu129"
-ARG VLLM_CU129_INDEX_URL="https://wheels.vllm.ai/0.27.0/cu129"
+ARG VLLM_CU129_INDEX_URL="https://wheels.vllm.ai/0.32.0/cu129"
 
 # =============================================================================
 # uv binary
@@ -98,9 +98,10 @@ LABEL org.opencontainers.image.title="Safe Synthesizer Tasks" \
 # sources, so plugin-only edits do not invalidate the large dependency layers.
 COPY plugins/nemo-safe-synthesizer/constraints.txt /tmp/safe-synthesizer-constraints.txt
 RUN uv venv /opt/venv
-# Override NSS 0.1.13's generation pins together: vLLM 0.26.0 unconditionally
-# warms up a CuTe DSL router kernel on Hopper that fails to compile. 0.24.0
-# avoids that warmup and uses the same PyTorch 2.11 / CUDA 12.9 training stack.
+# Match NSS 0.1.17's CUDA 12.9 generation stack. Upgrade vLLM and FlashInfer
+# together rather than retaining the vulnerable 0.27.0 generation override.
+# Mirror NSS v0.1.17's installer override for GHSA-h35f-9h28-mq5c: its wheel
+# requires setuptools >=83, while vLLM still declares an obsolete <81 cap.
 RUN printf '%s\n' \
         flashinfer-cubin \
         flashinfer-jit-cache \
@@ -130,14 +131,15 @@ RUN printf '%s\n' \
         "${SAFE_SYNTHESIZER_RUNTIME_PACKAGE}" \
         > /tmp/safe-synthesizer-runtime.txt && \
     printf '%s\n' \
-        'wandb>=0.30.0' \
+        'wandb>=0.31.0' \
+        'setuptools>=83.0.0' \
         'aiohttp>=3.14.3,<4' \
         'cryptography>=50.0.0,<51' \
         'pyarrow>=23.0.1,<24' \
-        'vllm==0.27.0+cu129' \
-        'flashinfer-python==0.6.16.post4' \
-        'flashinfer-cubin==0.6.16.post4' \
-        'flashinfer-jit-cache==0.6.16.post4+cu129' \
+        'vllm==0.32.0+cu129' \
+        'flashinfer-python==0.7.0.post1' \
+        'flashinfer-cubin==0.7.0.post1' \
+        'flashinfer-jit-cache==0.7.0.post1+cu129' \
          > /tmp/safe-synthesizer-overrides.txt
 
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -208,8 +210,8 @@ RUN mkdir -p docs && \
 # The runtime layer above installs CVE-patched cryptography/pyarrow; do not let
 # the workspace lock downgrade them during plugin sync.
 # Preserve the separately resolved training stack too: the workspace lock has
-# different PEFT/Accelerate versions. vLLM and FlashInfer match NSS 0.1.15's
-# cu129 generation extras; vLLM 0.27.0 skips unused MoE router warmup for dense models.
+# different PEFT/Accelerate versions. vLLM and FlashInfer match NSS 0.1.17's
+# cu129 generation extras.
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_CACHE_DIR=/root/.cache/uv uv sync --package nemo-safe-synthesizer-plugin --no-dev --no-editable --inexact \
         --no-install-package nemo-helix \
@@ -237,6 +239,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --no-install-package sentence-transformers \
         --no-install-package tokenizers \
         --no-install-package triton
+
+# The release workspace relock is blocked by the DataDesignerPlugins index.
+# Apply the same narrow post-sync fix as nhx-tasks until it can be relocked.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv --no-config pip install --python /opt/venv/bin/python --no-deps "urllib3==2.8.0"
 
 # Fail the image build if a later sync changes the pinned training versions.
 RUN python - <<'PY'

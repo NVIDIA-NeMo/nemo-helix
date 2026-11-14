@@ -5,20 +5,23 @@
 
 import logging
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
     HTTPException,
+    Path,
     Query,
     Request,
     Response,
 )
 from fastapi.responses import FileResponse
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.entities.base import ID_PATTERN
 from nhx.common.api.common import ErrorResponse, GenericSortField, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
@@ -38,13 +41,17 @@ from nhx.common.service.dependencies import (
     get_nemo_client,
     get_service_config_factory,
 )
+from nhx.core.files.api.endpoint_helpers import HTTP_EXCEPTION_DETAIL as _HTTP_EXCEPTION_DETAIL
 from nhx.core.files.api.endpoint_helpers import (
     CacheContext,
     get_cache_status_for_files,
     get_download_file_info,
     get_fileset,
     list_storage_files,
+    require_writable_storage,
+    resolve_download_storage,
     resolve_storage_secrets_for_user,
+    runtime_storage_http_error,
     stream_file_download,
 )
 from nhx.core.files.api.v2.filesets.schemas import (
@@ -132,18 +139,6 @@ _REFERENCE_COUNT_PAGE_SIZE = 1
 def _sanitize_for_log(value: object) -> str:
     """Strip line breaks from a value before logging."""
     return str(value).replace("\r", "").replace("\n", "")
-
-
-_HTTP_EXCEPTION_DETAIL = {
-    "content": {
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {"detail": {"type": "string"}},
-            }
-        }
-    }
-}
 
 
 class _ModelFilesetReference(EntityBase):
@@ -271,7 +266,7 @@ class FilesContext(BaseContext):
     status_code=HTTP_200_OK,
 )
 async def create_fileset(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     create_request: CreateFilesetRequest,
     background_tasks: BackgroundTasks,
     entity_store: EntityClient = Depends(get_entity_client),
@@ -411,8 +406,7 @@ async def create_fileset(
 )
 async def list_filesets(
     workspace: str,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=10, ge=1, le=100, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep(default_size=10, max_size=100)),
     sort: GenericSortField = Query(
         default=GenericSortField.CREATED_AT_DESC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -431,8 +425,8 @@ async def list_filesets(
     res = await entity_store.list(
         Fileset,
         workspace=workspace,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort.value,
         filter_operation=parsed.operation,
     )
@@ -470,6 +464,7 @@ async def retrieve_fileset(
     summary="Delete Fileset",
     status_code=HTTP_200_OK,
     responses={
+        HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Fileset not found"},
         HTTP_409_CONFLICT: {
             "description": "Fileset is referenced by a model or adapter entity",
             **_HTTP_EXCEPTION_DETAIL,
@@ -570,6 +565,7 @@ async def delete_fileset(
 
 @router.patch(
     "/v2/workspaces/{workspace}/filesets/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Fileset not found"}},
     summary="Update Fileset Metadata",
     response_model=FilesetOutput,
     status_code=HTTP_200_OK,
@@ -758,7 +754,10 @@ async def list_fileset_files(
         # External storage with opt-in: actually check cache
         cache_storage = storage_impl_factory(config.default_storage_config, {})
         lock_manager = _get_cache_lock_manager(entity_store, config)
-        cache_status_map = await get_cache_status_for_files(files, storage, cache_storage, lock_manager)
+        try:
+            cache_status_map = await get_cache_status_for_files(files, storage, cache_storage, lock_manager)
+        except (StorageAccessError, StorageUnavailableError, StorageBackendError) as exc:
+            raise runtime_storage_http_error(exc) from exc
     else:
         # External storage without opt-in: null (didn't check)
         cache_status_map = {}
@@ -793,7 +792,7 @@ async def head_file(
     logger.info(f"HEAD /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
-    storage = storage_impl_factory(fileset.storage, secrets)
+    storage = await resolve_download_storage(storage_impl_factory(fileset.storage, secrets), path)
 
     cache_ctx: CacheContext | None = None
     if fileset.storage.type != config.default_storage_config.type:
@@ -827,7 +826,8 @@ async def head_file(
             "content": {
                 "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
             },
-        }
+        },
+        HTTP_409_CONFLICT: {"description": "Upstream object changed; retry the request", **_HTTP_EXCEPTION_DETAIL},
     },
     response_class=FileResponse,  # coerces SDK into returning a File
 )
@@ -853,7 +853,7 @@ async def download_file(
     fileset = await get_fileset(workspace, name, entity_store)
     with scoped_app_ctx(FilesContext(fileset_name=fileset.name, path=path)):
         secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
-        storage = storage_impl_factory(fileset.storage, secrets)
+        storage = await resolve_download_storage(storage_impl_factory(fileset.storage, secrets), path)
 
         cache_ctx: CacheContext | None = None
         if fileset.storage.type != config.default_storage_config.type:
@@ -886,6 +886,12 @@ async def download_file(
     "/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}",
     summary="Upload Fileset Content",
     status_code=HTTP_200_OK,
+    responses={
+        HTTP_409_CONFLICT: {
+            "description": "Fileset storage is read-only",
+            **_HTTP_EXCEPTION_DETAIL,
+        }
+    },
     openapi_extra={
         "requestBody": {
             "content": {
@@ -911,9 +917,17 @@ async def upload_file(
     client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> FilesetFileOutput:
-    """Upload file content to a fileset."""
+    """Upload file content to a fileset. Read-only storage returns HTTP 409."""
     logger.info(f"PUT /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
+    # Preserve the immutable-fileset authorization error before capability checks.
+    service_source = fileset.custom_fields.get("service_source")
+    if service_source and not auth_client.principal.id.startswith("service:"):
+        raise HTTPException(
+            status_code=HTTP_403_FORBIDDEN,
+            detail="Access denied: This fileset's files are immutable",
+        )
+    require_writable_storage(fileset.storage)
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
@@ -925,14 +939,6 @@ async def upload_file(
     else:
         # Default to octet-stream for application/octet-stream or any other type
         chunk_processor = OctetStreamChunkProcessor()
-
-    # Temporary fix for making immutable datasets and preserving trust_remote_code
-    service_source = fileset.custom_fields.get("service_source")
-    if service_source and not auth_client.principal.id.startswith("service:"):
-        raise HTTPException(
-            status_code=HTTP_403_FORBIDDEN,
-            detail="Access denied: This fileset's files are immutable",
-        )
 
     # Get content length from request headers for backends that need it (e.g., S3)
     content_length_header = request.headers.get("content-length")
@@ -975,6 +981,12 @@ async def upload_file(
     "/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}",
     summary="Delete a specific file from a fileset",
     status_code=HTTP_200_OK,
+    responses={
+        HTTP_409_CONFLICT: {
+            "description": "Fileset storage is read-only",
+            **_HTTP_EXCEPTION_DETAIL,
+        }
+    },
 )
 async def delete_file(
     workspace: str,
@@ -988,10 +1000,11 @@ async def delete_file(
     Delete a specific file from a fileset.
 
     Permanently deletes the file from the storage backend.
-    Returns metadata about the deleted file.
+    Returns metadata about the deleted file. Read-only storage returns HTTP 409.
     """
     logger.info(f"DELETE /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
+    require_writable_storage(fileset.storage)
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 

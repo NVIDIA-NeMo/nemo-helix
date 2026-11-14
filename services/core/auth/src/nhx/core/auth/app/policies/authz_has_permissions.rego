@@ -1,9 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Check Permissions API
-# Separate endpoint for checking if a principal has specific permissions in a workspace
-# This is called by services that need to verify permissions outside of the request flow
 package authz
 
 import future.keywords.if
@@ -11,44 +8,49 @@ import future.keywords.in
 
 import data.common
 
-# API to check if principal has specific permissions in a workspace (called by services)
-# Input format:
-# {
-#   "principal_id": "user@example.com",
-#   "principal_email": "user@example.com", (optional)
-#   "principal_groups": ["group1", "group2"], (optional)
-#   "workspace": "my-workspace",
-#   "permissions": ["models.create", "models.update"]
-# }
-# Output format:
-# {
-#   "allowed": true
-# }
-has_permissions := result if {
-	# Platform admin bypass - has access to everything
-	applicable_principals := common.get_applicable_principals
-	count(applicable_principals) > 0
+# Explicit lists select authority; legacy permissions means subject under OBO,
+# otherwise actor. No admin shortcut can combine the two identity sets.
+has_permissions := {"allowed_workspaces": permitted_query_workspaces} if {
+	"workspaces" in object.keys(input)
+} else := {"allowed": true} if permission_query_allowed(input.workspace)
 
-	# Check if any principal is a platform admin
-	some principal in applicable_principals
-	"HelixAdmin" in data.authz.principals[principal].workspaces.system
+else := {"allowed": false}
 
-	result := {"allowed": true}
-} else := result if {
-	workspace := input.workspace
-	required_permissions := input.permissions
+# Reuse scalar permission checks without per-workspace requests or input copies.
+permitted_query_workspaces := [workspace |
+	workspace := input.workspaces[_]
+	permission_query_allowed(workspace)
+] if {
+	is_array(input.workspaces)
+	every workspace in input.workspaces { is_string(workspace) }
+} else := []
 
-	# Get all applicable principals
-	applicable_principals := common.get_applicable_principals
-	count(applicable_principals) > 0
+explicit_permission_query if "actor_permissions" in object.keys(input)
+explicit_permission_query if "subject_permissions" in object.keys(input)
 
-	# Check if any principal has all required permissions in the workspace
-	# Note: has_permissions also checks wildcard principal "*" as fallback
-	some principal in applicable_principals
-	common.has_permissions(principal, workspace, required_permissions)
+permission_query_allowed(workspace) if {
+	explicit_permission_query
+	count(common.get_actor_principals) > 0
+	actor_query_allowed(workspace)
+	subject_query_allowed(workspace)
+} else if {
+	not explicit_permission_query
+	extract_on_behalf_of_principal_id == ""
+	common.actor_permissions_satisfied(workspace, input.permissions)
+} else if {
+	not explicit_permission_query
+	extract_on_behalf_of_principal_id != ""
+	common.subject_permissions_satisfied(workspace, input.permissions)
+}
 
-	result := {"allowed": true}
-} else := result if {
-	# Default deny
-	result := {"allowed": false}
+actor_query_allowed(workspace) if {
+	not "actor_permissions" in object.keys(input)
+} else if {
+	common.actor_permissions_satisfied(workspace, input.actor_permissions)
+}
+
+subject_query_allowed(workspace) if {
+	not "subject_permissions" in object.keys(input)
+} else if {
+	common.subject_permissions_satisfied(workspace, input.subject_permissions)
 }

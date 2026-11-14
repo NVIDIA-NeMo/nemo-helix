@@ -262,14 +262,39 @@ def test_authentik_static_ci_prepares_envoy_validation_inputs() -> None:
     assert "helm dependency build contrib/auth/authentik/helm" in job
 
 
-def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:
-    ci_workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
-    job = _workflow_job_block(ci_workflow, "python-auth-idp-e2e-test")
+def test_cpu_smoke_image_build_is_required_in_ci_without_e2e_opt_in() -> None:
+    ci = _load_yaml(Path(".github/workflows/ci.yaml"))
+    e2e = _load_yaml(Path(".github/workflows/e2e.yaml"))
+    job = ci["jobs"]["build-cpu-smoke-images"]
 
-    assert "needs.policy-wasm.result == 'success'" in job
-    assert "needs.build-cpu-smoke-images.result == 'success'" in job
-    assert "needs.build-cpu-smoke-images.outputs.publish_images == 'true'" in job
-    assert "needs.python-auth-idp-static-test.result == 'success'" in job
+    assert job["needs"] == ["changes"]
+    assert job["if"].strip() == (
+        "!cancelled() && (\n"
+        "  github.event_name == 'workflow_dispatch' ||\n"
+        "  needs.changes.outputs.cpu-smoke == 'true' ||\n"
+        "  needs.changes.outputs.auth-idp == 'true' ||\n"
+        "  needs.changes.outputs.customization-auth == 'true'\n"
+        ")"
+    )
+    assert "build-cpu-smoke-images" in ci["jobs"]["ci-status"]["needs"]
+    assert "build-cpu-smoke-images" in ci["jobs"]["post-merge-image-status"]["needs"]
+    assert job["steps"] == e2e["jobs"]["build-cpu-smoke-images"]["steps"]
+    assert job["permissions"] == e2e["jobs"]["build-cpu-smoke-images"]["permissions"]
+
+
+def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:
+    workflow_path = Path(".github/workflows/e2e.yaml")
+    workflow = _load_yaml(workflow_path)
+    runtime_job = workflow["jobs"]["python-auth-idp-e2e-test"]
+    job = _workflow_job_block(workflow_path.read_text(encoding="utf-8"), "python-auth-idp-e2e-test")
+
+    assert set(runtime_job["needs"]) == {
+        "eligibility",
+        "policy-wasm",
+        "build-cpu-smoke-images",
+        "python-auth-idp-static-test",
+    }
+    assert runtime_job["if"] == "needs.build-cpu-smoke-images.outputs.publish_images == 'true'"
     assert '--image "${IMAGE_REGISTRY}/nhx-api:${BAKE_TAG}"' in job
 
 
@@ -481,7 +506,7 @@ def test_authentik_kubernetes_platform_client_uses_runtime_timeout(monkeypatch: 
             self.http_client = http_client
             self.owns_http_client = owns_http_client
 
-    monkeypatch.setattr(live_test.httpx, "Client", FakeHttpClient)
+    monkeypatch.setattr(live_test, "HttpClient", FakeHttpClient)
     monkeypatch.setattr(live_test, "NemoClient", FakeNemoClient)
 
     runtime = object.__new__(live_test.KubernetesAuthIdpRuntime)
@@ -707,7 +732,7 @@ def test_authentik_kubernetes_port_forward_times_out_without_readiness(monkeypat
 
     monotonic_values = iter([0.0, 0.0, 31.0])
     monkeypatch.setattr(live_test, "_free_port", lambda: 19001)
-    monkeypatch.setattr(live_test.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(live_test, "Popen", lambda *args, **kwargs: FakeProcess())
     monkeypatch.setattr(live_test, "monotonic", lambda: next(monotonic_values))
     monkeypatch.setattr(live_test, "pause", lambda seconds: None)
     requested_urls = []
@@ -716,7 +741,7 @@ def test_authentik_kubernetes_port_forward_times_out_without_readiness(monkeypat
         requested_urls.append(url)
         raise live_test.httpx.ConnectError("not ready")
 
-    monkeypatch.setattr(live_test.httpx, "get", fake_get)
+    monkeypatch.setattr(live_test, "http_get", fake_get)
 
     with pytest.raises(TimeoutError, match="timed out waiting for port-forward readiness"):
         live_test._start_port_forward_service("kind-ci", "nemo-helix-envoy", Path("ca.crt"))
@@ -750,7 +775,7 @@ def test_authentik_kubernetes_port_forward_reports_process_log(monkeypatch: pyte
         getattr(stdout, "flush")()
         return FakeProcess()
 
-    monkeypatch.setattr(live_test.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(live_test, "Popen", fake_popen)
 
     with pytest.raises(AssertionError, match="address already in use"):
         live_test._start_port_forward_service("kind-ci", "nemo-helix-envoy", Path("ca.crt"))
@@ -784,12 +809,12 @@ def test_authentik_kubernetes_port_forward_waits_after_kill(monkeypatch: pytest.
 
     monotonic_values = iter([0.0, 0.0, 31.0])
     monkeypatch.setattr(live_test, "_free_port", lambda: 19001)
-    monkeypatch.setattr(live_test.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(live_test, "Popen", lambda *args, **kwargs: FakeProcess())
     monkeypatch.setattr(live_test, "monotonic", lambda: next(monotonic_values))
     monkeypatch.setattr(live_test, "pause", lambda seconds: None)
     monkeypatch.setattr(
-        live_test.httpx,
-        "get",
+        live_test,
+        "http_get",
         lambda *args, **kwargs: (_ for _ in ()).throw(live_test.httpx.ConnectError("not ready")),
     )
 
@@ -819,7 +844,7 @@ def test_authentik_kubernetes_diagnostics_records_pod_discovery_timeout(
             stderr="kubectl timed out\n",
         )
 
-    monkeypatch.setattr(live_test.subprocess, "run", raise_timeout)
+    monkeypatch.setattr(live_test, "run_process", raise_timeout)
 
     log_dir = live_test._collect_kubernetes_diagnostics("kind-ci", "ci")
 
@@ -1232,7 +1257,7 @@ def test_authentik_kubernetes_runner_uses_helm_not_kustomize() -> None:
     run_sh = (AUTHENTIK_DIR / "run.sh").read_text(encoding="utf-8")
     live_test_path = Path("tests/auth_idp/k8s/test_authentik_kubernetes_live.py")
     live_test = live_test_path.read_text(encoding="utf-8")
-    ci_workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
+    ci_workflow = Path(".github/workflows/e2e.yaml").read_text(encoding="utf-8")
 
     assert "NHX_AUTHENTIK_K8S_HELM_RELEASE" in run_sh
     assert 'K8S_RUNTIME="${NHX_AUTHENTIK_K8S_RUNTIME:-kind}"' in run_sh
@@ -1365,7 +1390,7 @@ def test_authentik_runner_rejects_removed_bare_compose_and_k8s_aliases() -> None
 
 
 def test_authentik_ci_workflow_uses_explicit_test_actions() -> None:
-    workflow = _load_yaml(Path(".github/workflows/ci.yaml"))
+    workflow = _load_yaml(Path(".github/workflows/e2e.yaml"))
     matrix_include = workflow["jobs"]["python-auth-idp-e2e-test"]["strategy"]["matrix"]["include"]
 
     commands_by_runtime = {
@@ -1379,7 +1404,7 @@ def test_authentik_ci_workflow_uses_explicit_test_actions() -> None:
 
 
 def test_authentik_ci_workflow_does_not_carry_separate_k3d_runner() -> None:
-    workflow = _load_yaml(Path(".github/workflows/ci.yaml"))
+    workflow = _load_yaml(Path(".github/workflows/e2e.yaml"))
 
     assert "python-auth-idp-k3d-e2e-test" not in workflow["jobs"]
 

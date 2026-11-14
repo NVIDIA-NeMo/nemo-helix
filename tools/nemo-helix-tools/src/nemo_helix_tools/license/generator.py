@@ -14,14 +14,13 @@ import json
 import logging
 import shlex
 import shutil
-import subprocess
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from subprocess import run
 from typing import Any, Iterator, Optional
 from urllib.parse import urlparse
 
-import requests
 from nemo_helix_tools.license.format_osv_licenses import format_licenses_table
 from nemo_helix_tools.license.formats import get_formatter
 from nemo_helix_tools.license.license_utils import (
@@ -32,6 +31,8 @@ from nemo_helix_tools.license.license_utils import (
     resolve_license,
 )
 from packaging.requirements import InvalidRequirement, Requirement
+from requests import RequestException
+from requests import get as http_get
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +112,8 @@ def _get_pypi_json(package_name: str, version: str) -> dict[str, Any]:
 
     for url in urls:
         try:
-            response = requests.get(url, timeout=10)
-        except requests.RequestException as exc:
+            response = http_get(url, timeout=10)
+        except RequestException as exc:
             logger.debug("Could not fetch PyPI metadata for %s from %s: %s", package_name, url, exc)
             continue
 
@@ -198,22 +199,34 @@ def get_osv_scanner() -> Path:
     return Path(osv_path)
 
 
+# Per-package OSV fields that carry vulnerability data. We only consume
+# ``package`` and ``licenses``; these change whenever the OSV database is
+# updated (new aliases, ``modified`` timestamps, rewritten advisories) and
+# create large diffs unrelated to licensing.
+_OSV_VULNERABILITY_KEYS = ("groups", "vulnerabilities")
+
+
 def _sanitize_osv_json(output_file: Path) -> None:
     """
-    Remove machine-specific paths from OSV JSON output.
+    Strip machine-specific and non-license data from OSV JSON output.
 
-    The osv-scanner includes absolute paths like /Users/username/code/nhx/uv.lock
-    which cause unnecessary diffs when different developers run the tool.
+    - The osv-scanner includes absolute paths like /Users/username/code/nhx/uv.lock
+      which cause unnecessary diffs when different developers run the tool.
+    - It also embeds vulnerability advisories per package, which we ignore (only
+      licenses are used) but which churn whenever the OSV database changes.
+      osv-scanner has no flag to omit them, so they are pruned here.
     """
 
     with open(output_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # Remove path from source objects in results
     for result in data.get("results", []):
         source = result.get("source", {})
         if "path" in source:
             del source["path"]
+        for pkg_entry in result.get("packages", []):
+            for key in _OSV_VULNERABILITY_KEYS:
+                pkg_entry.pop(key, None)
 
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -317,7 +330,7 @@ def run_osv_scanner(lockfile: Path, output_file: Path, cwd: Optional[Path] = Non
 
     try:
         # Run osv-scanner, suppress stderr output (vulnerability warnings)
-        result = subprocess.run(
+        result = run(
             cmd,
             cwd=cwd,
             text=True,
@@ -589,7 +602,7 @@ def generate_lockfile_without_dev_dependencies(
     logger.debug(f"Working directory: {lockfile_dir}")
 
     try:
-        subprocess.run(
+        run(
             cmd,
             cwd=lockfile_dir,
             text=True,

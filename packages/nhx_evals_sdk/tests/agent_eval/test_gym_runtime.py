@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import shutil
 from collections import Counter, deque
 from pathlib import Path
 from typing import Any
@@ -26,6 +25,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym import (
     GymRuntimeConfig,
     discover_gym_tasks,
 )
+from nhx_evals_sdk.agent_eval.runtimes.gym import process as gym_process
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import (
     _flatten_overrides,
     hydra_scalar,
@@ -1180,7 +1180,7 @@ def test_env_vars_can_restore_rays_uv_hook() -> None:
 
 
 def test_gym_executable_reports_how_to_install_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(shutil, "which", lambda _: None)
+    monkeypatch.setattr(gym_process, "which", lambda _: None)
     with pytest.raises(RuntimeError, match="own environment"):
         gym_executable()
 

@@ -166,15 +166,14 @@ class NemoListResponse(BaseModel, Generic[T]):
         @router.get("/widgets", response_model=WidgetPage)
         async def list_widgets(
             workspace: str,
-            page: int = Query(default=1, ge=1),
-            page_size: int = Query(default=20, ge=1, le=100),
+            page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
             sort: str = Query(default="-created_at"),
             filter: WidgetFilter = Depends(make_filter_dep(WidgetFilter)),
             entity_client: NemoEntitiesClient = Depends(get_entity_client),
         ) -> WidgetPage:
             result = await entity_client.list(
                 Widget, workspace=workspace,
-                page=page, page_size=page_size, sort=sort, filter=filter,
+                page=page_params.page, page_size=page_params.page_size, sort=sort, filter=filter,
             )
             pagination = (
                 PaginationData.model_validate(result.pagination.model_dump())

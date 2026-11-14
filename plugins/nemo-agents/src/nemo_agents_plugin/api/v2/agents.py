@@ -14,12 +14,14 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, validate_agent_config
 from nemo_agents_plugin.api.v2._perms import AgentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.authz import scope
 from nemo_agents_plugin.context_schema import check_context_schema
-from nemo_agents_plugin.entities import Agent, AgentDeployment
+from nemo_agents_plugin.entities import NEMO_AGENTS_SPEC_CONFIG_FORMAT, Agent, AgentDeployment
+from nemo_agents_plugin.fabric.adapters import CONTEXT_UNAWARE_HINT, context_unaware_harness
 from nemo_agents_plugin.jobs.post_run_actions import validate_post_run_action_kinds
 from nemo_agents_plugin.schema import (
     AgentFilter,
@@ -28,8 +30,10 @@ from nemo_agents_plugin.schema import (
 )
 from nemo_helix_plugin.agents.types import ReferenceConfig
 from nemo_helix_plugin.agents.validation import resolve_agent_fileset
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -66,7 +70,7 @@ async def register_agent(
 ) -> Agent:
     """Register an agent."""
     config = _validate_agent_config_for_register(body)
-    _validate_run_declarations(body)
+    _validate_run_declarations(body, config)
     reference = await _resolve_agent_reference(body.reference, workspace=workspace, files_client=files_client)
 
     agent = Agent(
@@ -90,6 +94,8 @@ async def register_agent(
         ) from exc
     except NemoEntityValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to register agent '%s'", body.name)
         raise HTTPException(status_code=500, detail="Failed to register agent.") from exc
@@ -112,8 +118,7 @@ async def register_agent(
 )
 async def list_agents(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     parsed_filter: ParsedFilter = Depends(_agent_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -126,11 +131,13 @@ async def list_agents(
         result = await entity_client.list(
             Agent,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_operation=parsed_filter.operation,
         )
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list agents in workspace '%s'", workspace)
         raise HTTPException(status_code=500, detail="Failed to list agents.") from exc
@@ -163,6 +170,8 @@ async def get_agent(
             status_code=404,
             detail=f"Agent '{name}' not found in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to get agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to get agent.") from exc
@@ -189,6 +198,8 @@ async def delete_agent(
     # Check for live deployments that would be orphaned by this deletion.
     try:
         result = await entity_client.list(AgentDeployment, workspace=workspace)
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list deployments before deleting agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to check deployments.") from exc
@@ -219,6 +230,8 @@ async def delete_agent(
                 "Refresh the agent and try again."
             ),
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to delete agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to delete agent.") from exc
@@ -246,7 +259,7 @@ def _validate_agent_config_for_register(body: RegisterAgentRequest) -> dict[str,
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _validate_run_declarations(body: RegisterAgentRequest) -> None:
+def _validate_run_declarations(body: RegisterAgentRequest, config: dict[str, Any]) -> None:
     """Check what the agent declares about its runs before it is stored.
 
     A bad schema or an uninstalled action kind would otherwise surface only
@@ -255,6 +268,21 @@ def _validate_run_declarations(body: RegisterAgentRequest) -> None:
     try:
         if body.context_schema is not None:
             check_context_schema(body.context_schema)
+            _check_adapter_reads_context(body.config_format, config)
         validate_post_run_action_kinds(body.post_run_actions)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _check_adapter_reads_context(config_format: str, config: dict[str, Any]) -> None:
+    """Reject a context_schema on an agent whose default harness's adapter never reads the context."""
+    if config_format != NEMO_AGENTS_SPEC_CONFIG_FORMAT or not config:
+        return
+    unaware = context_unaware_harness(AgentConfig.model_validate(config))
+    if unaware is None:
+        return
+    harness_name, adapter_id = unaware
+    raise ValueError(
+        f"context_schema is set, but default harness {harness_name!r} ({adapter_id}) does not read the "
+        f"request context, so no job context would reach the agent. {CONTEXT_UNAWARE_HINT}"
+    )

@@ -52,6 +52,7 @@ from nemo_evals.jobs.agent_spec import (
     ResolvedTask,
     Target,
 )
+from nemo_evals.jobs.attempt_tasks import TASKS_DIGEST_KEY, TASKS_FROM_ATTEMPT, TASKS_FROM_KEY, frozen_tasks_digest
 from nemo_evals.jobs.gateway_models import TrialRoute
 from nemo_evals.jobs.gym_sandbox import (
     GYM_SANDBOX_PLAN_ENVVAR,
@@ -453,9 +454,14 @@ def test_agent_eval_job_reconstructs_tasks_and_persists_bundle(tmp_path: Path, m
     fake = _FakeEvaluator()
     mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
     ctx = _job_context(tmp_path)
+    save = mocker.spy(ctx.results, "save")
 
     spec = AgentEvalSpec(tasks=[_task_spec()], target=_runner_target("openai/gpt-5.4"))
     result = AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+
+    # Only the bundle, whose evidence agent runtimes may still change, is staged before upload.
+    staged = {call.args[0]: call.kwargs.get("stage", False) for call in save.call_args_list}
+    assert staged == {DEFAULT_RESULT_NAME: True, SUMMARY_RESULT_NAME: False}
 
     # The job reconstructed runtime tasks (bundled metric round-tripped) before handing off.
     assert [task.id for task in fake.received_tasks] == ["task-1"]
@@ -1483,7 +1489,8 @@ async def test_checked_fabric_spec_transforms_and_compiles() -> None:
     _assert_agent_eval_step_entrypoint(job_spec)
     config = cast(dict[str, Any], job_spec.steps[0].config)
     assert config["target"]["kind"] == "fabric"
-    assert config["tasks"][0]["spec"]["metrics"][0]["payload"]["kind"] == "inline"
+    assert "tasks" not in config
+    assert config[TASKS_DIGEST_KEY] == frozen_tasks_digest(spec.model_dump(mode="json"))
 
 
 def _patch_execution_profiles(mocker: MockerFixture, profiles: list[BaseExecutionProfile]) -> None:
@@ -1595,7 +1602,8 @@ async def test_compile_produces_cpu_task_step_carrying_each_target(
         expected_entrypoint=expected_entrypoint,
     )
     config = cast(dict[str, Any], step.config)
-    assert len(config["tasks"]) == 1
+    assert config[TASKS_FROM_KEY] == TASKS_FROM_ATTEMPT
+    assert "tasks" not in config
     assert config["target"]["kind"] == expected_kind
     if expected_endpoint_name is not None:
         endpoint = config["target"].get("model") or config["target"].get("agent")

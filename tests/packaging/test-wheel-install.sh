@@ -41,14 +41,20 @@ if [[ "${method}" == tool ]]; then
   uv tool install --no-config --python "${PYTHON_VERSION}" \
     --constraints "${constraints}" "${requirement}"
   bin_dir="${UV_TOOL_BIN_DIR}"
+  python_bin="${UV_TOOL_DIR}/${package}/bin/python"
 else
   uv venv .venv --python "${PYTHON_VERSION}"
   uv pip install --no-config --python .venv/bin/python \
     --constraint "${constraints}" "${requirement}"
   bin_dir="${check_dir}/.venv/bin"
+  python_bin="${bin_dir}/python"
 fi
 
 if [[ "${package}" == nemo-helix ]]; then
+  # Fail directly on plugin import errors: degraded discovery and auth-disabled
+  # startup can otherwise hide missing workspace-only dependencies. -I also
+  # prevents checkout/PYTHONPATH imports from satisfying a broken wheel.
+  "${python_bin}" -I "${GITHUB_WORKSPACE}/tests/packaging/check-wheel-imports.py"
   export PATH="${bin_dir}:${PATH}"
   bash "${GITHUB_WORKSPACE}/script/test-nemo-cli.sh"
 else

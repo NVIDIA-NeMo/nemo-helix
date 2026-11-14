@@ -22,9 +22,10 @@ import logging
 import textwrap
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE, EntityWriteValidationErrorResponse
-from nhx.common.api.common import DeleteResponse, Page, PaginationData
+from nhx.common.api.common import DeleteResponse, ErrorResponse, Page, PaginationData
 from nhx.common.auth import ALL_WORKSPACES
 from nhx.common.auth.client import AuthClient
 from nhx.common.entities.client import EntityValidationError
@@ -35,6 +36,7 @@ from nhx.core.entities.api.dependencies import (
 )
 from nhx.core.entities.api.v2.entities.schemas import EntityCreateInput, EntityUpdate
 from nhx.core.entities.api.v2.entity_access import (
+    get_control_entity_list_workspaces,
     require_control_entity_access,
     require_entity_read_access,
     require_relationship_access,
@@ -382,8 +384,7 @@ async def list_entities(
     workspace_repository: WorkspaceRepository,
     filter: FilterDep,
     auth_client: AuthClientDep,
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(100, ge=1, le=1000, description="Items per page"),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: str = Query(
         "-created_at",
         description=(
@@ -403,11 +404,14 @@ async def list_entities(
     ),
 ) -> EntitiesPage:
     """List entities with filtering, supporting cross-workspace queries."""
-    await require_control_entity_access(auth_client, workspace, entity_type, "list")
+    if workspace != ALL_WORKSPACES:
+        await require_control_entity_access(auth_client, workspace, entity_type, "list")
     await require_relationship_access(auth_client, filter)
-    # Handle cross-workspace query (workspace = "*")
     if workspace == ALL_WORKSPACES:
         accessible_workspaces = await get_accessible_workspaces(repository)
+        accessible_workspaces = await get_control_entity_list_workspaces(
+            auth_client, workspace_repository, entity_type, accessible_workspaces
+        )
         # Build combined filter for workspace access and user's filter
         query_workspace = ALL_WORKSPACES
         effective_filter = add_workspace_filtering(accessible_workspaces, filter, field="workspace")
@@ -427,8 +431,8 @@ async def list_entities(
         entities, total = await repository.list_entities(
             workspace=query_workspace,
             entity_type=entity_type,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_op=effective_filter,
             relationship_child_workspaces=accessible_workspaces,
@@ -451,11 +455,11 @@ async def list_entities(
     return EntitiesPage(
         data=entities,
         pagination=PaginationData(
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             current_page_size=len(entities),
             total_results=total,
-            total_pages=(total + page_size - 1) // page_size,
+            total_pages=(total + page_params.page_size - 1) // page_params.page_size,
         ),
         sort=sort,
         filter=filter.to_dict() if filter else None,
@@ -468,7 +472,10 @@ async def list_entities(
     response_model=Entity,
     tags=[API_TAG],
     summary="Get entity by name",
-    responses={403: {"description": "Not allowed to read entities in the requested workspace."}},
+    responses={
+        403: {"description": "Not allowed to read entities in the requested workspace."},
+        404: {"model": ErrorResponse, "description": "Entity or workspace not found"},
+    },
     description=textwrap.dedent("""
         Get a specific entity by its workspace, type, and name.
 
@@ -516,6 +523,7 @@ async def get_entity_by_name(
     summary="Update entity by name",
     responses={
         403: {"description": "Not allowed to update entities in the requested workspace."},
+        404: {"model": ErrorResponse, "description": "Entity not found or workspace being deleted"},
         **_ENTITY_WRITE_ERROR_RESPONSES,
     },
     description=textwrap.dedent("""
@@ -640,7 +648,10 @@ async def update_entity_by_name(
     response_model=DeleteResponse,
     tags=[API_TAG],
     summary="Delete entity by name",
-    responses={403: {"description": "Not allowed to delete entities in the requested workspace."}},
+    responses={
+        403: {"description": "Not allowed to delete entities in the requested workspace."},
+        404: {"model": ErrorResponse, "description": "Entity or workspace not found"},
+    },
     description=textwrap.dedent("""
         Delete an entity by its name.
 
@@ -698,6 +709,7 @@ async def delete_entity_by_name(
     response_model=Entity,
     tags=[API_TAG],
     summary="Get entity by ID (debug/internal)",
+    responses={404: {"model": ErrorResponse, "description": "Entity not found"}},
     description=textwrap.dedent("""
         Get a specific entity by its unique identifier.
         This endpoint is primarily for debugging and internal use.

@@ -202,8 +202,8 @@ class _OpenShell:
 @pytest.fixture
 def openshell(monkeypatch: pytest.MonkeyPatch) -> _OpenShell:
     fake = _OpenShell()
-    monkeypatch.setattr(gateway_module.shutil, "which", lambda _name: "/usr/local/bin/openshell")
-    monkeypatch.setattr(gateway_module.subprocess, "run", fake)
+    monkeypatch.setattr(gateway_module, "which", lambda _name: "/usr/local/bin/openshell")
+    monkeypatch.setattr(gateway_module, "run", fake)
     return fake
 
 
@@ -320,8 +320,8 @@ def test_a_missing_mtls_secret_is_a_credential_error(tmp_path: Path, openshell: 
 
 
 def test_a_failed_registration_surfaces_the_cli_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gateway_module.shutil, "which", lambda _name: "/usr/local/bin/openshell")
-    monkeypatch.setattr(gateway_module.subprocess, "run", _OpenShell(returncode=1, stderr="bad endpoint"))
+    monkeypatch.setattr(gateway_module, "which", lambda _name: "/usr/local/bin/openshell")
+    monkeypatch.setattr(gateway_module, "run", _OpenShell(returncode=1, stderr="bad endpoint"))
     config = _config(tmp_path, openshell_gateway_endpoint="http://openshell.openshell.svc:8080")
 
     with pytest.raises(AgentHardenerRunError, match="bad endpoint"):
@@ -329,7 +329,7 @@ def test_a_failed_registration_surfaces_the_cli_error(tmp_path: Path, monkeypatc
 
 
 def test_a_missing_openshell_cli_is_a_provisioning_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gateway_module.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(gateway_module, "which", lambda _name: None)
     config = _config(tmp_path, openshell_gateway_endpoint="http://openshell.openshell.svc:8080")
 
     with pytest.raises(AgentHardenerRunError, match="not on PATH") as raised:

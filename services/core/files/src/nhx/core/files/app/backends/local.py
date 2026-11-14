@@ -16,7 +16,7 @@ from typing import (
 )
 
 import anyio
-from anyio import to_thread
+from anyio import open_file, to_thread
 from nhx.common.files.storage_config import LocalStorageConfig as LocalStorageConfig
 from nhx.core.files.app.backends.base import (
     ByteRange,
@@ -72,7 +72,7 @@ class LocalStorageImpl(StorageImpl):
             RuntimeError: If the path is a directory, not a file
         """
         try:
-            async with await anyio.open_file(file_path, mode="rb"):
+            async with await open_file(file_path, mode="rb"):
                 pass
         except FileNotFoundError as exc:
             raise NotFoundError(f"File {path} does not exist in local storage at {file_path}") from exc
@@ -114,7 +114,7 @@ class LocalStorageImpl(StorageImpl):
         if byte_range is not None:
 
             async def _gen() -> AsyncIterator[bytes]:
-                async with await anyio.open_file(file_path, mode="rb") as file:
+                async with await open_file(file_path, mode="rb") as file:
                     start = byte_range.start
                     await file.seek(byte_range.start)
                     while start <= byte_range.end:
@@ -126,7 +126,7 @@ class LocalStorageImpl(StorageImpl):
         else:
 
             async def _gen() -> AsyncIterator[bytes]:
-                async with await anyio.open_file(file_path, mode="rb") as file:
+                async with await open_file(file_path, mode="rb") as file:
                     while chunk := await file.read(self.config.read_chunk_size):
                         yield chunk
 
@@ -167,7 +167,7 @@ class LocalStorageImpl(StorageImpl):
             buffer_pos = 0
             total_bytes = 0
 
-            async with await anyio.open_file(temp_path, "wb") as dest_file:
+            async with await open_file(temp_path, "wb") as dest_file:
                 async for chunk in fstream:
                     chunk_len = len(chunk)
                     total_bytes += chunk_len

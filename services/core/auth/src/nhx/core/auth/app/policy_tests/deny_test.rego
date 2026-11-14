@@ -21,11 +21,11 @@ deny_test_data := {
 		# Explicit deny marker (note permissions == [] would otherwise ALLOW any
 		# authenticated caller via the empty-permissions rule — deny must override that).
 		"/apis/agents/v2/workspaces/{workspace}/internal": {
-			"get": {"permissions": [], "deny": true},
+			"get": {"direct": {"actor_perms": []}, "delegated": {"actor_perms": [], "subject_perms": []}, "deny": true},
 		},
 		# Negative control: an ordinary route with no deny marker.
 		"/apis/models/v2/workspaces/{workspace}/models/{name}": {
-			"get": {"permissions": ["models.read"]},
+			"get": {"direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]}},
 		},
 	},
 	"workspaces": {"system": {}, "ws1": {}},
@@ -36,7 +36,7 @@ deny_test_data := {
 }
 
 test_deny_marker_denies_human_principal if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {"principal_id": "user@example.com", "method": "GET", "path": "/apis/agents/v2/workspaces/ws1/internal"}
 		with data.authz.roles as deny_test_data.roles
 		with data.authz.endpoints as deny_test_data.endpoints
@@ -48,7 +48,7 @@ test_deny_marker_denies_human_principal if {
 
 # Overrides the ServiceSystem "*" wildcard that a service:* principal defaults to.
 test_deny_marker_denies_service_principal if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {"principal_id": "service:agents", "method": "GET", "path": "/apis/agents/v2/workspaces/ws1/internal"}
 		with data.authz.roles as deny_test_data.roles
 		with data.authz.endpoints as deny_test_data.endpoints
@@ -60,7 +60,7 @@ test_deny_marker_denies_service_principal if {
 
 # Overrides the HelixAdmin allow-bypass.
 test_deny_marker_denies_platform_admin if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {"principal_id": "platform-admin@example.com", "method": "GET", "path": "/apis/agents/v2/workspaces/ws1/internal"}
 		with data.authz.roles as deny_test_data.roles
 		with data.authz.endpoints as deny_test_data.endpoints
@@ -72,7 +72,7 @@ test_deny_marker_denies_platform_admin if {
 
 # A route without the deny marker is unaffected — normal permission check applies.
 test_no_deny_marker_allows_with_permission if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {"principal_id": "user@example.com", "method": "GET", "path": "/apis/models/v2/workspaces/ws1/models/m1"}
 		with data.authz.roles as deny_test_data.roles
 		with data.authz.endpoints as deny_test_data.endpoints
@@ -85,7 +85,7 @@ test_no_deny_marker_allows_with_permission if {
 # Namespace fence: a path NOT in the endpoints map but under a degraded plugin's denied prefix
 # must be denied — directly closing the service: no-match bypass for an unenumerable plugin.
 test_denied_plugin_prefix_denies_service_principal if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {"principal_id": "service:x", "method": "POST", "path": "/apis/badplugin/v2/workspaces/ws1/anything/deep/path"}
 		with data.authz.roles as deny_test_data.roles
 		with data.authz.endpoints as deny_test_data.endpoints
@@ -99,7 +99,7 @@ test_denied_plugin_prefix_denies_service_principal if {
 # Control: WITHOUT the fence, that same unknown path is allowed for a service principal via the
 # no-match bypass — proving the fence is what closes the hole.
 test_unknown_path_without_fence_hits_service_bypass if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {"principal_id": "service:x", "method": "POST", "path": "/apis/badplugin/v2/workspaces/ws1/anything/deep/path"}
 		with data.authz.roles as deny_test_data.roles
 		with data.authz.endpoints as deny_test_data.endpoints
@@ -113,7 +113,7 @@ test_unknown_path_without_fence_hits_service_bypass if {
 # /apis/badplugin. The trailing slash in the fence rule (sprintf("%s/", [prefix])) is the only thing
 # keeping the sibling allowed; pin it so a refactor can't silently widen the fence onto a neighbour.
 test_sibling_prefix_not_collaterally_fenced if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {"principal_id": "service:x", "method": "POST", "path": "/apis/badplugin-extra/v2/workspaces/ws1/anything"}
 		with data.authz.roles as deny_test_data.roles
 		with data.authz.endpoints as deny_test_data.endpoints
@@ -128,7 +128,7 @@ test_sibling_prefix_not_collaterally_fenced if {
 # The old trailing-slash-only rule (startswith(path, "<prefix>/")) missed this exact-match case,
 # leaving a degraded plugin's root path open.
 test_bare_prefix_path_is_fenced if {
-	result := authz.allow
+	result := data.authz.allow
 		with input as {"principal_id": "service:x", "method": "GET", "path": "/apis/badplugin"}
 		with data.authz.roles as deny_test_data.roles
 		with data.authz.endpoints as deny_test_data.endpoints

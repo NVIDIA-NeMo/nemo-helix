@@ -252,13 +252,13 @@ def build_gym_agent_eval_spec() -> dict[str, Any]:
 
 
 def build_harbor_taskset_run_openhands_spec() -> dict[str, Any]:
-    """Return a ``nemo evals runs submit --spec-file`` request: openhands on a closed-book model, Kubernetes defaults."""
+    """Return a ``nemo evals runs submit --spec-file`` request: openhands on a gateway model, Kubernetes defaults."""
     return {
         # No spec.tasks: the submit's --harbor-dir, --harbor-hub, --harbor-git or --taskset supplies them.
         "spec": {
             "target": {
                 "kind": "harbor",
-                "source": {"name": "openhands", "model": {"ref": "default/nemotron-super-closed-book"}},
+                "source": {"name": "openhands", "model": {"ref": "default/nvidia-nemotron-3-5-super-vl-120b-a12b"}},
                 "agent_kwargs": {"version": "1.6.0", "temperature": "1", "top_p": "0.95", "disable_vision": True},
                 # Platform auth on: an inference-scoped access key in this secret. Auth off: drop env_secrets.
                 "env_secrets": {"LLM_API_KEY": "evals-inference-key"},

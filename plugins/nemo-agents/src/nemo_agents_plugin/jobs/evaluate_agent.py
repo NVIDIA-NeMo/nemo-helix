@@ -27,6 +27,7 @@ import logging
 import subprocess
 import tempfile
 from pathlib import Path
+from subprocess import run
 from typing import ClassVar, Generator
 
 from filesets import FilesetFileSystem
@@ -302,7 +303,7 @@ class EvaluateAgentJob(NemoJob):
                         logger.info("Evaluating against agent at %s", endpoint)
 
                     logger.info("Running: %s (cwd=%s)", " ".join(cmd), cwd)
-                    result = subprocess.run(cmd, check=True, cwd=cwd, timeout=EVAL_TIMEOUT_SECONDS)
+                    result = run(cmd, check=True, cwd=cwd, timeout=EVAL_TIMEOUT_SECONDS)
                     logger.info("EvaluateAgentJob completed (returncode=%d).", result.returncode)
                     return {"status": "completed", "returncode": result.returncode}
         except subprocess.TimeoutExpired:

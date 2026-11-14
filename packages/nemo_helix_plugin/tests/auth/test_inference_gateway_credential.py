@@ -5,9 +5,7 @@
 
 from __future__ import annotations
 
-import builtins
-from typing import Any
-
+import nhx.common.auth.bearer as bearer_mod
 import pytest
 from nemo_helix_plugin.auth import inference_gateway_credential
 
@@ -31,13 +29,7 @@ def test_the_credential_is_the_bearer_token_or_else_the_api_key(
 
 
 def test_nothing_is_read_outside_the_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    real_import = builtins.__import__
-
-    def without_nhx_common(name: str, *args: Any, **kwargs: Any) -> Any:
-        if name.startswith("nhx.common"):
-            raise ImportError(name)
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", without_nhx_common)
+    # Without nhx_common the platform's bearer helpers can't be imported.
+    monkeypatch.delattr(bearer_mod, "MalformedBearerTokenError")
 
     assert inference_gateway_credential({"Authorization": "Bearer tok"}) is None

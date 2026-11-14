@@ -20,6 +20,7 @@ from nemo_helix_ext.cli.telemetry.handler import (
 from pydantic import Field
 
 telemetry_module = importlib.import_module("nemo_helix_ext.cli.telemetry.handler")
+plugin_handler_module = importlib.import_module("nemo_helix_plugin.telemetry.handler")
 
 
 # =============================================================================
@@ -133,12 +134,12 @@ class TestBuildPayload:
         assert payload["sessionId"] == "undefined"
 
     def test_cpu_architecture_uses_platform_machine(self, monkeypatch):
-        monkeypatch.setattr(telemetry_module.platform, "machine", lambda: "arm64")
+        monkeypatch.setattr(plugin_handler_module, "machine", lambda: "arm64")
         payload = build_payload([self._make_queued()], source_client_version="1.0.0")
         assert payload["cpuArchitecture"] == "arm64"
 
     def test_cpu_architecture_empty_value_falls_back_to_undefined(self, monkeypatch):
-        monkeypatch.setattr(telemetry_module.platform, "machine", lambda: "")
+        monkeypatch.setattr(plugin_handler_module, "machine", lambda: "")
         payload = build_payload([self._make_queued()], source_client_version="1.0.0")
         assert payload["cpuArchitecture"] == "undefined"
 
@@ -385,7 +386,7 @@ class TestTelemetryHandlerSend:
         handler = self._make_handler()
         queued = self._make_queued()
 
-        with patch("httpx.AsyncClient", side_effect=RuntimeError("boom")):
+        with patch.object(plugin_handler_module, "AsyncClient", side_effect=RuntimeError("boom")):
             await handler._send_events([queued])
 
         assert len(handler._dlq) == 1

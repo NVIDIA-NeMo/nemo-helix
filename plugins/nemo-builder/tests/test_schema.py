@@ -148,6 +148,10 @@ class TestBuildSet:
     def test_revision_is_required_and_one_based(self) -> None:
         with pytest.raises(ValidationError, match="revision"):
             BuildSet(name="demo", revision=0, build_specs=[_spec("a")])
+        for too_big in (2**63, 10**20):
+            with pytest.raises(ValidationError, match="revision"):
+                BuildSet(name="demo", revision=too_big, build_specs=[_spec("a")])
+        assert BuildSet(name="demo", revision=2**63 - 1, build_specs=[_spec("a")])
         with pytest.raises(ValidationError, match="revision"):
             BuildSet.model_validate({"name": "demo", "build_specs": [_spec("a").model_dump()]})
 

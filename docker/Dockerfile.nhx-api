@@ -37,6 +37,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --active --only-group "${NHX_API_DEPENDENCY_GROUP}" --no-editable \
     --reinstall-package annoy --refresh-package annoy --no-binary-package annoy --no-cache
 
+# The release workspace relock is blocked by the DataDesignerPlugins index.
+# Apply the same narrow post-sync fix as nhx-tasks until it can be relocked.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv --no-config pip install --python /app/.venv/bin/python --no-deps "urllib3==2.8.0"
+
 # Native routing requires the extension and the IGW adapter in the same image.
 RUN /app/.venv/bin/python -c 'import switchyard_rust; import nemo_switchyard.middleware'
 
@@ -116,6 +121,8 @@ ENV USERNAME=nvs \
 # DuckDB extension cache (aws, httpfs) for S3 log storage
 COPY --chown=1000:1000 --from=builder /root/.duckdb /home/nvs/.duckdb
 COPY --from=builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
+# COPY merges directories: do not retain the runtime base's seeded pip metadata.
+RUN rm -rf /app/.venv
 COPY --chown=1000:1000 --from=builder /app/.venv /app/.venv
 COPY --chown=1000:1000 --from=builder /app/.source-distributions/nhx-api/ /usr/share/nemo-helix/source-distributions/nhx-api/
 ENV VIRTUAL_ENV=/app/.venv \

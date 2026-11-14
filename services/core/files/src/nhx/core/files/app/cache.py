@@ -71,6 +71,7 @@ async def cache_file_directly(
     """
     limiter = _get_background_cache_limiter()
     async with limiter:
+        source_storage = await source_storage.for_download(path)
         cache_path_key = await source_storage.get_cache_path_key(path)
         if cache_path_key is None:
             logger.debug("File not cacheable", extra={"path": path})

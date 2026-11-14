@@ -14,6 +14,7 @@ from nhx.guardrails.app.handlers.utils import (
     get_model_config_object,
     get_rail_types_from_config,
     get_rails_name_from_config,
+    run_check_async,
     run_generate_async,
     set_main_model_merged_custom_headers_into_context,
     to_internal_rails_config,
@@ -27,7 +28,7 @@ from nhx.guardrails.app.schemas.utils.request_converters import convert_check_re
 from nhx.guardrails.app.schemas.utils.response_transformers import (
     create_guardrail_check_response_from_generation_response,
 )
-from nhx.guardrails.app.services.rails.engine import RailsEngine, create_rails_engine, retire_rails_engine
+from nhx.guardrails.app.services.rails.engine import RailsEngine, create_rails_engine, retire_rails_engine, uses_iorails
 from nhx.guardrails.app.services.rails.service import RailsService
 from nhx.guardrails.app.services.utils import normalize_config_ids
 from nhx.guardrails.app.utils.config_utils import configure_rails_config
@@ -212,12 +213,22 @@ class CheckRequestHandler:
         try:
             options = self.body.options.model_dump(exclude_unset=True)
 
-            res = await run_generate_async(
-                self.llm_rails,
-                messages=messages,
-                options=options,
-                state=self.body.state,
-            )
+            if uses_iorails(self.llm_rails):
+                # IORails' generate_async always calls the main model and judges its reply, not the
+                # supplied messages. A check must judge the supplied messages as they are.
+                res = await run_check_async(
+                    self.llm_rails,
+                    messages=messages,
+                    rail_types=get_rail_types_from_config(self.llm_rails.config)["rails"],
+                    state=self.body.state,
+                )
+            else:
+                res = await run_generate_async(
+                    self.llm_rails,
+                    messages=messages,
+                    options=options,
+                    state=self.body.state,
+                )
 
             self.llm_rails.config.enable_rails_exceptions = self.current_rails_exceptions
         except Exception as e:

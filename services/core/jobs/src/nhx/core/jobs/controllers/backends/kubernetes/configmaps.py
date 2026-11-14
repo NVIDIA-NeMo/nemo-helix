@@ -6,11 +6,12 @@
 import datetime
 import json
 import logging
-import time
 from collections import deque
 from collections.abc import Callable
+from time import monotonic
 
 from kubernetes import client
+from kubernetes.client import CustomObjectsApi
 from kubernetes.client.rest import ApiException
 from nhx.common.jobs.constants import NEMO_JOB_STEP_CONFIG_FILE_NAME
 from nhx.core.jobs.app.constants import (
@@ -101,7 +102,7 @@ class StepConfigMapSweeper:
     ) -> None:
         self._core_v1 = core_v1
         self._batch_v1 = batch_v1
-        self._custom_v1 = client.CustomObjectsApi(core_v1.api_client)
+        self._custom_v1 = CustomObjectsApi(core_v1.api_client)
         self._namespace = namespace
         self._step_is_terminal = step_is_terminal
         self._next_sweep = 0.0
@@ -110,7 +111,7 @@ class StepConfigMapSweeper:
 
     def sweep(self, on_progress: Callable[[], None] | None = None) -> None:
         """Scan a bounded number of pages and retain unfinished candidates for the next pass."""
-        now = time.monotonic()
+        now = monotonic()
         if now < self._next_sweep:
             return
         self._next_sweep = now + SWEEP_INTERVAL_SECONDS
@@ -127,7 +128,7 @@ class StepConfigMapSweeper:
                 self._pending.extend(cm for cm in page.items if self._is_candidate(cm))
                 pages += 1
                 progress()
-                if not self._continue or time.monotonic() >= deadline:
+                if not self._continue or monotonic() >= deadline:
                     break
             if not self._pending:
                 return
@@ -139,7 +140,7 @@ class StepConfigMapSweeper:
             return
 
         processed = 0
-        while self._pending and processed < SWEEP_PAGE_SIZE and (processed == 0 or time.monotonic() < deadline):
+        while self._pending and processed < SWEEP_PAGE_SIZE and (processed == 0 or monotonic() < deadline):
             cm = self._pending.popleft()
             processed += 1
             try:

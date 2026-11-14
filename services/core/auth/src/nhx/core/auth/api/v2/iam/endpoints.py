@@ -8,8 +8,9 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nhx.common.api.common import DeleteResponse, Page
-from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
+from nhx.common.api.common import DeleteResponse, ErrorResponse, Page
+from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
@@ -64,6 +65,30 @@ async def _get_role_binding_by_name(
         raise HTTPException(status_code=409, detail=f"Multiple role bindings found for name '{name}'") from e
 
 
+def _translate_active_filter(operation: FilterOperation) -> FilterOperation:
+    """Replace derived active status throughout the filter tree before querying storage."""
+    if isinstance(operation, LogicalOperation):
+        return LogicalOperation(
+            operator=operation.operator,
+            operations=[_translate_active_filter(child) for child in operation.operations],
+        )
+    if not isinstance(operation, ComparisonOperation) or operation.field != "data.is_active":
+        return operation
+    if operation.operator != FilterOperator.EQ:
+        raise HTTPException(status_code=422, detail="is_active only supports equality with true or false")
+
+    value = operation.value
+    if isinstance(value, str) and value.lower() in ("true", "false"):
+        value = value.lower() == "true"
+    if not isinstance(value, bool):
+        raise HTTPException(status_code=422, detail="is_active must be true or false")
+
+    active_condition = ComparisonOperation(field="data.revoked_at", operator=FilterOperator.EQ, value=None)
+    if value:
+        return active_condition
+    return LogicalOperation(operator=FilterOperator.NOT, operations=[active_condition])
+
+
 @router.get(
     "/v2/iam/role-bindings",
     response_model=Page[RoleBinding],
@@ -75,8 +100,7 @@ async def _get_role_binding_by_name(
     ),
 )
 async def list_role_bindings(
-    page: int = Query(default=1, description="Page number."),
-    page_size: int = Query(default=10, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep(default_size=10)),
     # TODO(v2): Support sorting by granted_at once entities API supports custom sort fields
     sort: str = Query(
         default="created_at",
@@ -92,29 +116,14 @@ async def list_role_bindings(
     """
     require_service_principal_for_iam_role_bindings(auth_client)
 
-    # Translate is_active filter to revoked_at EXISTS filter for database query
-    is_active_value = parsed.remove("is_active")
-    if is_active_value is not None:
-        # is_active=True means revoked_at IS NULL (EXISTS=false)
-        # is_active=False means revoked_at IS NOT NULL (EXISTS=true)
-        revoked_condition = ComparisonOperation(
-            field="revoked_at",
-            operator=FilterOperator.EXISTS,
-            value=not is_active_value,
-        )
-        if parsed.operation is not None:
-            parsed.operation = LogicalOperation(
-                operator=FilterOperator.AND,
-                operations=[revoked_condition, parsed.operation],
-            )
-        else:
-            parsed.operation = revoked_condition
+    if parsed.operation is not None:
+        parsed.operation = _translate_active_filter(parsed.operation)
 
     res = await entities_client.list(
         RoleBindingEntity,
         workspace=ALL_WORKSPACES,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort,
         filter_operation=parsed.operation,
     )
@@ -206,6 +215,7 @@ async def create_role_binding(
 
 @router.get(
     "/v2/iam/role-bindings/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Role binding not found"}},
     response_model=RoleBinding,
     summary="Get role binding",
     description="Get a specific role binding (Platform Admin only)",
@@ -227,6 +237,7 @@ async def get_role_binding(
 
 @router.delete(
     "/v2/iam/role-bindings/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Role binding not found"}},
     response_model=DeleteResponse,
     summary="Revoke role binding",
     description="Revoke a role binding (Platform Admin only)",

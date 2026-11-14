@@ -16,9 +16,9 @@ NemoEntitiesClient, 404/409 mapping).
 from __future__ import annotations
 
 import logging
-from typing import TypeVar
+from typing import Annotated, TypeVar
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from nemo_agents_plugin.api.v2._perms import ComputeSpecPerms, EnvironmentPerms, EnvironmentSpecPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client
 from nemo_agents_plugin.authz import scope
@@ -35,7 +35,10 @@ from nemo_agents_plugin.schema import (
     EnvironmentSpecPage,
 )
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entities import CLIENT_ERRORS
+from nemo_helix_plugin.entities.base import ID_PATTERN
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -69,7 +72,7 @@ _compute_spec_filter_dep = make_filter_obj_dep(ComputeSpecFilter)
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[EnvironmentPerms.CREATE])
 async def create_environment(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     body: CreateEnvironmentRequest,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AgentEnvironment:
@@ -89,8 +92,7 @@ async def create_environment(
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[EnvironmentPerms.LIST])
 async def list_environments(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: EnvironmentFilter = Depends(_environment_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -101,8 +103,8 @@ async def list_environments(
         AgentEnvironment,
         EnvironmentPage,
         workspace=workspace,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort,
         filter=filter,
         kind="environments",
@@ -144,7 +146,7 @@ async def delete_environment(
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[EnvironmentSpecPerms.CREATE])
 async def create_environment_spec(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     body: CreateEnvironmentSpecRequest,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AgentEnvironmentSpec:
@@ -158,8 +160,7 @@ async def create_environment_spec(
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[EnvironmentSpecPerms.LIST])
 async def list_environment_specs(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: EnvironmentSpecFilter = Depends(_environment_spec_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -170,8 +171,8 @@ async def list_environment_specs(
         AgentEnvironmentSpec,
         EnvironmentSpecPage,
         workspace=workspace,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort,
         filter=filter,
         kind="environment specs",
@@ -213,7 +214,7 @@ async def delete_environment_spec(
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[ComputeSpecPerms.CREATE])
 async def create_compute_spec(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     body: CreateComputeSpecRequest,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AgentComputeSpec:
@@ -227,8 +228,7 @@ async def create_compute_spec(
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[ComputeSpecPerms.LIST])
 async def list_compute_specs(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: ComputeSpecFilter = Depends(_compute_spec_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -239,8 +239,8 @@ async def list_compute_specs(
         AgentComputeSpec,
         ComputeSpecPage,
         workspace=workspace,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort,
         filter=filter,
         kind="compute specs",
@@ -293,6 +293,8 @@ async def _create_entity(
         ) from exc
     except NemoEntityValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to create agent %s '%s'", kind, name)
         raise HTTPException(status_code=500, detail=f"Failed to create agent {kind}.") from exc
@@ -320,6 +322,8 @@ async def _list_entities(
             sort=sort,
             filter_obj=filter_dict or None,
         )
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list agent %s in workspace '%s'", kind, workspace)
         raise HTTPException(status_code=500, detail=f"Failed to list agent {kind}.") from exc
@@ -343,6 +347,8 @@ async def _get_entity(
             status_code=404,
             detail=f"Agent {kind} '{name}' not found in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to get agent %s '%s'", kind, name)
         raise HTTPException(status_code=500, detail=f"Failed to get agent {kind}.") from exc
@@ -368,6 +374,8 @@ async def _delete_entity(
             status_code=409,
             detail=f"Agent {kind} '{name}' was modified by another request in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to delete agent %s '%s'", kind, name)
         raise HTTPException(status_code=500, detail=f"Failed to delete agent {kind}.") from exc

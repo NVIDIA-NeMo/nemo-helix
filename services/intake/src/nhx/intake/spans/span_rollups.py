@@ -4,7 +4,10 @@
 """Shared ClickHouse expressions for span-derived token and cost rollups.
 
 Agent and root spans repeat the usage of the model calls beneath them, so a sum over every span counts the same
-tokens and cost two or three times. Instead, each trace sums a metric over the first of these tiers that reports it:
+tokens and cost two or three times. As an interim estimate, each trace takes the maximum of the summed
+model-call counters and the largest reported aggregate, independently for each metric. Aggregates are never
+added to calls or to each other: nested agent totals can describe the same usage. This is not verified
+reconciliation; the original span measurements remain available for inspection.
 
 1. Inference Gateway call spans (``GATEWAY_CALL_ATTRIBUTE``): the usage the provider reported for each call the
    gateway served. An agent that sends a ``traceparent`` gets them beneath its own spans for the same calls, which
@@ -18,7 +21,9 @@ tokens and cost two or three times. Instead, each trace sums a metric over the f
 3. The trace's other roots.
 4. Any other span.
 
-A metric that no span in the trace reports is NULL. A stored 0 counts as reported, so it blocks the next tier.
+Without eligible gateway coverage, take the maximum of summed tier-2 model counters and the largest
+reported tier-3/4 aggregate per metric. A metric with no non-gateway measurement remains NULL.
+A stored 0 counts as reported, not missing.
 
 A session adds up its traces, except for a trace marked ``USAGE_SUPERSEDED_ATTRIBUTE``: the gateway recorded its calls
 in another trace of the session, so once any trace totals a metric from gateway call spans, marked traces don't add
@@ -55,16 +60,20 @@ _ALL_METRICS = tuple(METRIC_ATTRIBUTE_FIELDS)
 _REPORTS = "has(mapKeys(attributes_number), %({metric}_key)s) AS reports_{metric}"
 _VALUE = "attributes_number[%({metric}_key)s] AS {metric}_value"
 
-# Per trace and metric: the sum over the lowest tier that reports the metric. When no span reports it, minIf
-# returns 0, no branch matches, and the total is NULL. A span that does not report the metric adds 0, so each sum
-# filters on the tier alone. multiIf rather than a simple CASE: ClickHouse runs it faster.
+# Per trace and metric: guard absence explicitly (ClickHouse sumIf/maxIf return 0 for empty sets).
+# Taking the largest aggregate instead of their sum avoids counting nested aggregate representations twice.
 _TRACE_TOTAL = """\
 multiIf(
     {from_gateway}, sumIf({metric}_value, usage_tier = 1),
-    minIf(usage_tier, reports_{metric} AND usage_tier > 1) = 2, sumIf({metric}_value, usage_tier = 2),
-    minIf(usage_tier, reports_{metric} AND usage_tier > 1) = 3, sumIf({metric}_value, usage_tier = 3),
-    minIf(usage_tier, reports_{metric} AND usage_tier > 1) = 4, sumIf({metric}_value, usage_tier = 4),
-    NULL
+    countIf(usage_tier > 1 AND reports_{metric}) = 0, NULL,
+    countIf(usage_tier = 2 AND reports_{metric}) = 0,
+        maxIf({metric}_value, usage_tier > 2 AND reports_{metric}),
+    countIf(usage_tier > 2 AND reports_{metric}) = 0,
+        sumIf({metric}_value, usage_tier = 2 AND reports_{metric}),
+    greatest(
+        sumIf({metric}_value, usage_tier = 2 AND reports_{metric}),
+        maxIf({metric}_value, usage_tier > 2 AND reports_{metric})
+    )
 )"""
 # Per trace and metric: whether its total came from gateway call spans; whether it holds gateway call spans that
 # nothing in the trace counted; and per trace, whether it is marked.

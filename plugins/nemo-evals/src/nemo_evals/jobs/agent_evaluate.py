@@ -62,6 +62,7 @@ from nemo_evals.jobs.agent_spec import (
     registered_agent_files,
     validate_task_collection,
 )
+from nemo_evals.jobs.attempt_tasks import load_attempt_tasks
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evals.jobs.gateway_models import (
     TrialRoute,
@@ -284,7 +285,7 @@ class _AgentEvalJobBase(NemoJob):
         target = await resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
         try:
             await check_gateway_model(target, async_sdk=async_sdk, authorize=authorize)
-            await require_closed_book_route(target, (), async_sdk=async_sdk, authorize=authorize)
+            await require_closed_book_route(target, async_sdk=async_sdk, authorize=authorize)
             validate_execution_support(resolved_tasks, target=target, adapters=ctx.adapters)
             if isinstance(target, GymRunnerTarget):
                 target = await prepare_gym_submission(resolved_tasks, target, ctx)
@@ -691,7 +692,8 @@ class _AgentEvalJobBase(NemoJob):
                 result.metadata.target.config["url"] = endpoint.url
 
         files = self._write_result_files(result, ctx.storage.persistent)
-        artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)
+        # Stage the bundle: agent runtimes can still change files under its evidence while it uploads.
+        artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir, stage=True)
         ctx.results.save(SUMMARY_RESULT_NAME, files.summary)
 
         outcome = agent_eval_outcome(result)
@@ -776,7 +778,7 @@ def _trial_credential_issuer(
 ) -> TrialCredentialIssuer | None:
     """The issuer of each trial's trial token, for a Harbor agent that calls a gateway model."""
     gateway = _trial_gateway(spec.target)
-    closed = closed_book_run(spec.target, ())
+    closed = closed_book_run(spec.target)
     if async_client is None or gateway is None:
         if closed:
             raise ValueError(
@@ -888,7 +890,7 @@ class AgentEvalJob(_AgentEvalJobBase):
         client: NemoClient,
     ) -> dict:
         """Run the agent evaluation locally and persist its result bundle as artifacts."""
-        return self._run_sync(config, ctx=ctx, client=client)
+        return self._run_sync(load_attempt_tasks(config, ctx=ctx, client=client), ctx=ctx, client=client)
 
 
 class AsyncAgentEvalJob(_AgentEvalJobBase):
@@ -902,4 +904,5 @@ class AsyncAgentEvalJob(_AgentEvalJobBase):
         async_client: AsyncNemoClient,
     ) -> dict:
         """Run the agent evaluation in a task container and persist async side effects."""
+        config = load_attempt_tasks(config, ctx=ctx)
         return self._run_with_client(config, ctx=ctx, platform_client=async_client, async_client=async_client)

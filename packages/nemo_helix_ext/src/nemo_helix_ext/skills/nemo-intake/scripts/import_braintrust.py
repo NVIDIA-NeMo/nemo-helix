@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
-import requests
 from _import_common import (
     ImportBundle,
     add_common_arguments,
@@ -30,6 +29,7 @@ from _import_common import (
     validate_common_arguments,
     validated_service_url,
 )
+from requests import get as http_get
 
 SOURCE = "braintrust"
 MAX_PAGES = 1000
@@ -220,7 +220,7 @@ def fetch_braintrust(args: argparse.Namespace) -> dict[str, Any]:
         params: dict[str, str | int] = {"limit": 1000}
         if cursor:
             params["cursor"] = cursor
-        response = requests.get(
+        response = http_get(
             url,
             headers={"Authorization": f"Bearer {api_key}"},
             params=params,

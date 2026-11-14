@@ -190,11 +190,11 @@ def kubernetes_client_mock():
     core_v1_mock = MagicMock()
     with (
         patch(
-            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.client.BatchV1Api",
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.BatchV1Api",
             return_value=batch_v1_mock,
         ),
         patch(
-            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.client.CoreV1Api",
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.CoreV1Api",
             return_value=core_v1_mock,
         ),
     ):
@@ -256,7 +256,7 @@ def kubernetes_job(
 ):
     """Create a KubernetesJob instance with mocked clients."""
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -1062,7 +1062,7 @@ def test_kubernetes_job_profile_environment_applied(
         **{**kubernetes_execution_profile_config.model_dump(), "env": {"HOME": "/tmp"}}
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -1101,7 +1101,7 @@ def test_kubernetes_job_uses_service_discovery_urls_for_job_runtime(
         loopback_address="nemo-gateway",
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=platform_config,
@@ -2333,7 +2333,7 @@ def test_schedule_kubernetes_gpu(mock_nemo_client, kubernetes_execution_profile_
     )
 
     # patch the check for kubernetes
-    with patch("kubernetes.config.load_incluster_config"):
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"):
         assert step is not None
         executor = GPUKubernetesJobBackend(
             nemo_client=mock_nemo_client,
@@ -3469,7 +3469,7 @@ def test_scheduler_name_applied_to_pod_spec(
         ),
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -3501,7 +3501,7 @@ def test_scheduler_name_not_set_by_default(
         storage=DEFAULT_STORAGE,
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -4184,7 +4184,7 @@ def test_cancelled_cleanup_budget_resumes_next_workload(kubernetes_job, test_ste
     first = test_step_pending.model_copy(update={"id": "a", "name": "first", "status": HelixJobStatus.CANCELLED})
     second = first.model_copy(update={"id": "b", "name": "second"})
     workloads = {step.id: common_labels_for_step(step) for step in [first, second]}
-    with patch("nhx.core.jobs.controllers.backends.base.time.monotonic", return_value=100.0) as clock:
+    with patch("nhx.core.jobs.controllers.backends.base.monotonic", return_value=100.0) as clock:
 
         def lookup(**kwargs):
             clock.return_value += 3

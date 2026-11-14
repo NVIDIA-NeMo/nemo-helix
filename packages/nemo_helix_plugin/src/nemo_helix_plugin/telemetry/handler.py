@@ -16,16 +16,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import platform
 import threading
 from collections.abc import Coroutine
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from platform import machine
 from typing import Any
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import httpx
+from httpx import AsyncClient
 from nemo_helix_plugin.telemetry.events import HelixTelemetryEvent
 
 CLIENT_ID = "184482118588404"
@@ -47,7 +48,7 @@ def _telemetry_enabled() -> bool:
 
 
 def _cpu_architecture() -> str:
-    return platform.machine() or "undefined"
+    return machine() or "undefined"
 
 
 def _telemetry_endpoint() -> str | None:
@@ -400,7 +401,7 @@ class TelemetryHandler:
         if endpoint is None:
             return
         try:
-            async with httpx.AsyncClient(timeout=SEND_TIMEOUT_SECONDS) as client:
+            async with AsyncClient(timeout=SEND_TIMEOUT_SECONDS) as client:
                 await self._send_events_with_client(client, events, endpoint=endpoint)
         except Exception:  # noqa: BLE001
             logger.debug("Telemetry send failed; routing events to DLQ", exc_info=True)

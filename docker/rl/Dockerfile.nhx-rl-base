@@ -166,12 +166,24 @@ USER ${BUILD_UID}:${BUILD_GID}
 # Empty UV_SYNC_MODE relocks. Default is --frozen.
 ARG UV_SYNC_MODE=--frozen
 
-# The driver installs this from PyPI rather than from RL's lock, which resolves it for the actor
-# venvs only. Keep in lockstep with the pin in NeMo-RL's pyproject.toml.
-ARG NEMO_SANDBOXED_GYM_VERSION=0.1.0a1
+# The pinned RL fork still declares vLLM 0.29.0, affected by CVE-2026-105759.
+# vLLM 0.30.0 retains torch 2.13.0 and requires FlashInfer 0.6.18.post1
+# plus CUTLASS DSL 4.7.1; update those coordinated generation pins together.
+# Update the actual vllm extra and lock together before any frozen sync, so
+# prefetched workers and later uv invocations cannot restore the vulnerable pin.
+# Remove this adaptation when the upstream RL source pin carries these versions.
+RUN uv add --optional vllm --no-sync \
+        'vllm==0.30.0' \
+        'flashinfer-python==0.6.18.post1' \
+        'flashinfer-cubin==0.6.18.post1' \
+        'flashinfer-jit-cache==0.6.18.post1' \
+        'nvidia-cutlass-dsl[cu13]==4.7.1' && \
+    mkdir -p /tmp/nhx-nemo-rl-lock && \
+    cp pyproject.toml uv.lock /tmp/nhx-nemo-rl-lock/
+
 # Warm the uv cache. Extras conflict, so each sync prunes the last; the cache is what remains.
 # The two combined syncs match the worker venvs: mcore+nemo_gym and vllm+nemo_gym.
-# RL's own pyproject.toml and uv.lock are used as-is. These nine packages are left out of
+# Use RL's manifest/lock with the generation security update above. These nine packages are left out of
 # the sync and installed from rl-cuda-ext-wheel after prefetch.
 #
 # `uv sync` is EXACT, so these do NOT accumulate - each --extra prunes the previous one and the base
@@ -204,6 +216,7 @@ SKIP=(
     # Optional transfer backend unused by RL; its wheel bundles Go/etcd libraries.
     --no-install-package mooncake-transfer-engine
     --no-install-package mooncake-transfer-engine-cuda13
+    --no-install-package nemo-sandboxed-gym
 )
 uv venv --seed
 
@@ -228,8 +241,10 @@ chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv
 EOF
 
 # Own layer so a pin edit does not rebuild the sync above.
-# opensandbox is the Gym client. OpenTelemetry pins: opentelemetry-overrides.txt.
+# opensandbox is the Gym client. The driver venv does not keep the nemo_gym extra,
+# so the client is installed here. OpenTelemetry pins: opentelemetry-overrides.txt.
 # Gym is --no-deps here; worker venvs get nemo_gym from the extra.
+# nemo-sandboxed-gym is not installed in this image.
 RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/opentelemetry-overrides.txt,readonly \
     <<"EOF" bash -eu
 set -x
@@ -248,12 +263,10 @@ uv pip install --directory /tmp --python /opt/nemo_rl_venv/bin/python \
     "${OTEL_UPGRADE[@]}" \
     "mlflow-skinny>=3.15.0,<3.16.0" \
     "sqlparse>=0.6.0,<0.7" \
-    "wandb>=0.30.0" \
+    "wandb>=0.31.0" \
     "${OTEL_PINS[@]}"
 uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps \
     -e /opt/nemo-rl/3rdparty/Gym-workspace/Gym
-uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps \
-    "nemo-sandboxed-gym==${NEMO_SANDBOXED_GYM_VERSION}"
 chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv /opt/nemo-rl
 EOF
 
@@ -291,6 +304,7 @@ SKIP=(
     # Match the cache-warming sync: do not install this unused Go/etcd-bearing wheel.
     --no-install-package mooncake-transfer-engine
     --no-install-package mooncake-transfer-engine-cuda13
+    --no-install-package nemo-sandboxed-gym
 )
 # Same wrapper prefetch_venvs.py writes, into the driver bin (on PATH) rather
 # than /usr/local/bin, which the build user cannot write.
@@ -316,11 +330,6 @@ sync_venv() {
     shift
     UV_PROJECT_ENVIRONMENT="${venv}" \
         uv sync ${UV_SYNC_MODE} --inexact --no-install-project --directory /opt/nemo-rl "$@" "${SKIP[@]}"
-    if [[ " $* " == *" --extra nemo_gym "* ]]; then
-        uv pip install --directory /tmp --python "${venv}/bin/python" \
-            "nemo-sandboxed-gym[server,opensandbox,ray]==${NEMO_SANDBOXED_GYM_VERSION}" \
-            "opensandbox>=0.1.9"
-    fi
     # --python selects the venv. --directory keeps uv from reading the git pins in pyproject.toml.
     uv pip install --directory /tmp --python "${venv}/bin/python" --no-deps /mnt/wheels/*.whl
     write_wrapper "${venv}"
@@ -338,6 +347,10 @@ EOF
 # After the worker syncs, so a source-only bump reuses that layer.
 # Exclude submodule .git dirs here; a later rm would still leave them in this layer.
 COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/nemo-rl
+# The full-source copy includes the upstream manifests. Restore the exact inputs
+# used for the prefetched venvs rather than shipping the old generation pins.
+RUN cp /tmp/nhx-nemo-rl-lock/pyproject.toml /tmp/nhx-nemo-rl-lock/uv.lock /opt/nemo-rl/ && \
+    rm -rf /tmp/nhx-nemo-rl-lock
 
 # Upstream's tokenizer assert already allows the 5.17.0 override (<5.20). The
 # verifiers pin and wrapper-dir patch stay so a later run of prefetch_venvs.py
@@ -362,7 +375,7 @@ EOF
 # ---- Per-environment Gym venvs, separate from /opt/ray_venvs. Off unless listed. ----
 ARG NEMO_GYM_PREFETCH_CONFIGS=""
 # Gym pins vllm==0.25.1, the CUDA 12 wheel. Override it to the cu130 build.
-# RL's own vllm extra stays 0.29.0.
+# RL's own vllm extra is patched to 0.30.0 above.
 ARG NEMO_GYM_CUDA=cu130
 ARG NEMO_GYM_VLLM_VERSION=0.25.1
 ARG TARGETARCH
@@ -409,7 +422,7 @@ for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python /opt/gym_venv
         uv pip install --directory /tmp --python "${py}" --upgrade-package virtualenv "virtualenv>=21.14.9"
     fi
     if "${py}" -c 'import importlib.metadata as m; m.version("hydra-core")' >/dev/null 2>&1; then
-        uv pip install --python "${py}" --no-deps --upgrade-package hydra-core "hydra-core>=1.3.4,<1.4"
+        uv pip install --python "${py}" --no-deps --upgrade-package hydra-core "hydra-core>=1.3.7,<1.4"
     fi
     # GHSA-8mcc-hrx5-hvxc, GHSA-7833-fr7j-v32q, GHSA-284h-m62q-gf8w (Critical). Same floor as the
     # nhx-gym-tasks lock's gitpython>=3.1.62 constraint (BDSA-2026-{30097,30098,31388}).
@@ -426,7 +439,7 @@ for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python /opt/gym_venv
         # Outside the project, or uv keeps opentelemetry-api 1.45.
         args=(--directory /tmp --python "${py}" "${OTEL_UPGRADE[@]}" "${OTEL_PINS[@]}")
         if "${py}" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("wandb") else 1)'; then
-            uv pip install "${args[@]}" --upgrade-package wandb "wandb>=0.30.0"
+            uv pip install "${args[@]}" --upgrade-package wandb "wandb>=0.31.0"
         else
             uv pip install "${args[@]}"
         fi

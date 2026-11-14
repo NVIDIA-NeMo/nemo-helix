@@ -80,7 +80,12 @@ def default_slot_dir() -> Path:
     """
     if sys.platform == "win32":  # never used: Windows has no flock, so no cap
         return Path(tempfile.gettempdir()) / "nemo-harbor-setup-slots"
-    return Path("/tmp") / f"nemo-harbor-setup-slots-{os.getuid()}"
+    return Path("/tmp") / f"nemo-harbor-setup-slots-{_uid()}"
+
+
+def _uid() -> int:
+    """This process's user ID; a seam so tests can pose as another user without patching ``os``."""
+    return os.getuid()
 
 
 def max_concurrent_setups() -> int:
@@ -175,9 +180,7 @@ def _owned_by_this_user(directory: Path) -> bool:
         info = directory.lstat()
     except OSError:
         return False
-    return (
-        stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid() and not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
-    )
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == _uid() and not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
 
 
 def _open_slot(path: Path) -> IO[bytes] | None:

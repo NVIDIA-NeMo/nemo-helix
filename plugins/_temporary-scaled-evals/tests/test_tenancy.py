@@ -4,6 +4,7 @@
 import asyncio
 from pathlib import Path
 
+import httpx
 import pytest
 import yaml
 from fastapi import HTTPException
@@ -28,10 +29,66 @@ def test_caller_is_admin_probes_the_platform_authorizer() -> None:
 
     assert asyncio.run(caller_is_admin(authorizer(None))) is True
     assert asyncio.run(caller_is_admin(authorizer(403))) is False
-    with pytest.raises(HTTPException) as raised:
-        asyncio.run(caller_is_admin(authorizer(503)))
-    assert raised.value.status_code == 503
-    assert probed == [_ADMIN_PROBE] * 3
+    assert probed == [_ADMIN_PROBE] * 2
+
+
+def _pdp_error(status: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "https://synthetic.invalid/allow")
+    return httpx.HTTPStatusError(
+        "synthetic PDP failure", request=request, response=httpx.Response(status, request=request)
+    )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        HTTPException(500),
+        HTTPException(503),
+        HTTPException(504),
+        _pdp_error(500),
+        _pdp_error(503),
+        httpx.ConnectError("synthetic connection failure"),
+        httpx.ReadTimeout("synthetic timeout"),
+    ],
+    ids=["http-500", "http-503", "http-504", "pdp-500", "pdp-503", "connection", "timeout"],
+)
+def test_admin_probe_unavailable_keeps_normal_access(failure: Exception, caplog: pytest.LogCaptureFixture) -> None:
+    """Optional admin privileges require a successful decision; outages are logged."""
+
+    async def authorize(method: str, path: str) -> None:
+        assert (method, path) == _ADMIN_PROBE
+        raise failure
+
+    assert asyncio.run(caller_is_admin(authorize)) is False
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelname == "WARNING"
+    assert "continuing without admin privileges" in caplog.records[0].message
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        HTTPException(401),
+        HTTPException(400),
+        _pdp_error(401),
+        _pdp_error(429),
+        RuntimeError("synthetic programming error"),
+    ],
+    ids=["http-401", "http-400", "pdp-401", "pdp-429", "unexpected"],
+)
+def test_admin_probe_preserves_authentication_and_unexpected_errors(
+    failure: Exception, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Fallback does not hide invalid authentication, client errors, or implementation failures."""
+
+    async def authorize(method: str, path: str) -> None:
+        assert (method, path) == _ADMIN_PROBE
+        raise failure
+
+    with pytest.raises(type(failure)) as raised:
+        asyncio.run(caller_is_admin(authorize))
+    assert raised.value is failure
+    assert not caplog.records
 
 
 @pytest.mark.parametrize(

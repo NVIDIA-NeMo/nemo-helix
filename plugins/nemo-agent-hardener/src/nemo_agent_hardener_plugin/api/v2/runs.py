@@ -31,6 +31,7 @@ from nemo_agent_hardener_plugin.authz import scope
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest, AgentHardenerRun
 from nemo_agent_hardener_plugin.jobs.defenses import compose_defense
 from nemo_agents_plugin.entities import Agent
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -60,8 +61,7 @@ _run_filter_dep = make_filter_dep(RunFilter)
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AgentHardenerRunPerms.LIST])
 async def list_runs(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: RunFilter = Depends(_run_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -72,8 +72,8 @@ async def list_runs(
         result = await entity_client.list(
             AgentHardenerRun,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_obj=filter_dict or None,
         )
