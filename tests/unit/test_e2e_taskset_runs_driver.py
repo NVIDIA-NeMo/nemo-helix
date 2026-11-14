@@ -24,6 +24,7 @@ import pytest
 from nemo_helix_plugin.client import client as client_module
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.client.oidc import NHXOIDCConfig
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
 from nemo_helix_plugin.jobs.client import JobsClient
 from nhx_evals_sdk.agent_eval.scores import AgentEvalTaskScore
@@ -36,9 +37,11 @@ from e2e.taskset_runs_driver import (
     EXPECTED_REWARDS,
     FORMAT_OK,
     REWARD,
+    WORKLOAD_SERVICE_ACCOUNT,
     BuildView,
     CliFailed,
     Evidence,
+    JobPod,
     JobView,
     RunDriver,
     Snapshot,
@@ -50,8 +53,12 @@ from e2e.taskset_runs_driver import (
     check_snapshot,
     check_snapshot_unchanged,
     check_task_jobs,
+    check_workload_discovery,
+    check_workload_identity,
     cli_contexts,
+    last_exception,
     login_hint,
+    parse_job_pods,
     parse_results,
     parse_status,
     read_bundle,
@@ -104,6 +111,22 @@ def page(*runs: dict[str, str], pages: int = 1) -> dict[str, Any]:
     return {"data": list(runs), "pagination": {"page": 1, "total_pages": pages, "total_results": len(runs)}}
 
 
+def jobs_api(*jobs: dict[str, Any]) -> NemoClient:
+    """A client whose Jobs API lists ``jobs``; the default lists none, so no test reaches the network."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        pagination = {
+            "page": 1,
+            "page_size": 100,
+            "current_page_size": len(jobs),
+            "total_pages": 1,
+            "total_results": len(jobs),
+        }
+        return httpx.Response(200, json={"data": list(jobs), "pagination": pagination})
+
+    return NemoClient(base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+
 def make_driver(
     tmp_path: Path,
     respond: Respond,
@@ -116,7 +139,7 @@ def make_driver(
     nemo = FakeNemo(respond)
     driver = RunDriver(
         nemo,
-        client or NemoClient(base_url="http://platform.test"),
+        client or jobs_api(),
         "ws",
         Evidence(tmp_path / "evidence", invocation="inv"),
         end=clock() + time_left,
@@ -1007,3 +1030,147 @@ def test_cancel_checkers_reject_empty_inputs() -> None:
         check_cancelled_while_queued(parse_status(_queued_cancelled() | {"tasks": []}), [])
     with pytest.raises(AssertionError, match=r"\[cancel\]"):
         check_foreign_job_cancel(parse_results(_foreign_cancel() | {"tasks": []}), "j")
+
+
+# --- Image-build failures and workload identity --------------------------------------------------------------------
+
+_DENIED = "PermissionDeniedError: HTTP 403: Not allowed to read entities in workspace 'ws'"
+
+
+def job_body(name: str, status: str, job_id: str) -> dict[str, Any]:
+    return {
+        "id": job_id,
+        "attempt_id": f"{job_id}-a1",
+        "name": name,
+        "workspace": "ws",
+        "source": "nemo-evals.task-image-build",
+        "platform_spec": {"steps": [{"name": "build", "executor": {"provider": "cpu", "container": {"image": "x"}}}]},
+        "fileset": "fs-1",
+        "status": status,
+    }
+
+
+def pod_body(name: str, job: str, *, service_account: str = WORKLOAD_SERVICE_ACCOUNT, token: bool = True) -> dict:
+    env = [{"name": "NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "value": "/var/run/token"}] if token else []
+    return {
+        "metadata": {"namespace": "nemo", "name": name, "labels": {"nhx.nvidia.com/job_id": job}},
+        "spec": {"serviceAccountName": service_account, "containers": [{"name": "main", "env": env}]},
+        "status": {"phase": "Failed"},
+    }
+
+
+def job_kubectl(*pods: dict[str, Any], log: str = "") -> Callable[[Sequence[str], float], subprocess.CompletedProcess]:
+    def kubectl(args: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        if "logs" in args:
+            return subprocess.CompletedProcess(args, 0, log, "")
+        return subprocess.CompletedProcess(args, 0, json.dumps({"items": list(pods)}), "")
+
+    return kubectl
+
+
+#: The image-build Job's log line in NVBug 7083853, as the Job's JSON logger writes it.
+DENIED_LOG = json.dumps({"level": "error", "exception": f"Traceback (most recent call last):\n  ...\n{_DENIED}\n"})
+
+
+def test_parse_job_pods_reads_who_each_pod_runs_as() -> None:
+    pods = parse_job_pods(
+        {"items": [pod_body("p1", "job-1"), pod_body("p2", "job-2", service_account="default", token=False)]}
+    )
+
+    assert pods == [
+        JobPod("nemo", "p1", "job-1", "Failed", WORKLOAD_SERVICE_ACCOUNT, True),
+        JobPod("nemo", "p2", "job-2", "Failed", "default", False),
+    ]
+
+
+def test_last_exception_finds_the_last_error_in_a_json_log() -> None:
+    assert last_exception("starting\n" + DENIED_LOG) == _DENIED
+    assert last_exception("all good\n") is None
+
+
+@pytest.mark.parametrize("path", ["timeout", "exit"])
+def test_submit_fails_with_the_failed_image_builds_cause(tmp_path: Path, path: str) -> None:
+    def respond(args: tuple[str, ...], timeout: int | None) -> subprocess.CompletedProcess[str]:
+        if path == "timeout":
+            raise subprocess.TimeoutExpired(["nemo"], timeout or 0, output=b"", stderr=b"")
+        return done("", returncode=1, stderr="Image build failed")
+
+    driver, _ = make_driver(
+        tmp_path,
+        respond,
+        Clock(),
+        client=jobs_api(job_body("task-image-build-abc-1", "error", "job-1"), job_body("other", "completed", "job-2")),
+        kube_context="kind-e2e",
+        kubectl=job_kubectl(pod_body("p1", "job-1"), log=DENIED_LOG),
+    )
+
+    with pytest.raises(
+        AssertionError, match=r"^\[image-build\] task-image-build-abc-1: PermissionDeniedError: HTTP 403"
+    ):
+        driver.submit("test_1", "--harbor-dir", "d", cap=240)
+
+    test_1 = evidence_file(driver)["test_1"]
+    assert test_1["image_build_failures"] == [{"job": "task-image-build-abc-1", "status": "error", "error": _DENIED}]
+    assert test_1["job_pods"][0]["service_account"] == WORKLOAD_SERVICE_ACCOUNT
+
+
+def test_submit_timeout_without_a_failed_build_raises_the_timeout(tmp_path: Path) -> None:
+    def respond(args: tuple[str, ...], timeout: int | None) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(["nemo"], timeout or 0, output=b"", stderr=b"")
+
+    driver, _ = make_driver(
+        tmp_path, respond, Clock(), client=jobs_api(job_body("task-image-build-abc-1", "active", "j"))
+    )
+    with pytest.raises(subprocess.TimeoutExpired):
+        driver.submit("test_1", "--harbor-dir", "d", cap=240)
+    assert "image_build_failures" not in evidence_file(driver)["test_1"]
+
+
+def test_build_failure_never_masks_the_failure_it_explains(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("gateway down")
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    driver, _ = make_driver(tmp_path, lambda args, timeout: done(), Clock(), client=client)
+
+    assert driver.build_failure("test_1") is None
+    assert "gateway down" in evidence_file(driver)["test_1"]["image_build_failures_error"]
+
+
+def test_build_failure_without_a_kube_context_uses_the_jobs_error_details(tmp_path: Path) -> None:
+    job = {**job_body("task-image-build-abc-1", "error", "j"), "error_details": {"message": "exit code 1"}}
+    driver, _ = make_driver(tmp_path, lambda args, timeout: done(), Clock(), client=jobs_api(job))
+
+    assert driver.build_failure("build") == "[image-build] task-image-build-abc-1: {'message': 'exit code 1'}"
+
+
+def test_check_workload_identity_passes_when_every_pod_runs_as_the_job_service_account() -> None:
+    check_workload_identity(parse_job_pods({"items": [pod_body("p1", "j1"), pod_body("p2", "j2")]}))
+
+
+@pytest.mark.parametrize(
+    ("pods", "message"),
+    [
+        ([], "no Job pods"),
+        ([pod_body("p1", "j1", service_account="default")], "ServiceAccount 'default'"),
+        ([pod_body("p1", "j1", token=False)], "workload token missing"),
+    ],
+)
+def test_check_workload_identity_fails_on_a_pod_acting_as_the_submitter(pods: list[dict], message: str) -> None:
+    with pytest.raises(AssertionError, match=message):
+        check_workload_identity(parse_job_pods({"items": pods}))
+
+
+def test_check_workload_discovery() -> None:
+    check_workload_discovery(
+        NHXOIDCConfig(
+            auth_enabled=True,
+            workload_token_exchange_enabled=True,
+            workload_client_id="nemo-helix-workload",
+            workload_token_endpoint="https://idp/token",
+        )
+    )
+    with pytest.raises(AssertionError, match=r"\[identity\] workload token exchange is off"):
+        check_workload_discovery(NHXOIDCConfig(auth_enabled=True))

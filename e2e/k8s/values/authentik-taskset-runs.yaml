@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Taskset runs on the Authentik umbrella release (contrib/auth/authentik/helm), for the nightly's auth-workload row:
+# real OIDC users and workload token exchange, so Jobs run as the nemo-helix-jobs ServiceAccount for the submitter.
+# builder.yaml and taskset-runs.yaml, nested under the nemo-helix subchart; applied by
+# setup_authentik_taskset_runs.sh with `helm upgrade --reuse-values`, the registry password by --set-file.
+# tests/auth_idp/static/test_authentik_kubernetes_demo.py keeps it in step with those files and the demo's lists.
+
+nemo-helix:
+  sandboxClusterCapable: true
+  builder:
+    enabled: true
+    workVolume:
+      accessModes:
+        - ReadWriteOnce
+      size: 5Gi
+    devRegistry:
+      enabled: true
+  platformConfig:
+    builder:
+      repository_prefix: e2e-builds
+      sandbox:
+        cpu: 500m
+        memory: 1Gi
+        ephemeral_storage: 4Gi
+      registry_username_secret: system/builder-registry-username
+      registry_password_secret: system/builder-registry-password
+      signing_key_secret: system/builder-signing-key
+    evals:
+      runs:
+        controller:
+          interval_seconds: 5
+          # One OIDC user (nemo-user) submits every run, so this still caps task Jobs cluster-wide, as the cancel
+          # test expects.
+          max_concurrent_task_jobs_per_creator: 2
+  # The demo runs a subset of services; without evals and builder every evals route is a 404. Lists replace the
+  # chart's, so these repeat the demo's lists (contrib/auth/authentik/helm/values.yaml) and add to them.
+  api:
+    services:
+      - auth
+      - models
+      - files
+      - inference-gateway
+      - jobs
+      - secrets
+      - entities
+      - deployments
+      - studio
+      - evals
+      - builder
+  core:
+    controller:
+      controllers:
+        - jobs
+        - models
+        - entities
+        - deployments
+        - evals-taskset-runs
+        - builder-queue

@@ -3,6 +3,13 @@
 
 # Taskset runs on kind, end to end: e2e/test_taskset_runs.py against a platform with the run controller, the builder
 # and OpenSandbox. Nightly and on dispatch, never on PRs or the merge queue: it gates no merge.
+#
+# Two rows:
+# - auth-off: the platform chart with auth off.
+# - auth-workload: the Authentik demo (contrib/auth/authentik) with workload token exchange, so Jobs run as the
+#   nemo-helix-jobs ServiceAccount for a non-admin OIDC user; the only mode that reaches Job-identity bugs such as
+#   NVBug 7083853. Until that is fixed on main, a failure that is exactly it is reported, not failed
+#   (.github/scripts/taskset_runs_known_failure.py).
 
 name: Nightly taskset runs e2e
 
@@ -76,7 +83,7 @@ jobs:
       publish: true
 
   kind-taskset-runs-e2e:
-    name: Kind taskset runs e2e (${{ matrix.copy }})
+    name: Kind taskset runs e2e (auth-${{ matrix.auth }}, ${{ matrix.copy }})
     needs: [plan, build-images]
     runs-on: ubuntu-latest
     # kind, OpenSandbox and the pre-pulls, then pytest's 49-minute timeout.
@@ -88,9 +95,11 @@ jobs:
       fail-fast: false
       matrix:
         copy: ${{ fromJSON(needs.plan.outputs.copies) }}
+        auth: ["off", workload]
     env:
-      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-taskset-runs-${{ matrix.copy }}
-      KUBE_NAMESPACE: nemo-helix
+      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-taskset-runs-${{ matrix.auth }}-${{ matrix.copy }}
+      # The Authentik demo installs into its own namespace.
+      KUBE_NAMESPACE: ${{ matrix.auth == 'workload' && 'nemo-authentik' || 'nemo-helix' }}
       NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-images.outputs.image_registry }}
       NHX_E2E_IMAGE_TAG: ${{ needs.build-images.outputs.image_tag }}
     steps:
@@ -120,6 +129,7 @@ jobs:
           kind-image-pull-user: ${{ github.actor }}
 
       - name: Install OpenSandbox
+        if: matrix.auth == 'off'
         shell: bash
         run: |
           set -euo pipefail
@@ -147,7 +157,26 @@ jobs:
             "${NHX_E2E_IMAGE_REGISTRY}/nhx-builder-tasks:${NHX_E2E_IMAGE_TAG}" \
             "${NHX_E2E_IMAGE_REGISTRY}/nhx-kaniko:${NHX_E2E_IMAGE_TAG}"
 
+      # The Authentik demo reuses the kind cluster above, whose ghcr-pull secret lets the node pull nhx-api before
+      # run.sh waits on Helm. It ends by exporting KUBECONFIG, the kube context and the gateway URL to GITHUB_ENV.
+      - name: Set up the Authentik demo with taskset runs
+        if: matrix.auth == 'workload'
+        shell: bash
+        env:
+          NHX_E2E_IMAGE_REGISTRY: ${{ env.NHX_E2E_IMAGE_REGISTRY }}
+          NHX_E2E_IMAGE_TAG: ${{ env.NHX_E2E_IMAGE_TAG }}
+          NHX_AUTHENTIK_K8S_NAMESPACE: ${{ env.KUBE_NAMESPACE }}
+          NHX_AUTHENTIK_K8S_REUSE_CLUSTER: "1"
+          NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET: ghcr-pull
+          NHX_AUTHENTIK_K8S_SKIP_IMAGE_LOAD: "1"
+          NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET: ngc-api
+          BUILDER_REGISTRY_PASSWORD_FILE: ${{ runner.temp }}/builder-registry-password
+          NHX_E2E_STATE_DIR: ${{ runner.temp }}/authentik-e2e
+          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
+        run: e2e/k8s/scripts/setup_authentik_taskset_runs.sh
+
       - name: Install NeMo Helix with the builder and taskset runs
+        if: matrix.auth == 'off'
         shell: bash
         env:
           NAMESPACE: ${{ env.KUBE_NAMESPACE }}
@@ -165,6 +194,7 @@ jobs:
         run: e2e/k8s/scripts/install_helm_e2e.sh
 
       - name: Wait for the API
+        if: matrix.auth == 'off'
         shell: bash
         run: |
           set -euo pipefail
@@ -172,10 +202,12 @@ jobs:
           e2e/k8s/scripts/wait_for_api.sh "${NHX_E2E_CLUSTER_URL}/cluster-info" 120
 
       - name: Let the node pull from the development registry
+        if: matrix.auth == 'off'
         shell: bash
         run: e2e/k8s/scripts/kind_dev_registry_mirror.sh
 
       - name: Create the builder's push secrets in the system workspace
+        if: matrix.auth == 'off'
         shell: bash
         env:
           NHX_BASE_URL: ${{ env.NHX_E2E_CLUSTER_URL }}
@@ -192,13 +224,22 @@ jobs:
         shell: bash
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+          AUTH: ${{ matrix.auth }}
+          NHX_E2E_STATE_DIR: ${{ runner.temp }}/authentik-e2e
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
           NHX_E2E_KUBE_CONTEXT: kind-${{ env.KIND_CLUSTER_NAME }}
           NHX_E2E_KUBE_NAMESPACE: ${{ env.KUBE_NAMESPACE }}
         run: |
           set -euo pipefail
           export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
+          if [[ "${AUTH}" == workload ]]; then
+            # A non-admin OIDC user: workspace-owner grants are what the Job-identity bugs are about.
+            e2e/k8s/scripts/authentik_user_token.sh nemo-user "${NHX_E2E_STATE_DIR}/nemo-user.token"
+            NHX_E2E_ACCESS_TOKEN="$(cat "${NHX_E2E_STATE_DIR}/nemo-user.token")"
+            export NHX_E2E_ACCESS_TOKEN NHX_E2E_WORKLOAD_IDENTITY=1
+          fi
           # record_property needs xunit1 to include per-test metadata without schema warnings.
+          status=0
           uv run --frozen pytest \
             e2e/test_taskset_runs.py \
             -v \
@@ -208,7 +249,14 @@ jobs:
             --run-e2e \
             --no-cov \
             -o junit_family=xunit1 \
-            --junitxml=report-kubernetes-taskset-runs-e2e.xml
+            --junitxml=report-kubernetes-taskset-runs-e2e.xml || status=$?
+          if (( status != 0 )); then
+            if [[ "${AUTH}" == workload ]] && python3 .github/scripts/taskset_runs_known_failure.py \
+              report-kubernetes-taskset-runs-e2e.xml "${E2E_SERVICES_LOG_DIR}" "${E2E_SERVICES_LOG_DIR}/known-failure.json"; then
+              exit 0
+            fi
+            exit "${status}"
+          fi
           # A skipped step, such as the leftover-sandbox check, is a check that didn't run: fail, as
           # run-taskset-run-controller-integration.sh does.
           if ! grep -q ' skipped="0"' report-kubernetes-taskset-runs-e2e.xml; then
@@ -221,7 +269,7 @@ jobs:
         uses: ./.github/actions/finalize-kind-e2e
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          artifact-name: kind-taskset-runs-e2e-${{ matrix.copy }}-kubernetes-artifacts
+          artifact-name: kind-taskset-runs-e2e-auth-${{ matrix.auth }}-${{ matrix.copy }}-kubernetes-artifacts
           junit-report: report-kubernetes-taskset-runs-e2e.xml
           services-log-dir: ${{ runner.temp }}/e2e-services-logs
 

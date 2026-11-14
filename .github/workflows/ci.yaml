@@ -135,7 +135,9 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: false
       - name: Run nightly report unit tests
-        run: uv run --no-cache .github/scripts/tests/test_nightly_taskset_runs_report.py
+        run: |
+          uv run --no-cache .github/scripts/tests/test_nightly_taskset_runs_report.py
+          uv run --no-cache .github/scripts/tests/test_taskset_runs_known_failure.py
 
   test-gates:
     name: Check test gates

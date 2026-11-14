@@ -25,6 +25,9 @@ token that can create workspaces and outlives the run. Without one the test stop
 - ``NHX_E2E_KUBE_CONTEXT``: the cluster's kubectl context. Adds the no-sandbox-left check, and saves sandbox
   diagnostics on failure; it needs cluster-wide read on ``batchsandboxes``. ``NHX_E2E_KUBE_NAMESPACE`` adds that
   namespace's events to them.
+- ``NHX_E2E_WORKLOAD_IDENTITY=1``: the cluster runs Jobs under workload token exchange (the nightly's
+  ``auth-workload`` row). Checks discovery advertises it and every Job pod ran as ``nemo-helix-jobs`` with the
+  workload token; needs ``NHX_E2E_KUBE_CONTEXT``.
 - ``E2E_SERVICES_LOG_DIR``: where the evidence goes; default ``.pytest_cache/taskset-runs-e2e/``.
 """
 
@@ -38,6 +41,7 @@ import pytest
 from nemo_helix_ext.config.config import Config
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import AuthenticationError
+from nemo_helix_plugin.client.oidc import discover_nhx_config
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nhx.testing import NemoRun
 
@@ -54,6 +58,8 @@ from e2e.taskset_runs_driver import (
     check_snapshot,
     check_snapshot_unchanged,
     check_task_jobs,
+    check_workload_discovery,
+    check_workload_identity,
     cli_contexts,
     evidence_dir,
     login_hint,
@@ -142,6 +148,11 @@ def test_taskset_run_on_kubernetes(
     record_property: Callable[[str, object], None],
 ) -> None:
     fresh = driver.evidence.data["fresh_workspace"]
+    workload_identity = os.environ.get("NHX_E2E_WORKLOAD_IDENTITY") == "1"
+    if workload_identity:  # before anything else: without exchange the row would pass while proving nothing
+        discovery = discover_nhx_config(driver.client.base_url)
+        driver.evidence.record(workload_token_exchange=discovery.workload_token_exchange_enabled)
+        check_workload_discovery(discovery)
     # The nightly's report warns when a green step used more than half its cap.
     driver.evidence.record("test_1", caps_s={"submit": TEST_1_SUBMIT_CAP, "run": RUN_CAP})
     driver.evidence.record("test_2", caps_s={"submit": TEST_2_CAP, "run": TEST_2_CAP})
@@ -158,6 +169,13 @@ def test_taskset_run_on_kubernetes(
     driver.evidence.record("test_1", task_jobs=task_jobs, bundle_job=status.bundle)
     record_property("task_jobs", task_jobs)
     check_run(status)
+
+    if workload_identity:
+        with subtests.test("workload identity"):
+            pods = driver.job_pods()  # image-build and task Jobs; their pods outlive the test (TTL 1 h)
+            driver.evidence.record("test_1", job_pods=pods)
+            assert os.environ.get("NHX_E2E_KUBE_CONTEXT"), "[identity] needs NHX_E2E_KUBE_CONTEXT"
+            check_workload_identity(pods)
 
     with subtests.test("task jobs"):
         jobs, attempts = driver.task_jobs(status)
@@ -206,6 +224,8 @@ def _created_ref(driver: RunDriver, dataset: Path, tasks: str) -> str:
     assert out.returncode == 0, f"[build] `tasksets create` exited {out.returncode}: {out.stderr.strip()}"
     ref = out.stdout.strip().splitlines()[-1]  # without --json the last line is the ref
     built = driver.cli("evals", "tasksets", "build-images", ref, "--wait", cap=900)
+    if built.returncode != 0 and (failure := driver.build_failure("build")):
+        raise AssertionError(failure)
     assert built.returncode == 0, f"[build] `build-images {ref}` exited {built.returncode}: {built.stdout[-2000:]}"
     return ref
 

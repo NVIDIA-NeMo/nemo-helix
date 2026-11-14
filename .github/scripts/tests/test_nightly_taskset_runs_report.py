@@ -190,6 +190,51 @@ def test_main_reads_the_artifacts_and_fails_a_red_report(tmp_path: Path) -> None
     assert "Stage: `[dispatch]`" in opened["body"] and "Taskset runs: run-1" in opened["body"]
 
 
+JUNIT_DENIED = (
+    '<testsuite><testcase><failure message="AssertionError: [image-build] task-image-build-x-1: '
+    "PermissionDeniedError: HTTP 403: Not allowed to read entities in workspace 'ws'\"/></testcase></testsuite>"
+)
+KNOWN = {"row": "auth-workload", "bug": "NVBug 7083853", "url": "https://nvbugspro.nvidia.com/bug/7083853"}
+
+
+def _artifact(root: Path, name: str, junit: str, known: bool = False) -> None:
+    nested = root / name
+    nested.mkdir()
+    (nested / "junit.xml").write_text(junit)
+    if known:
+        (nested / "known-failure.json").write_text(json.dumps(KNOWN))
+
+
+def test_a_known_auth_workload_failure_does_not_hide_an_auth_off_regression(tmp_path: Path) -> None:
+    """The known row's JUnit names [image-build] first; the report must name auth-off's own stage."""
+    _artifact(tmp_path, "kind-taskset-runs-e2e-auth-workload-1-kubernetes-artifacts", JUNIT_DENIED, known=True)
+    _artifact(tmp_path, "kind-taskset-runs-e2e-auth-off-1-kubernetes-artifacts", JUNIT_DISPATCH)
+    github = FakeGitHub()
+    env = {
+        "GITHUB_REPOSITORY": REPO,
+        "GITHUB_RUN_ID": "100",
+        "SOURCE_SHA": SHA,
+        "NEEDS_JSON": json.dumps(RED_TEST),  # the auth-off leg failed the matrix job
+        "ARTIFACTS": str(tmp_path),
+    }
+
+    assert report_module.main(env, github) == 1
+    _, _, opened = github.calls[1]
+    assert opened is not None
+    assert "Stage: `[dispatch]`" in opened["body"]
+    assert "Known failure, reported only: auth-workload: [NVBug 7083853]" in opened["body"]
+
+
+def test_a_green_run_with_a_known_failure_lists_it_when_closing(tmp_path: Path) -> None:
+    _artifact(tmp_path, "kind-taskset-runs-e2e-auth-workload-1-kubernetes-artifacts", JUNIT_DENIED, known=True)
+    evidence, junit, known = report_module.read_artifacts(tmp_path)
+    github = FakeGitHub(open_issue=3)
+
+    assert junit == "" and known == [KNOWN]
+    assert report_module.report(github, make_run(GREEN), evidence, junit, known) == {"action": "closed"}
+    assert "Known failure, reported only: auth-workload" in github.calls[1][2]["body"]
+
+
 def test_main_without_artifacts_reports_the_setup_stage() -> None:
     github = FakeGitHub()
     env = {"GITHUB_REPOSITORY": REPO, "GITHUB_RUN_ID": "100", "SOURCE_SHA": SHA, "NEEDS_JSON": json.dumps(RED_TEST)}
