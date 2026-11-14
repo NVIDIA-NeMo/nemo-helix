@@ -27,7 +27,7 @@ token that can create workspaces and outlives the run. Without one the test stop
   namespace's events to them.
 - ``NHX_E2E_WORKLOAD_IDENTITY=1``: the cluster runs Jobs under workload token exchange (the nightly's
   ``auth-workload`` row). Checks discovery advertises it and every Job pod ran as ``nemo-helix-jobs`` with the
-  workload token; needs ``NHX_E2E_KUBE_CONTEXT``.
+  workload token; needs ``NHX_E2E_KUBE_CONTEXT``. To run that row locally, see ``e2e/k8s/authentik-taskset-runs.md``.
 - ``E2E_SERVICES_LOG_DIR``: where the evidence goes; default ``.pytest_cache/taskset-runs-e2e/``.
 """
 
