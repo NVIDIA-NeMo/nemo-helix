@@ -117,6 +117,23 @@ describe('AssistantToolCallPart', () => {
     expect(getStepTitles()).toEqual(['Read a.md', 'Running pwd']);
   });
 
+  it('opens a folded group of repeated calls while its last call runs', async () => {
+    await renderPart({
+      args: {
+        actions: [
+          { args: { command: 'pwd' }, toolCallId: 'toolu_bash_1', toolName: 'Bash' },
+          { args: { command: 'ls' }, toolCallId: 'toolu_bash_2', toolName: 'Bash' },
+        ],
+      },
+      status: { type: 'running' },
+      toolName: ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
+    });
+
+    const group = screen.getByTestId('assistant-work-repeated-tool-calls');
+    expect(group).toHaveAttribute('open');
+    expect(getStepTitles(group)).toEqual(['Ran pwd', 'Running ls']);
+  });
+
   it('folds repeated calls of one tool into a step per tool, keeping each command', async () => {
     const user = userEvent.setup();
     await renderPart({
@@ -228,6 +245,32 @@ describe('AssistantToolCallPart', () => {
       'Read 2 files'
     );
     expect(screen.queryByText(/worked for/)).not.toBeInTheDocument();
+  });
+
+  it('shows a failed call inside collapsed details as failed', async () => {
+    await renderPart({
+      args: {
+        label: 'worked for 42s',
+        parts: [
+          {
+            type: 'tool-call',
+            args: { command: 'pnpm test' },
+            argsText: '{"command":"pnpm test"}',
+            isError: true,
+            result: 'exit 1',
+            toolCallId: 'toolu_bash',
+            toolName: 'Bash',
+          },
+        ],
+      },
+      argsText: '',
+      toolName: ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
+    });
+
+    expect(screen.getByTestId('assistant-work-step-failed')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('assistant-work-tool-call')).getByText('Error')
+    ).toBeInTheDocument();
   });
 
   it.each([ASSISTANT_JOB_PROGRESS_TOOL_NAME, ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME])(

@@ -83,6 +83,13 @@ const getTitleParts = (
   };
 };
 
+const getArgumentsPayload = (args: AssistantToolArgs, argsText: string | undefined) => {
+  if (argsText) {
+    return formatToolPayload(argsText);
+  }
+  return formatToolPayload(Object.keys(args).length > 0 ? args : '{}');
+};
+
 const getStepIcon = (toolName: string, fileChange: FileChangeSummary | undefined) => {
   if (!fileChange) {
     return getSubtleToolIcon(toolName);
@@ -103,9 +110,8 @@ export const ToolCallStep = ({
   const fileChange = isError ? undefined : getFileChangeSummary(toolName, toolArgs, argsText ?? '');
   const { action, detail } = getTitleParts(toolName, toolArgs, running, fileChange);
   const Icon = getStepIcon(toolName, fileChange);
-  const hasArgs = Object.keys(toolArgs).length > 0;
   const command = toolName === 'Bash' ? getBashCommand(toolArgs) : undefined;
-  const payload = formatToolPayload(hasArgs ? toolArgs : argsText || '{}');
+  const payload = getArgumentsPayload(toolArgs, argsText);
   const resultPayload = result === undefined ? undefined : formatToolPayload(result);
 
   return (
@@ -132,6 +138,14 @@ export const ToolCallStep = ({
             <span className="ml-density-xs tabular-nums" data-testid="assistant-work-edit-stats">
               <span className="text-feedback-success">+{fileChange.additions}</span>{' '}
               <span className="text-feedback-danger">−{fileChange.deletions}</span>
+            </span>
+          ) : null}
+          {isError && !running ? (
+            <span
+              className="ml-density-xs text-feedback-danger"
+              data-testid="assistant-work-step-failed"
+            >
+              Failed
             </span>
           ) : null}
         </>

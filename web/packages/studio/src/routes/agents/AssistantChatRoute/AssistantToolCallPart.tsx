@@ -39,6 +39,8 @@ type CollapsedDetailsPart =
       readonly type: 'tool-call';
       readonly args: AssistantToolArgs;
       readonly argsText?: string;
+      readonly isError?: boolean;
+      readonly result?: unknown;
       readonly toolCallId: string;
       readonly toolName: string;
     };
@@ -61,6 +63,8 @@ const getCollapsedDetailsParts = (value: unknown): readonly CollapsedDetailsPart
           type: 'tool-call',
           args: isPlainObject(part.args) ? toAssistantToolArgs(part.args) : {},
           argsText: typeof part.argsText === 'string' ? part.argsText : undefined,
+          isError: part.isError === true,
+          result: part.result,
           toolCallId: typeof part.toolCallId === 'string' ? part.toolCallId : part.toolName,
           toolName: part.toolName,
         },
@@ -85,6 +89,8 @@ const CollapsedDetailsPartContent = ({ part }: { readonly part: CollapsedDetails
         <AssistantToolCallPartContent
           args={part.args}
           argsText={part.argsText}
+          isError={part.isError}
+          result={part.result}
           toolName={part.toolName}
         />
       );
@@ -118,6 +124,7 @@ const SubtleToolGroup = ({ args, running }: SubtleToolGroupProps) => {
         return (
           <RepeatedToolCallsStep
             key={first.toolCallId}
+            defaultOpen={runningAction !== undefined && group.actions.includes(runningAction)}
             title={group.repeatedTitle}
             toolName={first.toolName}
           >
