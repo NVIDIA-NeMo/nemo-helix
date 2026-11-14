@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PluginContext } from '@studio/plugins/PluginContext';
-import type { LoadedPlugin, PluginNavGroup } from '@studio/plugins/types';
+import type { LoadedPlugin, PluginLoadFailure, PluginNavGroup } from '@studio/plugins/types';
 import { WorkspaceSideNav } from '@studio/routes/WorkspaceLayout/WorkspaceSideNav';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
@@ -39,12 +39,13 @@ const makePlugin = (name: string, groups: PluginNavGroup[]): LoadedPlugin => ({
   navItems: () => groups,
 });
 
-const renderWithPlugins = (plugins: LoadedPlugin[]) => {
+const renderWithPlugins = (plugins: LoadedPlugin[], failed: PluginLoadFailure[] = []) => {
   const element: ReactElement = (
     <PluginContext.Provider
       value={{
         plugins,
-        installedNames: new Set(plugins.map((p) => p.name)),
+        failed,
+        installedNames: new Set([...plugins, ...failed].map((p) => p.name)),
         isLoaded: true,
         isError: false,
       }}
@@ -302,5 +303,39 @@ describe('WorkspaceSideNav', () => {
     expect(screen.getAllByText('Governance')).toHaveLength(1);
     expect(await findPluginLinkWithIcon('One')).toBeInTheDocument();
     expect(await findPluginLinkWithIcon('Two')).toBeInTheDocument();
+  });
+
+  it('lists failed plugins under a FAILED PLUGINS group linking to their failure panel', () => {
+    renderWithPlugins(
+      [],
+      [
+        {
+          name: 'pr-review',
+          issues: [
+            { code: 'PLUGIN_MANIFEST_MISSING', subject: '', message: 'missing', steps: ['fix'] },
+            { code: 'PLUGIN_SPECIFIER_UNMAPPED', subject: 'lodash', message: 'm', steps: [] },
+          ],
+        },
+        {
+          name: 'broken',
+          issues: [{ code: 'PLUGIN_LOAD_FAILED', subject: '', message: 'boom', steps: ['fix'] }],
+        },
+      ]
+    );
+
+    expect(screen.getByText('FAILED PLUGINS')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'pr-review [PLUGIN_MANIFEST_MISSING]' })
+    ).toHaveAttribute('href', '/workspaces/test-workspace/plugin/pr-review');
+    expect(screen.getByRole('link', { name: 'broken [PLUGIN_LOAD_FAILED]' })).toHaveAttribute(
+      'href',
+      '/workspaces/test-workspace/plugin/broken'
+    );
+  });
+
+  it('has no FAILED PLUGINS group when no plugin failed', () => {
+    renderWithPlugins([makePlugin('ok', [])]);
+
+    expect(screen.queryByText('FAILED PLUGINS')).not.toBeInTheDocument();
   });
 });

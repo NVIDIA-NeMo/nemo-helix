@@ -36,6 +36,7 @@ describe('WorkspaceSideNav when the plugin icon chunk fails to load', () => {
       <PluginContext.Provider
         value={{
           plugins: [plugin],
+          failed: [],
           installedNames: new Set(['red-team']),
           isLoaded: true,
           isError: false,

@@ -7,8 +7,9 @@ import * as agentsSdk from '@nemo/sdk/generated/agents/index';
 import * as platformSdk from '@nemo/sdk/generated/platform/index';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { usePlugins, usePluginsLoaded } from '@studio/plugins/PluginContext';
+import { usePluginLoadFailure, usePlugins, usePluginsLoaded } from '@studio/plugins/PluginContext';
 import { PluginErrorBoundary } from '@studio/plugins/PluginErrorBoundary';
+import { PluginLoadFailurePanel } from '@studio/plugins/PluginLoadFailurePanel';
 import type {
   PluginBreadcrumb,
   PluginHost,
@@ -36,6 +37,7 @@ export const PluginRenderer = (): ReactElement => {
   const { pluginName } = useParams<{ pluginName: string }>();
   const plugins = usePlugins();
   const isLoaded = usePluginsLoaded();
+  const failure = usePluginLoadFailure(pluginName ?? '');
   const workspace = useWorkspaceFromPath();
   const bearerToken = useOidcBearerToken() ?? '';
   const navigate = useNavigate();
@@ -78,6 +80,8 @@ export const PluginRenderer = (): ReactElement => {
       <div className="flex h-full items-center justify-center text-subtle">Loading plugin…</div>
     );
   }
+
+  if (!plugin && failure) return <PluginLoadFailurePanel failure={failure} />;
 
   if (!plugin) {
     return (
