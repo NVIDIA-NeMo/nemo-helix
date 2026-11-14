@@ -16,6 +16,7 @@ import {
   toAssistantToolArgs,
   type AssistantToolArgs,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import type { NvidiaGuiIconProps } from '@nemo/icons';
 import { WindowTerminal } from '@nemo/icons/icons';
 import type { FC } from 'react';
@@ -121,7 +122,7 @@ const getRepeatedSubtleToolMessage = (toolName: string, count: number): string =
   }
 };
 
-const getFileName = (path: string): string => {
+export const getFileName = (path: string): string => {
   const segments = path.split(/[\\/]/).filter(Boolean);
   return segments.at(-1) ?? path;
 };
@@ -140,9 +141,6 @@ const getEditStats = (args: Record<string, unknown>): { additions: number; delet
   deletions: getLineCount(getRawStringArg(args, ['old_string']) ?? ''),
 });
 
-const isToolArgsRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 export const splitCollapsedThinkingParagraphs = (text: string): readonly string[] =>
   text
     .trim()
@@ -152,7 +150,7 @@ export const splitCollapsedThinkingParagraphs = (text: string): readonly string[
 
 const getAskUserQuestionSummary = (args: AssistantToolArgs): string | undefined => {
   const questions = args.questions;
-  const firstQuestion = Array.isArray(questions) ? questions.find(isToolArgsRecord) : undefined;
+  const firstQuestion = Array.isArray(questions) ? questions.find(isPlainObject) : undefined;
   return (
     getStringArg(args, ['question', 'prompt']) ??
     (firstQuestion
@@ -201,7 +199,7 @@ export const getFileChangeSummary = (
     const edits = args.edits;
     if (!Array.isArray(edits)) return undefined;
 
-    const stats = edits.filter(isToolArgsRecord).reduce<{ additions: number; deletions: number }>(
+    const stats = edits.filter(isPlainObject).reduce<{ additions: number; deletions: number }>(
       (total, edit) => {
         const editStats = getEditStats(edit);
         return {
@@ -357,6 +355,14 @@ export const getSubtleToolDetail = (
   return compactSubtleDetail(getToolSummary(toolName, args)) ?? message;
 };
 
+export const getBashCommand = (args: AssistantToolArgs): string | undefined => {
+  const command = args.command;
+  if (typeof command === 'string' && command) {
+    return command;
+  }
+  return undefined;
+};
+
 export const getToolInvocation = (toolName: string, args: AssistantToolArgs): string => {
   if (toolName === 'Bash') {
     const command = args.command;
@@ -371,12 +377,12 @@ export const getSubtleToolGroupActions = (args: AssistantToolArgs): readonly Sub
   if (!Array.isArray(actions)) return [];
 
   return actions
-    .filter(isToolArgsRecord)
+    .filter(isPlainObject)
     .map((action, index): SubtleToolAction | undefined => {
       const toolName = getRawStringArg(action, ['toolName'])?.trim();
       if (!toolName) return undefined;
 
-      const actionArgs = isToolArgsRecord(action.args) ? toAssistantToolArgs(action.args) : {};
+      const actionArgs = isPlainObject(action.args) ? toAssistantToolArgs(action.args) : {};
       const message = getSubtleToolMessage(toolName, actionArgs);
       if (!message) return undefined;
 

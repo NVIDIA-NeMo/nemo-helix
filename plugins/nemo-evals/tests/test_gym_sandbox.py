@@ -635,6 +635,30 @@ def test_a_job_cannot_switch_uv_back_online_under_a_derived_offline_run(tmp_path
         )
 
 
+def test_the_failure_routing_variable_is_the_one_the_host_reads() -> None:
+    """Evals spells the name out, since the wheel's published nemo-sandboxed-gym predates the host's constant."""
+    from nemo_evals.jobs.gym_sandbox import ROUTE_FAILURES_TO_SIDECAR_ENV_KEY
+    from sandboxed_gym.runtime import gym_host_runtime
+
+    assert ROUTE_FAILURES_TO_SIDECAR_ENV_KEY == gym_host_runtime.ROUTE_FAILURES_TO_SIDECAR_ENV_KEY
+
+
+def test_an_evaluation_host_returns_failed_rollouts_instead_of_failing_the_batch() -> None:
+    """Without it, Gym raises on the first failed agent `/run`, and one bad row costs the job every rollout."""
+    from nemo_evals.jobs.gym_sandbox import ROUTE_FAILURES_TO_SIDECAR_ENV_KEY
+
+    payload = serve_config(target(), capable_plan(), job_id="job-1")
+
+    assert payload["host_env"][ROUTE_FAILURES_TO_SIDECAR_ENV_KEY] == "1"
+
+
+def test_a_job_cannot_set_failure_routing_itself() -> None:
+    from nemo_evals.jobs.gym_sandbox import ROUTE_FAILURES_TO_SIDECAR_ENV_KEY
+
+    with pytest.raises(SandboxUnavailableError, match=ROUTE_FAILURES_TO_SIDECAR_ENV_KEY):
+        serve_config(target(env_vars={ROUTE_FAILURES_TO_SIDECAR_ENV_KEY: "0"}), capable_plan(), job_id="job-1")
+
+
 def test_a_job_may_set_uv_offline_when_the_deployment_does_not_derive_it(tmp_path: Path) -> None:
     persistent = stage_manifest(tmp_path, WHEELS_V1_MANIFEST)
 
@@ -895,6 +919,70 @@ async def test_session_runner_records_target_provenance_before_and_after_run(
     assert runner.runner_info().config["rollout_chunk_size"] == 2
     assert runner.runner_info().config["rollout_max_in_flight"] == 5
     assert runner.runner_info().config["rollout_timeout_s"] > 0
+
+
+@pytest.mark.asyncio
+async def test_a_platform_run_scores_each_reward_component_per_trial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The platform hands AgentEvaluator this wrapper, not SandboxedGymAgentTaskRunner, so the wrapper has to
+    # carry the scoring hook too; without it the components stay in trial metadata, unscored.
+    import json
+
+    import sandboxed_gym
+    from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
+    from nhx_evals_sdk.agent_eval.runtimes.gym import GymRewardMetric, discover_gym_tasks
+    from nhx_evals_sdk.agent_eval.runtimes.gym.records import NG_ROLLOUT_INDEX, NG_TASK_INDEX
+    from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig
+
+    rows = tmp_path / "rows.jsonl"
+    rows.write_text(
+        "".join(
+            json.dumps({"responses_create_params": {"input": [{"role": "user", "content": f"q{i}"}]}, "id": i}) + "\n"
+            for i in range(2)
+        ),
+        encoding="utf-8",
+    )
+    tasks = discover_gym_tasks(rows, metrics=[GymRewardMetric()])
+    components = {0: {"exact": 1.0, "answer_f1": 1.0}, 1: {"exact": 0.0, "answer_f1": 0.5}}
+
+    class Session:
+        def descriptor(self):
+            return SimpleNamespace(rollout_url="http://host", rollout_auth_token=None, headers={})
+
+        def shutdown(self):
+            pass
+
+        async def arun_rollouts(self, examples):
+            return [
+                {
+                    NG_TASK_INDEX: example[NG_TASK_INDEX],
+                    NG_ROLLOUT_INDEX: example[NG_ROLLOUT_INDEX],
+                    "reward": components[example[NG_TASK_INDEX]]["exact"],
+                    "reward_components": components[example[NG_TASK_INDEX]],
+                    "response": "answer",
+                }
+                for example in examples
+            ]
+
+    class Orchestrator:
+        def start(self, config):
+            return Session()
+
+    monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
+    runner = SessionBackedGymRunner(target=target(), plan=capable_plan(), job_id="job-1")
+
+    result = await AgentEvaluator().run(
+        tasks=tasks, target=runner, config=AgentEvalRunConfig(work_dir=tmp_path / "run")
+    )
+
+    means = {score.name: getattr(score, "mean", None) for score in result.summary.scores.scores}
+    assert means["gym_reward.reward"] == 0.5
+    assert means["gym_reward.exact"] == 0.5
+    assert means["gym_reward.answer_f1"] == 0.75
+    per_trial = {(score.task_id, output.name): output.value for score in result.scores for output in score.outputs}
+    assert per_trial[(tasks[0].id, "answer_f1")] == 1.0
+    assert per_trial[(tasks[1].id, "answer_f1")] == 0.5
 
 
 def test_the_host_env_reaches_the_built_spec() -> None:

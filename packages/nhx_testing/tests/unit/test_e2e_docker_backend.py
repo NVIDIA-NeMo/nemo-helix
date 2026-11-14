@@ -6,7 +6,10 @@
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
+import httpx
+import pytest
 from nhx.testing.e2e import docker as docker_backend
 
 
@@ -136,3 +139,58 @@ def test_clickhouse_image_can_be_overridden(monkeypatch) -> None:
     monkeypatch.setenv("NHX_E2E_CLICKHOUSE_IMAGE", "example/clickhouse:test")
 
     assert docker_backend._clickhouse_image() == "example/clickhouse:test"
+
+
+def _health_check_backend(monkeypatch, tmp_path: Path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("platform: {}\n")
+    backend = docker_backend.Docker(config_path, registry="registry.example/nhx", tag="test-tag")
+    container = Mock()
+    container.get_container_host_ip.return_value = "localhost"
+    container.get_logs.return_value = (b"", b"")
+    backend.container = container
+    backend._host_port = 32768
+    elapsed = [0.0]
+
+    def advance(seconds: float) -> None:
+        elapsed[0] += seconds
+
+    monkeypatch.setattr(docker_backend, "time", SimpleNamespace(monotonic=lambda: elapsed[0], sleep=advance))
+    return backend, container, elapsed
+
+
+@pytest.mark.parametrize("failure", ["unready", "connection"])
+def test_api_health_wait_allows_cold_start_over_one_minute(monkeypatch, tmp_path: Path, failure: str) -> None:
+    backend, container, elapsed = _health_check_backend(monkeypatch, tmp_path)
+
+    def health_response(*_args, **_kwargs):
+        if elapsed[0] >= 75:
+            return httpx.Response(200)
+        if failure == "connection":
+            raise httpx.ConnectError("API has not started yet")
+        return httpx.Response(503, json={"status": "not_ready"})
+
+    request = Mock(side_effect=health_response)
+    monkeypatch.setattr(docker_backend, "httpx", SimpleNamespace(get=request, RequestError=httpx.RequestError))
+
+    backend._wait_for_healthy(container)
+
+    assert elapsed[0] == 75
+    request.assert_called_with("http://localhost:32768/health/ready", timeout=5.0)
+
+
+def test_api_health_timeout_includes_last_readiness_response(monkeypatch, tmp_path: Path) -> None:
+    backend, container, elapsed = _health_check_backend(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        docker_backend,
+        "httpx",
+        SimpleNamespace(
+            get=Mock(return_value=httpx.Response(503, text='{"not_ready": ["builder-queue"]}')),
+            RequestError=httpx.RequestError,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Health check returned status 503.*builder-queue"):
+        backend._wait_for_healthy(container)
+
+    assert elapsed[0] == docker_backend.STARTUP_TIMEOUT_SECONDS

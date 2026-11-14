@@ -13,6 +13,7 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+from nemo_evals._fileset_receipt import FilesetReceipt
 from nemo_evals.taskset_runs.entities import MemberPhase, TasksetRunEntity, TasksetRunMemberEntity, TasksetRunPhase
 from nemo_evals.taskset_runs.identifiers import derive_run_id
 from nemo_evals.taskset_runs.plan_storage import PlanStoragePermissionDeniedError
@@ -349,13 +350,14 @@ def with_snapshot(acceptance, files_service, name):
         discard list, making winner/loser ownership visible in cleanup assertions.
     """
     files_service.filesets[(acceptance.plan.workspace, name)] = {"agent.yaml": b"config"}
+    files_service.allocations[(acceptance.plan.workspace, name)] = f"allocation-{name}"
     spec = acceptance.plan.spec.model_copy(deep=True)
     # Keep request ownership visible in the plan without inventing a new producer.
     spec.labels["snapshot"] = f"{acceptance.plan.workspace}/{name}"
     return replace(
         acceptance,
         plan=acceptance.plan.model_copy(update={"spec": spec}),
-        discard_on_loss=(f"{acceptance.plan.workspace}/{name}",),
+        discard_on_loss=(FilesetReceipt(f"{acceptance.plan.workspace}/{name}", f"allocation-{name}"),),
     )
 
 
@@ -404,8 +406,8 @@ async def test_accept_overlapping_submits(store, entity_store, files_service, ac
     assert first.run.execution_deadline_at == winner.execution_deadline_at
     assert first.run.finalization_deadline_at == winner.finalization_deadline_at
     assert await store.load_plan(first.run) == winner.plan
-    assert ("default", winner.discard_on_loss[0].split("/")[1]) in files_service.filesets
-    assert ("default", loser.discard_on_loss[0].split("/")[1]) not in files_service.filesets
+    assert ("default", winner.discard_on_loss[0].ref.split("/")[1]) in files_service.filesets
+    assert ("default", loser.discard_on_loss[0].ref.split("/")[1]) not in files_service.filesets
 
 
 async def test_accept_same_key_different_digest(store, entity_store, files_service, acceptance) -> None:
@@ -514,7 +516,10 @@ async def test_accept_cleanup_failure(store, files_service, acceptance, caplog, 
         "snapshot-a",
     )
     files_service.filesets[("default", "snapshot-b")] = {}
-    loser = replace(loser, discard_on_loss=(*loser.discard_on_loss, "default/snapshot-b"))
+    files_service.allocations[("default", "snapshot-b")] = "snapshot-b-id"
+    loser = replace(
+        loser, discard_on_loss=(*loser.discard_on_loss, FilesetReceipt("default/snapshot-b", "snapshot-b-id"))
+    )
     # Fail each plan deletion and the first snapshot; the second must still be attempted.
     files_service.fail_when = lambda operation, workspace, name: (
         RuntimeError(f"cannot delete {workspace}/{name}")
@@ -1128,3 +1133,31 @@ async def test_plan_write_permission_denial_preserves_typed_error_and_cleanup(
     assert [op for op, _, _ in files_service.calls] == (
         ["create"] if operation == "create" else ["create", "upload", "delete"]
     )
+
+
+@pytest.mark.parametrize("action", ["state", "start", "cancel"])
+async def test_run_mutations_pin_the_legacy_plan(
+    store, entity_store, files_service, files_client, acceptance, action: str
+) -> None:
+    allocation = (
+        await files_client.create_fileset(workspace="default", body=CreateFilesetRequest(name="existing-plan"))
+    ).data()
+    run = await entity_store.create(make_run(acceptance))
+    before_digest = run.plan_digest
+    files_service.calls.clear()
+    if action == "state":
+        updated = await store.set_state(run, error="progress")
+    elif action == "start":
+        updated = await store.start(run, now=acceptance.accepted_at)
+    else:
+        updated = await store.request_cancel(run.workspace, run.name, now=acceptance.accepted_at)
+    assert updated.plan_fileset_id == allocation.id
+    assert updated.plan_digest == before_digest
+    assert files_service.calls == [("get", "default", "existing-plan")]
+
+    # Reusing the name after the mutation must not change the recorded allocation.
+    files_service.allocations[("default", "existing-plan")] = "replacement-id"
+    files_service.calls.clear()
+    updated = await store.set_state(updated, error="next progress")
+    assert updated.plan_fileset_id == allocation.id
+    assert files_service.calls == []

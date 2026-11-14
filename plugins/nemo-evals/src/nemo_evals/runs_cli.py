@@ -24,40 +24,40 @@ import uuid
 from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
-import httpx
 import typer
+from harbor.registry.client.git_repo import GitRepoRegistryClient
+from harbor.registry.client.package import PackageDatasetClient
 from nemo_evals.api.fields import TaskRef, TasksetRef
 from nemo_evals.api.schemas import AgentEvalResult, TaskInput, TasksetInput
-from nemo_evals.api.taskset_run_schemas import TasksetRunInput
+from nemo_evals.api.taskset_run_schemas import TasksetRunInput, TasksetRunStatus, TasksetRunTask
 from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.image_builds.models import TERMINAL_BUILD_STATUSES, ImageBuild
 from nemo_evals.jobs.agent_evaluate import DEFAULT_RESULT_NAME, SUMMARY_FILE_NAME
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborBuiltinAgentSource, HarborRunnerTarget
-from nemo_evals.jobs.run_outcome import PUBLICATION_STATUS_KEY
+from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.sdk.resources import Evaluator
+from nemo_evals.sdk.taskset_run_resources import NamedTask, TasksetRunResults, TasksetRunSubmitError
 from nemo_evals.taskset_runs.controller import MAX_BUNDLE_ATTEMPTS
 from nemo_evals.taskset_runs.entities import SETTLED_MEMBER_PHASES, MemberPhase
-from nemo_evals.taskset_runs.identifiers import bundle_job_name, task_job_name
-from nemo_helix_plugin.cli_timestamps import parse_timestamp
+from nemo_evals.taskset_runs.identifiers import bundle_job_name
+from nemo_evals.taskset_runs.progress import TasksetRunProgress
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
 from nemo_helix_plugin.jobs.archive import safe_extract_tar
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import HelixJobResponse
+from nemo_helix_plugin.schema import Page
+from pydantic import BaseModel
 
-RETRY_ATTEMPTS = 5
-# The run POST alone: it answers once the run is accepted, which can take minutes while many submits share the API.
-SUBMIT_TIMEOUT_SECONDS = 300.0
-#: Connecting is quick or not happening: a stalled connect must not hold every retry for the full read timeout.
-SUBMIT_CONNECT_TIMEOUT_SECONDS = 10.0
 _NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
 
 
 class SelectionError(ValueError):
-    """``--tasks`` names a task that isn't there, or the same task twice."""
+    """``--tasks`` has an invalid index/range, an unknown or ambiguous name, or a repeated task."""
 
 
 @dataclass(frozen=True)
@@ -70,10 +70,10 @@ class Candidate:
 
 
 def select_tasks(candidates: Sequence[Candidate], tokens: str | None) -> list[Candidate]:
-    """Pick tasks by index (``0,5``) or name (``hello/sum-three`` or ``sum-three``); all when ``tokens`` is None.
+    """Pick tasks by zero-based index, inclusive range (``0-5``), or name; all when ``tokens`` is None.
 
     Raises:
-        SelectionError: An index is out of range, a name is unknown or ambiguous, or a task repeats.
+        SelectionError: An index/range is invalid, a name is unknown or ambiguous, or a task repeats.
     """
     if tokens is None:
         return list(candidates)
@@ -85,7 +85,19 @@ def select_tasks(candidates: Sequence[Candidate], tokens: str | None) -> list[Ca
             index = int(token)
             if index >= len(candidates):
                 raise SelectionError(f"task index {index} is out of range 0..{len(candidates) - 1}")
-            match = candidates[index]
+            matches = [candidates[index]]
+        elif bounds := re.fullmatch(r"([0-9]+)-([0-9]+)", token):
+            try:
+                start, end = map(int, bounds.groups())
+            except ValueError as exc:
+                raise SelectionError(
+                    f"invalid task range {token!r}: numeric endpoint exceeds the integer limit"
+                ) from exc
+            if start > end:
+                raise SelectionError(f"task range {token!r} is reversed; start must not exceed end")
+            if end >= len(candidates):
+                raise SelectionError(f"task range {token!r} is out of range 0..{len(candidates) - 1}")
+            matches = candidates[start : end + 1]
         else:
             matches = [
                 c
@@ -98,10 +110,10 @@ def select_tasks(candidates: Sequence[Candidate], tokens: str | None) -> list[Ca
                 raise SelectionError(f"no task named {token!r}; run with --list-tasks to see the names")
             if len({c.index for c in matches}) > 1:
                 raise SelectionError(f"{token!r} matches several tasks: {', '.join(c.native_id for c in matches)}")
-            match = matches[0]
-        if match in selected:
-            raise SelectionError(f"task {match.native_id} is selected twice")
-        selected.append(match)
+        for match in matches:
+            if match in selected:
+                raise SelectionError(f"task {match.native_id} is selected twice")
+            selected.append(match)
     if not selected:
         raise SelectionError("--tasks selects no task")
     return selected
@@ -123,8 +135,6 @@ def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tup
     Returns the dataset's name, its resolved version (``sha256:…``, also without ``@ref``) and the task
     directories, in the dataset's order.
     """
-    from harbor.registry.client.package import PackageDatasetClient
-
     client = PackageDatasetClient()
     metadata = asyncio.run(client.get_dataset_metadata(dataset))
     ids = sorted(metadata.task_ids, key=lambda task_id: task_id.get_name())
@@ -135,8 +145,6 @@ def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tup
 
 
 def list_hub_tasks(dataset: str) -> list[str]:
-    from harbor.registry.client.package import PackageDatasetClient
-
     metadata = asyncio.run(PackageDatasetClient().get_dataset_metadata(dataset))
     return sorted(task_id.get_name() for task_id in metadata.task_ids)
 
@@ -163,7 +171,7 @@ def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tupl
     Raises:
         RuntimeError: The selected tasks didn't come from one commit.
     """
-    from harbor.registry.client.git_repo import GitRepoRegistryClient, resolve_repo_source
+    from harbor.registry.client.git_repo import resolve_repo_source
 
     check_git_source(source)
     repo = resolve_repo_source(source)
@@ -182,7 +190,7 @@ def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tupl
 
 
 def list_git_tasks(source: str) -> list[str]:
-    from harbor.registry.client.git_repo import GitRepoRegistryClient, resolve_repo_source
+    from harbor.registry.client.git_repo import resolve_repo_source
 
     check_git_source(source)
     metadata = _run_git(GitRepoRegistryClient(resolve_repo_source(source)).get_dataset_metadata(""))
@@ -329,7 +337,7 @@ def taskset_members(evaluator: Evaluator, ref: str) -> list[str]:
     """The task refs of taskset ``ref`` (``workspace/name[#digest]``), pinned by digest as stored."""
     workspace, name, digest = _split_ref(ref)
     taskset = evaluator.tasksets.retrieve(name, revision=digest or None, workspace=workspace)
-    return sorted(str(member.root if isinstance(member, TaskRef) else member) for member in taskset.tasks)
+    return sorted(member.root for member in taskset.tasks)
 
 
 # --- Image builds -----------------------------------------------------------------------------------------
@@ -448,7 +456,7 @@ def wait_for_builds(
                 if current.status != build.status:  # pending → running prints "building": its Job started
                     line(_build_state(current), ref, _ready_detail(current))
             read_failures = 0
-        except (NemoClientError, httpx.TransportError) as exc:
+        except NemoClientError as exc:
             read_failures += 1
             if read_failures >= BUILD_READ_FAILURES:
                 raise
@@ -489,72 +497,6 @@ def _split_ref(ref: str) -> tuple[str, str, str]:
     head, _, digest = ref.partition("#")
     workspace, _, name = head.partition("/")
     return workspace, name, digest
-
-
-def submit_run(
-    client: NemoClient,
-    body: dict[str, Any],
-    *,
-    workspace: str,
-    echo: Callable[[str], None],
-    sleep: Callable[[float], None] = time.sleep,
-) -> dict[str, Any]:
-    """POST the run, retrying a 503 (an outage before the run was accepted) with the same idempotency key.
-
-    A POST that never connected is retried too: nothing reached the server. A POST that gets no answer is not
-    resent: the server may still be accepting it, and a second POST would redo that work while the API is at its
-    slowest. The error names the key, so a rerun replays the run instead of starting another.
-    """
-    url = f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs"
-    timeout = httpx.Timeout(SUBMIT_TIMEOUT_SECONDS, connect=SUBMIT_CONNECT_TIMEOUT_SECONDS)
-    answered = False
-    for attempt in range(1, RETRY_ATTEMPTS + 1):
-        try:
-            response = client.http_client.post(
-                url, json=body, headers=client.request_headers(None, url=url), timeout=timeout
-            )
-        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-            if attempt == RETRY_ATTEMPTS:
-                # An earlier attempt that got a 503 reached the server, which may have accepted the run after all.
-                sent = (
-                    "the last attempt was not sent, but an earlier one reached the platform and may have created the run"
-                    if answered
-                    else "nothing was sent"
-                )
-                raise RuntimeError(
-                    f"could not reach the platform to submit ({type(exc).__name__}: {exc}); {sent}. "
-                    f"Rerun the same command with --idempotency-key {body.get('idempotency_key')}"
-                ) from exc
-            echo(f"could not reach the platform ({type(exc).__name__}); retrying ({attempt}/{RETRY_ATTEMPTS - 1})")
-            sleep(2**attempt)
-            continue
-        except httpx.TransportError as exc:
-            reason = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
-            raise RuntimeError(
-                f"the submit got no answer ({reason}); the run may still be "
-                f"accepted. To check or finish it without starting a second run, rerun the same command with "
-                f"--idempotency-key {shlex.quote(str(body.get('idempotency_key')))}"
-            ) from exc
-        answered = True
-        if response.status_code == 503 and attempt < RETRY_ATTEMPTS:
-            echo(f"{response.json().get('detail')}; retrying ({attempt}/{RETRY_ATTEMPTS - 1})")
-            sleep(2**attempt)
-            continue
-        if response.status_code >= 400:
-            message = f"submit failed ({response.status_code}): {_detail(response)}"
-            if response.status_code >= 500 and body.get("idempotency_key"):
-                # The run may already be accepted: only the same key finishes it instead of starting another.
-                message += f"; to finish this run, rerun the same command with --idempotency-key {shlex.quote(body['idempotency_key'])}"
-            raise RuntimeError(message)
-        return response.json()
-    raise AssertionError("unreachable")
-
-
-def _detail(response: httpx.Response) -> str:
-    try:
-        return json.dumps(response.json().get("detail"))
-    except ValueError:
-        return response.text
 
 
 def run_request(
@@ -645,7 +587,11 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             "With --taskset and --experiment only; `tasksets create` prints it. --harbor-hub and --harbor-git set "
             "it themselves.",
         ),
-        tasks: str | None = typer.Option(None, "--tasks", help="Indexes or names, comma-separated; default all."),
+        tasks: str | None = typer.Option(
+            None,
+            "--tasks",
+            help="Zero-based indexes, inclusive ranges, or names, comma-separated (e.g. 0-4,7,anko-example); default all.",
+        ),
         agent: str = typer.Option("oracle", "--agent", help="Harbor built-in agent (without --spec-file)."),
         sandbox_profile: str | None = typer.Option(
             None, "--sandbox-profile", help="Operator sandbox profile; default: the operator's (without --spec-file)."
@@ -725,8 +671,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         spec: dict[str, Any] | None = None
         source: tuple[str, str | None] | None = parse_dataset(intake_dataset) if intake_dataset else None
 
-        def rerun(ref: str) -> str:
-            """This submit's command for ``ref``: the source flags become ``--taskset``, the run settings stay."""
+        def rerun(ref: str, *, idempotency_key: str | None = None) -> str:
+            """Keep this submit's settings on ``ref``; supply a key only to recover a submission."""
             kept: list[tuple[str, object]] = [
                 ("--spec-file", "<spec file>" if spec_file is not None and _is_stream(spec_file) else spec_file),
                 ("--agent", None if spec_file is not None or agent == "oracle" else agent),
@@ -737,6 +683,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 ("--dispatcher-profile", dispatcher_profile),
                 ("--experiment", experiment),
                 ("--intake-dataset", "@".join(p for p in source if p) if experiment and source else None),
+                ("--idempotency-key", idempotency_key),
             ]
             options = "".join(f" {name} {shlex.quote(str(value))}" for name, value in kept if value is not None)
             return f"nemo evals runs submit --taskset {shlex.quote(ref)}{options}{flag}"
@@ -793,16 +740,14 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 idempotency_key=idempotency_key,
             )
             submitting_key = request.idempotency_key
-            status = submit_run(
-                client, request.model_dump(mode="json", exclude_none=True), workspace=workspace, echo=echo
-            )
+            status = evaluator.taskset_runs.submit(request, workspace=workspace)
         except KeyboardInterrupt:
             # The run may already be accepted: only the same key avoids a second one
             if submitting_key is not None and taskset_ref is not None:
                 echo(
                     "Interrupted during submit; the run may still be accepted. To check or finish it without starting "
                     # the published ref, not the source: a changed source would send a different request (409)
-                    f"a second run, submit with the same key: {rerun(taskset_ref)} --idempotency-key {shlex.quote(submitting_key)}"
+                    f"a second run, submit with the same key: {rerun(taskset_ref, idempotency_key=submitting_key)}"
                 )
                 raise typer.Exit(code=130) from None
             if waiting_for_builds and taskset_ref:  # --taskset doesn't wait: it rejects tasks still building
@@ -810,33 +755,40 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                     "Stopped waiting; the image builds keep going. Check them with: "
                     f"nemo evals tasksets build-images {shlex.quote(taskset_ref)} --status"  # the ref names the workspace
                 )
-                echo(f"Once they're ready, submit with: {rerun(taskset_ref)}")
+                echo(f"Once they're ready, submit with: {rerun(taskset_ref, idempotency_key=idempotency_key)}")
             else:
-                echo(f"Interrupted. Submit with: {rerun(taskset_ref)}" if taskset_ref else "Interrupted.")
+                echo(
+                    f"Interrupted. Submit with: {rerun(taskset_ref, idempotency_key=idempotency_key)}"
+                    if taskset_ref
+                    else "Interrupted."
+                )
             raise typer.Exit(code=130) from None
         except (SelectionError, RuntimeError, NemoClientError, ValueError) as exc:
             echo(f"Error: {exc}", err=True)
+            # May be accepted: no answer, a 5xx, or a 403 from a downstream check partway through the submit.
+            # Any other status (400, 401, 404, 409, 422, 429) means the server refused it.
+            if isinstance(exc, TasksetRunSubmitError) and taskset_ref and _may_be_accepted(exc.status_code):
+                echo(
+                    "The run may already be accepted. To check or finish it without starting a second run, submit "
+                    f"with the same key: {rerun(taskset_ref, idempotency_key=exc.idempotency_key)}",
+                    err=True,
+                )
             if stored_ref is not None and "without images" in str(exc):
                 # The ref names its workspace, and build-images takes no --workspace.
                 echo(f"Check with: nemo evals tasksets build-images {shlex.quote(stored_ref)} --status", err=True)
             raise typer.Exit(code=1) from exc
-        if status.get("phase", "accepted") == "accepted":
-            echo(
-                f"Run {status['run_id']} accepted: {len(refs)} tasks, queued; the run controller starts their task Jobs"
-            )
+        if status.phase == "accepted":
+            echo(f"Run {status.run_id} accepted: {len(refs)} tasks, queued; the run controller starts their task Jobs")
         else:  # the key replayed a run that already started or ended
-            echo(
-                f"Run {status['run_id']} was already submitted with this key and is {status['phase']}; "
-                "nothing new started"
-            )
-        for line in status.get("warnings", []):
+            echo(f"Run {status.run_id} was already submitted with this key and is {status.phase}; nothing new started")
+        for line in status.warnings:
             echo(f"  {line}")
         if taskset_ref != stored_ref:  # a new taskset: reruns can skip the upload and the builds
             echo(f"Rerun these tasks: {rerun(taskset_ref)}")
             if spec is not None and spec.get("idempotency_key"):  # that command falls back to the file's key
                 echo("  It uses the spec file's idempotency_key; pass a new --idempotency-key to start another run")
         echo("")
-        echo(f"View evaluation run: nemo evals runs status {status['run_id']}{flag} --watch")
+        echo(f"View evaluation run: nemo evals runs status {status.run_id}{flag} --watch")
 
 
 def _is_stream(path: Path) -> bool:
@@ -845,8 +797,13 @@ def _is_stream(path: Path) -> bool:
     return (
         parts[:3] in {("/", "dev", "stdin"), ("/", "dev", "fd")}
         or (parts[:2] == ("/", "proc") and parts[3:4] == ("fd",))  # /proc/<pid or self>/fd/<n>
-        or not path.is_file()
+        or not _is_file(path)
     )
+
+
+def _is_file(path: Path) -> bool:
+    """``path.is_file()``, behind a seam so tests can fake a regular file under ``/dev`` or ``/proc``."""
+    return path.is_file()
 
 
 def _load_spec(spec_file: Path) -> dict[str, Any]:
@@ -910,7 +867,7 @@ def select_from_taskset(
     head, _, fragment = ref.partition("#")
     taskset_workspace, _, name = head.rpartition("/")
     taskset = evaluator.tasksets.retrieve(name, revision=fragment or None, workspace=taskset_workspace or workspace)
-    members = sorted(str(member.root if isinstance(member, TaskRef) else member) for member in taskset.tasks)
+    members = sorted(member.root for member in taskset.tasks)
     candidates = []
     for index, member in enumerate(members):
         task_workspace, task_name, digest = _split_ref(member)
@@ -946,38 +903,7 @@ def _print_tasks(
 
 
 # --- Progress and results ----------------------------------------------------------------------------------
-# TODO(M4, M5): replace these client-side joins with server-side reads.
-
-
-@dataclass(frozen=True)
-class TaskJobView:
-    """One task Job of a run: where it is, and its result record once it completed."""
-
-    index: int
-    job: str
-    task: str | None  # the task's id, from the Job's stored spec; None when the Job doesn't exist
-    status: str  # Jobs status, or "missing" when submit hasn't created the Job yet
-    job_id: str | None = None
-    result: AgentEvalResult | None = None
-    publication: dict[str, Any] | None = None  # the task's Intake publish outcome, once it published
-
-
-@dataclass(frozen=True)
-class TaskStateView:
-    """One task of a run as its member records it (``/tasks``); Jobs is read only for a settled task's publication."""
-
-    index: int
-    task: str  # the task's name in the pinned taskset, or the member's name (task-<i>)
-    state: str  # see task_state
-    job: str | None
-    error: str | None = None
-    publication: dict[str, Any] | None = None  # the task's Intake publish outcome, once it published
-    job_status: str | None = None  # the Job's status as the controller last read it
-
-    @property
-    def phase(self) -> str:
-        """The member phase the state cell starts with: ``failed`` for ``failed (completed)``."""
-        return self.state.partition(" ")[0]
+# Runs are read through ``Evaluator.taskset_runs``; only the bundle Job and the bundle download read Jobs.
 
 
 # The Job status each settled phase implies; the state cell shows another one, e.g. a cancel after the Job finished.
@@ -989,15 +915,20 @@ _EXPECTED_JOB_STATUS = {
 }
 
 
-def task_state(task: dict[str, Any]) -> str:
-    """The state cell of one ``/tasks`` item: ``queued``, ``queued (creating)``, ``registered (active)``, or its phase.
+def _text(value: object) -> str:
+    """An enum's value, or the text of anything else: ``f"{HelixJobStatus.ACTIVE}"`` would print its name."""
+    return str(value.value) if isinstance(value, Enum) else str(value)
+
+
+def task_state(task: TasksetRunTask) -> str:
+    """The state cell of one ``/tasks`` row: ``queued``, ``queued (creating)``, ``registered (active)``, or its phase.
 
     A queued task with a Job name has a create in flight: it holds a slot, but its Job may not exist yet. A
     settled task shows its Job's status when the phase doesn't imply it: ``cancelled (completed)``.
     """
-    phase, job_status = task["phase"], task.get("job_status")
+    phase, job_status = _text(task.phase), _text(task.job_status) if task.job_status else None
     if phase == MemberPhase.IMAGE_READY:
-        return "queued (creating)" if task.get("job") else "queued"
+        return "queued (creating)" if task.job else "queued"
     if phase == MemberPhase.REGISTERED and job_status:
         return f"registered ({job_status})"
     if job_status and _EXPECTED_JOB_STATUS.get(phase, job_status) != job_status:
@@ -1005,61 +936,40 @@ def task_state(task: dict[str, Any]) -> str:
     return phase
 
 
-def _published(view: TaskJobView | TaskStateView) -> str:
+def _state_cell(named: NamedTask, run: TasksetRunStatus | None) -> str:
+    """The one state cell of ``runs status`` and ``runs results``: a task with no row is ``waiting`` or ``not run``."""
+    if named.task is None:
+        return "not run" if run is not None and run.phase in _RUN_TERMINAL else "waiting"
+    return task_state(named.task)
+
+
+def _task_json(named: NamedTask, run: TasksetRunStatus) -> dict[str, Any]:
+    """One task in ``runs status --json`` and ``runs results --json``: the SDK's task plus its state cell."""
+    return named.model_dump(mode="json", exclude_none=True) | {"state": _state_cell(named, run)}
+
+
+def _published(publication: PublicationOutcome | None) -> str:
     """The ``published`` cell: what the task's Job published to Intake."""
-    if view.publication is None:
+    if publication is None:
         return "-"
-    if view.publication.get("status") == "completed":
-        return f"✓ {view.publication.get('trial_count', 0)} trials"
-    return f"✗ {view.publication.get('error') or 'failed'}"
+    if _text(publication.status) == "completed":
+        return f"✓ {publication.trial_count} trials"
+    return f"✗ {publication.error or 'failed'}"
 
 
-def get_run(client: NemoClient, workspace: str, run_id: str) -> dict[str, Any]:
-    """The stored run status from ``GET …/agent-evaluate/runs/{run_id}``."""
-    url = f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}"
-    response = client.http_client.get(url, headers=client.request_headers(None, url=url))
-    if response.status_code == 404:
-        raise SelectionError(f"run {workspace}/{run_id} not found")
-    if response.status_code >= 400:
-        raise RuntimeError(f"reading run {run_id} failed ({response.status_code}): {_detail(response)}")
-    return response.json()
+def _may_be_accepted(status_code: int | None) -> bool:
+    """Whether a failed submit may still have been accepted: no answer, a 5xx, or a downstream 403."""
+    return status_code is None or status_code == 403 or status_code >= 500
 
 
-def cancel_run(client: NemoClient, workspace: str, run_id: str) -> dict[str, Any]:
-    """Request a run's cancel with ``POST …/agent-evaluate/runs/{run_id}/cancel``; returns its stored status."""
-    url = f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}/cancel"
-    response = client.http_client.post(url, headers=client.request_headers(None, url=url))
-    if response.status_code == 404:
-        raise SelectionError(f"run {workspace}/{run_id} not found")
-    if response.status_code >= 400:
-        raise RuntimeError(f"cancelling run {run_id} failed ({response.status_code}): {_detail(response)}")
-    return response.json()
+def _not_found(workspace: str, run_id: str) -> SelectionError:
+    return SelectionError(f"run {workspace}/{run_id} not found")
 
 
-def list_runs(
-    client: NemoClient, workspace: str, *, active: bool, mine: bool, page: int, page_size: int
-) -> dict[str, Any]:
-    """One newest-first page of ``GET …/agent-evaluate/runs``: ``data`` and ``pagination``."""
-    url = f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs"
-    params = {"active": active, "mine": mine, "page": page, "page_size": page_size}
-    response = client.http_client.get(url, params=params, headers=client.request_headers(None, url=url))
-    if response.status_code >= 400:
-        raise RuntimeError(f"listing runs failed ({response.status_code}): {_detail(response)}")
-    return response.json()
-
-
-def list_run_tasks(
-    client: NemoClient, workspace: str, run_id: str, *, phase: str | None = None, page: int = 1, page_size: int = 1000
-) -> dict[str, Any]:
-    """One task-ordered page of ``GET …/agent-evaluate/runs/{run_id}/tasks``: ``data`` and ``pagination``."""
-    url = f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}/tasks"
-    params: dict[str, Any] = {"page": page, "page_size": page_size} | ({"phase": phase} if phase else {})
-    response = client.http_client.get(url, params=params, headers=client.request_headers(None, url=url))
-    if response.status_code == 404:
-        raise SelectionError(f"run {workspace}/{run_id} not found")
-    if response.status_code >= 400:
-        raise RuntimeError(f"listing the tasks of run {run_id} failed ({response.status_code}): {_detail(response)}")
-    return response.json()
+def _not_found_message(exc: NotFoundError, workspace: str, run_id: str) -> str:
+    """``run ws/id not found`` when the 404 came from the run's own URLs; otherwise the server's message."""
+    _, _, rest = exc.http_response.request.url.path.partition("/agent-evaluate/runs/")
+    return str(_not_found(workspace, run_id) if rest.split("/")[0] == run_id else exc)
 
 
 def _workspace_flag(workspace: str, configured: str) -> str:
@@ -1068,7 +978,7 @@ def _workspace_flag(workspace: str, configured: str) -> str:
 
 
 def download_run_bundle(
-    client: NemoClient, run: dict[str, Any], *, workspace: str, output_dir: Path
+    client: NemoClient, run: TasksetRunStatus, *, workspace: str, output_dir: Path
 ) -> tuple[str, Path]:
     """Download and unpack ``run``'s merged bundle into ``output_dir``; return the bundle Job and the bundle's path.
 
@@ -1079,10 +989,10 @@ def download_run_bundle(
     Raises:
         SelectionError: The run has no merged result, or the bundle is already there.
     """
-    run_id = run["run_id"]
-    if run.get("result_state") != "ready":
+    run_id = run.run_id
+    if run.result_state != "ready":
         raise SelectionError(
-            f"run {run_id} has no merged result (phase {run['phase']}, result {run.get('result_state', '-')}); "
+            f"run {run_id} has no merged result (phase {run.phase}, result {run.result_state}); "
             f"see `nemo evals runs status {run_id}{_workspace_flag(workspace, client.resolve_workspace())}`"
         )
     target = output_dir / DEFAULT_RESULT_NAME
@@ -1107,68 +1017,6 @@ def download_run_bundle(
             raise RuntimeError(f"Job {job}'s {DEFAULT_RESULT_NAME} archive has no {DEFAULT_RESULT_NAME}/ directory")
         shutil.move(unpacked / DEFAULT_RESULT_NAME, target)
     return job, target
-
-
-def run_task_jobs(
-    client: NemoClient, run: dict[str, Any], *, workspace: str, with_results: bool = False
-) -> list[TaskJobView]:
-    """Every task Job of ``run``, named ``<run_id>-task-<i>`` for each task of its pinned taskset revision."""
-    evaluator = Evaluator.from_client(client)
-    jobs = JobsClient.from_client(client)
-    taskset_workspace, name, digest = _split_ref(run["taskset_ref"])
-    taskset = evaluator.tasksets.retrieve(name, revision=digest, workspace=taskset_workspace)
-    views: list[TaskJobView] = []
-    for index in range(len(taskset.tasks)):
-        job_name = task_job_name(run["run_id"], index)
-        try:
-            job = jobs.get_job(workspace=workspace, name=job_name).data()
-        except NotFoundError:
-            views.append(TaskJobView(index, job_name, None, "missing"))
-            continue
-        tasks = job.spec.get("spec", {}).get("tasks") or [{}]
-        status = job.status.value if hasattr(job.status, "value") else str(job.status)
-        result = None
-        if with_results and status == "completed":
-            # Result records carry the Job's name as job_id (NEMO_JOB_ID), not its platform id.
-            found = evaluator.agent_eval_results.list(workspace=workspace, job_id=job_name, page_size=1).data
-            result = found[0] if found else None
-        publication = (job.status_details or {}).get(PUBLICATION_STATUS_KEY)
-        views.append(TaskJobView(index, job_name, tasks[0].get("id"), status, job.id, result, publication))
-    return views
-
-
-def run_tasks(client: NemoClient, run: dict[str, Any], *, workspace: str) -> list[TaskStateView]:
-    """Every task of ``run`` from ``/tasks``, named from its pinned taskset revision.
-
-    No Jobs call: what a settled task published comes from ``/tasks``, where the controller recorded it.
-    """
-    taskset_workspace, name, digest = _split_ref(run["taskset_ref"])
-    refs = Evaluator.from_client(client).tasksets.retrieve(name, revision=digest, workspace=taskset_workspace).tasks
-    items: list[dict[str, Any]] = []
-    page = 1
-    while True:
-        body = list_run_tasks(client, workspace, run["run_id"], page=page)
-        items += body["data"]
-        if not body["data"] or page >= body["pagination"]["total_pages"]:
-            break
-        page += 1
-    views: list[TaskStateView] = []
-    for item in items:
-        index, job_name = item["task_index"], item.get("job")
-        member = refs[index] if index < len(refs) else None
-        task = _split_ref(member.root if isinstance(member, TaskRef) else str(member))[1] if member else item["task"]
-        views.append(
-            TaskStateView(
-                index,
-                task,
-                task_state(item),
-                job_name,
-                item.get("error"),
-                item.get("publication"),
-                item.get("job_status"),
-            )
-        )
-    return views
 
 
 @dataclass(frozen=True)
@@ -1246,9 +1094,9 @@ def job_error(job: HelixJobResponse) -> str | None:
     return (job.error_details or {}).get("message")
 
 
-def _run_state(run: dict[str, Any], bundle: BundleJobView | None) -> str:
+def _run_state(run: TasksetRunStatus, bundle: BundleJobView | None) -> str:
     """The run's state in words; phase and result state alone read as contradictions ("completed", "failed")."""
-    phase, result = run["phase"], run.get("result_state")
+    phase, result = _text(run.phase), _text(run.result_state)
     if phase == "running" and bundle is not None and bundle.status not in _TERMINAL:
         return "merging task results"
     if phase in ("accepted", "running"):
@@ -1266,141 +1114,149 @@ def _run_state(run: dict[str, Any], bundle: BundleJobView | None) -> str:
     return phase
 
 
-def _instant(value: object) -> datetime:
+def _instant(value: datetime) -> datetime:
     """A status timestamp as an aware datetime; a naive one is UTC."""
-    parsed = parse_timestamp(str(value))
-    if parsed is None:
-        raise ValueError(f"not an ISO timestamp: {value!r}")
-    return parsed if parsed.utcoffset() is not None else parsed.replace(tzinfo=UTC)
+    return value if value.utcoffset() is not None else value.replace(tzinfo=UTC)
 
 
-def _queue_line(run: dict[str, Any], now: datetime | None) -> str | None:
+def _clock(value: datetime) -> str:
+    """``2026-10-16 12:00:00``: a status timestamp to the second, without its zone."""
+    return value.isoformat()[:19].replace("T", " ")
+
+
+def _queue_line(run: TasksetRunStatus, now: datetime | None) -> str | None:
     """How long the run waited for its first task slot; its clock starts there, not at acceptance."""
-    accepted = _instant(run["accepted_at"])
-    if run.get("started_at"):
-        waited = _duration((_instant(run["started_at"]) - accepted).total_seconds())
-        return f"  started   {str(run['started_at'])[:19].replace('T', ' ')} (queued {waited})"
-    if run["phase"] == "accepted":
+    accepted = _instant(run.accepted_at)
+    if run.started_at is not None:
+        waited = _duration((_instant(run.started_at) - accepted).total_seconds())
+        return f"  started   {_clock(run.started_at)} (queued {waited})"
+    if run.phase == "accepted":
         return f"  queued    {_duration(((now or datetime.now(UTC)) - accepted).total_seconds())} so far"
     return None
 
 
 def _status_table(
-    run: dict[str, Any],
-    views: Sequence[TaskStateView],
+    run: TasksetRunStatus,
+    tasks: Sequence[NamedTask],
     bundle: BundleJobView | None = None,
     *,
     workspace_flag: str = "",
     now: datetime | None = None,
 ) -> list[str]:
     """The status screen; ``workspace_flag`` (see ``_workspace_flag``) completes its printed commands."""
-    phase, result = run["phase"], run.get("result_state", "-")
+    phase, result = _text(run.phase), _text(run.result_state)
     queue = _queue_line(run, now)
     lines = [
-        f"Run {run['run_id']}",
-        f"  taskset   {_short_ref(run['taskset_ref'])}",
-        f"  accepted  {str(run['accepted_at'])[:19].replace('T', ' ')}",
+        f"Run {run.run_id}",
+        f"  taskset   {_short_ref(run.taskset_ref)}",
+        f"  accepted  {_clock(run.accepted_at)}",
         *([queue] if queue else []),
         f"  status    {_run_state(run, bundle)} (phase {phase}, result {result})",
-        f"  progress  {_progress_line(run.get('progress'))}",
+        f"  progress  {_progress_line(run.progress)}",
     ]
     if bundle is not None:
         lines.append(f"  bundle    {bundle.job} (attempt {bundle.attempt} of {MAX_BUNDLE_ATTEMPTS}): {bundle.status}")
     if bundle is not None and bundle.status in _FAILED:
         lines += [f"            {line}" for line in (bundle.error or "").splitlines()]
         lines.append(f"            logs: nemo jobs get-logs {bundle.job}{workspace_flag}")
-    error = run.get("error")
+    error = run.error
     # The controller's "bundle Job … ended …" only repeats the bundle line; any other error (a deadline) is news.
     if error and not (bundle is not None and error.startswith(f"bundle Job {bundle.job} ended")):
         lines.append(f"  error     {error}")
-    if result == "failed" and any(v.phase == MemberPhase.SUCCEEDED for v in views):
-        lines.append(f"  completed tasks' scores: nemo evals runs results {run['run_id']}{workspace_flag}")
+    phases = [_text(t.task.phase) if t.task is not None else None for t in tasks]
+    if result == "failed" and MemberPhase.SUCCEEDED in phases:
+        lines.append(f"  completed tasks' scores: nemo evals runs results {run.run_id}{workspace_flag}")
     lines.append("")
-    lines += _task_lines(views)
-    done = [v for v in views if v.phase in SETTLED_MEMBER_PHASES]
-    counts = {phase: sum(v.phase == phase for v in done) for phase in SETTLED_MEMBER_PHASES}
+    if not tasks:
+        return [*lines, "no tasks yet"]
+    lines += _task_lines(tasks, run)
+    done = [p for p in phases if p in SETTLED_MEMBER_PHASES]
+    counts = {p: done.count(p) for p in SETTLED_MEMBER_PHASES}
     stopped = "".join(f", {counts[p]} {p}" for p in (MemberPhase.CANCELLED, MemberPhase.EXPIRED) if counts[p])
     succeeded, failed = counts[MemberPhase.SUCCEEDED], counts[MemberPhase.FAILED]
-    lines.append(f"{len(done)}/{len(views)} done ({succeeded} succeeded, {failed} failed{stopped})")
+    lines.append(f"{len(done)}/{len(tasks)} done ({succeeded} succeeded, {failed} failed{stopped})")
     return lines
 
 
-def _progress_line(progress: dict[str, Any] | None) -> str:
+def _progress_line(progress: TasksetRunProgress | None) -> str:
     """The ``progress`` cell: tasks queued, being created, running (by Job status), then settled by phase."""
     if progress is None:
         return "no tasks yet; the run controller creates them on its next pass"
-    members, queued = progress["members"], progress["queued"]
+    members, queued = progress.members, progress.queued
     parts = [f"{queued} queued"] if queued else []
     creating = members.get(MemberPhase.IMAGE_READY, 0) - queued
     if creating:
         parts.append(f"{creating} creating")
     if registered := members.get(MemberPhase.REGISTERED, 0):
-        jobs = sorted(progress["task_jobs"].items(), key=lambda item: (-item[1], item[0]))
+        jobs = sorted(((_text(s), n) for s, n in progress.task_jobs.items()), key=lambda item: (-item[1], item[0]))
         by_status = f" ({', '.join(f'{count} {status}' for status, count in jobs)})" if jobs else ""
         parts.append(f"{registered} running{by_status}")
     skip = (MemberPhase.IMAGE_READY, MemberPhase.REGISTERED)
     parts += [f"{members[phase]} {phase}" for phase in MemberPhase if phase not in skip and members.get(phase)]
-    tasks = progress["tasks"]
+    tasks = progress.tasks
     return f"{tasks} task{'' if tasks == 1 else 's'}: {', '.join(parts)}"
 
 
-def _task_lines(views: Sequence[TaskStateView]) -> list[str]:
-    """The task table: one row per task with its state and Job, then what it published and its error, when set."""
-    width = max([4, *(len(v.task) for v in views)])
-    state_width = max([5, *(len(v.state) for v in views)])
-    job_width = max([3, *(len(v.job or "-") for v in views)])
-    published = [_published(v) for v in views] if any(v.publication is not None for v in views) else []
+def _task_lines(
+    tasks: Sequence[NamedTask], run: TasksetRunStatus | None, *, show_publication: bool = True
+) -> list[str]:
+    """The task table: one row per task with its state and Job, then what it published and its error, when set.
+
+    The ``published`` column appears only when ``show_publication`` is set and some task published.
+    """
+    states = [_state_cell(t, run) for t in tasks]
+    jobs = [(t.task.job if t.task else None) or "-" for t in tasks]
+    width = max([4, *(len(t.name) for t in tasks)])
+    state_width = max([5, *(len(state) for state in states)])
+    job_width = max([3, *(len(job) for job in jobs)])
+    publications = [t.task.publication if t.task else None for t in tasks]
+    shown = show_publication and any(p is not None for p in publications)
+    published = [_published(p) for p in publications] if shown else []
     published_width = max([9, *(len(cell) for cell in published)])
     header = f"{'#':>3}  {'task':<{width}}  {'state':<{state_width}}  {'Job':<{job_width}}"
     lines = [f"{header}  published" if published else header.rstrip()]
-    for i, view in enumerate(views):
-        row = f"{view.index:>3}  {view.task:<{width}}  {view.state:<{state_width}}  {(view.job or '-'):<{job_width}}"
+    for i, task in enumerate(tasks):
+        row = f"{task.index:>3}  {task.name:<{width}}  {states[i]:<{state_width}}  {jobs[i]:<{job_width}}"
         if published:
             row += f"  {published[i]:<{published_width}}"
-        if view.error:
-            row += f"  {view.error.splitlines()[0]}"
+        if task.task is not None and task.task.error:
+            row += f"  {task.task.error.splitlines()[0]}"
         lines.append(row.rstrip())
     return lines
 
 
-def _page_footer(page: dict[str, Any], noun: str) -> str:
+def _page_footer(page: Page[Any], noun: str) -> str:
     """``page 1 of 3 (45 runs); next: --page 2``, or the count on the last page."""
-    pagination = page.get("pagination") or {}
-    total, pages, current = pagination.get("total_results"), pagination.get("total_pages", 1), pagination.get("page", 1)
+    pagination = page.pagination
+    total = pagination.total_results if pagination else None
+    pages, current = (pagination.total_pages, pagination.page) if pagination else (1, 1)
     if pages > current:
         return f"page {current} of {pages} ({total} {noun}s); next: --page {current + 1}"
-    count = total if total is not None else len(page["data"])
+    count = total if total is not None else len(page.data)
     return f"{count} {noun}{'' if count == 1 else 's'}"
 
 
-def _tasks_table(page: dict[str, Any]) -> list[str]:
+def _tasks_table(page: Page[TasksetRunTask]) -> list[str]:
     """The ``runs tasks`` screen: one ``/tasks`` page, by member name."""
-    tasks = page["data"]
-    if not tasks:
+    if not page.data:
         return ["No tasks."]
-    views = [
-        TaskStateView(
-            t["task_index"], t["task"], task_state(t), t.get("job"), t.get("error"), None, t.get("job_status")
-        )
-        for t in tasks
-    ]
-    return [*_task_lines(views), _page_footer(page, "task")]
+    tasks = [NamedTask(index=t.task_index, name=t.task, task=t) for t in page.data]
+    return [*_task_lines(tasks, None, show_publication=False), _page_footer(page, "task")]
 
 
-def _list_table(page: dict[str, Any]) -> list[str]:
-    runs = page["data"]
-    if not runs:
+def _list_table(page: Page[TasksetRunStatus]) -> list[str]:
+    if not page.data:
         return ["No runs."]
     rows = [
         (
-            run["run_id"],
-            run["phase"],
-            run.get("result_state", "-"),
-            _short_ref(run["taskset_ref"]),
-            str(run["accepted_at"])[:19].replace("T", " "),
-            run.get("created_by") or "-",
+            run.run_id,
+            _text(run.phase),
+            _text(run.result_state),
+            _short_ref(run.taskset_ref),
+            _clock(run.accepted_at),
+            run.created_by or "-",
         )
-        for run in runs
+        for run in page.data
     ]
     header = ("run", "phase", "result", "taskset", "accepted", "by")
     widths = [max(len(row[i]) for row in [header, *rows]) for i in range(len(header))]
@@ -1414,27 +1270,34 @@ def _short_ref(ref: str) -> str:
     return f"{name}{sep}{digest[:8]}"
 
 
-def _results_table(
-    views: Sequence[TaskJobView], record: AgentEvalResult | None = None, *, workspace_flag: str = ""
-) -> list[str]:
+def _results_table(results: TasksetRunResults, *, workspace_flag: str = "") -> list[str]:
     """The results screen; ``workspace_flag`` (see ``_workspace_flag``) completes its printed command."""
-    results = [v.result for v in views if v.result is not None]
-    names = list(dict.fromkeys(score.name for result in results for score in result.scores.scores))
-    width = max([4, *(len(v.task or "") for v in views)])
-    header = f"{'#':>3}  {'task':<{width}}  {'status':<10}  trials  errors"
+    tasks, record = results.tasks, results.result
+    if not tasks:
+        return ["no tasks yet"]
+    found = [t.result for t in tasks if t.result is not None]
+    names = list(dict.fromkeys(score.name for result in found for score in result.scores.scores))
+    states = [_state_cell(t, results.run) for t in tasks]
+    width = max([4, *(len(t.name) for t in tasks)])
+    state_width = max([10, *(len(state) for state in states)])
+    header = f"{'#':>3}  {'task':<{width}}  {'status':<{state_width}}  trials  errors"
     lines = ["  ".join([header, *names])]
-    for view in views:
-        row = f"{view.index:>3}  {(view.task or '-'):<{width}}  {view.status:<10}"
-        if view.result is None:
+    for task, state in zip(tasks, states):
+        row = f"{task.index:>3}  {task.name:<{width}}  {state:<{state_width}}"
+        if task.result is None:
             lines.append(f"{row}  {'-':>6}  {'-':>6}")
             continue
-        summary = view.result.summary
-        by_name = view.result.scores.scores_by_name
+        summary = task.result.summary
+        by_name = task.result.scores.scores_by_name
         cells = [_cell(by_name[name].mean if name in by_name else None, len(name)) for name in names]
         trials = summary.trial_count if summary else "-"
         errors = summary.error_count if summary else "-"
         lines.append("  ".join([f"{row}  {trials:>6}  {errors:>6}", *cells]))
-    unrecorded = [v.job for v in views if v.status == "completed" and v.result is None]
+    unrecorded = [
+        t.task.job or t.task.task
+        for t in tasks
+        if t.result is None and t.task is not None and _text(t.task.job_status) == "completed"
+    ]
     if unrecorded:
         lines.append(f"warning: completed without a result record: {', '.join(unrecorded)}")
     if record is not None:  # the run's own record, from the merged bundle
@@ -1448,12 +1311,12 @@ def _results_table(
             lines.append(f"  {score.name}: {mean} (n={score.count}, nan={score.nan_count})")
         lines += ["", f"Download the merged bundle: nemo evals runs download {record.name}{workspace_flag}"]
         return lines
-    trials = sum(r.summary.trial_count for r in results if r.summary)
-    errors = sum(r.summary.error_count for r in results if r.summary)
+    trials = sum(r.summary.trial_count for r in found if r.summary)
+    errors = sum(r.summary.error_count for r in found if r.summary)
     lines.append(
-        f"run (combined here; no merged bundle yet): {len(results)}/{len(views)} tasks with results, {trials} trials, {errors} errors"
+        f"run (combined here; no merged bundle yet): {len(found)}/{len(tasks)} tasks with results, {trials} trials, {errors} errors"
     )
-    for score in rollup_scores(results):
+    for score in rollup_scores(found):
         mean = f"{score.mean:.3f}" if score.mean is not None else "n/a"
         lines.append(f"  {score.name}: {mean} (n={score.count}, nan={score.nan_count}, tasks={score.tasks})")
     return lines
@@ -1461,6 +1324,11 @@ def _results_table(
 
 def _cell(value: float | None, width: int) -> str:
     return f"{value:.2f}".rjust(width) if value is not None else "-".rjust(width)
+
+
+def _dump(model: BaseModel) -> str:
+    """A model as indented JSON, without its unset fields, as the API prints it."""
+    return json.dumps(model.model_dump(mode="json", exclude_none=True), indent=2)
 
 
 _TERMINAL = frozenset({"completed", "error", "cancelled"})
@@ -1483,12 +1351,13 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
         """List a workspace's runs, newest first."""
         client = client_factory()
         workspace = client.resolve_workspace(workspace)
+        taskset_runs = Evaluator.from_client(client).taskset_runs
         try:
-            body = list_runs(client, workspace, active=active, mine=mine, page=page, page_size=page_size)
-        except (RuntimeError, NemoClientError) as exc:
+            body = taskset_runs.list(workspace=workspace, active=active, mine=mine, page=page, page_size=page_size)
+        except NemoClientError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
-        typer.echo(json.dumps(body, indent=2) if output_json else "\n".join(_list_table(body)))
+        typer.echo(_dump(body) if output_json else "\n".join(_list_table(body)))
 
     @runs.command("status")
     def status(
@@ -1501,23 +1370,30 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
         """Show a run's progress and each task's state."""
         client = client_factory()
         workspace = client.resolve_workspace(workspace)
+        taskset_runs = Evaluator.from_client(client).taskset_runs
         try:
-            run = get_run(client, workspace, run_id)
             while True:
-                views = run_tasks(client, run, workspace=workspace)
+                run = taskset_runs.retrieve(run_id, workspace=workspace)  # once per refresh: header and rows agree
+                tasks = list(taskset_runs.iter_tasks(run))
                 bundle = newest_bundle_job(client, run_id, workspace=workspace)
                 if output_json:
-                    body = {"run": run, "bundle": bundle and bundle.__dict__}
-                    typer.echo(json.dumps(body | {"tasks": [v.__dict__ for v in views]}, indent=2))
+                    body = {
+                        "run": run.model_dump(mode="json", exclude_none=True),
+                        "bundle": bundle and bundle.__dict__,
+                        "tasks": [_task_json(task, run) for task in tasks],
+                    }
+                    typer.echo(json.dumps(body, indent=2))
                 else:
                     flag = _workspace_flag(workspace, client.resolve_workspace())
-                    typer.echo("\n".join(_status_table(run, views, bundle, workspace_flag=flag)))
-                if not watch or run["phase"] in _RUN_TERMINAL:
+                    typer.echo("\n".join(_status_table(run, tasks, bundle, workspace_flag=flag)))
+                if not watch or run.phase in _RUN_TERMINAL:
                     return
                 time.sleep(poll_seconds)
                 typer.echo("")
-                run = get_run(client, workspace, run_id)
-        except (SelectionError, RuntimeError, NemoClientError) as exc:
+        except NotFoundError as exc:
+            typer.echo(f"Error: {_not_found(workspace, run_id)}", err=True)
+            raise typer.Exit(code=1) from exc
+        except NemoClientError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
@@ -1533,12 +1409,16 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
         """List a run's tasks with their state and Job."""
         client = client_factory()
         workspace = client.resolve_workspace(workspace)
+        taskset_runs = Evaluator.from_client(client).taskset_runs
         try:
-            body = list_run_tasks(client, workspace, run_id, phase=phase, page=page, page_size=page_size)
-        except (SelectionError, RuntimeError, NemoClientError) as exc:
+            body = taskset_runs.tasks(run_id, workspace=workspace, phase=phase, page=page, page_size=page_size)
+        except NotFoundError as exc:
+            typer.echo(f"Error: {_not_found(workspace, run_id)}", err=True)
+            raise typer.Exit(code=1) from exc
+        except NemoClientError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
-        typer.echo(json.dumps(body, indent=2) if output_json else "\n".join(_tasks_table(body)))
+        typer.echo(_dump(body) if output_json else "\n".join(_tasks_table(body)))
 
     @runs.command("cancel")
     def cancel(
@@ -1550,15 +1430,19 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
         client = client_factory()
         workspace = client.resolve_workspace(workspace)
         try:
-            run = cancel_run(client, workspace, run_id)
-        except (SelectionError, RuntimeError, NemoClientError) as exc:
+            run = Evaluator.from_client(client).taskset_runs.cancel(run_id, workspace=workspace)
+        except NotFoundError as exc:
+            typer.echo(f"Error: {_not_found(workspace, run_id)}", err=True)
+            raise typer.Exit(code=1) from exc
+        except NemoClientError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
         if output_json:
-            typer.echo(json.dumps(run, indent=2))
+            typer.echo(_dump(run))
             return
         flag = _workspace_flag(workspace, client.resolve_workspace())
-        typer.echo(f"Cancel requested for {run_id} at {run['cancel_requested_at']} (phase {run['phase']}).")
+        requested = run.cancel_requested_at.isoformat() if run.cancel_requested_at else "-"
+        typer.echo(f"Cancel requested for {run_id} at {requested} (phase {_text(run.phase)}).")
         typer.echo(f"Follow it with: nemo evals runs status {run_id}{flag}")
 
     @runs.command("download")
@@ -1573,7 +1457,10 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
         client = client_factory()
         workspace = client.resolve_workspace(workspace)
         try:
-            run = get_run(client, workspace, run_id)
+            try:
+                run = Evaluator.from_client(client).taskset_runs.retrieve(run_id, workspace=workspace)
+            except NotFoundError as exc:
+                raise _not_found(workspace, run_id) from exc
             job, bundle = download_run_bundle(client, run, workspace=workspace, output_dir=output_dir or Path(run_id))
         except (SelectionError, RuntimeError, NemoClientError, tarfile.TarError, ValueError, OSError) as exc:
             typer.echo(f"Error: {exc}", err=True)
@@ -1592,31 +1479,17 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
         client = client_factory()
         workspace = client.resolve_workspace(workspace)
         try:
-            run = get_run(client, workspace, run_id)
-            views = run_task_jobs(client, run, workspace=workspace, with_results=True)
-            record = None
-            if run.get("result_state") == "ready":  # the controller saved the run's own record
-                record = Evaluator.from_client(client).agent_eval_results.retrieve(run_id, workspace=workspace)
-        except (SelectionError, RuntimeError, NemoClientError) as exc:
+            found = Evaluator.from_client(client).taskset_runs.results(run_id, workspace=workspace)
+        except NotFoundError as exc:  # the run, or its merged record
+            typer.echo(f"Error: {_not_found_message(exc, workspace, run_id)}", err=True)
+            raise typer.Exit(code=1) from exc
+        except NemoClientError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
         if output_json:
-            body = {
-                "run": run,
-                "tasks": [_view_json(v) for v in views],
-                "rollup": [score.__dict__ for score in rollup_scores([v.result for v in views if v.result])],
-                "result": record.model_dump(mode="json") if record is not None else None,
-            }
-            typer.echo(json.dumps(body, indent=2, default=str))
+            body = found.model_dump(mode="json", exclude_none=True)
+            body["tasks"] = [_task_json(task, found.run) for task in found.tasks]
+            typer.echo(json.dumps(body, indent=2))
             return
         flag = _workspace_flag(workspace, client.resolve_workspace())
-        typer.echo("\n".join(_results_table(views, record, workspace_flag=flag)))
-
-
-def _view_json(view: TaskJobView) -> dict[str, Any]:
-    data: dict[str, Any] = {"index": view.index, "job": view.job, "task": view.task, "status": view.status}
-    if view.publication is not None:
-        data["publication"] = view.publication
-    if view.result is not None:
-        data["result"] = view.result.model_dump(mode="json", include={"name", "scores", "summary", "bundle_ref"})
-    return data
+        typer.echo("\n".join(_results_table(found, workspace_flag=flag)))

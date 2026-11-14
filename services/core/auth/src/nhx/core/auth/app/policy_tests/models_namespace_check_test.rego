@@ -19,21 +19,21 @@ models_test_data := {
     "endpoints": {
         "/apis/models/v2/workspaces/{workspace}/models": {
             "get": {
-                "permissions": ["models.list"],
+                "direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]},
                 "scopes": ["models:read"]
             },
             "post": {
-                "permissions": ["models.create"],
+                "direct": {"actor_perms": ["models.create"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.create"]},
                 "scopes": ["models:write"]
             }
         },
         "/apis/models/v2/workspaces/{workspace}/models/{name}": {
             "get": {
-                "permissions": ["models.read"],
+                "direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]},
                 "scopes": ["models:read"]
             },
             "delete": {
-                "permissions": ["models.delete"],
+                "direct": {"actor_perms": ["models.delete"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.delete"]},
                 "scopes": ["models:write"]
             }
         }
@@ -59,7 +59,7 @@ models_test_data := {
 
 # Test 1: GET model with workspace in path
 test_model_get_with_workspace_no_check_header if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user@example.com",
         "method": "GET",
         "path": "/apis/models/v2/workspaces/team-ml/models/model-123",
@@ -77,7 +77,7 @@ test_model_get_with_workspace_no_check_header if {
 
 # Test 2: POST create model (collection)
 test_model_put_with_workspace_no_check_header if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user@example.com",
         "method": "POST",
         "path": "/apis/models/v2/workspaces/team-ml/models",
@@ -95,7 +95,7 @@ test_model_put_with_workspace_no_check_header if {
 
 # Test 3: DELETE model with workspace in path
 test_model_delete_with_workspace_no_check_header if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user@example.com",
         "method": "DELETE",
         "path": "/apis/models/v2/workspaces/team-ml/models/model-123",
@@ -113,7 +113,7 @@ test_model_delete_with_workspace_no_check_header if {
 
 # Test 4: GET model list for a workspace
 test_model_list_without_workspace_has_check_header if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user@example.com",
         "method": "GET",
         "path": "/apis/models/v2/workspaces/team-ml/models",
@@ -137,7 +137,7 @@ test_workspace_extraction_from_model_path if {
 
 # Test 6: Access denied to model in workspace without permission
 test_model_access_denied_without_permission if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user@example.com",
         "method": "GET",
         "path": "/apis/models/v2/workspaces/other-team/models/model-123",
@@ -157,7 +157,7 @@ test_model_access_denied_without_permission if {
 
 # Test 7: Access to public workspace model
 test_model_access_public_workspace if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "user@example.com",
         "method": "GET",
         "path": "/apis/models/v2/workspaces/public-models/models/model-456",

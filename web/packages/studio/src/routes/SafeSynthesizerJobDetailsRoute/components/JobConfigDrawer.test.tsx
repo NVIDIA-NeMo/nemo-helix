@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import type { GenerateJob } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
 import { JobConfigDrawer } from '@studio/routes/SafeSynthesizerJobDetailsRoute/components/JobConfigDrawer';
@@ -90,16 +90,6 @@ describe('JobConfigDrawer', () => {
       await user.click(closeButton);
 
       await waitFor(() => expect(mockOnOpenChange).toHaveBeenCalledWith(false, expect.anything()));
-    });
-
-    describe('Heading Content', () => {
-      it('should render heading with icon and text', () => {
-        render(<JobConfigDrawer job={mockJob} open onOpenChange={mockOnOpenChange} />, {
-          wrapper: createWrapper(),
-        });
-
-        expect(screen.getByText('Job Configuration')).toBeInTheDocument();
-      });
     });
   });
 });

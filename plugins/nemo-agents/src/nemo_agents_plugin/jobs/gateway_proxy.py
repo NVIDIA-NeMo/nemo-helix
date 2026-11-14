@@ -30,23 +30,21 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-import uvicorn
+from fastapi import FastAPI
 from nemo_agents_plugin.agent_config import AgentConfig, ModelConfig, TelemetryConfig
+from nemo_agents_plugin.fabric.gateway_models import gateway_models, is_gateway_url
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.client.auth import EnvAccessToken, TokenProviderAuth
 from nemo_helix_plugin.client.auth_proxy import build_auth_proxy_app
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, get_env_access_token
 from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
 from nemo_helix_plugin.client_provider import get_forwarding_headers, get_nemo_client
+from uvicorn import Config, Server
 
 logger = logging.getLogger(__name__)
 
 _STARTUP_TIMEOUT_SECONDS = 10.0
 _SHUTDOWN_TIMEOUT_SECONDS = 5
-
-
-def _is_gateway_url(base_url: object) -> bool:
-    return isinstance(base_url, str) and urlsplit(base_url).path.startswith("/apis/inference-gateway/")
 
 
 def _onto_proxy(url: str, origin: str) -> str:
@@ -57,7 +55,7 @@ def _onto_proxy(url: str, origin: str) -> str:
 def _gateway_models(config: AgentConfig) -> Iterator[ModelConfig]:
     models = [*config.models.values(), *(h.model for h in config.harnesses.values() if h.model is not None)]
     for model in models:
-        if _is_gateway_url(model.base_url or model.settings.get("base_url")):
+        if is_gateway_url(model.base_url or model.settings.get("base_url")):
             yield model
 
 
@@ -104,22 +102,9 @@ def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConf
     return runtime_config
 
 
-def _fabric_gateway_models(config: dict[str, Any]) -> Iterator[tuple[dict[str, Any], str]]:
-    models = config.get("models")
-    if not isinstance(models, dict):
-        return
-    for model in models.values():
-        if not isinstance(model, dict):
-            continue
-        settings = model.get("settings")
-        base_url = model.get("base_url") or (settings.get("base_url") if isinstance(settings, dict) else None)
-        if isinstance(base_url, str) and _is_gateway_url(base_url):
-            yield model, base_url
-
-
 def routes_fabric_inference_through_gateway(config: dict[str, Any]) -> bool:
     """:func:`routes_inference_through_gateway` for a translated Fabric config."""
-    return any(_fabric_gateway_models(config))
+    return bool(gateway_models(config))
 
 
 def rewrite_fabric_gateway_models(config: dict[str, Any], origin: str | None) -> dict[str, Any]:
@@ -128,9 +113,11 @@ def rewrite_fabric_gateway_models(config: dict[str, Any], origin: str | None) ->
         return config
 
     runtime_config = copy.deepcopy(config)
-    for model, original_url in _fabric_gateway_models(runtime_config):
-        model["base_url"] = _onto_proxy(original_url, origin)
-        settings = model.get("settings")
+    for model in gateway_models(runtime_config):
+        if not isinstance(model.config, dict):
+            continue
+        model.config["base_url"] = _onto_proxy(model.base_url, origin)
+        settings = model.config.get("settings")
         if isinstance(settings, dict):
             settings.pop("base_url", None)
     return runtime_config
@@ -216,11 +203,18 @@ def platform_auth_proxy() -> Generator[str | None, None, None]:
             raise ValueError("NHX_PRINCIPAL must provide a principal ID for authenticated agent jobs")
         app = build_auth_proxy_app(base_url=base_url, headers=headers)
 
+    with serve_auth_proxy(app) as origin:
+        yield origin
+
+
+@contextmanager
+def serve_auth_proxy(app: FastAPI) -> Generator[str, None, None]:
+    """Serve ``app`` on a loopback port in a background thread, yielding its origin."""
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
-        server = uvicorn.Server(
-            uvicorn.Config(
+        server = Server(
+            Config(
                 app,
                 host="127.0.0.1",
                 port=port,
@@ -237,15 +231,15 @@ def platform_auth_proxy() -> Generator[str | None, None, None]:
             except BaseException as error:
                 errors.append(error)
 
-        thread = threading.Thread(target=serve, name="agent-job-auth-proxy", daemon=True)
+        thread = threading.Thread(target=serve, name="auth-proxy", daemon=True)
         thread.start()
         try:
             deadline = time.monotonic() + _STARTUP_TIMEOUT_SECONDS
             while not server.started:
                 if not thread.is_alive():
-                    raise RuntimeError("Agent job auth proxy failed to start") from (errors[0] if errors else None)
+                    raise RuntimeError("Auth proxy failed to start") from (errors[0] if errors else None)
                 if time.monotonic() >= deadline:
-                    raise TimeoutError("Agent job auth proxy startup timed out")
+                    raise TimeoutError("Auth proxy startup timed out")
                 thread.join(timeout=0.01)
             yield f"http://127.0.0.1:{port}"
         finally:
@@ -257,7 +251,7 @@ def platform_auth_proxy() -> Generator[str | None, None, None]:
                 server.force_exit = True
                 thread.join(timeout=1)
             if thread.is_alive():
-                logger.error("Agent job auth proxy did not stop within its shutdown deadline")
+                logger.error("Auth proxy did not stop within its shutdown deadline")
 
 
 @contextmanager

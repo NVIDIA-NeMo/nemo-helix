@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useModelEntity } from '@nemo/common/src/api/models/useModelEntity';
 import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/ControlledSliderWithTextInput';
 import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
@@ -9,20 +10,61 @@ import {
   AccordionItem,
   AccordionRoot,
   AccordionTrigger,
+  Banner,
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 import {
+  expertParallelWarning,
+  suggestedExpertParallelSize,
+  totalGpus,
+} from '@studio/util/forms/expertParallel';
+import {
   AUTOMODEL_SPEC_DEFAULTS,
   DPO_SPEC_DEFAULTS,
   specSliderProps,
 } from '@studio/util/forms/specDefaults';
-import { useFormContext } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 
 const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
-  const { control } = useFormContext<CustomizationFormFields>();
+  const { control, getValues, setValue } = useFormContext<CustomizationFormFields>();
+  const [model, parallelism] = useWatch({
+    control,
+    name: ['automodel.model', 'automodel.parallelism'],
+  });
+  const spec = useModelEntity(model)?.spec;
+  const numExperts = spec?.moe_config?.num_experts;
+  const isMoe = !!numExperts && numExperts > 1;
+  const warning = expertParallelWarning(spec, parallelism ?? {});
+  const refillExpertParallelSize = () => {
+    const size = suggestedExpertParallelSize(spec, getValues('automodel.parallelism') ?? {});
+    if (size !== undefined) {
+      setValue('automodel.parallelism.expert_parallel_size', size ?? undefined);
+    }
+  };
+  // On release and on blur: a value passed through on the way, such as the 1 of a typed 12,
+  // would replace a size that fits the final layout.
+  const onGpuLayoutChange = {
+    Slider: { onValueCommit: refillExpertParallelSize },
+    TextInput: { onBlur: refillExpertParallelSize },
+  };
+  const expertParallelSizeField = (
+    <ControlledSliderWithTextInput
+      useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}
+      formFieldProps={{
+        slotLabel: 'Expert Parallel Size',
+        slotInfo:
+          "Shards a Mixture-of-Experts model's experts across GPUs. On more than one GPU, MoE models need a value above 1 that divides both the expert count and data parallel × context parallel size.",
+      }}
+      {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
+      min={1}
+      max={Math.max(1, totalGpus(parallelism ?? {}))}
+      step={1}
+      disabled={disabled}
+    />
+  );
   return (
     <Stack gap="density-lg">
       <ControlledSliderWithTextInput
@@ -32,6 +74,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
         min={1}
         max={16}
         step={1}
+        attributes={onGpuLayoutChange}
         disabled={disabled}
       />
       <ControlledSliderWithTextInput
@@ -44,8 +87,15 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
         min={1}
         max={8}
         step={1}
+        attributes={onGpuLayoutChange}
         disabled={disabled}
       />
+      {isMoe && expertParallelSizeField}
+      {warning && (
+        <Banner kind="inline" status="warning">
+          {warning}
+        </Banner>
+      )}
       <AccordionRoot multiple>
         <AccordionItem value="advanced-parallelism" className="border-b-0">
           <AccordionTrigger>
@@ -63,6 +113,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                 min={1}
                 max={8}
                 step={1}
+                attributes={onGpuLayoutChange}
                 disabled={disabled}
               />
               <ControlledSliderWithTextInput
@@ -78,6 +129,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                 min={1}
                 max={8}
                 step={1}
+                attributes={onGpuLayoutChange}
                 disabled={disabled}
               />
               <ControlledSliderWithTextInput
@@ -94,21 +146,10 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                 min={1}
                 max={8}
                 step={1}
+                attributes={onGpuLayoutChange}
                 disabled={disabled}
               />
-              <ControlledSliderWithTextInput
-                useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}
-                formFieldProps={{
-                  slotLabel: 'Expert Parallel Size',
-                  slotInfo:
-                    'Expert parallel size for MoE models. Must divide data_parallel_size × context_parallel_size, and tensor parallel size must be 1 when this is above 1.',
-                }}
-                {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
-                min={1}
-                max={8}
-                step={1}
-                disabled={disabled}
-              />
+              {!isMoe && expertParallelSizeField}
               <ControlledSwitch
                 useControllerProps={{ name: 'automodel.parallelism.sequence_parallel', control }}
                 formFieldProps={{
@@ -198,7 +239,7 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
         formFieldProps={{
           slotLabel: 'Expert Parallel Size',
           slotInfo:
-            'Expert parallel size for MoE models. GRPO only. NeMo RL key: expert_parallel_size.',
+            'Expert parallel size for MoE models. DPO and GRPO. NeMo RL key: expert_parallel_size.',
         }}
         {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
         min={1}

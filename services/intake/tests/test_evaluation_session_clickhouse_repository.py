@@ -82,6 +82,7 @@ async def test_list_sessions_maps_rows_and_binds_all_request_values() -> None:
         evaluation_name=evaluation_name,
         status=SpanStatus.ERROR,
         test_case_name=test_case_id,
+        created_after=None,
         page=2,
         page_size=5,
         mode="preview",
@@ -125,6 +126,50 @@ async def test_list_sessions_maps_rows_and_binds_all_request_values() -> None:
     assert executor.queries[2].parameters["page_storage_keys"] == [
         (1767225600000000, "trace-session-a", "root-session-a")
     ]
+    for query in executor.queries:
+        assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" not in query.statement
+        assert "created_after_us" not in query.parameters
+
+
+@pytest.mark.parametrize(
+    "sort_keys,page_query_name",
+    [
+        pytest.param([("cost_total_usd", True)], "evaluation_sessions.metric_sort.page", id="metric-sort"),
+        pytest.param(None, "evaluation_sessions.page", id="plain"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_list_sessions_binds_every_query_shape_to_created_after(
+    sort_keys: list[tuple[str, bool]] | None, page_query_name: str
+) -> None:
+    created_after = datetime(2026, 3, 1, 12, 0, 0, 123456, tzinfo=timezone.utc)
+    executor = _Executor([[{"count()": 1}], [_page_ref("session-a")], [_session_record("session-a")]])
+
+    await _repository(executor).list_sessions(
+        workspace="default",
+        evaluation_name="evaluation-a",
+        created_after=created_after,
+        page=1,
+        page_size=10,
+        mode="summary",
+        sort_keys=sort_keys,
+    )
+
+    assert [query.name for query in executor.queries] == [
+        "evaluation_sessions.count",
+        page_query_name,
+        "evaluation_sessions.hydrate",
+    ]
+    for query in executor.queries:
+        assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" in query.statement
+        assert query.parameters["created_after_us"] == 1772366400123456
+    hydrate = executor.queries[2].statement
+    assert "span_versions.event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" in hydrate
+    assert "ingested_at >= toDateTime64(fromUnixTimestamp64Micro(%(created_after_us)s), 3)" in hydrate
+    if page_query_name == "evaluation_sessions.metric_sort.page":
+        assert (
+            "span_versions.event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" in executor.queries[1].statement
+        )
 
 
 @pytest.mark.asyncio
@@ -140,6 +185,7 @@ async def test_metric_sort_uses_bounded_page_then_restores_hydration_order() -> 
     page = await _repository(executor).list_sessions(
         workspace="default",
         evaluation_name="evaluation-a",
+        created_after=None,
         page=1,
         page_size=2,
         mode="summary",
@@ -166,6 +212,7 @@ async def test_empty_result_stops_after_count() -> None:
     page = await _repository(executor).list_sessions(
         workspace="default",
         evaluation_name="evaluation-a",
+        created_after=None,
         page=1,
         page_size=100,
         mode="detailed",
@@ -184,6 +231,7 @@ async def test_metric_sort_rejects_unbounded_session_set_after_count() -> None:
         await _repository(executor).list_sessions(
             workspace="default",
             evaluation_name="evaluation-a",
+            created_after=None,
             page=1,
             page_size=100,
             mode="summary",

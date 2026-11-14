@@ -346,7 +346,7 @@ def test_spawn_fabric_uses_current_python_and_platform_server(
     monkeypatch.setenv("NVIDIA_API_KEY", "real-controller-key")
 
     with patch(
-        "nemo_agents_plugin.runner.in_memory.subprocess.Popen",
+        "nemo_agents_plugin.runner.in_memory.Popen",
         return_value=process,
         side_effect=OSError("spawn failed") if spawn_fails else None,
     ) as popen:
@@ -554,7 +554,7 @@ async def test_real_subprocess_exit_writes_log_at_recorded_path(tmp_path: Path) 
 
 def test_resolve_nat_bin_uses_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """`shutil.which` is preferred — covers activated venvs and the container."""
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/local/bin/{name}")
+    monkeypatch.setattr("nemo_agents_plugin.runner.in_memory.which", lambda name: f"/usr/local/bin/{name}")
     assert _resolve_nat_bin() == "/usr/local/bin/nat"
 
 
@@ -565,7 +565,7 @@ def test_resolve_nat_bin_uses_sibling_of_sys_executable(monkeypatch: pytest.Monk
     `nat` (it's co-installed with `nemo` via the `[services]` chain), but the
     venv's `bin/` is not prepended to PATH, so `shutil.which` returns None.
     """
-    monkeypatch.setattr("shutil.which", lambda _: None)
+    monkeypatch.setattr("nemo_agents_plugin.runner.in_memory.which", lambda _: None)
 
     fake_venv_bin = tmp_path / "bin"
     fake_venv_bin.mkdir()
@@ -573,7 +573,7 @@ def test_resolve_nat_bin_uses_sibling_of_sys_executable(monkeypatch: pytest.Monk
     fake_python.touch()
     fake_nat = fake_venv_bin / "nat"
     fake_nat.write_text("#!/bin/sh\necho nat-stub\n")
-    monkeypatch.setattr(sys, "executable", str(fake_python))
+    monkeypatch.setattr("nemo_agents_plugin.runner.in_memory.executable", str(fake_python))
 
     assert _resolve_nat_bin() == str(fake_nat)
 
@@ -582,14 +582,14 @@ def test_resolve_nat_bin_falls_back_to_container_path(monkeypatch: pytest.Monkey
     """When nothing else matches, return the container path. This preserves
     backwards-compatible behavior in the agentic container even if the PATH
     lookup somehow fails inside it."""
-    monkeypatch.setattr("shutil.which", lambda _: None)
+    monkeypatch.setattr("nemo_agents_plugin.runner.in_memory.which", lambda _: None)
 
     # sys.executable points somewhere with no sibling `nat`.
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     fake_python = fake_bin / "python"
     fake_python.touch()
-    monkeypatch.setattr(sys, "executable", str(fake_python))
+    monkeypatch.setattr("nemo_agents_plugin.runner.in_memory.executable", str(fake_python))
 
     assert _resolve_nat_bin() == "/app/.venv/bin/nat"
 
@@ -979,7 +979,7 @@ def test_spawn_fabric_inherits_socket_after_parent_closes(tmp_path: Path) -> Non
     try:
         with backend.reserve_socket() as reserved:
             port = reserved.getsockname()[1]
-            with patch("nemo_agents_plugin.runner.in_memory.subprocess.Popen", spawn_probe):
+            with patch("nemo_agents_plugin.runner.in_memory.Popen", spawn_probe):
                 proc = backend._spawn_fabric(
                     "probe",
                     tmp_path / "agent.yaml",

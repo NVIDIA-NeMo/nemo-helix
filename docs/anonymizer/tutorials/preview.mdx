@@ -116,12 +116,33 @@ preview.display_record(0)  # render record 0 with entity highlights in a noteboo
 
 `AnonymizerResource.preview` calls the plugin service: use a fileset or `http(s)` source, and include `model_configs`.
 
-The CLI accepts the same request as a YAML or JSON spec file and streams NDJSON frames:
+The CLI accepts the same request as a YAML or JSON spec file and streams NDJSON frames.
+To use the request from Step 1 with the CLI instead of calling `anonymizer.preview`, first
+serialize it to a local YAML file (no preview call is needed to write the spec):
+
+```python
+from pathlib import Path
+
+import yaml
+
+Path("/tmp/anonymizer-preview.yaml").write_text(
+    yaml.safe_dump(request.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
+)
+```
+
+Preview frames may contain original input text and PII. Treat both terminal output
+and saved files as sensitive. To display and save all emitted frames as NDJSON in a
+new owner-only file, run:
 
 ```bash
+output=$(mktemp ./anonymizer-preview.ndjson.XXXXXX) &&
 nemo anonymizer preview \
-  --spec-file /tmp/anonymizer-preview.yaml
+  --spec-file /tmp/anonymizer-preview.yaml | tee "$output"
+printf 'Saved to %s\n' "$output"
 ```
+
+The saved file contains all frame kinds, not just the anonymized records. This CLI
+path does not create the Python `preview` variable used in Step 3.
 
 <Accordion title="Async client">
 
@@ -146,7 +167,10 @@ In a standalone Python script, use `asyncio.run(run_preview())` instead (with `i
 
 </Accordion>
 
-## Step 3: Persist Preview Records
+## Step 3: Persist Preview Records (Python SDK)
+
+This step applies only if you called the sync or async Python SDK above. For the
+CLI path, use the NDJSON file saved by `tee` instead.
 
 `AnonymizerPreviewResult.dataset` and `trace_dataset` are pandas DataFrames, so save them with standard pandas methods:
 

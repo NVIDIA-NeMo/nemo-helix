@@ -1,10 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  type AtifIngestRequest,
-  AtifIngestRequestSchemaVersion,
-} from '@nemo/sdk/generated/platform/schema';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
+import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
+import { AtifIngestRequestSchemaVersion } from '@nemo/sdk/generated/platform/schema/AtifIngestRequestSchemaVersion';
 
 const SCHEMA_VERSIONS = new Set<string>(Object.values(AtifIngestRequestSchemaVersion));
 
@@ -24,16 +23,13 @@ export interface ParseAtifResult {
   failures: ParseFailure[];
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 /**
  * Front-loads the checks Intake would otherwise reject with a 422, so a typo in a
  * hand-written trace surfaces next to its file name instead of as one opaque failure.
  * This is deliberately shallow — the service remains the authority on the full schema.
  */
 const validate = (value: unknown): string | null => {
-  if (!isRecord(value)) return 'Expected a JSON object describing one ATIF trajectory.';
+  if (!isPlainObject(value)) return 'Expected a JSON object describing one ATIF trajectory.';
 
   const { schema_version: schemaVersion, agent, steps } = value;
 
@@ -42,7 +38,7 @@ const validate = (value: unknown): string | null => {
     return `Unsupported schema_version "${schemaVersion}". Expected one of ${[...SCHEMA_VERSIONS].join(', ')}.`;
   }
 
-  if (!isRecord(agent)) return 'Missing required field "agent".';
+  if (!isPlainObject(agent)) return 'Missing required field "agent".';
   if (typeof agent.name !== 'string' || agent.name.length === 0) {
     return 'Field "agent.name" must be a non-empty string.';
   }
@@ -50,7 +46,7 @@ const validate = (value: unknown): string | null => {
   if (steps !== undefined) {
     if (!Array.isArray(steps)) return 'Field "steps" must be an array.';
     const misnumbered = steps.findIndex(
-      (step, index) => !isRecord(step) || step.step_id !== index + 1
+      (step, index) => !isPlainObject(step) || step.step_id !== index + 1
     );
     if (misnumbered !== -1) {
       return `Step ${misnumbered + 1} must be an object with "step_id": ${misnumbered + 1} — step IDs are 1-based and sequential.`;

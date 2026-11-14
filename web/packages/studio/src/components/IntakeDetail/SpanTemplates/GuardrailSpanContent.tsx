@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { asNonEmptyString } from '@nemo/common/src/utils/asString';
 import { Badge } from '@nvidia/foundations-react-core';
 import {
   asBoolean,
   asList,
   asNumber,
-  asString,
   parseRawAttributes,
 } from '@studio/components/IntakeDetail/SpanTemplates/rawAttributes';
 import {
@@ -23,7 +23,7 @@ import type { FC } from 'react';
  */
 export const GuardrailSpanContent: FC<SpanTemplateContentProps> = ({ span }) => {
   const attributes = parseRawAttributes(span.raw_attributes);
-  const stage = asString(attributes['guardrail.stage']);
+  const stage = asNonEmptyString(attributes['guardrail.stage']);
   const blocked = asBoolean(attributes['guardrail.blocked']);
   const confidence = asNumber(attributes['guardrail.confidence']);
   const categories = asList(attributes['guardrail.categories']);

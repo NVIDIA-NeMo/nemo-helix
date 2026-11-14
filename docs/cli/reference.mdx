@@ -1009,6 +1009,9 @@ Use `--agent` for a known coding agent and `--path` for any other agent.
 Use `--skill` to select specific skills, `--user` for user scope, or
 `--project-dir` to explicitly select a known agent's project directory.
 
+A full install (no `--skill`) also removes skills a previous install wrote
+that this build no longer ships.
+
 **Examples:**
 
 ```shell
@@ -1598,7 +1601,7 @@ backends, this also deletes the underlying files.
 **Usage:**
 
 ```shell
-nemo files filesets delete [OPTIONS] NAME
+nemo files filesets delete [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -1607,6 +1610,7 @@ nemo files filesets delete [OPTIONS] NAME
 
 **Options:**
 
+* `--id`: Delete the exact fileset allocation by ID.
 * `--workspace`
 
 **Help:**
@@ -1631,7 +1635,7 @@ nemo files filesets list [OPTIONS]
 * `--workspace`
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
-* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: -created_at, created_at, -updated_at, updated_at, -name, name]
+* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: -created_at, created_at, -updated_at, updated_at, -name, name, -storage_type, storage_type]
 * `--all-pages`: Fetch all pages
 
 **Filter Options:**
@@ -3494,7 +3498,7 @@ nemo inference prompts list [OPTIONS]
 * `--workspace`
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
-* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: -created_at, created_at, -updated_at, updated_at, -name, name]
+* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: created_at, -created_at, updated_at, -updated_at, name, -name]
 * `--all-pages`: Fetch all pages
 
 **Filter Options:**
@@ -4318,6 +4322,7 @@ nemo jobs list [OPTIONS]
 **Options:**
 
 * `--workspace`
+* `--type, -t TYPE`: Only list jobs of this type: a plugin (e.g. 'evals', all its job types) or one job type (e.g. 'evals.evaluate'). Repeat for several. Lists through each job type's own route, so it can't be combined with a source filter or sort.
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
 * `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: created_at, -created_at, updated_at, -updated_at, source, -source]
@@ -5146,7 +5151,7 @@ nemo models create [OPTIONS] [NAME]
 
 * `--workspace`
 * `--api-endpoint`: Data about an inference endpoint. (JSON string)
-* `--backend-format <CHOICE>`: Inference backend API wire formats understood by IGW and middleware plugins. [possible values: OPENAI_CHAT, ANTHROPIC_MESSAGES]
+* `--backend-format <CHOICE>`: Inference backend API wire formats understood by IGW and middleware plugins. [possible values: OPENAI_CHAT, ANTHROPIC_MESSAGES, SYSTEMONE]
 * `--base-model`: Link to another model which is used as a base for the current model
 * `--custom-fields`: Custom fields for additional metadata (JSON string)
 * `--description`: Optional description of the model
@@ -5216,7 +5221,7 @@ nemo models list [OPTIONS]
 * `--workspace`
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
-* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: -created_at, created_at, -updated_at, updated_at, -name, name]
+* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: created_at, -created_at, updated_at, -updated_at, name, -name]
 * `--verbose`: Whether to include full spec details
 * `--all-pages`: Fetch all pages
 
@@ -5313,7 +5318,7 @@ nemo models update [OPTIONS] NAME
 * `--workspace`
 * `--verbose`: Whether to include full spec details
 * `--api-endpoint`: Data about an inference endpoint. (JSON string)
-* `--backend-format <CHOICE>`: Inference backend API wire formats understood by IGW and middleware plugins. [possible values: OPENAI_CHAT, ANTHROPIC_MESSAGES]
+* `--backend-format <CHOICE>`: Inference backend API wire formats understood by IGW and middleware plugins. [possible values: OPENAI_CHAT, ANTHROPIC_MESSAGES, SYSTEMONE]
 * `--base-model`: Link to another model which is used as a base for the current model
 * `--custom-fields`: Custom fields for additional metadata (JSON string)
 * `--description`: Optional description of the model
@@ -5916,7 +5921,7 @@ nemo workspaces list [OPTIONS]
 - Object (JSON): `{"name":{"$like":"value"}}` with operators `$eq`, `$like`, `$lt`, `$lte`, `$gt`, `$gte`, `$in`, `$nin`, `$and`, `$or`, `$not`
 * `--page <INTEGER>`: Page number
 * `--page-size <INTEGER>`: Items per page
-* `--sort <CHOICE>`: Sort field [possible values: -created_at, created_at, -updated_at, updated_at, -name, name]
+* `--sort <CHOICE>`: Sort field [possible values: created_at, -created_at, updated_at, -updated_at, name, -name]
 * `--all-pages`: Fetch all pages
 
 **Help:**
@@ -6250,6 +6255,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List agent jobs (evaluations, executions, packaging),...
 * `evaluate`: Evaluate an agent workflow against a dataset as a...
 * `execute`: Execute an agent to completion as a scheduled platform job.
 * `package-agent`: Build a container image for an agent stored on the platform.
@@ -6283,6 +6289,7 @@ nemo agents optimize [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `run-strategy`: Optimize a platform agent with an installed optimization...
 
 ##### nemo agents optimize list-strategies
@@ -6340,6 +6347,45 @@ nemo agents optimize prepare-fileset [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
+##### nemo agents optimize list-jobs
+
+List this plugin's jobs, newest first. Job types: run-strategy.
+
+**Usage:**
+
+```shell
+nemo agents optimize list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: run-strategy. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
+
 ##### nemo agents optimize run-strategy
 
 Optimize a platform agent with an installed optimization strategy.
@@ -6372,6 +6418,7 @@ nemo agents optimize run-strategy [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RunStrategySubmitSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -7303,6 +7350,48 @@ nemo agents sessions close [OPTIONS] NAME
 
 * `--help, -h`: Show this message and exit.
 
+#### nemo agents list-jobs
+
+List agent jobs (evaluations, executions, packaging), newest first.
+
+`--agent` lists an agent's runs: `nemo agents list-jobs --agent calc`.
+
+**Usage:**
+
+```shell
+nemo agents list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, e.g. evaluate, execute or package-agent. Repeat for several. Default: all.
+* `--agent, -a AGENT`: Only list runs of this agent: NAME in the listing workspace, or WORKSPACE/NAME. Repeat for several. Lists execute jobs, the only jobs that record their agent. With `--workspace` -, use WORKSPACE/NAME.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
+
 #### nemo agents evaluate
 
 Evaluate an agent workflow against a dataset as a scheduled platform job.
@@ -7334,6 +7423,7 @@ nemo agents evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the EvaluateAgentSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -7398,6 +7488,7 @@ nemo agents execute [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the ExecuteAgentJobConfig Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -7467,6 +7558,7 @@ nemo agents package-agent [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the PackageAgentInput Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -7622,6 +7714,7 @@ nemo data-designer [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `create`: Generate a synthetic dataset
 * `retrieval-generate`: Generate retrieval Q&A JSONL from a document corpus...
 * `retrieval-prepare`: Convert retrieval SDG output to eval_beir and training...
@@ -7999,6 +8092,45 @@ Function Spec flags are generated from the RetrievalPreviewSpec Pydantic schema.
 Some spec fields cannot be represented as CLI flags: `generate.file_extensions`, `generate.bundle_strategy`, `generate.query_counts`, `generate.reasoning_counts`, `generate.resume`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
+#### nemo data-designer list-jobs
+
+List this plugin's jobs, newest first. Job types: create, retrieval-generate, retrieval-prepare, retrieval-run.
+
+**Usage:**
+
+```shell
+nemo data-designer list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: create, retrieval-generate, retrieval-prepare, retrieval-run. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
+
 #### nemo data-designer create
 
 Generate a synthetic dataset
@@ -8101,6 +8233,7 @@ nemo data-designer retrieval-generate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RetrievalGenerateJobConfig Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -8186,11 +8319,12 @@ nemo data-designer retrieval-prepare [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RetrievalPrepareJobConfig Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `split_strategy`, `attn_implementation`, `mining.hard_neg_margin_type`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `split_strategy`, `attn_implementation`, `tokenizer_backend`, `mining.hard_neg_margin_type`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**
@@ -8298,11 +8432,12 @@ nemo data-designer retrieval-run [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RetrievalRunJobConfig Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `generate.file_extensions`, `generate.bundle_strategy`, `generate.query_counts`, `generate.reasoning_counts`, `generate.resume`, `prepare.split_strategy`, `prepare.attn_implementation`, `prepare.mining.hard_neg_margin_type`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `generate.file_extensions`, `generate.bundle_strategy`, `generate.query_counts`, `generate.reasoning_counts`, `generate.resume`, `prepare.split_strategy`, `prepare.attn_implementation`, `prepare.tokenizer_backend`, `prepare.mining.hard_neg_margin_type`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**
@@ -8634,6 +8769,7 @@ nemo garak [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `audit`: Run a garak scan against a configured target.
 
 #### nemo garak info
@@ -8938,6 +9074,45 @@ nemo garak targets delete [OPTIONS] NAME
 
 * `--help, -h`: Show this message and exit.
 
+#### nemo garak list-jobs
+
+List this plugin's jobs, newest first. Job types: audit.
+
+**Usage:**
+
+```shell
+nemo garak list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: audit. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
+
 #### nemo garak audit
 
 Run a garak scan against a configured target.
@@ -8967,6 +9142,7 @@ nemo garak audit [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AuditInputSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -9020,6 +9196,7 @@ nemo anonymizer [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `run`: Anonymize a dataset of records
 
 #### nemo anonymizer validate
@@ -9089,6 +9266,45 @@ Function Spec flags are generated from the PreviewRequest Pydantic schema. Prece
 Some spec fields cannot be represented as CLI flags: `config.detect.entity_labels`, `config.detect.excluded_entity_labels`, `config.replace`, `model_configs`, `selected_models.detection`, `selected_models.replace`, `selected_models.rewrite`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
+#### nemo anonymizer list-jobs
+
+List this plugin's jobs, newest first. Job types: run.
+
+**Usage:**
+
+```shell
+nemo anonymizer list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: run. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
+
 #### nemo anonymizer run
 
 Anonymize a dataset of records
@@ -9131,6 +9347,7 @@ nemo anonymizer run [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AnonymizerRequest Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -9183,6 +9400,7 @@ nemo evals [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `agent-evaluate`: Run agent evaluation over tasks against a model, agent,...
 * `evaluate`: Run evals SDK metrics against inline rows or FilesetRef...
 * `retrieve-eval`: Evaluate dense retrieval over a BEIR corpus with nDCG,...
@@ -9404,7 +9622,7 @@ nemo evals runs submit [OPTIONS]
 * `--taskset`: Stored taskset, workspace/name#digest (from `nemo evals tasksets create`): uploads no tasks and requests no image builds; submit refuses a task whose image isn't built.
 * `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless `--taskset`, `--harbor-dir`, `--harbor-hub` or `--harbor-git` supplies the tasks.
 * `--intake-dataset`: Intake label, NAME[@VERSION], shown as the dataset of the run's Evaluation; doesn't select tasks. With `--taskset` and `--experiment` only; `tasksets create` prints it. `--harbor-hub` and `--harbor-git` set it themselves.
-* `--tasks`: Indexes or names, comma-separated; default all.
+* `--tasks`: Zero-based indexes, inclusive ranges, or names, comma-separated (e.g. 0-4,7,anko-example); default all.
 * `--agent`: Harbor built-in agent (without `--spec-file`). [default: oracle]
 * `--sandbox-profile`: Operator sandbox profile; default: the operator's (without `--spec-file`).
 * `--dispatcher-profile`: Jobs profile for task Jobs.
@@ -9456,7 +9674,7 @@ nemo evals tasksets create [OPTIONS]
 * `--harbor-dir <PATH>`: Local Harbor dataset directory.
 * `--harbor-hub`: Harbor Hub dataset, org/name@ref.
 * `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: `<url>@<ref>` reads `tasks/` at that ref. For another directory, use a GitHub tree URL: `https://github.com/<org>/<repo>/tree/<ref>/<dir>`.
-* `--tasks`: Indexes or names, comma-separated; default all.
+* `--tasks`: Zero-based indexes, inclusive ranges, or names, comma-separated (e.g. 0-4,7,anko-example); default all.
 * `--list-tasks`: Print the selectable tasks and exit.
 * `--workspace`: Workspace for the tasks and the taskset; default: the configured workspace.
 * `--json`: Print the taskset as JSON.
@@ -9488,6 +9706,45 @@ nemo evals tasksets build-images [OPTIONS] REF
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+#### nemo evals list-jobs
+
+List this plugin's jobs, newest first. Job types: agent-evaluate, evaluate, retrieve-eval.
+
+**Usage:**
+
+```shell
+nemo evals list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: agent-evaluate, evaluate, retrieve-eval. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 #### nemo evals agent-evaluate
 
@@ -9523,11 +9780,12 @@ nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AgentEvalInputSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `target`, `trials`, `labels`, `tasks`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `target`, `trials`, `labels`, `result_ignore_patterns`, `tasks`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**
@@ -9586,6 +9844,7 @@ nemo evals evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the EvaluateInputSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -9643,6 +9902,7 @@ nemo evals retrieve-eval [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RetrieveEvalInputSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -9707,6 +9967,7 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `automodel.jobs`: Automodel SFT, retrieval, and knowledge-distillation...
 * `rl.jobs`: NeMo-RL DPO and GRPO training jobs on the platform...
 * `unsloth.jobs`: Unsloth SFT (LoRA / full / merged) training jobs on the...
@@ -10126,6 +10387,45 @@ nemo customization unsloth explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
+#### nemo customization list-jobs
+
+List this plugin's jobs, newest first. Job types: automodel.jobs, rl.jobs, unsloth.jobs.
+
+**Usage:**
+
+```shell
+nemo customization list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: automodel.jobs, rl.jobs, unsloth.jobs. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
+
 #### nemo customization automodel.jobs
 
 Automodel SFT, retrieval, and knowledge-distillation training jobs.
@@ -10167,17 +10467,19 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--training.retrieval.passage-max-length <INTEGER>`: Override `training.retrieval.passage_max_length` in the spec.
 * `--training.retrieval.query-prefix`: Literal prefix prepended to each query. Empty string disables prefixing.
 * `--training.retrieval.passage-prefix`: Literal prefix prepended to each passage. Empty string disables prefixing.
+* `--training.retrieval.temperature <FLOAT>`: Softmax temperature of the training loss: contrastive for bi_encoder, listwise for cross_encoder. Omit for 0.02 (bi_encoder) or 1.0 (cross_encoder). A Qwen3 causal reranker scores with raw yes/no logits, so this is its only temperature setting.
 * `--training.retrieval.export.opset <INTEGER>`: Override `training.retrieval.export.opset` in the spec.
 * `--training.retrieval.export.normalize`: L2-normalize embeddings. Ignored for cross_encoder.
 * `--training.retrieval.export.dimensions`: Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.
 * `--training.activation-checkpointing`: Recompute intermediate activations in the backward pass instead of storing them. Substantially lowers memory use for a modest slowdown, and is commonly enabled when training large MoE models.
 * `--training.mtp.num-nextn-predict-layers <INTEGER>`: How many tokens ahead to predict. Omit to keep the checkpoint's own value.
-* `--training.mtp.use-repeated-layer`: Share one weight-tied layer across the prediction depths. Only some Automodel models accept it (Nemotron-H in r0.6.0); omit it for others.
+* `--training.mtp.use-repeated-layer`: Share one weight-tied layer across the prediction depths. Only some Automodel models accept it (Nemotron-H in r0.7.0); omit it for others.
 * `--training.mtp.loss-scaling-factor <FLOAT>`: Weight of the MTP loss term relative to the main loss. Omit to keep the model's default (0.1).
-* `--training.backend.rope-fusion`: Fuse the rotary embedding into the attention kernel.
+* `--training.backend.rope-fusion`: Fuse the rotary embedding into the attention kernel. Automodel v0.7.0 turns this off for every model, so true has no effect.
 * `--training.backend.fake-balanced-gate`: Route tokens evenly across experts instead of using the trained router. Benchmarking aid.
 * `--training.backend.enable-hf-state-dict-adapter`: Save and load checkpoints in HuggingFace layout. Needed when the trained model is consumed by HuggingFace tooling.
 * `--training.backend.enable-fsdp-optimizations`: Enable Automodel's additional FSDP2 sharding optimizations.
+* `--training.mask-generation-prompt`: Leave out of the loss the tokens the chat template writes before each assistant reply: the role header and any empty reasoning block such as '&lt;think>&lt;/think>'. The model never generates them. Chat-format (messages) datasets only.
 * `--schedule.epochs <INTEGER>`: Override `schedule.epochs` in the spec.
 * `--schedule.max-steps <INTEGER>`: Override `schedule.max_steps` in the spec.
 * `--schedule.val-check-interval <FLOAT>`: Override `schedule.val_check_interval` in the spec.
@@ -10232,11 +10534,12 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `training.backend.attn`, `training.backend.linear`, `training.backend.rms_norm`, `training.backend.rope`, `training.backend.experts`, `training.backend.dispatcher`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `parallelism.pipeline.round_virtual_stages_to_pp_multiple`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `training.backend.attn`, `training.backend.linear`, `training.backend.rms_norm`, `training.backend.rope`, `training.backend.experts`, `training.backend.dispatcher`, `training.tokenizer_backend`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `parallelism.pipeline.round_virtual_stages_to_pp_multiple`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**
@@ -10304,6 +10607,7 @@ nemo customization rl.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RlJobInput Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -10412,6 +10716,7 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the UnslothJobInput Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
@@ -10696,7 +11001,47 @@ nemo safe-synthesizer [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
+* `list-jobs`: List this plugin's jobs, newest first.
 * `generate`: Generate synthetic data using Safe Synthesizer.
+
+#### nemo safe-synthesizer list-jobs
+
+List this plugin's jobs, newest first. Job types: generate.
+
+**Usage:**
+
+```shell
+nemo safe-synthesizer list-jobs [OPTIONS]
+```
+
+**Options:**
+
+* `--type, -t TYPE`: Only list jobs of this type, one of: generate. Repeat for several. Default: all.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
+* `--page-size <INTEGER RANGE>`: Number of jobs per page.
+
+**Filter Options:**
+
+* `--filter FILTER_JSON`: Filter as a JSON object (e.g. '`{"name": {"$like": "nightly"}}`') or a filter expression. The field options below are merged into a JSON filter and take precedence.
+* `--filter.name`
+* `--filter.project`
+* `--filter.status`: Only jobs in this status (e.g. active, completed). Repeat for several.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 #### nemo safe-synthesizer generate
 
@@ -10729,6 +11074,10 @@ nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 * `--config.evaluation.enabled`: Enable or disable evaluation.
 * `--config.evaluation.quasi-identifier-count <INTEGER>`: Number of quasi-identifiers to sample for privacy attacks.
 * `--config.evaluation.pii-replay-enabled`: Enable PII Replay detection.
+* `--config.evaluation.time-series.enabled`: Enable time-series evaluation metrics. Defaults to None, which follows time_series.is_timeseries. True requires top-level time-series mode.
+* `--config.evaluation.time-series.autocorrelation.max-lag <INTEGER>`: Maximum requested lag; short sequences use a smaller stable lag cap. Scores computed with different lag horizons are not directly comparable.
+* `--config.evaluation.time-series.autocorrelation.min-points <INTEGER>`: Minimum finite observations required in each sequence.
+* `--config.evaluation.time-series.autocorrelation.max-groups <INTEGER>`: Maximum shared groups to evaluate using a reproducible sample to bound runtime.
 * `--config.training.num-input-records-to-sample <INTEGER>`: Number of records the model will see during training. This parameter is a proxy for training time. For example, if its value is the same size as the input dataset, this is like training for a single epoch. If its value is larger, this is like training for multiple (possibly fractional) epochs. If its value is smaller, this is like training for a fraction of an epoch. Supports 'auto' where a reasonable value is chosen based on other config params and data. This flag accepts the integer form only; use `--spec` or `--spec-file` for the other union form(s).
 * `--config.training.batch-size <INTEGER>`: The batch size per device for training. Must be >= 1.
 * `--config.training.gradient-accumulation-steps <INTEGER>`: Number of update steps to accumulate the gradients for, before performing a backward/update pass. This technique increases the effective batch size that will fit into GPU memory. Must be >= 1.
@@ -10801,11 +11150,12 @@ nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the SafeSynthesizerJobConfig Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `config.data.max_sequences_per_example (other union forms)`, `config.evaluation.mia_excluded_columns`, `config.evaluation.pii_replay_entities`, `config.evaluation.pii_replay_columns`, `config.training.num_input_records_to_sample (other union forms)`, `config.training.learning_rate (other union forms)`, `config.training.lora_target_modules`, `config.training.rope_scaling_factor (other union forms)`, `config.training.quantization_bits`, `config.generation.structured_generation.backend`, `config.generation.structured_generation.schema_method`, `config.privacy.delta (other union forms)`, `config.time_series.start_timestamp`, `config.time_series.stop_timestamp`, `config.replace_pii.globals.locales`, `config.replace_pii.globals.classify.entities`, `config.replace_pii.globals.ner.ner_entities`, `config.replace_pii.globals.lock_columns`, `config.replace_pii.steps`, `config.preflight.disabled_checks`, `config.unknown_fields`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `config.data.max_sequences_per_example (other union forms)`, `config.evaluation.mia_excluded_columns`, `config.evaluation.pii_replay_entities`, `config.evaluation.pii_replay_columns`, `config.evaluation.time_series.autocorrelation.value_columns`, `config.training.num_input_records_to_sample (other union forms)`, `config.training.learning_rate (other union forms)`, `config.training.lora_target_modules`, `config.training.rope_scaling_factor (other union forms)`, `config.training.quantization_bits`, `config.generation.structured_generation.backend`, `config.generation.structured_generation.schema_method`, `config.privacy.delta (other union forms)`, `config.time_series.start_timestamp`, `config.time_series.stop_timestamp`, `config.replace_pii.globals.locales`, `config.replace_pii.globals.classify.entities`, `config.replace_pii.globals.ner.ner_entities`, `config.replace_pii.globals.lock_columns`, `config.replace_pii.steps`, `config.preflight.disabled_checks`, `config.unknown_fields`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**

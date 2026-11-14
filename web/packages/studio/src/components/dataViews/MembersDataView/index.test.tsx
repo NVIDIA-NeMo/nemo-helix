@@ -6,15 +6,17 @@ import { MembersDataView } from '@studio/components/dataViews/MembersDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
 import { XL_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
+import { menuFor } from '@studio/tests/util/menuFor';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter } from 'react-router';
 
 const workspace = 'default';
 const MEMBERS_URL = `${PLATFORM_BASE_URL}/apis/entities/v2/workspaces/:workspace/members`;
 
-const renderComponent = () =>
+const renderComponent = ({ onRemoveMember = vi.fn() } = {}) =>
   render(
     <MemoryRouter>
       {/* Retry without the exponential backoff, so the retry assertions below stay fast. */}
@@ -25,7 +27,7 @@ const renderComponent = () =>
           workspace={workspace}
           onAddMember={vi.fn()}
           onEditMember={vi.fn()}
-          onRemoveMember={vi.fn()}
+          onRemoveMember={onRemoveMember}
         />
       </TestProviders>
     </MemoryRouter>
@@ -44,6 +46,40 @@ const mockForbiddenList = () => {
 };
 
 describe('MembersDataView', () => {
+  it('shows Edit Role and Remove, with Remove styled as danger', async () => {
+    const user = userEvent.setup();
+    const onRemoveMember = vi.fn();
+    server.use(
+      http.get(MEMBERS_URL, () =>
+        HttpResponse.json({
+          data: [{ principal: 'alice@example.com', roles: ['Editor'] }],
+          pagination: {
+            page: 1,
+            page_size: 50,
+            current_page_size: 1,
+            total_pages: 1,
+            total_results: 1,
+          },
+        })
+      )
+    );
+    renderComponent({ onRemoveMember });
+
+    await screen.findByText('alice@example.com', undefined, { timeout: XL_SELECTOR_TIMEOUT });
+    const trigger = screen.getByRole('button', { name: 'Open quick actions menu' });
+    await user.click(trigger);
+
+    const menu = menuFor(trigger);
+    const items = within(menu).getAllByTestId('quick-actions-menu-item');
+    expect(items.map((item) => item.textContent)).toEqual(['Edit Role', 'Remove']);
+    expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
+
+    await user.click(within(menu).getByRole('menuitem', { name: 'Remove' }));
+    expect(onRemoveMember).toHaveBeenCalledWith(
+      expect.objectContaining({ principal: 'alice@example.com' })
+    );
+  });
+
   describe('Forbidden', () => {
     it('explains the missing permission instead of showing a generic error', async () => {
       mockForbiddenList();

@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, overload
 
 from nemo_evals.api.schemas import TasksetRef
-from nemo_evals.jobs.agent_spec import GymPlacement
+from nemo_evals.jobs.agent_spec import FilesetTaskSource, GymPlacement
 from nemo_evals.sdk._executor import (
     SubmitTargetSpec,
     _AsyncEvaluatorPluginExecutor,
@@ -38,6 +38,10 @@ from nemo_evals.sdk.task_resources import (
 from nemo_evals.sdk.taskset_resources import (
     AsyncEvaluatorTasksetsResource,
     EvaluatorTasksetsResource,
+)
+from nemo_evals.sdk.taskset_run_resources import (
+    AsyncEvaluatorTasksetRunsResource,
+    EvaluatorTasksetRunsResource,
 )
 from nemo_evals.sdk.types import (
     PluginDatasetInput,
@@ -76,6 +80,7 @@ class Evaluator:
         self.eval_results = EvaluatorEvalResultsResource(self._client)
         self.tasks = EvaluatorTasksResource(self._client)
         self.tasksets = EvaluatorTasksetsResource(self._client)
+        self.taskset_runs = EvaluatorTasksetRunsResource(self._client)
 
     @classmethod
     def from_client(cls, client: NemoClient) -> Evaluator:
@@ -138,9 +143,9 @@ class Evaluator:
     def submit(
         self,
         *,
-        tasks: TasksetRef,
+        tasks: TasksetRef | FilesetTaskSource,
         target: GymAgentTaskRunner,
-        placement: GymPlacement,
+        placement: GymPlacement | None = None,
     ) -> AgentEvaluatorJobResource: ...
 
     @overload
@@ -164,7 +169,7 @@ class Evaluator:
         *,
         metric: Metric | None = None,
         dataset: PluginDatasetInput | None = None,
-        tasks: TasksetRef | None = None,
+        tasks: TasksetRef | FilesetTaskSource | None = None,
         trials: list[AgentEvalTrial] | None = None,
         config: RunConfig | RunConfigOnline | RunConfigOnlineModel | None = None,
         target: SubmitTargetSpec | AgentTaskRunner | None = None,
@@ -176,8 +181,10 @@ class Evaluator:
         """Submit an evaluation job through the evals plugin executor.
 
         Two shapes, discriminated by what you supply: ``metric`` + ``dataset`` evaluates rows, and
-        ``tasks`` with either ``target`` or ``trials`` evaluates a stored taskset. Supply a live
-        runner as ``target`` or saved trials for offline rescoring. They are one
+        ``tasks`` with either ``target`` or ``trials`` evaluates tasks. ``tasks`` is a stored
+        taskset, or a :class:`FilesetTaskSource` that converts a Gym dataset file at submission and
+        needs a ``GymAgentTaskRunner`` target. Supply a live runner as ``target``, or saved trials
+        for offline rescoring of a stored taskset. They are one
         method because they are one concept — the split is a property of how the work is described
         today, not of what the caller is asking for.
 
@@ -270,6 +277,7 @@ class AsyncEvaluator:
         self.eval_results = AsyncEvaluatorEvalResultsResource(self._client)
         self.tasks = AsyncEvaluatorTasksResource(self._client)
         self.tasksets = AsyncEvaluatorTasksetsResource(self._client)
+        self.taskset_runs = AsyncEvaluatorTasksetRunsResource(self._client)
 
     @classmethod
     def from_client(cls, async_client: AsyncNemoClient) -> AsyncEvaluator:
@@ -334,9 +342,9 @@ class AsyncEvaluator:
     async def submit(
         self,
         *,
-        tasks: TasksetRef,
+        tasks: TasksetRef | FilesetTaskSource,
         target: GymAgentTaskRunner,
-        placement: GymPlacement,
+        placement: GymPlacement | None = None,
     ) -> AsyncAgentEvaluatorJobResource: ...
 
     @overload
@@ -360,7 +368,7 @@ class AsyncEvaluator:
         *,
         metric: Metric | None = None,
         dataset: PluginDatasetInput | None = None,
-        tasks: TasksetRef | None = None,
+        tasks: TasksetRef | FilesetTaskSource | None = None,
         trials: list[AgentEvalTrial] | None = None,
         config: RunConfig | RunConfigOnline | RunConfigOnlineModel | None = None,
         target: SubmitTargetSpec | AgentTaskRunner | None = None,
@@ -373,8 +381,9 @@ class AsyncEvaluator:
 
         The async counterpart of :meth:`Evaluator.submit`, with the same two shapes and the same
         argument rules: ``metric`` + ``dataset`` evaluates rows, and ``tasks`` with either
-        ``target`` (a live agent runner) or ``trials`` (saved trials, rescored offline) evaluates a
-        stored taskset. ``placement`` says where the platform runs that runner.
+        ``target`` (a live agent runner) or ``trials`` (saved trials, rescored offline) evaluates
+        tasks. ``tasks`` is a stored taskset, or a :class:`FilesetTaskSource`, which needs a
+        ``GymAgentTaskRunner`` target. ``placement`` says where the platform runs that runner.
         """
         if tasks is not None:
             if metric is not None or dataset is not None:

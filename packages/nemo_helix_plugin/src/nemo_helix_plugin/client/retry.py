@@ -10,8 +10,8 @@ retries on its own, under these same rules.
 
 from __future__ import annotations
 
-import email.utils
 from datetime import timezone
+from email.utils import parsedate_to_datetime
 from time import time as wall_time
 
 import httpx
@@ -44,12 +44,15 @@ def is_retryable(
 ) -> bool:
     """Whether ``policy`` allows another attempt after ``failure``.
 
-    Transport failures are always retryable. Whether the body can be sent again is
-    the caller's concern; see :func:`body_was_sent`. ``exist_ok`` marks a 409 as an
+    A transport failure is retryable unless the policy sets
+    ``resend_after_body_sent=False`` and the body may have been sent (see
+    :func:`body_was_sent`); a failure before any body byte was sent is always
+    retryable. Whether a one-shot body can be sent again is still the caller's
+    concern. ``exist_ok`` marks a 409 as an
     expected outcome the caller resolves, so it is not retried.
     """
     if isinstance(failure, httpx.TransportError):
-        return True
+        return policy.resend_after_body_sent or not body_was_sent(failure)
     status = failure.status_code
     if status == 409 and exist_ok:
         return False
@@ -87,7 +90,7 @@ def _retry_after(response: httpx.Response) -> float | None:
             # Retry-After may instead be an RFC 5322 / HTTP-date, e.g.
             # "Fri, 31 Dec 2027 23:59:59 GMT"; convert that to a delta.
             try:
-                retry_date = email.utils.parsedate_to_datetime(retry_after)
+                retry_date = parsedate_to_datetime(retry_after)
             except (TypeError, ValueError, OverflowError):
                 return None
             if retry_date.tzinfo is None:

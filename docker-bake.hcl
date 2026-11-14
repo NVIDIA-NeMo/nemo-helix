@@ -134,7 +134,7 @@ variable "NEMO_RL_REPO" {
 # RL pins Gym as a git submodule (-> soluwalana/Gym over https), so Gym rides in with the RL git ADD
 # - no separate Gym pin needed.
 variable "NEMO_RL_REF" {
-  default = "b19dd076dc81b41033bcdb60d0a019cbb813537e" # soluwalana/RL nhx/rl-20261101
+  default = "f34b91df909e4d9f8fa2faec66ce95fb746a07fa" # soluwalana/RL nhx/rl-20261110
 }
 variable "RL_BASE_CONTEXT" {
   default = ""
@@ -142,7 +142,7 @@ variable "RL_BASE_CONTEXT" {
 
 # The tag for base images if needed
 variable "WHEELS_TAG" {
-  default = "3c0a56ca13e155e72e1bc3f3808caf915c13ea28"
+  default = "254fde5799bd4b9eee56ee5c6a298c0ec648e76b"
 }
 
 variable "BAKE_CACHE_SOURCE_BRANCH" {
@@ -383,6 +383,7 @@ group "docker-cpu" {
     "nhx-agent-hardener-tasks-docker",
     "nhx-builder-tasks-docker",
     "nhx-kaniko-docker",
+    "nhx-agent-installer-docker",
   ]
 }
 
@@ -400,6 +401,8 @@ group "docker-cpu-ci" {
     "nhx-builder-tasks-smoke-test",
     "nhx-kaniko-docker",
     "nhx-kaniko-smoke-test",
+    "nhx-agent-installer-docker",
+    "nhx-agent-installer-smoke-test",
   ]
 }
 
@@ -1016,6 +1019,39 @@ target "nhx-kaniko-smoke-test" {
   platforms  = get_platforms()
 }
 
+# The self-contained agent installer an agent layer's build mounts (nemo-evals agent layers).
+target "nhx-agent-installer-docker" {
+  target     = "runtime"
+  context    = "."
+  dockerfile = "docker/Dockerfile.nhx-agent-installer"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+  }
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
+  cache-to   = maybe_registry_cache_to("nhx-agent-installer")
+  cache-from = maybe_registry_cache_from("nhx-agent-installer")
+  tags       = sha_and_maybe_latest_tags("nhx-agent-installer")
+  output     = image_output()
+  platforms  = get_platforms()
+}
+
+target "nhx-agent-installer-smoke-test" {
+  target     = "smoke-test"
+  context    = "."
+  dockerfile = "docker/Dockerfile.nhx-agent-installer"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+  }
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
+  cache-from = maybe_registry_cache_from("nhx-agent-installer")
+  output     = ["type=cacheonly"]
+  platforms  = get_platforms()
+}
+
 # Python wheel builders (causal-conv1d, mamba-ssm, magi-attention, av, opencv-python-headless).
 # CUDA extensions only ship source on PyPI (or git); av/opencv bundle FFmpeg. Pre-built for
 # amd64 and arm64. Wheels live at /wheels/*.whl inside each image.
@@ -1095,6 +1131,9 @@ target "nhx-safe-synthesizer-tasks-docker" {
   target     = "runtime"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-safe-synthesizer-tasks"
+  contexts = {
+    nhx-jobs-launcher = "target:nhx-jobs-launcher"
+  }
   args = {
     CONTAINER_VARIANT    = "${SAFE_SYNTHESIZER_CONTAINER_VARIANT}"
     NHX_COLLECT_SOURCES  = NHX_COLLECT_SOURCES
@@ -1112,6 +1151,9 @@ target "nhx-safe-synthesizer-tasks-smoke-test" {
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-safe-synthesizer-tasks"
+  contexts = {
+    nhx-jobs-launcher = "target:nhx-jobs-launcher"
+  }
   args = {
     CONTAINER_VARIANT    = "${SAFE_SYNTHESIZER_CONTAINER_VARIANT}"
     NHX_COLLECT_SOURCES  = NHX_COLLECT_SOURCES

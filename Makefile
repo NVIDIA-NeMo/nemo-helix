@@ -273,7 +273,7 @@ FLOX_EXEC :=
 else
 $(error TOOLCHAIN must be either flox or system)
 endif
-UV := $(FLOX_EXEC) uv
+UV := "$(CURDIR)/script/uv"
 ifeq ($(TOOLCHAIN),flox)
 FLOX_NODE_EXEC := $(FLOX_QUIET) activate --dir "$(CURDIR)/tools/nodejs" --
 PNPM := $(FLOX_NODE_EXEC) pnpm
@@ -442,10 +442,12 @@ PYTEST_CMD = env PYTHONWARNINGS="ignore::UserWarning:pytest_only.version" $(UV) 
 	--max-worker-restart=$(PYTEST_MAX_WORKER_RESTART) \
 	--dist $(PYTEST_DIST) --timeout=120 $(PYTEST_VERBOSITY) $(PYTEST_EXTRA)
 
-PYTEST_CI_OPTS := --cov=src --cov=packages \
-	--junitxml=report.xml \
+# PYTEST_COVERAGE=false skips coverage on CI legs whose reports nothing reads.
+PYTEST_COV_OPTS := $(if $(filter false,$(PYTEST_COVERAGE)),,--cov=src --cov=packages \
 	--cov-report json:coverage.json \
-	--cov-report xml:coverage.xml \
+	--cov-report xml:coverage.xml)
+PYTEST_CI_OPTS := $(PYTEST_COV_OPTS) \
+	--junitxml=report.xml \
 	--durations=25 \
 	-p no:faulthandler
 

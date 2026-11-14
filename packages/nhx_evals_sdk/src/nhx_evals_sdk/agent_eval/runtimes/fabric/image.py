@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from subprocess import run
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ def image_exists(tag: str, *, docker_bin: str = "docker") -> bool:
     that then also fails confusingly.
     """
     try:
-        result = subprocess.run(
+        result = run(
             [docker_bin, "image", "inspect", tag], capture_output=True, check=False, timeout=_INSPECT_TIMEOUT_S
         )
     except subprocess.TimeoutExpired as exc:
@@ -133,7 +134,7 @@ def ensure_fabric_image(*, docker_bin: str = "docker", force_build: bool = False
         shutil.copy2(_DOCKERFILE, ctx / "Dockerfile")
         (ctx / "requirements.txt").write_text("\n".join(_requirements(version)) + "\n", encoding="utf-8")
         try:
-            subprocess.run(
+            run(
                 [docker_bin, "build", "-t", tag, str(ctx)],
                 check=True,
                 env={**os.environ, "DOCKER_BUILDKIT": "1"},

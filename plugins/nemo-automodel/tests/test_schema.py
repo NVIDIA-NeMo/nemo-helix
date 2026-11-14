@@ -9,6 +9,7 @@ from nemo_automodel_plugin.schema import (
     AUTOMODEL_LEARNING_RATE_DEFAULTS,
     AutomodelJobInput,
     AutomodelJobOutput,
+    BackendSpec,
     DeploymentParams,
     ExportSpec,
 )
@@ -432,8 +433,12 @@ def test_backend_rejects_an_unknown_kernel() -> None:
     [{"attn": "cudnn"}, {"dispatcher": "mok"}],
     ids=["attn-cudnn", "dispatcher-mok"],
 )
-def test_backend_rejects_kernels_the_pinned_automodel_lacks(backend: dict[str, str]) -> None:
-    """Automodel r0.6.0 has neither; it would fall back or fail inside the training container."""
+def test_backend_rejects_kernels_the_training_image_cannot_run(backend: dict[str, str]) -> None:
+    """Automodel 0.7.0 has both, but neither runs in a Customizer job.
+
+    'mok' needs the mixture-of-kittens extra, which the nhx-automodel image does not install.
+    'cudnn' attention exists only for a few sparse-attention models (GLM DSA, Qwen3.8 Flash-Next).
+    """
     with pytest.raises(ValidationError, match="backend"):
         AutomodelJobInput.model_validate(
             {
@@ -441,6 +446,27 @@ def test_backend_rejects_kernels_the_pinned_automodel_lacks(backend: dict[str, s
                 "dataset": {"training": "default/train"},
                 "training": {"finetuning_type": "lora", "backend": backend},
             }
+        )
+
+
+def test_backend_rope_fusion_defaults_off_and_accepts_a_stored_null() -> None:
+    """Automodel v0.7.0 forces it off; specs stored before the default changed carry null."""
+    assert BackendSpec().rope_fusion is False
+    assert BackendSpec.model_validate({"rope_fusion": None}).rope_fusion is None
+
+
+@pytest.mark.parametrize(
+    ("training", "match"),
+    [
+        ({"tokenizer_backend": "huggingface"}, "tokenizer_backend"),
+        ({"recipe": "cross_encoder", "finetuning_type": "all_weights", "retrieval": {"temperature": 0}}, "temperature"),
+    ],
+    ids=["unknown-tokenizer-backend", "zero-temperature"],
+)
+def test_new_training_fields_fail_at_submit(training: dict[str, object], match: str) -> None:
+    with pytest.raises(ValidationError, match=match):
+        AutomodelJobInput.model_validate(
+            {"model": "qwen", "dataset": {"training": "default/train"}, "training": training}
         )
 
 

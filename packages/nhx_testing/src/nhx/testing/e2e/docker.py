@@ -26,7 +26,7 @@ from nhx.common.docker.gpu_detection import detect_gpu_device_ids
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.network import Network
 
-import docker
+from docker import from_env as docker_from_env
 
 from .base import E2EBackend
 
@@ -37,7 +37,9 @@ logger = logging.getLogger(__name__)
 
 CONTAINER_PORT = 8080
 HEALTH_ENDPOINT = "/health/ready"
-STARTUP_TIMEOUT_SECONDS = 60
+# Cold all-service auth containers can spend most of a minute importing plugins
+# before the API starts; leave time for controller and policy readiness as well.
+STARTUP_TIMEOUT_SECONDS = 180
 NHX_API_NETWORK_ALIAS = "nhx-quickstart"
 NHX_API_CONTAINER_NAME_PREFIX = "nhx-api-test"
 CLICKHOUSE_CONTAINER_PORT = 8123
@@ -89,7 +91,7 @@ def _create_test_network(network: Network) -> None:
         if os.environ.get("GITHUB_ACTIONS") != "true" or "all predefined address pools" not in str(exc):
             raise
         logger.warning("Docker address pools exhausted; pruning unused testcontainers networks older than 24h")
-        client = docker.from_env()
+        client = docker_from_env()
         try:
             result = client.networks.prune(
                 filters={"label": ["org.testcontainers=true", "org.testcontainers.lang=python"], "until": "24h"}
@@ -432,15 +434,15 @@ class Docker(E2EBackend):
 
         logger.info(f"Waiting for health check at: {health_url}")
 
-        start_time = time.time()
+        start_time = time.monotonic()
         last_error: Exception | None = None
 
-        while (time.time() - start_time) < STARTUP_TIMEOUT_SECONDS:
+        while (time.monotonic() - start_time) < STARTUP_TIMEOUT_SECONDS:
             try:
                 response = httpx.get(health_url, timeout=5.0)
                 if response.status_code == 200:
                     return
-                last_error = Exception(f"Health check returned status {response.status_code}")
+                last_error = Exception(f"Health check returned status {response.status_code}: {response.text[:2000]}")
             except httpx.RequestError as e:
                 last_error = e
 

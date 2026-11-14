@@ -978,7 +978,7 @@ class TestPutPipelineSentinelsCancellation:
         fake_task = mocker.Mock()
         fake_task.cancelling.return_value = 1
         mocker.patch(
-            "nhx_evals_sdk.execution.benchmark_execution.asyncio.current_task",
+            "nhx_evals_sdk.execution.benchmark_execution.current_task",
             return_value=fake_task,
         )
 

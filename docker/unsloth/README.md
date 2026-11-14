@@ -48,7 +48,7 @@ docker buildx bake \
 > **Prebuilt wheels (local builds).** The image installs `mamba-ssm` +
 > `causal-conv1d` from the shared `causal-conv1d-wheel` / `mamba-ssm-wheel`
 > bake contexts, using the `cu13.4` wheels built on NGC PyTorch 26.09
-> (automodel keeps the `cu13.3` wheels in the same images). A **local** bake must
+> (automodel and Customizer tasks install the same `cu13.4` builds). A **local** bake must
 > build those wheels first — prepend `USE_LOCAL_WHEELS=1` (or point
 > `WHEELS_REGISTRY`/`WHEELS_TAG` at prebuilt wheels), otherwise bake tries to
 > pull `${WHEELS_REGISTRY}/causal-conv1d-wheel:${WHEELS_TAG}` and fails. To
@@ -197,9 +197,9 @@ unsloth:
 
 ```bash
 # 0.5B Qwen — fast enough for a smoke test on a single GPU.
-nemo files filesets create base-qwen-05b -w default
+nemo files filesets create base-qwen-05b --workspace default
 # Push your model weights (or use an existing entity that already points at a fileset).
-nemo files upload <path-to-qwen-checkpoint> --fileset default/base-qwen-05b -w default
+nemo files upload <path-to-qwen-checkpoint> --fileset default/base-qwen-05b --workspace default
 
 nemo models create base-qwen-05b \
   -w default \
@@ -207,8 +207,8 @@ nemo models create base-qwen-05b \
   --finetuning_type all_weights
 
 # Tiny chat dataset.
-nemo files filesets create unsloth-smoke-dataset -w default
-nemo files upload ./smoke-dataset.jsonl --fileset default/unsloth-smoke-dataset -w default
+nemo files filesets create unsloth-smoke-dataset --workspace default
+nemo files upload ./smoke-dataset.jsonl --fileset default/unsloth-smoke-dataset --workspace default
 ```
 
 ### 4. Write a smoke job
@@ -275,16 +275,16 @@ else
 fi
 
 # Tail the status — should go PENDING → ACTIVE → COMPLETED across the four steps.
-nemo jobs status "$JOB_ID" -w default
+nemo jobs status "$JOB_ID" --workspace default
 
 # Stream logs from each step.
-nemo jobs logs "$JOB_ID" -w default --step model-and-dataset-download --follow
-nemo jobs logs "$JOB_ID" -w default --step training --follow
-nemo jobs logs "$JOB_ID" -w default --step model-upload --follow
-nemo jobs logs "$JOB_ID" -w default --step model-entity-creation --follow
+nemo jobs logs "$JOB_ID" --workspace default --step model-and-dataset-download --follow
+nemo jobs logs "$JOB_ID" --workspace default --step training --follow
+nemo jobs logs "$JOB_ID" --workspace default --step model-upload --follow
+nemo jobs logs "$JOB_ID" --workspace default --step model-entity-creation --follow
 
 # Verify the output entity (adapter, since save_method=lora).
-nemo models adapters list -w default --model_name base-qwen-05b
+nemo models adapters list --workspace default --model_name base-qwen-05b
 nemo models adapters retrieve qwen-unsloth-smoke-out \
   --model_name base-qwen-05b -w default
 ```
@@ -306,8 +306,8 @@ nemo models adapters retrieve qwen-unsloth-smoke-out \
 
 ```bash
 # Remove the smoke adapter + fileset.
-nemo models adapters delete qwen-unsloth-smoke-out --model_name base-qwen-05b -w default
-nemo files filesets delete qwen-unsloth-smoke-out -w default
+nemo models adapters delete qwen-unsloth-smoke-out --model_name base-qwen-05b --workspace default
+nemo files filesets delete qwen-unsloth-smoke-out --workspace default
 ```
 
 ---

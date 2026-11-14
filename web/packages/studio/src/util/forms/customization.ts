@@ -2,19 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { generateDefaultName } from '@nemo/common/src/utils/generateDefaultName';
-import {
-  type AutomodelJobInput,
-  type AutomodelJobsJobRequest,
-  RlGRPOTrainingFinetuningType,
-  type RlDPOTraining,
-  type RlGRPOTraining,
-  type RlJobInput,
-  type RlJobsJobRequest,
-  type UnslothJobInput,
-  type IntegrationsSpec,
-  type UnslothJobsJobRequest,
-  type CustomizationJobTemplate,
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
+import type {
+  AutomodelJobInput,
+  AutomodelJobsJobRequest,
+  RlDPOTraining,
+  RlGRPOTraining,
+  RlJobInput,
+  RlJobsJobRequest,
+  UnslothJobInput,
+  IntegrationsSpec,
+  UnslothJobsJobRequest,
+  CustomizationJobTemplate,
 } from '@nemo/sdk/generated/customizer/schema';
+import { RlGRPOTrainingFinetuningType } from '@nemo/sdk/generated/customizer/schema/RlGRPOTrainingFinetuningType';
 import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customizer/zod/automodel-jobs';
 import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod/rl-jobs';
 import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customizer/zod/unsloth-jobs';
@@ -623,15 +624,12 @@ export interface ReplayableJob {
   backend?: CustomizationBackend;
 }
 
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 /** `value` restricted to the keys `known` also has, so nothing is added, only dropped. */
 const keepKnownKeys = (value: unknown, known: unknown): unknown => {
   if (Array.isArray(value) && Array.isArray(known)) {
     return value.map((item, i) => keepKnownKeys(item, known[i]));
   }
-  if (!isPlainRecord(value) || !isPlainRecord(known)) return value;
+  if (!isPlainObject(value) || !isPlainObject(known)) return value;
   return Object.fromEntries(
     Object.entries(value)
       .filter(([key]) => key in known)
@@ -673,7 +671,7 @@ const keepSchemaKeys = (value: unknown, schema: z.ZodTypeAny): unknown => {
       ? value.map((item) => keepSchemaKeys(item, inner.element))
       : value;
   }
-  if (!isPlainRecord(value)) return value;
+  if (!isPlainObject(value)) return value;
   const object = inner instanceof z.ZodUnion ? matchingUnionOption(inner, value) : inner;
   if (!(object instanceof z.ZodObject)) return value;
   const shape = object.shape as z.ZodRawShape;

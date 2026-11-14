@@ -14,7 +14,9 @@ import { http, HttpResponse } from 'msw';
 // Mock the modal components (presentation-only — no data layer)
 vi.mock('@studio/components/DatasetCreateModal', () => ({
   DatasetCreateModal: vi.fn(({ open, onClose, onDatasetUpdated, dataset }) => {
-    if (!open) return null;
+    if (!open) {
+      return null;
+    }
     return (
       <div data-testid="dataset-create-modal">
         <div>Edit Dataset Modal</div>
@@ -34,19 +36,22 @@ vi.mock('@studio/components/DatasetCreateModal', () => ({
 }));
 
 vi.mock('@nemo/common/src/components/DeleteConfirmationModal', () => ({
-  DeleteConfirmationModal: vi.fn(({ open, onClose, onDelete, title }) => {
-    if (!open) return null;
+  DeleteConfirmationModal: vi.fn(({ open, onClose, onDelete }) => {
+    if (!open) {
+      return null;
+    }
     return (
       <div data-testid="delete-confirmation-modal">
         <div>Delete Confirmation Modal</div>
-        <div>{title}</div>
         <button onClick={onClose} data-testid="modal-close">
           Cancel
         </button>
         <button
           onClick={async () => {
             const result = await onDelete();
-            if (result) onClose();
+            if (result) {
+              onClose();
+            }
           }}
           data-testid="modal-delete"
         >
@@ -103,32 +108,49 @@ describe('ActionMenu', () => {
       expect(triggerButton).toBeInTheDocument();
     });
 
-    it('shows dropdown menu when trigger is clicked', async () => {
+    it('shows the actions with Delete last and styled as danger', async () => {
       const user = userEvent.setup();
       render(<ActionMenu {...defaultProps} />);
 
-      const triggerButton = screen.getByRole('button', { name: /open dataset actions menu/i });
-      await user.click(triggerButton);
+      await user.click(screen.getByRole('button', { name: /open dataset actions menu/i }));
 
-      expect(screen.getByText('View')).toBeInTheDocument();
-      expect(screen.getByText('Edit')).toBeInTheDocument();
-      expect(screen.getByText('Delete')).toBeInTheDocument();
+      const items = screen.getAllByTestId('quick-actions-menu-item');
+      expect(items.map((item) => item.textContent)).toEqual([
+        'View',
+        'Edit',
+        'Copy to New Fileset',
+        'Delete',
+      ]);
+      expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
+      expect(items[0]).not.toHaveClass('nv-menu-item--danger');
+    });
+  });
+
+  describe('Copy to New Fileset', () => {
+    it('opens the copy modal for local filesets', async () => {
+      const user = userEvent.setup();
+      render(<ActionMenu {...defaultProps} />);
+
+      await user.click(screen.getByRole('button', { name: /open dataset actions menu/i }));
+      await user.click(screen.getByText('Copy to New Fileset'));
+
+      expect(screen.getByText(/creates a new local fileset/i)).toBeInTheDocument();
     });
 
-    it('displays correct icons in dropdown items', async () => {
+    it('opens the copy modal for external filesets', async () => {
       const user = userEvent.setup();
-      render(<ActionMenu {...defaultProps} />);
+      const external = {
+        ...mockDataset,
+        storage: { type: 's3', bucket: 'b' },
+      } as Dataset;
+      render(<ActionMenu {...defaultProps} dataset={external} />);
 
-      const triggerButton = screen.getByRole('button', { name: /open dataset actions menu/i });
-      await user.click(triggerButton);
+      await user.click(screen.getByRole('button', { name: /open dataset actions menu/i }));
+      await user.click(screen.getByText('Copy to New Fileset'));
 
-      const viewItem = screen.getByText('View');
-      const editItem = screen.getByText('Edit');
-      const deleteItem = screen.getByText('Delete');
-
-      expect(viewItem).toBeInTheDocument();
-      expect(editItem).toBeInTheDocument();
-      expect(deleteItem).toBeInTheDocument();
+      expect(screen.getByText(`Copy Fileset: ${mockDataset.name}`)).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: /name/i })).toHaveValue('test-dataset-copy');
+      expect(screen.getByText(/so you can edit, upload, and delete files/i)).toBeInTheDocument();
     });
   });
 
@@ -173,7 +195,23 @@ describe('ActionMenu', () => {
 
       expect(screen.getByTestId('delete-confirmation-modal')).toBeInTheDocument();
       expect(screen.getByText('Delete Confirmation Modal')).toBeInTheDocument();
-      expect(screen.getByText(`Delete Dataset: ${mockDataset.name}`)).toBeInTheDocument();
+      expect(vi.mocked(DeleteConfirmationModal).mock.calls.at(-1)?.[0]).toMatchObject({
+        entity: 'dataset',
+        ids: [mockDataset.name],
+      });
+    });
+
+    it('names the row with entityLabel in the menu and delete copy', async () => {
+      const user = userEvent.setup();
+      render(<ActionMenu {...defaultProps} entityLabel="Fileset" />);
+
+      await user.click(screen.getByRole('button', { name: 'Open fileset actions menu' }));
+      await user.click(screen.getByText('Delete'));
+
+      expect(vi.mocked(DeleteConfirmationModal).mock.calls.at(-1)?.[0]).toMatchObject({
+        entity: 'fileset',
+        ids: [mockDataset.name],
+      });
     });
 
     it('surfaces the backend message when the fileset is in use', async () => {

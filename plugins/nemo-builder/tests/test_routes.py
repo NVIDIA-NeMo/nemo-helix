@@ -186,7 +186,12 @@ class TestComplete:
         entities.update.assert_awaited_once()
 
     def test_how_the_image_starts_is_recorded_with_it(self) -> None:
-        runtime_config = {"entrypoint": ["/bin/bash", "-l", "-c"], "cmd": ["/app/run.sh"], "working_dir": "/app"}
+        runtime_config = {
+            "entrypoint": ["/bin/bash", "-l", "-c"],
+            "cmd": ["/app/run.sh"],
+            "working_dir": "/app",
+            "user": "agent",
+        }
         response, _ = self._post(_row(), body={"digest": DIGEST, "runtime_config": runtime_config})
         assert response.status_code == 200
         assert response.json()["runtime_config"] == runtime_config

@@ -11,7 +11,7 @@ import logging
 import sys
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -21,7 +21,14 @@ from typing import Annotated, Any
 from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
-from nemo_agents_plugin.fabric.environment import release_runtime_base_dir, resolve_runtime_base_dir
+from nemo_agents_plugin.fabric.environment import (
+    prepare_deepagents_skills,
+    prepare_deepagents_workspace_baseline,
+    release_runtime_base_dir,
+    remove_deepagents_workspace,
+    resolve_runtime_base_dir,
+)
+from nemo_agents_plugin.fabric.mcp_status import McpServerStatus, McpStatusCache, McpStatusResponse
 from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
     FabricRuntimeExecutionError,
@@ -50,8 +57,9 @@ from nemo_agents_plugin.fabric.streaming import (
     iter_fabric_chat_completion_sse,
     openai_chat_completion_error_sse,
 )
-from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER, session_id_to_uuid
 from starlette.types import Receive, Scope, Send
+from uvicorn import run
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +97,17 @@ def _to_fabric_invocation_request(
         else "\n\n".join(f"{message.role}: {message.content}" for message in messages)
     )
     caller_context = {"session_id": session_id} if session_id is not None else {}
+    relay_session_root = None
+    if session_id is not None:
+        try:
+            relay_session_root = session_id_to_uuid(session_id)
+        except ValueError:
+            with suppress(ValueError):
+                relay_session_root = str(uuid.UUID(session_id))
     return FabricInvocationRequest(
         input=input_text,
         caller_context=caller_context,
+        relay_session_root=relay_session_root,
     )
 
 
@@ -325,10 +341,17 @@ def create_fabric_serving_app(
         agent_config = load_agent_config(config_path)
         runtime_base_dir = await asyncio.to_thread(resolve_runtime_base_dir, config_path)
         base_dir = runtime_base_dir.path
-        # Startup can still fail past this point, and a staged root must not outlive
-        # the process that made it even when the runtime never comes up.
+        workspace_baseline: Path | None = None
+        skills_snapshot: Path | None = None
+        # Release staged inputs after startup failures as well as normal shutdown.
         try:
             validation_result = await _validate_agent_config(agent_config, base_dir=base_dir)
+            workspace_baseline = await asyncio.to_thread(prepare_deepagents_workspace_baseline, agent_config, base_dir)
+            if workspace_baseline is not None:
+                skills_snapshot = await asyncio.to_thread(
+                    prepare_deepagents_skills, agent_config, base_dir, workspace_baseline
+                )
+            app.state.workspace_baseline = workspace_baseline
             app.state.agent_config = agent_config
             app.state.base_dir = base_dir
             app.state.validation_result = validation_result
@@ -338,6 +361,8 @@ def create_fabric_serving_app(
                 agent_config,
                 base_dir=base_dir,
                 session_registry=session_registry,
+                workspace_baseline=app.state.workspace_baseline,
+                skills_snapshot=skills_snapshot,
                 max_concurrent_invocations=settings.max_concurrent_invocations,
             )
             app.state.session_manager = session_manager
@@ -361,7 +386,9 @@ def create_fabric_serving_app(
                     # A staged root is only safe to remove once no runtime can still write to it.
                     await session_manager.close_all_sessions()
         finally:
-            await asyncio.to_thread(release_runtime_base_dir, runtime_base_dir)
+            if skills_snapshot is not None:
+                await asyncio.to_thread(remove_deepagents_workspace, skills_snapshot)
+            await asyncio.to_thread(release_runtime_base_dir, runtime_base_dir, workspace_baseline=workspace_baseline)
 
     app = FastAPI(title="NeMo Agents Fabric Server", lifespan=lifespan)
     runtime_instance_id = str(uuid.uuid4())
@@ -374,6 +401,19 @@ def create_fabric_serving_app(
             "runtime_instance_id": runtime_instance_id,
             "runtime_started_at": runtime_started_at.isoformat(),
         }
+
+    mcp_status_cache = McpStatusCache()
+
+    @app.get("/v1/mcp/servers")
+    async def list_mcp_servers() -> McpStatusResponse:
+        return await mcp_status_cache.get(app.state.agent_config)
+
+    @app.get("/v1/mcp/servers/{name}")
+    async def get_mcp_server(name: str) -> McpServerStatus:
+        status = await mcp_status_cache.get_server(app.state.agent_config, name)
+        if status is None:
+            raise HTTPException(status_code=404, detail=f"MCP server '{name}' is not declared by this agent.")
+        return status
 
     @app.post("/v1/chat/completions", response_model=None, response_model_exclude_none=True)
     async def chat_completions(
@@ -513,10 +553,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    import uvicorn
-
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run(
+    run(
         create_fabric_serving_app(
             args.agent_config,
             settings=FabricServingSettings(

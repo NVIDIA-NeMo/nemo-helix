@@ -23,6 +23,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+import sandboxed_gym.orchestrator as orchestrator_module
 from sandboxed_gym.config import BrokerEndpoint
 from sandboxed_gym.host.models import GymHostHandle
 from sandboxed_gym.orchestrator import RolloutTransportError, SandboxedGymSession
@@ -95,7 +96,7 @@ def test_list_entries_reads_the_host_entries_route(monkeypatch: pytest.MonkeyPat
         captured["timeout"] = timeout
         return _Response()
 
-    monkeypatch.setattr(urllib.request, "urlopen", _open)
+    monkeypatch.setattr(orchestrator_module, "urlopen", _open)
 
     entries = _session().list_entries()
 
@@ -121,7 +122,7 @@ def test_list_entries_keeps_a_proxy_path_prefix(monkeypatch: pytest.MonkeyPatch)
         del timeout
         return _Response()
 
-    monkeypatch.setattr(urllib.request, "urlopen", _open)
+    monkeypatch.setattr(orchestrator_module, "urlopen", _open)
     session = _session()
     session.host = GymHostHandle(
         host_id="h1",
@@ -253,7 +254,7 @@ def test_a_host_error_is_attributed_to_the_sandbox_and_not_retried(
         attempts += 1
         raise _http_error(500, {"error": {"code": "internal", "message": "env exploded"}})
 
-    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(orchestrator_module, "urlopen", _urlopen)
 
     with pytest.raises(RolloutTransportError) as excinfo:
         _session().run_rollouts([{"id": 1}])
@@ -272,7 +273,7 @@ def test_a_transport_failure_reaching_no_host_is_retried(monkeypatch: pytest.Mon
         attempts += 1
         raise urllib.error.URLError("connection refused")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(orchestrator_module, "urlopen", _urlopen)
 
     with pytest.raises(RolloutTransportError) as excinfo:
         _session(rollout_max_attempts=2).run_rollouts([{"id": 1}])
@@ -426,7 +427,7 @@ def test_a_body_that_dies_mid_read_is_not_retried(monkeypatch: pytest.MonkeyPatc
         attempts += 1
         return _DyingResponse()
 
-    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(orchestrator_module, "urlopen", _urlopen)
 
     with pytest.raises(RolloutTransportError) as excinfo:
         _session(rollout_max_attempts=3).run_rollouts([{"id": 1}])
@@ -449,7 +450,7 @@ def test_a_connection_that_never_landed_is_still_retried(monkeypatch: pytest.Mon
         attempts += 1
         raise urllib.error.URLError("connection refused")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(orchestrator_module, "urlopen", _urlopen)
 
     with pytest.raises(RolloutTransportError):
         _session(rollout_max_attempts=2).run_rollouts([{"id": 1}])
@@ -539,19 +540,41 @@ def test_a_non_utf8_body_is_a_contract_failure_not_a_decode_crash() -> None:
     assert "not UTF-8" in str(excinfo.value)
 
 
+_DIGIT_LIMIT_BODY = b"1" * 5000
+_DEEPLY_NESTED_BODY = b"[" * 100_000 + b"]" * 100_000
+
+
+def _json_refuses(body: bytes) -> bool:
+    try:
+        json.loads(body)
+    except (ValueError, RecursionError):
+        return True
+    return False
+
+
 def test_a_json_refusal_that_is_not_a_decode_error_is_a_contract_failure() -> None:
     """``json`` has refusals that are not ``JSONDecodeError``, and they escape a narrow catch.
 
-    Both bodies below are well within ``max_response_bytes``, so nothing upstream stops them.
+    The body is well within ``max_response_bytes``, so nothing upstream stops it.
     """
-    session = _session()
+    with pytest.raises(RolloutTransportError) as excinfo:
+        _session()._decode_results(_DIGIT_LIMIT_BODY)
 
-    for payload in (b"1" * 5000, b"[" * 100_000 + b"]" * 100_000):
-        with pytest.raises(RolloutTransportError) as excinfo:
-            session._decode_results(payload)
+    assert excinfo.value.origin == "sandbox"
+    assert not excinfo.value.retryable
 
-        assert excinfo.value.origin == "sandbox"
-        assert not excinfo.value.retryable
+
+@pytest.mark.skipif(
+    not _json_refuses(_DEEPLY_NESTED_BODY),
+    reason="this interpreter parses the nesting: Python 3.14 bounds recursion by stack size, not depth",
+)
+def test_json_refusing_deep_nesting_is_a_contract_failure() -> None:
+    """Where ``json`` raises ``RecursionError`` on deep nesting, it is classified like a decode error."""
+    with pytest.raises(RolloutTransportError) as excinfo:
+        _session()._decode_results(_DEEPLY_NESTED_BODY)
+
+    assert excinfo.value.origin == "sandbox"
+    assert not excinfo.value.retryable
 
 
 def test_a_non_list_results_field_is_a_contract_failure() -> None:

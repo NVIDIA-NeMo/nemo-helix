@@ -43,6 +43,7 @@ import logging
 import os
 import re
 import shlex
+import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Generator, Iterator, Mapping
@@ -51,8 +52,9 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from pkgutil import resolve_name
+from subprocess import run as run_command
 from time import monotonic, sleep
-from typing import Any, ClassVar, Optional, TypeVar, cast
+from typing import Annotated, Any, ClassVar, Optional, TypeVar, cast
 
 import click
 import httpx
@@ -75,6 +77,7 @@ from nemo_agents_plugin.entities import (
     ethos_fileset_name,
     supports_image_entrypoint,
 )
+from nemo_agents_plugin.sdk import agent_refs_filter
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
 from nemo_helix_ext.cli.chat_tui import ExitAction, StreamingResponse, run_chat_tui
@@ -99,7 +102,22 @@ from nemo_helix_plugin.agents.types import (
 from nemo_helix_plugin.cli import NemoCLI
 from nemo_helix_plugin.cli_codegen import handle_code_generation
 from nemo_helix_plugin.cli_confirm import confirm_destructive
+from nemo_helix_plugin.cli_error_handling import handle_errors
 from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
+from nemo_helix_plugin.cli_list_jobs import (
+    LIST_JOBS_COMMAND,
+    JobFilterNameOption,
+    JobFilterOption,
+    JobFilterProjectOption,
+    JobFilterStatusOption,
+    JobSortOption,
+    PageOption,
+    PageSizeOption,
+    build_job_filter,
+    resolve_job_types,
+    run_list_jobs,
+    select_job_types,
+)
 from nemo_helix_plugin.cli_options import (
     AllPagesOption,
     EntityOutputFormat,
@@ -310,6 +328,7 @@ class AgentsCLI(NemoCLI):
         _register_platform_commands(app)
         _register_environment_commands(app)
         _register_post_run_action_commands(app)
+        _register_job_commands(app)
         return app
 
 
@@ -409,8 +428,6 @@ def _register_local_commands(app: typer.Typer) -> None:
         port: int = typer.Option(8080, "--port", "-p"),
     ) -> None:
         """Run an agent locally as a persistent FastAPI server."""
-        import subprocess
-
         config = _load_yaml(agent_config)
         if not isinstance(config, dict):
             typer.echo(f"Error: agent config {agent_config} root must be a YAML mapping.", err=True)
@@ -437,7 +454,7 @@ def _register_local_commands(app: typer.Typer) -> None:
 
         typer.echo(f"Starting agent server: {' '.join(cmd)}")
         try:
-            subprocess.run(cmd, check=True, cwd=agent_config.parent)
+            run_command(cmd, check=True, cwd=agent_config.parent)
         except subprocess.CalledProcessError as exc:
             typer.echo(f"Agent server exited with code {exc.returncode}.", err=True)
             raise typer.Exit(code=exc.returncode)
@@ -1921,6 +1938,86 @@ def _register_post_run_action_commands(app: typer.Typer) -> None:
         )
 
 
+#: The agents job type whose jobs record the agent they ran, in ``spec.agent_ref``.
+_EXECUTE_JOB_TYPE = "execute"
+
+
+def _register_job_commands(app: typer.Typer) -> None:
+    """Register ``list-jobs``, replacing the generated one to add ``--agent``."""
+
+    @app.command(name=LIST_JOBS_COMMAND, rich_help_panel="Jobs")
+    @collect_warnings
+    @handle_errors
+    def list_jobs(
+        ctx: typer.Context,
+        job_type: Annotated[
+            list[str] | None,
+            typer.Option(
+                "--type",
+                "-t",
+                metavar="TYPE",
+                help="Only list jobs of this type, e.g. evaluate, execute or package-agent. Repeat for several. "
+                "Default: all.",
+            ),
+        ] = None,
+        agent: Annotated[
+            list[str] | None,
+            typer.Option(
+                "--agent",
+                "-a",
+                metavar="AGENT",
+                help="Only list runs of this agent: NAME in the listing workspace, or WORKSPACE/NAME. Repeat for "
+                "several. Lists execute jobs, the only jobs that record their agent. With --workspace -, "
+                "use WORKSPACE/NAME.",
+            ),
+        ] = None,
+        workspace: WorkspaceOption = None,
+        filter_json: JobFilterOption = None,
+        filter_name: JobFilterNameOption = None,
+        filter_project: JobFilterProjectOption = None,
+        filter_status: JobFilterStatusOption = None,
+        sort: JobSortOption = None,
+        page: PageOption = None,
+        page_size: PageSizeOption = None,
+        all_pages: AllPagesOption = False,
+        output_format: ListOutputFormatOption = None,
+        no_truncate: NoTruncateOption = None,
+        columns: OutputColumnsOption = None,
+    ) -> None:
+        """List agent jobs (evaluations, executions, packaging), newest first.
+
+        `--agent` lists an agent's runs: `nemo agents list-jobs --agent calc`.
+        """
+        collections = select_job_types(resolve_job_types(["agents"]), job_type)
+        agent_filter: dict[str, object] | None = None
+        if agent:
+            if any(collection.name != _EXECUTE_JOB_TYPE for collection in collections) and job_type:
+                raise click.BadParameter(
+                    f"only {_EXECUTE_JOB_TYPE} jobs record their agent; use --type {_EXECUTE_JOB_TYPE} or drop --type.",
+                    param_hint="'--agent'",
+                )
+            collections = [c for c in collections if c.name == _EXECUTE_JOB_TYPE]
+            try:
+                agent_filter = agent_refs_filter(agent, workspace=resolve_cli_workspace(ctx, workspace))
+            except ValueError as exc:
+                raise click.BadParameter(str(exc), param_hint="'--agent'") from exc
+        run_list_jobs(
+            ctx,
+            collections,
+            workspace=workspace,
+            query_filter=build_job_filter(
+                filter_json, name=filter_name, project=filter_project, status=filter_status, extra=agent_filter
+            ),
+            sort=sort,
+            page=page,
+            page_size=page_size,
+            all_pages=all_pages,
+            output_format=output_format,
+            no_truncate=no_truncate,
+            columns=columns,
+        )
+
+
 def _register_environment_commands(app: typer.Typer) -> None:
     """Register ``environment-specs``, ``environments``, and ``compute-specs`` sub-groups.
 
@@ -2416,8 +2513,6 @@ def _local_invoke(
     ``nemo-agents-spec-v1`` configs translate to an in-memory ``FabricConfig``
     and use Fabric's one-shot runtime lifecycle.
     """
-    import subprocess
-
     from nemo_agents_plugin.utils import temp_injected_config
 
     if input_file:
@@ -2443,7 +2538,7 @@ def _local_invoke(
         for query in queries:
             cmd = ["nat", "run", "--config_file", injected_path.name, "--input", query]
             try:
-                subprocess.run(cmd, check=True, cwd=injected_path.parent)
+                run_command(cmd, check=True, cwd=injected_path.parent)
             except subprocess.CalledProcessError as exc:
                 typer.echo(f"Error: nat run exited with code {exc.returncode}.", err=True)
                 raise typer.Exit(code=exc.returncode)
@@ -2765,7 +2860,7 @@ def _create_session_for_deployment(
         ),
     )
     try:
-        session_id = response["id"]
+        session_id = response.get("session_uuid") or response["id"]
         if not isinstance(session_id, str) or not session_id:
             raise ValueError
         created_session = AgentSession.model_validate(response)
@@ -2789,7 +2884,7 @@ def _resolve_existing_session(
         lambda: _json_from_response(client.get_session(workspace=workspace, name=session_name)),
     )
     try:
-        session_id = response["id"]
+        session_id = response.get("session_uuid") or response["id"]
         if not isinstance(session_id, str) or not session_id:
             raise ValueError
         resolved_session = AgentSession.model_validate(response)
@@ -3352,7 +3447,9 @@ def _upload_ethos_fileset(
     fileset = ethos_fileset_name(agent_name)
     sdk = shared_cli_client(NemoClient)
     with tempfile.TemporaryDirectory(prefix=f".{agent_name}-ethos-upload-") as directory:
-        staged = Path(directory) / agent_root.name
+        # The upload uses directory contents, not its basename. A fixed child
+        # also keeps relative roots like '.' and '..' inside the temp directory.
+        staged = Path(directory) / "agent"
         staged.mkdir()
         for relative_path, content in artifacts:
             destination = staged / relative_path

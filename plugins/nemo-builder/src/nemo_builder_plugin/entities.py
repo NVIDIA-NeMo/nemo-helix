@@ -21,6 +21,9 @@ from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN
 from pydantic import BaseModel, Field, computed_field
 
+#: The entity store filters JSON integers as int64, so a larger revision would be stored but never found.
+MAX_REVISION = 2**63 - 1
+
 
 class UpstreamImage(BaseModel):
     """The published image a copy came from, resolved when the build was submitted."""
@@ -38,7 +41,7 @@ class Provenance(BaseModel):
     """The build that produces the image, written at submit."""
 
     build_set: str = Field(description="The `BuildSet.name` this row came from.")
-    revision: int = Field(ge=1, description="The `BuildSet.revision` this row came from.")
+    revision: int = Field(ge=1, le=MAX_REVISION, description="The `BuildSet.revision` this row came from.")
     spec: str | None = Field(
         default=None, description="The `BuildSpec.name` this row came from, or None for the set's unnamed spec."
     )
@@ -69,6 +72,14 @@ class ImageRuntimeConfig(BaseModel):
     )
     working_dir: str | None = Field(
         default=None, max_length=4096, description="The image's `WORKDIR`, or None when it sets none."
+    )
+    user: str | None = Field(
+        default=None,
+        max_length=256,
+        description=(
+            "The image's `USER`, as `name`, `uid` or either with `:group`; an empty string when it sets none, so it "
+            "runs as root. None when Builder didn't record it, as for an image it built before it started to."
+        ),
     )
 
 

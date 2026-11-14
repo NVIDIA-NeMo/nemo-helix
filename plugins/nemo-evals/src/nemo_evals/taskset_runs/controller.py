@@ -45,13 +45,19 @@ from typing import ClassVar, Protocol
 
 import httpx
 from filesets import AsyncFilesetFileSystem, parse_fileset_ref
+from nemo_evals.agent_layers.models import AgentLayerEntity
+from nemo_evals.agent_layers.run_agents import setup_network_is_public
+from nemo_evals.agent_layers.service import expired, newest_layer
+from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
 from nemo_evals.jobs.agent_evaluate import DEFAULT_RESULT_NAME, SUMMARY_FILE_NAME
+from nemo_evals.jobs.agent_spec import HarborRunnerTarget
 from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.jobs.result_persistence import agent_eval_result_entity
 from nemo_evals.jobs.run_outcome import PUBLICATION_STATUS_KEY
 from nemo_evals.jobs.taskset_bundle import BUNDLE_JOB_SOURCE, TasksetBundleJob
+from nemo_evals.revisions import RevisionNotFoundError
 from nemo_evals.taskset_runs.entities import (
     SETTLED_MEMBER_PHASES,
     MemberPhase,
@@ -70,11 +76,13 @@ from nemo_evals.taskset_runs.store import PlanDigestMismatchError, TasksetRunSto
 from nemo_evals.taskset_runs.task_jobs import (
     Registration,
     adoption,
+    member_environment,
     past_grace,
     register_member,
     runs_request,
     task_job_request,
 )
+from nemo_evals.taskset_runs.trials import TrialCounts, count_trials, reported_trials
 from nemo_helix_plugin.auth import RuntimePrincipal
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError, NotFoundError
@@ -304,6 +312,31 @@ class MemberListingIncompleteError(RuntimeError):
     """A member create found its name taken: the run's listing missed a member, so its held count is unknown."""
 
 
+#: Agent layer reads a run's settle sends at once.
+_LAYER_READS = 8
+
+#: A task revision's newest agent layer for an install key: ``(task entity name, revision digest, key)``.
+AgentLayerLookup = Callable[[str, str, str], Awaitable["AgentLayerEntity | None"]]
+
+
+def _task_revision(plan: TasksetRunPlan, index: int) -> tuple[str, str] | None:
+    """Task ``index``'s ``(entity name, revision digest)``, the revision its agent layer belongs to; None for a task
+    that has none: one that isn't stored, or one whose setup network isn't public, which a layer may not serve even
+    when one was built for its revision before that rule."""
+    spec = plan.spec.tasks[index].spec
+    provenance = spec.provenance
+    if provenance is None or not isinstance(spec, ResolvedHarborTaskDefinition):
+        return None
+    if not setup_network_is_public(spec.config):
+        return None
+    return (provenance.entity_name, provenance.revision_digest)
+
+
+def _waiting(member: TasksetRunMemberEntity) -> bool:
+    """Holds no Job and no slot: queued, or waiting for its agent layer."""
+    return member.phase is MemberPhase.IMAGE_PREPARING or is_queued(member)
+
+
 def _settled(member: TasksetRunMemberEntity) -> bool:
     return member.phase in SETTLED_MEMBER_PHASES
 
@@ -419,8 +452,10 @@ class TasksetRunReconciler:
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         stop_requested: Callable[[], bool] = lambda: False,
+        agent_layers: AgentLayerLookup | None = None,
     ) -> None:
         self.store = store
+        self._agent_layers = agent_layers
         self._jobs_for = jobs_for
         self.config = config
         self._clock = clock
@@ -534,6 +569,8 @@ class TasksetRunReconciler:
         state.plan, state.cap = plan, run_cap(plan, self.config)
         await self._ensure_members(state, plan)
         stop = stop_phase(run, now)
+        if stop is None:
+            await self._await_layers(state, plan, now)
         async with self._jobs_for(run.workspace, run) as inner:
             jobs = GuardedRunJobs(inner, breaker)
             await self._read_jobs(state, plan, jobs, breaker, now, stop)
@@ -548,20 +585,73 @@ class TasksetRunReconciler:
         state.no_grant = False
 
     async def _ensure_members(self, state: _RunState, plan: TasksetRunPlan) -> None:
-        """Create the run's missing members, queued in ``image_ready``; only when fewer than its tasks exist."""
+        """Create the run's missing members, only when fewer than its tasks exist: queued in ``image_ready``, or in
+        ``image_preparing`` when the run's tasks wait for agent layers."""
         if len(state.members) >= len(plan.spec.tasks):
             return
         have = {m.task_index for m in state.members}
+        phase = MemberPhase.IMAGE_PREPARING if plan.agent_layers is not None else MemberPhase.IMAGE_READY
         for index in range(len(plan.spec.tasks)):
             if index in have:
                 continue
-            created = await self.store.create_member(state.run, index)
+            created = await self.store.create_member(
+                state.run, index, plan.spec.tasks[index].id, planned_trials=_planned_trials(plan), phase=phase
+            )
             if created is None:
                 raise MemberListingIncompleteError(
                     f"run {state.run.name}: member task-{index} exists but wasn't listed"
                 )
             state.members.append(created)
         state.members.sort(key=lambda m: m.task_index)
+
+    async def _await_layers(self, state: _RunState, plan: TasksetRunPlan, now: datetime) -> None:
+        """Queue each member waiting for its agent layer once the layer is ready, failed, gone or overdue.
+
+        A ready, unexpired layer becomes the member's agent image; any other outcome queues the member on the plan's
+        image, so its trials install the agent in setup. Reads each task revision's layer once a cycle; a read that
+        fails leaves its members waiting until the next cycle, or until ``wait_until``.
+        """
+        waiting = [m for m in state.members if m.phase is MemberPhase.IMAGE_PREPARING]
+        if not waiting:
+            return
+        layers, lookup = plan.agent_layers, self._agent_layers
+        overdue = layers is None or now >= _utc(layers.wait_until)
+        revisions = {m.task_index: _task_revision(plan, m.task_index) for m in waiting}
+        read: dict[tuple[str, str], AgentLayerEntity | None | Exception] = {}
+        if layers is not None and lookup is not None:
+            limit = asyncio.Semaphore(_LAYER_READS)
+
+            async def fetch(revision: tuple[str, str]) -> None:
+                async with limit:
+                    try:
+                        read[revision] = await lookup(*revision, layers.key)
+                    except Exception as exc:
+                        read[revision] = exc
+
+            unique = dict.fromkeys(revision for revision in revisions.values() if revision is not None)
+            await asyncio.gather(*(fetch(revision) for revision in unique))
+        for member in waiting:
+            revision = revisions[member.task_index]
+            layer = read.get(revision) if revision is not None else None
+            if isinstance(layer, Exception):
+                logger.debug("Run %s: reading %s's agent layer failed: %s", state.run.name, member.name, layer)
+                if not overdue:
+                    continue
+                layer = None
+            if layer is not None and layer.status in ("pending", "running") and not overdue:
+                continue
+            image = None
+            if layer is not None and not expired(layer, now):
+                image = layer.agent_image(plan.task_environments[member.task_index].agent)
+            if image is None:
+                why = layer.error or layer.status if layer is not None else "no layer"
+                logger.info(
+                    "Run %s: %s runs without an agent layer (%s); its trials install the agent",
+                    state.run.name,
+                    member.name,
+                    f"overdue, {why}" if overdue else why,
+                )
+            state.replace(await self.store.update_member(member, phase=MemberPhase.IMAGE_READY, agent_layer=image))
 
     async def _read_jobs(
         self,
@@ -632,7 +722,7 @@ class TasksetRunReconciler:
         Returns the member as last written and, when it was adopted, the Job just read.
         """
         index = member.task_index
-        request = await task_job_request(plan, state.run, index, plan.task_environments[index])
+        request = await task_job_request(plan, state.run, index, member_environment(plan, member))
         assert request.name is not None
         try:
             found = await adoption(job, request, jobs) if job is not None else None
@@ -662,7 +752,7 @@ class TasksetRunReconciler:
         jobs: RunJobs,
         stop: TasksetRunPhase | None,
     ) -> None:
-        """P4: settle a registered member whose Job ended; record a changed ``job_status`` otherwise.
+        """P4: settle a registered member whose Job ended; record a changed ``job_status`` or trial counts otherwise.
 
         ``job`` is what the run's Jobs list read under the member's name (None: no Job there). Ours only when its
         id is ``member.job_id``: Jobs deletes only ended Jobs, so another id under the name means ours ended and
@@ -681,8 +771,9 @@ class TasksetRunReconciler:
             state.replace(await self.store.update_member(member, phase=phase, error="job_missing"))
         elif status not in TERMINAL_JOB_STATUSES:
             state.matched.add(member.name)
-            if job.status != member.job_status:
-                state.replace(await self.store.update_member(member, job_status=job.status))
+            counts = _trial_counts(job) or member.trial_counts
+            if job.status != member.job_status or counts != member.trial_counts:
+                state.replace(await self.store.update_member(member, job_status=job.status, trial_counts=counts))
         elif result is not None and result.job != member.job_id:
             # The name changed hands between the two reads; the next read sees the other id and settles it.
             logger.info("Run %s: Job %s was replaced before its result was read", state.run.name, member.task_job)
@@ -694,6 +785,7 @@ class TasksetRunReconciler:
                     bundle_ref=result.artifact_url,
                     job_status=job.status,
                     publication=_publication(job),
+                    trial_counts=_trial_counts(job) or member.trial_counts,
                 )
             )
         else:
@@ -707,6 +799,7 @@ class TasksetRunReconciler:
                     error=error,
                     job_status=job.status,
                     publication=_publication(job),
+                    trial_counts=_trial_counts(job) or member.trial_counts,
                 )
             )
 
@@ -726,7 +819,7 @@ class TasksetRunReconciler:
         forced = now >= _utc(state.run.finalization_deadline_at)
         reason = "run cancelled" if stop is TasksetRunPhase.CANCELLED else "execution deadline passed"
         for member in _rotated([m for m in state.members if not _settled(m)], self._cycle):
-            if is_queued(member):
+            if _waiting(member):
                 state.replace(await self.store.update_member(member, phase=phase, error=f"{reason}{NOT_STARTED}"))
             elif member.phase is MemberPhase.IMAGE_READY:  # an intent: its Job wasn't proven ours this pass
                 if member.name in state.missing and past_grace(member.create_sent_at, now, self.grace):
@@ -809,7 +902,7 @@ class TasksetRunReconciler:
         async with self._jobs_for(run.workspace, run) as inner:
             jobs = GuardedRunJobs(inner, breaker)
             for member in _rotated([m for m in state.members if not _settled(m)], self._cycle):
-                if is_queued(member):
+                if _waiting(member):
                     state.replace(await self.store.update_member(member, phase=phase, error=error))
                 elif member.phase is MemberPhase.IMAGE_READY:
                     logger.warning(
@@ -848,7 +941,12 @@ class TasksetRunReconciler:
                 ended = f"{error}; its Job ended {_status(job)}"
                 state.replace(
                     await self.store.update_member(
-                        member, phase=phase, error=ended, job_status=job.status, publication=_publication(job)
+                        member,
+                        phase=phase,
+                        error=ended,
+                        job_status=job.status,
+                        publication=_publication(job),
+                        trial_counts=_trial_counts(job) or member.trial_counts,
                     )
                 )
                 return
@@ -1361,6 +1459,18 @@ def _publication(job: HelixJobResponse) -> PublicationOutcome | None:
         return None
 
 
+def _planned_trials(plan: TasksetRunPlan) -> int | None:
+    """Trials each task Job runs: one task, ``n_attempts`` times; None for a target that isn't a Harbor runner."""
+    target = plan.spec.target
+    return target.n_attempts if isinstance(target, HarborRunnerTarget) else None
+
+
+def _trial_counts(job: HelixJobResponse) -> TrialCounts | None:
+    """The Job's trials counted by phase, as it last reported them; None when it reported none we can read."""
+    trials = reported_trials(job.status_details)
+    return count_trials(trials) if trials else None
+
+
 class JobsServiceRunJobs:
     """:class:`RunJobs` over the platform: reads, cancels and records as the evals service; creates for the creator.
 
@@ -1511,7 +1621,18 @@ class EvaluatorRunController(NemoController):
         store = TasksetRunStore(
             AsyncEntitiesClient.from_client(self._service), AsyncFilesClient.from_client(self._service), retry=NO_RETRY
         )
-        self._reconciler = TasksetRunReconciler(store, self._jobs_for, self.config, stop_requested=self.stop_requested)
+        entities = EntityClient(AsyncEntitiesClient.from_client(self._service).with_retry(NO_RETRY))
+
+        async def agent_layer(task: str, revision: str, key: str) -> AgentLayerEntity | None:
+            workspace, _, name = task.partition("/")
+            try:
+                return await newest_layer(entities, workspace, name, revision, key)
+            except (NemoEntityNotFoundError, RevisionNotFoundError):
+                return None  # the task or revision is gone: its members run on the plan's image
+
+        self._reconciler = TasksetRunReconciler(
+            store, self._jobs_for, self.config, stop_requested=self.stop_requested, agent_layers=agent_layer
+        )
 
     async def on_shutdown(self) -> None:
         if self._service_context is not None:

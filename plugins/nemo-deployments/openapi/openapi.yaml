@@ -47,23 +47,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          default: 1
-          title: Page
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          default: 20
-          title: Page Size
       - name: sort
         in: query
         required: false
@@ -71,6 +54,27 @@ paths:
           type: string
           default: -created_at
           title: Sort
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Page size.
+          default: 20
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -187,23 +191,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          default: 1
-          title: Page
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          default: 20
-          title: Page Size
       - name: sort
         in: query
         required: false
@@ -219,6 +206,27 @@ paths:
           title: Status In
           type: string
         description: Comma-separated deployment statuses for bulk reconciler queries.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Page size.
+          default: 20
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -373,23 +381,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          default: 1
-          title: Page
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          default: 20
-          title: Page Size
       - name: sort
         in: query
         required: false
@@ -397,6 +388,27 @@ paths:
           type: string
           default: -created_at
           title: Sort
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Page size.
+          default: 20
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -718,6 +730,14 @@ components:
           title: Labels
         backendConfig:
           $ref: '#/components/schemas/DeploymentBackendConfig'
+        shmSize:
+          title: Shmsize
+          description: Size of /dev/shm in the main containers (e.g. '32Gi'). Defaults
+            to 8Gi because the runtime default of 64Mi is too small for multi-process
+            workloads. Memory is used only as files are written. Null keeps the runtime
+            default.
+          default: 8Gi
+          type: string
         workloadIdentity:
           $ref: '#/components/schemas/WorkloadIdentitySpec'
       type: object
@@ -981,6 +1001,13 @@ components:
           title: Labels
         backendConfig:
           $ref: '#/components/schemas/DeploymentBackendConfig'
+        shmSize:
+          title: Shmsize
+          description: Size of /dev/shm in the main containers, as a Kubernetes quantity
+            (e.g. '32Gi'). Multi-process workloads such as multi-GPU inference servers
+            exchange data through it. New configs default to 8Gi; null keeps the runtime
+            default of 64Mi.
+          type: string
         authProxySidecar:
           type: boolean
           title: Authproxysidecar

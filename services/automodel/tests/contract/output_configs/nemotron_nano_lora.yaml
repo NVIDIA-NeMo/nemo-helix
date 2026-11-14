@@ -52,7 +52,6 @@ checkpoint:
   restore_from: LATEST
   save_consolidated: true
   dequantize_base_checkpoint: true
-  v4_compatible: false
 dataset:
   _target_: nemo_automodel.components.datasets.llm.column_mapped_text_instruction_dataset.ColumnMappedTextInstructionDataset
   path_or_dataset_id: ./sample-datasets/prompt_completion/training.jsonl

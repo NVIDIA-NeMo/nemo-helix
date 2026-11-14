@@ -96,7 +96,10 @@ async def test_service_bearer_requires_signed_creator_permission(
             auth,
             "oidc",
             OIDCConfig(
-                enabled=True, issuer="https://idp.example.test", workload=OIDCWorkloadConfig(client_id="driver-test")
+                enabled=True,
+                issuer="https://idp.example.test",
+                audience="driver-test-audience",
+                workload=OIDCWorkloadConfig(client_id="driver-test"),
             ),
         ),
     ):

@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useNavigate } from 'react-router';
 import type { Mock } from 'vitest';
-
-import { ErrorMessage } from '.';
 
 // Mock react-router
 vi.mock('react-router', async (importOriginal) => {

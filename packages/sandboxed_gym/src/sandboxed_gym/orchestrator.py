@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-import atexit
 import http.client
 import json
 import logging
@@ -16,10 +15,14 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from atexit import register as register_atexit
 from collections.abc import Callable, Coroutine, Mapping
+from os import kill
+from signal import signal as set_signal_handler
 from types import FrameType
 from typing import Any, Protocol, TypeVar
 from urllib.parse import urlparse, urlunsplit
+from urllib.request import urlopen
 
 import sandboxed_gym.job_reaper as job_reaper
 from sandboxed_gym.broker import EpisodeBrokerServer
@@ -370,7 +373,7 @@ class SandboxedGymSession:
         url = urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
         request = urllib.request.Request(url, method="GET", headers=dict(self.host.headers))
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urlopen(request, timeout=30) as response:
                 body = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -490,7 +493,7 @@ class SandboxedGymSession:
         )
         started = time.monotonic()
         try:
-            with urllib.request.urlopen(request, timeout=self._rollout_timeout_s) as response:
+            with urlopen(request, timeout=self._rollout_timeout_s) as response:
                 payload = response.read()
         except urllib.error.HTTPError as exc:
             raise self._transport_error(exc.read().decode("utf-8", errors="replace"), exc.code, chunk, started) from exc
@@ -683,13 +686,13 @@ def install_termination_cleanup(shutdown: Callable[[], object]) -> None:
     on ``atexit``.
     """
     _TERMINATION_SHUTDOWNS.append(shutdown)
-    atexit.register(shutdown)
+    register_atexit(shutdown)
 
     def _terminate(signum: int, _frame: FrameType | None) -> None:
         # Restored before the cleanup runs, not after: a second signal arriving mid-shutdown then
         # takes the default action and terminates, rather than re-entering this handler on top of
         # an in-flight destroy. Two SIGTERMs mean the sender wants the process gone.
-        signal.signal(signum, signal.SIG_DFL)
+        set_signal_handler(signum, signal.SIG_DFL)
         LOGGER.warning("received signal %s; destroying sandboxed Gym host before exit", signum)
         error: BaseException | None = None
         for hook in list(_TERMINATION_SHUTDOWNS):
@@ -706,11 +709,11 @@ def install_termination_cleanup(shutdown: Callable[[], object]) -> None:
         finally:
             # Re-raised even if cleanup failed, so the exit status still reports the signal --
             # swallowing it would make a cancelled job look like a clean stop.
-            os.kill(os.getpid(), signum)
+            kill(os.getpid(), signum)
 
     for signum in TERMINATION_SIGNALS:
         try:
-            signal.signal(signum, _terminate)
+            set_signal_handler(signum, _terminate)
         except ValueError:
             # Only the main thread may install handlers, and Ray does not promise to call an
             # actor method there. atexit still covers the ordinary exit.

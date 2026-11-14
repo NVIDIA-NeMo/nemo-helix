@@ -6,6 +6,7 @@
 import hashlib
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Literal, Self
 
 from nemo_evals.api.fields import TasksetRef
@@ -20,6 +21,9 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunPhase,
 )
 from nemo_evals.taskset_runs.progress import TasksetRunProgress
+from nemo_evals.taskset_runs.specs import TASK_BUNDLE_FILES
+from nemo_evals.taskset_runs.trials import TrialCounts, TrialProgress
+from nemo_helix_plugin.jobs.ignore_patterns import matches_ignore_patterns
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -206,6 +210,20 @@ class TasksetRunInput(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _require_aggregation_inputs(self) -> Self:
+        """Reject exclusions that prevent aggregation before scheduling task Jobs."""
+        excluded = [
+            name
+            for name in TASK_BUNDLE_FILES
+            if matches_ignore_patterns(Path(name), self.spec.result_ignore_patterns or [])
+        ]
+        if excluded:
+            raise ValueError(
+                "spec.result_ignore_patterns excludes required Kubernetes aggregation inputs: " + ", ".join(excluded)
+            )
+        return self
+
+    @model_validator(mode="after")
     def _require_serial_trials(self) -> Self:
         """Check that this request leaves Harbor trial concurrency to the task Job.
 
@@ -232,13 +250,16 @@ def request_digest(req: TasksetRunInput) -> str:
         req: Validated caller request, with model defaults filled.
 
     Returns:
-        SHA-256 of compact JSON with sorted keys and only idempotency_key excluded. An omitted
-        ``publication``, and a Harbor target's unset ``closed_book``, are left out too, so requests from before
-        those fields existed keep their digest.
+        SHA-256 of compact JSON with sorted keys, excluding idempotency_key. An omitted
+        ``publication``, a Harbor target's unset ``closed_book``, and empty result-retention
+        settings are left out too, so requests from before those fields existed keep their digest.
     """
     exclude = {"idempotency_key"} if req.publication is not None else {"idempotency_key", "publication"}
     body = req.model_dump(mode="json", exclude=exclude)
-    target = body["spec"].get("target")
+    spec = body["spec"]
+    if not req.spec.result_ignore_patterns:
+        spec.pop("result_ignore_patterns", None)
+    target = spec.get("target")
     if isinstance(req.spec.target, HarborRunnerTarget) and not req.spec.target.closed_book and isinstance(target, dict):
         target.pop("closed_book", None)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
@@ -295,13 +316,13 @@ class TasksetRunStatus(BaseModel):
     progress: TasksetRunProgress | None = Field(
         default=None,
         description=(
-            "Counted from the run's members on each GET of this run; None before the controller creates them, "
-            "and in run lists and submit responses."
+            "Counted from the run's members on each GET of this run, and in run lists that ask for it; None before "
+            "the controller creates them, and in other run lists and submit responses."
         ),
     )
 
 
-_INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}
+_INTERNAL_FIELDS = {"plan_ref", "plan_fileset_id", "plan_digest", "request_digest"}
 
 
 class TasksetRunTask(BaseModel):
@@ -315,6 +336,10 @@ class TasksetRunTask(BaseModel):
 
     task: str = Field(description="Member name within the run, for example task-7.")
     task_index: int = Field(ge=0, description="Zero-based index of the task in the run's resolved task list.")
+    task_name: str | None = Field(
+        default=None,
+        description="The task's id in the run's taskset (a Harbor task's native id); omitted for runs from before it.",
+    )
     phase: MemberPhase = Field(description="Stored image preparation and execution progress of this task.")
     job: str | None = Field(
         default=None,
@@ -332,6 +357,25 @@ class TasksetRunTask(BaseModel):
             "reported nothing."
         ),
     )
+    trial_counts: TrialCounts | None = Field(
+        default=None,
+        description=(
+            "The task Job's trials counted by phase, as the controller last read them; every planned trial counts "
+            "as pending until the Job reports."
+        ),
+    )
+
+
+class TasksetRunTaskDetail(TasksetRunTask):
+    """One task with each of its trials, as its task Job last reported them."""
+
+    trials: list[TrialProgress] | None = Field(
+        default=None,
+        description=(
+            "Each of the task's trials, read from its Job on this request; trial_counts is counted from this list. "
+            "Omitted before the task has a Job, when the Job reported no trials, or when the Job can't be read."
+        ),
+    )
 
 
 def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
@@ -347,11 +391,13 @@ def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
     return TasksetRunTask(
         task=member.name,
         task_index=member.task_index,
+        task_name=member.task_name,
         phase=member.phase,
         job=member.task_job,
         job_status=member.job_status,
         error=member.error,
         publication=member.publication,
+        trial_counts=member.trial_counts,
     )
 
 

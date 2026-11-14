@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AssistantMessageCompletion } from '@nemo/common/src/components/AssistantChat/types';
+import { ParamsDropdown } from '@nemo/common/src/components/ModelSelectV2/ParamsDropdown';
 import { ChatMulti } from '@nemo/icons/icons';
 import { useModelsListProviders } from '@nemo/sdk/generated/platform/model-providers';
 import {
@@ -17,8 +18,12 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
-import { ParamsPopover } from '@studio/components/chat/ParamsPopover';
+import {
+  CHAT_INFERENCE_PARAM_FIELDS,
+  chatParamDefaults,
+  chatParamMetadataWithMaxTokens,
+  mergeChatParams,
+} from '@studio/components/chat/params';
 import {
   routeSettingText,
   routingStrategyTitle,
@@ -39,6 +44,8 @@ import {
 import { getVirtualModelDetailRoute } from '@studio/routes/utils';
 import { type FC, useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router';
+
+const PARAM_METADATA = chatParamMetadataWithMaxTokens(1024);
 
 const ROLE_BADGE: Record<RouteRole, { label: string; color: 'purple' | 'green' | 'gray' }> = {
   capable: { label: 'Capable', color: 'purple' },
@@ -110,10 +117,7 @@ export interface RoutingTestPanelProps {
  */
 export const RoutingTestPanel: FC<RoutingTestPanelProps> = ({ workspace, route }) => {
   const { virtualModel } = route;
-  const [inferenceParams, setInferenceParams] = useState<InferenceParams>({
-    ...DEFAULT_INFERENCE_PARAMS,
-    max_tokens: 1024,
-  });
+  const [inferenceParams, setInferenceParams] = useState(() => chatParamDefaults(PARAM_METADATA));
   // Kept per VirtualModel, so switching routes and back keeps what was already observed.
   const [responsesByModel, setResponsesByModel] = useState<Record<string, RoutedResponse[]>>({});
   const responses = useMemo(
@@ -169,7 +173,14 @@ export const RoutingTestPanel: FC<RoutingTestPanelProps> = ({ workspace, route }
               {routingStrategyTitle(route.configType)} · {routeSettingText(route)}
             </Text>
           </Flex>
-          <ParamsPopover value={inferenceParams} onChange={setInferenceParams} />
+          <ParamsDropdown
+            inferenceParams={inferenceParams}
+            onInferenceParamsChange={(next) =>
+              setInferenceParams((prev) => mergeChatParams(prev, next))
+            }
+            fields={CHAT_INFERENCE_PARAM_FIELDS}
+            fieldMetadata={PARAM_METADATA}
+          />
         </Flex>
 
         <Grid cols={{ base: 1, xl: 3 }} gap="density-xl">

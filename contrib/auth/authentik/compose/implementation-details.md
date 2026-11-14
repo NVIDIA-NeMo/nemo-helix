@@ -34,8 +34,9 @@ The stack contains:
 - `nemo`: the NeMo Helix API service configured for Authentik and the Docker
   jobs backend.
 - `gateway`: Envoy terminating local HTTPS on host port `18080`.
-- `gateway-tls-init`: a small init container that copies local TLS material into
-  the named `gateway-tls` volume with permissions suitable for Envoy.
+- `gateway-tls-init`: an init container, run from the platform image, that
+  copies local TLS material into the named `gateway-tls` volume with
+  permissions suitable for Envoy, and writes `ca-bundle.crt` for clients.
 - `authentik-blueprint-init`: a one-shot init container that applies the shared
   NeMo Helix blueprint before the gateway starts.
 - `authentik-postgres`: PostgreSQL for Authentik.
@@ -118,8 +119,12 @@ flow or the workload identity pattern.
   endpoint.
 
 The Docker jobs executor mounts the `gateway-tls` volume into workload
-containers and sets `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` so workload code
-trusts the local gateway certificate.
+containers. `NHX_CLIENT_SSL_CERT_FILE` names the gateway certificate for
+platform calls. `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` name `ca-bundle.crt`,
+which `gateway-tls-init` builds from the platform image's CA bundle with the
+gateway certificate appended. Those variables replace a client's trust store
+rather than adding to it, so the gateway certificate alone would stop jobs, and
+the `nemo` service, from reaching public hosts such as PyPI or a model provider.
 
 ## Gateway And Auth Headers
 

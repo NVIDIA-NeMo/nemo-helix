@@ -44,20 +44,22 @@ _COMPLETION_TOKEN_KEYS = ("output_tokens", "completion_tokens")
 def rollout_to_resource_spans(
     record: Mapping[str, Any],
     *,
+    run_id: str,
     rollout_id: str,
     task_id: str | None = None,
     model_calls: Sequence[Mapping[str, Any]] = (),
 ) -> list[ResourceSpans]:
     """Return the OTLP spans for one rollout, under a single resource.
 
-    Ids are derived from ``rollout_id`` rather than generated, so converting the same record twice
-    yields the same ids and a re-publish replaces its spans instead of duplicating them. That makes
-    ``rollout_id`` load-bearing: two rollouts sharing one collide, and a consumer keyed on span
-    identity would store only the last. A task id is not enough — one task can be attempted
+    Ids are derived from the structural ``[run_id, rollout_id]`` pair rather than generated.
+    Converting the same pair twice yields the same ids, so a re-publish replaces its spans
+    instead of duplicating them. Reusing a pair for different evidence would collide, and a
+    consumer keyed on span identity would store only the last. A task id is not enough — one task can be attempted
     repeatedly, and Gym does not always record which attempt a record is.
 
     Args:
         record: One Gym rollout record.
+        run_id: Identifies the evaluation run; independent executions must use distinct IDs.
         rollout_id: Identifies this attempt uniquely among all rollouts in the run.
         task_id: The task this rollout answers, used to name the root span.
         model_calls: This rollout's captured model exchanges, when Gym recorded them. Each becomes
@@ -68,8 +70,11 @@ def rollout_to_resource_spans(
         The rollout's resource spans, ready to hand to ``ExportTraceServiceRequest`` or to store:
         one AGENT root span with its LLM and TOOL children.
     """
-    trace_id = _id_bytes(rollout_id, "trace", width=_TRACE_ID_BYTES)
-    root_id = _id_bytes(rollout_id, "root", width=_SPAN_ID_BYTES)
+    if not run_id:
+        raise ValueError("run_id must be nonempty when rendering Gym evidence")
+    identity = json.dumps([run_id, rollout_id], ensure_ascii=False, separators=(",", ":"))
+    trace_id = _id_bytes(identity, "trace", width=_TRACE_ID_BYTES)
+    root_id = _id_bytes(identity, "root", width=_SPAN_ID_BYTES)
     raw_response = record.get("response")
     # Gym records `response` as the Responses API payload, but some adapters write the answer as a
     # bare string. Both are answers; only the mapping carries usage and tool calls.
@@ -77,15 +82,15 @@ def rollout_to_resource_spans(
     response = raw_response if isinstance(raw_response, Mapping) else {}
 
     llm_spans = [
-        _captured_llm_span(call, trace_id=trace_id, parent_id=root_id, seed=rollout_id, ordinal=ordinal)
+        _captured_llm_span(call, trace_id=trace_id, parent_id=root_id, seed=identity, ordinal=ordinal)
         for ordinal, call in enumerate(model_calls)
-    ] or [_llm_span(record, response, trace_id=trace_id, parent_id=root_id, seed=rollout_id, answer=answer)]
+    ] or [_llm_span(record, response, trace_id=trace_id, parent_id=root_id, seed=identity, answer=answer)]
     root = _root_span(record, response, trace_id=trace_id, span_id=root_id, task_id=task_id, answer=answer)
     _span_root_over_children(root, llm_spans)
     spans = [
         root,
         *llm_spans,
-        *_tool_spans(response, trace_id=trace_id, parent_id=root_id, seed=rollout_id),
+        *_tool_spans(response, trace_id=trace_id, parent_id=root_id, seed=identity),
     ]
     return [
         ResourceSpans(

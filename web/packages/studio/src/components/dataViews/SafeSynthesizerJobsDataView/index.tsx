@@ -11,6 +11,7 @@ import {
   ROW_SELECTION_COLUMN_SIZE,
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
@@ -35,10 +36,9 @@ import type {
   GenerateJobsSortField,
 } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { Button, Stack } from '@nvidia/foundations-react-core';
-import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { isCancellableJob } from '@studio/components/dataViews/SafeSynthesizerJobsDataView/utils';
 import { FilesetFilePreviewLink } from '@studio/components/SafeSynthesizerFilesetPreview/FilesetFilePreviewLink';
-import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
+import { getDeleteJobsDescription, STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import {
   getNewSafeSynthesizerRoute,
@@ -74,15 +74,15 @@ export const GenerateJobsDataView: FC = () => {
     },
   });
 
-  const handleDeleteJobs = async (jobsToDelete: GenerateJob[]) => {
-    const invalid = jobsToDelete.filter((job) => !job.workspace || !job.name);
+  const handleDeleteJobs = async () => {
+    const invalid = deleteJobs.filter((job) => !job.workspace || !job.name);
     if (invalid.length > 0) {
       throw new Error(
         `Cannot delete ${invalid.length} job${invalid.length !== 1 ? 's' : ''}: missing workspace or name.`
       );
     }
     await Promise.all(
-      jobsToDelete.map(async (job) => {
+      deleteJobs.map(async (job) => {
         try {
           await deleteJobMutation.mutateAsync({ workspace: job.workspace!, name: job.name });
         } catch (error) {
@@ -92,6 +92,7 @@ export const GenerateJobsDataView: FC = () => {
         }
       })
     );
+    return true;
   };
 
   // Cancel job mutation
@@ -301,10 +302,6 @@ export const GenerateJobsDataView: FC = () => {
                       },
                     ]
                   : []),
-                {
-                  label: 'Delete',
-                  onSelect: () => setDeleteJobs([row.original]),
-                },
                 ...(isCancellableJob(row.original.status)
                   ? [
                       {
@@ -314,6 +311,7 @@ export const GenerateJobsDataView: FC = () => {
                     ]
                   : []),
               ]}
+              deleteAction={{ onSelect: () => setDeleteJobs([row.original]) }}
             />
           ),
         }),
@@ -391,16 +389,19 @@ export const GenerateJobsDataView: FC = () => {
         }}
       />
 
-      <BulkDeleteModal
-        items={deleteJobs}
-        open={deleteJobs.length > 0}
-        onDelete={handleDeleteJobs}
-        title={(count) => `Delete ${count} Safe Synthesizer Job${count !== 1 ? 's' : ''}`}
-        onClose={() => {
-          setDeleteJobs([]);
-          dataViewState.rowSelection.set({});
-        }}
-      />
+      {deleteJobs.length > 0 && (
+        <DeleteConfirmationModal
+          open
+          entity="Safe Synthesizer job"
+          ids={deleteJobs.map((job) => job.name)}
+          description={getDeleteJobsDescription(deleteJobs.length)}
+          onDelete={handleDeleteJobs}
+          onClose={() => {
+            setDeleteJobs([]);
+            dataViewState.rowSelection.set({});
+          }}
+        />
+      )}
 
       {cancelTarget && (
         <CancelJobModal

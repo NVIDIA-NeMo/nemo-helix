@@ -10,7 +10,8 @@
  * its affiliates is strictly prohibited.
  */
 
-import { type ModelProvider, ModelProviderStatus } from '@nemo/sdk/generated/platform/schema';
+import type { ModelProvider } from '@nemo/sdk/generated/platform/schema';
+import { ModelProviderStatus } from '@nemo/sdk/generated/platform/schema/ModelProviderStatus';
 import { InferenceProviderDetailsSidePanel } from '@studio/routes/InferenceProvidersListRoute/InferenceProviderDetailsSidePanel';
 import { render, screen } from '@studio/tests/util/render';
 

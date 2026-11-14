@@ -3,6 +3,8 @@
 
 """Base classes for storage backends."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import (
@@ -100,6 +102,14 @@ class StorageImpl(ABC):
         if not files:
             raise NotFoundError(f"File not found for path: {path}")
         return files[0]
+
+    async def for_download(self, path: str) -> StorageImpl:
+        """Return a download view with metadata, cache identity and content pinned.
+
+        Mutable backends override this to resolve a fresh object identity before
+        consulting the cache. An already-pinned view should return itself.
+        """
+        return self
 
     async def get_cache_path_key(self, path: str | None = None) -> str | None:
         """

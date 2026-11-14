@@ -3,6 +3,7 @@
 
 import type { StatTileDiagnosticProps, StatTileStatus } from '@nemo/common/src/components/StatTile';
 import { formatFileSize } from '@nemo/common/src/components/UploadModal/utils';
+import { asNonEmptyString } from '@nemo/common/src/utils/asString';
 import { formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
 import { ShapeCircle, GpuCard } from '@nemo/icons/icons';
@@ -27,8 +28,6 @@ import { getTextWithCount } from '@studio/util/strings';
 import type { ReactNode } from 'react';
 
 export { formatFinetuningType };
-
-export type FileType = 'training' | 'testing' | 'validation';
 
 /** Training/finetuning type for display (e.g. training.training_type / training.finetuning_type). */
 export const getFormattedTrainingType = (type?: string) => {
@@ -186,9 +185,6 @@ export const getCustomizationTrainingProgress = (customization: CustomizationJob
 
 const asFiniteNumber = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-
-const asNonEmptyString = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.length > 0 ? value : undefined;
 
 export const getTrainingTelemetry = (
   job: CustomizationJob | null | undefined
@@ -762,12 +758,17 @@ export const getGrpoRunConfig = (
   const expertParallel = parallelism.expert_parallel_size ?? 1;
 
   // Megatron is inert for GRPO. The policy worker is always AutomodelPolicyWorker.
-  const isLora = training.finetuning_type === 'lora';
+  const trainingLabel =
+    training.finetuning_type === 'lora'
+      ? 'LoRA'
+      : training.finetuning_type === 'lora_merged'
+        ? 'LoRA (merged)'
+        : 'Full weights';
 
   return {
     environment: spec.environment,
     promptDataset: spec.dataset,
-    trainingBackend: joinParts('Automodel', isLora ? 'LoRA' : 'Full weights'),
+    trainingBackend: joinParts('Automodel', trainingLabel),
     parallelism: joinParts(
       `TP ${tensorParallel}`,
       `PP ${parallelism.pipeline_parallel_size ?? 1}`,

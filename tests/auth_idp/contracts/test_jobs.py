@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
+from nemo_helix_plugin.auth.workload_identity import docker_job_workload_group
 from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nhx.testing import grant_workspace_role
 from nhx.testing.e2e import wait_for_job_logs, wait_for_platform_job
@@ -14,6 +16,18 @@ pytestmark = [
     pytest.mark.auth_idp_runtime,
     pytest.mark.e2e,
 ]
+
+
+@pytest.fixture(autouse=True)
+def grant_docker_job_actor_role(auth_idp_case, auth_idp_runtime, auth_idp_workspace):
+    if auth_idp_case.backend == "compose":
+        # Docker jobs have a distinct actor, not the submitting provider identity.
+        grant_workspace_role(
+            auth_idp_runtime.e2e_setup_client(),
+            workspace=auth_idp_workspace,
+            principal=docker_job_workload_group(auth_idp_workspace),
+            roles=["JobRunner"],
+        )
 
 
 def test_provider_workload_job_runs_via_workload_profile(
@@ -82,3 +96,71 @@ def test_provider_workload_job_runs_via_workload_profile(
         for log in step_logs.data
     )
     assert any(f"Successfully retrieved workspace: {auth_idp_workspace}" in log.message for log in step_logs.data)
+
+
+def test_workload_profile_runs_steps_that_need_persistent_storage(
+    auth_idp_case,
+    auth_idp_runtime,
+    auth_idp_workspace,
+):
+    require_capability(auth_idp_case, "workspace_rbac")
+    require_capability(auth_idp_case, "workload_job")
+
+    e2e_setup_client = auth_idp_runtime.e2e_setup_client()
+    for principal in auth_idp_runtime.workload_role_principals():
+        grant_workspace_role(
+            e2e_setup_client,
+            workspace=auth_idp_workspace,
+            principal=principal,
+            roles=["Viewer", "Editor", "JobRunner"],
+        )
+
+    # Jobs refuse a step that sets the storage path env var unless its profile has
+    # persistent storage. The second step runs in a new container, so reading the
+    # first step's file proves the PVC is mounted rather than the container's own disk.
+    storage_path = f"${{{PERSISTENT_JOB_STORAGE_PATH_ENVVAR}}}"
+    storage_env = [{"name": PERSISTENT_JOB_STORAGE_PATH_ENVVAR, "value": DEFAULT_JOB_STORAGE_PATH}]
+
+    def storage_step(name: str, command: str) -> dict[str, object]:
+        return {
+            "name": name,
+            "executor": {
+                "provider": "cpu",
+                "profile": "workload",
+                "container": {"image": nhx_api_image(), "entrypoint": ["sh", "-c"], "command": [command]},
+            },
+            "environment": storage_env,
+        }
+
+    job = (
+        JobsClient.from_client(auth_idp_runtime.workload_provider_client())
+        .create_job(
+            workspace=auth_idp_workspace,
+            body=CreateHelixJobRequest(
+                source=f"{auth_idp_case.id}-workload-storage-job",
+                spec={"test": "workload-storage-job"},
+                platform_spec={
+                    "steps": [
+                        storage_step(
+                            "workload-storage-write",
+                            f'mkdir -p "{storage_path}" && echo stored > "{storage_path}/probe.txt"',
+                        ),
+                        storage_step(
+                            "workload-storage-read",
+                            f'echo "Persistent storage: $(cat "{storage_path}/probe.txt")"',
+                        ),
+                    ]
+                },
+            ),
+        )
+        .data()
+    )
+
+    completed_job = wait_for_platform_job(e2e_setup_client, job.name, auth_idp_workspace, timeout=240)
+    assert completed_job.status == "completed"
+
+    step_logs = wait_for_job_logs(e2e_setup_client, job.name, auth_idp_workspace, min_log_count=1, timeout=240)
+    assert any(
+        log.job_step == "workload-storage-read" and "Persistent storage: stored" in log.message
+        for log in step_logs.data
+    )

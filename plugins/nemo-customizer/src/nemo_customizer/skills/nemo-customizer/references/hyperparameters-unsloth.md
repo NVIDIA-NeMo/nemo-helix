@@ -156,7 +156,7 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `rank` | `16` | Higher → more capacity, more VRAM. Default vLLM and model-free NIM deployments load adapters only up to rank 16; above that the deployment needs a raised `--max-lora-rank` (`post-training-eval.md` § **LoRA rank limit**). |
+| `rank` | `16` | Higher → more capacity, more VRAM. Default vLLM deployments load adapters up to rank 32 and model-free NIM deployments up to rank 16; above that the deployment needs a raised `--max-lora-rank` (`post-training-eval.md` § **LoRA rank limit**). |
 | `alpha` | `16` | LoRA scaling; common rule of thumb `alpha ≈ rank` or `2× rank`. |
 | `dropout` | `0.0` | LoRA dropout (0.0–<1.0). |
 | `target_modules` | Unsloth 7-module set: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj` | Full attention + MLP. Override with a subset like `["q_proj","v_proj"]` for a lighter touch. |
@@ -250,7 +250,7 @@ Leave `learning_rate` unset to get Unsloth's guidance: `2e-4` for LoRA, which su
 |----------|--------|---------|
 | Default / balanced | 16 | 16 |
 | Lighter touch | 8 | 16 |
-| More capacity (deployment needs `--max-lora-rank 32`) | 32 | 32 or 64 |
+| More capacity (a model-free NIM deployment needs `--max-lora-rank 32`) | 32 | 32 or 64 |
 
 Drop `rank` before lowering batch when OOM. Higher `alpha/rank` ratios amplify adapter influence; Unsloth's defaults keep `alpha == rank`.
 

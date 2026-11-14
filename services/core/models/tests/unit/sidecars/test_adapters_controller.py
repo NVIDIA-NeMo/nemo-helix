@@ -58,6 +58,8 @@ def controller(tmp_path):
         ctrl.base_model_name_override = ""
         ctrl.vllm_endpoint = ""
         ctrl.vllm_request_timeout = 120.0
+        ctrl._vllm_loaded_adapters = set()
+        ctrl._vllm_reload_pending = set()
         return ctrl
 
 
@@ -742,9 +744,9 @@ class TestEagerVllmAdapterLoad:
         routes = [c.args[0] for c in api.call_args_list]
         assert routes == ["/v1/unload_lora_adapter", "/v1/load_lora_adapter"]
 
-    def test_unchanged_adapter_is_reloaded_idempotently(self, controller, transfer_mock, tmp_path):
-        """An up-to-date adapter is not re-downloaded, but is still (idempotently)
-        loaded so it survives a vLLM restart; vLLM tolerates the already-loaded case."""
+    def test_unchanged_adapter_is_loaded_once(self, controller, transfer_mock, tmp_path):
+        """An up-to-date adapter is loaded once. Later cycles remember that and
+        do not call vLLM again."""
         controller.vllm_endpoint = "http://localhost:49152"
         ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
         dir_name = "default--my-adapter"
@@ -756,12 +758,19 @@ class TestEagerVllmAdapterLoad:
         adapter = _make_adapter("my-adapter", "default/fs", updated_at=ts)
         self._model_entity(controller, transfer_mock, adapter)
 
-        with patch.object(controller, "_vllm_api_call", return_value=(200, "")) as api:
+        def api_call(route, payload=None, method="POST"):
+            if route == "/v1/models":
+                return (200, json.dumps({"data": [{"id": "default--my-adapter"}]}))
+            return (200, "")
+
+        with patch.object(controller, "_vllm_api_call", side_effect=api_call) as api:
+            controller._update_lora_adapters(set())
             controller._update_lora_adapters(set())
 
         transfer_mock.download.assert_not_called()
-        api.assert_called_once()
-        assert api.call_args.args[0] == "/v1/load_lora_adapter"
+        load_calls = [c for c in api.call_args_list if c.args[0] == "/v1/load_lora_adapter"]
+        assert len(load_calls) == 1
+        assert "default--my-adapter" in controller._vllm_loaded_adapters
 
     def test_nim_mode_does_not_call_vllm(self, controller, transfer_mock, tmp_path):
         """With no vLLM endpoint (NIM), the sidecar never touches the runtime LoRA API."""
@@ -813,6 +822,90 @@ class TestEagerVllmAdapterLoad:
         assert adapter_dir.is_dir()
         routes = [c.args[0] for c in api.call_args_list]
         assert routes == ["/v1/load_lora_adapter"]
+
+    def test_missing_vllm_model_is_loaded_again(self, controller, transfer_mock, tmp_path):
+        """A vLLM restart drops the adapter from /v1/models. The local set must
+        drop it too, or the next cycle never calls load_lora_adapter."""
+        controller.vllm_endpoint = "http://localhost:49152"
+        ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        dir_name = "default--my-adapter"
+        adapter_dir = tmp_path / dir_name
+        adapter_dir.mkdir()
+        with open(adapter_dir / ADAPTER_META_FILENAME, "w") as f:
+            json.dump({"fileset": "default/fs", "updated_at": ts.isoformat()}, f)
+
+        adapter = _make_adapter("my-adapter", "default/fs", updated_at=ts)
+        self._model_entity(controller, transfer_mock, adapter)
+        controller._vllm_loaded_adapters.add(dir_name)
+
+        def api_call(route, payload=None, method="POST"):
+            if route == "/v1/models":
+                return (200, json.dumps({"data": [{"id": "base-model"}]}))
+            return (200, "")
+
+        with patch.object(controller, "_vllm_api_call", side_effect=api_call) as api:
+            controller._update_lora_adapters(set())
+
+        load_calls = [c for c in api.call_args_list if c.args[0] == "/v1/load_lora_adapter"]
+        assert len(load_calls) == 1
+        assert dir_name in controller._vllm_loaded_adapters
+
+    def test_vllm_list_failure_keeps_loaded_set(self, controller, transfer_mock, tmp_path):
+        """A failed listing is not evidence the adapter is gone."""
+        controller.vllm_endpoint = "http://localhost:49152"
+        ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        dir_name = "default--my-adapter"
+        adapter_dir = tmp_path / dir_name
+        adapter_dir.mkdir()
+        with open(adapter_dir / ADAPTER_META_FILENAME, "w") as f:
+            json.dump({"fileset": "default/fs", "updated_at": ts.isoformat()}, f)
+
+        adapter = _make_adapter("my-adapter", "default/fs", updated_at=ts)
+        self._model_entity(controller, transfer_mock, adapter)
+        controller._vllm_loaded_adapters.add(dir_name)
+
+        def api_call(route, payload=None, method="POST"):
+            if route == "/v1/models":
+                raise urllib.error.URLError("refused")
+            return (200, "")
+
+        with patch.object(controller, "_vllm_api_call", side_effect=api_call) as api:
+            controller._update_lora_adapters(set())
+
+        assert dir_name in controller._vllm_loaded_adapters
+        assert all(c.args[0] != "/v1/load_lora_adapter" for c in api.call_args_list)
+
+    def test_failed_unload_stays_pending_until_replacement_succeeds(self, controller):
+        """A 503 unload plus a 400 'already loaded' must not record the old weights.
+
+        The next cycle, even with reload=False, still unloads before it loads.
+        """
+        controller.vllm_endpoint = "http://localhost:49152"
+        lora_name = "default--my-adapter"
+
+        def failed_unload(route, payload=None, method="POST"):
+            if route == "/v1/unload_lora_adapter":
+                return (503, "unavailable")
+            if route == "/v1/load_lora_adapter":
+                return (400, "LoRA adapter has already been loaded")
+            return (200, "")
+
+        with patch.object(controller, "_vllm_api_call", side_effect=failed_unload) as api:
+            controller._ensure_vllm_adapter_loaded(lora_name, "/scratch/loras/x", reload=True)
+
+        assert [c.args[0] for c in api.call_args_list] == ["/v1/unload_lora_adapter"]
+        assert lora_name not in controller._vllm_loaded_adapters
+        assert lora_name in controller._vllm_reload_pending
+
+        with patch.object(controller, "_vllm_api_call", return_value=(200, "")) as api:
+            controller._ensure_vllm_adapter_loaded(lora_name, "/scratch/loras/x", reload=False)
+
+        assert [c.args[0] for c in api.call_args_list] == [
+            "/v1/unload_lora_adapter",
+            "/v1/load_lora_adapter",
+        ]
+        assert lora_name in controller._vllm_loaded_adapters
+        assert lora_name not in controller._vllm_reload_pending
 
     def test_load_tolerates_already_loaded(self, controller, transfer_mock):
         controller.vllm_endpoint = "http://localhost:49152"

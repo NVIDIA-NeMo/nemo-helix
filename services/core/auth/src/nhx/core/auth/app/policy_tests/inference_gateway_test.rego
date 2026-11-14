@@ -52,7 +52,7 @@ mock_inference_gateway_principals := {
 
 # TEST: OpenAI gateway endpoint with trailing URI - chat completions
 test_openai_gateway_chat_completions if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -71,7 +71,7 @@ test_openai_gateway_chat_completions if {
 
 # TEST: OpenAI gateway endpoint with different trailing URI - completions
 test_openai_gateway_completions if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -90,7 +90,7 @@ test_openai_gateway_completions if {
 
 # TEST: OpenAI gateway GET request with trailing URI
 test_openai_gateway_get_models if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -109,7 +109,7 @@ test_openai_gateway_get_models if {
 
 # TEST: Model gateway endpoint with workspace and model in path
 test_model_gateway_chat_completions if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -128,7 +128,7 @@ test_model_gateway_chat_completions if {
 
 # TEST: Model gateway endpoint - unauthorized workspace
 test_model_gateway_unauthorized_workspace if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -152,7 +152,7 @@ test_model_gateway_unauthorized_workspace if {
 
 # TEST: Provider gateway endpoint with workspace and provider in path
 test_provider_gateway_models_list if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -171,7 +171,7 @@ test_provider_gateway_models_list if {
 
 # TEST: Provider gateway POST with nested trailing URI
 test_provider_gateway_post_nested_path if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -190,7 +190,7 @@ test_provider_gateway_post_nested_path if {
 
 # TEST: Viewer can run inference (inference.gateway.*.exec is a Viewer permission)
 test_viewer_can_run_openai_inference if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -209,7 +209,7 @@ test_viewer_can_run_openai_inference if {
 
 # TEST: Viewer can run inference via model gateway
 test_viewer_can_run_model_inference if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -228,7 +228,7 @@ test_viewer_can_run_model_inference if {
 
 # TEST: Viewer can run inference via provider gateway
 test_viewer_can_run_provider_inference if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -254,7 +254,7 @@ mock_no_role_principals := {
 
 # TEST: No-role user denied on model gateway
 test_model_gateway_no_role_denied if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -274,7 +274,7 @@ test_model_gateway_no_role_denied if {
 
 # TEST: No-role user denied on openai gateway
 test_openai_gateway_no_role_denied if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -294,7 +294,7 @@ test_openai_gateway_no_role_denied if {
 
 # TEST: No-role user denied on provider gateway
 test_provider_gateway_no_role_denied if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -314,7 +314,7 @@ test_provider_gateway_no_role_denied if {
 
 # TEST: No principal denied on model gateway
 test_model_gateway_no_principal_denied if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -334,7 +334,7 @@ test_model_gateway_no_principal_denied if {
 
 # TEST: No principal denied on openai gateway
 test_openai_gateway_no_principal_denied if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -354,7 +354,7 @@ test_openai_gateway_no_principal_denied if {
 
 # TEST: No principal denied on provider gateway
 test_provider_gateway_no_principal_denied if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -374,7 +374,7 @@ test_provider_gateway_no_principal_denied if {
 
 # TEST: Unauthorized workspace denied on openai gateway
 test_openai_gateway_unauthorized_workspace if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -394,7 +394,7 @@ test_openai_gateway_unauthorized_workspace if {
 
 # TEST: Unauthorized workspace denied on provider gateway
 test_provider_gateway_unauthorized_workspace if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -414,7 +414,7 @@ test_provider_gateway_unauthorized_workspace if {
 
 # TEST: Verify pattern matching works with very long trailing URIs
 test_openai_gateway_long_trailing_uri if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -433,7 +433,7 @@ test_openai_gateway_long_trailing_uri if {
 
 # TEST: Verify pattern matching extracts workspace correctly from model gateway
 test_model_gateway_workspace_extraction if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {
@@ -452,7 +452,7 @@ test_model_gateway_workspace_extraction if {
 
 # TEST: Verify pattern matching extracts workspace correctly from provider gateway
 test_provider_gateway_workspace_extraction if {
-	result := authz.allow with input as {
+	result := data.authz.allow with input as {
 		"attributes": {
 			"request": {
 				"http": {

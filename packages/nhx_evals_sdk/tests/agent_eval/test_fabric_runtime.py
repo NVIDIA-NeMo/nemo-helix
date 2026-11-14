@@ -1485,7 +1485,7 @@ def test_codex_home_removal_retries_when_codex_writes_after_the_first_delete(
 ) -> None:
     home = tmp_path / "codex-home"
     (home / ".tmp").mkdir(parents=True)
-    real_rmtree = fabric_runtime.shutil.rmtree
+    real_rmtree = fabric_runtime.rmtree
     deletes: list[Path] = []
 
     def rmtree_then_codex_writes_once(path: Path, ignore_errors: bool = False) -> None:
@@ -1494,7 +1494,7 @@ def test_codex_home_removal_retries_when_codex_writes_after_the_first_delete(
         if len(deletes) == 1:
             (path / ".tmp" / "plugins-clone").mkdir(parents=True)
 
-    monkeypatch.setattr(fabric_runtime.shutil, "rmtree", rmtree_then_codex_writes_once)
+    monkeypatch.setattr(fabric_runtime, "rmtree", rmtree_then_codex_writes_once)
     monkeypatch.setattr(fabric_runtime, "sleep", lambda _seconds: None)
 
     fabric_runtime._remove_codex_home(home)
@@ -1508,10 +1508,10 @@ def test_codex_home_is_removed_when_linking_the_login_fails(monkeypatch: pytest.
     base_auth.parent.mkdir()
     base_auth.write_text("{}", encoding="utf-8")
 
-    def refuse(self: Path, target: Path) -> None:
+    def refuse(source: Path, link: Path) -> None:
         raise OSError("symlinks not permitted")
 
-    monkeypatch.setattr(Path, "symlink_to", refuse)
+    monkeypatch.setattr(fabric_runtime, "symlink", refuse)
 
     with pytest.raises(OSError, match="symlinks not permitted"):
         fabric_runtime._make_codex_home()

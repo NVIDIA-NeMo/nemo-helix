@@ -4,13 +4,13 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { useListAnnotations } from '@nemo/sdk/generated/platform/annotations';
-import {
-  AnnotationSortField,
-  type FeedbackAnnotationInputValue,
-  type Span,
-  SpanStatus,
-  type Trace,
+import type {
+  FeedbackAnnotationInputValue,
+  Span,
+  Trace,
 } from '@nemo/sdk/generated/platform/schema';
+import { AnnotationSortField } from '@nemo/sdk/generated/platform/schema/AnnotationSortField';
+import { SpanStatus } from '@nemo/sdk/generated/platform/schema/SpanStatus';
 import {
   type ListSpansQueryError,
   useGetSpan,
@@ -30,7 +30,6 @@ import {
   type TraceViewMode,
   TraceViewToolbar,
 } from '@studio/components/IntakeDetail/TraceViewToolbar';
-import { featureFlags } from '@studio/constants/featureFlags';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import {
   buildSpanHierarchyRows,
@@ -77,8 +76,6 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
   onViewModeChange,
 }) => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeViewMode =
-    viewMode === 'graph' && !featureFlags.traceGraphEnabled ? 'tree' : viewMode;
   const linkedSpanId = searchParams.get(QUERY_PARAMETERS.spanId) || null;
   const [openSpanIds, setOpenSpanIds] = useState<string[]>([]);
   // Bumped to broadcast expand/collapse-all to the selected span's sections in
@@ -237,13 +234,13 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
   // In list view, expand/collapse opens every span row; in tree view it opens
   // every section of the one selected span.
   const expandAll = useCallback(() => {
-    if (activeViewMode === 'list') setOpenSpanIds(listSpanRows.map((span) => span.span_id));
+    if (viewMode === 'list') setOpenSpanIds(listSpanRows.map((span) => span.span_id));
     else setSectionExpandToken((token) => token + 1);
-  }, [activeViewMode, listSpanRows]);
+  }, [viewMode, listSpanRows]);
   const collapseAll = useCallback(() => {
-    if (activeViewMode === 'list') setOpenSpanIds([]);
+    if (viewMode === 'list') setOpenSpanIds([]);
     else setSectionCollapseToken((token) => token + 1);
-  }, [activeViewMode]);
+  }, [viewMode]);
 
   // "Add note" reveals the span (selecting it in tree view, expanding its row in
   // list view) and bumps the nonce so its annotations panel opens and focuses
@@ -312,11 +309,10 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
   return (
     <Stack gap="density-lg" className="min-w-0">
       <TraceViewToolbar
-        viewMode={activeViewMode}
+        viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
-        showGraph={featureFlags.traceGraphEnabled}
-        onCollapseAll={activeViewMode !== 'graph' && spanRows.length > 0 ? collapseAll : undefined}
-        onExpandAll={activeViewMode !== 'graph' && spanRows.length > 0 ? expandAll : undefined}
+        onCollapseAll={viewMode !== 'graph' && spanRows.length > 0 ? collapseAll : undefined}
+        onExpandAll={viewMode !== 'graph' && spanRows.length > 0 ? expandAll : undefined}
       />
 
       {isShowingFallbackSpans ? (
@@ -325,13 +321,13 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
 
       {showSpanLimitMessage && (
         <Text kind="body/regular/sm" className="text-secondary">
-          {activeViewMode === 'graph'
+          {viewMode === 'graph'
             ? `Showing ${spans.length.toLocaleString()} of ${traceSpanTotal.toLocaleString()} spans for this trace. This graph is incomplete.`
             : `Showing ${spans.length.toLocaleString()} of ${traceSpanTotal.toLocaleString()} spans for this trace. Parent spans outside this page are marked in the hierarchy.`}
         </Text>
       )}
 
-      {activeViewMode === 'tree' ? (
+      {viewMode === 'tree' ? (
         <SpanTreeView
           trajectories={treeTrajectories}
           activeTraceId={trace.id}
@@ -357,7 +353,7 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
           onAddNote={() => selectedSpan && handleAddNote(selectedSpan.span_id)}
           emptyContent={spansStatusContent ?? linkedSpanStatusContent}
         />
-      ) : activeViewMode === 'graph' ? (
+      ) : viewMode === 'graph' ? (
         <TraceSpanGraphView
           key={trace.id}
           spanRows={listSpanRows}

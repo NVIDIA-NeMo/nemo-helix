@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useWebSession } from '@studio/providers/auth/useWebSession';
 import { useMemo } from 'react';
 import { useAuth } from 'react-oidc-context';
-
-import { useWebSession } from './useWebSession';
 
 /** Millisecond timestamps exceed this; oidc-client-ts uses seconds since epoch. */
 const EXPIRY_SECONDS_VS_MS_THRESHOLD = 10_000_000_000;

@@ -24,10 +24,11 @@ import logging
 import textwrap
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.workspaces.constants import SAMPLE_WORKSPACE_PREFIX
 from nemo_helix_plugin.workspaces.types import WorkspaceDeletionStatus
-from nhx.common.api.common import DeleteResponse, GenericSortField, Page, PaginationData
+from nhx.common.api.common import DeleteResponse, ErrorResponse, GenericSortField, Page, PaginationData
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.models import Principal
@@ -46,6 +47,7 @@ from nhx.core.entities.api.v2.workspaces.schemas import (
     WorkspaceMemberUpdate,
     WorkspaceUpdate,
 )
+from nhx.core.entities.app.repository.exceptions import InvalidFilterError
 from nhx.core.entities.entities import Entity, Workspace, WorkspaceDeletionStage
 from nhx.core.entities.utils.filter import FilterDep
 from sqlalchemy.exc import IntegrityError
@@ -148,6 +150,20 @@ async def _count_active_admins(
     return count
 
 
+async def _can_set_workspace_limits(auth_client: AuthClient, workspace: str | None) -> bool:
+    """Whether the caller may set workspace limits.
+
+    Editor already holds ``workspaces.update``, so limits get their own Admin check.
+    Pass ``workspace=None`` on create, where the creator is auto-granted Admin and so an
+    Admin check proves nothing: only platform admins and services may set limits then.
+    """
+    if not auth_client.auth_enabled or auth_client.principal.caller_kind == "service_principal":
+        return True
+    if await auth_client.has_role("system", "HelixAdmin"):
+        return True
+    return workspace is not None and await auth_client.has_role(workspace, "Admin")
+
+
 async def _delete_all_role_bindings(entity_repository: EntityRepository, workspace: str) -> list[Entity]:
     """Delete all role bindings in a workspace.
 
@@ -227,6 +243,12 @@ async def create_workspace(
             detail=f"Workspace names beginning with '{SAMPLE_WORKSPACE_PREFIX}' are reserved for the sample flow",
         )
 
+    if workspace.limits is not None and not await _can_set_workspace_limits(auth_client, None):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Setting workspace limits when creating a workspace requires a platform admin",
+        )
+
     existing = await workspace_repository.get_workspace_by_name(name=workspace.name)
     if existing:
         raise HTTPException(
@@ -238,6 +260,7 @@ async def create_workspace(
         new_workspace = await workspace_repository.create_workspace(
             name=workspace.name,
             description=workspace.description,
+            limits=workspace.limits,
             created_by=auth_client.principal.effective_id,
         )
     except IntegrityError as e:
@@ -330,8 +353,7 @@ async def list_workspaces(
     repository: WorkspaceRepository,
     entity_repository: EntityRepository,
     filter: FilterDep,
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(100, ge=1, le=1000, description="Items per page"),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: GenericSortField = Query(GenericSortField.CREATED_AT_DESC, description="Sort field"),
 ) -> Page[Workspace]:
     """List workspaces accessible to the current principal."""
@@ -340,20 +362,23 @@ async def list_workspaces(
 
     combined_filter = _exclude_deleting_workspaces(add_workspace_filtering(accessible_workspaces, filter, field="name"))
 
-    workspaces, total = await repository.list_workspaces(
-        page=page,
-        page_size=page_size,
-        sort=sort,
-        filter_op=combined_filter,
-    )
+    try:
+        workspaces, total = await repository.list_workspaces(
+            page=page_params.page,
+            page_size=page_params.page_size,
+            sort=sort,
+            filter_op=combined_filter,
+        )
+    except InvalidFilterError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return Page(
         data=workspaces,
         pagination=PaginationData(
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             total_results=total,
-            total_pages=(total + page_size - 1) // page_size,
+            total_pages=(total + page_params.page_size - 1) // page_params.page_size,
             current_page_size=len(workspaces),
         ),
         sort=sort,
@@ -366,6 +391,7 @@ async def list_workspaces(
     response_model=Workspace,
     tags=[API_TAG],
     summary="Get workspace by ID",
+    responses={404: {"model": ErrorResponse, "description": "Workspace not found"}},
     description=textwrap.dedent("""
         Get a specific workspace by ID.
 
@@ -395,14 +421,18 @@ async def get_workspace(
     response_model=Workspace,
     tags=[API_TAG],
     summary="Update workspace",
+    responses={404: {"model": ErrorResponse, "description": "Workspace not found"}},
     description=textwrap.dedent("""
-        Update a workspace's description.
+        Update a workspace's description and/or limits.
+
+        Setting `limits` requires the Admin role on the workspace. Omitted fields are unchanged.
 
         Example:
         ```
         PUT /apis/entities/v2/workspaces/ml-team
         {
-            "description": "Updated description for ML Team"
+            "description": "Updated description for ML Team",
+            "limits": {"max_concurrent_jobs": 50}
         }
         ```
     """),
@@ -414,10 +444,16 @@ async def update_workspace(
     auth_client: AuthClientDep,
 ) -> Workspace:
     """Update workspace."""
+    if workspace_data.limits is not None and not await _can_set_workspace_limits(auth_client, name):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Setting workspace limits requires the Admin role on the workspace",
+        )
     try:
         workspace = await repository.update_workspace(
             name=name,
             description=workspace_data.description,
+            limits=workspace_data.limits,
             updated_by=auth_client.principal.effective_id,
         )
         if workspace is None:
@@ -443,6 +479,7 @@ async def update_workspace(
     response_model=DeleteResponse,
     tags=[API_TAG],
     summary="Delete workspace",
+    responses={404: {"model": ErrorResponse, "description": "Workspace not found"}},
     description=textwrap.dedent("""
         Delete a workspace.
 
@@ -539,6 +576,7 @@ async def _may_read_workspace_deletion(auth_client: AuthClient, workspace: Works
     response_model=WorkspaceDeletionStatus,
     tags=[API_TAG],
     summary="Get workspace deletion status",
+    responses={404: {"model": ErrorResponse, "description": "Workspace deletion not found or not accessible"}},
     description=textwrap.dedent("""
         Read the cleanup stage for a workspace whose name is still reserved.
 
@@ -762,6 +800,7 @@ async def add_workspace_member(
     response_model=WorkspaceMember,
     tags=[API_TAG],
     summary="Update workspace member roles",
+    responses={404: {"model": ErrorResponse, "description": "Workspace not found"}},
     description=textwrap.dedent("""
         Update the roles for a workspace member.
 
@@ -932,6 +971,7 @@ async def update_workspace_member(
     response_model=DeleteResponse,
     tags=[API_TAG],
     summary="Remove workspace member",
+    responses={404: {"model": ErrorResponse, "description": "Workspace or member not found"}},
     description=textwrap.dedent("""
         Remove a member from the workspace by revoking all their roles.
 

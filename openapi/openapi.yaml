@@ -434,10 +434,10 @@ paths:
         schema:
           type: integer
           minimum: 1
-          description: Page number to retrieve.
+          description: Page number.
           default: 1
           title: Page
-        description: Page number to retrieve.
+        description: Page number.
       - name: page_size
         in: query
         required: false
@@ -445,10 +445,10 @@ paths:
           type: integer
           maximum: 100
           minimum: 1
-          description: Number of keys to retrieve per page.
+          description: Page size.
           default: 100
           title: Page Size
-        description: Number of keys to retrieve per page.
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -759,24 +759,6 @@ paths:
       description: List all role bindings (Platform Admin only)
       operationId: list_role_bindings_apis_auth_v2_iam_role_bindings_get
       parameters:
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -788,6 +770,27 @@ paths:
           title: Sort
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -868,6 +871,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoleBinding'
+        '404':
+          description: Role binding not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -905,6 +914,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Role binding not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1107,10 +1122,8 @@ paths:
     get:
       tags:
       - Entity Store
-      summary: Get entity by ID (debug/internal)
+      summary: Get entity by ID
       description: 'Get a specific entity by its unique identifier.
-
-        This endpoint is primarily for debugging and internal use.
 
 
         Example:
@@ -1135,6 +1148,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entity'
+        '404':
+          description: Entity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1184,6 +1203,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDeletionStatus'
+        '404':
+          description: Workspace deletion not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1269,27 +1294,6 @@ paths:
         ```'
       operationId: list_workspaces_apis_entities_v2_workspaces_get
       parameters:
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number
-          default: 1
-          title: Page
-        description: Page number
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Items per page
-          default: 100
-          title: Page Size
-        description: Items per page
       - name: sort
         in: query
         required: false
@@ -1327,6 +1331,27 @@ paths:
           - Bracket notation: ?filter[name][$like]=value
 
           - Relationship traversal: ?filter[relationship][$exists]=true or ?filter[relationship][field]=value'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -1370,6 +1395,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Workspace'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1380,8 +1411,11 @@ paths:
       tags:
       - Entity Store
       summary: Update workspace
-      description: "Update a workspace's description.\n\nExample:\n```\nPUT /apis/entities/v2/workspaces/ml-team\n\
-        {\n    \"description\": \"Updated description for ML Team\"\n}\n```"
+      description: "Update a workspace's description and/or limits.\n\nSetting `limits`\
+        \ requires the Admin role on the workspace. Omitted fields are unchanged.\n\
+        \nExample:\n```\nPUT /apis/entities/v2/workspaces/ml-team\n{\n    \"description\"\
+        : \"Updated description for ML Team\",\n    \"limits\": {\"max_concurrent_jobs\"\
+        : 50}\n}\n```"
       operationId: update_workspace_apis_entities_v2_workspaces__name__put
       parameters:
       - name: name
@@ -1403,6 +1437,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Workspace'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1448,6 +1488,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1555,27 +1601,6 @@ paths:
         schema:
           type: string
           title: Entity Type
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number
-          default: 1
-          title: Page
-        description: Page number
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Items per page
-          default: 100
-          title: Page Size
-        description: Items per page
       - name: sort
         in: query
         required: false
@@ -1644,6 +1669,27 @@ paths:
           - Bracket notation: ?filter[name][$like]=value
 
           - Relationship traversal: ?filter[relationship][$exists]=true or ?filter[relationship][field]=value'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -1653,6 +1699,120 @@ paths:
                 $ref: '#/components/schemas/EntitiesPage'
         '403':
           description: Not allowed to list entities in the requested workspace.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id}:
+    put:
+      tags:
+      - Entity Store
+      summary: Update entity by ID
+      operationId: update_entity_by_id_apis_entities_v2_workspaces__workspace__entities__entity_type__by_id__entity_id__put
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: entity_type
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entity Type
+      - name: entity_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entity Id
+      - name: parent
+        in: query
+        required: false
+        schema:
+          description: Optional parent scope for the selected ID.
+          title: Parent
+          type: string
+        description: Optional parent scope for the selected ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntityUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entity'
+        '422':
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
+    delete:
+      tags:
+      - Entity Store
+      summary: Delete entity by ID
+      description: Delete the selected ID while preserving scope and optional version
+        checks.
+      operationId: delete_entity_by_id_apis_entities_v2_workspaces__workspace__entities__entity_type__by_id__entity_id__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: entity_type
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entity Type
+      - name: entity_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entity Id
+      - name: parent
+        in: query
+        required: false
+        schema:
+          description: Optional parent scope for the selected ID.
+          title: Parent
+          type: string
+        description: Optional parent scope for the selected ID.
+      - name: expected_db_version
+        in: query
+        required: false
+        schema:
+          description: Delete only this entity version.
+          title: Expected Db Version
+          type: integer
+        description: Delete only this entity version.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '403':
+          description: Not allowed to delete entities in the requested workspace.
+        '404':
+          description: Entity not found in the requested scope.
+        '409':
+          description: Entity version conflict.
         '422':
           description: Validation Error
           content:
@@ -1711,6 +1871,12 @@ paths:
                 $ref: '#/components/schemas/Entity'
         '403':
           description: Not allowed to read entities in the requested workspace.
+        '404':
+          description: Entity or workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1776,6 +1942,12 @@ paths:
                 $ref: '#/components/schemas/Entity'
         '403':
           description: Not allowed to update entities in the requested workspace.
+        '404':
+          description: Entity not found or workspace being deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Request validation error, or a referenced resource such as
             the workspace does not exist
@@ -1844,6 +2016,12 @@ paths:
                 $ref: '#/components/schemas/DeleteResponse'
         '403':
           description: Not allowed to delete entities in the requested workspace.
+        '404':
+          description: Entity or workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1986,6 +2164,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceMember'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2045,6 +2229,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Workspace or member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2117,27 +2307,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number
-          default: 1
-          title: Page
-        description: Page number
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Items per page
-          default: 100
-          title: Page Size
-        description: Items per page
       - name: sort
         in: query
         required: false
@@ -2175,6 +2344,27 @@ paths:
           - Bracket notation: ?filter[name][$like]=value
 
           - Relationship traversal: ?filter[relationship][$exists]=true or ?filter[relationship][field]=value'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -2269,6 +2459,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Project'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2310,6 +2506,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2333,6 +2535,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[\w\-\+.@:]+$
           title: Workspace
       requestBody:
         required: true
@@ -2372,6 +2575,17 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/FilesetSortField'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: -created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
       - name: page
         in: query
         required: false
@@ -2393,17 +2607,6 @@ paths:
           default: 10
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/GenericSortField'
-          description: The field to sort by. To sort in decreasing order, use `-`
-            in front of the field name.
-          default: -created_at
-        description: The field to sort by. To sort in decreasing order, use `-` in
-          front of the field name.
       - in: query
         name: filter
         style: deepObject
@@ -2420,6 +2623,106 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetOutputsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/files/v2/workspaces/{workspace}/filesets/by-id/{fileset_id}:
+    get:
+      tags:
+      - Files
+      summary: Get Fileset by ID
+      operationId: get_fileset_by_id_apis_files_v2_workspaces__workspace__filesets_by_id__fileset_id__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: fileset_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Fileset Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Files
+      summary: Delete Fileset by ID
+      operationId: delete_fileset_by_id_apis_files_v2_workspaces__workspace__filesets_by_id__fileset_id__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: fileset_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Fileset Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '409':
+          description: Fileset is referenced, changed concurrently, or deletion is
+            in progress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '503':
+          description: Fileset references could not be verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -2502,6 +2805,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Fileset is referenced by a model or adapter entity
           content:
@@ -2558,6 +2867,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2684,6 +2999,15 @@ paths:
               schema:
                 type: string
                 format: binary
+        '409':
+          description: Upstream object changed; retry the request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -2736,7 +3060,8 @@ paths:
       tags:
       - Files
       summary: Upload Fileset Content
-      description: Upload file content to a fileset.
+      description: Upload file content to a fileset. Read-only storage returns HTTP
+        409.
       operationId: upload_file_apis_files_v2_workspaces__workspace__filesets__name_____path__put
       parameters:
       - name: workspace
@@ -2764,6 +3089,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetFileOutput'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -2841,7 +3175,7 @@ paths:
 
         Permanently deletes the file from the storage backend.
 
-        Returns metadata about the deleted file.'
+        Returns metadata about the deleted file. Read-only storage returns HTTP 409.'
       operationId: delete_file_apis_files_v2_workspaces__workspace__filesets__name_____path__delete
       parameters:
       - name: workspace
@@ -2869,6 +3203,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetFileOutput'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -2953,7 +3296,9 @@ paths:
       description: 'Upload OTLP logs to a specified fileset in JSON or Protobuf format.
 
 
-        Supports both application/json and application/x-protobuf content types.'
+        Supports both application/json and application/x-protobuf content types.
+
+        Read-only storage returns HTTP 409 before reading the request body.'
       operationId: upload_otlp_logs_apis_files_v2_workspaces__workspace__filesets__name__otlp_v1_logs_post
       parameters:
       - name: workspace
@@ -2990,6 +3335,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OtelExportLogsServiceResponse'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -3257,24 +3611,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -3286,6 +3622,27 @@ paths:
           default: created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -4468,27 +4825,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number (1-indexed).
-          default: 1
-          title: Page
-        description: Page number (1-indexed).
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          description: Number of results per page.
-          default: 20
-          title: Page Size
-        description: Number of results per page.
       - name: sort
         in: query
         required: false
@@ -4509,6 +4845,27 @@ paths:
           title: Exclude Autoprovisioned
         description: When true, controller-managed (autoprovisioned) passthrough VirtualModels
           are excluded from the results.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          description: Page size.
+          default: 20
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -4749,6 +5106,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/AnnotationSortField'
+          default: -created_at
       - name: page
         in: query
         required: false
@@ -4770,13 +5134,6 @@ paths:
           default: 10
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/AnnotationSortField'
-          default: -created_at
       - in: query
         name: filter
         style: deepObject
@@ -4950,27 +5307,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Page size.
-          default: 100
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -4993,6 +5329,27 @@ paths:
           \ tokens.<stat>, or evaluators.<name>.<stat>, where <stat> is one of mean,\
           \ median, p90, p95, p99, sum, count. When omitted, defaults to -created_at\
           \ with pinned evaluations first."
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -5378,27 +5735,6 @@ paths:
         schema:
           type: string
           title: Name
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Page size.
-          default: 100
-          title: Page Size
-        description: Page size.
       - name: mode
         in: query
         required: false
@@ -5432,6 +5768,27 @@ paths:
           \ e.g. '-cost_total_usd,latency_ms'. Fields: test_case_name, started_at,\
           \ ended_at, latency_ms, status, cost_total_usd, tokens. When omitted, sessions\
           \ are ordered by started_at ascending."
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -5514,6 +5871,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/EvaluatorResultSortField'
+          default: -created_at
       - name: page
         in: query
         required: false
@@ -5535,13 +5899,6 @@ paths:
           default: 10
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/EvaluatorResultSortField'
-          default: -created_at
       - in: query
         name: filter
         style: deepObject
@@ -5590,6 +5947,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EvaluatorResult'
+        '404':
+          description: Evaluator result not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -5642,6 +6005,22 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - -created_at
+          - created_at
+          - -updated_at
+          - updated_at
+          - -name
+          - name
+          type: string
+          description: Sort field; prefix with '-' for descending.
+          default: -created_at
+          title: Sort
+        description: Sort field; prefix with '-' for descending.
       - name: page
         in: query
         required: false
@@ -5663,22 +6042,6 @@ paths:
           default: 100
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          enum:
-          - -created_at
-          - created_at
-          - -updated_at
-          - updated_at
-          - -name
-          - name
-          type: string
-          description: Sort field; prefix with '-' for descending.
-          default: -created_at
-          title: Sort
-        description: Sort field; prefix with '-' for descending.
       - in: query
         name: filter
         style: deepObject
@@ -6232,27 +6595,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -6277,6 +6619,27 @@ paths:
         description: Response mode. summary omits payloads and raw attributes; preview
           includes input and output truncated to 300 characters; detailed returns
           full payloads and raw attributes.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -6324,6 +6687,23 @@ paths:
           - trace_id
           title: By
         description: Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/SpanGroupSortField'
+          description: Sort groups by size or by start time. Use -started_at for the
+            traces or sessions that began most recently, which answers 'what ran lately'
+            in one call instead of paging through spans. A group's time is its earliest
+            matching span, so this orders by when work started and not by when it
+            was last active.
+          default: -span_count
+        description: Sort groups by size or by start time. Use -started_at for the
+          traces or sessions that began most recently, which answers 'what ran lately'
+          in one call instead of paging through spans. A group's time is its earliest
+          matching span, so this orders by when work started and not by when it was
+          last active.
       - name: page
         in: query
         required: false
@@ -6345,23 +6725,6 @@ paths:
           default: 10
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/SpanGroupSortField'
-          description: Sort groups by size or by start time. Use -started_at for the
-            traces or sessions that began most recently, which answers 'what ran lately'
-            in one call instead of paging through spans. A group's time is its earliest
-            matching span, so this orders by when work started and not by when it
-            was last active.
-          default: -span_count
-        description: Sort groups by size or by start time. Use -started_at for the
-          traces or sessions that began most recently, which answers 'what ran lately'
-          in one call instead of paging through spans. A group's time is its earliest
-          matching span, so this orders by when work started and not by when it was
-          last active.
       - in: query
         name: filter
         style: deepObject
@@ -6421,6 +6784,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Span'
+        '404':
+          description: Span not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -6476,27 +6845,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -6521,6 +6869,27 @@ paths:
         description: Response mode. summary returns root-span fields without payloads
           or rollups; preview adds token, cost, and span-count rollups plus 300-character
           input/output previews; detailed returns rollups and full payloads.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -6664,6 +7033,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Trace'
+        '404':
+          description: Trace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -6716,6 +7091,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[\w\-\+.@:]+$
           title: Workspace
       requestBody:
         required: true
@@ -6770,26 +7146,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -6801,6 +7157,27 @@ paths:
           default: -created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -6843,26 +7220,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 25
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -6872,6 +7229,27 @@ paths:
           description: Sort attempts by sequence. Prefix with `-` for descending order.
           default: -seq
         description: Sort attempts by sequence. Prefix with `-` for descending order.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -7028,12 +7406,19 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobSortField'
+          default: created_at
       - name: page
         in: query
         required: false
         schema:
           type: integer
-          exclusiveMinimum: 0
+          minimum: 1
           description: Page number.
           default: 1
           title: Page
@@ -7043,18 +7428,12 @@ paths:
         required: false
         schema:
           type: integer
-          exclusiveMinimum: 0
+          maximum: 1000
+          minimum: 1
           description: Page size.
           default: 25
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/HelixJobSortField'
-          default: created_at
       - in: query
         name: filter
         style: deepObject
@@ -7115,6 +7494,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobStep'
+        '404':
+          description: Attempt step not found
         '422':
           description: Validation Error
           content:
@@ -7268,6 +7649,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobTask'
+        '404':
+          description: Attempt or step not found
         '422':
           description: Validation Error
           content:
@@ -7318,6 +7701,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobTask'
+        '404':
+          description: Attempt step or task not found
         '422':
           description: Validation Error
           content:
@@ -8213,26 +8598,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 25
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -8244,6 +8609,27 @@ paths:
           default: created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -8311,11 +8697,23 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: created_at
+          title: Sort
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
       - name: page
         in: query
         required: false
         schema:
           type: integer
+          minimum: 1
           description: Page number.
           default: 1
           title: Page
@@ -8331,17 +8729,6 @@ paths:
           default: 100
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          type: string
-          description: The field to sort by. To sort in decreasing order, use `-`
-            in front of the field name.
-          default: created_at
-          title: Sort
-        description: The field to sort by. To sort in decreasing order, use `-` in
-          front of the field name.
       - in: query
         name: filter
         style: deepObject
@@ -8426,6 +8813,12 @@ paths:
         '204':
           description: Delete adapter by name. The entity store delete uses the adapter's
             stored parent (entity `parent` field).
+        '404':
+          description: Adapter not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -8506,6 +8899,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Adapter'
+        '404':
+          description: Adapter not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -8528,24 +8927,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page size.
-          default: 100
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -8557,6 +8938,27 @@ paths:
           title: Sort
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -8655,6 +9057,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelDeploymentConfig'
+        '404':
+          description: Deployment configuration version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -8971,24 +9379,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page size.
-          default: 100
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -9011,6 +9401,27 @@ paths:
           title: All Versions
         description: If true, return all versions of each deployment. If false (default),
           return only the latest version.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -9098,6 +9509,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelDeployment'
+        '404':
+          description: Deployment version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -9492,24 +9909,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page size.
-          default: 100
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -9530,6 +9929,27 @@ paths:
           default: false
           title: Verbose
         description: Whether to include full spec details
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -9825,6 +10245,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
+        '404':
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       tags:
       - Models
@@ -9850,6 +10276,12 @@ paths:
       responses:
         '204':
           description: Delete model entity
+        '404':
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -9912,6 +10344,17 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/PromptSort'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
       - name: page
         in: query
         required: false
@@ -9933,17 +10376,6 @@ paths:
           default: 100
           title: Page Size
         description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/PromptSort'
-          description: The field to sort by. To sort in decreasing order, use `-`
-            in front of the field name.
-          default: created_at
-        description: The field to sort by. To sort in decreasing order, use `-` in
-          front of the field name.
       - in: query
         name: filter
         style: deepObject
@@ -10011,12 +10443,16 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '200':
@@ -10069,6 +10505,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Prompt'
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10087,16 +10529,26 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '204':
           description: Delete a prompt
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10158,25 +10610,9 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          description: Page size.
-          default: 100
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -10188,6 +10624,27 @@ paths:
           default: created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -10225,6 +10682,8 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       requestBody:
         required: true
@@ -10274,6 +10733,8 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
@@ -10323,12 +10784,16 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '200':
@@ -10361,16 +10826,26 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '204':
           description: Delete a model provider
+        '404':
+          description: Model provider not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10447,6 +10922,8 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
@@ -10500,6 +10977,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[\w\-\+.@:]+$
           title: Workspace
       requestBody:
         required: true
@@ -10538,7 +11016,7 @@ paths:
         required: false
         schema:
           type: integer
-          exclusiveMinimum: 0
+          minimum: 1
           description: Page number.
           default: 1
           title: Page
@@ -10548,7 +11026,8 @@ paths:
         required: false
         schema:
           type: integer
-          exclusiveMinimum: 0
+          maximum: 1000
+          minimum: 1
           description: Page size.
           default: 10
           title: Page Size
@@ -10643,6 +11122,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixSecretResponse'
+        '404':
+          description: Secret not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10671,6 +11156,12 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '404':
+          description: Secret not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -12260,6 +12751,7 @@ components:
       enum:
       - OPENAI_CHAT
       - ANTHROPIC_MESSAGES
+      - SYSTEMONE
       title: BackendFormat
       description: Inference backend API wire formats understood by IGW and middleware
         plugins.
@@ -14019,6 +14511,12 @@ components:
           description: 'Whether to allow the creation of the volume if it does not
             exist (default: false).'
           default: false
+        read_only:
+          type: boolean
+          title: Read Only
+          description: 'Mount the volume read-only in the job container, so job code
+            cannot change what it holds (default: false).'
+          default: false
       type: object
       required:
       - volume_name
@@ -15757,6 +16255,26 @@ components:
       - generic
       - model
       title: FilesetPurpose
+    FilesetSortField:
+      type: string
+      enum:
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      - name
+      - -name
+      - storage_type
+      - -storage_type
+      title: FilesetSortField
+      description: 'Sort options for listing filesets.
+
+
+        Extends the generic entity sorts with ``storage_type``, which orders by the
+
+        storage backend recorded on the fileset. Prefix a field with ``-`` for
+
+        descending order.'
     FinetuningType:
       type: string
       enum:
@@ -20514,6 +21032,14 @@ components:
           type: string
           title: Family
           description: Model architecture family (e.g., 'llama', 'mixtral', 'gpt2')
+        architectures:
+          title: Architectures
+          description: Architectures declared in the checkpoint's top-level config.json.
+            For a multimodal checkpoint this names the whole model (e.g., 'NemotronH_Omni_Reasoning_V3'),
+            while the other fields describe its language model.
+          items:
+            type: string
+          type: array
         num_layers:
           type: integer
           title: Num Layers
@@ -21104,6 +21630,15 @@ components:
           items:
             type: string
           type: array
+        num_gpus:
+          title: Num Gpus
+          description: GPUs requested for a gpu step of this profile that does not
+            declare its own resources.num_gpus; a gpu step with neither asks for one.
+            cpu steps never request a GPU, as on the docker and k8s backends. A GPU
+            sandbox keeps the k8s default /dev/shm, since OpenShell has no shm sizing;
+            a step's shm_size is ignored.
+          type: integer
+          minimum: 1.0
         egress_proxy:
           title: Egress Proxy
           description: 'HTTP proxy URL injected as HTTP_PROXY/HTTPS_PROXY for the
@@ -22268,6 +22803,7 @@ components:
       properties:
         principal:
           type: string
+          maxLength: 256
           title: Principal
           description: The principal identifier (email, user ID, or group ID)
         workspace:
@@ -22275,6 +22811,7 @@ components:
           description: The workspace this binding applies to. None for platform-level
             roles.
           type: string
+          pattern: ^[\w\-\+.@:]+$
         role:
           type: string
           title: Role
@@ -24644,6 +25181,10 @@ components:
           title: Description
           description: Optional description
           type: string
+        limits:
+          allOf:
+          - $ref: '#/components/schemas/WorkspaceLimits'
+          description: Optional per-workspace resource limits
         created_at:
           type: string
           format: date-time
@@ -24714,11 +25255,33 @@ components:
           title: Description
           description: Optional description of the workspace
           type: string
+        limits:
+          allOf:
+          - $ref: '#/components/schemas/WorkspaceLimits'
+          description: Optional per-workspace limits. Only persisted when provided;
+            requires a platform admin.
       type: object
       required:
       - name
       title: WorkspaceInput
       description: Schema for creating a new workspace.
+    WorkspaceLimits:
+      properties:
+        max_concurrent_jobs:
+          title: Max Concurrent Jobs
+          description: Maximum number of jobs the workspace may have admitted concurrently.
+            When unset, the Jobs service default applies.
+          type: integer
+          minimum: 1.0
+      additionalProperties: false
+      type: object
+      title: WorkspaceLimits
+      description: 'Optional per-workspace resource limits.
+
+
+        A field left unset means "use the platform default"; the consumer applies
+
+        that default, it is never written back to the workspace record.'
     WorkspaceMember:
       properties:
         principal:
@@ -24750,6 +25313,7 @@ components:
       properties:
         principal:
           type: string
+          maxLength: 256
           title: Principal
           description: The principal identifier (email, user ID, or group ID)
           examples:
@@ -24807,6 +25371,11 @@ components:
           title: Description
           description: Updated description
           type: string
+        limits:
+          allOf:
+          - $ref: '#/components/schemas/WorkspaceLimits'
+          description: Updated per-workspace limits. Omit to leave unchanged; requires
+            workspace Admin.
       type: object
       title: WorkspaceUpdate
       description: Schema for updating a workspace.
@@ -24838,8 +25407,9 @@ components:
     HelixBearer:
       type: http
       scheme: bearer
-      description: Supply a raw Helix access token. The Authorization header's Bearer
-        prefix is added automatically.
+      description: 'Send `Authorization: Bearer <token>` when setting the HTTP header
+        directly (for example, with curl). In a bearer-auth token field, supply only
+        the raw Helix access token; the client adds the Bearer prefix.'
       x-fern-bearer:
         name: accessToken
         env: NHX_ACCESS_TOKEN

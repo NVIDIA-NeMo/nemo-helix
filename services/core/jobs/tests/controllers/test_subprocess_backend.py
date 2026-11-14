@@ -5,14 +5,16 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+from nemo_helix_plugin.jobs.spec import HelixJobSecretEnvironmentVariableRef
 from nhx.common.config import HelixConfig
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.providers import SubprocessExecutionProvider
-from nhx.core.jobs.app.schemas import StepLifecycle
+from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable, StepLifecycle
 from nhx.core.jobs.controllers.backends.base import (
     NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
     NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR,
@@ -87,6 +89,45 @@ def test_schedule_starts_process_and_stages_environment(
     assert metadata.work_dir.is_relative_to(tmp_path)
     assert metadata.persistent_dir.is_relative_to(tmp_path)
     mock_jobs_client.update_attempt_step_task.assert_called()
+
+
+@pytest.mark.parametrize("name", ["NHX_PRINCIPAL", "NEMO_JOB_SECRETS"])
+def test_prepare_runtime_rejects_step_env_for_platform_injected_names(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending, name
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = test_step_pending.model_copy(deep=True)
+    step.step_spec.environment = [HelixJobEnvironmentVariable(name=name, value="attacker-chosen")]
+
+    with pytest.raises(ValueError, match=name):
+        backend._prepare_runtime(step)
+    assert not any(tmp_path.iterdir())
+
+
+def test_prepare_runtime_rejects_plain_env_name_that_spoofs_reserved_name(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = test_step_pending.model_copy(deep=True)
+    step.step_spec.environment = [HelixJobEnvironmentVariable(name="NHX_PRINCIPAL=x", value="attacker")]
+
+    with pytest.raises(ValueError, match="must not contain"):
+        backend._prepare_runtime(step)
+
+
+def test_prepare_runtime_rejects_secret_env_name_that_injects_reserved_name(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = test_step_pending.model_copy(deep=True)
+    step.step_spec.environment = [
+        HelixJobEnvironmentVariable(
+            name="X=default/a,NHX_PRINCIPAL", from_secret=HelixJobSecretEnvironmentVariableRef(name="b")
+        )
+    ]
+
+    with pytest.raises(ValueError, match="must match"):
+        backend._prepare_runtime(step)
 
 
 def test_created_step_does_not_ttl_before_backend_acceptance(
@@ -356,6 +397,29 @@ def test_schedule_passes_the_agent_wheel_through(mock_nemo_client, tmp_path, moc
     assert metadata.process.wait(timeout=5) == 0
 
 
+def test_schedule_passes_the_telemetry_opt_out_through(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(
+        test_step_pending,
+        ["/bin/sh", "-c", 'test "$NEMO_TELEMETRY_ENABLED" = "false"'],
+    )
+
+    with (
+        patch.dict(os.environ, {"PATH": "/bin", "NEMO_TELEMETRY_ENABLED": "false"}, clear=True),
+        patch("nhx.core.jobs.controllers.backends.subprocess.create_otel_logger", return_value=None),
+    ):
+        update = backend.schedule(step.step_spec.executor, step)
+
+    assert update.status == HelixJobStatus.PENDING
+    metadata = backend._process_registry.get(
+        SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
+    )
+    assert metadata is not None
+    assert metadata.process.wait(timeout=5) == 0
+
+
 def test_schedule_preserves_uds_otlp_metadata_in_runtime_env(mock_nemo_client, tmp_path, test_step_pending):
     platform_config = HelixConfig(  # type: ignore[abstract]
         service_discovery={"files": "unix:///tmp/nemo-helix.sock"},
@@ -574,7 +638,7 @@ def test_build_command_resolves_console_script_via_sys_executable_when_virtual_e
         command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
     )
 
-    with patch.object(sys, "executable", str(bin_dir / "python")):
+    with patch("nhx.core.jobs.controllers.backends.subprocess.python_executable", str(bin_dir / "python")):
         result = SubprocessJobBackend._build_command(executor, None)
 
     assert result == [
@@ -597,7 +661,7 @@ def test_build_command_leaves_console_script_unchanged_when_absent_from_sys_exec
         command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
     )
 
-    with patch.object(sys, "executable", str(bin_dir / "python")):
+    with patch("nhx.core.jobs.controllers.backends.subprocess.python_executable", str(bin_dir / "python")):
         result = SubprocessJobBackend._build_command(executor, None)
 
     assert result == [
@@ -945,7 +1009,7 @@ def test_reclaim_raises_when_storage_cannot_be_removed(mock_nemo_client, tmp_pat
     backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
 
     with (
-        patch("nhx.core.jobs.controllers.backends.subprocess.shutil.rmtree", side_effect=PermissionError),
+        patch("nhx.core.jobs.controllers.backends.subprocess.rmtree", side_effect=PermissionError),
         pytest.raises(PermissionError),
     ):
         backend.reclaim_persistent_storage("default", "train-llama")
@@ -1121,10 +1185,11 @@ def test_failed_secret_injection_leaves_no_task_token_file(
 def test_task_token_file_removal_is_retried_after_a_failure(mock_nemo_client, tmp_path, mock_platform_config):
     backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     metadata = _auth_metadata(tmp_path, exited=True)
-    token_file = metadata.task_auth_token_file
+    token_file = MagicMock(spec=Path)
+    token_file.unlink.side_effect = PermissionError("denied")
+    metadata.task_auth_token_file = token_file
 
-    with patch("pathlib.Path.unlink", side_effect=PermissionError("denied")):
-        backend._refresh_task_auth(metadata)
+    backend._refresh_task_auth(metadata)
 
     assert metadata.task_auth_token_file == token_file
 

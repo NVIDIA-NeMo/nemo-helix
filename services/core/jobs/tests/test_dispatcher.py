@@ -53,6 +53,7 @@ from nhx.core.jobs.app.constants import (
 from nhx.core.jobs.app.dispatcher import (
     JobDeletionConflictError,
     JobDispatcher,
+    JobEnvironmentValidationError,
     JobOperationConflictError,
     JobStatusUpdateSkippedError,
     JobStorageReclaimPendingError,
@@ -4246,3 +4247,57 @@ async def test_a_delete_that_fails_after_queueing_leaves_a_job_rerun_refuses(
 
     with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
         await mock_dispatcher.rerun_job(job.name, DEFAULT_WORKSPACE)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "from_secret"),
+    [
+        ("NHX_PRINCIPAL", None),
+        ("NEMO_JOB_SECRETS", None),
+        ("X=default/a,NHX_PRINCIPAL", SimpleNamespace(name="b")),
+    ],
+)
+async def test_validate_job_secrets_rejects_reserved_or_malformed_env_names(name, from_secret):
+    dispatcher = JobDispatcher.__new__(JobDispatcher)
+    spec = SimpleNamespace(steps=[SimpleNamespace(environment=[SimpleNamespace(name=name, from_secret=from_secret)])])
+
+    with pytest.raises(JobEnvironmentValidationError, match="must"):
+        await dispatcher.validate_job_secrets(spec, "default")
+
+
+@pytest.mark.asyncio
+async def test_validate_job_secrets_checks_env_names_before_secret_lookups():
+    dispatcher = JobDispatcher.__new__(JobDispatcher)
+    dispatcher.secrets = AsyncMock()
+    spec = SimpleNamespace(
+        steps=[
+            SimpleNamespace(
+                environment=[
+                    SimpleNamespace(name="OK", from_secret=SimpleNamespace(name="s")),
+                    SimpleNamespace(name="NHX_PRINCIPAL", from_secret=None),
+                ]
+            )
+        ]
+    )
+
+    with pytest.raises(JobEnvironmentValidationError):
+        await dispatcher.validate_job_secrets(spec, "default")
+    dispatcher.secrets.get_secret.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_job_rejects_reserved_step_env_names(
+    mock_dispatcher: JobDispatcher,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    created = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    platform_spec = TestConstants.PLATFORM_SPEC.model_copy(deep=True)
+    platform_spec.steps[0].environment = [HelixJobEnvironmentVariable(name="NHX_PRINCIPAL", value="attacker")]
+
+    with pytest.raises(JobEnvironmentValidationError, match="NHX_PRINCIPAL"):
+        await mock_dispatcher.update_job(
+            created.name,
+            DEFAULT_WORKSPACE,
+            UpdateHelixJobRequest(spec={"revision": 2}, platform_spec=platform_spec),
+        )

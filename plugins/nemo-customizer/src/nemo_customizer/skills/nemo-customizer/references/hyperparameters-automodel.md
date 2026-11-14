@@ -112,9 +112,9 @@ Full template:
 | Field | Default | Notes |
 |-------|---------|-------|
 | `training_type` | `sft` | `distillation` requires `teacher_model` (entity ref) |
-| `recipe` | `auto` | `auto` uses the checkpoint head; `sft`, `bi_encoder`, or `cross_encoder` explicitly selects the recipe. Explicit encoder recipes can wrap a causal-LM checkpoint. Unset batch/LR/warmup fields are rewritten for encoder recipes — see **Retrieval recipe defaults** below. |
+| `recipe` | `auto` | `auto` uses the checkpoint head; `sft`, `bi_encoder`, or `cross_encoder` explicitly selects the recipe. Explicit encoder recipes can wrap a causal-LM checkpoint. A Qwen3 reranker without a `pipeline_tag: text-ranking` model card (any Customizer output, or one fine-tuned elsewhere) reads as a chat model, so set `cross_encoder` explicitly for it. Unset batch/LR/warmup fields are rewritten for encoder recipes — see **Retrieval recipe defaults** below. |
 | `finetuning_type` | `lora` | `all_weights` (full fine-tune), `lora_merged` (merge adapter into base) |
-| `lora.rank` | `16` | Higher → more capacity, more VRAM. Typical training range 8–32. Default vLLM and model-free NIM deployments load adapters only up to **rank 16**; above that the deployment needs a raised `--max-lora-rank` (`post-training-eval.md` § **LoRA rank limit**) |
+| `lora.rank` | `16` | Higher → more capacity, more VRAM. Typical training range 8–32. Default vLLM deployments load adapters up to **rank 32** and model-free NIM deployments up to **rank 16**; above that the deployment needs a raised `--max-lora-rank` (`post-training-eval.md` § **LoRA rank limit**) |
 | `lora.alpha` | `32` | Scaling; common rule of thumb **alpha ≈ 2× rank** |
 | `lora.dropout` | `0.0` | LoRA dropout (0.0–1.0) for regularization |
 | `lora.merge` | `false` | If true with `lora_merged`, output is full weights not adapter |
@@ -122,8 +122,10 @@ Full template:
 | `lora.exclude_modules` | `null` | Patterns to exclude from LoRA, e.g. `["*.out_proj"]` |
 | `lora.use_triton` | `true` | Use the optimized Triton LoRA kernel |
 | `max_seq_length` | `2048` | Truncate/pack to this length; lower if OOM |
-| `precision` | `null` | `bf16` \| `fp16` \| `fp32` \| `fp8`; null auto-detects from the checkpoint |
+| `precision` | `null` | `bf16` \| `fp16` \| `fp32` \| `fp8`; null auto-detects from the checkpoint. Exception: full-weight distillation with `Adam`/`AdamW` keeps the student in fp32, because those optimizers hold no separate fp32 copy of the weights. Set `precision` to override |
 | `attn_implementation` | `sdpa` | `sdpa` (PyTorch native) \| `flash_attention_2` \| `eager` |
+| `tokenizer_backend` | `null` | **Leave unset** unless the tokenizer fails to load. See **Tokenizer backend** below |
+| `mask_generation_prompt` | `false` | Chat (messages) data only. `true` stops training on the role header and empty `<think></think>` the chat template writes before each reply. See below |
 | `teacher_model` | — | **Model entity ref** (not HF id). Required for distillation; see below |
 | `distillation_ratio` | `0.5` | KD blend (0–1) |
 | `distillation_temperature` | `1.0` | KD temperature |
@@ -131,6 +133,44 @@ Full template:
 | `offload_teacher` | `false` | Offload teacher weights to CPU |
 
 LoRA block is auto-created when `finetuning_type` is `lora` or `lora_merged`.
+
+### Tokenizer backend (`training.tokenizer_backend`)
+
+**Default: leave it unset.** Set it only when a job fails while loading the tokenizer, or when you must match how the model is served.
+
+| Recipe | Unset means |
+|--------|-------------|
+| `bi_encoder`, `cross_encoder` | `nemo_wrapped_auto`: the checkpoint's own Hugging Face tokenizer (`tokenizer.json`), the one Retriever/Ranking NIM and vLLM serve with |
+| `sft`, `distillation` | Automodel's default, `nemo_auto`, exactly as before this field existed. Helix writes no tokenizer setting |
+| Vision-language models | Not supported: VLM jobs load the checkpoint's processor, and setting the field fails the job at submission |
+
+| Value | Loads | Use when |
+|-------|-------|----------|
+| `nemo_auto` | A tokenizer Automodel registers for the checkpoint's `model_type` when there is one (Mistral's `tekken.json` for Mistral-family types, TikToken for Kimi K3), otherwise the Hugging Face tokenizer | Mistral-family LLMs published with `tekken.json` |
+| `nemo_wrapped_auto` | The checkpoint's Hugging Face tokenizer, skipping Automodel's registry, with Automodel's BOS/EOS/pad handling | The checkpoint's `model_type` has a registered tokenizer but the checkpoint ships only `tokenizer.json` |
+| `transformers_auto` | Plain Hugging Face `AutoTokenizer`, without Automodel's wrapper | You need byte-identical behavior to an external Hugging Face pipeline |
+| `tokenizers` | `tokenizer.json` read directly | `AutoTokenizer` cannot resolve the checkpoint's tokenizer class |
+
+What setting it does:
+
+- **`sft` and `distillation`:** Helix adds a `dataset.tokenizer` block. Automodel builds one tokenizer from it and uses it for both the training and validation data. Distillation caveat: Automodel's student/teacher vocabulary check always uses its default tokenizer, so a student that needs a non-default backend can still fail that check.
+- **`bi_encoder` and `cross_encoder`:** it replaces the `nemo_wrapped_auto` default.
+
+**Nemotron models:**
+
+- **Nemotron 3 Embed 1B needs the Hugging Face tokenizer.** Its `config.json` says `model_type: ministral3`, and Automodel v0.7.0 maps that type to Mistral's `tekken.json` tokenizer, but the checkpoint ships only `tokenizer.json`. Under `nemo_auto`, training fails with `No tokenizer file found.`, and mining fails with `Some kwargs ... are not supported by MistralCommonBackend.from_pretrained`. Helix's retrieval default (`nemo_wrapped_auto`) already handles this, so leave the field unset. Never set `nemo_auto` for it.
+- **Leave it unset for the others.** Llama Nemotron Embed/Rerank (`llama_bidirec`), Nemotron LLMs (`nemotron_h`, `llama`), and Qwen models have no registered tokenizer, so every backend loads the same `tokenizer.json`.
+- **Mining** takes its own `tokenizer_backend` on `retrieval-prepare` (`nemo_wrapped_auto` by default, or `nemo_auto`); see `nemo-retrieval-recipes` `references/sdg.md`.
+
+### `mask_generation_prompt` (chat SFT)
+
+At inference, the chat template writes the assistant role header, and for hybrid reasoning models an empty `<think></think>`, before the model generates anything. By default those tokens are part of the training loss, the same as before this field existed.
+
+`true` removes them from the loss for both the training and validation data. Then:
+- **The model learns only the reply.** Supervising an empty think block also teaches Qwen3 and Nemotron hybrid models to close `<think>` immediately, which can hurt their thinking mode after fine-tuning.
+- **Loss and validation loss read lower**, because the hard-to-predict template tokens no longer count.
+
+Chat-format (messages) data only. Prompt/completion data fails the job, and vision-language and retrieval recipes are rejected at submission.
 
 ### Automodel `schedule`
 
@@ -231,7 +271,15 @@ Use `"recipe": "cross_encoder"` and the rerank model entity for ranking. Leave b
 
 Dataset, collator, and export knobs for `bi_encoder` / `cross_encoder`. Use `training.retrieval` only; `training.embedding` is rejected.
 
+`retrieval.temperature` is the loss softmax temperature. Unset means `0.02` for `bi_encoder` and `1.0` for `cross_encoder`. Lower values sharpen the contrast between the positive and the negatives. For a Qwen3 causal reranker it is the only temperature setting; Automodel's Qwen3-Reranker example recipe uses `0.3`.
+
 `retrieval.export` writes ONNX plus the HF checkpoint. `primary` (`onnx` by default, or `hf`) selects the fileset root; the other artifact goes under `alternates/`. `precision` defaults to `fp16` to match typical Hugging Face checkpoints. Embeddings emit pooled `embeddings`; cross-encoders emit `logits`. Set `dimensions: true` for Matryoshka truncation. Unmerged LoRA is not exported.
+
+**Qwen3 causal rerankers** (a `cross_encoder` job on a `Qwen3ForCausalLM` base such as Qwen3-Reranker) have no score head:
+- **Training prompt.** Helix trains them on Qwen3-Reranker's own prompt: system message, `<Instruct>`/`<Query>`/`<Document>`, then the empty think block. Classifier rerankers keep `question:{query} \n \n passage:{passage}`.
+- **Score.** `logit("yes") - logit("no")` at the last token. The HF output stays a plain Qwen3 causal LM, and the ONNX `logits` holds that score.
+- **Re-tuning.** The output's files look like a chat model's, so model registration labels it a chat model and `recipe: auto` picks `sft`. Set `training.recipe: cross_encoder` explicitly when you train from a tuned Qwen3 reranker, including one fine-tuned outside Helix.
+- **Serving.** Score the tuned model with the same prompt, for example vLLM's Qwen3 reranker template. Other formatting reads the yes/no logits at the wrong position. On vLLM, train with `retrieval.export.primary: hf` (vLLM serves the fileset root) and deploy with `executor_config.additional_args`: `["--runner", "pooling", "--hf-overrides", "{\"architectures\": [\"Qwen3ForSequenceClassification\"], \"classifier_from_token\": [\"no\", \"yes\"], \"is_original_qwen3_reranker\": true}", "--chat-template", "<Qwen3 reranker template>"]`. The overrides make vLLM score with the yes/no logits instead of loading a chat model.
 
 ### `parallelism`
 
@@ -261,7 +309,7 @@ Apply user overrides to `/tmp/job.json` before submit. For **batch / GPU count /
 |----------------|-----------|
 | CUDA OOM | **`batch-sizing.md` tuning loop:** halve `micro_batch_size`, then `global_batch_size`, then `max_seq_length`; use TP > 1 only if the model does not fit one ≥48 GB GPU. MoE with `expert_parallel_size` > 1 needs TP 1: add GPUs and raise `expert_parallel_size`, or set `training.activation_checkpointing: true` |
 | Slow / low GPU use | **`batch-sizing.md`:** step toward high-util column or double `micro`+GBS until ~35–40 GiB; multi-GPU data parallel if model fits one GPU |
-| Underfitting | More `epochs`, slightly higher `learning_rate`, higher LoRA `rank` (above 16, raise the deployment's `--max-lora-rank`) |
+| Underfitting | More `epochs`, slightly higher `learning_rate`, higher LoRA `rank` (above the deployment's max rank, 32 on vLLM or 16 on model-free NIM, raise its `--max-lora-rank`) |
 | Overfitting | Fewer `epochs`, lower `learning_rate`, higher `weight_decay`, smaller `rank` |
 | Quick smoke test | `max_steps` only (e.g. 10–50), **omit or ignore epoch goal**; or `epochs: 1` on tiny slice |
 | Reproducibility | Set `schedule.seed` |
@@ -278,13 +326,13 @@ The schema default for LoRA is `5e-5`.
 
 ### Automodel LoRA rank / alpha
 
-**Deployment limit:** Default **vLLM** and **model-free NIM** deployments load adapters only up to rank **16**; the multi-LLM NIM up to 32. Keep `rank` at 16 unless the deployment raises its max rank (`post-training-eval.md` § **LoRA rank limit**).
+**Deployment limit:** Default **vLLM** deployments load adapters up to rank **32**, **model-free NIM** deployments up to **16**, and the multi-LLM NIM up to 32. Keep `rank` at or below the deployment's limit unless it raises its max rank (`post-training-eval.md` § **LoRA rank limit**).
 
 | Use case | `rank` | `alpha` |
 |----------|--------|---------|
 | Default / balanced | 16 | 32 |
 | Low VRAM / light touch | 8 | 16 |
-| More capacity (deployment needs `--max-lora-rank 32`) | 32 | 64 |
+| More capacity (a model-free NIM deployment needs `--max-lora-rank 32`) | 32 | 64 |
 
 ### Epochs vs dataset size
 
@@ -310,7 +358,7 @@ Use **`batch-sizing.md` § Batch sizing** and **§ Multi-GPU** for `batch` and `
 "optimizer": { "learning_rate": 2e-5, "warmup_steps": 100 }
 ```
 
-Rank 32 adapters need a deployment with `--max-lora-rank` ≥ 32 (`post-training-eval.md` § **LoRA rank limit**). Pair with batch rows from **`batch-sizing.md`** (e.g. ≤4B default `micro` 32 / GBS 128, not `micro` 1 / GBS 4).
+Rank 32 adapters load on default vLLM deployments; a model-free NIM deployment needs `--max-lora-rank` ≥ 32 (`post-training-eval.md` § **LoRA rank limit**). Pair with batch rows from **`batch-sizing.md`** (e.g. ≤4B default `micro` 32 / GBS 128, not `micro` 1 / GBS 4).
 
 ---
 

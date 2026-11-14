@@ -2,21 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { triggerDownload } from '@nemo/common/src/utils/file';
-import { Download, Pencil, Trash, Split, MoreVert } from '@nemo/icons/icons';
-import {
-  Button,
-  DropdownContent,
-  DropdownItem,
-  DropdownRoot,
-  DropdownTrigger,
-  Flex,
-} from '@nvidia/foundations-react-core';
 import { useDatasetFileDelete } from '@studio/api/datasets/useDatasetFileDelete';
 import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileSplitsModal';
 import { RenameFileModal } from '@studio/components/FilesTable/RenameFileModal';
 import type { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
+import { getDeleteFilesDescription } from '@studio/constants/filesets';
 import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { useWorkers } from '@studio/providers/workers/useWorkers';
 import LargeFileWorker from '@studio/workers/LargeFileWorker?worker';
@@ -50,7 +43,7 @@ export const FileActions: FC<Props> = ({
   const bearerToken = useOidcBearerToken();
   const { createWorker } = useWorkers();
 
-  const { mutateAsync: deleteFile, error: deleteError } = useDatasetFileDelete();
+  const { mutateAsync: deleteFile } = useDatasetFileDelete();
 
   const downloadFile = async () => {
     const worker = new LargeFileWorker();
@@ -109,51 +102,24 @@ export const FileActions: FC<Props> = ({
 
   return (
     <>
-      <DropdownRoot>
-        <DropdownTrigger asChild showChevron={false}>
-          <Button
-            kind="tertiary"
-            aria-label="Open file actions menu"
-            className="absolute top-4 right-19"
-          >
-            <MoreVert />
-          </Button>
-        </DropdownTrigger>
-        <DropdownContent align="end">
-          <DropdownItem onClick={openModalWithFile('createSplit')}>
-            <Flex align="center" gap="density-sm">
-              <Split size="20" />
-              Create Split
-            </Flex>
-          </DropdownItem>
-          <DropdownItem onClick={downloadFile}>
-            <Flex align="center" gap="density-sm">
-              <Download size="20" />
-              Download
-            </Flex>
-          </DropdownItem>
-          <DropdownItem onClick={openModalWithFile('rename')}>
-            <Flex align="center" gap="density-sm">
-              <Pencil size="20" />
-              Rename
-            </Flex>
-          </DropdownItem>
-          <DropdownItem onClick={openModalWithFile('delete')} danger>
-            <Flex align="center" gap="density-sm">
-              <Trash size="20" />
-              Delete
-            </Flex>
-          </DropdownItem>
-        </DropdownContent>
-      </DropdownRoot>
+      <div className="absolute top-4 right-19">
+        <QuickActionsMenuRoot
+          ariaLabel="Open file actions menu"
+          actions={[
+            { label: 'Create Split', onSelect: openModalWithFile('createSplit') },
+            { label: 'Download', onSelect: downloadFile },
+            { label: 'Rename', onSelect: openModalWithFile('rename') },
+          ]}
+          deleteAction={{ onSelect: openModalWithFile('delete') }}
+        />
+      </div>
       {openModal === 'delete' && modalFile && (
         <DeleteConfirmationModal
           open
+          entity="file"
+          ids={[file.path]}
+          description={getDeleteFilesDescription(1)}
           onDelete={handleDeleteFile}
-          simpleConfirm
-          title="Delete File"
-          confirmationText={file.path}
-          errorText={deleteError?.message}
           onClose={() => setOpenModal(undefined)}
         />
       )}

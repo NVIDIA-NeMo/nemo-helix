@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import datetime
 import logging
-import time
+import re
 from abc import ABC, abstractmethod
 from bisect import bisect_right
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
+from time import monotonic
 from typing import Generic, Literal, Optional, TypeVar
 from urllib.parse import SplitResult, quote, urlsplit
 
@@ -36,6 +37,7 @@ from nhx.common.config.base import (
 from nhx.common.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -64,6 +66,7 @@ from nhx.core.jobs.app.constants import (
 )
 from nhx.core.jobs.app.lifecycle import active_ttl_anchor, ensure_aware, step_provider_profile
 from nhx.core.jobs.app.providers import ComputeResources
+from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable
 from nhx.core.jobs.entities import get_step_spec_name, is_final_platform_step
 from pydantic import BaseModel, model_validator
 
@@ -95,6 +98,9 @@ RESERVED_MANAGED_JOB_AUTH_ENVIRONMENT_VARIABLE_NAMES: frozenset[str] = frozenset
         "NEMO_WORKLOAD_TOKEN",
         "NEMO_WORKLOAD_TOKEN_FILE",
         WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
+        # Delegated identity and secret references are injected by the platform; a step must not override them.
+        NHX_PRINCIPAL_ENVVAR,
+        NEMO_JOB_SECRETS_ENVVAR,
     }
 )
 
@@ -112,6 +118,7 @@ RESERVED_JOB_ENVIRONMENT_VARIABLE_NAMES: frozenset[str] = (
             # From nhx.common.jobs.constants
             CONFIG_TASK_STORAGE_PATH_ENVVAR,
             EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+            NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
             NEMO_JOB_ATTEMPT_ID_ENVVAR,
             NEMO_JOB_FILESET_ENVVAR,
             NEMO_JOB_ID_ENVVAR,
@@ -153,11 +160,40 @@ def find_reserved_managed_job_environment_variable_names(env_names: Iterable[str
     )
 
 
+_VALID_ENVIRONMENT_VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_ENVIRONMENT_VARIABLE_NAME_UNSAFE_CHARS = re.compile(r"[=\x00]")
+
+
 def validate_no_reserved_managed_job_environment_variable_names(env_names: Iterable[str], *, source: str) -> None:
     """Reject user-provided platform-managed env names for managed jobs."""
     conflicting = find_reserved_managed_job_environment_variable_names(env_names)
     if conflicting:
         raise ValueError(f"{source} must not use platform-reserved managed environment keys: {conflicting}")
+
+
+def validate_step_environment(environment: Iterable[HelixJobEnvironmentVariable], *, source: str) -> None:
+    """Reject platform-reserved step env names, unsafe names, and non-identifier secret-backed names.
+
+    Secret-backed names are joined into NEMO_JOB_SECRETS with ``,`` and ``=`` separators, so they must
+    be plain identifiers. Every name is later rendered as ``NAME=value`` (docker), so ``=`` or NUL in a
+    name could shift that boundary and spoof a reserved name such as NHX_PRINCIPAL.
+    """
+    environment = list(environment)
+    validate_no_reserved_managed_job_environment_variable_names((envvar.name for envvar in environment), source=source)
+    malformed = sorted(
+        {
+            envvar.name
+            for envvar in environment
+            if envvar.from_secret is not None and not _VALID_ENVIRONMENT_VARIABLE_NAME.fullmatch(envvar.name)
+        }
+    )
+    if malformed:
+        raise ValueError(f"{source} for secrets must match {_VALID_ENVIRONMENT_VARIABLE_NAME.pattern}: {malformed}")
+    unsafe = sorted(
+        {envvar.name for envvar in environment if _ENVIRONMENT_VARIABLE_NAME_UNSAFE_CHARS.search(envvar.name)}
+    )
+    if unsafe:
+        raise ValueError(f"{source} must not contain '=' or NUL: {unsafe}")
 
 
 NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR = "NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT"
@@ -459,10 +495,10 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
         )
         start = bisect_right(names, self._cancelled_workload_cursor)
         batch = names[start : start + CANCELLED_WORKLOAD_BATCH_SIZE] or names[:CANCELLED_WORKLOAD_BATCH_SIZE]
-        deadline = time.monotonic() + CANCELLED_WORKLOAD_BUDGET_SECONDS
+        deadline = monotonic() + CANCELLED_WORKLOAD_BUDGET_SECONDS
         progress = on_progress or (lambda: None)
         for index, name in enumerate(batch):
-            if index and time.monotonic() >= deadline:
+            if index and monotonic() >= deadline:
                 break
             self._cancelled_workload_cursor = name
             labels = workloads[name]

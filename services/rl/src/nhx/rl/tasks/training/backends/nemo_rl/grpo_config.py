@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from copy import deepcopy
 from pathlib import Path
@@ -60,7 +59,7 @@ logger = logging.getLogger(__name__)
 
 def _build_lora_cfg(customizer_config: TrainingStepConfig, is_vlm: bool = False) -> dict[str, Any]:
     """Map TrainingStepConfig LoRA settings onto NeMo-RL DTensor lora_cfg."""
-    enabled = customizer_config.training.finetuning_type == FinetuningType.LORA
+    enabled = customizer_config.training.finetuning_type in (FinetuningType.LORA, FinetuningType.LORA_MERGED)
     lora = customizer_config.training.lora
     tp = customizer_config.parallelism.tensor_parallel_size
     # Triton is the faster LoRA path but only works at TP 1 (its kernel has no DTensor
@@ -224,22 +223,6 @@ def _count_jsonl_rows(path: Path) -> int:
     return count
 
 
-def _warn_if_v4_compatible_on_v5_checkpoint(model_path: str, v4_compatible: bool) -> None:
-    if not v4_compatible:
-        return
-    try:
-        version = json.loads((Path(model_path) / "config.json").read_text(encoding="utf-8")).get("transformers_version")
-        major = int(str(version).split(".")[0])
-    except (OSError, ValueError, AttributeError):
-        return
-    if major >= 5:
-        logger.warning(
-            "v4_compatible is enabled but the base checkpoint is transformers v%s; "
-            "set training.v4_compatible=false to keep the v5 config.json.",
-            major,
-        )
-
-
 # Formats whose wheels/ can be a complete closure. This is capability, not policy:
 # sandbox egress configuration decides whether uv is actually forced offline.
 OFFLINE_CAPABLE_ENVIRONMENT_FORMATS = frozenset({"wheels-v1", "adapter-wheels-v1"})
@@ -321,8 +304,12 @@ def _resolve_gym_paths(
     )
 
 
-def _sandbox_host_provider_options(gym: TrainingStepConfig.GymConfig) -> dict[str, Any]:
-    """``create.resource`` must match ``sandbox.resources``."""
+def sandbox_host_provider_options(gym: TrainingStepConfig.GymConfig) -> dict[str, Any]:
+    """OpenSandbox host-provider options for a GRPO job.
+
+    ``create.resource`` must match ``sandbox.resources``. The training task passes the same
+    options to the sandbox reaper, so it reaches the server the Gym actor created sandboxes on.
+    """
     connection: dict[str, Any] = {}
     if gym.sandbox_server_protocol:
         connection["protocol"] = gym.sandbox_server_protocol
@@ -340,6 +327,7 @@ def _build_nemo_gym_env_config(
     customizer_config: TrainingStepConfig,
     job_ctx: NHXJobContext,
 ) -> dict[str, Any]:
+    """Build the NeMo-Gym environment section of the GRPO config."""
     gym = customizer_config.gym
     if gym is None:
         raise ValueError("GRPO jobs require gym configuration on TrainingStepConfig")
@@ -427,7 +415,7 @@ def _build_nemo_gym_env_config(
             # Only emitted when the operator declared it, so an unset value leaves
             # NeMo-RL's own default in place rather than this compiler asserting one.
             # create.resource must match resources.
-            host_provider_options=_sandbox_host_provider_options(gym),
+            host_provider_options=sandbox_host_provider_options(gym),
             # Same rule: unset leaves the OpenSandbox server's default in place.
             resources=gym.sandbox_resources or None,
             environment_pvc_claim=mounts.environment_pvc_claim,
@@ -704,9 +692,7 @@ def compile_grpo_config(
     cfg["policy"]["automodel_cfg"]["checkpoint"] = {
         "model_save_format": "safetensors",
         "save_consolidated": "every",
-        "v4_compatible": customizer_config.model.v4_compatible,
     }
-    _warn_if_v4_compatible_on_v5_checkpoint(model_path, customizer_config.model.v4_compatible)
 
     # NeMo-RL forwards these to the training model as HF config kwargs and to vLLM as
     # `hf_overrides`, so one setting covers both. The passthrough is copied rather than

@@ -16,7 +16,14 @@ from nhx.core.files.entities import FileLock
 @pytest.fixture
 def mock_entity_client():
     """Create a mock entity client."""
-    return AsyncMock()
+    client = AsyncMock()
+
+    async def persist(lock: FileLock) -> FileLock:
+        lock._id = "lock-id"
+        return lock
+
+    client.create.side_effect = persist
+    return client
 
 
 @pytest.fixture
@@ -31,7 +38,6 @@ def lock_manager(mock_entity_client):
 
 async def test_acquire_succeeds_when_no_existing_lock(lock_manager, mock_entity_client):
     """Test that lock acquisition succeeds when no existing lock."""
-    mock_entity_client.create.return_value = None
     path = "test/file.bin"
     expected_lock_name = _path_to_lock_name(path)
 
@@ -46,10 +52,9 @@ async def test_acquire_succeeds_when_no_existing_lock(lock_manager, mock_entity_
     assert created_lock.workspace == "test-workspace"
 
     # Should have released the lock
-    mock_entity_client.delete.assert_called_once_with(
+    mock_entity_client.delete_by_id.assert_called_once_with(
         FileLock,
-        expected_lock_name,
-        workspace="test-workspace",
+        "lock-id",
         expected_db_version=1,
     )
 
@@ -75,7 +80,7 @@ async def test_acquire_fails_when_fresh_lock_exists(lock_manager, mock_entity_cl
         assert acquired is False
 
     # Should not have released anything (we don't own the lock)
-    mock_entity_client.delete.assert_not_called()
+    mock_entity_client.delete_by_id.assert_not_called()
 
 
 async def test_acquire_succeeds_after_cleaning_stale_lock(lock_manager, mock_entity_client):
@@ -105,6 +110,7 @@ async def test_acquire_succeeds_after_cleaning_stale_lock(lock_manager, mock_ent
         path=path,
         acquired_at=datetime.now(UTC),  # Updated timestamp
     )
+    updated_lock._id = "lock-id"
     updated_lock._db_version = 3  # Version incremented after update
     mock_entity_client.update.return_value = updated_lock
 
@@ -123,10 +129,9 @@ async def test_acquire_succeeds_after_cleaning_stale_lock(lock_manager, mock_ent
     assert updated_entity.acquired_at > stale_time
     assert updated_entity._db_version == 2  # db_version from stale lock is preserved
     # Lock should be released when context manager exits (delete is called in _release)
-    mock_entity_client.delete.assert_called_once_with(
+    mock_entity_client.delete_by_id.assert_called_once_with(
         FileLock,
-        lock_name,
-        workspace="test-workspace",
+        "lock-id",
         expected_db_version=3,
     )
 
@@ -170,7 +175,7 @@ async def test_acquire_handles_update_version_conflict(lock_manager, mock_entity
     # Should have called update once (failed due to version conflict)
     mock_entity_client.update.assert_called_once()
     # Should not have deleted anything
-    mock_entity_client.delete.assert_not_called()
+    mock_entity_client.delete_by_id.assert_not_called()
 
 
 async def test_acquire_handles_update_not_found(lock_manager, mock_entity_client):
@@ -244,6 +249,7 @@ async def test_race_condition_multiple_requests_takeover_stale_lock(lock_manager
         path=path,
         acquired_at=datetime.now(UTC),  # Updated by another request
     )
+    updated_lock._id = "lock-id"
     updated_lock._db_version = 3
     # First get returns stale, second get returns updated (fresh) lock
     mock_entity_client.get.side_effect = [stale_lock, updated_lock]
@@ -262,9 +268,7 @@ async def test_race_condition_multiple_requests_takeover_stale_lock(lock_manager
 
 async def test_lock_released_on_success(lock_manager, mock_entity_client):
     """Test that lock is released after successful operation."""
-    mock_entity_client.create.return_value = None
     path = "test/file.bin"
-    expected_lock_name = _path_to_lock_name(path)
 
     async with lock_manager.acquire(path) as acquired:
         assert acquired is True
@@ -272,19 +276,16 @@ async def test_lock_released_on_success(lock_manager, mock_entity_client):
         await asyncio.sleep(0.01)
 
     # Lock should be released
-    mock_entity_client.delete.assert_called_with(
+    mock_entity_client.delete_by_id.assert_called_with(
         FileLock,
-        expected_lock_name,
-        workspace="test-workspace",
+        "lock-id",
         expected_db_version=1,
     )
 
 
 async def test_lock_released_on_exception(lock_manager, mock_entity_client):
     """Test that lock is released even if an exception occurs."""
-    mock_entity_client.create.return_value = None
     path = "test/file.bin"
-    expected_lock_name = _path_to_lock_name(path)
 
     with pytest.raises(ValueError, match="test error"):
         async with lock_manager.acquire(path) as acquired:
@@ -292,36 +293,33 @@ async def test_lock_released_on_exception(lock_manager, mock_entity_client):
             raise ValueError("test error")
 
     # Lock should still be released
-    mock_entity_client.delete.assert_called_with(
+    mock_entity_client.delete_by_id.assert_called_with(
         FileLock,
-        expected_lock_name,
-        workspace="test-workspace",
+        "lock-id",
         expected_db_version=1,
     )
 
 
 async def test_lock_not_released_if_already_gone(lock_manager, mock_entity_client):
     """Test that missing lock during release doesn't cause an error."""
-    mock_entity_client.create.return_value = None
-    mock_entity_client.delete.side_effect = EntityNotFoundError("not found")
+    mock_entity_client.delete_by_id.side_effect = EntityNotFoundError("not found")
 
     # Should not raise
     async with lock_manager.acquire("test/file.bin") as acquired:
         assert acquired is True
 
     # Delete was called but didn't raise despite EntityNotFoundError
-    mock_entity_client.delete.assert_called_once()
+    mock_entity_client.delete_by_id.assert_called_once()
 
 
 async def test_lock_not_released_if_version_changed(lock_manager, mock_entity_client):
     """Test that a lock reacquired by another request is not deleted by stale release."""
-    mock_entity_client.create.return_value = None
-    mock_entity_client.delete.side_effect = EntityConflictError("changed")
+    mock_entity_client.delete_by_id.side_effect = EntityConflictError("changed")
 
     async with lock_manager.acquire("test/file.bin") as acquired:
         assert acquired is True
 
-    mock_entity_client.delete.assert_called_once()
+    mock_entity_client.delete_by_id.assert_called_once()
 
 
 async def test_conflict_then_lock_deleted_before_get(lock_manager, mock_entity_client):

@@ -48,6 +48,11 @@ reusable actions, and supporting docs.
   optional. When adding a new CI job that should block merges, add it to
   `ci-status.needs`.
 
+- `e2e.yaml`
+  Independent Kind, Python, auth-IDP runtime, and Studio E2E suites with their
+  CPU image build and policy prerequisites. Runs on `main` pushes, labeled
+  same-repository PRs, or manual dispatch; not part of the required CI gate.
+
 - `security.yaml`
   Security workflow. It runs TruffleHog secrets scanning and CodeQL analysis on
   pushes to `main`, pull requests to `main` or `release/*`, and manual dispatch.
@@ -80,25 +85,52 @@ reusable actions, and supporting docs.
 
 ## Post-merge image and end-to-end checks
 
-Container image builds and platform e2e checks in `ci.yaml` run only on pushes
-to `main`, or via `workflow_dispatch`. They are skipped for
-pull requests and merge-group validation. This includes CPU smoke, garak, and
-Safe Synthesizer image builds; all Kind suites; Authentik/ZITADEL runtime tests;
-and both Python e2e jobs. Existing path filters and manual publishing inputs
-still apply. Studio UI e2e and Docker source-image smoke remain manual-only.
+`e2e.yaml` runs the E2E suite on pushes to `main`, explicit PR opt-in, and
+`workflow_dispatch`. It does not run for merge groups or use path filters.
+Manual runs retain the `image_tag` and `publish` inputs.
+
+For PRs to `main` or `release/*`, maintainers can opt in by adding **`e2e`** to a
+**non-draft, same-repository PR**. Forks and missing/invalid PR context cannot opt
+in. PR runs are triggered only by label additions, checking current labels and
+draft status. New commits, reopening, and readiness changes do not rerun E2E;
+remove and reapply `e2e` to test a newer commit or a previously draft PR.
+Unlabeling or converting to draft does not cancel an existing run. No
+`pull_request_target` or new permissions are used.
+
+The label enables CPU image publication, all Kind suites (including builder
+with auth off and on), Authentik/ZITADEL runtime tests and their static
+prerequisites, both Python e2e jobs, and Studio
+UI E2E tests. Policy-WASM is built within the E2E workflow, and successful
+published image prerequisites remain enforced. E2E jobs no longer participate
+in the required `CI status` aggregate; auth-IDP static tests remain in CI too.
+
+CI also builds CPU smoke images without E2E opt-in when CPU-smoke, auth-IDP,
+customization-auth, or builder-e2e inputs change (including on PRs and merge
+groups), or on manual dispatch. This build is included in required `CI status` and the
+main-push image failure notification. The CI and E2E build steps are duplicated
+so each workflow runs independently; a static test keeps those steps aligned.
+Fork PRs build locally without publishing; same-repository PRs, merge groups,
+and `main` pushes retain publication. Manual CI publication requires
+`publish: true`, and `image_tag` can override the default commit-SHA tag.
+
+Separate garak and Safe Synthesizer image builds are not enabled by the label.
+Docker source-image smoke remains manual-only. Manual
+`publish: false` still skips tests needing published images. These opt-in checks
+are expensive and execute trusted PR code; apply the label deliberately.
 
 Lint, unit tests, integration tests, wheel build/install checks, Helm validation,
 and Docker bake-graph validation stay pre-merge. Printing the bake graph does
 not build an image. Integration required-check policy is unchanged.
 
-On automatic `main` runs, `Post-merge image and e2e status` waits for the image/e2e
-jobs and their prerequisites, writes a result summary, and sends one failure
-alert per run through the existing `SLACK_ALERTS_WEBHOOK`. The alert identifies
-failed/cancelled jobs, the commit, and the run containing logs and artifacts.
-Path-filtered skips are normal; prerequisite failures still alert when their
-dependent tests cannot run. Missing webhook configuration or failed delivery
-fails the notification job rather than silently dropping an alert. Manual runs
-do not send Slack alerts. Main-run concurrency behavior is unchanged.
+On automatic `main` runs, `Post-merge image status` reports CI's CPU smoke,
+garak, and Safe Synthesizer image builds and prerequisites through the existing
+`SLACK_ALERTS_WEBHOOK`. It no longer observes E2E results across workflows.
+`Post-merge E2E status` independently waits for every E2E job and prerequisite,
+then uses the same helper and webhook to send one failure alert per E2E run.
+Both notifications include failed/cancelled jobs, the commit, and a diagnostics
+link; success/skipped results do not alert. Missing webhooks or failed delivery
+fail the notification job rather than silently dropping alerts. PR and manual
+E2E runs do not send Slack alerts.
 
 ## GitHub Apps
 

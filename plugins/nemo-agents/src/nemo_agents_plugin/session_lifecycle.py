@@ -9,7 +9,7 @@ import logging
 from datetime import UTC, datetime
 from urllib.parse import quote
 
-import httpx
+from httpx import AsyncClient
 from nemo_agents_plugin.deployment_routing import get_deployment_endpoint, get_deployment_transport
 from nemo_agents_plugin.entities import AgentDeployment, AgentSession
 from nemo_helix_plugin.entity_client import NemoEntitiesClient
@@ -85,7 +85,7 @@ async def cleanup_fabric_runtime(
         cleanup_url, routing_headers = transport.target(
             f"{endpoint.rstrip('/')}/v1/sessions/{quote(session.id, safe='')}"
         )
-        async with httpx.AsyncClient(
+        async with AsyncClient(
             timeout=_FABRIC_CLEANUP_TIMEOUT_SECONDS,
             follow_redirects=False,
             **transport.client_kwargs(),

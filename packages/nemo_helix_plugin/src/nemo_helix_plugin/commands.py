@@ -21,6 +21,7 @@ retaining ``explain`` as a schema subcommand::
 
     nemo <plugin> <job-name>          [--profile ...] [-o ...]
     nemo <plugin> <job-name> explain  [--profile ...]
+    nemo <plugin> list-jobs           [--type <job-name> ...] [--filter ...]
 
 Plugin authors do **not** call this themselves — it is called automatically
 by the platform's CLI loader. The platform comes from the global ``nemo --base-url`` /
@@ -35,6 +36,9 @@ Generated command interface
 
 ``explain``
     Print the job's spec / options schemas.
+
+``list-jobs``
+    List the plugin's jobs, optionally only some job types (one per plugin).
 
 Example
 -------
@@ -138,12 +142,12 @@ _FN_SUBMIT_RESERVED_FLAGS: frozenset[str] = _FN_RUN_RESERVED_FLAGS | _RETIRED_RO
 
 # Static flag names declared by each job submit command. The spec-source
 # flags plus deprecated ``--config`` / ``--config-file`` aliases are reserved,
-# as are submission flags (``--profile`` / ``--workspace``), options-passthrough
-# flags (``-o`` / ``--options-file``), and the retired routing names. Reserved
+# as are submission flags (``--profile`` / ``--workspace`` / ``--output-location``),
+# options-passthrough flags (``-o`` / ``--options-file``), and the retired routing names. Reserved
 # spec fields remain reachable via ``--spec`` / ``--spec-file`` JSON.
 _JOB_SUBMIT_RESERVED_FLAGS: frozenset[str] = (
     frozenset({"spec", "spec_file", "config", "config_file"})
-    | frozenset({"options", "options_file", "profile", "workspace"})
+    | frozenset({"options", "options_file", "profile", "workspace", "output_location"})
     | _RETIRED_ROUTING_FLAGS
 )
 
@@ -297,11 +301,14 @@ def add_job_commands(
     *,
     cli: NemoCLI | None = None,
 ) -> None:
-    """Inject submit/explain commands for each job into *cli_app*.
+    """Inject submit/explain commands for each job, and one ``list-jobs`` command, into *cli_app*.
 
     Each entry in *jobs* produces one :class:`typer.Typer` sub-group
     registered under :attr:`~nemo_helix_plugin.job.NemoJob.name` in a ``"Jobs"``
     rich help panel. The sub-group owns ``submit`` / ``explain`` commands.
+    ``list-jobs`` lists the jobs of every type in *jobs* (see
+    :mod:`nemo_helix_plugin.cli_list_jobs`); it is skipped when *cli_app* already
+    has a ``list-jobs`` command, which is how a plugin supplies its own.
 
     Args:
         cli_app: The plugin's :class:`typer.Typer` group to inject
@@ -317,9 +324,12 @@ def add_job_commands(
             the sub-group is mounted, giving the plugin a chance to amend
             the auto-generated CLI surface.
     """
+    from nemo_helix_plugin.cli_list_jobs import add_list_jobs_command
+
     scheduler = NemoJobScheduler()
     for job_cls in jobs.values():
         _register_job_subgroup(cli_app, job_cls, scheduler, cli=cli)
+    add_list_jobs_command(cli_app, jobs)
 
 
 def _register_job_subgroup(
@@ -428,6 +438,7 @@ def _add_submit_command(
         options: list[str] = cast("list[str]", kwargs.pop("options", []))
         options_file: Path | None = cast("Path | None", kwargs.pop("options_file", None))
         profile: str | None = cast("str | None", kwargs.pop("profile", None))
+        output_location: str | None = cast("str | None", kwargs.pop("output_location", None))
         workspace = resolve_cli_workspace(typer_ctx, cast("str | None", kwargs.pop("workspace", None)))
         original_kwargs["workspace"] = workspace
         config: str | None = cast("str | None", kwargs.pop("config", None))
@@ -476,6 +487,8 @@ def _add_submit_command(
                 "headers": resolved_headers or None,
             }
             metadata = _resolve_submit_metadata(typer_ctx)
+            if output_location is not None:
+                metadata = {**(metadata or {}), "output_location": output_location}
             if metadata is not None:
                 submit_kwargs["metadata"] = metadata
             result = scheduler.submit_remote(job_cls, spec_data, **submit_kwargs)
@@ -611,6 +624,16 @@ def _build_job_submit_signature(leaves: list[SpecLeafField]) -> inspect.Signatur
                     "Execution profile (operator-configured). Required unless the active "
                     "cluster has a 'default' profile."
                 ),
+                rich_help_panel=_PANEL_SUBMISSION,
+            ),
+        ),
+        kw(
+            "output_location",
+            Optional[str],
+            typer.Option(
+                None,
+                "--output-location",
+                help="Existing fileset for the job's logs and results (in the submission workspace).",
                 rich_help_panel=_PANEL_SUBMISSION,
             ),
         ),
@@ -1034,6 +1057,7 @@ class JobSubmit(Protocol):
         spec: str,
         workspace: str | None,
         profile: str | None = None,
+        output_location: str | None = None,
         options: list[str] | None = None,
         options_file: Path | None = None,
         renderer_kwargs: Mapping[str, object] | None = None,
@@ -1063,6 +1087,7 @@ def take_job_submit(group: typer.Typer) -> JobSubmit:
         spec: str,
         workspace: str | None,
         profile: str | None = None,
+        output_location: str | None = None,
         options: list[str] | None = None,
         options_file: Path | None = None,
         renderer_kwargs: Mapping[str, object] | None = None,
@@ -1076,6 +1101,7 @@ def take_job_submit(group: typer.Typer) -> JobSubmit:
                 options=options or [],
                 options_file=options_file,
                 profile=profile,
+                output_location=output_location,
                 workspace=workspace,
                 config=None,
                 config_file=None,

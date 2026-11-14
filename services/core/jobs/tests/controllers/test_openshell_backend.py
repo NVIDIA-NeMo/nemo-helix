@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime
+import logging
 import subprocess
 import sys
 from collections.abc import AsyncGenerator
@@ -24,6 +25,8 @@ from nemo_helix_plugin.jobs.execution_profiles import OpenShellJobTLSConfig
 from nemo_helix_plugin.jobs.types import AuthContext
 from nemo_helix_plugin.openshell.types import GatewayCredentialConfig, GatewayProviderBinding, ProviderAccessRevoked
 from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.app.providers import ComputeResources, ContainerSpec, CPUExecutionProvider, GPUExecutionProvider
+from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable
 from nhx.core.jobs.controllers.backends.openshell import (
     OpenShellJobBackend,
     OpenShellJobEgressConfig,
@@ -57,8 +60,17 @@ def _backend(mock_nemo_client, mock_platform_config, **config_overrides) -> Open
     return backend
 
 
-def _no_container_executor() -> SimpleNamespace:
-    return SimpleNamespace(container=SimpleNamespace(image=None, entrypoint=None, command=None))
+def _no_container_executor() -> CPUExecutionProvider:
+    return CPUExecutionProvider(container=ContainerSpec())
+
+
+def _gpu_executor(num_gpus: int | None) -> GPUExecutionProvider:
+    return GPUExecutionProvider(
+        provider="gpu",
+        profile="default",
+        container=ContainerSpec(image="test-image"),
+        resources=ComputeResources(num_gpus=num_gpus),
+    )
 
 
 def _create_request(backend: OpenShellJobBackend) -> SimpleNamespace:
@@ -146,6 +158,7 @@ class TestRegistry:
     def test_registry_contains_openshell(self) -> None:
         assert BackendKey("cpu", "openshell") in backend_registry
         assert backend_registry[BackendKey("cpu", "openshell")] is OpenShellJobBackend
+        assert backend_registry[BackendKey("gpu", "openshell")] is OpenShellJobBackend
 
     def test_profile_roundtrips(self) -> None:
         profile = OpenShellJobExecutionProfile(
@@ -310,6 +323,103 @@ class TestSchedule:
         assert labels["nhx.nvidia.com/managed_by"] == "jobs-controller"
         assert labels["nhx.nvidia.com/job_execution_backend"] == "openshell"
 
+    def test_cpu_step_requests_no_gpu(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+
+        update = backend.schedule(test_step_pending.step_spec.executor, test_step_pending)
+
+        assert update.status == HelixJobStatus.PENDING
+        assert not _create_request(backend).spec.HasField("resource_requirements")
+
+    def test_step_gpu_count_reaches_the_sandbox_spec(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+
+        update = backend.schedule(_gpu_executor(num_gpus=2), test_step_pending)
+
+        assert update.status == HelixJobStatus.PENDING
+        resources = _create_request(backend).spec.resource_requirements
+        assert resources.gpu.count == 2
+
+    def test_gpu_step_without_a_count_requests_one(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+
+        backend.schedule(_gpu_executor(num_gpus=None), test_step_pending)
+
+        assert _create_request(backend).spec.resource_requirements.gpu.count == 1
+
+    def test_step_gpu_count_wins_over_the_profile(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config, num_gpus=4)
+
+        backend.schedule(_gpu_executor(num_gpus=2), test_step_pending)
+
+        assert _create_request(backend).spec.resource_requirements.gpu.count == 2
+
+    def test_profile_gpu_count_does_not_apply_to_a_cpu_step(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config, num_gpus=4)
+
+        backend.schedule(test_step_pending.step_spec.executor, test_step_pending)
+
+        assert not _create_request(backend).spec.HasField("resource_requirements")
+
+    def test_profile_gpu_count_applies_to_a_gpu_step(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config, num_gpus=4)
+
+        backend.schedule(_gpu_executor(num_gpus=None), test_step_pending)
+
+        assert _create_request(backend).spec.resource_requirements.gpu.count == 4
+
+    def test_cpu_step_gpu_count_is_ignored(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        executor = CPUExecutionProvider(container=ContainerSpec(image="img"), resources=ComputeResources(num_gpus=2))
+
+        backend.schedule(executor, test_step_pending)
+
+        assert not _create_request(backend).spec.HasField("resource_requirements")
+
+    def test_zero_gpu_count_means_no_gpu(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config, num_gpus=4)
+
+        update = backend.schedule(_gpu_executor(num_gpus=0), test_step_pending)
+
+        assert update.status == HelixJobStatus.PENDING
+        assert not _create_request(backend).spec.HasField("resource_requirements")
+
+    @pytest.mark.parametrize("num_gpus", [-1, 2**32])
+    def test_out_of_range_gpu_count_is_rejected_before_creation(
+        self, mock_nemo_client, mock_platform_config, test_step_pending, num_gpus: int
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+
+        update = backend.schedule(_gpu_executor(num_gpus=num_gpus), test_step_pending)
+
+        assert update.status == HelixJobStatus.ERROR
+        assert "num_gpus" in update.status_details["message"]
+        backend._client.create.assert_not_called()
+
+    def test_shm_size_on_a_step_is_warned_and_ignored(
+        self, mock_nemo_client, mock_platform_config, test_step_pending, caplog
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        executor = GPUExecutionProvider(
+            container=ContainerSpec(image="img"), resources=ComputeResources(num_gpus=1, shm_size="8Gi")
+        )
+
+        with caplog.at_level(logging.WARNING):
+            backend.schedule(executor, test_step_pending)
+
+        assert any("shm_size" in record.getMessage() for record in caplog.records)
+        assert _create_request(backend).spec.resource_requirements.gpu.count == 1
+
     def test_default_image_when_step_declares_none(
         self, mock_nemo_client, mock_platform_config, test_step_pending
     ) -> None:
@@ -331,8 +441,8 @@ class TestSchedule:
 
     def test_step_entrypoint_wins_over_default(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
         backend = _backend(mock_nemo_client, mock_platform_config)
-        executor = SimpleNamespace(
-            container=SimpleNamespace(image="img", entrypoint=["/custom/bin"], command=["--flag"])
+        executor = CPUExecutionProvider(
+            container=ContainerSpec(image="img", entrypoint=["/custom/bin"], command=["--flag"])
         )
 
         backend.schedule(executor, test_step_pending)
@@ -417,6 +527,19 @@ class TestSchedule:
         request = _create_request(backend)
         env = dict(request.spec.environment)
         assert env["NHX_BASE_URL"] == "http://localhost:8080"
+
+    @pytest.mark.parametrize("name", ["NHX_PRINCIPAL", "NEMO_JOB_SECRETS"])
+    def test_step_env_cannot_override_platform_injected_names(
+        self, mock_nemo_client, mock_platform_config, test_step_pending, name
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending.model_copy(deep=True)
+        step.step_spec.environment = [HelixJobEnvironmentVariable(name=name, value="attacker-chosen")]
+
+        with pytest.raises(ValueError, match=name):
+            backend.schedule(step.step_spec.executor, step)
+
+        backend._client.create.assert_not_called()
 
     def test_task_storage_defaults_without_step_override(
         self, mock_nemo_client, mock_platform_config, test_step_pending
@@ -1002,9 +1125,13 @@ async def test_provider_revocation_uses_async_transport_and_timeout(
     channel = MagicMock()
     channel.__aenter__.return_value = channel
     with (
-        patch("grpc.aio.insecure_channel", return_value=channel) as insecure,
-        patch("grpc.aio.secure_channel", return_value=channel) as secure,
-        patch("grpc.ssl_channel_credentials") as credentials,
+        patch(
+            "nhx.core.jobs.controllers.backends.openshell.backend.aio_insecure_channel", return_value=channel
+        ) as insecure,
+        patch(
+            "nhx.core.jobs.controllers.backends.openshell.backend.aio_secure_channel", return_value=channel
+        ) as secure,
+        patch("nhx.core.jobs.controllers.backends.openshell.backend.ssl_channel_credentials") as credentials,
         patch("nemo_helix_plugin.openshell.provider_client.OpenShellStub", return_value=stub),
     ):
         async with backend._provider_provisioner() as provisioner:
@@ -1036,3 +1163,36 @@ async def test_provider_revocation_uses_async_transport_and_timeout(
         ),
         timeout=7,
     )
+
+
+class TestResultStorageContext:
+    """The sandbox is handed the job's fileset and artifact base path.
+
+    Provider-bound sandboxes may only POST results, not GET the job record, so the
+    result sink has to receive this context through the environment.
+    """
+
+    def test_step_context_reaches_the_sandbox_env(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending.model_copy(deep=True)
+        step.artifact_base_path = "jobs/test-job"
+
+        backend.schedule(step.step_spec.executor, step)
+
+        env = dict(_create_request(backend).spec.environment)
+        assert env["NEMO_JOB_FILESET"] == "test-logs-fileset"
+        assert env["NEMO_JOB_ARTIFACT_BASE_PATH"] == "jobs/test-job"
+
+    def test_job_without_output_location_sets_an_empty_base_path(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending.model_copy(deep=True)
+        step.artifact_base_path = None
+
+        backend.schedule(step.step_spec.executor, step)
+
+        env = dict(_create_request(backend).spec.environment)
+        assert env["NEMO_JOB_ARTIFACT_BASE_PATH"] == ""

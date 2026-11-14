@@ -14,12 +14,15 @@ translation, CLI/API wiring, deploy semantics, or durable session management.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, TypeVar
+
+from nemo_agents_plugin.fabric.environment import remove_deepagents_workspace
 
 # CI type-checks this plugin via ty extra-paths without installing nemo-agents deps.
 from nemo_fabric import (
@@ -29,6 +32,7 @@ from nemo_fabric import (
     RunRequest,
     RunResult,
     Runtime,
+    RuntimeStatus,
 )
 
 # Defined in the plugin contract package so a post-run action author can read a result
@@ -36,6 +40,9 @@ from nemo_fabric import (
 from nemo_helix_plugin.agents.post_run_actions import (
     FabricRuntimeResult as FabricRuntimeResult,
 )
+
+logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 
 class StreamingMethod(StrEnum):
@@ -54,6 +61,7 @@ class FabricInvocationRequest:
     request_id: str | None = None
     caller_context: dict[str, Any] = field(default_factory=dict)
     timeout_seconds: float | None = None
+    relay_session_root: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +80,9 @@ class FabricOneShotRequest:
     caller_context: dict[str, Any] = field(default_factory=dict)
     overrides: dict[str, Any] | None = None
     timeout_seconds: float | None = None
+    relay_session_root: str | None = None
+    # Set only for private serving workspaces owned by this invocation.
+    workspace_dir: Path | None = None
 
 
 class FabricRuntimeStream:
@@ -274,6 +285,7 @@ async def stream_fabric_agent_once(
                 input=request.input,
                 request_id=request.request_id,
                 caller_context=request.caller_context,
+                relay_session_root=request.relay_session_root,
                 timeout_seconds=request.timeout_seconds,
             ),
             streaming_method=streaming_method,
@@ -287,9 +299,13 @@ async def _one_shot_runtime(
     fabric: Any,
     streaming: bool = False,
 ) -> AsyncGenerator[Runtime, None]:
+    runtime: Runtime | None = None
+    entered = False
     try:
         async with AsyncExitStack() as stack:
-            try:
+
+            async def start() -> None:
+                nonlocal runtime
                 runtime = await fabric.start_runtime(
                     request.fabric_config,
                     base_dir=request.base_dir,
@@ -297,18 +313,61 @@ async def _one_shot_runtime(
                     streaming=streaming,
                     **(fabric_streaming_options(request.fabric_config) if streaming else {}),
                 )
+
+            try:
+                if request.workspace_dir is None:
+                    await start()
+                else:
+                    await await_resource_task(asyncio.create_task(start()))
+                assert runtime is not None
                 runtime = await stack.enter_async_context(runtime)
+                entered = True
             except FabricError as error:
                 raise FabricRuntimeStartError(f"Fabric runtime startup failed: {error}") from error
             yield runtime
     except FabricError as error:
         raise FabricRuntimeExecutionError(f"Fabric runtime cleanup failed: {error}") from error
+    finally:
+        try:
+            if request.workspace_dir is not None and runtime is not None and not entered:
+                try:
+                    await await_resource_task(asyncio.create_task(runtime.stop()))
+                except Exception:
+                    logger.exception("Failed to stop Fabric runtime after one-shot startup was interrupted.")
+        finally:
+            await release_fabric_workspace(request.workspace_dir, runtime=runtime)
+
+
+async def await_resource_task(task: asyncio.Future[_T]) -> _T:
+    """Finish a resource operation before propagating caller cancellation."""
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except (asyncio.CancelledError, Exception):
+                pass
+        if not task.cancelled():
+            task.exception()
+        raise
+
+
+async def release_fabric_workspace(workspace: Path | None, *, runtime: Runtime | None = None) -> None:
+    """Release owned storage only once its runtime has stopped."""
+    if workspace is None:
+        return
+    if runtime is not None and runtime.status is not RuntimeStatus.STOPPED:
+        logger.warning("Retaining DeepAgents workspace %s: runtime shutdown was not confirmed.", workspace)
+        return
+    await await_resource_task(asyncio.create_task(asyncio.to_thread(remove_deepagents_workspace, workspace)))
 
 
 def _with_platform_invocation_context(request: FabricInvocationRequest | FabricOneShotRequest) -> RunRequest:
     """Preserve Platform invocation metadata when calling Fabric."""
     request_kwargs: dict[str, Any] = {
         "context": request.caller_context,
+        "relay_session_root": request.relay_session_root,
         "input": request.input,
     }
     if request.request_id is not None:

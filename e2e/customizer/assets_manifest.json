@@ -112,17 +112,17 @@
         "e2e/customizer/tests/test_smoke.py::test_rl_grpo_internet_formats_smoke"
       ]
     },
-    "ascii_tree_adapter_env": {
-      "hub_id": "primeintellect/ascii-tree",
+    "deepscaler_adapter_env": {
+      "hub_id": "primeintellect/deepscaler-math",
       "hub_version": "0.1.5",
       "environment_format": "adapter-wheels-v1",
       "s3_published": false,
       "generator": "e2e/customizer/generate_grpo_assets.py --env-only",
       "outputs": {
-        "grpo_ascii_tree_env": {
+        "grpo_deepscaler_env": {
           "manifest": "nemo-environment.yaml"
         },
-        "grpo_ascii_tree_smoke": {
+        "grpo_deepscaler_smoke": {
           "training": "training.jsonl",
           "validation": "validation.jsonl"
         }

@@ -7,16 +7,16 @@ import datetime
 import json
 import logging
 import os
-import shutil
 import signal
 import subprocess
-import sys
 import threading
 import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from shutil import rmtree
+from sys import executable as python_executable
 from typing import Literal
 
 from nemo_helix_plugin.client.constants import ACCESS_TOKEN_FILE_ENVVAR
@@ -27,6 +27,7 @@ from nhx.common.config import get_platform_config
 from nhx.common.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -49,6 +50,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobUpdate,
     get_logs_endpoint_config_from_fileset,
     step_ttl_seconds_active,
+    validate_step_environment,
 )
 from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     SubprocessOtelLogger,
@@ -75,6 +77,9 @@ SUBPROCESS_INHERITED_ENV_ALLOWLIST = frozenset(
         "VIRTUAL_ENV",
         # A path on the build host, so operator-set like the rest of this list.
         "NEMO_AGENTS_WHEEL",
+        # The documented platform opt-out. Without it, jobs such as Data Designer fall back to
+        # telemetry on even when the operator has turned it off.
+        "NEMO_TELEMETRY_ENABLED",
     }
 )
 
@@ -434,7 +439,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
     def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
         try:
-            shutil.rmtree(self._root_dir / workspace / job)
+            rmtree(self._root_dir / workspace / job)
         except FileNotFoundError:
             pass
         return True
@@ -463,7 +468,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                     should_cleanup = expires_at < datetime.datetime.now(datetime.timezone.utc)
 
             if should_cleanup:
-                shutil.rmtree(metadata.work_dir, ignore_errors=True)
+                rmtree(metadata.work_dir, ignore_errors=True)
                 self._process_registry.pop(key)
 
     def _get_task_fallback_update(self, step: HelixJobStepWithContext) -> JobUpdate | None:
@@ -509,7 +514,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
     @staticmethod
     def _cleanup_failed_startup_dirs(work_dir: Path, persistent_dir: Path) -> None:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        rmtree(work_dir, ignore_errors=True)
         # Drop empty attempt and step directories. Leave job storage in place when
         # a previous attempt already wrote into it.
         for path in (
@@ -526,6 +531,9 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
     def _prepare_runtime(self, step: HelixJobStepWithContext) -> tuple[dict[str, str], str, Path, Path, Path]:
         task_id = f"task-{uuid.uuid4().hex}"
+        spec = step.step_spec
+        if spec and spec.environment:
+            validate_step_environment(spec.environment, source="Job step environment keys")
         job_dir = self._root_dir / step.workspace / step.job
         job_attempt_dir = job_dir / str(step.attempt_id)
         work_dir = job_attempt_dir / step.name / task_id
@@ -537,7 +545,6 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         ephemeral_dir.mkdir(parents=True, exist_ok=True)
         persistent_dir.mkdir(parents=True, exist_ok=True)
 
-        spec = step.step_spec
         config_path = config_dir / NEMO_JOB_STEP_CONFIG_FILE_NAME
         config_path.write_text(json.dumps(spec.config if spec else {}), encoding="utf-8")
         log_path = work_dir / "task.log.jsonl"
@@ -561,6 +568,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                 NEMO_JOB_TASK_ENVVAR: task_id,
                 NEMO_JOB_WORKSPACE_ENVVAR: step.workspace,
                 NEMO_JOB_FILESET_ENVVAR: step.fileset,
+                NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR: step.artifact_base_path or "",
                 **({NEMO_JOB_UID_ENVVAR: step.job_id} if step.job_id else {}),
                 EPHEMERAL_TASK_STORAGE_PATH_ENVVAR: str(ephemeral_dir),
                 CONFIG_TASK_STORAGE_PATH_ENVVAR: str(config_dir),
@@ -619,10 +627,10 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         # deploys. Prefer VIRTUAL_ENV when set, else fall back to the controller's own
         # interpreter dir -- which IS the venv bin even when launched directly (e.g.
         # `.venv/bin/nemo-helix` with no activation, where VIRTUAL_ENV is unset).
-        bin_dir = Path(virtual_env) / "bin" if virtual_env else Path(sys.executable).parent
+        bin_dir = Path(virtual_env) / "bin" if virtual_env else Path(python_executable).parent
         if command[0] in {"python", "python3"}:
             venv_python = SubprocessJobBackend._resolve_in_bin("python", bin_dir)
-            return [venv_python or sys.executable, *command[1:]]
+            return [venv_python or python_executable, *command[1:]]
         # Resolve a bare console-script name against the venv bin before falling back to
         # a bare PATH lookup; a command carrying a path separator is left untouched.
         if os.sep not in command[0] and (os.altsep is None or os.altsep not in command[0]):

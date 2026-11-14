@@ -10,11 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, 
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nhx.common.api.common import ErrorResponse
-from nhx.common.entities.utils import parse_adapters_suffix
+from nhx.common.entities.utils import format_adapter_composite, parse_adapters_suffix, parse_model_entity_ref
 from nhx.common.service.dependencies import get_nemo_client
 from nhx.core.inference_gateway.api.authz import (
     OPENAI_EXEC_PERMISSION,
     enforce_delegated_workspace_access,
+    enforce_model_ref_access,
 )
 from nhx.core.inference_gateway.api.dependencies import (
     global_http_client,
@@ -23,6 +24,8 @@ from nhx.core.inference_gateway.api.dependencies import (
     global_virtual_model_cache,
 )
 from nhx.core.inference_gateway.api.errors import (
+    raise_model_entity_not_found,
+    raise_no_providers_for_model_entity,
     raise_virtual_model_not_found,
 )
 from nhx.core.inference_gateway.api.middleware_registry import (
@@ -144,6 +147,7 @@ async def openai_get_model(
     workspace: str,
     name: str,
     virtual_model_cache: Annotated[VirtualModelCache, Depends(global_virtual_model_cache)],
+    model_cache: Annotated[ModelCache, Depends(global_model_cache)],
 ) -> OpenAIModelResp:
     """
     Retrieve information about a specific OpenAI-compatible model.
@@ -157,13 +161,109 @@ async def openai_get_model(
     validate_entity_name(workspace, field_name="workspace")
     validate_model_entity_name(model_name, field_name="model")
     await enforce_delegated_workspace_access(workspace, OPENAI_EXEC_PERMISSION)
-    if resolve_vm_for_model(virtual_model_cache, workspace, model_name) is None:
+    virtual_model = resolve_vm_for_model(virtual_model_cache, workspace, model_name)
+    if virtual_model is None:
         raise_virtual_model_not_found(workspace, model_name)
+
+    # A LoRA composite also needs its adapter in the routing table.
+    if "&adapters/" in model_name:
+        await _raise_unless_adapter_route_ready(model_cache, virtual_model, workspace, model_name)
 
     return OpenAIModelResp(
         id=f"{workspace}/{model_name}",
         owned_by=workspace,
     )
+
+
+def _require_routable_entity(model_cache: ModelCache, entity_id: str) -> None:
+    """Raise the 404 chat completions would when ``entity_id`` cannot be proxied."""
+    ref = parse_model_entity_ref(entity_id)
+    entity = model_cache.get_from_model_entity(ref.workspace, ref.name)
+    if entity is None:
+        raise_model_entity_not_found(ref.workspace, ref.name)
+    if not entity.model_providers:
+        raise_no_providers_for_model_entity(ref.workspace, ref.name)
+
+
+def _model_ids_from_mapping(models: dict[str, object]) -> list[str] | None:
+    """Return model ids from a middleware ``models`` map, or None if the shape is unfamiliar.
+
+    Switchyard stores the ids it writes into ``body["model"]`` as a string or a
+    list of strings under each category. ``judge`` is omitted: those ids are
+    called internally and are never written into ``body["model"]``. Any other
+    value means this map is not that selection list.
+    """
+    ids: list[str] = []
+    for category, value in models.items():
+        if category == "judge":
+            continue
+        if isinstance(value, str) and value.strip():
+            ids.append(value.strip())
+            continue
+        if isinstance(value, list) and value and all(isinstance(item, str) and item.strip() for item in value):
+            ids.extend(item.strip() for item in value)
+            continue
+        return None
+    return ids
+
+
+def _replacement_model_ids(virtual_model: VirtualModel) -> list[str] | None:
+    """Ids request middleware writes into ``body["model"]``, when its config names them.
+
+    Returns None when no request-middleware config names those ids. A plain model
+    listed on the VirtualModel is not such a name: middleware may leave the
+    adapter composite in place, and the plain model must not satisfy this check.
+    """
+    found: list[str] = []
+    named = False
+    for call in virtual_model.request_middleware or []:
+        config = call.config if isinstance(call.config, dict) else None
+        models = config.get("models") if config is not None else None
+        if not isinstance(models, dict) or not models:
+            continue
+        ids = _model_ids_from_mapping(models)
+        if ids is None:
+            continue
+        named = True
+        found.extend(ids)
+    if not named:
+        return None
+    # A map that names only judge ids selects nothing. Fall back to the seeded entity.
+    return list(dict.fromkeys(found)) or None
+
+
+async def _raise_unless_adapter_route_ready(
+    model_cache: ModelCache, virtual_model: VirtualModel, workspace: str, model_name: str
+) -> None:
+    """Raise the same 404 chat completions would for a LoRA composite with no routable entity.
+
+    Chat seeds the adapter splice of ``default_model_entity``, or the public
+    composite when that is unset, and then request middleware may replace
+    ``body["model"]``. Named replacement ids are checked first, so a default
+    composite neither hides a missing target nor blocks healthy targets.
+
+    Each reference is authorized before the routing table is read, matching
+    :func:`enforce_model_ref_access` on the chat path. A denied workspace
+    returns 403 and does not reveal whether the entity exists.
+    """
+    adapter_parts = parse_adapters_suffix(model_name)
+    if adapter_parts is None:
+        raise_model_entity_not_found(workspace, model_name)
+    _, adapter_workspace, adapter_name = adapter_parts
+
+    replacement_ids = _replacement_model_ids(virtual_model)
+    if replacement_ids is not None:
+        entity_ids = replacement_ids
+    elif virtual_model.default_model_entity:
+        entity_ids = [format_adapter_composite(virtual_model.default_model_entity, adapter_workspace, adapter_name)]
+    else:
+        entity_ids = [f"{workspace}/{model_name}"]
+
+    refs = [parse_model_entity_ref(entity_id) for entity_id in entity_ids]
+    for ref in refs:
+        await enforce_model_ref_access(workspace, ref)
+    for ref in refs:
+        _require_routable_entity(model_cache, f"{ref.workspace}/{ref.name}")
 
 
 # Use individual decorators with explicit ordering to ensure deterministic OpenAPI generation

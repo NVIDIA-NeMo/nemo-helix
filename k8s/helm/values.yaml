@@ -112,6 +112,14 @@ opensandbox:
     serverServiceAccount: "opensandbox-server"
     # -- The Kata server's ServiceAccount. Empty if you don't run one.
     kataServerServiceAccount: ""
+  # -- Ingress isolation for OpenSandbox sandbox pods, a second layer over the per-sandbox execd token Harbor evaluations set. It also covers ports other than execd, such as Compose services, and sandboxes from other clients. OpenSandbox's egress sidecar filters only what leaves a sandbox, so without this policy any pod that can reach a sandbox's IP can connect to it.
+  # Rendered whenever `sandboxClusterCapable` or `platformConfig.platform.sandbox_cluster_capable` is true, whatever `networkPolicies.enabled` says, and has no off switch. It admits sandbox pod ingress only from `opensandbox.namespace`; add other sources to `extraIngress`. Needs a CNI that enforces NetworkPolicy.
+  # @default -- This object has the following default values for sandbox pod ingress isolation.
+  sandboxNetworkPolicy:
+    # -- Pod selector for the OpenSandbox server pods within `opensandbox.namespace`. Empty admits every pod in that namespace. Required when the server runs in the sandbox namespace.
+    serverPodSelector: {}
+    # -- Extra NetworkPolicy ingress rules appended to the sandbox policy, such as a gateway in ingress gateway mode. `[{}]` admits all ingress.
+    extraIngress: []
 
 # -- RBAC configuration settings for optional dependencies
 rbac:
@@ -266,6 +274,13 @@ networkPolicies:
     # -- Extra NetworkPolicy ingress rules appended to the API policy, for cluster-specific ingress controllers, gateways, monitoring, or debugging pods.
     extraIngress: []
 
+  # -- Ingress isolation for embedded PostgreSQL. Requires a NetworkPolicy-enforcing CNI and the top-level switch. Only same-release API and controller pods are allowed by default.
+  postgresql:
+    # -- Create the embedded PostgreSQL ingress policy.
+    enabled: true
+    # -- Additional ingress rules for cluster-specific database clients. Kubernetes NetworkPolicy allowances are additive.
+    extraIngress: []
+
   # -- NetworkPolicy configuration for the core controller pods.
   # @default -- This object has the following default values for core controller pod ingress isolation.
   controller:
@@ -410,7 +425,8 @@ postgresql:
   # -- PostgreSQL authentication configuration.
   auth:
     username: nemo
-    password: nemo
+    # -- PostgreSQL password. If unset, generate a random password on install and reuse the existing Secret on upgrade. This does not rotate passwords in an initialized database; coordinate role password changes and workload restarts separately.
+    password: ""
     database: nemohelix
     # -- Name of an existing secret containing the PostgreSQL password. If set, the chart does not create a secret.
     existingSecret: ""
@@ -1027,10 +1043,26 @@ api:
   # -- Pod-level security context settings for the API service.
   # @default -- This object has the following default values for the pod security context.
   podSecurityContext:
+    # -- UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. An explicit global `podSecurityContext.runAsUser` / `runAsGroup` takes precedence over this default.
+    runAsUser: 1000
+    # -- GID of the `nvs` user.
+    runAsGroup: 1000
     # -- The file system group ID to use for all containers.
     fsGroup: 1000
   # -- Container-level security context settings for the API service.
-  securityContext: {}
+  # @default -- This object has the following default values for the container security context.
+  securityContext:
+    # -- Refuse to start if the image resolves to UID 0.
+    runAsNonRoot: true
+    # -- Block setuid binaries from gaining privileges.
+    allowPrivilegeEscalation: false
+    # -- Linux capabilities to drop.
+    capabilities:
+      drop:
+        - ALL
+    # -- Seccomp profile applied to the container.
+    seccompProfile:
+      type: RuntimeDefault
   # -- Service configuration for the API service.
   # @default -- This object has the following default values for the service configuration.
   service:
@@ -1268,10 +1300,26 @@ core:
     # -- Pod-level security context settings for the controller service.
     # @default -- This object has the following default values for the pod security context.
     podSecurityContext:
+      # -- UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. An explicit global `podSecurityContext.runAsUser` / `runAsGroup` takes precedence over this default.
+      runAsUser: 1000
+      # -- GID of the `nvs` user.
+      runAsGroup: 1000
       # -- The file system group ID to use for all containers.
       fsGroup: 1000
     # -- Container-level security context settings for the controller service.
-    securityContext: {}
+    # @default -- This object has the following default values for the container security context.
+    securityContext:
+      # -- Refuse to start if the image resolves to UID 0.
+      runAsNonRoot: true
+      # -- Block setuid binaries from gaining privileges.
+      allowPrivilegeEscalation: false
+      # -- Linux capabilities to drop.
+      capabilities:
+        drop:
+          - ALL
+      # -- Seccomp profile applied to the container.
+      seccompProfile:
+        type: RuntimeDefault
     # -- Kubernetes deployment resources configuration for the controller service.
     resources: {}
 

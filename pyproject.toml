@@ -382,9 +382,9 @@ constraint-dependencies = [
   "sqlfluff>=4.2.2",
   "sqlparse>=0.6.0,<0.7",
   "starlette>=1.3.1",
-  "urllib3>=2.7.0",
+  "urllib3>=2.8.0",
   "uv>=0.13.4",
-  "wandb>=0.30.0",
+  "wandb>=0.31.0",
 ]
 
 override-dependencies = [
@@ -407,14 +407,14 @@ override-dependencies = [
   "joserfc>=1.7.2",
   "pyasn1>=0.6.4",            # High OOS – nhx-garak-tasks + customizer
   "setuptools>=78.1.1",       # High OOS – nhx-tasks/gpu-tasks/customizer-tasks
-  "urllib3>=2.7.0",           # High OOS – nhx-garak-tasks + customizer
+  "urllib3>=2.8.0",           # GHSA-vxq7-64xx-v4gw and GHSA-8988-9cw3-xx77
   "wheel>=0.46.2",            # High OOS – widespread
   "cbor2>=5.9.0",             # High – customizer + nhx-gpu-tasks
   "simpleeval>=1.0.5",        # High – nhx-api + nhx-gpu-tasks
   "ujson>=5.12.0",            # High – nhx-api/cpu-tasks/gpu-tasks
   "xgrammar>=0.1.32",         # High – customizer + nhx-gpu-tasks
-  "fastmcp>=3.2.0",           # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High)
-  "wandb>=0.30.0",            # wandb-core Go CVEs (nspect); optional integrations + training images
+  "fastmcp>=3.4.4",           # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High)
+  "wandb>=0.31.0",            # wandb-core Go CVEs (nspect); optional integrations + training images
   "cryptography>=50.0.0,<51", # GHSA-g6cj-pr64-35w5; overrides nvidia-nat-core's <47 cap after changelog review
   "click>=8.2.0",             # Below CVEs are based on constraints that garak has
   "litellm==1.95.1",          # CVE-2026-84377 backport; retain aioboto3 compatibility and avoid compromised 1.107.0
@@ -658,6 +658,8 @@ extra-paths = [
   "plugins/nemo-agent-hardener/tests/unit",
   # So ``helpers`` and ``reconciler.conftest`` resolve in the deployments plugin's unit tests.
   "plugins/nemo-deployments/tests/unit",
+  # Match pytest's sibling-module resolution for the deployments K8s integration fixtures.
+  "plugins/nemo-deployments/tests/integration",
   # nemo-evals plugin is not a workspace member; add its src so ty can
   # resolve nemo_evals imports when checking plugin test files.
   "plugins/nemo-evals/src",
@@ -742,6 +744,10 @@ exclude = [
   "docs/",
 
   "./sdk/",
+
+  # Image inventory scripts. openpyxl is not a workspace dependency.
+  "docker/rl/scripts/package_dump_to_xslx.py",
+  "docker/rl/scripts/scan_rl_image_packages.py",
 ]
 
 # TEMPORARY — remove together with the fix in #1237, which is where this file is

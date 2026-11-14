@@ -174,8 +174,9 @@ GRPO needs OpenSandbox, which the platform chart does not install. The `customiz
 (`e2e/k8s/scripts/install_opensandbox_minikube.sh`), installs the platform with `sandboxClusterCapable=true`,
 and selects `grpo`. The nightly and weekly schedules always run it; manual runs opt in.
 
-GRPO smoke trains every environment format (`wheels-v1`, `adapter-wheels-v1`, `native-v1`, and
-`native-v1` reference-only) with Automodel full weights and Automodel LoRA,
+GRPO smoke trains `math_with_judge` as `wheels-v1`, `native-v1`, and `native-v1` reference-only,
+plus Prime Intellect `deepscaler-math` converted to `adapter-wheels-v1`, with Automodel full
+weights and Automodel LoRA,
 and serves each output. The `native-v1` formats install the server's requirements from a package
 index, so they need sandbox internet. That setting is platform-wide, and turning it on stops
 forcing the wheels formats offline, so the job runs in two phases: the wheels formats first, then
@@ -194,9 +195,10 @@ Qwen3-0.6B, Nemotron 3 Embed 1B, and Nemotron 3.5 Lightning snapshots are staged
 The GRPO environment packages are not published. They vendor the `nemo-gym`, `ray`, and `openai`
 versions of the NeMo-RL commit the training image is built from, so CI builds them from the
 checkout under test (`generate_grpo_assets.py --env-only`) and a pin bump cannot leave
-them stale. That build is the one place CI pulls from outside S3: it clones NeMo-RL, downloads
-wheels from PyPI, and the `ascii-tree` conversion fetches the environment from the Prime
-Intellect hub and its dataset (`kalomaze/ascii-tree-mix-it1`, ~36 MB) from Hugging Face.
+them stale. That build is the one place CI pulls from outside S3: it clones NeMo-RL,
+downloads wheels from PyPI, and the `deepscaler-math` conversion fetches the environment
+from the Prime Intellect hub and its dataset (`agentica-org/DeepScaleR-Preview-Dataset`)
+from Hugging Face.
 
 Generate the off-CI assets, then publish them with ``publish_assets_to_s3.sh``:
 
@@ -230,9 +232,21 @@ does not require GPUs or OpenSandbox.
 | `E2E_MODEL_FREE_NIM_IMAGE` / `E2E_MODEL_FREE_NIM_TAG` | Model-free NIM that the Automodel smoke test serves its outputs on | `nvcr.io/nim/nvidia/vllm-model-free-nim` / `latest` |
 | `E2E_GPU_TEST_TIMEOUT` | Per-test timeout in seconds (the embedding test sets its own 12-hour timeout) | `5400` |
 | `E2E_ASSETS_CACHE_DIR` | Local cache for assets synced from S3 | `e2e/customizer/.asset-cache` |
+| `E2E_ASSETS_REUSE_LOCAL` | Set to `1` to skip `aws s3 sync` for any asset whose cache dir is already populated (e.g. staged by hand). Off by default. | unset |
 | `E2E_ASSETS_SYNC_TIMEOUT` | Timeout in seconds for each `aws s3 sync` | `1800` |
 | `S3_BUCKET` / `S3_ENDPOINT_URL` | Override the asset bucket or S3 endpoint | manifest bucket |
 | `HF_TOKEN` | Hugging Face token for models pulled at runtime | (optional for public repos) |
+
+### Feature: Taskset runs (Kubernetes)
+
+`e2e/test_taskset_runs.py` submits the 2-task Harbor dataset in `e2e/data/taskset_runs_dataset/` with `nemo evals runs submit --harbor-dir`, waits for the run, and checks its task Jobs through the Jobs API, its rewards (1 and 0), and the downloaded merged bundle. It then resubmits by `--taskset` and checks that no image was rebuilt. The cluster needs the taskset run controller, Builder with `system/`-qualified registry and signing secrets, and OpenSandbox. With auth on, pass a token that can create workspaces with `--access-token` or `NHX_E2E_ACCESS_TOKEN`; without one the test stops at once and prints the `nemo auth login` to run. The test writes the run and task Job IDs to `taskset-runs-e2e-<uuid>.json` under `$E2E_SERVICES_LOG_DIR` (default `.pytest_cache/taskset-runs-e2e/`) after every step, and cancels its runs on teardown. Set `NHX_E2E_WORKSPACE` to reuse a workspace and its images, and `NHX_E2E_KUBE_CONTEXT` to add the leftover-sandbox check and sandbox diagnostics on failure (it needs cluster-wide read on `batchsandboxes`).
+
+```bash
+uv run pytest e2e/test_taskset_runs.py --cluster-url http://127.0.0.1:18080 --feature taskset-runs -v
+# Auth on:
+uv run pytest e2e/test_taskset_runs.py --cluster-url https://nemo-helix.example.com --feature taskset-runs \
+  --access-token "$(nemo --context <context> auth token)" -v
+```
 
 ### Custom Registry and Tag (Docker)
 

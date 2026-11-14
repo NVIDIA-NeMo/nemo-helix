@@ -10,10 +10,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path, Query, Request, status
 from fastapi.openapi.models import Example
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
+from nemo_helix_plugin.client.errors import HTTPClientError
+from nemo_helix_plugin.entities.base import ID_PATTERN
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.result_manager import download_from_result_info
 from nemo_helix_plugin.jobs.types import JobControl
@@ -62,6 +65,7 @@ from nhx.core.jobs.app.dispatcher import (
     JobAlreadyExistsError,
     JobDeletionConflictError,
     JobDispatcher,
+    JobEnvironmentValidationError,
     JobHasNoAttemptError,
     JobOperationConflictError,
     JobOutputLocationError,
@@ -368,7 +372,7 @@ async def get_execution_profiles() -> list[ExecutionProfileT]:
     status_code=status.HTTP_201_CREATED,
 )
 async def create_job(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     request: Annotated[CreateHelixJobRequest, Body(openapi_examples=_CREATE_JOB_OPENAPI_EXAMPLES)],
     auth_client: AuthClient = Depends(get_auth_client),
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
@@ -389,6 +393,8 @@ async def create_job(
         )
     except PauseTTLLimitError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.detail) from exc
+    except JobEnvironmentValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     except JobOutputLocationError as exc:
         logger.info("Invalid output_location for workspace '%s'", sanitize_for_log(workspace), exc_info=True)
         raise HTTPException(
@@ -426,8 +432,7 @@ async def create_job(
 )
 async def list_jobs(
     workspace: str,
-    page: int = Query(default=1, description="Page number.", gt=0),
-    page_size: int = Query(default=10, description="Page size.", gt=0),
+    page_params: PageParams = Depends(make_page_dep(default_size=10)),
     sort: HelixJobListSortField = Query(
         default=HelixJobListSortField.CREATED_AT_DESC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -437,16 +442,17 @@ async def list_jobs(
 ) -> Page[HelixJobResponse]:
     """List platform jobs with filtering and pagination."""
 
-    offset = (page - 1) * page_size
-    jobs, total_count = await dispatcher.list_jobs(parsed, workspace, limit=page_size, offset=offset, sort=sort)
+    jobs, total_count = await dispatcher.list_jobs(
+        parsed, workspace, limit=page_params.page_size, offset=page_params.offset, sort=sort
+    )
 
     return Page(
         data=jobs,
         pagination=PaginationData(
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             current_page_size=len(jobs),
-            total_pages=int(math.ceil(total_count / page_size)) if total_count > 0 else 1,
+            total_pages=int(math.ceil(total_count / page_params.page_size)) if total_count > 0 else 1,
             total_results=total_count,
         ),
         sort=sort,
@@ -712,8 +718,7 @@ async def get_job_status(
 async def list_job_attempts(
     job: str,
     workspace: str,
-    page: int = Query(default=1, description="Page number.", gt=0),
-    page_size: int = Query(default=25, description="Page size.", gt=0),
+    page_params: PageParams = Depends(make_page_dep(default_size=25)),
     sort: HelixJobAttemptSortField = Query(
         default=HelixJobAttemptSortField.SEQ_DESC,
         description="Sort attempts by sequence. Prefix with `-` for descending order.",
@@ -727,8 +732,8 @@ async def list_job_attempts(
             job,
             workspace,
             parsed,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
         )
         if result is None:
@@ -740,10 +745,10 @@ async def list_job_attempts(
         return Page(
             data=attempts,
             pagination=PaginationData(
-                page=page,
-                page_size=page_size,
+                page=page_params.page,
+                page_size=page_params.page_size,
                 current_page_size=len(attempts),
-                total_pages=int(math.ceil(total_count / page_size)) if total_count > 0 else 1,
+                total_pages=int(math.ceil(total_count / page_params.page_size)) if total_count > 0 else 1,
                 total_results=total_count,
             ),
             sort=sort,
@@ -902,6 +907,8 @@ async def page_job_logs(
         except InvalidPageCursorError as e:
             logger.error(f"Invalid page cursor: {str(e)}")
             raise HTTPException(status_code=422, detail=str(e))
+        except HTTPClientError:
+            raise
         except Exception as e:
             logger.error(f"Unexpected error when querying logs: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to query job logs")
@@ -1080,8 +1087,7 @@ async def download_job_result(
 async def list_steps(
     name: str,
     workspace: str,
-    page: int = Query(default=1, description="Page number.", gt=0),
-    page_size: int = Query(default=25, description="Page size.", gt=0),
+    page_params: PageParams = Depends(make_page_dep(default_size=25)),
     sort: HelixJobSortField = Query(
         default=HelixJobSortField.CREATED_AT_ASC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -1094,19 +1100,18 @@ async def list_steps(
         if name != "-":
             filter.job = name
 
-        offset = (page - 1) * page_size
         steps, total_count = await dispatcher.list_steps(
-            filter=filter, sort=sort, limit=page_size, offset=offset, workspace=workspace
+            filter=filter, sort=sort, limit=page_params.page_size, offset=page_params.offset, workspace=workspace
         )
 
         dumped = filter.model_dump(mode="json", exclude_none=True)
         return Page(
             data=steps,
             pagination=PaginationData(
-                page=page,
-                page_size=page_size,
+                page=page_params.page,
+                page_size=page_params.page_size,
                 current_page_size=len(steps),
-                total_pages=int(math.ceil(total_count / page_size)) if total_count > 0 else 1,
+                total_pages=int(math.ceil(total_count / page_params.page_size)) if total_count > 0 else 1,
                 total_results=total_count,
             ),
             sort=sort,
@@ -1223,8 +1228,7 @@ async def list_attempt_steps(
     job: str,
     attempt: str,
     workspace: str,
-    page: int = Query(default=1, description="Page number.", gt=0),
-    page_size: int = Query(default=25, description="Page size.", gt=0),
+    page_params: PageParams = Depends(make_page_dep(default_size=25)),
     sort: HelixJobSortField = Query(default=HelixJobSortField.CREATED_AT_ASC),
     parsed: ParsedFilter = Depends(make_filter_dep(HelixAttemptStepsListFilter)),
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
@@ -1237,8 +1241,8 @@ async def list_attempt_steps(
                 attempt,
                 workspace,
                 parsed,
-                page=page,
-                page_size=page_size,
+                page=page_params.page,
+                page_size=page_params.page_size,
                 sort=sort,
             )
         except JobHasNoAttemptError as exc:
@@ -1252,10 +1256,10 @@ async def list_attempt_steps(
         return Page(
             data=steps,
             pagination=PaginationData(
-                page=page,
-                page_size=page_size,
+                page=page_params.page,
+                page_size=page_params.page_size,
                 current_page_size=len(steps),
-                total_pages=int(math.ceil(total_count / page_size)) if total_count > 0 else 1,
+                total_pages=int(math.ceil(total_count / page_params.page_size)) if total_count > 0 else 1,
                 total_results=total_count,
             ),
             sort=sort,
@@ -1265,6 +1269,7 @@ async def list_attempt_steps(
 
 @router.get(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}",
+    responses={status.HTTP_404_NOT_FOUND: {"description": "Attempt step not found"}},
     status_code=status.HTTP_200_OK,
 )
 async def get_attempt_step(
@@ -1430,6 +1435,7 @@ async def list_attempt_step_tasks(
 
 @router.put(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks/{name}",
+    responses={status.HTTP_404_NOT_FOUND: {"description": "Attempt or step not found"}},
     status_code=status.HTTP_200_OK,
 )
 async def update_attempt_step_task(
@@ -1458,6 +1464,7 @@ async def update_attempt_step_task(
 
 @router.get(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks/{name}",
+    responses={status.HTTP_404_NOT_FOUND: {"description": "Attempt step or task not found"}},
     status_code=status.HTTP_200_OK,
 )
 async def get_attempt_step_task(

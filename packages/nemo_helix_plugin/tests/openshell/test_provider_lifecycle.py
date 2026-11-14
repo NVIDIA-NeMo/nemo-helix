@@ -299,7 +299,7 @@ async def test_auth_disabled_provisioning_renewal_and_cleanup(setup):
     setup.provisioner.clock = lambda: 4000000000
     assert await setup.provisioner.prepare(binding(), **setup.kwargs, renew=True) == names
     renewed = setup.gateway.providers[names[0]].credential_handles["API_TOKEN"].handle
-    assert renewed != handle
+    assert renewed == handle
     assert setup.registry.resolve(owner, renewed).claims.principal_id is None
     assert all("X-NHX-Principal-On-Behalf-Of" not in request.headers for request in setup.requests)
     await setup.provisioner.cleanup(workload_workspace="team", workload_id="sandbox-1")
@@ -397,7 +397,11 @@ async def test_renewal_survives_controller_restart_without_fetching_values(setup
         assert len(setup.gateway.updates) == updates
     current = setup.gateway.providers[names[0]]
     assert current.metadata.id == original.metadata.id
-    assert current.credential_handles["API_TOKEN"] != original.credential_handles["API_TOKEN"]
+    assert current.credential_handles["API_TOKEN"] == original.credential_handles["API_TOKEN"]
+    assert current.metadata.resource_version == original.metadata.resource_version + 3
+    assert all(
+        not update.provider.credentials and not update.provider.credential_handles for update in setup.gateway.updates
+    )
     assert len(setup.requests) == 8  # Creator permission and metadata, never /access.
     owner = ProviderOwner(
         workspace=current.metadata.workspace,
@@ -408,15 +412,16 @@ async def test_renewal_survives_controller_restart_without_fetching_values(setup
     claims = setup.registry.resolve(owner, current.credential_handles["API_TOKEN"].handle).claims
     assert claims.workload == setup.kwargs["workload"]
     assert claims.principal_id == "user-1"
-    with pytest.raises(RegistrationDenied):
-        setup.registry.resolve(owner, original.credential_handles["API_TOKEN"].handle)
+    setup.registry.clock = lambda: claims.binding_expires_at + 1
+    assert setup.registry.resolve(owner, original.credential_handles["API_TOKEN"].handle).claims == claims
 
 
 async def test_concurrent_renewal_uses_gateway_version_and_retry_observes_winner(setup):
     provisioner = setup.provisioner
     provisioner.config.renewal_mode = "helix"
     provisioner.clock = lambda: 1000
-    await provisioner.prepare(binding(), **setup.kwargs)
+    names = await provisioner.prepare(binding(), **setup.kwargs)
+    original = setup.gateway.providers[names[0]]
     setup.gateway.attached.add("sandbox-1")
     barrier = asyncio.Barrier(2)
 
@@ -439,6 +444,15 @@ async def test_concurrent_renewal_uses_gateway_version_and_retry_observes_winner
     provisioner.client = ProviderGatewayClient(setup.gateway.channel())
     await provisioner.prepare(binding(), **setup.kwargs, renew=True)
     assert len(setup.gateway.updates) == 1
+    current = setup.gateway.providers[names[0]]
+    assert current.credential_handles == original.credential_handles
+    owner = ProviderOwner(
+        workspace=current.metadata.workspace,
+        provider=names[0],
+        provider_id=current.metadata.id,
+        credential_key="API_TOKEN",
+    )
+    setup.registry.resolve(owner, original.credential_handles["API_TOKEN"].handle)
 
 
 async def test_renewal_prefers_config_timestamp_and_preserves_unrelated_config(setup):
@@ -527,14 +541,14 @@ async def test_denied_provider_is_detached_deleted_and_never_renewed(setup, deni
         if denial is PermissionError
         else denial(httpx.Response(403 if denial is PermissionDeniedError else 404))
     )
-    original_issue = provisioner._issue_ticket
-    provisioner._issue_ticket = AsyncMock(side_effect=error)
+    original_authorize = provisioner._authorize_binding
+    provisioner._authorize_binding = AsyncMock(side_effect=error)
     with pytest.raises(ProviderAccessRevoked):
         await provisioner.prepare(binding(), **setup.kwargs, renew=True)
     assert set(names) == setup.gateway.detached_providers
     assert not setup.gateway.providers
     assert not setup.gateway.updates[0].provider.credentials  # Intent update never sends redactions or values.
-    provisioner._issue_ticket = original_issue
+    provisioner._authorize_binding = original_authorize
     with pytest.raises(ProviderAccessRevoked):
         await provisioner.prepare(binding(), **setup.kwargs, renew=True)
     assert not setup.gateway.providers
@@ -548,7 +562,7 @@ async def test_revocation_retries_after_restart(setup, failure):
     names = await provisioner.prepare(binding(), **setup.kwargs)
     setup.gateway.attached.add("sandbox-1")
     provisioner.clock = lambda: 1010
-    provisioner._issue_ticket = AsyncMock(side_effect=PermissionError)
+    provisioner._authorize_binding = AsyncMock(side_effect=PermissionError)
 
     async def failing_call(method: str, request: Message) -> Message:
         if method == failure:
@@ -561,7 +575,7 @@ async def test_revocation_retries_after_restart(setup, failure):
     assert names[0] in setup.gateway.providers
     # After intent was committed, restoring permission cannot cancel cleanup.
     if failure != "UpdateProvider":
-        provisioner._issue_ticket = AsyncMock(side_effect=AssertionError("must not authorize a revoked provider"))
+        provisioner._authorize_binding = AsyncMock(side_effect=AssertionError("must not authorize a revoked provider"))
     restarted = type(provisioner)(
         provisioner.config,
         provisioner.workspace,
@@ -569,7 +583,7 @@ async def test_revocation_retries_after_restart(setup, failure):
         tickets=provisioner.tickets,
         clock=lambda: 1011,
     )
-    restarted._issue_ticket = provisioner._issue_ticket
+    restarted._authorize_binding = provisioner._authorize_binding
     with pytest.raises(ProviderAccessRevoked):
         await restarted.prepare(binding(), **setup.kwargs, renew=True)
     assert not setup.gateway.providers
@@ -583,14 +597,14 @@ async def test_secret_outage_does_not_remove_provider_and_recovers(setup):
     names = await provisioner.prepare(binding(), **setup.kwargs)
     setup.gateway.attached.add("sandbox-1")
     provisioner.clock = lambda: 1010
-    original_issue = provisioner._issue_ticket
-    provisioner._issue_ticket = AsyncMock(side_effect=TimeoutError)
+    original_authorize = provisioner._authorize_binding
+    provisioner._authorize_binding = AsyncMock(side_effect=TimeoutError)
     with pytest.raises(TimeoutError):
         await provisioner.prepare(binding(), **setup.kwargs, renew=True)
     assert names[0] in setup.gateway.providers
     assert not setup.gateway.detached_providers
     assert not setup.gateway.updates
-    provisioner._issue_ticket = original_issue
+    provisioner._authorize_binding = original_authorize
     assert await provisioner.prepare(binding(), **setup.kwargs, renew=True) == names
 
 
@@ -608,14 +622,14 @@ async def test_denied_provider_does_not_prevent_other_provider_renewal(setup):
     }
     names = await provisioner.prepare(bindings, **setup.kwargs)
     setup.gateway.attached.add("sandbox-1")
-    original_issue = provisioner._issue_ticket
+    original_authorize = provisioner._authorize_binding
 
-    async def issue(scope, **kwargs):
+    async def authorize(scope, **kwargs):
         if scope.credential_key == "OTHER_TOKEN":
             raise PermissionError
-        return await original_issue(scope, **kwargs)
+        await original_authorize(scope, **kwargs)
 
-    provisioner._issue_ticket = issue
+    provisioner._authorize_binding = authorize
     provisioner.clock = lambda: 1010
     with pytest.raises(ProviderAccessRevoked):
         await provisioner.prepare(bindings, **setup.kwargs, renew=True)
@@ -667,6 +681,12 @@ def test_policy_allows_workload_operations_without_broad_platform_access():
     assert ("POST", "/apis/inference-gateway/v2/workspaces/team/openai/-/v1/chat/completions") in allowed
     assert all("/secrets/" not in path and "/entities/" not in path and "/auth/" not in path for _, path in allowed)
     assert ("POST", "/apis/jobs/v2/workspaces/team/jobs") not in allowed
+    # Result saves must not depend on reading the job record: the restricted policy
+    # deliberately leaves GET /jobs/{job} out.
+    assert ("GET", "/apis/jobs/v2/workspaces/team/jobs/job-1") not in allowed
+    # Saving the same result name twice reads the existing record instead of failing.
+    assert ("POST", "/apis/jobs/v2/workspaces/team/jobs/job-1/results/*") in allowed
+    assert ("GET", "/apis/jobs/v2/workspaces/team/jobs/job-1/results/*") in allowed
     assert restricted.landlock.compatibility == "hard_requirement"
 
     # Compare the handwritten policy with requests built by the actual client contract.

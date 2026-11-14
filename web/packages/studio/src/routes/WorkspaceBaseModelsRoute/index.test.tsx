@@ -21,6 +21,7 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 const mockNavigate = vi.fn();
 const mockEnvironment = vi.hoisted(() => ({
   customizerEnabled: false,
+  modelDetailsEnabled: false,
 }));
 
 vi.mock('@studio/constants/environment', async (importOriginal) => {
@@ -29,6 +30,9 @@ vi.mock('@studio/constants/environment', async (importOriginal) => {
     ...actual,
     get CUSTOMIZER_ENABLED() {
       return mockEnvironment.customizerEnabled;
+    },
+    get MODEL_DETAILS_ENABLED() {
+      return mockEnvironment.modelDetailsEnabled;
     },
   };
 });
@@ -214,7 +218,7 @@ describe('WorkspaceBaseModelsRoute deep linking', () => {
   // in the monorepo parallel test environment.
   let WorkspaceBaseModelsRoute: React.FC;
   beforeAll(async () => {
-    ({ WorkspaceBaseModelsRoute } = await import('./index'));
+    ({ WorkspaceBaseModelsRoute } = await import('@studio/routes/WorkspaceBaseModelsRoute/index'));
   }, 30000);
 
   beforeEach(() => {
@@ -318,6 +322,23 @@ describe('WorkspaceBaseModelsRoute deep linking', () => {
     );
   });
 
+  it('opens the model detail page instead of the panel when model details are on', async () => {
+    mockEnvironment.modelDetailsEnabled = true;
+    try {
+      render(
+        <TestWrapper initialEntry="/workspaces/ws1/base-models?s=llama">
+          <WorkspaceBaseModelsRoute />
+        </TestWrapper>
+      );
+
+      fireEvent.click(await screen.findByTestId('base-model-card'));
+
+      expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/base-models/my-model');
+    } finally {
+      mockEnvironment.modelDetailsEnabled = false;
+    }
+  });
+
   it('preserves list query params and removes tab when closing a model panel', async () => {
     const listQueryParams = new URLSearchParams({
       s: 'llama',
@@ -347,7 +368,7 @@ describe('WorkspaceBaseModelsRoute deep linking', () => {
 describe('WorkspaceBaseModelsRoute customizable filter gating', () => {
   let WorkspaceBaseModelsRoute: React.FC;
   beforeAll(async () => {
-    ({ WorkspaceBaseModelsRoute } = await import('./index'));
+    ({ WorkspaceBaseModelsRoute } = await import('@studio/routes/WorkspaceBaseModelsRoute/index'));
   }, 30000);
 
   beforeEach(() => {
@@ -382,7 +403,7 @@ describe('WorkspaceBaseModelsRoute customizable filter gating', () => {
 describe('WorkspaceBaseModelsRoute card prop wiring', () => {
   let WorkspaceBaseModelsRoute: React.FC;
   beforeAll(async () => {
-    ({ WorkspaceBaseModelsRoute } = await import('./index'));
+    ({ WorkspaceBaseModelsRoute } = await import('@studio/routes/WorkspaceBaseModelsRoute/index'));
   }, 30000);
 
   beforeEach(() => {

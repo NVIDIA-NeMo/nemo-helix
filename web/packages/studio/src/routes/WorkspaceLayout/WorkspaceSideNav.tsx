@@ -35,9 +35,10 @@ import {
   getOptimizerSideNavItems,
   getSafeSynthesizerSideNavItems,
   getSettingsSideNavItems,
+  getTasksetSideNavItems,
   getVirtualModelsSideNavItems,
 } from '@studio/routes/groups';
-import { getAgentsListRoute } from '@studio/routes/utils';
+import { getAgentsListRoute, getWorkspaceDatasetsRoute } from '@studio/routes/utils';
 import { lazy, Suspense, useMemo } from 'react';
 
 const NoPluginNavIcon = () => null;
@@ -52,9 +53,8 @@ const PluginNavIcon = lazy(() =>
     })
 );
 
-// The parent rows stand for the entity their landing page lists, so they take
-// that entity's canonical glyph. `Datasets` only groups the data jobs today,
-// but it is becoming an entity in its own right, so it is treated as one here.
+// These rows stand for the entity their landing page lists, so they take
+// that entity's canonical glyph.
 const AgentsIcon = ENTITY_ICONS.agents;
 const ModelsIcon = ENTITY_ICONS.baseModels;
 const DatasetsIcon = ENTITY_ICONS.datasets;
@@ -73,7 +73,10 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
     const customizerNav = getCustomizationSideNavItems(workspace);
     const evalNav = getEvaluationSideNavItems(workspace);
     const tracesNav = getIntakeSideNavItems(workspace);
-    const experimentNav = getExperimentSideNavItems(workspace);
+    const evaluationItems = [
+      ...getExperimentSideNavItems(workspace),
+      ...getTasksetSideNavItems(workspace),
+    ];
     const safeSynthesizerNav = getSafeSynthesizerSideNavItems(workspace);
     const dataDesignerNav = getDataDesignerSideNavItems(workspace);
     const anonymizerNav = getAnonymizerSideNavItems(workspace);
@@ -95,10 +98,9 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
       ...deploymentsNav,
       ...virtualModelsNav,
     ];
-    const datasetSubItems = [...anonymizerNav, ...dataDesignerNav, ...safeSynthesizerNav];
 
-    // Agents links to its own entity list page; Models is a disclosure whose 'Model Catalog'
-    // child is the list page. The chevron expands any sub-items.
+    // Agents links to its entity list page; Models is a disclosure whose 'Model Catalog' child
+    // is the list page. The chevron expands any sub-items.
     const agentsHref = showAgents ? getAgentsListRoute(workspace) : undefined;
 
     const componentItems = [
@@ -125,17 +127,17 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
         : []),
     ];
 
-    const dataItems =
-      datasetSubItems.length > 0
-        ? [
-            {
-              id: 'datasets-group',
-              slotIcon: <DatasetsIcon className={iconColorClass} />,
-              slotLabel: 'Datasets',
-              subItems: datasetSubItems,
-            },
-          ]
-        : [];
+    const dataItems = [
+      {
+        id: 'dataset-list',
+        slotIcon: <DatasetsIcon className={iconColorClass} />,
+        slotLabel: 'Datasets',
+        href: getWorkspaceDatasetsRoute(workspace),
+      },
+      ...anonymizerNav,
+      ...dataDesignerNav,
+      ...safeSynthesizerNav,
+    ];
 
     const governanceItems = getGuardrailsSideNavItems(workspace);
 
@@ -145,8 +147,8 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
         ? [{ group: 'Observability', items: observabilityItems }]
         : []),
       ...(componentItems.length > 0 ? [{ group: 'Components', items: componentItems }] : []),
-      ...(experimentNav.length > 0 ? [{ group: 'Evaluations', items: experimentNav }] : []),
-      ...(dataItems.length > 0 ? [{ group: 'Data', items: dataItems }] : []),
+      ...(evaluationItems.length > 0 ? [{ group: 'Evaluations', items: evaluationItems }] : []),
+      { group: 'Data', items: dataItems },
       ...(governanceItems.length > 0 ? [{ group: 'Governance', items: governanceItems }] : []),
     ];
   }, [workspace, showAgents]);

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { CustomizationOverview } from '@studio/components/CustomizationOverview';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import {

@@ -4,7 +4,7 @@
 """Tests for S3 storage backend."""
 
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -174,22 +174,34 @@ class TestS3StorageImplInit:
         assert impl._full_key(path) == expected
 
     @pytest.mark.parametrize(
-        ("prefix", "path", "expected"),
+        ("prefix", "path"),
         [
-            (
-                "test-prefix",
-                "models/model.bin",
-                "cache/s3/test-bucket/test-prefix/models/model.bin",
-            ),
-            ("test-prefix", None, "cache/s3/test-bucket/test-prefix"),
-            ("", "file.txt", "cache/s3/test-bucket/file.txt"),
+            ("test-prefix", "models/model.bin"),
+            ("test-prefix", None),
+            ("", "file.txt"),
+            ("", None),
         ],
     )
-    async def test_get_cache_path_key(self, prefix, path, expected):
-        """Test cache path key generation."""
+    async def test_get_cache_path_key(self, prefix, path):
+        """S3 cache paths use a new namespace and resolve object metadata."""
         config = S3StorageConfig(bucket="test-bucket", prefix=prefix, use_sdk_auth=True)
         impl = S3StorageImpl(config, {})
-        assert await impl.get_cache_path_key(path) == expected
+        async with mock_s3_client(impl) as client:
+            client.head_object.return_value = {"ContentLength": 10, "ETag": '"opaque/../etag"'}
+            key = await impl.get_cache_path_key(path)
+            assert key is not None and key.startswith("cache/s3-v2/")
+            assert ".." not in key and "opaque" not in key
+            if path is None:
+                client.head_object.assert_not_awaited()
+            else:
+                client.head_object.assert_awaited_once_with(Bucket="test-bucket", Key=impl._full_key(path))
+
+    async def test_cache_root_isolates_s3_endpoints(self):
+        """Equal bucket names on different S3 servers must not share content."""
+        config = S3StorageConfig(bucket="bucket", use_sdk_auth=True)
+        first = S3StorageImpl(config, {})
+        second = S3StorageImpl(config.model_copy(update={"endpoint_url": "https://other-s3"}), {})
+        assert await first.get_cache_path_key() != await second.get_cache_path_key()
 
     def test_config_owns_storage_data(self):
         """Deleting an S3 fileset removes objects under our prefix, so we own the data."""
@@ -261,6 +273,86 @@ class TestS3StorageImplListFiles:
                 await s3_impl_no_prefix.list_files()
 
         assert "Not found" in str(exc_info.value)
+
+
+class TestS3StorageImplListFilesPathFilters:
+    """Test list_files path filters with realistic S3 raw-prefix semantics.
+
+    S3 treats Prefix as a raw string match, so the mocked paginator filters
+    keys the same way: a key is returned when it starts with the query
+    prefix. The fileset's own storage boundary (``foo/``) scopes the query,
+    while the path filter keeps raw prefix matching within the fileset.
+    """
+
+    ALL_RELATIVE = [
+        "item",
+        "item.txt",
+        "item/a.txt",
+        "item.txt/a.txt",
+        "item.txt.bak",
+        "item-extra/a.txt",
+    ]
+
+    @staticmethod
+    def _raw_prefix_paginator(keys: list[str]) -> MagicMock:
+        """Paginator that mimics S3 raw string prefix matching."""
+        captured: dict[str, Any] = {}
+
+        def paginate(*, Bucket=None, Prefix=""):  # noqa: N803 - matches botocore API
+            captured["Prefix"] = Prefix
+            return AsyncIteratorMock([{"Contents": [{"Key": k, "Size": 1} for k in keys if k.startswith(Prefix)]}])
+
+        paginator = MagicMock()
+        paginator.paginate.side_effect = paginate
+        paginator.captured = captured
+        return paginator
+
+    @pytest.mark.parametrize("prefix", ["foo", "foo/", ""])
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            (None, ALL_RELATIVE),
+            ("", ALL_RELATIVE),
+            ("item", ALL_RELATIVE),
+            ("item/", ["item/a.txt"]),
+            ("item.txt", ["item.txt", "item.txt/a.txt", "item.txt.bak"]),
+            ("item.txt/", ["item.txt/a.txt"]),
+        ],
+    )
+    async def test_list_files_path_filters(self, prefix, path, expected):
+        """Path filters keep raw prefix matching inside the fileset boundary."""
+        config = S3StorageConfig(bucket="test-bucket", prefix=prefix, region="us-east-1", use_sdk_auth=True)
+        impl = S3StorageImpl(config, {})
+        boundary = impl._full_key("")
+        keys = [boundary + rel for rel in self.ALL_RELATIVE]
+
+        paginator = self._raw_prefix_paginator(keys)
+        async with mock_s3_client(impl) as mock_client:
+            mock_client.get_paginator = MagicMock(return_value=paginator)
+            files = await impl.list_files(path)
+
+        assert sorted(f.path for f in files) == sorted(expected)
+        # The query prefix is the fileset's storage boundary plus the raw path filter.
+        assert paginator.captured["Prefix"] == boundary + (path or "")
+
+    async def test_list_files_excludes_neighbor_keys(self):
+        """Neighbor filesets and the bare prefix object are not listed."""
+        config = S3StorageConfig(bucket="test-bucket", prefix="foo", region="us-east-1", use_sdk_auth=True)
+        impl = S3StorageImpl(config, {})
+        keys = [
+            "foo",
+            "foo/a.txt",
+            "foo-bar/a.txt",
+            "foo.txt",
+            "foobar/a.txt",
+        ]
+
+        paginator = self._raw_prefix_paginator(keys)
+        async with mock_s3_client(impl) as mock_client:
+            mock_client.get_paginator = MagicMock(return_value=paginator)
+            files = await impl.list_files()
+
+        assert [f.path for f in files] == ["a.txt"]
 
 
 class TestS3StorageImplDownload:
@@ -383,62 +475,11 @@ class TestS3StorageImplDownload:
 class TestS3StorageImplUpload:
     """Test upload method."""
 
-    async def test_upload_requires_content_length(self, s3_impl_no_prefix):
-        """Test upload raises ValueError when content_length is not provided."""
-
-        async def data_stream():
-            yield b"test data"
-
-        with pytest.raises(ValueError) as exc_info:
-            await s3_impl_no_prefix.upload("file.txt", data_stream())
-
-        assert "content_length is required" in str(exc_info.value)
-
-    async def test_upload_generates_presigned_url(self, s3_impl):
-        """Test that upload generates a presigned URL and streams content."""
-        captured_url = None
-        captured_headers = None
-
-        async def mock_upload_streaming(url, data, headers=None, **kwargs):
-            nonlocal captured_url, captured_headers
-            captured_url = url
-            captured_headers = headers
-            async for _ in data:
-                pass
-            return 0
-
-        async def data_stream():
-            yield b"test data"
-
-        async with mock_s3_client(s3_impl) as mock_client:
-            mock_client.generate_presigned_url.return_value = (
-                "https://test-bucket.s3.amazonaws.com/test-prefix/file.txt"
-                "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc123"
-            )
-            with patch(
-                "nhx.core.files.app.backends.s3.upload_url_streaming",
-                side_effect=mock_upload_streaming,
-            ):
-                result = await s3_impl.upload("file.txt", data_stream(), content_length=9)
-
-        assert result.path == "file.txt"
-        assert result.size == 9
-        assert "test-bucket" in captured_url
-        assert "X-Amz-Signature" in captured_url
-        assert captured_headers["Content-Length"] == "9"
-
-    async def test_upload_presigned_url_generation_fails(self, s3_impl_no_prefix):
-        """Test upload handles presigned URL generation failure."""
-
-        async def data_stream():
-            yield b"test data"
-
-        async with mock_s3_client(s3_impl_no_prefix) as mock_client:
-            mock_client.generate_presigned_url.side_effect = _make_client_error("NoSuchBucket")
-            with pytest.raises(S3ConfigError) as exc_info:
-                await s3_impl_no_prefix.upload("file.txt", data_stream(), content_length=9)
-
-        assert "Not found" in str(exc_info.value)
+    @pytest.mark.parametrize("content_length", [None, -1])
+    async def test_upload_requires_content_length(self, s3_impl_no_prefix, content_length):
+        """Reject missing or negative lengths before consuming the request stream."""
+        with pytest.raises(ValueError, match="content_length"):
+            await s3_impl_no_prefix.upload("file.txt", AsyncIteratorMock([b"test data"]), content_length)
 
 
 class TestS3StorageImplValidateStorage:
@@ -536,6 +577,119 @@ class TestS3StorageImplDeleteAll:
             await s3_impl.delete_all()
 
         mock_client.delete_objects.assert_not_called()
+
+
+class TestS3StorageImplDeleteAllPrefixIsolation:
+    """delete_all must only delete keys owned by this fileset's prefix.
+
+    S3 prefix matching is a raw string match, so listing with Prefix=foo also
+    returns foo-bar, foo.txt, and foobar. Those neighbor keys must never be
+    deleted: a key is owned only when it equals the configured prefix or lies
+    under the directory boundary (``foo/``).
+    """
+
+    @staticmethod
+    def _deleted_keys(mock_client) -> list[str]:
+        """Collect every key passed to delete_objects across all calls."""
+        return [
+            obj["Key"] for call in mock_client.delete_objects.call_args_list for obj in call.kwargs["Delete"]["Objects"]
+        ]
+
+    @staticmethod
+    def _make_page(keys: list[str]) -> dict[str, list[dict[str, Any]]]:
+        return {"Contents": [{"Key": k} for k in keys]}
+
+    @staticmethod
+    def _make_impl(prefix: str) -> S3StorageImpl:
+        config = S3StorageConfig(bucket="test-bucket", prefix=prefix, region="us-east-1", use_sdk_auth=True)
+        return S3StorageImpl(config, {})
+
+    @staticmethod
+    def _owned_and_neighbor_keys(prefix: str) -> tuple[set[str], list[str]]:
+        """Owned keys and raw-prefix neighbor keys for a configured prefix."""
+        bare = prefix.rstrip("/")
+        boundary = bare + "/"
+        owned = {prefix, boundary, boundary + "a.txt", boundary + "report.txt/a.txt"}
+        if prefix.endswith("/"):
+            # A slash-terminated prefix owns its directory tree; only the bare
+            # prefix object (outside the directory) is a neighbor.
+            neighbors = [bare]
+        else:
+            neighbors = [prefix + suffix for suffix in ("-bar", "-bar/a.txt", ".txt", ".txt/a.txt", "bar", "bar/a.txt")]
+        return owned, neighbors
+
+    @pytest.mark.parametrize("prefix", ["foo", "foo.txt", "foo/", "foo.txt/"])
+    async def test_delete_all_keeps_neighbor_keys(self, prefix):
+        """Only the exact prefix object and directory descendants are deleted."""
+        impl = self._make_impl(prefix)
+        owned, neighbors = self._owned_and_neighbor_keys(prefix)
+
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = AsyncIteratorMock([self._make_page(sorted(owned) + neighbors)])
+
+        async with mock_s3_client(impl) as mock_client:
+            mock_client.get_paginator = MagicMock(return_value=mock_paginator)
+            await impl.delete_all()
+
+        assert set(self._deleted_keys(mock_client)) == owned
+        mock_paginator.paginate.assert_called_once_with(Bucket="test-bucket", Prefix=prefix)
+
+    @pytest.mark.parametrize("prefix", ["foo", "foo.txt", "foo/", "foo.txt/"])
+    async def test_delete_all_skips_page_of_only_neighbors(self, prefix):
+        """A page holding only neighbor keys must not call delete_objects."""
+        impl = self._make_impl(prefix)
+        owned, neighbors = self._owned_and_neighbor_keys(prefix)
+
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = AsyncIteratorMock(
+            [
+                self._make_page(neighbors),
+                self._make_page(sorted(owned)),
+            ]
+        )
+
+        async with mock_s3_client(impl) as mock_client:
+            mock_client.get_paginator = MagicMock(return_value=mock_paginator)
+            await impl.delete_all()
+
+        assert mock_client.delete_objects.call_count == 1
+        assert set(self._deleted_keys(mock_client)) == owned
+
+    @pytest.mark.parametrize("prefix", ["foo", "foo.txt", "foo/", "foo.txt/"])
+    async def test_delete_all_one_call_per_owned_page(self, prefix):
+        """One delete_objects call per page that still has owned keys."""
+        impl = self._make_impl(prefix)
+        owned, neighbors = self._owned_and_neighbor_keys(prefix)
+
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = AsyncIteratorMock(
+            [
+                self._make_page(sorted(owned)),
+                {"Contents": []},
+                self._make_page(neighbors + [next(iter(owned))]),
+            ]
+        )
+
+        async with mock_s3_client(impl) as mock_client:
+            mock_client.get_paginator = MagicMock(return_value=mock_paginator)
+            await impl.delete_all()
+
+        assert mock_client.delete_objects.call_count == 2
+        assert set(self._deleted_keys(mock_client)) == owned
+
+    async def test_delete_all_empty_prefix_deletes_everything(self):
+        """An empty prefix owns the whole bucket, so every listed key is deleted."""
+        impl = self._make_impl("")
+        keys = ["a.txt", "dir/b.txt", "foo-bar", "foo.txt"]
+
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = AsyncIteratorMock([self._make_page(keys)])
+
+        async with mock_s3_client(impl) as mock_client:
+            mock_client.get_paginator = MagicMock(return_value=mock_paginator)
+            await impl.delete_all()
+
+        assert set(self._deleted_keys(mock_client)) == set(keys)
 
 
 class TestAiobotocoreCompatibility:

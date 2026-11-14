@@ -58,7 +58,7 @@ Give the **nemo-evals** skill these inputs, the same for base and tuned except t
 |---|---|
 | Rows | The frozen `test.jsonl` |
 | Target | `Model(url="<gateway>/apis/inference-gateway/v2/workspaces/<ws>/openai/-/v1", name="<model ID>")`, where `<gateway>` is the platform URL the agent uses (`nemo inference get-url` prints the full route) |
-| Prompt template | `{"messages": "{{ item.messages[:-1] }}"}`; a model without a chat template uses **Models without a chat template** below |
+| Prompt template | `{"messages": "{{ item.messages[:-1] }}"}`; image rows use the template in **Image rows** below; a model without a chat template uses **Models without a chat template** below |
 | Reference | `{{ item.messages[-1].content }}`. The assistant `content` is a string. |
 | Metric | Short answers: `F1Metric`. Exact labels: `ExactMatchMetric`. Tool calls: `ToolCallingMetric`. Open-ended answers: an LLM judge, chosen with nemo-evals' metric selection |
 | Inference | `temperature` 0; `max_tokens` 64 for short labels; for thinking models (Qwen3, Nemotron 3.5 Lightning) turn thinking off with `extra_body={"chat_template_kwargs": {"enable_thinking": false}}` |
@@ -109,7 +109,36 @@ Training and evaluation use the **same CHAT JSONL row shape**:
 
 The **final** turn is the label; every earlier turn is context. Send `messages[:-1]` and score against `messages[-1].content`. Do not flatten the rows to `prompt` / `expected`, and do not send the label turn; a model without a chat template gets its prompt from the completions template in **Hand-off to nemo-evals**.
 
-An image row keeps the part list on the user turn. Send `messages[:-1]` with those image parts intact. The assistant label is a string, so the reference stays `{{ item.messages[-1].content }}`. A relative `image_url` is the fileset path the trainer reads. The inference gateway does not have that fileset, so a prompt sent there needs a `data:` URL or a URL the gateway can fetch.
+### Image rows
+
+An image row keeps the part list on the user turn, and its `image_url` is the fileset-relative path the trainer reads (`validation/images/00000.png`). The inference gateway does not resolve a relative path, so `{"messages": "{{ item.messages[:-1] }}"}` fails for image rows. Write the request part by part instead, and turn the path into a `fileset://<workspace>/<fileset>#<path>` reference. The gateway downloads the file with the caller's permissions and inlines it as a `data:` URL; the rows stay as they are. For one image part followed by one text part, which is the shape `import_cord.py` and `import_finance.py` write:
+
+```json
+{"messages": [{"role": "user", "content": [
+  {"type": "image_url", "image_url": {"url": "fileset://<ws>/<fileset>#{{ item.messages[0].content[0].image_url.url }}"}},
+  {"type": "text", "text": "{{ item.messages[0].content[1].text }}"}]}]}
+```
+
+- The reference stays `{{ item.messages[-1].content }}`: the assistant label is a string.
+- The template's indices follow the importers' row shape: `messages[0]` is the user turn, `content[0]` is its image part, and `content[1]` is its text part. Rows with a different shape need different indices.
+- The template names the fileset, so a copy of the dataset under another name needs it changed.
+- The request must go through the gateway. A deployment called directly reads only `data:` and `http(s)` URLs.
+- The images are found only if the fileset was uploaded with a trailing slash on the source directory (`hf-conversion.md` § **Image rows**).
+
+### CORD-v2
+
+Score the official validation split in the `cord-v2` fileset, not a separate test split (`hf-conversion.md` § **Image rows**). The published numbers use its first 20 rows.
+
+| Input | Value |
+|---|---|
+| Rows | Platform job: `FilesetRef("<ws>/cord-v2#validation/validation.jsonl")`. Local run: that file's rows. `limit_samples=20` to compare with the published numbers |
+| Prompt template | **Image rows** above, with `cord-v2` as the fileset |
+| Exact match | `StringCheckMetric(operation="equals", left_template="{{ sample.output_text \| trim }}", right_template="{{ item.messages[-1].content }}")`, reported as `string-check`. Not `ExactMatchMetric` or `F1Metric`: they strip punctuation first, which erases the tags |
+| Similarity | `SequenceSimilarityMetric(reference="{{ item.messages[-1].content }}", candidate="{{ sample.output_text \| trim }}")`, reported as `sequence-similarity` |
+| Inference | `temperature` 0, `max_tokens` 1024, thinking off: `extra_body={"chat_template_kwargs": {"enable_thinking": false}}` |
+| Both metrics in one job | `evaluator.submit` takes one metric. Put both in one spec and submit it with `nemo evals evaluate --spec-file` (nemo-evals § **Multiple metrics**) |
+
+Published numbers on the first 20 validation rows (Automodel Super VL guide): the base model scores 0/20 exact with mean similarity 0.048; the LoRA (rank 64, step 199, merged) scores 8/20 and 0.954. The base model answers in prose, so near-zero scores for it are expected. Expect small differences from upstream, which decoded merged weights with Hugging Face `generate`.
 
 ## Reading the result
 
@@ -127,12 +156,27 @@ When comparing several adapters, for example different epoch counts, score each 
 
 | Engine / image | Default max rank | Raise it on the deployment config |
 |---|---|---|
-| vLLM (`engine: vllm`, the default) | **16** | `executor_config.additional_args: ["--max-lora-rank", "<rank>"]` |
+| vLLM (`engine: vllm`, the default) | **32**, set by the platform (vLLM's own default is 16). Nemotron 3.5 Super VL recipe adapters are rank 64: set `--max-lora-rank 64` via `additional_args` | `executor_config.additional_args: ["--max-lora-rank", "<rank>"]` |
 | Model-free NIM, vLLM (`vllm-model-free-nim`; the default NIM image) | **16** | `executor_config.additional_envs: {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Model-free NIM, SGLang (`sglang-model-free-nim`) | **16** if the server starts with no adapters; otherwise the highest rank among adapters present at start | `executor_config.additional_envs: {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Multi-LLM NIM (`llm-nim`, NIM 1.x) | **32** | `executor_config.additional_envs: {"NIM_MAX_LORA_RANK": "<rank>"}` |
 
-vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job cannot set `additional_args`, so for a vLLM adapter above rank 16 create a deployment config template with the flag and reference it by name. Before training at rank > 16, confirm the user will deploy with a raised limit.
+vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job cannot set `additional_args`, so for a vLLM adapter above the default max rank of 32 (including Nemotron 3.5 Super VL recipe adapters, rank 64) create a deployment config template with the flag and reference it by name. Before training above that rank, confirm the user will deploy with a raised limit.
+
+**Weights volume.** On Kubernetes the deployment downloads the model into a volume of `executor_config.disk_size`, default `50Gi`. When the model's files are larger, set `disk_size` above their size, in the job's inline `deployment_config` or in the deployment config; otherwise the download runs out of space and the deployment never becomes ready.
+
+**Nemotron 3.5 Super VL.** Set `disk_size` to at least `300Gi` (BF16) or `100Gi` (NVFP4). Register the model entity with `trust_remote_code: true`; vLLM needs it to load the checkpoint, and the platform needs it to read the config and size tensor parallelism. Serve adapters and fine-tuned models on the BF16 checkpoint, which the training used. The platform adds no model-specific vLLM flags, so set the flags from NVIDIA's [vLLM cookbook](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/usage-cookbook/Nemotron-3.5-Super-VL/vllm_cookbook.ipynb) yourself in `executor_config.additional_args` of a deployment config template (an inline `deployment_config` cannot set them):
+
+- Every deployment: `["--max-model-len", "114688", "--reasoning-parser", "nemotron_v3", "--tool-call-parser", "qwen3_coder", "--enable-auto-tool-choice", "--mamba-ssm-cache-dtype", "float32", "--limit-mm-per-prompt", "{\"image\": 1, \"video\": 1}"]`. Without `--max-model-len`, vLLM sizes the KV cache for the native 1M-token context and exits at startup.
+- Released base model, LoRA disabled: also `"--speculative-config", "{\"method\": \"mtp\", \"num_speculative_tokens\": 3}"` (MTP). Omit it for LoRA, for fine-tuned checkpoints (Automodel's Super VL recipes set `num_nextn_predict_layers: 0`, so they have no MTP layer), and for Nemotron 3.5 Bolt, which shares the architecture but has no MTP layer.
+- LoRA enabled: also `"--max-lora-rank", "64", "--max-loras", "2"`. vLLM reserves GPU memory for every expert in each LoRA slot, so more slots need more GPU memory.
+
+Two flags stay off unless the user opts in; describe the tradeoff and let the user choose:
+
+- `--enable-expert-parallel`: whole experts per GPU, for high-concurrency serving. NVIDIA's cookbook uses it only in text-only throughput setups.
+- `--skip-mm-profiling`: faster startup, but vLLM stops reserving vision-encoder memory, so large images under load can run out of GPU memory.
+
+On Blackwell GPUs add `--mm-encoder-attn-backend TORCH_SDPA`. Send images as `data:` URLs, as `fileset://<workspace>/<fileset>#<path>` references, which the gateway inlines on every route (PNG, JPEG, GIF, or WebP; at most 25 MiB), or as `http(s)` URLs, which the deployment downloads itself; `--allowed-media-domains <host> ...` in `additional_args` limits those hosts. Neither the gateway nor the deployment reads local paths.
 
 **Pick the engine.** Deploy with **`engine: vllm`** by default; it is also the default for an inline `deployment_config` on the job. Use `engine: nim` only when the user asks for NIM or has a model-specific NIM image for the model. When using NIM for a Hugging Face checkpoint:
 

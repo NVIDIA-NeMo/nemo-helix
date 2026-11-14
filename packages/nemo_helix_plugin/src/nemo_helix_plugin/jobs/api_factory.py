@@ -35,13 +35,20 @@ from anyio import open_file, to_thread
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import GENERATED_ROUTE_CALLERS, AuthzScope, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.client_provider import get_async_nemo_client
-from nemo_helix_plugin.dependencies import RequestAuthorizer, get_entity_client, get_nemo_client, get_request_authorizer
+from nemo_helix_plugin.dependencies import (
+    RequestAuthorizer,
+    get_entity_client,
+    get_nemo_client,
+    get_request_authorizer,
+    get_submission_authorizer,
+)
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
@@ -581,6 +588,13 @@ InputToOutputTransformerAsync = Callable[
     [JobInputT, str, EntityClient, str | None, AsyncNemoClient], Awaitable[JobOutputT]
 ]
 
+# A write a transformer defers until the job is about to be created: after compile succeeds, and never
+# on a dry run. Given the canonical spec, it performs the write and returns the spec to store.
+type DeferredWrite = Callable[[Any], Awaitable[Any]]
+# Registers a :data:`DeferredWrite`. A transformer that accepts a ``defer`` keyword receives one, and one
+# that accepts ``authorize`` receives the caller's :class:`RequestAuthorizer` (``None`` outside the platform).
+type DeferWrite = Callable[[DeferredWrite], None]
+
 # Job name generator: called when user doesn't provide a name
 JobNameGenerator = Callable[[], str]
 
@@ -730,11 +744,15 @@ async def _transform_input_to_output(
     job_name: str | None,
     service_name: str,
     async_client: AsyncNemoClient,
+    *,
+    authorize: RequestAuthorizer | None = None,
+    defer: DeferWrite | None = None,
 ) -> JobSchemaLike:
     """Transform a job input spec into an output spec using the provided transformer.
 
     If no transformer is provided, returns the input spec unchanged (backward compatible).
-    Supports both sync and async transformer callables.
+    Supports both sync and async transformer callables. A transformer that accepts ``authorize``
+    or ``defer`` keywords receives them (see :data:`DeferWrite`).
 
     Raises:
         HTTPException(422): If the transformer raises any other exception.
@@ -742,13 +760,22 @@ async def _transform_input_to_output(
     """
     if input_to_output is None:
         return spec
+    parameters = inspect.signature(input_to_output).parameters
+    accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters.values())
+    submission_kwargs: dict[str, object] = {}
+    if accepts_kwargs or "authorize" in parameters:
+        submission_kwargs["authorize"] = authorize
+    if defer is not None and (accepts_kwargs or "defer" in parameters):
+        submission_kwargs["defer"] = defer
     try:
         if inspect.iscoroutinefunction(input_to_output):
-            return await input_to_output(spec, workspace, entity_client, job_name, async_client)
+            return await input_to_output(spec, workspace, entity_client, job_name, async_client, **submission_kwargs)
         # Run sync transformers in a thread pool to avoid blocking the event loop.
         return await to_thread.run_sync(
-            partial(input_to_output, spec, workspace, entity_client, job_name, async_client)
+            partial(input_to_output, spec, workspace, entity_client, job_name, async_client, **submission_kwargs)
         )
+    except HTTPException:
+        raise
     except PermissionError as e:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -759,6 +786,27 @@ async def _transform_input_to_output(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Failed to transform {service_name} job input to output: {str(e)}",
         ) from e
+
+
+async def _run_deferred_writes(deferred: list[DeferredWrite], spec: JobSchemaLike, service_name: str) -> JobSchemaLike:
+    """Run the transformer's deferred writes in order, each on the spec the previous one returned.
+
+    Raises:
+        HTTPException: 403 when a write raises ``PermissionError``, 422 for any other failure.
+    """
+    try:
+        for write in deferred:
+            spec = await write(spec)
+    except HTTPException:
+        raise
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Failed to submit {service_name} job: {str(e)}",
+        ) from e
+    return spec
 
 
 async def _compile_platform_spec(
@@ -1294,6 +1342,7 @@ def job_route_factory(
             dry_run: _DryRun | None = Depends(dry_run_dependency),
             async_client: AsyncNemoClient = Depends(get_nemo_client),
             entity_client: EntityClient = Depends(get_entity_client),
+            authorize: RequestAuthorizer | None = Depends(get_submission_authorizer),
         ) -> TypedJobResponse:
             f"""Create a new job for the {service_name} microservice."""
 
@@ -1301,6 +1350,7 @@ def job_route_factory(
             dry_run_name = request.name or _DRY_RUN_JOB_NAME
             job_name = dry_run_name if dry_run is not None else _resolve_job_name(request.name, generate_job_name)
             input_spec = _without_job_discriminator(cast(JobInputT, request.spec))
+            deferred: list[DeferredWrite] = []
             job_spec = await _transform_input_to_output(
                 input_to_output,
                 input_spec,
@@ -1309,6 +1359,8 @@ def job_route_factory(
                 job_name,
                 service_name,
                 async_client,
+                authorize=authorize,
+                defer=deferred.append,
             )
             platform_spec = await _compile_platform_spec(
                 platform_job_config_compiler,
@@ -1339,6 +1391,9 @@ def job_route_factory(
                     custom_fields=request.custom_fields,
                     status_details={"checks": [check.model_dump() for check in checks]},
                 )
+
+            # Writes the transformer deferred run only now: after every check and compile have passed.
+            job_spec = await _run_deferred_writes(deferred, job_spec, service_name)
 
             # Create the job through the typed Jobs client.
             # Build call kwargs, only including optional fields when they have values
@@ -1387,8 +1442,7 @@ def job_route_factory(
         async def list_jobs(
             workspace: str,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
-            page: int = Query(default=1, description="Page number.", gt=0),
-            page_size: int = Query(default=10, description="Page size.", gt=0),
+            page_params: PageParams = Depends(make_page_dep(default_size=10)),
             sort: BaseJobsSortField = Query(
                 default=BaseJobsSortField.CREATED_AT_DESC,
                 description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -1443,8 +1497,8 @@ def job_route_factory(
             # parse_json_filter, so a single JSON-string param survives the
             # round trip cleanly.
             list_query: ListJobsQueryParams = {
-                "page": page,
-                "page_size": page_size,
+                "page": page_params.page,
+                "page_size": page_params.page_size,
                 "sort": str(sort),
                 "filter": json.dumps(parsed.to_response()),
             }
@@ -1553,15 +1607,18 @@ def job_route_factory(
             workspace: str,
             name: str,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
-            page: int = Query(default=1, gt=0),
-            page_size: int = Query(default=25, gt=0),
+            page_params: PageParams = Depends(make_page_dep(default_size=25)),
             sort: Literal["seq", "-seq"] = Query(default="-seq"),
             filter: str | None = Query(default=None),
         ) -> Page[TypedJobAttempt]:
             f"""List attempts for a {service_name} job."""
             jobs = AsyncJobsClient.from_client(async_client)
             await _require_job_in_collection(jobs, name=name, workspace=workspace)
-            query: ListAttemptsQueryParams = {"page": page, "page_size": page_size, "sort": sort}
+            query: ListAttemptsQueryParams = {
+                "page": page_params.page,
+                "page_size": page_params.page_size,
+                "sort": sort,
+            }
             if filter is not None:
                 query["filter"] = filter
             attempt_page = (

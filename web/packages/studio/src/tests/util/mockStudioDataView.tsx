@@ -38,9 +38,12 @@ interface MockColumn {
   header: string;
 }
 
+type MockRowActionsCellRenderer = (ctx: { row: { original: unknown } }) => React.ReactNode;
+
 interface BuildColumnsResult {
   columns: MockColumn[];
   rowActions?: MockRowActions;
+  rowActionsCell?: MockRowActionsCellRenderer;
 }
 
 function buildColumns(
@@ -48,6 +51,7 @@ function buildColumns(
 ): BuildColumnsResult {
   const captured: MockColumn[] = [];
   let rowActions: MockRowActions | undefined;
+  let rowActionsCell: MockRowActionsCellRenderer | undefined;
 
   const mockHelper: AnyObject = {
     accessor: (
@@ -69,9 +73,13 @@ function buildColumns(
 
   const mockPrebuilt: AnyObject = {
     rowSelectionColumn: () => ({ id: 'row-selection' }),
-    rowActionsColumn: (opts: { rowActions?: MockRowActions } = {}) => {
+    rowActionsColumn: (
+      opts: { rowActions?: MockRowActions; cell?: MockRowActionsCellRenderer } = {}
+    ) => {
       if (typeof opts.rowActions === 'function') {
         rowActions = opts.rowActions;
+      } else if (typeof opts.cell === 'function') {
+        rowActionsCell = opts.cell;
       }
       captured.push({ id: 'row-actions', header: '' });
       return { id: 'row-actions', ...opts };
@@ -80,7 +88,7 @@ function buildColumns(
   };
 
   makeColumns(mockHelper, mockPrebuilt);
-  return { columns: captured, rowActions };
+  return { columns: captured, rowActions, rowActionsCell };
 }
 
 interface RowMenuItem {
@@ -191,7 +199,10 @@ export const MockStudioDataView = <DataType,>({
   const data = useMemo(() => {
     return (attributes?.DataViewRoot?.data ?? []) as DataType[];
   }, [attributes?.DataViewRoot?.data]);
-  const { columns, rowActions } = useMemo(() => buildColumns(makeColumns), [makeColumns]);
+  const { columns, rowActions, rowActionsCell } = useMemo(
+    () => buildColumns(makeColumns),
+    [makeColumns]
+  );
   const displayRows = useMemo(() => flattenWithSubRows(data), [data]);
 
   const requestStatus = attributes?.DataViewRoot?.requestStatus;
@@ -229,6 +240,9 @@ export const MockStudioDataView = <DataType,>({
                         <MockRowActionsCell row={row} rowActions={rowActions} />
                       </td>
                     );
+                  }
+                  if (col.id === 'row-actions' && rowActionsCell) {
+                    return <td key={col.id}>{rowActionsCell({ row: { original: row } })}</td>;
                   }
                   const value = (row as AnyObject)[col.id];
                   return (

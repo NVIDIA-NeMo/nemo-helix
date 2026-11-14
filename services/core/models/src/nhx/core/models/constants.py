@@ -11,6 +11,12 @@ import re
 
 from nhx.common.entities.client import parse_qualified_name
 
+# Preserve legacy lookup names (including Unicode/uppercase) while accepting create's + and @.
+RESOURCE_LOOKUP_NAME_PATTERN = r"^[\w.+@-]+$"
+RESOURCE_LOOKUP_NAME_PATTERN_DESCRIPTION = (
+    "Name must be nonempty and contain only Unicode word characters, dots, hyphens, plus signs, and at signs."
+)
+
 # Per-segment rules match ``nhx.common.entities.constants.NAME_PATTERN`` (one segment of workspace/model_name).
 _NAME_SEGMENT = r"[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)"
 

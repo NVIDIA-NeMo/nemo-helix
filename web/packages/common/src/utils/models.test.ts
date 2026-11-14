@@ -2,20 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  type Adapter,
-  FinetuningType,
-  ModelDeploymentStatus,
-  type ModelEntity,
-} from '@nemo/sdk/generated/platform/schema';
-
-import {
   getModelEntityChatStatus,
   groupModelsByWorkspace,
   isBaseModel,
   isServedByBaseModel,
   toInferenceModelEntityId,
   toInferenceModelName,
-} from './models';
+} from '@nemo/common/src/utils/models';
+import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import { FinetuningType } from '@nemo/sdk/generated/platform/schema/FinetuningType';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 
 const createModel = (overrides: Partial<ModelEntity> = {}): ModelEntity => ({
   id: 'test-id',

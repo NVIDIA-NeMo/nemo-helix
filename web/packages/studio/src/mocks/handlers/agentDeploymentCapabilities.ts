@@ -5,6 +5,7 @@ import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { http, HttpResponse } from 'msw';
 
 export const DEPLOYMENT_MODES_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployment-modes`;
+export const MCP_STATUS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments/:name/-/v1/mcp/servers`;
 export const EXECUTION_PROFILES_URL = `${PLATFORM_BASE_URL}/apis/jobs/v2/execution-profiles`;
 
 export const deploymentModesResponse = (enabled: readonly string[]) => ({
@@ -21,6 +22,9 @@ export const executionProfilesResponse = (profiles: { profile: string; backend: 
 export const agentDeploymentCapabilitiesHandlers = [
   http.get(DEPLOYMENT_MODES_URL, () =>
     HttpResponse.json(deploymentModesResponse(['subprocess', 'docker']))
+  ),
+  http.get(MCP_STATUS_URL, () =>
+    HttpResponse.json({ servers: [], checked_at: new Date().toISOString() })
   ),
   http.get(EXECUTION_PROFILES_URL, () =>
     HttpResponse.json(

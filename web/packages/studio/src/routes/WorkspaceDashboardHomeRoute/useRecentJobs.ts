@@ -5,7 +5,7 @@ import { isServerError } from '@nemo/common/src/api/common/utils';
 import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import type { StudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getJobsListJobsQueryKey, useJobsListJobs } from '@nemo/sdk/generated/platform/jobs';
-import { HelixJobListSortField } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobListSortField } from '@nemo/sdk/generated/platform/schema/HelixJobListSortField';
 import { DEFAULT_QUERY_RETRY_COUNT } from '@studio/api/queryClient';
 import {
   buildFilter,
