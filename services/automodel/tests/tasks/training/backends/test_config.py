@@ -1171,6 +1171,46 @@ def test_bi_encoder_compile_forwards_distributed_inbatch_negative(tmp_path: Path
     assert compiled["model"]["do_distributed_inbatch_negative"] is requested
 
 
+@pytest.mark.parametrize(
+    ("retrieval", "automodel_answer", "expected"),
+    [
+        (RetrievalConfig(), ("last", False), ("last", False)),
+        (RetrievalConfig(pooling="cls", normalize=True), ("cls", True), ("cls", True)),
+        (RetrievalConfig(), ("weighted_avg", True), "Set training.retrieval.pooling"),
+    ],
+    ids=["base-choice", "job-values", "pooling-it-cannot-declare"],
+)
+def test_bi_encoder_compile_takes_pooling_from_automodel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    retrieval: RetrievalConfig,
+    automodel_answer: tuple[str, bool],
+    expected: tuple[str, bool] | str,
+) -> None:
+    """Automodel picks the pooling from the job's values and the base; Helix sends it explicitly.
+
+    How Automodel reads the base's files is covered against the real Automodel in tests/smoke_gpu.
+    """
+    asked: list[tuple[str, str | None, bool | None]] = []
+
+    def automodel(model_path: str, pooling: str | None, normalize: bool | None) -> tuple[str, bool]:
+        asked.append((model_path, pooling, normalize))
+        return automodel_answer
+
+    monkeypatch.setattr("nhx.automodel.tasks.training.backends.checkpoints._automodel_bi_encoder_pooling", automodel)
+    config, prepared = _embed_training_config(tmp_path, retrieval=retrieval)
+    config.training.recipe = TrainingRecipe.BI_ENCODER
+
+    if isinstance(expected, str):
+        with pytest.raises(ValueError, match=expected):
+            _compile_retrieval(config, tmp_path, prepared)
+        return
+    compiled = _compile_retrieval(config, tmp_path, prepared)
+
+    assert asked == [(config.model.path, retrieval.pooling, retrieval.normalize)]
+    assert (compiled["model"]["pooling"], compiled["model"]["l2_normalize"]) == expected
+
+
 def test_cross_encoder_compile_omits_distributed_inbatch_negative(tmp_path: Path) -> None:
     config, prepared = _embed_training_config(
         tmp_path,

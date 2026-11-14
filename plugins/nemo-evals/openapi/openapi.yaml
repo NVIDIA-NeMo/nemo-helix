@@ -8160,13 +8160,15 @@ components:
           type: string
           title: Query Prefix
           description: Literal prefix prepended to each query. Empty string disables
-            prefixing.
+            prefixing. An embedder scores best with the query prefix it was trained
+            with.
           default: 'query: '
         passage_prefix:
           type: string
           title: Passage Prefix
           description: Literal prefix prepended to each passage. Empty string disables
-            prefixing.
+            prefixing. An embedder scores best with the passage prefix it was trained
+            with.
           default: 'passage: '
       additionalProperties: false
       type: object
@@ -8226,13 +8228,15 @@ components:
           type: string
           title: Query Prefix
           description: Literal prefix prepended to each query. Empty string disables
-            prefixing.
+            prefixing. An embedder scores best with the query prefix it was trained
+            with.
           default: 'query: '
         passage_prefix:
           type: string
           title: Passage Prefix
           description: Literal prefix prepended to each passage. Empty string disables
-            prefixing.
+            prefixing. An embedder scores best with the passage prefix it was trained
+            with.
           default: 'passage: '
       additionalProperties: false
       type: object

@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from enum import StrEnum
 from pathlib import Path
 from shutil import copytree
+from typing import Any
 
 from nhx.automodel.tasks.training.backends.registry import (
     is_causal_reranker_checkpoint,
@@ -41,6 +42,7 @@ from nhx.automodel.tasks.training.schemas import (
     ExportConfig,
     FinetuningType,
     Precision,
+    RetrievalConfig,
     TrainingStepConfig,
 )
 from nhx.customization_common.training.lora import merge_lora_adapter
@@ -121,6 +123,54 @@ def auto_torch_dtype(model_path: str | Path) -> str:
             if isinstance(entry, dict) and entry.get("dtype") in _SAFETENSORS_FLOAT_DTYPES:
                 return _SAFETENSORS_FLOAT_DTYPES[entry["dtype"]]
     return "float32"
+
+
+# Poolings the ONNX export and the Sentence Transformers files can express. Automodel also
+# accepts others (weighted_avg, colbert, multi_vector) from a base config.json.
+_DECLARABLE_POOLINGS = ("avg", "cls", "last")
+
+
+def _read_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+
+
+def _automodel_bi_encoder_pooling(model_path: str, pooling: str | None, normalize: bool | None) -> tuple[str, bool]:
+    """The pooling and L2 normalization Automodel's bi-encoder uses for this base and these job values.
+
+    The same functions ``BiEncoderModel.build`` calls: the job's values win, then the base's
+    Sentence Transformers files, then its ``config.json`` ``pooling``, then avg with normalization.
+    They also reject Sentence Transformers files Automodel can't train with. Helix always passes a
+    downloaded checkpoint, so the lookup never reaches the Hub.
+
+    Training image only: it imports ``nemo_automodel`` and ``transformers``.
+    """
+    from nemo_automodel._transformers.retrieval import _resolve_bi_encoder_options
+    from nemo_automodel._transformers.sentence_transformer_export import _load_sentence_transformer_wrapper_options
+    from transformers import PretrainedConfig
+
+    config = PretrainedConfig.from_dict(_read_json(Path(model_path) / "config.json") or {})
+    saved = _load_sentence_transformer_wrapper_options(model_path, {"local_files_only": True})
+    return _resolve_bi_encoder_options(config, saved, pooling, normalize)
+
+
+def embedding_pooling(customizer_config: TrainingStepConfig) -> tuple[str, bool]:
+    """The pooling and L2 normalization a bi_encoder job trains with, as Automodel decides them.
+
+    Unset ``retrieval.pooling`` and ``retrieval.normalize`` keep what the base was pretrained with,
+    because training with another pooling starts from embeddings the model never learned. Training,
+    the ONNX export, and the Sentence Transformers files all use this, so the served model pools
+    the way it trained.
+    """
+    retrieval = customizer_config.retrieval or RetrievalConfig()
+    pooling, normalize = _automodel_bi_encoder_pooling(
+        customizer_config.model.path, retrieval.pooling, retrieval.normalize
+    )
+    if pooling not in _DECLARABLE_POOLINGS:
+        raise ValueError(
+            f"The base checkpoint pools with {pooling!r}; Helix trains embedders with "
+            f"{', '.join(_DECLARABLE_POOLINGS)}. Set training.retrieval.pooling."
+        )
+    return pooling, normalize
 
 
 def trained_automodel_model_class(customizer_config: TrainingStepConfig) -> bool:
@@ -319,6 +369,73 @@ def sanitize_encoder_hf(output_path: Path, base_model_path: Path) -> None:
         config.get("model_type"),
         config.get("architectures"),
     )
+
+
+def _trained_prompt(prefix: str) -> str:
+    """The text training put before each query or passage: Automodel's collator adds a space after the prefix."""
+    prefix = prefix.rstrip(" ")
+    return f"{prefix} " if prefix else ""
+
+
+def declare_embedding_pooling(output_path: Path, customizer_config: TrainingStepConfig) -> None:
+    """Record the embedder's trained pooling where servers read it.
+
+    vLLM, Sentence Transformers, and TEI read an embedder's pooling from the Sentence Transformers
+    files (``modules.json``, ``1_Pooling/config.json``). For Llama bidirectional models vLLM uses
+    ``config.json``'s ``pooling`` instead. Without either, vLLM pools the last token, which a
+    mean-pooled model wasn't trained for, and retrieval quality collapses. Automodel writes both on
+    full-weight saves, so this does nothing when ``modules.json`` exists; Helix's LoRA merge saves
+    the base's ``config.json`` and no Sentence Transformers files.
+
+    The files describe the trained model: its pooling and normalization (``embedding_pooling``) and
+    the job's query and passage prefixes as prompts. Only ``max_seq_length`` comes from the base,
+    because fine-tuning doesn't change it. The layout matches the supported base checkpoints.
+    """
+    output_path = Path(output_path)
+    if (output_path / "modules.json").exists():
+        return
+    retrieval = customizer_config.retrieval or RetrievalConfig()
+    pooling, normalize = embedding_pooling(customizer_config)
+    config = _read_json(output_path / "config.json") or {}
+    hidden_size = config.get("hidden_size") or (config.get("text_config") or {}).get("hidden_size")
+    if not isinstance(hidden_size, int):
+        raise ValueError(f"Cannot declare embedding pooling: no hidden_size in {output_path / 'config.json'}.")
+
+    modules = [
+        {"idx": 0, "name": "0", "path": "", "type": "sentence_transformers.models.Transformer"},
+        {"idx": 1, "name": "1", "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+    ]
+    if normalize:
+        modules.append({"idx": 2, "name": "2", "path": "2_Normalize", "type": "sentence_transformers.models.Normalize"})
+    files: dict[str, Any] = {
+        "modules.json": modules,
+        "1_Pooling/config.json": {
+            "word_embedding_dimension": hidden_size,
+            "pooling_mode_cls_token": pooling == "cls",
+            "pooling_mode_mean_tokens": pooling == "avg",
+            "pooling_mode_max_tokens": False,
+            "pooling_mode_mean_sqrt_len_tokens": False,
+            "pooling_mode_weightedmean_tokens": False,
+            "pooling_mode_lasttoken": pooling == "last",
+            "include_prompt": True,
+        },
+        "config_sentence_transformers.json": {
+            "prompts": {
+                "query": _trained_prompt(retrieval.query_prefix),
+                "document": _trained_prompt(retrieval.passage_prefix),
+            },
+            "default_prompt_name": None,
+            "similarity_fn_name": "cosine" if normalize else "dot",
+        },
+    }
+    base_settings = _read_json(Path(customizer_config.model.path) / "sentence_bert_config.json")
+    if isinstance(base_settings, dict) and base_settings.get("max_seq_length"):
+        files["sentence_bert_config.json"] = {"max_seq_length": base_settings["max_seq_length"], "do_lower_case": False}
+    files["config.json"] = {**config, "pooling": pooling}
+    for name, content in files.items():
+        (output_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (output_path / name).write_text(json.dumps(content, indent=2) + "\n", encoding="utf-8")
+    logger.info("Declared %s pooling, normalize=%s in %s", pooling, normalize, output_path)
 
 
 def merge_lora_embedding_adapter(
@@ -525,12 +642,14 @@ def _onnx_safe_bidirectional_mask():
 def _build_export_module(
     inner,
     model_type: ModelType,
-    cfg: ExportConfig,
     score_token_ids: tuple[int, int] | None = None,
+    pooling: str | None = None,
+    normalize: bool = True,
 ):
     """Pool embeddings or emit logits, matching the NIM graph contract.
 
     ``score_token_ids`` (yes, no) selects a causal reranker, whose ``inner`` is a causal LM.
+    ``pooling`` and ``normalize`` are the embedding's training values (``embedding_pooling``).
     """
     import torch
     import torch.nn.functional as F
@@ -609,7 +728,9 @@ def _build_export_module(
         if score_token_ids is not None:
             return _CausalRerankerForExport(inner, *score_token_ids)
         return _CrossEncoderForExport(inner)
-    return _EmbeddingForExport(inner, pooling=cfg.pooling, normalize=cfg.normalize)
+    if pooling is None:
+        raise ValueError("An embedding export needs the pooling the model trained with.")
+    return _EmbeddingForExport(inner, pooling=pooling, normalize=normalize)
 
 
 def _reranker_token_ids(config, tokenizer) -> tuple[int, int]:
@@ -632,11 +753,14 @@ def export_onnx(
     trust_remote_code: bool = False,
     load_trust_remote_code: bool = False,
     causal_reranker: bool = False,
+    pooling: str | None = None,
+    normalize: bool = True,
 ) -> Path:
     """Write ``model.onnx`` and ``tokenizer/``. Optionally verify against the traced module.
 
     ``causal_reranker`` exports a cross-encoder that scores with a causal LM's yes/no
     next-token logits (see ``is_causal_reranker_checkpoint``) rather than a score head.
+    An embedding graph pools with ``pooling`` and ``normalize``, the values the model trained with.
     """
     import torch
     from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
@@ -662,7 +786,7 @@ def export_onnx(
     ).eval()
 
     score_token_ids = _reranker_token_ids(inner.config, tokenizer) if causal_reranker else None
-    export_model = _build_export_module(inner, model_type, cfg, score_token_ids)
+    export_model = _build_export_module(inner, model_type, score_token_ids, pooling=pooling, normalize=normalize)
     device = torch.device("cuda")
     export_model = export_model.to(device=device, dtype=torch_dtype).eval()
 
@@ -923,6 +1047,8 @@ def process_checkpoint(
 
     if (is_embedding or is_cross_encoder) and checkpoint_format != CheckpointFormat.HF_PEFT:
         export_cfg = _resolve_export_config(customizer_config)
+        # An embedding graph pools the way the model trained; a reranker pools inside its own head.
+        pooling, normalize = embedding_pooling(customizer_config) if is_embedding else (None, False)
         # Full-SFT copy still has Automodel auto_map until sanitize runs.
         load_trust_remote_code = True if finetuning_type == FinetuningType.ALL_WEIGHTS else job_trust_remote_code
         export_onnx(
@@ -934,9 +1060,13 @@ def process_checkpoint(
             trust_remote_code=job_trust_remote_code,
             load_trust_remote_code=load_trust_remote_code,
             causal_reranker=causal_reranker,
+            pooling=pooling,
+            normalize=normalize,
         )
         if not job_trust_remote_code:
             sanitize_encoder_hf(output_path, Path(base_model_path))
+        if is_embedding:
+            declare_embedding_pooling(output_path, customizer_config)
         _restructure_encoder_output(output_path, export_cfg.primary)
 
     # Determine precision: use explicit config value, or extract from base model
