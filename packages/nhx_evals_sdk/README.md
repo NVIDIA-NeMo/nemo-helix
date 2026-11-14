@@ -57,21 +57,16 @@ result = evaluate_offline_sync(metric=metric, dataset=[{"expected": "4", "predic
 
 ## Gym captured usage in OTLP
 
-`ng_trajectory_otlp.rollout_to_resource_spans` renders captured model calls using
-Intake-compatible usage attributes for input, output, reported total, cache read,
-cache write, and reasoning tokens. A captured call with `tokens_in` or `tokens_out`
-uses Gym's normalized counters; missing or unknown normalized counters stay absent
-even when raw provider usage is present. This avoids reinterpreting provider cache
-accounting after Gym has normalized it.
+Captured Gym model calls preserve input, output, reported total, cache read,
+cache write, and reasoning token counts when converted to OTLP traces for Intake.
+Gym's normalized usage takes precedence over provider-reported usage; older
+captures without normalized counters continue to use the provider's counts.
+Explicit zeros are preserved, unknown counts remain absent, and missing totals
+are not inferred.
 
-Legacy captures without normalized input/output fields read `response.usage`,
-including `input_tokens_details.cached_tokens`,
-`input_tokens_details.cache_write_tokens`, and
-`output_tokens_details.reasoning_tokens`. Explicit zero counts are preserved;
-missing totals are not calculated from input and output tokens. Nonempty embedded
-`ng_model_call_capture.calls` lists of mappings take precedence over the separate
-`model_calls` argument. Empty or malformed embedded captures leave that argument
-in effect.
+When a rollout includes valid embedded model-call captures, those captures are
+used instead of separately supplied calls. Empty or malformed embedded captures
+leave separately supplied calls in effect.
 
 ## Docker Compose sandbox provider
 
