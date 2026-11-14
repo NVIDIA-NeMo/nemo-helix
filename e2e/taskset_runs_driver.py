@@ -32,7 +32,9 @@ from nemo_evals.api.taskset_run_schemas import TasksetRunStatus
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.sdk.taskset_run_resources import NamedTask, TasksetRunResults
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.oidc import NHXOIDCConfig
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
 from nemo_helix_plugin.jobs.client import JobsClient
 from nhx.testing import NemoRun
@@ -66,6 +68,13 @@ _TASKSET = re.compile(r"^Published taskset (\S+)", re.MULTILINE)
 _UNRESOLVED_POLL_SECONDS = 30.0
 _UNRESOLVED_POLL_INTERVAL = 5.0
 _CLEANUP_RESERVE = 60.0  # of CLEANUP, kept for the cancels however slow the diagnostics are
+#: The Jobs controller's pod labels (``nhx.core.jobs.app.constants``), and who a Job runs as under workload token
+#: exchange: the chart's Job ServiceAccount, acting for the submitter through the projected token.
+_JOB_WORKSPACE_LABEL = "nhx.nvidia.com/job_workspace_id"
+_JOB_ID_LABEL = "nhx.nvidia.com/job_id"
+WORKLOAD_SERVICE_ACCOUNT = "nemo-helix-jobs"
+#: The last ``SomethingError: message`` in a Job's log; stops at a JSON string's escapes and quotes.
+_EXCEPTION = re.compile(r"[\w.]+(?:Error|Exception): [^\n\"\\]*")
 #: Failed ``runs status`` polls in a row that ``wait`` rides out, such as a gateway 502 or a dropped port-forward.
 _STATUS_FAILURES = 3
 
@@ -144,6 +153,18 @@ class BuildView:
     images: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class JobPod:
+    """A Job's pod, as kubectl lists it: who it runs as."""
+
+    namespace: str
+    name: str
+    job: str  # the Jobs controller's job_id label
+    phase: str
+    service_account: str
+    workload_token: bool  # the container gets NHX_WORKLOAD_IDENTITY_TOKEN_FILE
+
+
 #: Each task's newest image build, by task name.
 Snapshot = dict[str, BuildView]
 
@@ -203,6 +224,31 @@ def parse_submit(stdout: str | bytes | None, stderr: str | bytes | None) -> dict
     if taskset := _TASKSET.search(out):
         parsed["taskset_ref"] = taskset.group(1)
     return parsed
+
+
+def parse_job_pods(body: Mapping[str, Any]) -> list[JobPod]:
+    """``kubectl get pods -o json`` of Job pods, as ``JobPod`` views."""
+    pods = []
+    for item in body.get("items", []):
+        spec = item.get("spec") or {}
+        env = {var.get("name") for container in spec.get("containers", []) for var in container.get("env") or []}
+        pods.append(
+            JobPod(
+                namespace=item["metadata"].get("namespace", ""),
+                name=item["metadata"]["name"],
+                job=(item["metadata"].get("labels") or {}).get(_JOB_ID_LABEL, ""),
+                phase=(item.get("status") or {}).get("phase", ""),
+                service_account=spec.get("serviceAccountName", ""),
+                workload_token=WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR in env,
+            )
+        )
+    return pods
+
+
+def last_exception(log: str) -> str | None:
+    """The last ``SomethingError: message`` in a Job's log, or None."""
+    found = _EXCEPTION.findall(log.replace("\\n", "\n"))  # a JSON log escapes the traceback's newlines
+    return found[-1].strip() if found else None
 
 
 def evidence_dir(repo_root: Path) -> Path:
@@ -354,6 +400,8 @@ class RunDriver:
             parsed = parse_submit(exc.stdout, exc.stderr)
             self._resolve(key, parsed.get("run_id"))
             self.evidence.record(step, phase="timed_out", **parsed)
+            if failure := self.build_failure(step):
+                raise AssertionError(failure) from exc
             raise
         parsed = parse_submit(out.stdout, out.stderr)
         self._resolve(key, parsed.get("run_id"))
@@ -363,6 +411,8 @@ class RunDriver:
             durations_s={"submit": round(self._clock() - started)},
             **parsed,
         )
+        if out.returncode != 0 and (failure := self.build_failure(step)):
+            raise AssertionError(failure)
         assert out.returncode == 0 and parsed.get("run_id"), (
             f"[submit] `runs submit` exited {out.returncode} without a run ID: {out.stderr.strip()}"
         )
@@ -491,6 +541,50 @@ class RunDriver:
                     images=tuple(sorted(image.image_ref or "" for image in build.images)),
                 )
         return snapshot
+
+    def job_pods(self, cap: float = 30) -> list[JobPod]:
+        """The pods of this workspace's Jobs; none without a kube context."""
+        if self._kube_context is None:
+            return []
+        args = ["--context", self._kube_context, "get", "pods", "-A", "-l", f"{_JOB_WORKSPACE_LABEL}={self.workspace}"]
+        out = self._kubectl([*args, "-o", "json"], self.sec_left(cap))
+        assert out.returncode == 0, f"[identity] kubectl get pods failed: {out.stderr.strip()}"
+        return parse_job_pods(json.loads(out.stdout))
+
+    def build_failure(self, step: str) -> str | None:
+        """Why an image build failed, when one did: ``[image-build] <job>: <its last error>``, else None.
+
+        A failed image-build Job leaves its build "building" until ``JOB_GRACE`` ends, so ``runs submit`` and
+        ``build-images --wait`` fail late, by timeout or exit code, without the cause. This reads it from the
+        Jobs API and, with a kube context, the Job pod's log, and records it with who the pods ran as. Never raises:
+        it only adds a cause to a failure already under way.
+        """
+        try:
+            page = JobsClient.from_client(self.sdk()).list_jobs(
+                workspace=self.workspace,
+                query_params={"filter": {"name": {"$like": "task-image-build-%"}}, "page_size": 100},
+            )
+            failed = [job for job in page.page().items if _value(job.status) == "error"]
+            if not failed:
+                return None
+            pods = self.job_pods()
+            failures = []
+            for job in failed:
+                error = None
+                for pod in (p for p in pods if p.job in {job.id, job.name}):
+                    log = self._kubectl(
+                        ["--context", str(self._kube_context), "logs", "-n", pod.namespace, pod.name,
+                         "--all-containers"],
+                        self.sec_left(30),
+                    )  # fmt: skip
+                    error = last_exception(log.stdout) or error
+                failures.append({"job": job.name, "status": "error", "error": error or str(job.error_details)})
+            self.evidence.record(step, image_build_failures=failures, job_pods=pods)
+        except Exception as exc:  # noqa: BLE001 - a diagnostic must not replace the failure it explains
+            self.evidence.record(step, image_build_failures_error=f"{type(exc).__name__}: {exc}")
+            return None
+        first = failures[0]
+        return f"[image-build] {first['job']}: {first['error']}"
 
     # --- Cleanup ---------------------------------------------------------------------------------------------
 
@@ -736,6 +830,28 @@ def check_snapshot_unchanged(before: Snapshot, after: Snapshot) -> None:
         same = ("id", "job", "images", "status")
         assert {k: getattr(now, k) for k in same} == {k: getattr(build, k) for k in same}, (
             f"[reuse] {name} was rebuilt: {build} -> {now}"
+        )
+
+
+def check_workload_discovery(config: NHXOIDCConfig) -> None:
+    """Auth discovery advertises workload token exchange, so Jobs act as their ServiceAccount, not the submitter."""
+    assert config.auth_enabled and config.workload_token_exchange_enabled, (
+        f"[identity] workload token exchange is off: auth_enabled={config.auth_enabled}, "
+        f"workload_token_exchange_enabled={config.workload_token_exchange_enabled}"
+    )
+    assert config.workload_token_endpoint and config.workload_client_id, (
+        f"[identity] discovery has no workload token endpoint or client: {config.workload_token_endpoint!r}, "
+        f"{config.workload_client_id!r}"
+    )
+
+
+def check_workload_identity(pods: Sequence[JobPod]) -> None:
+    """Every Job pod ran as the Job ServiceAccount with the workload token, so the run exercised token exchange."""
+    assert pods, "[identity] no Job pods found in the workspace"
+    for pod in pods:
+        assert pod.service_account == WORKLOAD_SERVICE_ACCOUNT and pod.workload_token, (
+            f"[identity] {pod.name} ran as ServiceAccount {pod.service_account!r}, "
+            f"workload token {'mounted' if pod.workload_token else 'missing'}"
         )
 
 

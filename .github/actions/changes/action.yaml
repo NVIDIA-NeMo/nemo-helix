@@ -80,7 +80,7 @@ outputs:
     description: "'true' if NGC metadata scripts, tests, or assets changed"
     value: ${{ steps.filter.outputs.ngc-metadata }}
   nightly-taskset-runs-report:
-    description: "'true' if the nightly taskset-runs e2e report helper or its tests changed"
+    description: "'true' if the nightly taskset-runs e2e report or known-failure helpers or their tests changed"
     value: ${{ steps.filter.outputs.nightly-taskset-runs-report }}
   cpu-smoke:
     description: "'true' if CPU smoke image or Kubernetes smoke test inputs changed"
@@ -295,6 +295,8 @@ runs:
           nightly-taskset-runs-report:
             - '.github/scripts/nightly_taskset_runs_report.py'
             - '.github/scripts/tests/test_nightly_taskset_runs_report.py'
+            - '.github/scripts/taskset_runs_known_failure.py'
+            - '.github/scripts/tests/test_taskset_runs_known_failure.py'
           ngc-metadata:
             - '.github/scripts/ngc_metadata.py'
             - '.github/scripts/tests/test_ngc_metadata.py'
