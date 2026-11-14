@@ -14,6 +14,9 @@
 name: Nightly taskset runs e2e
 
 on:
+  # TEMPORARY, drop before merge: one CI run of this branch.
+  push:
+    branches: [taskset-runs-auth-e2e/ngoncharenko]
   schedule:
     - cron: "0 10 * * *"  # 10:00 UTC (02:00 PST), ahead of the 16:00 America/Los_Angeles RC cut
   workflow_dispatch:
@@ -277,7 +280,8 @@ jobs:
     name: Report
     needs: [plan, build-images, kind-taskset-runs-e2e]
     # Its own job: a job whose dependency failed is skipped, so an alert inside the e2e job would miss a failed build.
-    if: always() && (github.event_name == 'schedule' || inputs.classify_for != '')
+    # TEMPORARY, drop `push` before merge.
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'push' || inputs.classify_for != '')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -305,4 +309,6 @@ jobs:
           SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
           CLASSIFY_FOR: ${{ inputs.classify_for }}
           ARTIFACTS: ${{ runner.temp }}/artifacts
+          # TEMPORARY, drop before merge: on a push, print the GitHub calls instead of making them.
+          ACT: ${{ github.event_name == 'push' && 'true' || '' }}
         run: python3 .github/scripts/nightly_taskset_runs_report.py
