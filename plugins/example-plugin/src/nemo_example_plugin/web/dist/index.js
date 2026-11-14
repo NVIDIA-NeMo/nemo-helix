@@ -1,6 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-
 import { Button as e, Flex as t, Stack as n, Text as r } from "@nvidia/foundations-react-core";
 import { NavLink as i, Navigate as a, Outlet as o, Route as s, Routes as c } from "react-router";
 import { RelativeTime as l, StatusBadge as u, StudioDataView as d, TableEmptyState as f, useStudioDataViewState as p } from "@nemo/common";
@@ -240,14 +239,14 @@ function E({ getAccessToken: e }) {
 			/* @__PURE__ */ g(r, {
 				kind: "body/regular/sm",
 				color: "secondary",
-				children: "Studio passes an OIDC access token to every plugin via the plugin's auth prop. Call getAccessToken() per request — it returns the current token after silent renewal — and use it as a Bearer token."
+				children: "Studio passes its configured OIDC bearer token (access token or ID token) to every plugin via the plugin's auth prop. Call getAccessToken() per request — it returns the current token after silent renewal — and use it as a Bearer token."
 			}),
 			/* @__PURE__ */ _(n, {
 				gap: "1",
 				children: [/* @__PURE__ */ g(r, {
 					kind: "label/bold/sm",
 					children: "Example API call"
-				}), /* @__PURE__ */ g(w, { children: "fetch('/apis/v1/workspaces', {\n  headers: { Authorization: `Bearer ${getAccessToken()}` },\n})" })]
+				}), /* @__PURE__ */ g(w, { children: "const token = getAccessToken()\nfetch('/apis/v1/workspaces', {\n  headers: token ? { Authorization: `Bearer ${token}` } : {},\n})" })]
 			}),
 			/* @__PURE__ */ _(n, {
 				gap: "1",
@@ -288,7 +287,7 @@ function D({ workspaceId: e }) {
 				children: [/* @__PURE__ */ g(r, {
 					kind: "label/bold/sm",
 					children: "Example API call scoped to this workspace"
-				}), /* @__PURE__ */ g(w, { children: "fetch(`/apis/v1/workspaces/${workspaceId}/models`, {\n  headers: { Authorization: `Bearer ${getAccessToken()}` },\n})" })]
+				}), /* @__PURE__ */ g(w, { children: "const token = getAccessToken()\nfetch(`/apis/v1/workspaces/${workspaceId}/models`, {\n  headers: token ? { Authorization: `Bearer ${token}` } : {},\n})" })]
 			})
 		]
 	});
@@ -307,25 +306,25 @@ var k = (e) => [{
 	items: [
 		{
 			id: "example-overview",
-			iconName: "flask-conical",
+			iconName: "beaker",
 			label: "Overview",
 			href: v(e, "overview")
 		},
 		{
 			id: "example-auth",
-			iconName: "key-round",
+			iconName: "key",
 			label: "Auth",
 			href: v(e, "auth")
 		},
 		{
 			id: "example-workspace",
-			iconName: "building-2",
+			iconName: "business",
 			label: "Workspace",
 			href: v(e, "workspace")
 		},
 		{
 			id: "example-shared-ui",
-			iconName: "table",
+			iconName: "layout-grid",
 			label: "Shared UI",
 			href: v(e, "shared-ui")
 		}

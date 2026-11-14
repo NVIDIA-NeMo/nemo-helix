@@ -131,6 +131,7 @@ const ignores = [
   `${pathPrefix}packages/studio/.test-reports`,
   `${pathPrefix}packages/sdk/generated/**`,
   `${pathPrefix}packages/common/plugin-types/**`,
+  `${pathPrefix}packages/common/plugin-build/**`,
   `${pathPrefix}packages/storybook/public/mockServiceWorker.js`,
   `${pathPrefix}demo-notebook/**`,
 ];
