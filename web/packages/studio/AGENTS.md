@@ -6,8 +6,8 @@
 ## About This Package
 
 - Main React frontend application for NeMo Studio
+- **Read [README.md](README.md) before proposing or building a feature.** It is Studio's product charter: mission, responsibilities, principles, and direction.
 - Built with React 18, TypeScript, Vite
-- Handles user interfaces for model customization, evaluation, and deployment
 - Integrates with backend APIs through generated SDK clients
 
 ## Design System
