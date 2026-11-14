@@ -159,3 +159,55 @@ def test_dali_files_removed():
     ]
     assert DALI_FILE_REMOVALS.issubset(patterns)
     assert_file_patterns_absent(patterns)
+
+
+_CLASSIC_LAST_TOKEN_BASE = {
+    "modules.json": [
+        {"idx": 0, "name": "0", "path": "", "type": "sentence_transformers.models.Transformer"},
+        {"idx": 1, "name": "1", "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+    ],
+    "1_Pooling/config.json": {"pooling_mode_mean_tokens": False, "pooling_mode_lasttoken": True},
+}
+
+
+@pytest.mark.smoke_nhx_automodel_training
+@pytest.mark.parametrize(
+    ("base_files", "job", "expected"),
+    [
+        (_CLASSIC_LAST_TOKEN_BASE, (None, None), ("last", False)),
+        (
+            {
+                "modules.json": [
+                    {"path": "", "type": "sentence_transformers.base.modules.transformer.Transformer"},
+                    {"path": "1_Pooling", "type": "sentence_transformers.sentence_transformer.modules.pooling.Pooling"},
+                    {"path": "2_Normalize", "type": "sentence_transformers.models.Normalize"},
+                ],
+                "1_Pooling/config.json": {"pooling_mode": "cls"},
+            },
+            (None, None),
+            ("cls", True),
+        ),
+        ({"config.json": {"pooling": "mean"}}, (None, None), ("avg", True)),
+        ({}, (None, None), ("avg", True)),
+        (_CLASSIC_LAST_TOKEN_BASE, ("avg", None), ("avg", False)),
+        ({**_CLASSIC_LAST_TOKEN_BASE, "1_Pooling/config.json": {"pooling_mode_max_tokens": True}}, (None, None), None),
+    ],
+    ids=["classic-last-token", "pooling-mode-cls", "config-pooling", "nothing-declared", "job-wins", "max-pooling"],
+)
+def test_embedder_pooling_follows_automodel(
+    tmp_path: Path, base_files: dict[str, Any], job: tuple[str | None, bool | None], expected: tuple[str, bool] | None
+):
+    """Helix asks the installed Automodel how a base pools; its private functions must still exist."""
+    import json
+
+    from nhx.automodel.tasks.training.backends.checkpoints import _automodel_bi_encoder_pooling
+
+    for name, content in {"config.json": {}, **base_files}.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(json.dumps(content))
+
+    if expected is None:
+        with pytest.raises(ValueError, match="pooling metadata"):
+            _automodel_bi_encoder_pooling(str(tmp_path), *job)
+    else:
+        assert _automodel_bi_encoder_pooling(str(tmp_path), *job) == expected

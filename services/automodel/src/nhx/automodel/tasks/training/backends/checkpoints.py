@@ -125,67 +125,51 @@ def auto_torch_dtype(model_path: str | Path) -> str:
     return "float32"
 
 
-# Each pooling Helix trains, as Sentence Transformers' 1_Pooling/config.json spells it:
-# the classic flag, and the newer ``pooling_mode`` value.
-_SENTENCE_TRANSFORMER_POOLING = {
-    "avg": ("pooling_mode_mean_tokens", "mean"),
-    "cls": ("pooling_mode_cls_token", "cls"),
-    "last": ("pooling_mode_lasttoken", "lasttoken"),
-}
+# Poolings the ONNX export and the Sentence Transformers files can express. Automodel also
+# accepts others (weighted_avg, colbert, multi_vector) from a base config.json.
+_DECLARABLE_POOLINGS = ("avg", "cls", "last")
 
 
 def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
-def _base_embedding_pooling(model_path: str | Path) -> tuple[str, bool]:
-    """The pooling and L2 normalization a base embedder was pretrained with.
+def _automodel_bi_encoder_pooling(model_path: str, pooling: str | None, normalize: bool | None) -> tuple[str, bool]:
+    """The pooling and L2 normalization Automodel's bi-encoder uses for this base and these job values.
 
-    Read in Automodel's order: the Sentence Transformers files (``modules.json`` and the Pooling
-    module's ``config.json``), else ``config.json``'s ``pooling``, else mean with normalization.
-    Training with a different pooling than pretraining starts from embeddings the model never learned.
+    The same functions ``BiEncoderModel.build`` calls: the job's values win, then the base's
+    Sentence Transformers files, then its ``config.json`` ``pooling``, then avg with normalization.
+    They also reject Sentence Transformers files Automodel can't train with. Helix always passes a
+    downloaded checkpoint, so the lookup never reaches the Hub.
+
+    Training image only: it imports ``nemo_automodel`` and ``transformers``.
     """
-    model_path = Path(model_path)
-    modules = _read_json(model_path / "modules.json")
-    if isinstance(modules, list):
-        by_type = {str(m.get("type", "")).rsplit(".", 1)[-1]: m for m in modules if isinstance(m, dict)}
-        if "Pooling" in by_type:
-            settings = _read_json(model_path / str(by_type["Pooling"].get("path", "")) / "config.json") or {}
-            declared = [
-                pooling
-                for pooling, (flag, mode) in _SENTENCE_TRANSFORMER_POOLING.items()
-                if settings.get(flag) is True or settings.get("pooling_mode") == mode
-            ]
-            if len(declared) != 1:
-                raise ValueError(
-                    f"{model_path} declares a Sentence Transformers pooling Helix cannot train; "
-                    f"supported: {', '.join(_SENTENCE_TRANSFORMER_POOLING)}."
-                )
-            return declared[0], "Normalize" in by_type
-    config = _read_json(model_path / "config.json") or {}
-    pooling = config.get("pooling") or "avg"
-    pooling = "avg" if pooling == "mean" else pooling
-    if pooling not in _SENTENCE_TRANSFORMER_POOLING:
-        raise ValueError(
-            f"{model_path}/config.json declares pooling {pooling!r}; supported: "
-            f"{', '.join(_SENTENCE_TRANSFORMER_POOLING)}."
-        )
-    return pooling, True
+    from nemo_automodel._transformers.retrieval import _resolve_bi_encoder_options
+    from nemo_automodel._transformers.sentence_transformer_export import _load_sentence_transformer_wrapper_options
+    from transformers import PretrainedConfig
+
+    config = PretrainedConfig.from_dict(_read_json(Path(model_path) / "config.json") or {})
+    saved = _load_sentence_transformer_wrapper_options(model_path, {"local_files_only": True})
+    return _resolve_bi_encoder_options(config, saved, pooling, normalize)
 
 
 def embedding_pooling(customizer_config: TrainingStepConfig) -> tuple[str, bool]:
-    """The pooling and L2 normalization a bi_encoder job trains with.
+    """The pooling and L2 normalization a bi_encoder job trains with, as Automodel decides them.
 
-    The job's ``retrieval.pooling`` and ``retrieval.normalize`` win; unset ones come from the base
-    checkpoint. Training, the ONNX export, and the Sentence Transformers files all use this, so
-    the served model pools the way it trained.
+    Unset ``retrieval.pooling`` and ``retrieval.normalize`` keep what the base was pretrained with,
+    because training with another pooling starts from embeddings the model never learned. Training,
+    the ONNX export, and the Sentence Transformers files all use this, so the served model pools
+    the way it trained.
     """
     retrieval = customizer_config.retrieval or RetrievalConfig()
-    pooling, normalize = retrieval.pooling, retrieval.normalize
-    if pooling is None or normalize is None:
-        base_pooling, base_normalize = _base_embedding_pooling(customizer_config.model.path)
-        pooling = pooling or base_pooling
-        normalize = base_normalize if normalize is None else normalize
+    pooling, normalize = _automodel_bi_encoder_pooling(
+        customizer_config.model.path, retrieval.pooling, retrieval.normalize
+    )
+    if pooling not in _DECLARABLE_POOLINGS:
+        raise ValueError(
+            f"The base checkpoint pools with {pooling!r}; Helix trains embedders with "
+            f"{', '.join(_DECLARABLE_POOLINGS)}. Set training.retrieval.pooling."
+        )
     return pooling, normalize
 
 
