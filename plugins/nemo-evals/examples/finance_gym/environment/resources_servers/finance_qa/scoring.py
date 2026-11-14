@@ -29,52 +29,27 @@ def token_limit(task: str) -> int:
 def chat_message(response: Mapping[str, Any]) -> dict[str, str]:
     """The Responses API ``response`` as the chat message the cookbook reads.
 
-    The model server must run with ``uses_reasoning_parser: true``; without it, Gym's ``inference_provider``
-    drops the provider's ``reasoning_content``. With it, Gym wraps that reasoning in ``<think>`` tags in front of
-    the content, then moves every ``<think>`` block into one reasoning item, a summary part each, in order.
+    Needs ``uses_reasoning_parser: true`` on Gym's ``inference_provider``, which otherwise drops
+    ``reasoning_content``. With it, Gym wraps that reasoning in ``<think>`` in front of the content, then moves
+    every ``<think>`` block into a reasoning item. Putting the blocks back in front of the content rebuilds that
+    text, which the cookbook splits as it would the provider's message.
 
-    So the first part, unless it's empty, is the model's own reasoning, which becomes ``reasoning_content``: the
-    cookbook puts it back inside ``<think>`` before splitting the answer off at the first ``</think>``. Any other
-    part was a ``<think>`` block the model wrote in its content, as the cookbook's prompt asks. It goes back in front
-    of the content, where the cookbook's split still finds it.
-
-    Limitation: Gym keeps the blocks' order but not where they sat, so every written block goes back in front of
-    the content. That rebuilds the provider's message when the model writes its blocks before its answer, as the
-    prompt asks. A block written after the answer moves in front of it, and the answer can differ from the
-    cookbook's: ``2018<think>trace</think>``, with no reasoning of the model's own, scores as ``2018`` here and as
-    an empty answer in the cookbook. When the model also returns its own reasoning, the cookbook's split falls
-    after that, and the scores match. Replaying the content of all 2,949 Super VL test responses (thinking on)
-    this way changed no score.
+    Gym doesn't keep where the blocks sat, so a block written after the answer moves in front of it. That can change
+    the cookbook's answer only when the model returns no reasoning of its own.
     """
-    message_text = ""
-    reasoning_texts: list[str] = []
+    blocks = ""
+    text = ""
     for item in response.get("output") or []:
-        if item.get("type") == "message":
+        if item.get("type") == "reasoning":
+            for part in list(item.get("summary") or []) + list(item.get("content") or []):
+                # An empty block still goes back: its tags move the cookbook's split.
+                if part.get("text") is not None:
+                    blocks += f"<think>{part['text']}</think>"
+        elif item.get("type") == "message":
             for part in item.get("content") or []:
                 if part.get("text"):
-                    message_text += part["text"]
-        elif item.get("type") == "reasoning":
-            parts = list(item.get("summary") or []) + list(item.get("content") or [])
-            for part in parts:
-                # Keep empty texts too: an empty <think></think> block the model wrote still goes back.
-                if part.get("text") is not None:
-                    reasoning_texts.append(part["text"])
-
-    if not reasoning_texts:
-        return {"content": message_text, "reasoning_content": ""}
-
-    # Gym wraps the model's own reasoning only when there is some. So an empty first part was an empty block the
-    # model wrote, and every part goes back into the content.
-    if reasoning_texts[0]:
-        own_reasoning = reasoning_texts[0]
-        written_texts = reasoning_texts[1:]
-    else:
-        own_reasoning = ""
-        written_texts = reasoning_texts
-    written_blocks = ""
-    for text in written_texts:
-        written_blocks += f"<think>{text}</think>"
-    return {"content": written_blocks + message_text, "reasoning_content": own_reasoning}
+                    text += part["text"]
+    return {"content": blocks + text}
 
 
 def score(*, task: str, expected_answer: str, response: Mapping[str, Any], tolerance: float = 0.05) -> dict[str, float]:
