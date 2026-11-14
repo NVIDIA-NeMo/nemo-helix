@@ -41,6 +41,7 @@ from nemo_helix_plugin.models.client import AsyncModelsClient
 logger = logging.getLogger(__name__)
 
 _ACTIVE_JOB_STATUSES = [
+    "provisional",
     "created",
     "queued",
     "pending",

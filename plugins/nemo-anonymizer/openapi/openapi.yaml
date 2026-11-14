@@ -1152,6 +1152,7 @@ components:
     HelixJobStatus:
       type: string
       enum:
+      - provisional
       - created
       - queued
       - pending

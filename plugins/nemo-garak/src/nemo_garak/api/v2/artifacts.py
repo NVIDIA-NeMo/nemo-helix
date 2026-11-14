@@ -70,15 +70,18 @@ async def download_audit_artifacts(
     try:
         tmp = Path(tmp_dir.name)
 
+        job_reference: str | None = None
         for result_name in _REPORT_RESULT_NAMES:
             try:
                 result_info = (
                     await jobs_client.get_job_result(
                         name=result_name,
-                        job=job,
+                        job=job_reference or job,
                         workspace=workspace,
                     )
                 ).data()
+                if job_reference is None:
+                    job_reference = result_info.job
             except NotFoundError:
                 continue
 

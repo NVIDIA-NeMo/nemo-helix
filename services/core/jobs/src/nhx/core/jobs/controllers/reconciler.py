@@ -9,8 +9,9 @@ from collections.abc import Callable
 from typing import cast
 
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError
+from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError, NotFoundError
 from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import (
     HelixJobStatusUpdateRequest,
@@ -20,7 +21,7 @@ from nemo_helix_plugin.jobs.types import (
     ListStepsQueryParams,
 )
 from nhx.common.controller import Controller, HeartbeatMixin
-from nhx.common.entities import SYSTEM_WORKSPACE, EntityConflictError, SyncEntityClient
+from nhx.common.entities import SYSTEM_WORKSPACE, EntityConflictError, EntityNotFoundError, SyncEntityClient
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.common.observability import scoped_app_ctx, start_span_with_ctx
 from nhx.core.jobs.app.constants import (
@@ -41,7 +42,14 @@ from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.controllers.backends import extract_provider_profile
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.diagnostics import log_job_diagnostics_if_debug
-from nhx.core.jobs.entities import HelixJobStorageReclaim, JobStorageTarget
+from nhx.core.jobs.entities import (
+    STEP_SPEC_NAME_CONFIG_KEY,
+    HelixJob,
+    HelixJobAttempt,
+    HelixJobStep,
+    HelixJobStorageReclaim,
+    JobStorageTarget,
+)
 from opentelemetry import metrics, trace
 
 tracer = trace.get_tracer(__name__)
@@ -65,6 +73,10 @@ class JobReconciler(HeartbeatMixin, Controller):
         # ``workspace=`` explicitly (incl. cross-workspace "-"), so the client's
         # default workspace is never relied upon.
         self._jobs = JobsClient.from_client(nemo_client)
+        self._files = FilesClient.from_client(nemo_client)
+        self._provisional_page = 1
+        self._reclaim_page = 1
+        self._unstarted_rerun_page = 1
         self._stop_signal = stop_signal
         self._is_healthy = False
         self._logger = logger
@@ -226,7 +238,184 @@ class JobReconciler(HeartbeatMixin, Controller):
                     self.emit_heartbeat()
 
         with tracer.start_as_current_span("jobs_reconciler/enforce_storage_retention"):
+            self._recover_unstarted_reruns()
+            self._cleanup_provisional_jobs()
             self._enforce_storage_retention()
+
+    def _recover_unstarted_reruns(self) -> None:
+        """Retire a rerun whose Attempt was saved without its first Step.
+
+        Rerun creates an Attempt, publishes the Job's current_attempt_id, then
+        creates the first Step in separate Entity Store writes. A crash between
+        writes, or failed publication followed by failed compensation, can leave
+        a CREATED Attempt with no Step. Normal reconciliation starts from Steps,
+        so that Attempt would never finish and DELETE would reject the Job.
+
+        After the creation deadline, fence the Job version and reserve the first
+        Step's unique name with an ERROR record. A delayed publisher then loses
+        its version check, or a delayed starter loses the Step-name race. If a
+        real Step wins first, leave it alone. The existing terminal cleanup scan
+        retries status projection from the persisted ERROR record after failures
+        or controller replacement.
+
+        Initial creation uses provisional-Job cleanup. A rerun belongs to an
+        existing Job whose earlier Attempts and results must remain intact.
+        """
+        try:
+            response = self._system_entities.list(
+                HelixJobAttempt,
+                workspace="-",
+                filter_obj={"status": HelixJobStatus.CREATED.value},
+                sort="created_at",
+                page=self._unstarted_rerun_page,
+                page_size=100,
+            )
+            self._unstarted_rerun_page = self._unstarted_rerun_page + 1 if len(response.data) == 100 else 1
+        except Exception:
+            logger.exception("Could not list unstarted reruns")
+            return
+        for attempt in response.data:
+            if self._stop_signal and self._stop_signal.is_set():
+                return
+            if attempt.seq == 0 or attempt.created_at is None:
+                continue
+            created_at = attempt.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=datetime.timezone.utc)
+            if (datetime.datetime.now(datetime.timezone.utc) - created_at).total_seconds() < (
+                self._storage_config.creation_timeout_seconds
+            ):
+                continue
+            try:
+                steps = self._system_entities.list(
+                    HelixJobStep,
+                    workspace=attempt.workspace,
+                    filter_obj={"attempt_id": attempt.id},
+                    page_size=1,
+                )
+                if steps.data:
+                    continue
+                job = self._system_entities.get_by_id(HelixJob, attempt.job)
+                if job.status == HelixJobStatus.PROVISIONAL:
+                    continue
+                # Invalidate an unpublished rerun's held Job version. If publication
+                # wins this race, leave the Attempt for the next pass.
+                self._system_entities.update(job)
+                first_step = attempt.get_first_step()
+                step = self._system_entities.create(
+                    HelixJobStep(
+                        name=first_step.name,
+                        workspace=attempt.workspace,
+                        attempt_id=attempt.id,
+                        config={**(first_step.config or {}), STEP_SPEC_NAME_CONFIG_KEY: first_step.name},
+                        status=HelixJobStatus.ERROR,
+                        status_details={JOB_TASK_CLEANUP_PENDING_KEY: True},
+                        error_details={"message": "Rerun did not publish its first Step before the creation deadline"},
+                    )
+                )
+                # Parent-scoped Step uniqueness prevents a paused starter from
+                # creating runnable work after recovery. The existing terminal
+                # cleanup scan retries this update if the request fails.
+                self._jobs.update_attempt_step_status(
+                    job=job.id,
+                    attempt=attempt.id,
+                    name=step.name,
+                    workspace=step.workspace,
+                    body=HelixJobStatusUpdateRequest(
+                        status=HelixJobStatus.ERROR,
+                        expected_step_id=step.id,
+                        error_details=step.error_details,
+                    ),
+                ).data()
+            except (EntityConflictError, EntityNotFoundError):
+                pass
+            except Exception:
+                logger.exception("Could not recover unstarted rerun", extra={"attempt": attempt.id})
+            finally:
+                self.emit_heartbeat()
+
+    def _cleanup_provisional_jobs(self) -> None:
+        """The sole reconciler owns abandoned creation and accepted deletion."""
+        if self._stop_signal and self._stop_signal.is_set():
+            return
+        try:
+            response = self._system_entities.list(
+                HelixJob,
+                workspace="-",
+                filter_obj={"status": HelixJobStatus.PROVISIONAL.value},
+                sort="created_at",
+                page=self._provisional_page,
+                page_size=100,
+            )
+            self._provisional_page = self._provisional_page + 1 if len(response.data) == 100 else 1
+        except Exception:
+            logger.exception("Could not list provisional Jobs")
+            return
+        for job in response.data:
+            if self._stop_signal and self._stop_signal.is_set():
+                return
+            if job.status != HelixJobStatus.PROVISIONAL or job.created_at is None:
+                continue
+            created_at = job.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=datetime.timezone.utc)
+            age = (datetime.datetime.now(datetime.timezone.utc) - created_at).total_seconds()
+            if age < self._storage_config.creation_timeout_seconds:
+                continue
+            try:
+                # An identical payload must advance the version. A creator cannot
+                # continue with the version it held before this fence.
+                job = self._system_entities.update(job)
+                if not self._settle_provisional_storage(job):
+                    continue
+                job = self._settle_provisional_artifacts(job)
+                self._system_entities.delete_by_id(HelixJob, job.id, expected_db_version=job.db_version)
+            except EntityNotFoundError:
+                pass
+            except EntityConflictError:
+                logger.info("Provisional Job changed before cleanup", extra={"job": job.id})
+            except Exception:
+                logger.exception("Could not complete provisional Job cleanup", extra={"job": job.id})
+            finally:
+                self.emit_heartbeat()
+
+    def _settle_provisional_storage(self, job: HelixJob) -> bool:
+        targets = storage_targets(job.platform_spec)
+        if not targets:
+            return True
+        name = HelixJobStorageReclaim.name_for_job(job.id)
+        try:
+            record = self._system_entities.get(HelixJobStorageReclaim, name, workspace=SYSTEM_WORKSPACE)
+        except EntityNotFoundError:
+            record = self._system_entities.create(
+                HelixJobStorageReclaim(
+                    name=name,
+                    workspace=SYSTEM_WORKSPACE,
+                    job_id=job.id,
+                    job_workspace=job.workspace,
+                    job_name=job.name,
+                    targets=targets,
+                )
+            )
+        # Empty records stay durable until the Job is gone, so restart cannot
+        # reintroduce a finished backend cleanup workload.
+        return self._reclaim_storage(record)
+
+    def _settle_provisional_artifacts(self, job: HelixJob) -> HelixJob:
+        if job.output_location is not None:
+            return job
+        fileset_id = job.fileset_id
+        if fileset_id is None:
+            # Editable Fileset metadata cannot establish allocation ownership.
+            # Unknown initial allocations retain the accepted orphan deferral.
+            if job.current_attempt_id is not None:
+                raise RuntimeError(f"Artifact ownership of Job {job.id} needs reconciliation")
+            return job
+        try:
+            self._files.delete_fileset_by_id(fileset_id=fileset_id, workspace=job.workspace)
+        except NotFoundError:
+            pass
+        return job
 
     def _enforce_storage_retention(self) -> None:
         """Reclaim queued storage every tick, and queue stopped jobs' storage on the retention interval."""
@@ -270,8 +459,16 @@ class JobReconciler(HeartbeatMixin, Controller):
         in the background, so a record stays until a later tick finds the removal done.
         """
         try:
-            # One page per tick. Anything beyond it is picked up on the next tick.
-            reclaims = list(self._system_entities.list(HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE).data)
+            reclaims = list(
+                self._system_entities.list(
+                    HelixJobStorageReclaim,
+                    workspace=SYSTEM_WORKSPACE,
+                    sort="created_at",
+                    page=self._reclaim_page,
+                    page_size=100,
+                ).data
+            )
+            self._reclaim_page = self._reclaim_page + 1 if len(reclaims) == 100 else 1
         except Exception:
             logger.exception("Could not list job storage to reclaim")
             return
@@ -280,7 +477,16 @@ class JobReconciler(HeartbeatMixin, Controller):
             try:
                 if not self._reclaim_storage(reclaim):
                     continue
-                self._system_entities.delete_by_id(HelixJobStorageReclaim, reclaim.id)
+                try:
+                    owner = self._system_entities.get_by_id(HelixJob, reclaim.job_id)
+                except EntityNotFoundError:
+                    owner = None
+                if owner is not None and owner.status == HelixJobStatus.PROVISIONAL:
+                    continue
+                current = self._system_entities.get_by_id(HelixJobStorageReclaim, reclaim.id)
+                self._system_entities.delete_by_id(
+                    HelixJobStorageReclaim, current.id, expected_db_version=current.db_version
+                )
                 logger.info("Reclaimed job storage", extra=extra)
             except Exception:
                 logger.exception("Could not reclaim job storage", extra=extra)

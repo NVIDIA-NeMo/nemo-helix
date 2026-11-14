@@ -56,7 +56,8 @@ class HelixJob(EntityBase):
     )
     current_attempt_id: Optional[str] = Field(default=None, description="Current Attempt ID")
     status: Optional[HelixJobStatus] = Field(default=None, description="Current attempt status")
-    fileset: str = Field(..., description="Fileset ID for storing job artifacts (logs, results)")
+    fileset: str = Field(..., description="Fileset name for storing job artifacts (logs, results)")
+    fileset_id: str | None = Field(default=None, description="Immutable ID of the owned artifact fileset")
     output_location: Optional[str] = Field(
         default=None,
         description="Caller-supplied artifact fileset; None when the dispatcher auto-created the fileset",

@@ -451,3 +451,26 @@ async def test_job_rerun_active_job(test_client: AsyncClient):
     assert rerun_job_data["attempt_id"] != original_attempt_id
     assert rerun_job_data["status"] == "created"
     assert rerun_job_data["status_details"]["rerun_warning"] == "out of memory"
+
+
+@pytest.mark.asyncio
+async def test_rerun_existing_job_without_attempt_returns_conflict(test_client: AsyncClient, mock_store):
+    from nhx.common.jobs.schemas import HelixJobStatus
+    from nhx.core.jobs.entities import HelixJob
+
+    owner = await mock_store.create(
+        HelixJob(
+            name="not-run",
+            workspace="default",
+            source="test",
+            fileset="outputs",
+            output_location="outputs",
+            status=HelixJobStatus.CREATED,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+        )
+    )
+    response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{owner.id}/rerun")
+    assert response.status_code == 409
+    assert "has not run yet" in response.json()["detail"]
+    missing = await test_client.post("/apis/jobs/v2/workspaces/default/jobs/missing/rerun")
+    assert missing.status_code == 404

@@ -4,6 +4,7 @@
 from unittest.mock import patch
 
 import httpx
+import pytest
 from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError
 from nemo_helix_plugin.jobs.types import AuthContext
 from nhx.common.jobs.schemas import HelixJobStatus
@@ -501,3 +502,74 @@ def test_queued_and_running_gauges_report_counts_by_workspace_and_user(
         ("ws-a", "bob"): 1,
         ("ws-b", "unknown"): 1,
     }
+
+
+def test_provisional_job_cannot_reach_backend(
+    job_scheduler: JobScheduler,
+    backend_registry: BackendRegistry,
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+):
+    job = mock_jobs_client.get_job.return_value.data.return_value
+    job.status = HelixJobStatus.PROVISIONAL
+    backend = backend_registry.get_backend(provider="cpu", profile="default")
+    assert isinstance(backend, MockDockerCPUJobBackend)
+
+    with pytest.raises(SchedulingDeferred, match="pending"):
+        job_scheduler.schedule_step(test_step_created)
+
+    assert backend.mock.schedule_calls == []
+
+
+@pytest.mark.parametrize("status_code", [0, 429, 503, 403])
+def test_job_lookup_failure_defers_only_retryable_errors(
+    job_scheduler, mock_jobs_client, test_step_created, status_code
+):
+    from nemo_helix_plugin.client.errors import NemoHTTPError
+
+    request = httpx.Request("GET", "http://jobs.test/job")
+    error = (
+        NemoHTTPError(httpx.Response(status_code, request=request))
+        if status_code
+        else NemoTransportError(httpx.ConnectTimeout("lookup timed out", request=request))
+    )
+    mock_jobs_client.get_job.side_effect = error
+    expected = NemoHTTPError if status_code == 403 else SchedulingDeferred
+    with pytest.raises(expected):
+        job_scheduler.schedule_step(test_step_created)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "headers", "deferred"),
+    [
+        (408, {}, True),
+        (409, {}, True),
+        (500, {}, True),
+        (403, {}, False),
+        (403, {"x-should-retry": "true"}, True),
+        (503, {"x-should-retry": "false"}, False),
+    ],
+)
+def test_scheduler_pass_uses_controller_retry_policy(
+    job_scheduler,
+    backend_registry,
+    mock_jobs_client,
+    test_step_created,
+    status_code,
+    headers,
+    deferred,
+):
+    from nemo_helix_plugin.client.errors import NemoHTTPError
+    from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
+
+    job_scheduler._nemo_client = job_scheduler._nemo_client.with_retry(PLATFORM_DEFAULT_RETRY_POLICY)
+    mock_jobs_client.list_steps.return_value = paginated_response([test_step_created])
+    mock_jobs_client.get_job.side_effect = NemoHTTPError(
+        httpx.Response(status_code, headers=headers, request=httpx.Request("GET", "http://jobs.test/job"))
+    )
+    job_scheduler.step()
+
+    backend = backend_registry.get_backend(provider="cpu", profile="default")
+    assert backend.mock.schedule_calls == []
+    body = mock_jobs_client.update_job_step_status.call_args.kwargs["body"]
+    assert body.status == (HelixJobStatus.CREATED if deferred else HelixJobStatus.ERROR)

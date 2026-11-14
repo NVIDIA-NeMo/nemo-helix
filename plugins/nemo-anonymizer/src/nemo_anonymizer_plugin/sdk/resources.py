@@ -231,7 +231,7 @@ class AnonymizerResource(_BaseAnonymizerResource[NemoClient]):
             resp.raise_for_status()
             job = resp.json()
             logger.info(f"  |-- job name: {job['name']}")
-            job_client = AnonymizerJobResource(job_name=job["name"], platform=self._platform, workspace=workspace)
+            job_client = AnonymizerJobResource(job_id=job["id"], platform=self._platform, workspace=workspace)
             if wait_until_done:
                 job_client.wait_until_done()
             return job_client
@@ -245,7 +245,7 @@ class AnonymizerResource(_BaseAnonymizerResource[NemoClient]):
                 headers=self._headers(),
             )
             resp.raise_for_status()
-            return AnonymizerJobResource(job_name=job_name, platform=self._platform, workspace=workspace)
+            return AnonymizerJobResource(job_id=resp.json()["id"], platform=self._platform, workspace=workspace)
         except Exception as e:
             raise _get_error(e) from e
 
@@ -303,7 +303,7 @@ class AsyncAnonymizerResource(_BaseAnonymizerResource[AsyncNemoClient]):
             )
             resp.raise_for_status()
             job = resp.json()
-            job_client = AsyncAnonymizerJobResource(job_name=job["name"], platform=self._platform, workspace=workspace)
+            job_client = AsyncAnonymizerJobResource(job_id=job["id"], platform=self._platform, workspace=workspace)
             if wait_until_done:
                 await job_client.wait_until_done()
             return job_client
@@ -317,7 +317,7 @@ class AsyncAnonymizerResource(_BaseAnonymizerResource[AsyncNemoClient]):
                 headers=self._headers(),
             )
             resp.raise_for_status()
-            return AsyncAnonymizerJobResource(job_name=job_name, platform=self._platform, workspace=workspace)
+            return AsyncAnonymizerJobResource(job_id=resp.json()["id"], platform=self._platform, workspace=workspace)
         except Exception as e:
             raise _get_error(e) from e
 

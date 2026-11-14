@@ -9,6 +9,18 @@ description: ""
 
 This section describes how to configure jobs in NeMo Helix. The Jobs service is responsible for scheduling batch jobs, collecting telemetry and managing job results.
 
+## Creation and deletion lifecycle
+
+A Job is visible as `provisional` while its resources are being prepared. It becomes `created` only after setup is durable. Execution and normal lifecycle mutations wait for that publication. A valid `created` Job can have no current Attempt; get, list, and status still return it, while attempt-dependent operations report that no Attempt exists.
+
+Deletion first records `provisional` on an eligible Job. HTTP 204 acknowledges that request; the Jobs controller finishes resource cleanup and removes the Job afterward. Poll the existing get operation using the returned Job ID until it returns not found when you need to wait for completion. A service error or timeout does not mean the Job has disappeared. Workspace deletion performs this wait before advancing to Files cleanup.
+
+The controller retries failed cleanup and retains the Job until its known owned resources are settled. Caller-supplied output locations remain borrowed. Do not select another Job's auto-created artifact Fileset as an output location: that usage has no sharing protection. An unknown empty allocation can remain after an allocation response is lost, and can block a later create with the same name. Legacy allocations whose ownership cannot be established are retained for reconciliation.
+
+`jobs.storage.creation_timeout_seconds` sets the grace before a provisional Job becomes eligible for cleanup; its default is 900 seconds. A deletion request for a recently created Job also waits for this grace. Run exactly one active Jobs cleanup controller. The supplied Helm deployment uses one replica and a Recreate rollout; custom startup, restart, and failover procedures must stop the old controller before starting its replacement.
+
+Continuing SDK handles and watches retain the Job ID they received, so ordinary deletion and recreation under the same name does not move them to the replacement. Existing HTTP addressing still tries an ID and then a name. A literal Job name equal to a disappeared ID remains ambiguous at that public boundary.
+
 ## Listing Jobs by Type
 
 Every plugin that submits jobs has a `list-jobs` command that lists only that plugin's jobs, newest first. Use `--type` to filter to specific job types; the command's help names them.

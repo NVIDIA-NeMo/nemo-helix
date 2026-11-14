@@ -107,7 +107,7 @@ class Faults:
     create_late_save: float = 0.0  # the client timed out; Jobs links the attempt later, within create_grace
     create_lost_name: float = 0.0  # Job row saved, attempt never linked: 409 and 404 forever (AIRCORE-1379)
     stepless_first: float = 0.0  # the first step is saved a little after the Job shows up
-    read_5xx: float = 0.0  # GET, has_steps, result, cancel
+    read_5xx: float = 0.0  # GET, has_job_steps, result, cancel
     read_timeout: float = 0.0
     refuse_cancel: float = 0.0  # per Job: cancel answers 409 while it runs
     job_error: float = 0.0
@@ -243,7 +243,13 @@ class FakeJobsCluster:
         if f.read_timeout and rng.random() < f.read_timeout:
             self._time_out(kind)
 
+    def _name(self, workspace: str, reference: str) -> str:
+        return next(
+            (job.name for (ws, _), job in self.jobs.items() if ws == workspace and job.id == reference), reference
+        )
+
     async def get(self, workspace: str, name: str) -> HelixJobResponse | None:
+        name = self._name(workspace, name)
         self._enter("get", name)
         self._read_faults("get")
         job = self.jobs.get((workspace, name))
@@ -257,7 +263,8 @@ class FakeJobsCluster:
         listed = {name: self.jobs.get((workspace, name)) for name in names}
         return {name: job.response() for name, job in listed.items() if job is not None and job.visible(now)}
 
-    async def has_steps(self, workspace: str, name: str) -> bool:
+    async def has_job_steps(self, workspace: str, name: str) -> bool:
+        name = self._name(workspace, name)
         self._enter("steps", name)
         self._read_faults("steps")
         job = self.jobs.get((workspace, name))
@@ -267,6 +274,7 @@ class FakeJobsCluster:
         return job.step_at is not None and now >= job.step_at
 
     async def result(self, workspace: str, job_name: str, name: str) -> HelixJobResultResponse | None:
+        job_name = self._name(workspace, job_name)
         self._enter("result", job_name)
         self._read_faults("result")
         job = self.jobs.get((workspace, job_name))
@@ -281,6 +289,7 @@ class FakeJobsCluster:
         )
 
     async def cancel(self, workspace: str, name: str) -> None:
+        name = self._name(workspace, name)
         self._enter("cancel", name)
         self._read_faults("cancel")
         self.cancels.append((self.sim.cycle, workspace, name))
@@ -511,8 +520,11 @@ class ClusterRunJobs:
             raise RuntimeError("this Jobs adapter only reads")
         return await self._cluster.create(self._workspace, self._run, request)
 
-    async def has_steps(self, name: str) -> bool:
-        return await self._cluster.has_steps(self._workspace, name)
+    async def has_job_steps(self, job_id: str) -> bool:
+        return await self._cluster.has_job_steps(self._workspace, job_id)
+
+    async def has_attempt_steps(self, job_id: str, attempt_id: str) -> bool:
+        return await self._cluster.has_job_steps(self._workspace, job_id)
 
     async def read_summary(self, bundle_ref: str) -> AgentEvalSummary:
         return AgentEvalSummary()

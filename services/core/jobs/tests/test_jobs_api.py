@@ -1926,8 +1926,10 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
     projects = ["default/test-project", "other-workspace/test-project"]
     with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
         mock_files = AsyncMock()
+        mock_files.with_retry = MagicMock(return_value=mock_files)
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
+        mock_fileset_obj.id = "fileset-owned-allocation"
         mock_resp = MagicMock()
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp

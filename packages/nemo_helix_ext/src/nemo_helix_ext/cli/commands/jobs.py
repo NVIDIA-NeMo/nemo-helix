@@ -58,6 +58,7 @@ from nemo_helix_ext.cli.core.types import (
 from nemo_helix_ext.cli.core.waiters import wait_for_platform_job
 
 JobStatusValue = Literal[
+    "provisional",
     "created",
     "queued",
     "pending",
@@ -501,7 +502,7 @@ def _render_lifecycle_code(
     workspace = _format_python_literal(args["workspace"]) if args.get("workspace") is not None else "None"
     if mode == "watch":
         return [
-            'resource_name = getattr(response, "name", None) or args.get("name")',
+            "resource_name = response.id",
             "if not resource_name:",
             '    raise RuntimeError("Unable to determine created resource name for --watch")',
             "for event in jobs_client.watch_job(",
@@ -515,7 +516,7 @@ def _render_lifecycle_code(
     if mode == "wait":
         resource_label = (wait_config or {}).get("resource_label", "job")
         return [
-            'resource_name = getattr(response, "name", None) or args.get("name")',
+            "resource_name = response.id",
             "if not resource_name:",
             '    raise RuntimeError("Unable to determine created resource name for --wait")',
             f"resource_label = {_format_python_literal(resource_label)}",
@@ -716,7 +717,7 @@ def create_jobs(
         timestamp_format=state.get_timestamp_format(),
     )
     if wait or watch:
-        wait_name = getattr(result, "name", None) or all_kwargs.get("name")
+        wait_name = result.id
         if not wait_name:
             raise RuntimeError("Unable to determine created resource name for --wait/--watch")
         wait_workspace = getattr(result, "workspace", None) or request_workspace

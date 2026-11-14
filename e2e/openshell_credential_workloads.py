@@ -105,6 +105,8 @@ def launch_credential_job(
         )
         .data()
     )
+    if job.attempt_id is None:
+        raise RuntimeError("Credential probe Job was published without its required Attempt")
     return CredentialWorkload(
         kind="job",
         workspace=workspace,

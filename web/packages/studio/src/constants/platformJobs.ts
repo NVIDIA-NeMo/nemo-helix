@@ -9,6 +9,7 @@ export const getDeleteJobsDescription = (count: number) =>
     : "The jobs are removed from this workspace and can't be restored.";
 
 export const STATUS_FILTER_OPTIONS = [
+  { value: HelixJobStatus.provisional, label: 'Provisional' },
   { value: HelixJobStatus.created, label: 'Created' },
   { value: HelixJobStatus.queued, label: 'Queued' },
   { value: HelixJobStatus.pending, label: 'Pending' },

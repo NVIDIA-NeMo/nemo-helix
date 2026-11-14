@@ -126,6 +126,15 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
 
         raise ValueError(f"Invalid sort field {sort_key}")
 
+    async def _commit_snapshot(self, session: AsyncSession, entity: DBEntity) -> Entity:
+        await session.flush()
+        # Read generated fields while this transaction still owns the write.
+        # A post-commit refresh could return another writer's version.
+        await session.refresh(entity)
+        snapshot = self.field_policy.project(entity.to_pydantic()).model_copy(deep=True)
+        await session.commit()
+        return snapshot
+
     async def create_entity(
         self,
         *,
@@ -156,10 +165,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             )
 
             sess.add(db_entity)
-            await sess.commit()
-            await sess.refresh(db_entity)
-
-            return self.field_policy.project(db_entity.to_pydantic())
+            return await self._commit_snapshot(sess, db_entity)
 
     async def get_entity_by_id(
         self,
@@ -345,15 +351,15 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                 existing_entity.project = project
             if updated_by is not None:
                 existing_entity.updated_by = updated_by
+            # Every successful update advances the conditional-write boundary,
+            # including an otherwise unchanged payload used as a fence.
+            existing_entity.db_version += 1
             try:
-                await sess.commit()
+                return await self._commit_snapshot(sess, existing_entity)
             except StaleDataError as err:
                 raise EntityVersionConflictError(
                     f"Entity with ID '{entity_id}' was modified by another request. Please refetch and retry."
                 ) from err
-            await sess.refresh(existing_entity)
-
-            return self.field_policy.project(existing_entity.to_pydantic())
 
     async def update_entity_by_name(
         self,
@@ -404,15 +410,15 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                 existing_entity.project = project
             if updated_by is not None:
                 existing_entity.updated_by = updated_by
+            # Every successful update advances the conditional-write boundary,
+            # including an otherwise unchanged payload used as a fence.
+            existing_entity.db_version += 1
             try:
-                await sess.commit()
+                return await self._commit_snapshot(sess, existing_entity)
             except StaleDataError as err:
                 raise EntityVersionConflictError(
                     f"Entity '{name}' of type '{entity_type}' in workspace '{workspace}' was modified by another request. Please refetch and retry."
                 ) from err
-            await sess.refresh(existing_entity)
-
-            return self.field_policy.project(existing_entity.to_pydantic())
 
     async def delete_entity(
         self,

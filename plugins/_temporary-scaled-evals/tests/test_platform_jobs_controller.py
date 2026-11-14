@@ -119,7 +119,7 @@ async def test_controller_settles_every_cancelled_evaluation_it_inspects(
     async def _get_job_status(*, workspace: str, name: str) -> Any:
         if name not in statuses:
             raise NotFoundError(httpx.Response(404, request=httpx.Request("GET", "http://jobs")))
-        return SimpleNamespace(data=lambda: SimpleNamespace(status=statuses[name]))
+        return SimpleNamespace(data=lambda: SimpleNamespace(id=f"platform-{name}", status=statuses[name]))
 
     cancelled: list[str] = []
 
@@ -137,7 +137,7 @@ async def test_controller_settles_every_cancelled_evaluation_it_inspects(
     # A queued Job is stopped before it pulls an image and runs a cancelled
     # evaluation. A running one is left alone because its task owns sandbox
     # teardown, and cancelling it would race a sandbox launch.
-    assert cancelled == ["job-3"]
+    assert cancelled == ["platform-job-3"]
     # A dead Job still holding a sandbox has no task left to release it. It must
     # terminalize, or it pins the head of the teardown window forever and hides
     # the leaked runtime.

@@ -314,7 +314,7 @@ def test_result_manager_factory_explicit_workspace_overrides_client_workspace() 
     files_client = FilesClient(base_url="http://platform.test", workspace="client-ws")
 
     manager = result_manager_factory(
-        job_name="j",
+        job_id="j",
         attempt_id="attempt-1",
         workspace="explicit-ws",
         files_client=files_client,
@@ -331,7 +331,7 @@ def test_result_manager_factory_ignores_job_env_and_uses_client_workspace(monkey
     files_client = FilesClient(base_url="http://platform.test", workspace="client-ws")
 
     manager = result_manager_factory(
-        job_name="j",
+        job_id="j",
         attempt_id="attempt-1",
         files_client=files_client,
         fileset_name="job-fileset",
@@ -349,7 +349,7 @@ async def test_async_result_manager_factory_ignores_job_env_and_uses_client_work
     files_client = AsyncFilesClient(base_url="http://platform.test", workspace="client-ws")
 
     manager = async_result_manager_factory(
-        job_name="j",
+        job_id="j",
         attempt_id="attempt-1",
         files_client=files_client,
         fileset_name="job-fileset",
@@ -404,7 +404,7 @@ class TestHelixJobResults:
 
         factory.assert_called_once()
         call_kwargs = factory.call_args.kwargs
-        assert call_kwargs["job_name"] == "j"
+        assert call_kwargs["job_id"] == "j"
         assert call_kwargs["workspace"] == "ws"
         assert call_kwargs["attempt_id"] == "A1"
         assert isinstance(call_kwargs["files_client"], FilesClient)
@@ -456,7 +456,7 @@ def test_result_manager_forwards_staging_to_the_file_manager(tmp_path: Path) -> 
     file_manager.upload.return_value = "fileset://ws/results#results/attempt-a/bundle"
     file_manager.storage_type.return_value = "fileset"
     manager = ResultManager(
-        job_name="job-a",
+        job_id="job-a",
         workspace="ws",
         attempt_id="attempt-a",
         files_client=MagicMock(),
@@ -464,7 +464,7 @@ def test_result_manager_forwards_staging_to_the_file_manager(tmp_path: Path) -> 
         fileset_name="results",
     )
 
-    with patch.object(manager, "_create_file_manager", return_value=file_manager):
+    with patch.object(ResultManager, "_create_file_manager", return_value=file_manager):
         manager.create_result("bundle", artifact, stage=True)
 
     assert file_manager.upload.call_args.kwargs["stage"] is True
@@ -481,7 +481,7 @@ def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(
     file_manager.upload.return_value = "fileset://ws/results#results/attempt-a/metrics"
     file_manager.storage_type.return_value = "fileset"
     manager = ResultManager(
-        job_name="job-a",
+        job_id="job-a",
         workspace="ws",
         attempt_id="attempt-a",
         fileset_name="results",
@@ -489,7 +489,7 @@ def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(
         jobs_client=jobs_client,
     )
 
-    with patch.object(manager, "_create_file_manager", return_value=file_manager):
+    with patch.object(type(manager), "_create_file_manager", return_value=file_manager):
         manager.create_result("metrics", artifact)
 
     assert file_manager.upload.call_args.kwargs["remote_path"] == "results/attempt-a/metrics"

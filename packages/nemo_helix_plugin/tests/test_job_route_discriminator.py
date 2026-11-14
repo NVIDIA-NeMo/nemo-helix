@@ -105,6 +105,7 @@ class _JobsClient:
         self.list_query: dict[str, object] | None = None
         self.get_calls: list[str] = []
         self.action_calls: list[str] = []
+        self.action_targets: list[str] = []
 
     def with_retry(self, _policy: object) -> _JobsClient:
         return self
@@ -145,7 +146,7 @@ class _JobsClient:
         await self._unexpected_action("get-attempt")
         raise AssertionError("unreachable")
 
-    async def delete_job(self, **_kwargs: object) -> None:
+    async def delete_job(self, *, name: str, workspace: str) -> None:
         await self._unexpected_action("delete")
 
     async def cancel_job(self, **_kwargs: object) -> _Response:
@@ -208,8 +209,9 @@ class _WriteOnlyJobsClient(_JobsClient):
         del name, workspace
         raise AssertionError("the caller's jobs.read permission must not be used for mutation preflight")
 
-    async def delete_job(self, **_kwargs: object) -> None:
+    async def delete_job(self, *, name: str, workspace: str) -> None:
         self.action_calls.append("delete")
+        self.action_targets.append(name)
 
     async def cancel_job(self, **kwargs: object) -> _Response:
         return self._mutation_response("cancel", cast(str, kwargs["name"]), cast(str, kwargs["workspace"]))
@@ -229,7 +231,7 @@ class _WriteOnlyJobsClient(_JobsClient):
     async def update_job(self, *, name: str, workspace: str, body: object) -> _Response:
         self.updated_body = body
         self.updated_name = name
-        response = self._mutation_response("update", "war-1", workspace)
+        response = self._mutation_response("update", name, workspace)
         spec = getattr(body, "spec", None)
         if spec is not None:
             cast(SimpleNamespace, response.data()).spec = spec
@@ -237,7 +239,8 @@ class _WriteOnlyJobsClient(_JobsClient):
 
     def _mutation_response(self, action: str, name: str, workspace: str) -> _Response:
         self.action_calls.append(action)
-        job = _job(name, "war-game")
+        self.action_targets.append(name)
+        job = _job(name.removeprefix("id-"), "war-game")
         job.workspace = workspace
         return _Response(job)
 
@@ -448,6 +451,7 @@ def test_mutation_ownership_lookup_uses_internal_service_client_not_caller_read(
     assert authorization_calls == [(authorized_method, authorized_path)]
     assert ownership_jobs.get_calls == ["war-1"]
     assert caller_jobs.action_calls == [action]
+    assert caller_jobs.action_targets == ["id-war-1"]
     assert internal_client.entered and internal_client.exited
     client_factory.assert_called_once_with(
         as_service="agent-hardener",
@@ -582,3 +586,22 @@ def test_factory_rejects_root_model_for_discriminated_collection() -> None:
             platform_job_config_compiler=_compiler,
             job_discriminator="war-game",
         )
+
+
+@pytest.mark.parametrize("path", ["pause", "resume", "control", "rerun"])
+def test_malformed_checked_spec_is_rejected_before_mutation(path):
+    caller_jobs = _WriteOnlyJobsClient()
+    invalid = _job("war-1", "war-game")
+    invalid.spec = {_DISCRIMINATOR_KEY: "war-game"}
+    ownership_jobs = _JobsClient({"war-1": invalid})
+    internal_client = _InternalNemoClient(ownership_jobs)
+    client = TestClient(_build_app(caller_jobs))
+    with patch("nemo_helix_plugin.jobs.api_factory.get_async_nemo_client", return_value=internal_client):
+        result = (
+            client.patch("/war/default/jobs/war-1/control", json={})
+            if path == "control"
+            else client.post(f"/war/default/jobs/war-1/{path}")
+        )
+    assert result.status_code == 404
+    assert caller_jobs.action_calls == []
+    assert ownership_jobs.get_calls == ["war-1"]

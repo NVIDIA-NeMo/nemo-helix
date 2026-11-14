@@ -54,6 +54,7 @@ class HelixJobStatus(str, Enum):
     ``PENDING`` means the backend resource exists and is waiting to start.
     """
 
+    PROVISIONAL = "provisional"
     CREATED = "created"
     QUEUED = "queued"
     PENDING = "pending"
@@ -73,6 +74,7 @@ class HelixJobStatus(str, Enum):
     @staticmethod
     def non_terminals() -> list["HelixJobStatus"]:
         return [
+            HelixJobStatus.PROVISIONAL,
             HelixJobStatus.CREATED,
             HelixJobStatus.QUEUED,
             HelixJobStatus.PENDING,
