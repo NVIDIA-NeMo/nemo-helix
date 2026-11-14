@@ -2456,6 +2456,7 @@ def _require_supported_python() -> None:
 
 
 @handle_errors
+@emit.track_onboarding
 def setup_command(
     ctx: typer.Context,
     auto: Annotated[
@@ -2668,46 +2669,33 @@ def setup_command(
     skills_from_list = _parse_csv_flag(skills_from)
     clients = SetupClients.from_context(cli_context)
 
-    try:
-        if auto:
-            _run_auto_mode(
-                cli_context,
-                clients,
-                workspace,
-                base_url,
-                install_skills,
-                skills_agents=skills_agents_list,
-                skills_scope=skills_scope,
-                skills_from=skills_from_list,
-                skills_path=skills_path,
-                certificate_authority=certificate_authority,
-                inference_base_url=inference_base_url,
-            )
-        else:
-            _run_interactive_mode(
-                cli_context,
-                clients,
-                workspace,
-                base_url,
-                install_skills,
-                skills_agents=skills_agents_list,
-                skills_scope=skills_scope,
-                skills_from=skills_from_list,
-                skills_path=skills_path,
-                certificate_authority=certificate_authority,
-            )
-    except typer.Exit as exc:
-        # A clean user-cancel raises typer.Exit(0); that is a normal end of the
-        # flow, not a failure, so it must not corrupt the onboarding funnel.
-        # Only a non-zero exit code counts as ERROR. Re-raise unchanged either way.
-        status = TaskStatusEnum.COMPLETED if exc.exit_code == 0 else TaskStatusEnum.ERROR
-        emit.emit_event(OnboardingStepEvent(step="setup_finished", task_status=status))
-        raise
-    except Exception:
-        # Any real (non-Exit) failure: setup did not finish cleanly.
-        emit.emit_event(OnboardingStepEvent(step="setup_finished", task_status=TaskStatusEnum.ERROR))
-        raise
-    emit.emit_event(OnboardingStepEvent(step="setup_finished", task_status=TaskStatusEnum.COMPLETED))
+    if auto:
+        _run_auto_mode(
+            cli_context,
+            clients,
+            workspace,
+            base_url,
+            install_skills,
+            skills_agents=skills_agents_list,
+            skills_scope=skills_scope,
+            skills_from=skills_from_list,
+            skills_path=skills_path,
+            certificate_authority=certificate_authority,
+            inference_base_url=inference_base_url,
+        )
+    else:
+        _run_interactive_mode(
+            cli_context,
+            clients,
+            workspace,
+            base_url,
+            install_skills,
+            skills_agents=skills_agents_list,
+            skills_scope=skills_scope,
+            skills_from=skills_from_list,
+            skills_path=skills_path,
+            certificate_authority=certificate_authority,
+        )
 
 
 def _run_auto_mode(
