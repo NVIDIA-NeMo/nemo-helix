@@ -1171,69 +1171,44 @@ def test_bi_encoder_compile_forwards_distributed_inbatch_negative(tmp_path: Path
     assert compiled["model"]["do_distributed_inbatch_negative"] is requested
 
 
-_LAST_TOKEN_BASE = {
-    "modules.json": [
-        {"path": "", "type": "sentence_transformers.models.Transformer"},
-        {"path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
-    ],
-    "1_Pooling/config.json": {"pooling_mode_mean_tokens": False, "pooling_mode_lasttoken": True},
-}
-
-
-def _write_base(base: Path, files: dict[str, Any]) -> None:
-    base.mkdir()
-    for name, content in files.items():
-        (base / name).parent.mkdir(parents=True, exist_ok=True)
-        (base / name).write_text(json.dumps(content))
-
-
 @pytest.mark.parametrize(
-    ("base_files", "retrieval", "expected"),
+    ("retrieval", "automodel_answer", "expected"),
     [
-        (_LAST_TOKEN_BASE, RetrievalConfig(), ("last", False)),
-        (
-            {
-                "modules.json": [
-                    {"path": "", "type": "sentence_transformers.base.modules.transformer.Transformer"},
-                    {"path": "1_Pooling", "type": "sentence_transformers.sentence_transformer.modules.pooling.Pooling"},
-                    {"path": "2_Normalize", "type": "sentence_transformers.models.Normalize"},
-                ],
-                "1_Pooling/config.json": {"pooling_mode": "cls"},
-            },
-            RetrievalConfig(),
-            ("cls", True),
-        ),
-        ({"config.json": {"pooling": "mean"}}, RetrievalConfig(), ("avg", True)),
-        ({}, RetrievalConfig(), ("avg", True)),
-        (_LAST_TOKEN_BASE, RetrievalConfig(pooling="avg"), ("avg", False)),
+        (RetrievalConfig(), ("last", False), ("last", False)),
+        (RetrievalConfig(pooling="cls", normalize=True), ("cls", True), ("cls", True)),
+        (RetrievalConfig(), ("weighted_avg", True), "Set training.retrieval.pooling"),
     ],
-    ids=["st-last-token", "st-pooling-mode-cls", "config-pooling", "nothing-declared", "job-pooling-wins"],
+    ids=["base-choice", "job-values", "pooling-it-cannot-declare"],
 )
-def test_bi_encoder_compile_pooling_defaults_to_the_base(
-    tmp_path: Path, base_files: dict[str, Any], retrieval: RetrievalConfig, expected: tuple[str, bool]
+def test_bi_encoder_compile_takes_pooling_from_automodel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    retrieval: RetrievalConfig,
+    automodel_answer: tuple[str, bool],
+    expected: tuple[str, bool] | str,
 ) -> None:
-    """Unset pooling and normalize keep what the base was pretrained with; the job's values win."""
-    _write_base(tmp_path / "base", base_files)
+    """Automodel picks the pooling from the job's values and the base; Helix sends it explicitly.
+
+    How Automodel reads the base's files is covered against the real Automodel in tests/smoke_gpu.
+    """
+    asked: list[tuple[str, str | None, bool | None]] = []
+
+    def automodel(model_path: str, pooling: str | None, normalize: bool | None) -> tuple[str, bool]:
+        asked.append((model_path, pooling, normalize))
+        return automodel_answer
+
+    monkeypatch.setattr("nhx.automodel.tasks.training.backends.checkpoints._automodel_bi_encoder_pooling", automodel)
     config, prepared = _embed_training_config(tmp_path, retrieval=retrieval)
-    config.model.path = str(tmp_path / "base")
     config.training.recipe = TrainingRecipe.BI_ENCODER
 
+    if isinstance(expected, str):
+        with pytest.raises(ValueError, match=expected):
+            _compile_retrieval(config, tmp_path, prepared)
+        return
     compiled = _compile_retrieval(config, tmp_path, prepared)
 
+    assert asked == [(config.model.path, retrieval.pooling, retrieval.normalize)]
     assert (compiled["model"]["pooling"], compiled["model"]["l2_normalize"]) == expected
-
-
-def test_bi_encoder_compile_rejects_a_base_pooling_it_cannot_train(tmp_path: Path) -> None:
-    _write_base(
-        tmp_path / "base",
-        {**_LAST_TOKEN_BASE, "1_Pooling/config.json": {"pooling_mode_max_tokens": True}},
-    )
-    config, prepared = _embed_training_config(tmp_path)
-    config.model.path = str(tmp_path / "base")
-    config.training.recipe = TrainingRecipe.BI_ENCODER
-
-    with pytest.raises(ValueError, match="pooling Helix cannot train"):
-        _compile_retrieval(config, tmp_path, prepared)
 
 
 def test_cross_encoder_compile_omits_distributed_inbatch_negative(tmp_path: Path) -> None:
