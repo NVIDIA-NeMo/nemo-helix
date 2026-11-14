@@ -234,6 +234,13 @@ jobs:
           driver: docker-container
           cleanup: true
 
+      - name: Resolve bake cache branch
+        id: cache-branch
+        uses: ./.github/actions/bake-cache-branch
+        with:
+          base-ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.base_ref || github.ref_name }}
+          event-name: ${{ github.event_name }}
+
       - name: Configure bake variables
         id: bake-vars
         shell: bash
@@ -242,6 +249,8 @@ jobs:
           INPUT_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
           INPUT_PUBLISH: ${{ inputs.publish }}
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CACHE_SOURCE_BRANCH: ${{ steps.cache-branch.outputs.source-branch }}
+          CACHE_TARGET_BRANCH: ${{ steps.cache-branch.outputs.target-branch }}
         run: |
           set -euo pipefail
 
@@ -279,6 +288,8 @@ jobs:
             printf 'FASTEMBED_MODEL_REPO=%s\n' "qdrant/all-MiniLM-L6-v2-onnx"
             printf 'FASTEMBED_MODEL_REVISION=%s\n' "main"
             printf 'PUBLISH_IMAGES=%s\n' "$publish_images"
+            printf 'BAKE_CACHE_SOURCE_BRANCH=%s\n' "$CACHE_SOURCE_BRANCH"
+            printf 'BAKE_CACHE_TARGET_BRANCH=%s\n' "$CACHE_TARGET_BRANCH"
           } >> "$GITHUB_ENV"
           {
             printf 'image_registry=%s\n' "$image_registry"
@@ -321,7 +332,7 @@ jobs:
             -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .
 
       - name: Log in to GHCR
-        if: env.PUBLISH_IMAGES == 'true'
+        if: env.PUBLISH_IMAGES == 'true' || env.BAKE_CACHE_TARGET_BRANCH != ''
         shell: bash
         env:
           GHCR_TOKEN: ${{ github.token }}
@@ -368,6 +379,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -391,11 +403,20 @@ jobs:
           driver: docker-container
           cleanup: true
 
+      - name: Resolve bake cache branch
+        id: cache-branch
+        uses: ./.github/actions/bake-cache-branch
+        with:
+          base-ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.base_ref || github.ref_name }}
+          event-name: ${{ github.event_name }}
+
       - name: Configure bake variables
         shell: bash
         env:
           INPUT_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CACHE_SOURCE_BRANCH: ${{ steps.cache-branch.outputs.source-branch }}
+          CACHE_TARGET_BRANCH: ${{ steps.cache-branch.outputs.target-branch }}
         run: |
           set -euo pipefail
 
@@ -409,7 +430,17 @@ jobs:
             printf 'CACHE_REGISTRY=%s\n' "$image_registry"
             printf 'BAKE_TAG=%s\n' "$bake_tag"
             printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
+            printf 'BAKE_CACHE_SOURCE_BRANCH=%s\n' "$CACHE_SOURCE_BRANCH"
+            printf 'BAKE_CACHE_TARGET_BRANCH=%s\n' "$CACHE_TARGET_BRANCH"
           } >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Print Docker bake graph
         shell: bash
@@ -431,6 +462,7 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -458,11 +490,20 @@ jobs:
           driver: docker-container
           cleanup: true
 
+      - name: Resolve bake cache branch
+        id: cache-branch
+        uses: ./.github/actions/bake-cache-branch
+        with:
+          base-ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.base_ref || github.ref_name }}
+          event-name: ${{ github.event_name }}
+
       - name: Configure bake variables
         shell: bash
         env:
           INPUT_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CACHE_SOURCE_BRANCH: ${{ steps.cache-branch.outputs.source-branch }}
+          CACHE_TARGET_BRANCH: ${{ steps.cache-branch.outputs.target-branch }}
         run: |
           set -euo pipefail
 
@@ -476,7 +517,17 @@ jobs:
             printf 'CACHE_REGISTRY=%s\n' "$image_registry"
             printf 'BAKE_TAG=%s\n' "$bake_tag"
             printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
+            printf 'BAKE_CACHE_SOURCE_BRANCH=%s\n' "$CACHE_SOURCE_BRANCH"
+            printf 'BAKE_CACHE_TARGET_BRANCH=%s\n' "$CACHE_TARGET_BRANCH"
           } >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Print Docker bake graph
         shell: bash
@@ -784,7 +835,7 @@ jobs:
           path: report.xml
 
   python-unit-test:
-    name: Python unit tests (py${{ matrix.python-version }})
+    name: Python unit tests (py${{ matrix.python-version }}, ${{ matrix.group }})
     needs: [policy-wasm]
     runs-on: ubuntu-latest
     permissions:
@@ -796,6 +847,9 @@ jobs:
         # the only one that answers "does the code work here". Packaging and install are
         # covered elsewhere; running them is not the same as running the tests.
         python-version: ["3.12", "3.13", "3.14"]
+        # Path-based groups balanced by JUnit durations (tests/unit_groups.py); each group
+        # also skips importing the others' test files.
+        group: [core, plugins, misc]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -819,30 +873,35 @@ jobs:
           EXTRA: cpu
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           PYTEST_WORKERS: "4"
+          PYTEST_EXTRA: --unit-group=${{ matrix.group }}
+          # coverage-comment reads only py3.12; tracing the other legs only slows them.
+          PYTEST_COVERAGE: ${{ matrix.python-version == '3.12' }}
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-unit-test-results-py${{ matrix.python-version }}
+          name: python-unit-test-results-py${{ matrix.python-version }}-${{ matrix.group }}
           retention-days: 30
+          include-hidden-files: true
           path: |
             report.xml
             coverage.xml
             coverage.json
             coverage-html/
+            .coverage
       - name: Upload worker crash dumps
         # Separate artifact so coverage-comment keeps receiving exactly the files it expects.
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-unit-crash-dumps-py${{ matrix.python-version }}
+          name: python-unit-crash-dumps-py${{ matrix.python-version }}-${{ matrix.group }}
           retention-days: 30
           if-no-files-found: ignore
           path: crash-dumps/
 
   # The `main-and-release-checks` ruleset requires a check named exactly "Python unit tests".
-  # Now that the job is a matrix, its legs report "Python unit tests (py3.12)" and friends, and
+  # Now that the job is a matrix, its legs report "Python unit tests (py3.12, core)" and friends, and
   # nothing carries the bare name -- the required check would sit on "Expected — Waiting for
   # status to be reported" forever. This job reports that name, and is red whenever any leg is.
   # Removing it means updating the ruleset, which needs repository admin.
@@ -1889,11 +1948,10 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          # One interpreter's results, so the coverage table stays a single number. Pinned
-          # rather than globbed: this download is `continue-on-error`, so a name that stops
-          # matching would quietly render "N/A" instead of failing.
-          name: python-unit-test-results-py3.12
-          path: unit-coverage
+          # One interpreter's groups, so the coverage table stays a single number. The combine
+          # step below renders "N/A" unless every group's data is present.
+          pattern: python-unit-test-results-py3.12-*
+          path: unit-coverage/groups
       - name: Download integration test coverage
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -1906,6 +1964,16 @@ jobs:
           version: ${{ env.UV_VERSION }}
           python-version: "3.13"
           enable-cache: false
+      - name: Combine unit coverage
+        # Never report one group's coverage as coverage of the whole suite.
+        continue-on-error: true
+        shell: bash
+        run: |
+          for group in core plugins misc; do
+            test -s "unit-coverage/groups/python-unit-test-results-py3.12-${group}/.coverage"
+          done
+          uvx --from coverage==7.15.3 coverage combine --keep unit-coverage/groups/*/.coverage
+          uvx --from coverage==7.15.3 coverage xml -o unit-coverage/coverage.xml
       - name: Combine integration coverage
         # Never report one group's coverage as coverage of the whole suite.
         continue-on-error: true

@@ -72,6 +72,7 @@ const aliasMap: Record<string, CodeSnippetLanguage> = {
   rs: 'rust',
   sh: 'shell',
   yml: 'yaml',
+  jsonl: 'json',
   md: 'markdown',
 };
 

@@ -43,7 +43,6 @@ export const DASHBOARD_ROUTE_ENABLED = ASSISTANT_STUDIO_ENABLED || DASHBOARD_SAN
 export const EVALS_ENABLED = featureFlags.evalsEnabled !== false;
 export const EVALS_BENCHMARKS_ENABLED = featureFlags.evalsBenchmarksEnabled !== false;
 export const EXPERIMENT_ENABLED = featureFlags.experiment !== false;
-export const INFERENCE_PROVIDER_ENABLED = featureFlags.inferenceProviderEnabled !== false;
 export const INTAKE_ENABLED = featureFlags.intakeEnabled !== false;
 export const MEMBERS_ENABLED = featureFlags.membersEnabled !== false;
 export const METRICS_ENABLED = featureFlags.metricsEnabled !== false;

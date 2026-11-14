@@ -80,7 +80,6 @@ export const flagDefinitions = {
   experiment: previewFlag('VITE_FF_EXPERIMENT', true),
   flagOverridesEnabled: booleanFlag('VITE_FF_FLAG_OVERRIDES_ENABLED', false),
   guardrailsEnabled: previewFlag('VITE_FF_GUARDRAILS_ENABLED'),
-  inferenceProviderEnabled: previewFlag('VITE_FF_INFERENCE_PROVIDER_ENABLED', true),
   intakeEnabled: previewFlag('VITE_FF_INTAKE_ENABLED', true),
   membersEnabled: previewFlag('VITE_FF_MEMBERS_ENABLED', true),
   metricsEnabled: previewFlag('VITE_FF_METRICS_ENABLED', false),

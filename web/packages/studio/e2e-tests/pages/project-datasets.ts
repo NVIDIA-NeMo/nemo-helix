@@ -49,7 +49,7 @@ export class ProjectDatasetsPage {
     await confirmDeleteButton.click();
     await waitForLongOperation(this.page);
 
-    await expectToastIsVisible(this.page, 'Dataset deleted successfully');
+    await expectToastIsVisible(this.page, `Deleted dataset '${name}'.`);
   }
 
   /**
@@ -99,7 +99,7 @@ export class ProjectDatasetsPage {
     await confirmDeleteButton.click();
     await waitForLongOperation(this.page);
 
-    await expectToastIsVisible(this.page, 'Successfully deleted!');
+    await expectToastIsVisible(this.page, `Deleted file '${filePath}'.`);
     await waitForLongOperation(this.page);
     await expect(this.page.getByText(fileName!)).not.toBeVisible();
   }

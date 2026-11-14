@@ -113,7 +113,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Inference Providers',
     description: 'Studio has a UI for adding and managing inference providers.',
     getHref: getWorkspaceInferenceProvidersRoute,
-    requiredFeatureFlags: ['inferenceProviderEnabled'],
     patterns: [
       /\binference provider\b/i,
       /\bmodel provider\b/i,

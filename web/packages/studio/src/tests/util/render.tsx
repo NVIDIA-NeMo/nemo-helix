@@ -15,7 +15,7 @@ import { RouterProvider } from 'react-router/dom';
 /**
  * Options for the renderRoute function
  */
-export interface RenderRouteOptions {
+interface RenderRouteOptions {
   /**
    * Mock browsing history - initializes the router at these URL(s).
    * If array, last item will be used as the current path.
