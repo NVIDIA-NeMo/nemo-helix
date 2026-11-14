@@ -39,6 +39,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
 from nhx.core.jobs.app.dispatcher import (
     JobAlreadyExistsError,
     JobDispatcher,
+    JobEnvironmentValidationError,
     JobHasNoAttemptError,
     JobOutputLocationError,
     JobSecretValidationError,
@@ -622,6 +623,38 @@ def test_create_job_secret_validation_error_returns_safe_guidance():
     assert "referenced secrets were not found or are not accessible" in detail
     assert "api-key" not in detail
     assert "db_version" not in detail
+
+
+@pytest.mark.asyncio
+async def test_create_job_environment_validation_error_returns_422_naming_rejected_key(
+    test_client: AsyncClient,
+    mock_dispatcher: JobDispatcher,
+):
+    """Same status as update; ordered before ``except ValueError``, which would turn it into a 409."""
+    raw_error = "Job step environment keys must not use platform-reserved managed environment keys: ['NHX_PRINCIPAL']"
+    with patch.object(
+        mock_dispatcher, "create_job", new=AsyncMock(side_effect=JobEnvironmentValidationError(raw_error))
+    ):
+        response = await test_client.post(
+            "/apis/jobs/v2/workspaces/default/jobs",
+            json={
+                "name": "env-job",
+                "source": "test-source",
+                "spec": {},
+                "platform_spec": {
+                    "steps": [
+                        {
+                            "name": "valid-step",
+                            "executor": TestConstants.TEST_EXECUTOR.model_dump(mode="json"),
+                            "config": {},
+                        }
+                    ]
+                },
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == raw_error
 
 
 @pytest.mark.asyncio

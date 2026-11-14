@@ -16,7 +16,6 @@ import {
   EVALS_ENABLED,
   EXPERIMENT_ENABLED,
   GUARDRAILS_ENABLED,
-  INFERENCE_PROVIDER_ENABLED,
   INTAKE_ENABLED,
   MEMBERS_ENABLED,
   MODEL_DETAILS_ENABLED,
@@ -74,9 +73,6 @@ export const gateGuardrailsRoutes = (routes: RouteObject | RouteObject[]) =>
 
 export const gateVirtualModelsRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(VIRTUAL_MODELS_ROUTE_ENABLED, routes);
-
-export const gateInferenceProviderRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(INFERENCE_PROVIDER_ENABLED, routes);
 
 export const gateMembersRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(MEMBERS_ENABLED, routes);

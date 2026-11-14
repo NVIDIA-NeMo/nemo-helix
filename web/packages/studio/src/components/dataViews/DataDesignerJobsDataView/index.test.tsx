@@ -214,4 +214,78 @@ describe('DataDesignerJobsDataView', () => {
       expect(screen.queryByRole('menuitem', { name: 'Cancel' })).not.toBeInTheDocument();
     });
   });
+
+  describe('delete confirmation', () => {
+    const DELETE_URL = `${PLATFORM_BASE_URL}/apis/data-designer/v2/workspaces/:workspace/jobs/create/:name`;
+    const DESCRIPTION_ONE = "The job is removed from this workspace and can't be restored.";
+    const DESCRIPTION_MANY = "The jobs are removed from this workspace and can't be restored.";
+
+    const setup = async (names: string[]) => {
+      const deleted: string[] = [];
+      server.use(
+        http.get(LIST_URL, () =>
+          HttpResponse.json(
+            makePage(names.map((name) => ({ ...makeJob(name), status: HelixJobStatus.completed })))
+          )
+        ),
+        http.delete(DELETE_URL, ({ params }) => {
+          deleted.push(String(params.name));
+          return new HttpResponse(null, { status: 204 });
+        })
+      );
+      const user = userEvent.setup();
+      renderComponent();
+      await screen.findByText(names[0], undefined, { timeout: XL_SELECTOR_TIMEOUT });
+      return { user, deleted };
+    };
+
+    const selectRow = async (user: UserEvent, index: number) => {
+      const rowCheckboxAt = () =>
+        screen.getAllByRole('checkbox', { name: /(De)?select row/i })[index];
+      await waitFor(() => expect(rowCheckboxAt()).toBeEnabled());
+      await user.click(rowCheckboxAt());
+      await waitFor(() => expect(rowCheckboxAt()).toBeChecked());
+    };
+
+    it('names the job from the row Delete action and deletes it on confirm', async () => {
+      const { user, deleted } = await setup(['delete-me']);
+      await user.click(screen.getAllByRole('button', { name: /actions/i })[0]);
+      await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(
+        within(dialog).getByRole('heading', { name: "Delete Data Designer job 'delete-me'?" })
+      ).toBeInTheDocument();
+      expect(within(dialog).getByText(DESCRIPTION_ONE)).toBeInTheDocument();
+
+      await user.click(within(dialog).getByRole('button', { name: 'Delete Data Designer Job' }));
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(deleted).toEqual(['delete-me']);
+      expect(await screen.findByTestId('mock-toast-success')).toHaveTextContent(
+        "Deleted Data Designer job 'delete-me'."
+      );
+    });
+
+    it('lists every selected job in the bulk dialog and deletes them all', async () => {
+      const { user, deleted } = await setup(['job-a', 'job-b']);
+      await screen.findByText('job-b');
+      await selectRow(user, 0);
+      await selectRow(user, 1);
+      await user.click(await screen.findByRole('button', { name: 'Delete selected jobs' }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(
+        within(dialog).getByRole('heading', { name: 'Delete 2 Data Designer jobs?' })
+      ).toBeInTheDocument();
+      expect(within(dialog).getByText(DESCRIPTION_MANY)).toBeInTheDocument();
+      expect(within(dialog).getByText('job-a')).toBeInTheDocument();
+      expect(within(dialog).getByText('job-b')).toBeInTheDocument();
+
+      await user.click(within(dialog).getByRole('button', { name: 'Delete 2 Data Designer Jobs' }));
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect([...deleted].sort()).toEqual(['job-a', 'job-b']);
+    });
+  });
 });

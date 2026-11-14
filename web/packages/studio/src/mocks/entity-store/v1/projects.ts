@@ -2,24 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /** V1 project shape (namespace-based) for MSW handlers. */
-export interface ProjectV1 {
+interface ProjectV1 {
   namespace: string;
   name: string;
   description?: string;
   created_at?: string;
   updated_at?: string;
-}
-
-export interface ProjectsPageV1 {
-  data: ProjectV1[];
-  pagination: {
-    page: number;
-    page_size: number;
-    total_results: number;
-    total_pages: number;
-    current_page_size: number;
-  };
-  sort?: string;
 }
 
 const project1: ProjectV1 = {

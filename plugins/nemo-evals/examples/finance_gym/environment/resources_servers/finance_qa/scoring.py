@@ -11,7 +11,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-import cookbook
+import cookbook  # ty: ignore[unresolved-import]
 
 #: Tasks the cookbook scores as program synthesis, which adds the Python syntax check.
 PROGRAM_SYNTHESIS_TASKS = frozenset({"CodeFinQA", "CodeTAT-QA"})

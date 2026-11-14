@@ -71,9 +71,10 @@ def env(monkeypatch, tmp_path):
         data, metadata = objects[Key]
         return dict(metadata, ContentLength=len(data))
 
-    def upload(source, bucket, key, *, Config):
-        """Consume the managed transfer stream on its AnyIO worker."""
+    def upload_fileobj(source, bucket, key, *, Config):
+        """Consume the managed upload stream on its AnyIO worker."""
         assert bucket == "bucket" and key == "prefix/data.jsonl"
+        assert not Config.use_threads
         put(source.read())
 
     async def download(url, *, session, headers, byte_range, chunk_size):
@@ -100,7 +101,7 @@ def env(monkeypatch, tmp_path):
     session_client.return_value.__aenter__.return_value = client
     monkeypatch.setattr(storage._session, "client", session_client)
     upload_client = MagicMock()
-    upload_client.upload_fileobj.side_effect = upload
+    upload_client.upload_fileobj.side_effect = upload_fileobj
     upload_session = MagicMock()
     upload_session.client.return_value = upload_client
     monkeypatch.setattr(s3_backend.boto3, "Session", lambda: upload_session)
