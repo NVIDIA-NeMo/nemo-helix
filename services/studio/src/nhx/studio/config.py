@@ -76,6 +76,17 @@ class StudioConfig(create_service_config_class("studio")):  # type: ignore[misc]
         default=False,
         description="Enable Studio UI browser telemetry export.",
     )
+    plugin_error_reports_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Accept plugin load-failure reports from Studio and write them to the platform log. "
+            "When unset, reports are accepted only while platform auth is disabled (local use). "
+            "Setting it to true while platform auth is enabled exposes an unauthenticated log-writing endpoint "
+            "(everything under /studio bypasses the auth middleware). "
+            "Auth enforced by a reverse proxy in front of a platform with auth.enabled: false counts as "
+            "'auth disabled': the endpoint turns on, still restricted to loopback browser origins and bounded."
+        ),
+    )
     otel: StudioOtelConfig = Field(
         default_factory=StudioOtelConfig,
         description="Studio UI OpenTelemetry settings.",

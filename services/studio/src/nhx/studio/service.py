@@ -14,15 +14,28 @@ from typing import ClassVar
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse
 from nemo_helix_plugin.authz import Permission
+from nhx.common.config.base import get_auth_config
 from nhx.common.http_clients import shared_async_http_client
 from nhx.common.service import RouterConfig, Service
 from nhx.common.service.dependencies import service_instance_dependency
 from nhx.studio.config import StudioConfig
+from nhx.studio.plugin_reports import (
+    MAX_BODY_BYTES,
+    PluginLoadErrorReport,
+    ReportThrottle,
+    format_report,
+    is_loopback_origin,
+)
 from nhx.studio.plugins import build_plugins_router, discover_plugins
 from nhx.studio.static_files import SPAStaticFiles, build_csp
+from pydantic import ValidationError
 from starlette.responses import Response
+from starlette.staticfiles import NotModifiedResponse, StaticFiles
 
 logger = logging.getLogger(__name__)
+
+# Directory-less StaticFiles, used only for its ETag/Last-Modified conditional-GET check.
+_CONDITIONAL_GET = StaticFiles(directory=None)
 
 TELEMETRY_ALLOWED_HEADERS = "Accept,Accept-Language,Content-Encoding,Content-Language,Content-Type"
 TELEMETRY_ALLOWED_METHODS = "POST, OPTIONS"
@@ -67,7 +80,7 @@ PACKAGED_INSTALL_NOTICE_HTML = f"""      <p>This install ships with the Studio b
 
 def _bundle_asset_media_type(filename: str) -> str | None:
     """Media type for an allowed plugin bundle asset; None for disallowed suffixes."""
-    if filename.endswith(".js.map"):
+    if filename == "plugin.manifest.json" or filename.endswith(".js.map"):
         return "application/json"
     if filename.endswith(".js"):
         return "text/javascript"
@@ -142,6 +155,7 @@ class StudioService(Service[StudioConfig]):
             app: The platform's FastAPI application
         """
         self._mount_telemetry_proxy(app)
+        self._mount_plugin_error_reports(app)
         self._mount_assistant_mcp(app)
         self._mount_static_files(app)
         self._configure_plugins(app)
@@ -161,6 +175,50 @@ class StudioService(Service[StudioConfig]):
         if self.service_config is not None:
             return self.service_config
         return StudioConfig()
+
+    def _mount_plugin_error_reports(self, app: FastAPI) -> None:
+        """Mount the browser plugin load-error report endpoint (before the /studio static mount)."""
+        throttle = ReportThrottle()
+
+        async def report_plugin_load_errors(request: Request) -> Response:
+            if not self._plugin_error_reports_enabled():
+                return Response(status_code=status.HTTP_404_NOT_FOUND)
+            # A browser page on any site can POST text/plain without a preflight, and the platform's CORS
+            # reflects every origin, so the endpoint itself must refuse non-loopback origins.
+            origin = request.headers.get("origin")
+            if origin is not None and not is_loopback_origin(origin):
+                return Response(status_code=status.HTTP_403_FORBIDDEN)
+            # Bound the body even without Content-Length (chunked): count bytes as they arrive.
+            if int(request.headers.get("content-length", 0)) > MAX_BODY_BYTES:
+                return Response(status_code=status.HTTP_413_CONTENT_TOO_LARGE)
+            body = bytearray()
+            async for chunk in request.stream():
+                body += chunk
+                if len(body) > MAX_BODY_BYTES:
+                    return Response(status_code=status.HTTP_413_CONTENT_TOO_LARGE)
+            try:
+                report = PluginLoadErrorReport.model_validate_json(body)
+            except ValidationError:
+                return Response(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
+            rendered = format_report(report)
+            verdict = throttle.check(report.plugin, rendered)
+            if verdict == "limited":
+                return Response(status_code=status.HTTP_429_TOO_MANY_REQUESTS)
+            if verdict == "log":
+                logger.warning("%s", rendered)
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+        app.add_api_route(
+            "/studio/api/plugin-load-errors",
+            report_plugin_load_errors,
+            methods=["POST"],
+            include_in_schema=False,
+        )
+
+    def _plugin_error_reports_enabled(self) -> bool:
+        """Return whether plugin load-error reports are accepted (explicit flag, else only when auth is off)."""
+        flag = self._get_config().plugin_error_reports_enabled
+        return flag if flag is not None else not get_auth_config().enabled
 
     def _mount_telemetry_proxy(self, app: FastAPI) -> None:
         """Mount OTLP/HTTP telemetry proxy routes that replace the old nginx behavior."""
@@ -375,7 +433,7 @@ class StudioService(Service[StudioConfig]):
                 )
 
         @app.get("/plugin-ui/{plugin_name}/{filename}", include_in_schema=False)
-        async def serve_plugin_asset(plugin_name: str, filename: str) -> FileResponse:
+        async def serve_plugin_asset(plugin_name: str, filename: str, request: Request) -> Response:
             # Allowlist: only direct children of the bundle dir with bundle-asset
             # suffixes — never the plugin's Python source or subdirectories.
             bundle_dir = bundle_dirs.get(plugin_name)
@@ -387,7 +445,14 @@ class StudioService(Service[StudioConfig]):
             file_path = (bundle_dir / filename).resolve()
             if file_path.parent != bundle_dir.resolve() or not file_path.is_file():
                 raise HTTPException(status_code=404)
-            return FileResponse(file_path, media_type=media_type)
+            # no-cache = always revalidate (ETag/Last-Modified); otherwise browsers serve a stale bundle after a rebuild.
+            response = FileResponse(
+                file_path, media_type=media_type, headers={"Cache-Control": "no-cache"}, stat_result=file_path.stat()
+            )
+            # FileResponse sends validators but never answers conditional requests itself; StaticFiles' logic does.
+            if _CONDITIONAL_GET.is_not_modified(response.headers, request.headers):
+                return NotModifiedResponse(response.headers)
+            return response
 
         app.include_router(build_plugins_router(manifests))
 
