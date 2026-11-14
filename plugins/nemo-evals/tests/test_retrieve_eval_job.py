@@ -18,6 +18,7 @@ from nemo_evals.jobs.retrieve_eval import (
     RetrieveEvalSpec,
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.evals.types import RetrieveEvalJob as ClientRetrieveEvalJob
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProviderSpec
@@ -56,6 +57,31 @@ def _spec() -> RetrieveEvalSpec:
         target=Retrieval(embeddings=Model(url="https://igw.example.test/v1/chat/completions", name="embed")),
         k=[1, 10],
     )
+
+
+def test_typed_retrieve_eval_job_matches_canonical_server_payload() -> None:
+    retrieval = Retrieval(
+        embeddings=Model(
+            url="https://igw.example.test/v1",
+            name="embedder",
+            served_model_name="provider/embedder",
+        ),
+        reranker=Model(
+            url="https://igw.example.test/v1",
+            name="reranker",
+            served_model_name="provider/reranker",
+            inference=RankingInference(contract="hosted-rerank-v1", path="rerank"),
+        ),
+        embedding_in_flight=3,
+        query_prefix="",
+        passage_prefix="document: ",
+    )
+    spec = RetrieveEvalSpec(dataset=FilesetRef("default/beir"), target=retrieval, baseline=retrieval)
+    payload = spec.model_dump(mode="json")
+
+    job = ClientRetrieveEvalJob.model_validate({"name": "retrieval", "spec": payload})
+
+    assert job.spec.model_dump(mode="json") == payload
 
 
 def _async_platform() -> AsyncNemoClient:

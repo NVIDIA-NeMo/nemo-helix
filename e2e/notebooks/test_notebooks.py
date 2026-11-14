@@ -154,11 +154,13 @@ GPU_NOTEBOOKS: set[str] = {
     "docs/safe-synthesizer/tutorials/safe-synthesizer-101.md",
 }
 
-CELL_TIMEOUT_SECONDS = 1800
+# Retrieval generation and GPU training can exceed 30 minutes in a single cell,
+# especially when models must be downloaded into a cold cache.
+CELL_TIMEOUT_SECONDS = 3600
 
-# Customizer/GPU notebook tests can legitimately run longer than the global
-# 600s pytest timeout while waiting for backend training jobs to complete.
-pytestmark = pytest.mark.timeout(3600)
+# Allow multiple long-running cells plus setup/teardown within each notebook.
+# Keep this above the cell timeout so Papermill can report the timed-out cell.
+pytestmark = pytest.mark.timeout(7200)
 
 
 def _rel_path_keys(rel: str) -> set[str]:

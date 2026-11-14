@@ -256,8 +256,13 @@ def test_retrieve_eval_job_models_match_job_route_contract() -> None:
                     "embeddings": {
                         "url": "https://igw.example.test/v1/embeddings",
                         "name": "embedder",
+                        "served_model_name": "team-a/embedder",
+                        "inference": None,
                     },
                     "first_stage_k": 50,
+                    "embedding_in_flight": 3,
+                    "query_prefix": "query: ",
+                    "passage_prefix": "passage: ",
                 },
                 "k": [10, 1],
             },
@@ -273,6 +278,11 @@ def test_retrieve_eval_job_models_match_job_route_contract() -> None:
     assert job.spec.dataset.root == "team-a/beir"
     assert job.spec.target.embeddings.name == "embedder"
     assert job.spec.target.first_stage_k == 50
+    assert job.spec.target.embeddings.served_model_name == "team-a/embedder"
+    assert job.spec.target.embeddings.inference is None
+    assert job.spec.target.embedding_in_flight == 3
+    assert job.spec.target.query_prefix == "query: "
+    assert job.spec.target.passage_prefix == "passage: "
     assert job.spec.k == [1, 10]
     assert job.status is HelixJobStatus.COMPLETED
     assert job.status_details == {"progress": 1.0}
@@ -319,6 +329,56 @@ def test_retrieve_eval_job_models_match_job_route_contract() -> None:
                 target=RetrieveEvalModelRef("team-a/embedder"),
             ),
             output_location="workspace/fileset",
+        )
+
+
+@pytest.mark.parametrize("section", ["target", "baseline"])
+def test_retrieve_eval_job_preserves_ranking_metadata(section: str) -> None:
+    target = {
+        "embeddings": {"url": "https://igw.example.test/v1", "name": "embedder"},
+        "reranker": {
+            "url": "https://igw.example.test/v1",
+            "name": "reranker",
+            "served_model_name": "provider/reranker",
+            "inference": {"type": "ranking", "contract": "hosted-rerank-v1", "path": "rerank"},
+        },
+        "embedding_in_flight": 4,
+        "query_prefix": "",
+        "passage_prefix": "passages: ",
+    }
+    spec = {"dataset": "team-a/beir", "target": target, section: target}
+
+    job = RetrieveEvalJob.model_validate({"name": "retrieval", "spec": spec})
+
+    parsed = job.spec.target if section == "target" else job.spec.baseline
+    assert parsed is not None
+    assert parsed.embedding_in_flight == 4
+    assert parsed.query_prefix == ""
+    assert parsed.passage_prefix == "passages: "
+    assert parsed.reranker is not None
+    assert parsed.reranker.served_model_name == "provider/reranker"
+    assert parsed.reranker.inference is not None
+    assert parsed.reranker.inference.contract == "hosted-rerank-v1"
+    assert parsed.reranker.inference.path == "rerank"
+
+
+def test_retrieve_eval_submit_accepts_tuning_and_retains_strict_validation() -> None:
+    target = RetrieveEvalRetrievalInputSpec(
+        embeddings=RetrieveEvalModelRef("team-a/embedder"),
+        embedding_in_flight=3,
+        query_prefix="",
+        passage_prefix="document: ",
+    )
+    assert target.model_dump(mode="json")["embedding_in_flight"] == 3
+    assert target.query_prefix == ""
+    assert target.passage_prefix == "document: "
+    with pytest.raises(ValidationError):
+        RetrieveEvalRetrievalInputSpec(embeddings=target.embeddings, embedding_in_flight=0)
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        RetrieveEvalRetrievalInputSpec.model_validate({"embeddings": "team-a/embedder", "unknown": 1})
+    with pytest.raises(ValidationError):
+        RetrieveEvalModel.model_validate(
+            {"url": "https://igw.example.test/v1", "name": "reranker", "inference": {"type": "unknown"}}
         )
 
 
