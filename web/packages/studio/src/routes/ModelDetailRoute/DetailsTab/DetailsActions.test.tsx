@@ -77,7 +77,10 @@ describe('DetailsActions', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
     const dialog = await screen.findByRole('dialog');
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    expect(
+      within(dialog).getByRole('heading', { name: "Delete model 'my-model'?" })
+    ).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete Model' }));
 
     expect(deleteModel).toHaveBeenCalledWith({ workspace: 'default', name: 'my-model' });
     await waitFor(() =>

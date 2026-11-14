@@ -15,7 +15,6 @@ import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMe
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import type {
   DatetimeFilter,
   VirtualModel,
@@ -58,7 +57,6 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
   guardrailConfig,
   attributes,
 }) => {
-  const toast = useToast();
   const queryClient = useQueryClient();
   const openRow = useRowNavigation();
 
@@ -167,16 +165,11 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
     if (!modalVirtualModel?.name) {
       return false;
     }
-    try {
-      await deleteVirtualModelMutation.mutateAsync({
-        workspace,
-        name: modalVirtualModel.name,
-      });
-      return true;
-    } catch {
-      toast.error('Failed to delete virtual model');
-      return false;
-    }
+    await deleteVirtualModelMutation.mutateAsync({
+      workspace,
+      name: modalVirtualModel.name,
+    });
+    return true;
   };
 
   const handleModalClose = () => {
@@ -303,12 +296,11 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
       {modalVirtualModel && (
         <DeleteConfirmationModal
           open
-          simpleConfirm
+          entity="virtual model"
+          ids={[modalVirtualModel.name ?? modalVirtualModel.id]}
+          description="Its inference route and middleware pipelines are removed and can't be restored."
           onDelete={handleDeleteVirtualModel}
-          title={`Delete virtual model: ${modalVirtualModel.name}`}
-          confirmationText={modalVirtualModel.name}
           onClose={handleModalClose}
-          description="Deleting this virtual model removes its inference route and middleware pipelines. Are you sure you want to proceed?"
         />
       )}
     </Stack>
