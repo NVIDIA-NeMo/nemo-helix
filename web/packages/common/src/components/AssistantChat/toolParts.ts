@@ -130,6 +130,8 @@ interface SerializedAssistantTextPart {
 interface SerializedAssistantToolPart {
   readonly args: AssistantToolArgs;
   readonly argsText: string;
+  readonly isError?: boolean;
+  readonly result?: unknown;
   readonly toolCallId: string;
   readonly toolName: string;
   readonly type: 'tool-call';
@@ -161,6 +163,8 @@ const serializeAssistantPart = (
     type: 'tool-call',
     args: toAssistantToolArgs(part.args),
     argsText: part.argsText,
+    isError: part.isError,
+    result: part.result,
     toolCallId: part.toolCallId,
     toolName: part.toolName,
   };
