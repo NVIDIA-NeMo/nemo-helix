@@ -26,6 +26,7 @@ from nhx.core.files.api.endpoint_helpers import (
     get_file_info,
     get_fileset,
     list_storage_files,
+    resolve_download_storage,
     resolve_storage_secrets_for_user,
     stream_file_download,
 )
@@ -83,7 +84,7 @@ async def head_file(
     """Get file metadata without downloading content."""
     fileset = await get_fileset(workspace, name, entity_store)
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
-    storage = storage_impl_factory(fileset.storage, secrets)
+    storage = await resolve_download_storage(storage_impl_factory(fileset.storage, secrets), path)
 
     cache_ctx: CacheContext | None = None
     if fileset.storage.type != config.default_storage_config.type:
@@ -127,7 +128,7 @@ async def download_file(
     """Download file content with Range support."""
     fileset = await get_fileset(workspace, name, entity_store)
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
-    storage = storage_impl_factory(fileset.storage, secrets)
+    storage = await resolve_download_storage(storage_impl_factory(fileset.storage, secrets), path)
 
     # Set up caching for external storage backends (HuggingFace, NGC, etc.)
     cache_ctx: CacheContext | None = None

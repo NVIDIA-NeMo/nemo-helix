@@ -38,6 +38,7 @@ async def test_cache_hit_serves_from_cache():
     """Test that cache hits are served directly from cache storage."""
     # Mock storages
     source_storage = MagicMock()
+    source_storage.for_download = AsyncMock(return_value=source_storage)
     source_storage.get_cache_path_key = AsyncMock(return_value="test/cache/key")
     source_storage.download = AsyncMock()  # Should NOT be called
 
@@ -72,6 +73,7 @@ async def test_cache_miss_schedules_background_task():
 
     # Mock storages
     source_storage = MagicMock()
+    source_storage.for_download = AsyncMock(return_value=source_storage)
     source_storage.get_cache_path_key = AsyncMock(return_value="test/cache/key")
     source_data = [b"source", b"data"]
     source_storage.download = AsyncMock(return_value=async_iter_from_list(source_data))
@@ -112,6 +114,7 @@ async def test_non_cacheable_storage_bypasses_cache():
     """Test that storage without cache_path_key bypasses caching entirely."""
     # Mock storage that doesn't support caching
     source_storage = MagicMock()
+    source_storage.for_download = AsyncMock(return_value=source_storage)
     source_storage.get_cache_path_key = AsyncMock(return_value=None)  # Not cacheable
     source_data = [b"direct", b"data"]
     source_storage.download = AsyncMock(return_value=async_iter_from_list(source_data))
@@ -144,6 +147,7 @@ async def test_byte_range_requests_check_cache_and_schedule_background_task():
 
     # Mock storages
     source_storage = MagicMock()
+    source_storage.for_download = AsyncMock(return_value=source_storage)
     source_storage.get_cache_path_key = AsyncMock(return_value="test/cache/key")
     source_data = [b"partial"]
     source_storage.download = AsyncMock(return_value=async_iter_from_list(source_data))
@@ -181,6 +185,7 @@ async def test_byte_range_cache_hit_serves_from_cache():
     source_storage = MagicMock()
     source_storage.get_cache_path_key = AsyncMock(return_value="test/cache/key")
     source_storage.download = AsyncMock()  # Should NOT be called
+    source_storage.for_download = AsyncMock(return_value=source_storage)
 
     cache_storage = MagicMock()
     cached_data = [b"partial_cached"]
