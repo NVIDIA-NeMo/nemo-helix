@@ -5,6 +5,7 @@
 # The Authentik demo on kind, with taskset runs: real OIDC users and workload token exchange, so Jobs run as the
 # nemo-helix-jobs ServiceAccount for their submitter. For e2e/test_taskset_runs.py in the nightly's auth-workload
 # row, and locally. Idempotent: rerun it to reapply the values after a code or image change.
+# How to run it locally, and what trips it up: e2e/k8s/authentik-taskset-runs.md.
 #
 #   1. contrib/auth/authentik/run.sh up k8s: the cluster (created, or reused), Authentik and the platform
 #   2. with NHX_E2E_LOAD_IMAGES=1, load the step, builder and kaniko images from the local Docker into kind
