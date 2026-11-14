@@ -113,7 +113,7 @@ variable "BASE_TAG_PYTHON" {
 
 # Pin for nhx-automodel-base.
 variable "BASE_TAG_AUTOMODEL" {
-  default = "658a648b8d821fbac9236bafad5c177b9af8789e"
+  default = "44d73b88672f05fb701d1e8b45c08a7602c296f6"
 }
 
 # Pin for nhx-rl-base (prebuilt-base tag) + the NeMo-RL / NeMo-Gym source the base builds from.
@@ -142,7 +142,7 @@ variable "RL_BASE_CONTEXT" {
 
 # The tag for base images if needed
 variable "WHEELS_TAG" {
-  default = "254fde5799bd4b9eee56ee5c6a298c0ec648e76b"
+  default = "44d73b88672f05fb701d1e8b45c08a7602c296f6"
 }
 
 variable "BAKE_CACHE_SOURCE_BRANCH" {
