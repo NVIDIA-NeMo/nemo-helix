@@ -14,16 +14,10 @@ import {
   ControlledSearchableSelect,
   type SelectItemOption,
 } from '@nemo/common/src/components/form/ControlledSearchableSelect';
-import {
-  getSecretsListSecretsQueryKey,
-  secretsListSecrets,
-} from '@nemo/sdk/generated/platform/secrets';
 import { MenuItem } from '@nvidia/foundations-react-core';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useWorkspaceSecretPages } from '@studio/routes/SecretsListRoute/useWorkspaceSecretPages';
 import { type ReactNode, useCallback, useMemo } from 'react';
 import type { FieldValues, UseControllerProps } from 'react-hook-form';
-
-const SECRETS_PAGE_SIZE = 20;
 
 /** Value used for the optional “no secret” row in the select. */
 export const NO_SECRET_SELECT_VALUE = '';
@@ -62,17 +56,7 @@ export function SecretSearchableSelect<T extends FieldValues>({
     hasNextPage,
     isFetchingNextPage,
     isLoading: isLoadingSecrets,
-  } = useInfiniteQuery({
-    queryKey: [...getSecretsListSecretsQueryKey(workspace), 'infinite'] as const,
-    queryFn: ({ signal, pageParam }) =>
-      secretsListSecrets(workspace, { page: pageParam, page_size: SECRETS_PAGE_SIZE }, signal),
-    initialPageParam: 1,
-    getNextPageParam: (lastPage) => {
-      const p = lastPage.pagination;
-      return p && p.page < p.total_pages ? p.page + 1 : undefined;
-    },
-    enabled: queryEnabled && !!workspace,
-  });
+  } = useWorkspaceSecretPages(workspace, queryEnabled);
 
   const secretOptions: SelectItemOption[] = useMemo(() => {
     const list = secretsPages?.pages.flatMap((page) => page.data) ?? [];
