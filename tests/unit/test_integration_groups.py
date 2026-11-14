@@ -40,6 +40,8 @@ def test_groups_preserve_integration_collection(pytester: pytest.Pytester) -> No
             "def test_integration(): pass\n"
         )
     pytester.makepyfile(test_group_probe_unit="def test_unit(): pass")
+    # Unit-only files must not be imported under -m integration; this one fails collection if it is.
+    pytester.makepyfile(test_group_probe_unit_import="raise RuntimeError('unit file imported')")
     selections = {}
     for group in (None, "services", "platform"):
         args = ["-m", "integration", "--collect-only", "-q"]
