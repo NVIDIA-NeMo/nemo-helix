@@ -37,6 +37,14 @@ def chat_message(response: Mapping[str, Any]) -> dict[str, str]:
     back inside ``<think>`` before splitting the answer off at the first ``</think>``. Any later part was a
     ``<think>`` block the model wrote in its content, as the cookbook's prompt asks. It goes back in front of the
     content, where the cookbook's split still finds it.
+
+    Limitation: Gym keeps the blocks' order but not where they sat, so every written block goes back in front of
+    the content. That rebuilds the provider's message when the model writes its blocks before its answer, as the
+    prompt asks. A block written after the answer moves in front of it, and the answer can differ from the
+    cookbook's: ``2018<think>trace</think>``, with no reasoning of the model's own, scores as ``2018`` here and as
+    an empty answer in the cookbook. When the model also returns its own reasoning, the cookbook's split falls
+    after that, and the scores match. Replaying the content of all 2,949 Super VL test responses (thinking on)
+    this way changed no score.
     """
     message_text = ""
     reasoning_texts: list[str] = []
