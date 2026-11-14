@@ -60,7 +60,7 @@ Override platform: `export BUILD_PLATFORM=linux/amd64` or `--set "*.platform=lin
 ```bash
 cd /path/to/nemo-helix
 
-export WHEELS_TAG="${WHEELS_TAG:-3fd6986ff173b598446ffac06d9be3f84b482495}"
+export WHEELS_TAG="${WHEELS_TAG:-44d73b88672f05fb701d1e8b45c08a7602c296f6}"
 export BAKE_TAG="${WHEELS_TAG}"
 
 docker buildx bake \
