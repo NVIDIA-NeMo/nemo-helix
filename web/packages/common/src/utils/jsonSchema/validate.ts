@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import Ajv2020 from 'ajv/dist/2020';
+import { validate as validateAgainstMetaSchema } from '@nemo/common/src/utils/jsonSchema/generated/metaSchemaValidator';
 
 /**
  * Client-side mirror of the backend's `jsonschema.validator_for(...).check_schema(...)`
@@ -9,9 +9,13 @@ import Ajv2020 from 'ajv/dist/2020';
  *
  * Uses the Draft 2020-12 meta-schema to match the `$schema` value emitted by
  * `inferJsonSchema`.
+ *
+ * The validator is ajv-generated at build time
+ * (`scripts/generate-meta-schema-validator.ts`) rather than compiled by ajv at
+ * runtime: ajv compiles schemas with `new Function`, which Studio's CSP
+ * forbids. Same ajv, same meta-schema, same options — only the compile step
+ * moves. See the generator for the full story.
  */
-
-const ajv = new Ajv2020({ strict: false, allErrors: true });
 
 export interface ValidationResult {
   valid: boolean;
@@ -23,9 +27,13 @@ export type ParseAndValidateResult =
   | { valid: false; errors: string[] };
 
 export function validateJsonSchemaDocument(schema: unknown): ValidationResult {
-  const valid = ajv.validateSchema(schema as object);
+  // Validates against Draft 2020-12 whatever the document's own `$schema`
+  // says. `ajv.validateSchema` used to dispatch on that keyword and throw on a
+  // meta-schema it hadn't loaded (draft-07, say); reporting errors beats
+  // throwing, and `inferJsonSchema` only ever emits 2020-12.
+  const valid = validateAgainstMetaSchema(schema);
   if (valid) return { valid: true, errors: [] };
-  const errors = (ajv.errors ?? []).map(formatError);
+  const errors = (validateAgainstMetaSchema.errors ?? []).map(formatError);
   return { valid: false, errors: errors.length > 0 ? errors : ['Invalid JSON Schema document'] };
 }
 

@@ -131,6 +131,9 @@ const ignores = [
   `${pathPrefix}packages/studio/.test-reports`,
   `${pathPrefix}packages/sdk/generated/**`,
   `${pathPrefix}packages/common/plugin-types/**`,
+  // ajv-generated; the drift test compares it byte-for-byte against a fresh
+  // generation, so --fix must not touch it.
+  `${pathPrefix}packages/common/src/utils/jsonSchema/generated/**`,
   `${pathPrefix}packages/storybook/public/mockServiceWorker.js`,
   `${pathPrefix}demo-notebook/**`,
 ];

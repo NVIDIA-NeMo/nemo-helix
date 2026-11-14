@@ -20,3 +20,6 @@ packages/studio/src/generated/*
 
 # Rolled-up plugin surface types; formatting it breaks the CI drift check
 packages/common/plugin-types/
+
+# ajv-generated meta-schema validator; formatting it breaks the drift test
+packages/common/src/utils/jsonSchema/generated/
