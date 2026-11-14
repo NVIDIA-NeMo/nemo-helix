@@ -14,10 +14,7 @@ import {
   getReasoningDelta,
   getUsageCompletionTokens,
 } from '@nemo/common/src/components/AssistantChat/completionMetrics';
-import {
-  appendCompletionDeltaParts,
-  getWorkDetailsMessageParts,
-} from '@nemo/common/src/components/AssistantChat/completionSections';
+import { appendCompletionDeltaParts } from '@nemo/common/src/components/AssistantChat/completionSections';
 import {
   getCompletionImages,
   getCompletionText,
@@ -37,7 +34,6 @@ import {
   getOpenAIMessages,
   getUserMessageContent,
 } from '@nemo/common/src/components/AssistantChat/messageUtils';
-import { groupConsecutiveAssistantSubtleToolCalls } from '@nemo/common/src/components/AssistantChat/toolParts';
 import type { AssistantChatProps } from '@nemo/common/src/components/AssistantChat/types';
 import { useChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -48,15 +44,11 @@ type ImagePart = { type: 'image'; image: string };
 
 const getMessageContent = (
   parts: readonly ThreadAssistantMessagePart[],
-  images: readonly ImagePart[],
-  status: MessageStatus
-): ThreadMessageLike['content'] => {
-  const content =
-    status.type === 'complete'
-      ? getWorkDetailsMessageParts(parts)
-      : groupConsecutiveAssistantSubtleToolCalls(parts);
-  return [...(content.length ? content : [{ type: 'text' as const, text: '' }]), ...images];
-};
+  images: readonly ImagePart[]
+): ThreadMessageLike['content'] => [
+  ...(parts.length ? parts : [{ type: 'text' as const, text: '' }]),
+  ...images,
+];
 
 type UseAssistantChatRuntimeOptions = Pick<
   AssistantChatProps,
@@ -115,7 +107,7 @@ export const useAssistantChatRuntime = ({
       setThreadMessages(
         messagesRef.current.map((message) =>
           message.id === assistantMessageId
-            ? { ...message, content: getMessageContent(parts, images, status), status }
+            ? { ...message, content: getMessageContent(parts, images), status }
             : message
         )
       );

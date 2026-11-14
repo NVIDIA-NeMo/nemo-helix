@@ -2,14 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ThreadAssistantMessagePart } from '@assistant-ui/react';
-import {
-  appendCompletionDeltaParts,
-  getWorkDetailsMessageParts,
-} from '@nemo/common/src/components/AssistantChat/completionSections';
-import {
-  ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
-  ASSISTANT_WORK_DETAILS_LABEL,
-} from '@nemo/common/src/components/AssistantChat/toolParts';
+import { appendCompletionDeltaParts } from '@nemo/common/src/components/AssistantChat/completionSections';
 
 const fold = (
   deltas: readonly Parameters<typeof appendCompletionDeltaParts>[1][]
@@ -62,40 +55,5 @@ describe('appendCompletionDeltaParts', () => {
     ]);
 
     expect(part).toEqual(expect.objectContaining({ args: {}, argsText: '{"a' }));
-  });
-});
-
-describe('getWorkDetailsMessageParts', () => {
-  it('groups reasoning and tool calls into work details and keeps the final answer', () => {
-    const parts = getWorkDetailsMessageParts(
-      fold([
-        { reasoning: 'Plan.' },
-        { text: 'Looking it up.' },
-        { toolCalls: [{ index: 0, id: 'call_a', function: { name: 'search', arguments: '{}' } }] },
-        { text: 'It is sunny.' },
-      ])
-    );
-
-    expect(parts).toHaveLength(2);
-    expect(parts[0]).toEqual(
-      expect.objectContaining({
-        toolName: ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
-        args: {
-          label: ASSISTANT_WORK_DETAILS_LABEL,
-          parts: [
-            { type: 'reasoning', text: 'Plan.' },
-            { type: 'text', text: 'Looking it up.' },
-            expect.objectContaining({ type: 'tool-call', toolName: 'search' }),
-          ],
-        },
-      })
-    );
-    expect(parts[1]).toEqual({ type: 'text', text: 'It is sunny.' });
-  });
-
-  it('returns replies without tool calls unchanged', () => {
-    const parts = fold([{ reasoning: 'Hmm.' }, { text: 'Answer.' }]);
-
-    expect(getWorkDetailsMessageParts(parts)).toBe(parts);
   });
 });
