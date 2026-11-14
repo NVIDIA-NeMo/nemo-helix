@@ -39,15 +39,10 @@ Build pods run in another namespace, so the platform's URL they get must be name
 {{- if .Values.builder.enabled }}
 platform:
   base_url: {{ printf "http://%s.%s.svc:%s" (include "nhx-api.api-servicename" .) .Release.Namespace (toString .Values.api.service.port) | quote }}
-{{- if or .Values.builder.devRegistry.enabled .Values.builder.maxConcurrentBuilds }}
+{{- if .Values.builder.devRegistry.enabled }}
 builder:
-  {{- if .Values.builder.devRegistry.enabled }}
   # Fully qualified: registry clients, cosign's among them, speak plain HTTP by default only to a `.local` host.
   registry: {{ printf "http://%s.%s.svc.cluster.local:5000" (include "nemo-helix.builder.devRegistryName" .) .Release.Namespace | quote }}
-  {{- end }}
-  {{- with .Values.builder.maxConcurrentBuilds }}
-  max_concurrent_builds: {{ . | int }}
-  {{- end }}
 {{- end }}
 {{- end }}
 {{- end -}}
@@ -69,6 +64,11 @@ a profile the config adds doesn't inherit executor_defaults.
     # Deletes each finished step's Job and, once the job succeeds, its directory on the work volume. Nothing else does.
     cleanup_completed_jobs_immediately: true
     ttl_seconds_before_active: {{ $.Values.builder.ttlSecondsBeforeActive | int }}
+    {{- with $.Values.builder.maxConcurrentBuilds }}
+    # Jobs starts a step on this profile only while fewer than this many run on it, and queues the rest. Jobs counts
+    # each profile apart, so only build steps count here: eval, customizer and other jobs run on other profiles.
+    max_active_jobs: {{ . | int }}
+    {{- end }}
     storage:
       pvc_name: {{ include "nemo-helix.builder.workVolume" $ | quote }}
       volume_permissions_image: {{ $.Values.core.storage.volumePermissionsImage | quote }}
