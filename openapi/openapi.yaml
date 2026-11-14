@@ -2999,6 +2999,15 @@ paths:
               schema:
                 type: string
                 format: binary
+        '409':
+          description: Upstream object changed; retry the request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
