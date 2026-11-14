@@ -424,8 +424,13 @@ class ListTracesQueryParams(TypedDict, total=False):
     filter: TraceFilterParam | str
 
 
+class RetrieveSpanQueryParams(TypedDict, total=False):
+    session_id: str
+
+
 class RetrieveTraceQueryParams(TypedDict, total=False):
     mode: TraceMode
+    session_id: str
 
 
 class SpanFilterParam(TypedDict, total=False):

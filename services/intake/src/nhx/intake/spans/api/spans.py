@@ -11,6 +11,7 @@ from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.filter import FilterOperator
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
+from nhx.intake.repository.span import SpanAmbiguousError
 from nhx.intake.spans.api.dependencies import SpansServiceDep, require_workspace_access, validate_list_query_params
 from nhx.intake.spans.api.query_filters import (
     filter_comparisons,
@@ -174,7 +175,10 @@ async def list_span_groups(
 
 @router.get(
     "/v2/workspaces/{workspace}/spans/{span_id}",
-    responses={404: {"model": ErrorResponse, "description": "Span not found"}},
+    responses={
+        404: {"model": ErrorResponse, "description": "Span not found"},
+        409: {"description": "Span ID belongs to multiple sessions; supply session_id."},
+    },
     response_model=Span,
     response_model_exclude_none=True,
     tags=[API_TAG],
@@ -183,9 +187,17 @@ async def get_span(
     workspace: str,
     span_id: str,
     service: SpansServiceDep,
+    session_id: str | None = Query(
+        default=None, description="Session containing the span. Required for ambiguous span IDs."
+    ),
 ) -> Span:
     try:
-        span = await service.get_span(workspace=workspace, span_id=span_id)
+        span = await service.get_span(workspace=workspace, span_id=span_id, session_id=session_id)
+    except SpanAmbiguousError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Span {workspace}/{span_id} belongs to multiple sessions; supply session_id",
+        ) from exc
     except SpanNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Span {workspace}/{span_id} not found")
     return Span.from_domain(span)

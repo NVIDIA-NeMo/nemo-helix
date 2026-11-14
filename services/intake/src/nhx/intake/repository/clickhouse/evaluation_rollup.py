@@ -431,7 +431,7 @@ def _current_session_span_metrics_sql(spans_table: str, joined_after_sql: str = 
                 workspace,
                 source_format,
                 trace_id,
-                argMax(session_id, (event_ts, is_deleted)) AS dedup_session_id,
+                session_id AS dedup_session_id,
                 argMax({USAGE_TIER_EXPRESSION}, (event_ts, is_deleted)) AS usage_tier,
                 argMax({USAGE_SUPERSEDED_EXPRESSION}, (event_ts, is_deleted)) AS usage_superseded,
                 argMax(attributes_number[%(cost_key)s], (event_ts, is_deleted)) AS cost_value,
@@ -447,7 +447,7 @@ def _current_session_span_metrics_sql(spans_table: str, joined_after_sql: str = 
             FROM {spans_table}
             WHERE workspace = %(workspace)s
                 AND (workspace, session_id) IN (SELECT DISTINCT workspace, session_id FROM scoped_sessions){joined_after_sql}
-            GROUP BY workspace, source_format, trace_id, external_span_id, id
+            GROUP BY workspace, session_id, source_format, trace_id, external_span_id, id
         )
     """
 

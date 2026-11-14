@@ -16,6 +16,7 @@ from nhx.intake.repository.clickhouse.span import (
     _order_by,
 )
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
+from nhx.intake.repository.span import SpanAmbiguousError
 from nhx.intake.spans.api.spans_schemas import SpanGroupBy, SpanGroupSortField
 from nhx.intake.spans.domain import SpanListFilter, SpanStatus
 from nhx.intake.spans.storage import make_pagination
@@ -366,3 +367,54 @@ def _span_row(*, internal_id: int, external_span_id: str, started_at: datetime) 
         "is_deleted": 0,
     }
     return tuple(values[column] for column in SPAN_COLUMNS)
+
+
+@pytest.mark.asyncio
+async def test_get_span_rejects_unscoped_colliding_sessions():
+    client = _Client(
+        query_results=[
+            _QueryResult(
+                [(1, "session-a", 1, 0), (1, "session-b", 2, 0)],
+                ["id", "session_id", "start_time_us", "current_is_deleted"],
+            )
+        ]
+    )
+    with pytest.raises(SpanAmbiguousError):
+        await _repository(client).get_span(workspace="workspace-a", span_id="shared")
+    assert len(client.queries) == 1
+    assert "GROUP BY workspace, session_id, source_format, trace_id, external_span_id, id" in client.queries[0]
+    assert "LIMIT 1 BY session_id" in client.queries[0]
+    assert "LIMIT 2" in client.queries[0]
+    assert "argMax(session_id" not in client.queries[0]
+
+
+@pytest.mark.asyncio
+async def test_get_span_scoped_miss_never_looks_in_another_session():
+    client = _Client()
+    assert await _repository(client).get_span(workspace="workspace-a", span_id="shared", session_id="session-b") is None
+    assert len(client.queries) == 1
+    assert client.parameters[0] == {"workspace": "workspace-a", "span_id": "shared", "session_id": "session-b"}
+    assert "AND session_id = %(session_id)s" in client.queries[0]
+
+
+@pytest.mark.asyncio
+async def test_get_span_scoped_lookup_hydrates_the_selected_session():
+    started_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    values = dict(
+        zip(SPAN_COLUMNS, _span_row(internal_id=7, external_span_id="shared", started_at=started_at), strict=True)
+    )
+    values["session_id"] = "session-b"
+    values["name"] = "session-b-span"
+    client = _Client(
+        query_results=[
+            _QueryResult(
+                [(7, "session-b", 1767225600000000, 0)], ["id", "session_id", "start_time_us", "current_is_deleted"]
+            ),
+            _QueryResult([tuple(values[column] for column in SPAN_COLUMNS)], SPAN_COLUMNS),
+        ]
+    )
+    span = await _repository(client).get_span(workspace="workspace-a", span_id="shared", session_id="session-b")
+    assert span is not None
+    assert span.session_id == "session-b"
+    assert span.name == "session-b-span"
+    assert all(parameters["session_id"] == "session-b" for parameters in client.parameters)
