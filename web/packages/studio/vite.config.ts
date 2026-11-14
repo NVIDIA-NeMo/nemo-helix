@@ -399,6 +399,76 @@ const isCI = Boolean(process.env.CI);
 const isProd = process.env.NODE_ENV === 'production';
 const isTest = Boolean(process.env.VITEST);
 
+// CI shards the Studio suite by product area via STUDIO_TEST_GROUP. A file runs in the first
+// group whose prefixes match it; `platform` takes the rest, so no file is dropped or repeated.
+const STUDIO_TEST_GROUPS: Readonly<Record<string, readonly string[]>> = {
+  agents: [
+    'src/routes/agents',
+    'src/api/agents',
+    'src/components/agents',
+    'src/components/*Intake*',
+    'src/routes/*Intake*',
+    'src/api/intake',
+    'src/components/*Trace*',
+    'src/routes/*Trace*',
+  ],
+  data: [
+    'src/components/dataViews',
+    'src/components/filesets',
+    'src/components/*Fileset*',
+    'src/routes/*Fileset*',
+    'src/components/File*',
+    'src/components/*DataDesigner*',
+    'src/routes/DataDesigner*',
+    'src/components/*SafeSynthesizer*',
+    'src/routes/SafeSynthesizer*',
+    'src/components/*Anonymizer*',
+    'src/routes/Anonymizer*',
+    'src/api/datasets',
+    'src/api/files',
+    'src/components/transform',
+  ],
+  models: [
+    'src/components/evaluation',
+    'src/routes/evaluation',
+    'src/routes/Evaluation*',
+    'src/api/evaluation',
+    'src/components/*Customization*',
+    'src/routes/*Customization*',
+    'src/components/customizer',
+    'src/routes/guardrails',
+    'src/api/guardrail*',
+    'src/routes/Model*',
+    'src/routes/*Deployment*',
+    'src/routes/InferenceProvider*',
+    'src/routes/optimizer',
+    'src/routes/Experiment*',
+    'src/routes/virtualModels',
+  ],
+};
+const STUDIO_TEST_FILE = '**/*.{test,spec}.?(c|m)[jt]s?(x)';
+
+function studioTestGroupFiles(group: string | undefined): {
+  include?: string[];
+  exclude: string[];
+} {
+  if (!group) return { exclude: [] };
+  const names = Object.keys(STUDIO_TEST_GROUPS);
+  const index = group === 'platform' ? names.length : names.indexOf(group);
+  if (index < 0) {
+    throw new Error(
+      `Unknown STUDIO_TEST_GROUP "${group}"; expected one of ${[...names, 'platform'].join(', ')}`
+    );
+  }
+  return {
+    include: STUDIO_TEST_GROUPS[group]?.map((prefix) => `${prefix}/${STUDIO_TEST_FILE}`),
+    exclude: names
+      .slice(0, index)
+      .flatMap((name) => STUDIO_TEST_GROUPS[name].map((prefix) => `${prefix}/**`)),
+  };
+}
+const studioTestGroup = studioTestGroupFiles(process.env.STUDIO_TEST_GROUP);
+
 const commonPackageDir = path.resolve(configDir, '../common');
 const licenseFileNames = [
   'LICENSE',
@@ -620,7 +690,8 @@ export default defineConfig(({ mode }) => {
       setupFiles: ['@nemo/testing/react/setup', './vitest.setup.tsx'],
       testTimeout: isCI ? 60000 : 10000,
       hookTimeout: isCI ? 60000 : 10000,
-      exclude: ['e2e-tests/**', 'node_modules'],
+      ...(studioTestGroup.include && { include: studioTestGroup.include }),
+      exclude: ['e2e-tests/**', 'node_modules', ...studioTestGroup.exclude],
       coverage: {
         include: ['src/**/*.{js,jsx,ts,tsx}'],
         provider: 'v8',
