@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib.util
 import math
 import random
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -76,6 +77,27 @@ def _response(texts: list[str], *, reasoning: str | None = None, field: str = "s
     return {"id": "resp_1", "object": "response", "output": output, "usage": usage}
 
 
+#: Gym 0.7.0's ``ResponsesConverter.THINK_TAG_PATTERN`` (``nemo_gym/responses_converter.py``).
+GYM_THINK_TAGS = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+
+
+def _through_gyms_reasoning_parser(message: dict[str, str], tokens: int | None) -> dict:
+    """The response Gym 0.7.0's ``inference_provider`` returns for ``message`` with ``uses_reasoning_parser: true``.
+
+    ``InferenceProvider.chat_completions`` wraps the provider's ``reasoning_content`` in ``<think>`` tags in front
+    of the content. ``ResponsesConverter.postprocess_assistant_message_dict`` then moves every ``<think>`` block
+    into one reasoning item, a summary part each, and keeps the rest as the output text.
+    """
+    own = message.get("reasoning_content") or ""
+    content = (f"<think>{own}</think>" if own else "") + message["content"]
+    blocks = GYM_THINK_TAGS.findall(content)
+    response = _response([GYM_THINK_TAGS.sub("", content)], tokens=tokens)
+    if blocks:
+        summary = [{"type": "summary_text", "text": block} for block in blocks]
+        response["output"].insert(0, {"type": "reasoning", "id": "rs_1", "summary": summary})
+    return response
+
+
 def _cookbook_scores(task: str, reference: str, message: dict[str, Any], tokens: int | None) -> dict[str, float]:
     row = cookbook.cookbook_row(
         task=task,
@@ -131,6 +153,10 @@ def _case(rng: random.Random) -> tuple[str, str, dict[str, Any], dict[str, Any],
         # A reasoning parser split the trace into its own output item.
         field = "summary" if form == 0 else "content"
         response = _response([prediction], reasoning=reasoning, field=field, tokens=tokens)
+        if not reasoning:
+            # Gym wraps the model's own reasoning only when there is some, so an empty part was an empty block the
+            # model wrote.
+            return task, reference, response, {"content": f"<think></think>{prediction}"}, tokens
         return task, reference, response, {"content": prediction, "reasoning_content": reasoning}, tokens
     text = {
         2: f"{reasoning}\n</think>\n{prediction}",
@@ -151,6 +177,61 @@ def test_the_scorer_agrees_with_the_cookbook_on_generated_rows() -> None:
         scores = scoring.score(task=task, expected_answer=reference, response=response)
 
         assert scores == pytest.approx(_cookbook_scores(task, reference, message, tokens)), (task, response)
+
+
+def test_the_scorer_agrees_with_the_cookbook_through_gyms_reasoning_parser() -> None:
+    """With the parser on, the scorer rebuilds the message the provider returned, so the cookbook's split agrees."""
+    rng = random.Random(4037)
+    traces = ["revenue = 120\nanswer = revenue * 2", "answer = (120", "Read the table."]
+    for _ in range(600):
+        task = rng.choice(list(TASKS))
+        reference, prediction = _answer_pair(rng, task)
+        trace, other = rng.choice(traces), rng.choice(traces)
+        content = rng.choice(
+            [
+                f"<think>\n{trace}\n</think>\n{prediction}",
+                f"<think>{trace}</think>\n\n{prediction}",
+                f"<think>{trace}</think><think>{other}</think>{prediction}",
+                f"<think></think><think>{trace}</think>{prediction}",
+                f"<think></think>{prediction}",
+                prediction,
+                f"<think>\n{trace} and then",
+                "",
+            ]
+        )
+        own = rng.choice(["", "The user wants the 2019 value.\nRead the table.", trace])
+        message = {"content": content, "reasoning_content": own}
+        tokens = rng.choice([None, 100, 255, 256, 511, 512])
+
+        scores = scoring.score(
+            task=task, expected_answer=reference, response=_through_gyms_reasoning_parser(message, tokens)
+        )
+
+        assert scores == pytest.approx(_cookbook_scores(task, reference, message, tokens)), (task, message)
+
+
+def test_the_models_own_reasoning_decides_where_the_cookbook_finds_the_answer() -> None:
+    """The base model reasons, then writes the prompt's ``<think>`` block and the answer in its content.
+
+    The cookbook puts the reasoning first, so the answer it splits off still holds the written block, and the row
+    scores 0. Without the reasoning parser, Gym drops the reasoning, and the same row would score 1.
+    """
+    message = {
+        "reasoning_content": "The user wants the year with more capital.\nCompare 100,076 and 92,322.",
+        "content": "<think>\nCapital is 92,322 in 2019 and 100,076 in 2018.\n</think>\n2018",
+    }
+    expected = _cookbook_scores("TAT-DQA/span", "2018", message, 361)
+    assert expected["task_correct"] == 0.0
+
+    with_parser = scoring.score(
+        task="TAT-DQA/span", expected_answer="2018", response=_through_gyms_reasoning_parser(message, 361)
+    )
+    reasoning_dropped = scoring.score(
+        task="TAT-DQA/span", expected_answer="2018", response=_response([message["content"]], tokens=361)
+    )
+
+    assert with_parser == pytest.approx(expected)
+    assert reasoning_dropped["task_correct"] == 1.0
 
 
 def test_generated_rows_reach_every_outcome() -> None:

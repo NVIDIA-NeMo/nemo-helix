@@ -29,20 +29,27 @@ def token_limit(task: str) -> int:
 def chat_message(response: Mapping[str, Any]) -> dict[str, str]:
     """The Responses API ``response`` as the chat message the cookbook reads.
 
-    The output text becomes ``content``. Reasoning that a parser split into its own output item becomes
-    ``reasoning_content``, which the cookbook puts back inside ``<think>`` before splitting the answer off.
+    Needs ``uses_reasoning_parser: true`` on Gym's ``inference_provider``, which otherwise drops
+    ``reasoning_content``. With it, Gym wraps that reasoning in ``<think>`` in front of the content, then moves
+    every ``<think>`` block into a reasoning item. Putting the blocks back in front of the content rebuilds that
+    text, which the cookbook splits as it would the provider's message.
+
+    Gym doesn't keep where the blocks sat, so a block written after the answer moves in front of it. That can change
+    the cookbook's answer only when the model returns no reasoning of its own.
     """
-    content: list[str] = []
-    reasoning: list[str] = []
+    blocks = ""
+    text = ""
     for item in response.get("output") or []:
-        kind = item.get("type")
-        if kind == "message":
-            content.extend(part["text"] for part in item.get("content") or [] if part.get("text"))
-        elif kind == "reasoning":
-            for part in [*(item.get("summary") or []), *(item.get("content") or [])]:
+        if item.get("type") == "reasoning":
+            for part in list(item.get("summary") or []) + list(item.get("content") or []):
+                # An empty block still goes back: its tags move the cookbook's split.
+                if part.get("text") is not None:
+                    blocks += f"<think>{part['text']}</think>"
+        elif item.get("type") == "message":
+            for part in item.get("content") or []:
                 if part.get("text"):
-                    reasoning.append(part["text"])
-    return {"content": "".join(content), "reasoning_content": "\n".join(reasoning)}
+                    text += part["text"]
+    return {"content": blocks + text}
 
 
 def score(*, task: str, expected_answer: str, response: Mapping[str, Any], tolerance: float = 0.05) -> dict[str, float]:
