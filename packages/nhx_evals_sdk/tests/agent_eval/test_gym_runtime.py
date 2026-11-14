@@ -2127,6 +2127,34 @@ def test_workspace_secret_prefers_prefixed_variable_then_bare_fallback(monkeypat
     assert observed == ["workspace-value", "bare-value"]
 
 
+def test_gym_servers_get_an_output_dir_inside_the_run_work_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from nhx_evals_sdk.agent_eval.runtimes.gym import runtime as gym_runtime
+    from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig
+
+    monkeypatch.setattr(gym_runtime, "gym_executable", lambda: "gym")
+    runner = GymAgentTaskRunner(config=_config(env_vars={gym_runtime.OUTPUT_DIR_ENV: "/elsewhere"}))
+    observed: list[str] = []
+
+    async def capture_env(gym, selection, subprocess_env, work_dir):
+        observed.append(subprocess_env[gym_runtime.OUTPUT_DIR_ENV])
+        raise RuntimeError("stop before start")
+
+    monkeypatch.setattr(runner, "_validate_config", capture_env)
+    monkeypatch.chdir(tmp_path)
+    tasks = discover_gym_tasks(EXAMPLE)[:1]
+    with pytest.raises(RuntimeError, match="stop before start"):
+        asyncio.run(runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=Path("run"))))
+
+    expected = tmp_path.resolve() / "run" / "gym_run" / gym_runtime.OUTPUT_SUBDIR
+    assert observed == [str(expected)]
+    assert expected.is_dir()
+
+    (expected / "video.mp4").write_text("from a failed run")
+    with pytest.raises(FileExistsError, match="already holds Gym output"):
+        asyncio.run(runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=Path("run"))))
+    assert observed == [str(expected)]
+
+
 def test_custom_secret_resolver_supplies_gym_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
     from nhx_evals_sdk.agent_eval.runtimes.gym import runtime as gym_runtime
 

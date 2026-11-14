@@ -924,6 +924,24 @@ a2: reward=0.8, error=RuntimeError
 
 The error changes `a2`'s status and error rollup; it does not discard or replace its finite reward.
 
+## Keep task outputs
+
+A task's container is removed when its trial ends. To keep files the task produces, such as generated
+media or checkpoints, list their container paths in `artifacts`:
+
+```json
+"target": {
+    "kind": "harbor",
+    "artifacts": ["/workspace/scratch"]
+}
+```
+
+Harbor copies each path out of the task container after the trial, mirroring it under the trial's
+`artifacts/` directory, so `/workspace/scratch/video.mp4` lands at `artifacts/workspace/scratch/video.mp4`.
+Files written to `/logs/artifacts/` are collected without being listed. A platform job saves them with the
+rest of Harbor's output under `evidence/harbor/` in the `agent-eval-results` result. Only regular files are
+uploaded; symbolic links are skipped.
+
 ## Attempts and concurrency
 
 - **`n_attempts`** — desired attempts per task. On resume, Harbor runs only the missing attempts.
