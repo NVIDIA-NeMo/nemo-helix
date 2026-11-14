@@ -55,6 +55,19 @@ metric = ExactMatchMetric.from_template(
 result = evaluate_offline_sync(metric=metric, dataset=[{"expected": "4", "prediction": "4"}])
 ```
 
+## Gym captured usage in OTLP
+
+Captured Gym model calls preserve input, output, reported total, cache read,
+cache write, and reasoning token counts when converted to OTLP traces for Intake.
+Gym's normalized usage takes precedence over provider-reported usage; older
+captures without normalized counters continue to use the provider's counts.
+Explicit zeros are preserved, unknown counts remain absent, and missing totals
+are not inferred.
+
+When a rollout includes valid embedded model-call captures, those captures are
+used instead of separately supplied calls. Empty or malformed embedded captures
+leave separately supplied calls in effect.
+
 ## Docker Compose sandbox provider
 
 `compose.py` is the stable public facade for the production Docker Compose

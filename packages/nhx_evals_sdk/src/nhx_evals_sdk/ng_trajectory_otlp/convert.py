@@ -59,12 +59,16 @@ def rollout_to_resource_spans(
 
     Args:
         record: One Gym rollout record.
+            A nonempty ``ng_model_call_capture.calls`` list of mappings takes precedence over
+            ``model_calls`` when the record includes embedded capture evidence.
         run_id: Identifies the evaluation run; independent executions must use distinct IDs.
         rollout_id: Identifies this attempt uniquely among all rollouts in the run.
         task_id: The task this rollout answers, used to name the root span.
         model_calls: This rollout's captured model exchanges, when Gym recorded them. Each becomes
             its own timed LLM span; without them the rollout record supports only one untimed span
             carrying the turn's summed usage.
+            Captures with ``tokens_in`` or ``tokens_out`` use Gym's normalized usage counters,
+            including explicit unknown values, instead of reinterpreting raw provider usage.
 
     Returns:
         The rollout's resource spans, ready to hand to ``ExportTraceServiceRequest`` or to store:
@@ -80,6 +84,11 @@ def rollout_to_resource_spans(
     # bare string. Both are answers; only the mapping carries usage and tool calls.
     answer = raw_response if isinstance(raw_response, str) and raw_response else None
     response = raw_response if isinstance(raw_response, Mapping) else {}
+
+    capture = record.get("ng_model_call_capture")
+    calls = capture.get("calls") if isinstance(capture, Mapping) else None
+    if isinstance(calls, list) and calls and all(isinstance(call, Mapping) for call in calls):
+        model_calls = calls
 
     llm_spans = [
         _captured_llm_span(call, trace_id=trace_id, parent_id=root_id, seed=identity, ordinal=ordinal)
@@ -183,14 +192,33 @@ def _captured_llm_span(call: Mapping[str, Any], *, trace_id: bytes, parent_id: b
         attributes["gen_ai.request.model"] = model
     response = call.get("response")
     usage = response.get("usage") if isinstance(response, Mapping) else None
-    if isinstance(usage, Mapping):
+    if "tokens_in" in call or "tokens_out" in call:
+        # Gym normalizes provider dialects, including Anthropic's exclusive input/cache counts.
+        for field, attribute in (
+            ("tokens_in", "gen_ai.usage.input_tokens"),
+            ("tokens_out", "gen_ai.usage.output_tokens"),
+            ("tokens_total", "gen_ai.usage.total_tokens"),
+            ("cached_tokens", "llm.token_count.prompt_details.cache_read"),
+            ("cache_creation_tokens", "llm.token_count.prompt_details.cache_write"),
+            ("tokens_reasoning", "llm.token_count.completion_details.reasoning"),
+        ):
+            if (count := _token_count(call, (field,))) is not None:
+                attributes[attribute] = count
+    elif isinstance(usage, Mapping):
         if (prompt := _token_count(usage, _PROMPT_TOKEN_KEYS)) is not None:
             attributes["gen_ai.usage.input_tokens"] = prompt
         if (completion := _token_count(usage, _COMPLETION_TOKEN_KEYS)) is not None:
             attributes["gen_ai.usage.output_tokens"] = completion
-        details = usage.get("input_tokens_details")
-        if isinstance(details, Mapping) and (cached := _token_count(details, ("cached_tokens",))) is not None:
-            attributes["gen_ai.usage.cache_read.input_tokens"] = cached
+        if (total := _token_count(usage, ("total_tokens",))) is not None:
+            attributes["gen_ai.usage.total_tokens"] = total
+        for details_key, count_key, attribute in (
+            ("input_tokens_details", "cached_tokens", "llm.token_count.prompt_details.cache_read"),
+            ("input_tokens_details", "cache_write_tokens", "llm.token_count.prompt_details.cache_write"),
+            ("output_tokens_details", "reasoning_tokens", "llm.token_count.completion_details.reasoning"),
+        ):
+            details = usage.get(details_key)
+            if isinstance(details, Mapping) and (count := _token_count(details, (count_key,))) is not None:
+                attributes[attribute] = count
     if isinstance(ttft := call.get("latency_ttft_ms"), (int, float)) and not isinstance(ttft, bool):
         # No OTLP semantic convention names time-to-first-token on a span, so this stays namespaced
         # rather than borrowing a metric's name and implying a meaning it does not have.
