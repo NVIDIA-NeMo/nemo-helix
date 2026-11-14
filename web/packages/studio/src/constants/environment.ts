@@ -45,6 +45,7 @@ export const EVALS_BENCHMARKS_ENABLED = featureFlags.evalsBenchmarksEnabled !== 
 export const EXPERIMENT_ENABLED = featureFlags.experiment !== false;
 export const INTAKE_ENABLED = featureFlags.intakeEnabled !== false;
 export const MEMBERS_ENABLED = featureFlags.membersEnabled !== false;
+export const METRICS_ENABLED = featureFlags.metricsEnabled !== false;
 export const MODEL_DETAILS_ENABLED = featureFlags.modelDetailsEnabled !== false;
 export const MODEL_EVALUATION_FORM_ENABLED = featureFlags.modelEvaluationFormEnabled !== false;
 export const MONITOR_ENABLED = featureFlags.monitorEnabled !== false;
