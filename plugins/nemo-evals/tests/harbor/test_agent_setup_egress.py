@@ -7,6 +7,7 @@ import asyncio
 import shlex
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -19,8 +20,10 @@ from harbor.agents.installed.base import NonZeroAgentExitCodeError
 from harbor.agents.nop import NopAgent
 from harbor.environments.base import ExecResult
 from harbor.environments.capabilities import EnvironmentCapabilities
-from harbor.models.task.config import NetworkMode, NetworkPolicy
+from harbor.environments.docker.docker import DockerEnvironment
+from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.config import AgentConfig
+from harbor.models.trial.paths import TrialPaths
 from nemo_evals.harbor import agent_setup_egress
 from nemo_evals.harbor.agent_setup_egress import (
     GUARDED_METHODS,
@@ -713,3 +716,36 @@ def test_an_acp_shorthand_keeps_its_registry_spec(tmp_path):
     from harbor.agents.installed.acp import AcpAgent
 
     assert isinstance(_agent(tmp_path, inner="acp:claude-code"), AcpAgent)
+
+
+@pytest.mark.parametrize("name", ["host-gateway.yaml", "host-gateway-sidecar.yaml"])
+@pytest.mark.parametrize("task_compose", [False, True])
+@pytest.mark.parametrize("caller_overlay", [False, True])
+def test_only_sdk_host_alias_overlays_are_excluded_from_compose_guard(
+    tmp_path: Path, name: str, task_compose: bool, caller_overlay: bool
+) -> None:
+    environment_dir = tmp_path / "environment"
+    environment_dir.mkdir()
+    (environment_dir / "Dockerfile").write_text("FROM python:3.13-slim\n")
+    if task_compose:
+        (environment_dir / "docker-compose.yaml").write_text("services: {worker: {image: alpine}}\n")
+    alias = Path(str(files("nhx_evals_sdk.agent_eval.runtimes.harbor").joinpath(name)))
+    overlays = [alias]
+    if caller_overlay:
+        # An identical basename or content outside the installed SDK is not a
+        # trusted alias overlay. A task can put arbitrary services in that file.
+        custom = tmp_path / name
+        custom.write_text(alias.read_text())
+        overlays.append(custom)
+    environment = DockerEnvironment(
+        environment_dir=environment_dir,
+        environment_name="sdk-alias-guard",
+        session_id="sdk-alias-guard",
+        trial_paths=TrialPaths(trial_dir=tmp_path / "trial"),
+        task_env_config=EnvironmentConfig(),
+        extra_docker_compose=overlays,
+    )
+    # A public baseline needs no daemon or kernel probe. This test exercises the
+    # actual installed Docker class's Compose classification, not a fake client.
+    assert environment._uses_compose
+    assert agent_setup_egress._uses_compose(environment) is (task_compose or caller_overlay)

@@ -26,6 +26,8 @@ import shlex
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from functools import cache
+from importlib.resources import files
+from pathlib import Path
 from typing import Any, ClassVar
 
 from harbor.agents.base import BaseAgent
@@ -33,6 +35,7 @@ from harbor.agents.factory import AgentFactory
 from harbor.agents.installed.acp_registry import is_acp_registry_shorthand, registry_spec_from_agent_name
 from harbor.agents.installed.base import BaseInstalledAgent, NonZeroAgentExitCodeError
 from harbor.environments.base import BaseEnvironment, ExecResult
+from harbor.environments.docker.docker import DockerEnvironment
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from harbor.models.trial.config import AgentConfig
 from nemo_evals.harbor.setup_cleanup import KILL_CONNECTION_HOLDERS_SCRIPT, LIST_PROCESSES_SCRIPT, SHELL, SYSTEM_PATH
@@ -189,7 +192,20 @@ def _uses_compose(environment: BaseEnvironment) -> bool:
     The cleanup only sees the main service's processes, so a compose environment keeps the task's policy.
     Every Harbor provider that supports compose reports per instance whether it uses it.
     """
-    return environment.capabilities.docker_compose and environment._uses_compose
+    if not (environment.capabilities.docker_compose and environment._uses_compose):
+        return False
+    if isinstance(environment, DockerEnvironment) and not environment._environment_docker_compose_path.exists():
+        # The SDK adds host aliases as Compose overlays, but they start no task
+        # services. Only these installed overlays are safe to exclude: a task's
+        # own Compose file or any caller overlay must keep the existing guard.
+        aliases = {
+            Path(str(files("nhx_evals_sdk.agent_eval.runtimes.harbor").joinpath(name))).resolve()
+            for name in ("host-gateway.yaml", "host-gateway-sidecar.yaml")
+        }
+        overlays = environment.extra_docker_compose_paths
+        if overlays and all(path.resolve() in aliases for path in overlays):
+            return False
+    return True
 
 
 @cache
