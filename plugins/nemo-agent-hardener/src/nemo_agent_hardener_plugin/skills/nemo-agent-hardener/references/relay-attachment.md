@@ -36,7 +36,7 @@ for Route B (BYO).
    | Framework | The interception line |
    |---|---|
    | LangChain `create_agent` | `create_agent(model=…, tools=…, middleware=[NemoRelayMiddleware()])` |
-   | Hand-built LangGraph graph | `graph.add_node("tools", create_tool_node(TOOLS))` — `from nemo_relay.integrations.langgraph import create_tool_node` |
+   | Hand-built LangGraph graph | `graph.add_node("tools", create_tool_node(TOOLS))` — `from nemo_relay.integrations.langgraph import create_tool_node`; or, to keep your own `ToolNode` options, `ToolNode(TOOLS, awrap_tool_call=NemoRelayMiddleware().awrap_tool_call)` (what `examples/langgraph-victim` does) |
    | DeepAgents library | `create_deep_agent(**add_nemo_relay_integration(kwargs))` — `from nemo_relay.integrations.deepagents import add_nemo_relay_integration` |
    | Hermes | no code: `export HERMES_NEMO_RELAY_PLUGINS_TOML=/etc/nemo-relay/plugins.toml` and `hermes plugins enable observability/nemo_relay` in the Dockerfile |
 
