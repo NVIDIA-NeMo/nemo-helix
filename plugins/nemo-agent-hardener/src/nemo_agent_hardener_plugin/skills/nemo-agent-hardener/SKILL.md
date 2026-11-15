@@ -142,7 +142,8 @@ nemo agent-hardener init --project-dir ./my-agent --name my-agent --harness lang
   confirm they match the agent before continuing.
 - A name is used once: `init` with an existing `--name` fails with `HTTP 409 … already exists`, and
   there is no `manifest delete`. Change an existing manifest with `manifest set` (or `refresh` after
-  the agent's files change); start over under a new `--name`.
+  the agent's files change); start over under a new `--name`, then run `synth-benign` for it before
+  `run`, since a new name has no benign suite.
 
 **Worked example — the bundled `langgraph-victim`, with an NVIDIA Build key.** Its Dockerfile states
 none of the secrets, model settings or hosts, so `init` warns "No credential-shaped env names" and
