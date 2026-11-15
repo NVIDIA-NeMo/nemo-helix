@@ -36,7 +36,7 @@ Symptom → cause → fix. Every entry here has actually happened.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Fileset name is required` (or the ref is not found) on `--replay-hitlog` | a bare name or file path was passed where a `<workspace>/<fileset>` reference is expected | `nemo files filesets create` first, `nemo files upload` into it, then reference `workspace/name` — upload does **not** auto-create a named fileset |
-| The guardrails defender wrote no rail for an attack: `no execution trace for this attack` | the attack left no Relay trace when it was sent (live, or re-sent by a replay): Relay is not attached to the victim, or the agent never answered it | confirm Relay is attached ([relay-attachment.md](relay-attachment.md)), then run or replay again |
+| The guardrails defender wrote no rail for an attack: `no execution trace for this attack` | the attack left no Relay trace it could be matched to when it was sent (live, or re-sent by a replay): Relay is not attached to the victim, the agent never answered it, or — on a hand-built LangGraph graph — the model node calls the model outside Relay, so traces carry no prompt (tool calls still show) | confirm Relay is attached and, on a hand-built graph, that model calls go through `nemo_relay.llm.execute` ([relay-attachment.md](relay-attachment.md), obligation 3); then run or replay again |
 
 ## Results read wrong
 
