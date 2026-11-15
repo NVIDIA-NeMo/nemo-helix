@@ -3,7 +3,7 @@
 
 """``agent-hardener.war-game`` job — registered under ``nemo.jobs``.
 
-Orchestrates one attack/defend/validate war-game against a deployed NAT agent by shelling out to
+Orchestrates one attack/defend/validate war-game against a deployed agent by shelling out to
 agent-hardener's own CLI (its own venv; agent-hardener is never imported). This module holds only the job
 class: ``compile`` builds the platform job spec (pre-creating the run record for Studio's live view)
 and ``run`` sequences the phases. The mechanics live in sibling modules:
@@ -187,7 +187,7 @@ class AgentHardenerRunJob(NemoJob):
 
     name = "war-game"  # CLI: `nemo agent-hardener war-game ...`; keeps `run` free for the wrapper command
     job_collection_path = "/jobs"
-    description = "Run the Agent Hardener war-game against a deployed NAT agent."
+    description = "Run the Agent Hardener war-game against a deployed agent."
     container = "cpu-tasks"
     spec_schema: ClassVar[type[BaseModel] | None] = WarGameSpec
 
