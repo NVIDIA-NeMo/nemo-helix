@@ -29,7 +29,7 @@ Symptom → cause → fix. Every entry here has actually happened.
 | A run fails with `429` or `rate limit` errors | the NVIDIA key hit its rate limit | switch Agent Hardener's models to another provider (SKILL.md, "Changing Agent Hardener's models") |
 | `safety model … not applied: no defender selection to attach it to` | `--safety-model` is set but the manifest has no defender selection, so the default judge is used | `manifest set <name> --defender guardrails --defender openshell` |
 | After `manifest set --env`, the agent cannot reach its model | `--env` replaced the whole env map and dropped the values not passed (for example `INFERENCE_BASE_URL`) | pass every `--env KEY=VALUE` again; check with `manifest show` |
-| `init` fails with `HTTP 409: Manifest '…' already exists` | the name is taken; there is no `manifest delete` | change it with `manifest set`, or use a new `--name` |
+| `init` fails with `HTTP 409: Manifest '…' already exists` | the name is taken; there is no `manifest delete` | change it with `manifest set`, or use a new `--name` and run `synth-benign` for it before `run` |
 
 ## Run or job never starts
 
