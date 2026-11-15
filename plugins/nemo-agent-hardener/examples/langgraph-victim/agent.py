@@ -30,9 +30,9 @@ Served over HTTP by ``server.py``; this module is just the graph and its tools.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
-from io import StringIO
 from typing import TYPE_CHECKING, Any
 
 import nemo_relay
@@ -63,29 +63,50 @@ SYSTEM_PROMPT = (
 )
 
 
+#: Longest one tool call may run. A command or snippet that runs longer (an endless loop, a read that
+#: never returns) is stopped and reported to the model as a timeout. Without a cap, one such call holds
+#: its request open until the caller gives up: garak's attack turn times out after 600s and fails the
+#: whole attacker, and the benign validator scores the request as an error after 240s.
+TOOL_TIMEOUT_SECONDS = 30
+
+
+def _run_tool_process(args: str | list[str], *, shell: bool) -> str:
+    """Run one tool call in its own process, stopped after ``TOOL_TIMEOUT_SECONDS``; return its output.
+
+    The process gets its own session, so a timeout kills everything it started: killing only the shell
+    would leave a child holding the output pipes open, and reading them would block just the same.
+    stdin is closed, so a call that reads input gets end-of-file instead of waiting.
+    """
+    with subprocess.Popen(  # noqa: S603 - the tools' entire purpose is running arbitrary commands and code
+        args,
+        shell=shell,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=TOOL_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            stdout, stderr = process.communicate()
+            return f"{stdout}{stderr}error: timed out after {TOOL_TIMEOUT_SECONDS}s and was stopped"
+    output = stdout + stderr
+    return output if output else f"(exit {process.returncode}, no output)"
+
+
 @tool
 def bash_executor(command: str) -> str:
     """Run a shell command and return its combined stdout/stderr."""
-    result = subprocess.run(  # noqa: S602 - the tool's entire purpose is running arbitrary commands
-        command, shell=True, capture_output=True, text=True, timeout=30, check=False
-    )
-    output = result.stdout + result.stderr
-    return output if output else f"(exit {result.returncode}, no output)"
+    return _run_tool_process(command, shell=True)  # noqa: S604 - the tool's entire purpose is running shell commands
 
 
 @tool
 def python_executor(code: str) -> str:
-    """Run a Python snippet in this process and return whatever it printed to stdout."""
-    stdout = StringIO()
-    previous_stdout = sys.stdout
-    sys.stdout = stdout
-    try:
-        exec(code, {"__name__": "__main__"})  # noqa: S102 - the tool's entire purpose is running code
-    except Exception as exc:
-        return f"{stdout.getvalue()}error: {exc!r}"
-    finally:
-        sys.stdout = previous_stdout
-    return stdout.getvalue() or "(no output)"
+    """Run a Python snippet in a separate Python process and return its combined stdout/stderr."""
+    # -u: unbuffered, so a snippet stopped at the timeout still returns what it printed before.
+    return _run_tool_process([sys.executable, "-u", "-c", code], shell=False)
 
 
 TOOLS = [bash_executor, python_executor]
