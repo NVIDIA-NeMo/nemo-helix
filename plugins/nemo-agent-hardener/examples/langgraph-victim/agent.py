@@ -12,11 +12,17 @@ The graph is the usual two-node agent loop, wired explicitly rather than via the
     START -> model -> (tools -> model)* -> END
 
 Relay is wired the way the nemo-agent-hardener skill's relay-attachment reference prescribes for a
-hand-built graph: the tools node is
-``ToolNode(TOOLS, awrap_tool_call=relay.awrap_tool_call)``. That wrapper is *the* interception point
-— without it tool calls run outside Relay, no guardrail can refuse them, and Agent Hardener's tool-path
-preflight fails the run. The callback handler in ``server.py`` adds LLM/scope telemetry on top, but
-it is observability only and cannot refuse anything.
+hand-built graph, in both nodes:
+
+- The tools node is ``ToolNode(TOOLS, awrap_tool_call=relay.awrap_tool_call)``. That wrapper is *the*
+  interception point — without it tool calls run outside Relay, no guardrail can refuse them, and
+  Agent Hardener's tool-path preflight fails the run.
+- The model node sends each LLM call through ``nemo_relay.llm.execute``. Without it the LLM call
+  never reaches Relay: no LLM span is recorded, so the attack's trace has no prompt and no model
+  steps, and the traces guardrails defender cannot match the attack to it or write a rail from it.
+
+The callback handler in ``server.py`` adds graph/scope telemetry on top, but it is observability
+only: it records no LLM call and cannot refuse anything.
 
 Served over HTTP by ``server.py``; this module is just the graph and its tools.
 """
@@ -27,13 +33,19 @@ import os
 import subprocess
 import sys
 from io import StringIO
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from langchain_core.messages import SystemMessage
+import nemo_relay
+from langchain_core.messages import SystemMessage, messages_from_dict, messages_to_dict
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
+
+# Private module: Relay exports the middleware but not the wire format it speaks, and a hand-built
+# graph has to speak that format itself for a guardrail to read and answer its LLM calls. An
+# invented envelope is rejected by Relay's response decoding with a TypeError that ends the turn.
+from nemo_relay.integrations.langchain._serialization import LANGCHAIN_MODEL_RESPONSE_KEY, LangChainCodec
 from nemo_relay.integrations.langgraph import NemoRelayMiddleware
 from pydantic import SecretStr
 
@@ -100,9 +112,29 @@ def build_agent() -> CompiledStateGraph:
     ).bind_tools(TOOLS)
 
     async def model(state: MessagesState) -> dict[str, list]:
-        """One LLM turn: decide whether to answer or to call a tool."""
-        reply = await llm.ainvoke([SystemMessage(content=SYSTEM_PROMPT), *state["messages"]])
-        return {"messages": [reply]}
+        """One LLM turn: decide whether to answer or to call a tool — routed through Relay.
+
+        A bare ``await llm.ainvoke(...)`` reaches the provider directly, and a graph that does that is
+        only half instrumented: a guardrail can refuse a tool, but no LLM intercept runs and no LLM span
+        is recorded. The trace of an attack then carries no prompt, so nothing downstream can tell
+        which attack it belongs to.
+
+        ``create_agent`` gets this wiring from ``NemoRelayMiddleware``. A hand-built graph does it here,
+        which is what ``nemo_relay.llm.execute`` is for: the provider call becomes the innermost link
+        of the chain, and every LLM intercept wraps it.
+        """
+        messages = [SystemMessage(content=SYSTEM_PROMPT), *state["messages"]]
+        codec = LangChainCodec()
+        request = nemo_relay.LLMRequest({}, {"messages": messages_to_dict(messages), "model": MODEL})
+
+        async def call(request: nemo_relay.LLMRequest) -> Any:
+            # Read the messages back off the request rather than closing over them, so a rewrite by a
+            # request intercept is what actually reaches the provider.
+            reply = await llm.ainvoke(messages_from_dict(request.content["messages"]))
+            return {LANGCHAIN_MODEL_RESPONSE_KEY: {"messages": messages_to_dict([reply])}}
+
+        result = await nemo_relay.llm.execute(MODEL, request, call, model_name=MODEL, codec=codec, response_codec=codec)
+        return {"messages": messages_from_dict(result[LANGCHAIN_MODEL_RESPONSE_KEY]["messages"])}
 
     # THE interception line. awrap_tool_call routes every tool call through Relay, which is what
     # puts a guardrail intercept in the path; a bare ToolNode(TOOLS) runs the tools outside Relay.

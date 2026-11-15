@@ -78,8 +78,9 @@ def create_app() -> FastAPI:
     @app.post("/v1/chat/completions")
     async def chat_completions(body: ChatRequest) -> dict[str, Any]:
         # One Relay agent scope per request, with the LangGraph callback handler on the invoke:
-        # the handler records the graph/LLM runs, and the tools node (see agent.create_tool_node)
-        # records the tool calls. Everything the request does hangs off this scope.
+        # the handler records the graph's runs, the model node (nemo_relay.llm.execute) records the
+        # LLM calls, and the tools node (awrap_tool_call) records the tool calls. Everything the
+        # request does hangs off this scope.
         with nemo_relay.scope.scope("langgraph-victim", nemo_relay.ScopeType.Agent):
             result = await agent.ainvoke(
                 {"messages": [(m.role, m.content) for m in body.messages]},
