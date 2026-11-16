@@ -858,8 +858,17 @@ def check_snapshot_unchanged(before: Snapshot, after: Snapshot) -> None:
         )
 
 
-def check_workload_discovery(config: NHXOIDCConfig) -> None:
-    """Auth discovery advertises workload token exchange, so Jobs act as their ServiceAccount, not the submitter."""
+def check_workload_discovery(config: NHXOIDCConfig, *, exchange: bool) -> None:
+    """Auth is on, and discovery advertises workload token exchange exactly when the row expects it.
+
+    With exchange Jobs act as their ServiceAccount; without it, as the submitter.
+    """
+    if not exchange:
+        assert config.auth_enabled and not config.workload_token_exchange_enabled, (
+            f"[identity] expected auth on and workload token exchange off: auth_enabled={config.auth_enabled}, "
+            f"workload_token_exchange_enabled={config.workload_token_exchange_enabled}"
+        )
+        return
     assert config.auth_enabled and config.workload_token_exchange_enabled, (
         f"[identity] workload token exchange is off: auth_enabled={config.auth_enabled}, "
         f"workload_token_exchange_enabled={config.workload_token_exchange_enabled}"
@@ -870,9 +879,17 @@ def check_workload_discovery(config: NHXOIDCConfig) -> None:
     )
 
 
-def check_workload_identity(pods: Sequence[JobPod]) -> None:
-    """Every Job pod ran as the Job ServiceAccount with the workload token, so the run exercised token exchange."""
+def check_workload_identity(pods: Sequence[JobPod], *, exchange: bool) -> None:
+    """Every Job pod ran as the row expects.
+
+    With exchange, as the Job ServiceAccount with the workload token. Without it, with no workload token: the Job
+    acts as its submitter.
+    """
     assert pods, "[identity] no Job pods found in the workspace"
+    if not exchange:
+        with_token = [pod.name for pod in pods if pod.workload_token]
+        assert not with_token, f"[identity] workload token exchange is off, but {with_token} mounted the workload token"
+        return
     for pod in pods:
         assert pod.service_account == WORKLOAD_SERVICE_ACCOUNT and pod.workload_token, (
             f"[identity] {pod.name} ran as ServiceAccount {pod.service_account!r}, "

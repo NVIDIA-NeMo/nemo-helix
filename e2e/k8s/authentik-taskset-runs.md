@@ -3,12 +3,14 @@
 
 # Taskset runs with workload identity, on local kind
 
-The nightly taskset-run E2E's `auth-workload` row (`.github/workflows/nightly-taskset-runs-e2e.yaml`), run on your
-machine. It runs `e2e/test_taskset_runs.py` on the Authentik demo (`contrib/auth/authentik`) with workload token
+The nightly taskset-run E2E's `auth-on-exchange-true` row (`.github/workflows/nightly-taskset-runs-e2e.yaml`), run on
+your machine. It runs `e2e/test_taskset_runs.py` on the Authentik demo (`contrib/auth/authentik`) with workload token
 exchange, so every Job runs as the `nemo-helix-jobs` ServiceAccount on behalf of the submitter. Use it to
 reproduce a Job-identity bug, such as a Job's 403 on the Entity Store (NVBug 7083853), or to test its fix.
 
-Auth on without token exchange doesn't reach these bugs: there, Jobs act as the submitter.
+Auth on without token exchange doesn't reach these bugs: there, Jobs act as the submitter. The nightly covers
+that in its `auth-on-exchange-false` row, on the platform chart rather than this demo: the demo's own services
+authenticate through token exchange, so it doesn't run without it.
 
 ## Prerequisites
 
@@ -60,7 +62,7 @@ These are the builder registry's password, the signing key, app passwords and to
 state=~/.cache/nhx-e2e/nhx-authentik-reuse
 set -a; source "${state}/env"; set +a   # KUBECONFIG, kube context, gateway URL, gateway CA
 e2e/k8s/scripts/authentik_user_token.sh nemo-user "${state}/nemo-user.token"
-NHX_E2E_ACCESS_TOKEN="$(cat "${state}/nemo-user.token")" NHX_E2E_WORKLOAD_IDENTITY=1 \
+NHX_E2E_ACCESS_TOKEN="$(cat "${state}/nemo-user.token")" NHX_E2E_WORKLOAD_TOKEN_EXCHANGE=true \
     _TYPER_FORCE_DISABLE_TERMINAL=1 E2E_SERVICES_LOG_DIR="${state}/runs/latest" \
     uv run --frozen pytest e2e/test_taskset_runs.py --kubernetes --cluster-url "${NHX_E2E_CLUSTER_URL}" \
     --feature taskset-runs -m taskset_runs_e2e -v --no-cov --junitxml="${state}/runs/latest/junit.xml"
@@ -73,13 +75,6 @@ NHX_E2E_ACCESS_TOKEN="$(cat "${state}/nemo-user.token")" NHX_E2E_WORKLOAD_IDENTI
   also run it, as the nightly does. It builds its own images and adds up to 15 minutes.
 - **The token:** it expires after 1 hour, so mint a new one for each run.
 
-To check a failure against the nightly's known-failure rule:
-
-```bash
-python3 .github/scripts/taskset_runs_known_failure.py "${state}/runs/latest/junit.xml" "${state}/runs/latest" \
-    "${state}/runs/latest/known-failure.json"
-```
-
 ## 4. Read the result
 
 The evidence JSON in `E2E_SERVICES_LOG_DIR` records each step. These are the outcomes to expect:
@@ -88,8 +83,9 @@ The evidence JSON in `E2E_SERVICES_LOG_DIR` records each step. These are the out
   is NVBug 7083853, as on `main` until its fix lands. The test reads the error from the failed Job's pod log,
   because the build stays "building" until `JOB_GRACE` (2 min) runs out and `runs submit` times out without the
   cause. The evidence's `job_pods` shows who each pod ran as.
-- `[identity] …` means the run didn't exercise workload identity: discovery has token exchange off, or a Job pod
-  ran as another ServiceAccount or without the workload token.
+- `[identity] …` means the run didn't exercise the row's Job identity: discovery disagrees with
+  `NHX_E2E_WORKLOAD_TOKEN_EXCHANGE`, or a Job pod ran as another ServiceAccount, without the workload token with
+  exchange on, or with it with exchange off.
 - A task Job that finishes while the run's result is missing, with a 403 on an Entity Store write, is NVBug
   6993994. That bug is reachable only once 7083853 is fixed.
 
