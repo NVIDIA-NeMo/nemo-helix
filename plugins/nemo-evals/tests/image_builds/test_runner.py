@@ -25,11 +25,17 @@ from nemo_evals.image_builds.models import (
     build_entity_name,
     build_job_name,
 )
-from nemo_evals.image_builds.runner import TaskImageBuildSpec, read_task_archive, run_task_image_build
+from nemo_evals.image_builds.runner import (
+    EntityBuildRecords,
+    TaskImageBuildSpec,
+    read_task_archive,
+    run_task_image_build,
+)
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
 from nemo_evals.jobs.task_image_build import is_job_for, task_image_build_job_request
 from nemo_evals.revisions import apply_tag, get_revision, publish_revision
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.client.errors import ConflictError, PermissionDeniedError
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 Outcome = Literal["ready", "failed"]
@@ -181,7 +187,7 @@ async def _stored_task_definition(entity_store, spec: TaskImageBuildSpec) -> Har
 
 async def _run(entity_store, spec: TaskImageBuildSpec, builder: _Builder, **kwargs) -> TaskImageBuildEntity:
     return await run_task_image_build(
-        spec, entities=entity_store, files=Mock(), builder=builder, sleep=_no_sleep, **kwargs
+        EntityBuildRecords(entity_store, spec), files=Mock(), builder=builder, sleep=_no_sleep, **kwargs
     )
 
 
@@ -311,6 +317,40 @@ async def test_a_finished_build_is_left_alone(entity_store, store_task, archive)
     assert builder.submits == []
 
 
+class _RouteBuildRecords(EntityBuildRecords):
+    """Build records as the Job sees them through the job-runtime routes: a stale write is an HTTP 409."""
+
+    async def save(self, build: TaskImageBuildEntity) -> TaskImageBuildEntity:
+        try:
+            return await super().save(build)
+        except NemoEntityConflictError:
+            raise ConflictError(httpx.Response(409, json={"detail": "The image build changed since the Job read it"}))
+
+
+async def test_a_build_ended_by_another_writer_keeps_that_ending(entity_store, store_task, archive) -> None:
+    """Evals fails the build (its Job was cancelled) while the Job builds: the Job's next write conflicts, and it
+    keeps the newer ending instead of overwriting it."""
+    spec = await _start(entity_store, store_task, config={})
+
+    class _CancelledMidBuild(_Builder):
+        async def get_image(self, name: str) -> ContainerImage | None:
+            stored = await _stored_build(entity_store, spec)
+            if stored.status == "running":
+                stored.status, stored.error = "failed", "job cancelled"
+                await entity_store.update(stored)
+            return await super().get_image(name)
+
+    build = await run_task_image_build(
+        _RouteBuildRecords(entity_store, spec),
+        files=Mock(),
+        builder=_CancelledMidBuild({"sort-task/environment": "ready"}),
+        sleep=_no_sleep,
+    )
+
+    assert (build.status, build.error) == ("failed", "job cancelled")
+    assert (await _stored_build(entity_store, spec)).error == "job cancelled"
+
+
 class _RecordingJobs(_Jobs):
     def __init__(self) -> None:
         self.created: list[CreateHelixJobRequest] = []
@@ -368,7 +408,7 @@ def test_job_fails_when_the_build_fails(monkeypatch, status: str, job_status: st
     from nemo_evals.jobs.task_image_build import TaskImageBuildJob
     from nemo_helix_plugin.client.client import AsyncNemoClient
 
-    async def run(spec, **clients):
+    async def run(records, **clients):
         return Mock(status=status)
 
     monkeypatch.setattr("nemo_evals.jobs.task_image_build.run_task_image_build", run)

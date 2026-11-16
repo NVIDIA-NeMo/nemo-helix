@@ -28,8 +28,9 @@ ExecutorKey = tuple[str, str]
 
 
 def principal_of(step: HelixJobStepWithContext) -> str | None:
-    """The submitting user's identity, or ``None`` when the step carries no auth context."""
-    return step.auth_context.principal_id if step.auth_context is not None else None
+    """The submitting user's identity, the user a service submitted for, or ``None`` with no auth context."""
+    context = step.auth_context
+    return (context.principal_on_behalf_of or context.principal_id) if context is not None else None
 
 
 def round_robin_by_user(steps: Iterable[HelixJobStepWithContext]) -> list[HelixJobStepWithContext]:

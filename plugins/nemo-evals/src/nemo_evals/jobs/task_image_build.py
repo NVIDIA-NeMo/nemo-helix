@@ -10,9 +10,8 @@ import asyncio
 from nemo_evals.image_builds.builder import HttpImageBuilder
 from nemo_evals.image_builds.models import TASK_IMAGE_BUILD_JOB_SOURCE
 from nemo_evals.image_builds.runner import TaskImageBuildSpec, run_task_image_build
+from nemo_evals.image_builds.runtime import RuntimeBuildRecords
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.entities import EntityClient
-from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
@@ -29,6 +28,8 @@ from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 TASK_IMAGE_BUILD_MODULE = "nemo_evals.tasks.task_image_build"
+#: The Evals service attribute granting a task-builder Job its one build, as a ``TaskImageBuildSpec``.
+TASK_IMAGE_BUILD_GRANT = "task_image_build"
 
 TASK_IMAGE_BUILD_RESOURCES = ResourcesSpec(
     requests=ResourcesRequestsSpec(cpu="50m", memory="128Mi"),
@@ -49,8 +50,7 @@ class TaskImageBuildJob(NemoJob):
         spec = TaskImageBuildSpec.model_validate(config)
         build = asyncio.run(
             run_task_image_build(
-                spec,
-                entities=EntityClient(AsyncEntitiesClient.from_client(async_client)),
+                RuntimeBuildRecords(async_client, spec),
                 files=AsyncFilesClient.from_client(async_client),
                 builder=HttpImageBuilder(async_client, workspace=spec.workspace),
             )
@@ -81,6 +81,7 @@ def task_image_build_job_request(
         spec=spec.model_dump(mode="json"),
         platform_spec=HelixJobSpec(steps=[step]),
         custom_fields={"task_image_build": _build_key(spec)},
+        service_attributes={TASK_IMAGE_BUILD_GRANT: spec.model_dump(mode="json")},
     )
 
 

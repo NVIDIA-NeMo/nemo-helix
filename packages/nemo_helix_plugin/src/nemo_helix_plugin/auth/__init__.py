@@ -17,7 +17,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
@@ -128,6 +128,10 @@ class AuthContext(BaseModel):
     principal_on_behalf_of_authz_aliases: list[str] = Field(
         default_factory=list,
         description="Alternate trusted identifiers for the on-behalf-of principal",
+    )
+    service_attributes: dict[str, dict[str, JsonValue]] = Field(
+        default_factory=dict,
+        description="Attributes the creating service set, by service name, signed into the workload access tokens of what it created",
     )
 
     def __eq__(self, other: object) -> bool:

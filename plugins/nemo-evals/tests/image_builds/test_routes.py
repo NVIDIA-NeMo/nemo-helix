@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -17,7 +18,7 @@ from nemo_evals.api.v2 import image_builds as image_builds_routes
 from nemo_evals.entities import TaskEntity
 from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity, build_entity_name, build_job_name
 from nemo_evals.image_builds.runner import TaskImageBuildSpec
-from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, ImageBuildService
+from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, ImageBuildService, builder_authorizer
 from nemo_evals.jobs.task_image_build import task_image_build_job_request
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, PermissionDeniedError
@@ -135,12 +136,8 @@ async def test_the_build_check_authorizes_builders_submit_route_as_the_caller(en
         checked.append((method, path))
         raise HTTPException(status_code=403, detail="Access to taskset member denied")
 
-    service = get_image_build_service(
-        "team a", entity_store, AsyncNemoClient(base_url="http://platform.test"), authorize
-    )
-
     with pytest.raises(ImageBuildForbiddenError, match="workspace team a"):
-        await service.authorize_builds("team a")
+        await builder_authorizer(authorize)("team a")
     assert checked == [("POST", "/apis/builder/v2/workspaces/team%20a/builds")]
 
 
@@ -352,3 +349,20 @@ def test_the_request_schema_takes_every_spelling_the_route_does(platform: str) -
 
 def _string_pattern(schema: dict) -> str:
     return next(option["pattern"] for option in schema.get("anyOf", [schema]) if "pattern" in option)
+
+
+async def test_build_jobs_are_created_by_evals_for_the_caller(monkeypatch) -> None:
+    """Jobs records Evals as a build Job's creator, which is what admits the Job to the job-runtime routes."""
+    seen: dict = {}
+
+    def client(**kwargs):
+        seen.update(kwargs)
+        return AsyncNemoClient(base_url="http://platform.test")
+
+    monkeypatch.setattr("nemo_evals.api.dependencies.get_async_nemo_client", client)
+    monkeypatch.setattr("nemo_evals.api.dependencies.current_auth_context", lambda: None)
+    services = get_image_build_service("team", caller="user@example.com", entity_client=Mock(), authorize=AsyncMock())
+
+    await anext(services)
+
+    assert seen == {"as_service": "evals", "internal": True, "on_behalf_of": "user@example.com"}

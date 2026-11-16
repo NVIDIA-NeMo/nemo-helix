@@ -13,6 +13,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
+from typing import Protocol
 
 from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.identity import Platform, normalize_reference
@@ -63,10 +64,41 @@ class TaskImageBuildSpec(BaseModel):
     attempt: int
 
 
+class BuildRecords(Protocol):
+    """Where one build reads its record and the revision it builds, and records its progress."""
+
+    async def load(self) -> tuple[TaskImageBuildEntity, TaskRevisionEntity]: ...
+
+    async def save(self, build: TaskImageBuildEntity) -> TaskImageBuildEntity: ...
+
+
+class EntityBuildRecords:
+    """One build's record, read and written in the Entity Store."""
+
+    def __init__(self, entities: EntityClient, spec: TaskImageBuildSpec) -> None:
+        self._entities = entities
+        self._spec = spec
+
+    async def load(self) -> tuple[TaskImageBuildEntity, TaskRevisionEntity]:
+        spec = self._spec
+        head = await self._entities.get(TaskEntity, name=spec.task, workspace=spec.workspace)
+        # Any revision with this digest will do: they hold the same contents.
+        revision = await get_revision(self._entities, TaskRevisionEntity, head, spec.revision_digest)
+        build = await self._entities.get(
+            TaskImageBuildEntity,
+            name=build_entity_name(spec.revision_digest, spec.attempt),
+            workspace=spec.workspace,
+            parent=head.id,
+        )
+        return build, revision
+
+    async def save(self, build: TaskImageBuildEntity) -> TaskImageBuildEntity:
+        return await self._entities.update(build)
+
+
 async def run_task_image_build(
-    spec: TaskImageBuildSpec,
+    records: BuildRecords,
     *,
-    entities: EntityClient,
     files: AsyncFilesClient,
     builder: ImageBuilder,
     poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS,
@@ -75,22 +107,14 @@ async def run_task_image_build(
     clock: Callable[[], float] = time.monotonic,
 ) -> TaskImageBuildEntity:
     """Plan, submit and follow every image of one build, recording progress on its record."""
-    head = await entities.get(TaskEntity, name=spec.task, workspace=spec.workspace)
-    # Any revision with this digest will do: they hold the same contents.
-    revision = await get_revision(entities, TaskRevisionEntity, head, spec.revision_digest)
-    build = await entities.get(
-        TaskImageBuildEntity,
-        name=build_entity_name(spec.revision_digest, spec.attempt),
-        workspace=spec.workspace,
-        parent=head.id,
-    )
+    build, revision = await records.load()
     if build.status in TERMINAL_BUILD_STATUSES:
         return build
     try:
         return await _build(
             build,
             revision,
-            entities=entities,
+            records=records,
             files=files,
             builder=builder,
             poll_interval=poll_interval,
@@ -100,17 +124,17 @@ async def run_task_image_build(
         )
     except Exception as exc:
         logger.exception("Image build %s of %s raised", build.name, build.task)
-        current = await entities.get(TaskImageBuildEntity, name=build.name, workspace=build.workspace, parent=head.id)
+        current, _ = await records.load()
         if current.status in TERMINAL_BUILD_STATUSES:
             return current
-        return await _fail(entities, current, f"task-builder error: {exc}")
+        return await _fail(records, current, f"task-builder error: {exc}")
 
 
 async def _build(
     build: TaskImageBuildEntity,
     revision: TaskRevisionEntity,
     *,
-    entities: EntityClient,
+    records: BuildRecords,
     files: AsyncFilesClient,
     builder: ImageBuilder,
     poll_interval: float,
@@ -119,19 +143,19 @@ async def _build(
     clock: Callable[[], float],
 ) -> TaskImageBuildEntity:
     if not isinstance(revision.spec, HarborTaskDefinition):
-        return await _fail(entities, build, f"task {build.task} is not a Harbor task")
+        return await _fail(records, build, f"task {build.task} is not a Harbor task")
     definition = revision.spec
 
     try:
         images = await _plan(files, definition, build)
     except ImagePlanError as exc:
-        return await _fail(entities, build, str(exc))
+        return await _fail(records, build, str(exc))
 
     build.status = "running"
     build.images = images
     for image in images:
         await _submit(builder, image, definition, rebuild=build.rebuild)
-    build = await entities.update(build)
+    build = await records.save(build)
 
     started = clock()
     while not _settled(build.images):
@@ -143,13 +167,13 @@ async def _build(
             break
         await sleep(poll_interval)
         if await _refresh(builder, build.images):
-            build = await entities.update(build)
+            build = await records.save(build)
 
     failed = [image for image in build.images if image.status == "failed"]
     build.status = "failed" if failed else "ready"
     build.error = f"{failed[0].type}: {failed[0].error}" if failed else None
     logger.info("Image build %s of %s finished %s", build.name, build.task, build.status)
-    return await entities.update(build)
+    return await records.save(build)
 
 
 def _choose_platforms(images: list[BuildImage], requested: str | None) -> None:
@@ -340,8 +364,8 @@ def _apply(image: BuildImage, builder_image: ContainerImage) -> None:
         image.status = "building"
 
 
-async def _fail(entities: EntityClient, build: TaskImageBuildEntity, error: str) -> TaskImageBuildEntity:
+async def _fail(records: BuildRecords, build: TaskImageBuildEntity, error: str) -> TaskImageBuildEntity:
     build.status = "failed"
     build.error = error
     logger.info("Image build %s of %s failed: %s", build.name, build.task, error)
-    return await entities.update(build)
+    return await records.save(build)

@@ -9,9 +9,11 @@ from typing import Any
 
 import httpx
 import jwt
+from nemo_helix_plugin.auth.workload_delegations import SERVICE_ATTRIBUTES_CLAIM
 from nemo_helix_plugin.client.auth import ServicePrincipalTokenProvider
 from nhx.common.auth.jwks import AsyncJWKSClient
 from nhx.common.config import AuthConfig, get_platform_config
+from pydantic import JsonValue
 
 from .models import Principal
 from .signing_keys import RSASigningKey, RSASigningKeyCache
@@ -43,6 +45,7 @@ class ServiceWorkloadAccessTokenProvider(ServicePrincipalTokenProvider):
     config: AuthConfig
     service_name: str
     on_behalf_of: str | Principal | None = None
+    service_attributes: dict[str, dict[str, JsonValue]] | None = None
 
     @property
     def service_principal_id(self) -> str:
@@ -57,6 +60,7 @@ class ServiceWorkloadAccessTokenProvider(ServicePrincipalTokenProvider):
             self.config,
             service_name=self.service_name,
             on_behalf_of=self.on_behalf_of,
+            service_attributes=self.service_attributes,
         )
 
     async def get_access_token_async(self) -> str:
@@ -64,6 +68,7 @@ class ServiceWorkloadAccessTokenProvider(ServicePrincipalTokenProvider):
             self.config,
             service_name=self.service_name,
             on_behalf_of=self.on_behalf_of,
+            service_attributes=self.service_attributes,
         )
 
 
@@ -211,9 +216,15 @@ def _principal_claims(principal: Principal) -> dict[str, Any]:
     return claims
 
 
-def _service_token_claims(service_name: str, on_behalf_of: str | Principal | None) -> dict[str, Any]:
+def _service_token_claims(
+    service_name: str,
+    on_behalf_of: str | Principal | None,
+    service_attributes: dict[str, dict[str, JsonValue]] | None,
+) -> dict[str, Any]:
     service_subject = f"service:{service_name}"
     if on_behalf_of is None:
+        if service_attributes:
+            raise ValueError("A service token carrying service attributes must act on behalf of a principal")
         return {"sub": service_subject}
 
     if isinstance(on_behalf_of, Principal):
@@ -221,6 +232,8 @@ def _service_token_claims(service_name: str, on_behalf_of: str | Principal | Non
     else:
         subject_claims = {"sub": on_behalf_of}
     subject_claims["act"] = {"sub": service_subject}
+    if service_attributes:
+        subject_claims[SERVICE_ATTRIBUTES_CLAIM] = service_attributes
     return subject_claims
 
 
@@ -258,12 +271,13 @@ def issue_service_workload_access_token(
     *,
     service_name: str,
     on_behalf_of: str | Principal | None = None,
+    service_attributes: dict[str, dict[str, JsonValue]] | None = None,
 ) -> str:
     signing_key = workload_signing_key(config)
     return _encode_access_token(
         config,
         signing_key,
-        subject_claims=_service_token_claims(service_name, on_behalf_of),
+        subject_claims=_service_token_claims(service_name, on_behalf_of, service_attributes),
         scope=granted_workload_scope(config, None),
     )
 
@@ -273,12 +287,13 @@ async def issue_service_workload_access_token_async(
     *,
     service_name: str,
     on_behalf_of: str | Principal | None = None,
+    service_attributes: dict[str, dict[str, JsonValue]] | None = None,
 ) -> str:
     signing_key = await workload_signing_key_async(config)
     return _encode_access_token(
         config,
         signing_key,
-        subject_claims=_service_token_claims(service_name, on_behalf_of),
+        subject_claims=_service_token_claims(service_name, on_behalf_of, service_attributes),
         scope=granted_workload_scope(config, None),
     )
 

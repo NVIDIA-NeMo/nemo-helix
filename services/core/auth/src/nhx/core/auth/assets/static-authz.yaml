@@ -248,7 +248,7 @@ authz:
           description: "Read safe synthesizer jobs"
     secrets:
       access:
-        description: "Access secret values (service principals only)"
+        description: "Access secret values (service principals, or a Job acting for its submitter)"
         has_role: false
       create:
         description: "Create secrets"
@@ -427,6 +427,7 @@ authz:
       description: "Runtime permissions for job workload containers"
       permissions:
       - jobs.logs.create
+      - secrets.access
     ServiceSystem:
       description: >-
         Internal Helix service principal (principal IDs matching service:*). Used when no

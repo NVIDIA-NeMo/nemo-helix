@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,8 +11,13 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from nemo_helix_plugin.auth.workload_delegations import SERVICE_ATTRIBUTES_CLAIM, current_workload_service_attributes
+from nhx.common.auth.client import AuthClient
+from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
+from nhx.common.auth.token_resolver import ResolvedTokenKind
 from nhx.common.auth.workload_tokens import (
+    issue_service_workload_access_token,
     issue_service_workload_access_token_async,
     resolve_workload_access_token,
     resolve_workload_subject_token,
@@ -149,3 +155,54 @@ async def test_workload_subject_token_resolves_with_configured_subject_issuer(tm
     assert resolved.principal.email == "svc-nemo@example.test"
     assert resolved.principal.groups == ["nemo-workloads"]
     assert resolved.scopes == ["openid", "email", "groups"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("token_kind", "attributes", "read"),
+    [
+        ("workload_access_token", {"evals": {"build": "b-1"}}, {"build": "b-1"}),
+        ("oidc_access_token", {"evals": {"build": "b-1"}}, None),
+        ("access_key", {"evals": {"build": "b-1"}}, None),
+        ("workload_access_token", {"agents": {"build": "b-1"}}, None),
+        ("workload_access_token", {"evals": "b-1"}, None),
+    ],
+    ids=["workload-token", "oidc-token", "access-key", "another-service", "malformed"],
+)
+async def test_only_a_workload_access_token_carries_service_attributes(
+    tmp_path: Path, token_kind: ResolvedTokenKind, attributes: dict, read: dict | None
+) -> None:
+    config = _token_exchange_config(tmp_path)
+    token = await issue_service_workload_access_token_async(config, service_name="jobs", on_behalf_of="user:alice")
+    resolved = await resolve_workload_access_token(config, token)
+    assert resolved is not None
+    raw_claims = resolved.claims.raw_claims | {SERVICE_ATTRIBUTES_CLAIM: attributes}
+    resolved = replace(resolved, token_kind=token_kind, claims=replace(resolved.claims, raw_claims=raw_claims))
+    marker = auth_client_context.set(
+        AuthClient(principal=resolved.principal, config=config, resolved_bearer_token=resolved)
+    )
+    try:
+        assert current_workload_service_attributes("evals") == read
+    finally:
+        auth_client_context.reset(marker)
+
+
+@pytest.mark.asyncio
+async def test_a_delegated_service_token_carries_the_attributes_it_was_minted_with(tmp_path: Path) -> None:
+    config = _token_exchange_config(tmp_path)
+    attributes = {"evals": {"build": "b-1"}}
+
+    token = await issue_service_workload_access_token_async(
+        config, service_name="jobs", on_behalf_of=Principal(id="user:alice"), service_attributes=attributes
+    )
+    resolved = await resolve_workload_access_token(config, token)
+
+    assert resolved is not None
+    assert resolved.claims.raw_claims[SERVICE_ATTRIBUTES_CLAIM] == attributes
+
+
+def test_service_attributes_need_a_principal_to_act_for(tmp_path: Path) -> None:
+    config = _token_exchange_config(tmp_path)
+
+    with pytest.raises(ValueError, match="on behalf of"):
+        issue_service_workload_access_token(config, service_name="jobs", service_attributes={"evals": {"b": "1"}})

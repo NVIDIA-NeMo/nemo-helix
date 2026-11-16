@@ -307,6 +307,10 @@ deny_request if {
 	path_parts[8] == "access"
 
 	request_caller_kind != "service_principal"
+
+	# A delegated workload (a Job acting for its submitter under token exchange) is not denied here:
+	# the route contract still requires secrets.access on the workload and secrets.read on the submitter.
+	extract_on_behalf_of_principal_id == ""
 }
 
 # OPA policy bundle download: system-scoped iam.bundle.read only (see static-authz endpoints).
