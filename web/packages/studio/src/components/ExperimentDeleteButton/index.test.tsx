@@ -52,7 +52,7 @@ it.each([false, true])(
     expect(request).not.toHaveBeenCalled();
     await openDelete();
     await userEvent.click(
-      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete' })
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete Experiment' })
     );
     await waitFor(() => expect(deleted).toHaveBeenCalledOnce());
     expect(request).toHaveBeenCalledOnce();
@@ -81,7 +81,7 @@ it('surfaces deletion errors without navigating away', async () => {
   render(<ExperimentDeleteButton workspace={DEFAULT_WORKSPACE} name={NAME} onDeleted={deleted} />);
   await userEvent.click(screen.getByRole('button', { name: `Delete experiment ${NAME}` }));
   await userEvent.click(
-    within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete' })
+    within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete Experiment' })
   );
   expect(await screen.findByText(/Experiment deletion failed/)).toBeVisible();
   expect(deleted).not.toHaveBeenCalled();
