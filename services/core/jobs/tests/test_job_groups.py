@@ -15,7 +15,12 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     JobGroupMember,
     UpdateJobGroupRequest,
 )
-from nhx.core.jobs.app.dispatcher import JobAlreadyExistsError, JobDeletionConflictError, JobDispatcher
+from nhx.core.jobs.app.dispatcher import (
+    JobAlreadyExistsError,
+    JobDeletionConflictError,
+    JobDispatcher,
+    JobOperationConflictError,
+)
 from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec, StepLifecycle
 from nhx.core.jobs.app.test_helpers import TestConstants
 from nhx.core.jobs.entities import HelixJob, HelixJobAttempt, HelixJobStep, JobGroup
@@ -643,3 +648,155 @@ async def test_fail_fast_persists_failed_group_status_after_sweep(mock_dispatche
         assert await _member_status(mock_store, sibling) in (HelixJobStatus.CANCELLING, HelixJobStatus.CANCELLED)
     # The persisted group status reflects the error (not left at PENDING/RUNNING).
     assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.FAILED
+
+
+# -- Group cancellation: the cancel endpoint writes a single top-down intent, and the
+# -- per-member teardown fans out off the request path and settles the group to cancelled.
+
+
+@pytest.mark.asyncio
+async def test_cancel_group_writes_cancelling_intent_in_a_single_write(mock_dispatcher, mock_store):
+    """Cancelling a group records the group's own CANCELLING status without touching members.
+
+    The caller signals intent once: cancel_job_group writes the group status and returns. The
+    members are not swept here (that is the endpoint's off-path background fan-out); so right
+    after the intent write the members are still in their pre-cancel state.
+    """
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=3), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+    for member in members:
+        await _drive_member_via_rollup(mock_dispatcher, mock_store, member, HelixJobStatus.ACTIVE)
+
+    response = await mock_dispatcher.cancel_job_group(group.id, DEFAULT_WORKSPACE)
+
+    assert response is not None
+    assert response.status == JobGroupStatus.CANCELLING
+    stored = await mock_store.get_by_id(JobGroup, group.id)
+    assert stored.status == JobGroupStatus.CANCELLING
+    # Intent write alone does not cancel members; the teardown fan-out is separate.
+    for member in members:
+        assert await _member_status(mock_store, member) == HelixJobStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_cancel_group_sweep_cancels_non_terminal_members(mock_dispatcher, mock_store):
+    """The teardown sweep cancels every non-terminal member through the per-job cancel path."""
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=3), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[0], HelixJobStatus.ACTIVE)
+    # members[1], members[2] remain in CREATED (never dispatched).
+
+    await mock_dispatcher.cancel_job_group(group.id, DEFAULT_WORKSPACE)
+    cancelled = await mock_dispatcher.cancel_group_members(group.id, DEFAULT_WORKSPACE)
+
+    assert set(cancelled) == {m.id for m in members}
+    for member in members:
+        assert await _member_status(mock_store, member) in (HelixJobStatus.CANCELLING, HelixJobStatus.CANCELLED)
+
+
+@pytest.mark.asyncio
+async def test_cancel_group_cancels_not_yet_dispatched_members_without_dispatch(mock_dispatcher, mock_store):
+    """Members still in CREATED (not yet started) go straight to CANCELLED, never dispatched."""
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=2), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+    # Both members are freshly created (CREATED) -- nothing dispatched.
+
+    await mock_dispatcher.cancel_job_group(group.id, DEFAULT_WORKSPACE)
+    await mock_dispatcher.cancel_group_members(group.id, DEFAULT_WORKSPACE)
+
+    for member in members:
+        assert await _member_status(mock_store, member) == HelixJobStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_cancel_group_settles_to_cancelled_once_all_members_terminal(mock_dispatcher, mock_store):
+    """Full lifecycle: cancel intent -> sweep -> members terminal -> group rolls up to CANCELLED.
+
+    The group-status roll-up (which settles terminal CANCELLED) rides the member status write,
+    so driving each swept member to its terminal CANCELLED through the roll-up path lands the
+    stored group status on CANCELLED.
+    """
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=2), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+
+    await mock_dispatcher.cancel_job_group(group.id, DEFAULT_WORKSPACE)
+    # Drive each member to the terminal CANCELLED through the roll-up path (what the controller
+    # does as the backend finishes tearing each member down).
+    for member in members:
+        await _drive_member_via_rollup(mock_dispatcher, mock_store, member, HelixJobStatus.CANCELLED)
+
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.CANCELLED
+    assert (await mock_dispatcher.get_job_group(group.id, DEFAULT_WORKSPACE)).status == JobGroupStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_cancel_group_is_idempotent_for_an_already_cancelling_group(mock_dispatcher, mock_store):
+    """Re-cancelling a group that is already cancelling is a no-op on the stored status."""
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=2), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[0], HelixJobStatus.ACTIVE)
+
+    first = await mock_dispatcher.cancel_job_group(group.id, DEFAULT_WORKSPACE)
+    second = await mock_dispatcher.cancel_job_group(group.id, DEFAULT_WORKSPACE)
+
+    assert first.status == JobGroupStatus.CANCELLING
+    assert second.status == JobGroupStatus.CANCELLING
+    stored = await mock_store.get_by_id(JobGroup, group.id)
+    assert stored.status == JobGroupStatus.CANCELLING
+
+
+@pytest.mark.asyncio
+async def test_cancel_group_refuses_a_group_that_has_already_finished(mock_dispatcher, mock_store):
+    """A group that has settled into a terminal state is not reopened by a cancel request."""
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=2), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+    for member in members:
+        await _drive_member_via_rollup(mock_dispatcher, mock_store, member, HelixJobStatus.COMPLETED)
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.COMPLETED
+
+    with pytest.raises(JobOperationConflictError):
+        await mock_dispatcher.cancel_job_group(group.id, DEFAULT_WORKSPACE)
+
+    # The terminal status is untouched.
+    stored = await mock_store.get_by_id(JobGroup, group.id)
+    assert stored.status == JobGroupStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_cancel_missing_group_returns_none(mock_dispatcher):
+    assert await mock_dispatcher.cancel_job_group("does-not-exist", DEFAULT_WORKSPACE) is None
+
+
+@pytest.mark.asyncio
+async def test_member_rollup_does_not_overwrite_a_stored_cancelling_intent(mock_dispatcher, mock_store):
+    """A stored top-down CANCELLING intent survives a benign non-terminal member roll-up.
+
+    After cancel writes the group's CANCELLING intent but before the teardown sweep moves any
+    member, a member can still transition on its own (e.g. a controller moves it CREATED ->
+    ACTIVE). That roll-up computes a non-terminal RUNNING -- which must NOT clobber the stored
+    CANCELLING, or the group would report ``running`` while a cancel is in flight. Only a
+    terminal roll-up may move the group off CANCELLING.
+    """
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=False, member_count=2), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+
+    await mock_dispatcher.cancel_job_group(group.id, DEFAULT_WORKSPACE)
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.CANCELLING
+
+    # A member transitions non-terminally in the window before the sweep reaches it.
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[0], HelixJobStatus.ACTIVE)
+
+    # The stored cancel intent is preserved, not overwritten with RUNNING.
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.CANCELLING

@@ -127,3 +127,35 @@ async def test_update_missing_group_returns_404(job_group_client: AsyncClient):
 async def test_delete_missing_group_returns_404(job_group_client: AsyncClient):
     response = await job_group_client.delete(f"{_base()}/missing")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cancel_group_endpoint_returns_cancelling(job_group_client: AsyncClient):
+    await job_group_client.post(_base(), json=_create_body())
+    response = await job_group_client.post(f"{_base()}/api-group/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelling"
+
+
+@pytest.mark.asyncio
+async def test_cancel_missing_group_returns_404(job_group_client: AsyncClient):
+    response = await job_group_client.post(f"{_base()}/missing/cancel")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_recancel_after_group_already_settled_conflicts(job_group_client: AsyncClient):
+    """A second cancel of a group that already finished cancelling returns 409, not an error.
+
+    This tiny group's members are never dispatched, so the first cancel's background teardown
+    cancels them immediately and the group settles to the terminal ``cancelled``. A later cancel
+    of that finished group is a conflict (a terminal group is never reopened) -- the documented
+    409, surfaced cleanly rather than as a 500. True same-state idempotency (re-cancelling a group
+    that is still cancelling) is covered at the dispatcher layer, where a member can be held active.
+    """
+    await job_group_client.post(_base(), json=_create_body())
+    first = await job_group_client.post(f"{_base()}/api-group/cancel")
+    assert first.status_code == 200
+    assert first.json()["status"] == "cancelling"
+    second = await job_group_client.post(f"{_base()}/api-group/cancel")
+    assert second.status_code == 409
