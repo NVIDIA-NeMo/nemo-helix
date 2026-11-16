@@ -48,7 +48,7 @@ describe('TaskDetailRoute', () => {
   it('previews the tasksets that use it and links to the full list', async () => {
     renderDetail();
     const behind = await screen.findByRole('button', { name: /sort-suite/ });
-    expect(await within(behind).findByText('Behind latest')).toBeInTheDocument();
+    expect(await within(behind).findByText('Newer revision available')).toBeInTheDocument();
     expect(screen.getByText('2 total')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'View all' }));
@@ -64,15 +64,15 @@ describe('TaskDetailRoute', () => {
     expect(screen.getByRole('row', { name: /\br1\b/ })).toBeInTheDocument();
   });
 
-  it('lists the tasksets that use it, flagging a pin behind latest', async () => {
+  it('lists the tasksets that use it, noting a pin with a newer revision', async () => {
     renderDetail();
     await userEvent.click(await screen.findByRole('tab', { name: 'Used By' }));
     const behind = await screen.findByRole('row', { name: /\bsort-suite\b/ });
-    expect(await within(behind).findByText('Behind latest')).toBeInTheDocument();
+    expect(await within(behind).findByText('Newer revision available')).toBeInTheDocument();
     expect(within(behind).getByText('r1')).toBeInTheDocument();
     const current = screen.getByRole('row', { name: /\bphishing-triage\b/ });
     expect(within(current).getByText('r2')).toBeInTheDocument();
-    expect(within(current).queryByText('Behind latest')).not.toBeInTheDocument();
+    expect(within(current).queryByText('Newer revision available')).not.toBeInTheDocument();
 
     await userEvent.click(within(behind).getByText('sort-suite'));
     // Opens the member as the taskset pins it, so the drawer shows the pinned revision.
@@ -86,7 +86,7 @@ describe('TaskDetailRoute', () => {
     renderDetail();
     const pinned = await screen.findByRole('button', { name: /sort-suite/ });
     expect(await within(pinned).findByText('Latest unknown')).toBeInTheDocument();
-    expect(within(pinned).queryByText('Behind latest')).not.toBeInTheDocument();
+    expect(within(pinned).queryByText('Newer revision available')).not.toBeInTheDocument();
   });
 
   it('opens a tab from its path', async () => {

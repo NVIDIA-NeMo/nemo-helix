@@ -6,7 +6,8 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import type { Task } from '@nemo/sdk/generated/evals/schema';
 import { Flex, Stack, Tag } from '@nvidia/foundations-react-core';
 import { DetailPanel } from '@studio/components/DetailPanel';
-import { RUNNER_LABELS, tagNames } from '@studio/routes/evaluation/tasksets/helpers';
+import { RUNNER_LABELS } from '@studio/routes/evaluation/taskHelpers';
+import { tagNames } from '@studio/routes/evaluation/tasksets/helpers';
 import type { FC } from 'react';
 
 /** At-a-glance identity for the task, beside its definition. */

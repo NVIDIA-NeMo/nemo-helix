@@ -3,6 +3,14 @@
 
 import type { DatetimeFilter, Taskset } from '@nemo/sdk/generated/evals/schema';
 
+/** A task reference split into its parts: `[workspace/]name[#revision]`. */
+export interface TaskRefParts {
+  workspace: string;
+  name: string;
+  /** Pinned revision digest or tag; absent when the ref follows the latest revision. */
+  version?: string;
+}
+
 /** Task list column filters, keyed by column id. */
 export interface TaskListFilters {
   /** Multi-select state: the selected runner kinds. */
@@ -19,7 +27,9 @@ export interface TaskUsageRow extends Taskset {
   pinnedDigest?: string;
   /** Ordinal of the pinned revision, when it is one of the task's listed revisions. */
   pinnedRevision?: number;
-  /** The pin names content other than the task's latest revision; undefined when the latest
-   *  revision couldn't be loaded to compare against. */
-  behindLatest?: boolean;
+  /** Ordinal of the task's latest revision, once its revisions load. */
+  latestRevision?: number;
+  /** The task has a revision newer than the pin; undefined when its revisions couldn't be
+   *  loaded to compare against. */
+  hasNewerRevision?: boolean;
 }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { requestStatus } from '@nemo/common/src/components/DataView/requestStatus';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
@@ -9,7 +10,6 @@ import type { StudioDataViewState } from '@nemo/common/src/hooks/useStudioDataVi
 import type { Revision } from '@nemo/sdk/generated/evals/schema';
 import { Flex, Tag, Text } from '@nvidia/foundations-react-core';
 import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
-import { requestStatus } from '@studio/routes/evaluation/tasksets/helpers';
 import { type ComponentProps, type FC, useMemo } from 'react';
 
 type RevisionRow = Revision & { id: string };

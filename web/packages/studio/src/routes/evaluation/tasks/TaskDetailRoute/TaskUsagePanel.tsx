@@ -46,7 +46,9 @@ export const TaskUsagePanel: FC<TaskUsagePanelProps> = ({ task, onViewAll }) => 
     }
     if (rows.length === 0) {
       return (
-        <Message>No taskset uses this task yet. Add it to one to run it in an evaluation.</Message>
+        <Message>
+          No tasksets in this workspace use this task yet. Add it to one to run it in an evaluation.
+        </Message>
       );
     }
     return rows.map((row, index) => (

@@ -11,6 +11,7 @@ import { Loading } from '@studio/components/Layouts/Loading';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
+import { RUNNER_LABELS } from '@studio/routes/evaluation/taskHelpers';
 import { OverviewTab } from '@studio/routes/evaluation/tasks/TaskDetailRoute/OverviewTab';
 import { RevisionHistory } from '@studio/routes/evaluation/tasks/TaskDetailRoute/RevisionHistory';
 import {
@@ -18,7 +19,6 @@ import {
   TASK_DETAIL_TABS,
 } from '@studio/routes/evaluation/tasks/TaskDetailRoute/tabs';
 import { UsedByTable } from '@studio/routes/evaluation/tasks/TaskDetailRoute/UsedByTable';
-import { RUNNER_LABELS } from '@studio/routes/evaluation/tasksets/helpers';
 import { getTaskDetailRoute, getTasksRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import type { FC } from 'react';

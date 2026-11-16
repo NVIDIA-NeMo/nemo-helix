@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { requestStatus } from '@nemo/common/src/components/DataView/requestStatus';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
@@ -11,7 +12,6 @@ import { Text } from '@nvidia/foundations-react-core';
 import { PinnedRevision } from '@studio/routes/evaluation/tasks/TaskDetailRoute/PinnedRevision';
 import { useTaskUsage } from '@studio/routes/evaluation/tasks/TaskDetailRoute/useTaskUsage';
 import type { TaskUsageRow } from '@studio/routes/evaluation/tasks/types';
-import { requestStatus } from '@studio/routes/evaluation/tasksets/helpers';
 import { getTasksetDetailRoute } from '@studio/routes/utils';
 import type { ComponentProps, FC } from 'react';
 import { useNavigate } from 'react-router';
@@ -66,7 +66,9 @@ export const UsedByTable: FC<{ task: Task }> = ({ task }) => {
         },
         DataViewTableContent: {
           renderEmptyState: () => (
-            <Text className="text-subtle p-density-xl">No taskset uses this task.</Text>
+            <Text className="text-subtle p-density-xl">
+              No tasksets in this workspace use this task.
+            </Text>
           ),
           renderErrorState: () => (
             <ErrorPanel

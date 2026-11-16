@@ -5,13 +5,18 @@ import { Flex, Tag, Text } from '@nvidia/foundations-react-core';
 import type { TaskUsageRow } from '@studio/routes/evaluation/tasks/types';
 import type { FC } from 'react';
 
-type PinnedRevisionProps = Pick<TaskUsageRow, 'pinnedDigest' | 'pinnedRevision' | 'behindLatest'>;
+type PinnedRevisionProps = Pick<
+  TaskUsageRow,
+  'pinnedDigest' | 'pinnedRevision' | 'latestRevision' | 'hasNewerRevision'
+>;
 
-/** The task revision a taskset pins: its ordinal (or short digest), flagged when behind latest. */
+/** The task revision a taskset pins: its ordinal (or short digest), noting when a newer one exists.
+ *  An older pin is intentional, so the note is informational, not a warning. */
 export const PinnedRevision: FC<PinnedRevisionProps> = ({
   pinnedDigest,
   pinnedRevision,
-  behindLatest,
+  latestRevision,
+  hasNewerRevision,
 }) => {
   if (!pinnedDigest) return <Text className="text-subtle">latest</Text>;
   return (
@@ -23,12 +28,17 @@ export const PinnedRevision: FC<PinnedRevisionProps> = ({
           {pinnedDigest.slice(0, 12)}
         </Text>
       )}
-      {behindLatest && (
-        <Tag kind="outline" color="yellow" readOnly>
-          Behind latest
+      {hasNewerRevision && (
+        <Tag
+          kind="outline"
+          color="gray"
+          readOnly
+          title={`The task's latest revision is r${latestRevision}. This taskset keeps its pin so its evaluations stay reproducible.`}
+        >
+          Newer revision available
         </Tag>
       )}
-      {behindLatest === undefined && (
+      {hasNewerRevision === undefined && (
         <Tag
           kind="outline"
           color="gray"

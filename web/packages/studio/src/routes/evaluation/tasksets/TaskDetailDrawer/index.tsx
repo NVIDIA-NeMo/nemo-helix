@@ -8,9 +8,9 @@ import {
   getEvalsGetTaskRevisionQueryOptions,
 } from '@nemo/sdk/generated/evals/evals-plugin-tasks-routes';
 import { Anchor, SidePanel, Stack, Text } from '@nvidia/foundations-react-core';
+import { parseTaskRef, RUNNER_LABELS } from '@studio/routes/evaluation/taskHelpers';
 import { TaskDefinition } from '@studio/routes/evaluation/tasks/TaskDefinition';
 import { TaskMetricsPanel } from '@studio/routes/evaluation/tasks/TaskDefinition/TaskMetricsPanel';
-import { parseTaskRef, RUNNER_LABELS } from '@studio/routes/evaluation/tasksets/helpers';
 import { getTaskDetailRoute } from '@studio/routes/utils';
 import { useQuery } from '@tanstack/react-query';
 import type { FC } from 'react';

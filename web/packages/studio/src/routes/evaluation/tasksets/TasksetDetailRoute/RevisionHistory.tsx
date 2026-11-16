@@ -4,7 +4,7 @@
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useEvalsListTasksetRevisions } from '@nemo/sdk/generated/evals/evals-plugin-tasksets-routes';
 import type { Taskset } from '@nemo/sdk/generated/evals/schema';
-import { RevisionTable } from '@studio/routes/evaluation/tasksets/RevisionTable';
+import { RevisionTable } from '@studio/routes/evaluation/components/RevisionTable';
 import { keepPreviousData } from '@tanstack/react-query';
 import type { FC } from 'react';
 
