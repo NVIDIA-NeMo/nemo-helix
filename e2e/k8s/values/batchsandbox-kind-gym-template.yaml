@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# BatchSandbox template for the kind sandboxed Gym e2e (e2e/k8s/scripts/install_opensandbox_kind.sh).
+# BatchSandbox template for the kind sandboxed Gym e2e, applied by install_opensandbox_minikube.sh
+# (BATCHSANDBOX_TEMPLATE) from .github/actions/setup-kind-cluster.
 # Same ConfigMap name as k8s/helm/examples/opensandbox/batchsandbox-template.yaml. Like the minikube
 # template, it leaves out that file's node affinity: a kind cluster is one control-plane node, which
 # the affinity would refuse.
@@ -29,8 +30,8 @@ data:
           automountServiceAccountToken: false
           # Sandbox pods are built from this template by the OpenSandbox server, not by the jobs
           # controller, so the chart's imagePullSecrets do not reach them. setup_local_kind_cpu.sh
-          # creates ghcr-pull when GITHUB_TOKEN is set. CI also pulls the Gym host image onto the
-          # node first, so a cluster without the Secret still starts sandboxes from loaded images.
+          # creates ghcr-pull when GITHUB_TOKEN is set, and the install stops without it
+          # (SANDBOX_PULL_SECRET).
           imagePullSecrets:
             - name: ghcr-pull
           # OpenSandbox v0.2.1 copies only volumeMounts from the container named "sandbox" onto

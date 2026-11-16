@@ -3,7 +3,7 @@
 
 # Sandboxed Gym evaluation, for the Kind sandboxed Gym e2e (the gym_sandbox_e2e tests in
 # e2e/test_evaluator_plugin.py). Layer it on kind.yaml, on a cluster that already has OpenSandbox
-# (e2e/k8s/scripts/install_opensandbox_kind.sh). The chart's opensandbox.* defaults already point at
+# (install_opensandbox_minikube.sh with batchsandbox-kind-gym-template.yaml; see e2e/README.md). The chart's opensandbox.* defaults already point at
 # that install.
 #
 # This turns on sandboxed execution for every Gym target on the cluster, so the colocated Gym e2e

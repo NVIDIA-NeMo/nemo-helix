@@ -350,7 +350,10 @@ OpenSandbox runs sandboxes there, and the tests look for the Gym host there. The
 ```bash
 export KIND_CLUSTER_NAME=nhx-e2e KUBE_NAMESPACE=nemo-helix   # and NGC_API_KEY, GITHUB_TOKEN
 ./e2e/k8s/scripts/setup_local_kind_cpu.sh
-./e2e/k8s/scripts/install_opensandbox_kind.sh
+KUBE_CONTEXT="kind-${KIND_CLUSTER_NAME}" \
+  BATCHSANDBOX_TEMPLATE=e2e/k8s/values/batchsandbox-kind-gym-template.yaml \
+  SANDBOX_PULL_SECRET=ghcr-pull \
+  ./e2e/k8s/scripts/install_opensandbox_minikube.sh
 NAMESPACE="${KUBE_NAMESPACE}" NHX_E2E_REGISTRY=<registry> NHX_E2E_TAG=<tag> \
   HELM_VALUES=e2e/k8s/values/kind.yaml HELM_EXTRA_ARGS="-f e2e/k8s/values/gym-sandbox.yaml" \
   ./e2e/k8s/scripts/install_helm_e2e.sh
@@ -366,17 +369,18 @@ uv run --frozen pytest e2e/test_evaluator_plugin.py \
     -m gym_sandbox_e2e -v -rs --no-cov
 ```
 
-`<gateway-url>` is the URL `install_helm_e2e.sh` logs as `Resolved Gateway URL`. The header of
-`e2e/k8s/scripts/install_opensandbox_kind.sh` lists the variables it reads. It pulls OpenSandbox's
-images onto the node first only under bash 4.4 or later; with an older bash, such as the one macOS
-ships, the kubelet pulls them.
+`<gateway-url>` is the URL `install_helm_e2e.sh` logs as `Resolved Gateway URL`. The OpenSandbox
+install is the one the taskset-runs nightly uses, pointed at the Gym lane's template.
+`setup_local_kind_cpu.sh` creates `ghcr-pull` only when `GITHUB_TOKEN` is set, and the install stops
+without it.
 
 **CI.** The `kind-gym-sandbox-e2e` job in `.github/workflows/e2e.yaml` runs these tests on a kind
 cluster of its own, and fails if any of them skips or if its report does not hold exactly two tests
 (`.github/scripts/check_junit_no_skips.py`). Its `setup-kind-cluster` step creates the cluster
-(`setup_local_kind_cpu.sh`), installs OpenSandbox (`install_opensandbox_kind.sh`, which pulls
-OpenSandbox's images onto the node first and ends by creating and deleting a sandbox), and installs
-the platform with `kind.yaml` and `gym-sandbox.yaml`.
+(`setup_local_kind_cpu.sh`), pulls OpenSandbox's images onto the node, installs
+OpenSandbox (`install_opensandbox_minikube.sh` with `batchsandbox-kind-gym-template.yaml`, which ends
+by creating and deleting a sandbox), and installs the platform with `kind.yaml` and
+`gym-sandbox.yaml`.
 The job then pulls `nhx-gym-host` onto the node. That image comes from `build-gym-host-image`, a job
 of its own that builds the `docker-gym-host` bake group, so a failure there stops only this lane.
 The colocated Gym tests stay in `kind-gym-e2e`: turning on `sandboxed_gym_default` sandboxes every

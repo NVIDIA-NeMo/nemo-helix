@@ -166,20 +166,48 @@ runs:
         kubectl get gatewayclass cloud-provider-kind
         kubectl -n "${NAMESPACE}" get gateway "${KUBE_GATEWAY_NAME}"
 
+    # OpenSandbox's images are pulled onto the node first, so a Docker Hub rate limit fails this step
+    # by name and not inside a sandbox's create wait. Keep the list in step with
+    # k8s/helm/examples/opensandbox/opensandbox-{controller,server}.yaml and the verification's
+    # SANDBOX_IMAGE; tests/unit/test_setup_kind_opensandbox_images.py checks it.
+    - name: Pre-pull OpenSandbox images
+      if: ${{ inputs['install-opensandbox'] == 'true' }}
+      shell: bash
+      env:
+        KIND_CLUSTER_NAME: ${{ inputs['kind-cluster-name'] }}
+      run: |
+        images=(
+          docker.io/opensandbox/controller:v0.2.0
+          docker.io/opensandbox/server:v0.2.1
+          docker.io/opensandbox/execd:v1.0.21
+          docker.io/opensandbox/egress:v1.1.4
+          docker.io/library/busybox:1.36
+        )
+        for attempt in 1 2 3; do
+          # A stalled pull would otherwise hold the job until its own timeout, past every retry.
+          if timeout 300 e2e/k8s/scripts/prepull_kind_images.sh "${images[@]}"; then exit 0; fi
+          if [ "${attempt}" -lt 3 ]; then sleep $((attempt * 20)); fi
+        done
+        echo "::error::could not pull the OpenSandbox images" >&2
+        exit 1
+
     # Before NeMo Helix, so the API-key Secret is in the release namespace when the first job starts.
-    # The script ends by creating and deleting a plain sandbox, so a cluster that cannot run one at
+    # ghcr-pull already exists here: "Start kind cluster" creates it from kind-image-pull-token.
+    # The install ends by creating and deleting a plain sandbox, so a cluster that cannot run one at
     # all fails here. Egress policy and PVC mounts are first exercised by the tests.
     - name: Install OpenSandbox
       if: ${{ inputs['install-opensandbox'] == 'true' }}
       shell: bash
       env:
-        KIND_CLUSTER_NAME: ${{ inputs['kind-cluster-name'] }}
+        KUBE_CONTEXT: kind-${{ inputs['kind-cluster-name'] }}
         KUBE_NAMESPACE: ${{ inputs['kube-namespace'] }}
+        BATCHSANDBOX_TEMPLATE: e2e/k8s/values/batchsandbox-kind-gym-template.yaml
+        SANDBOX_PULL_SECRET: ghcr-pull
       # The verification deletes its sandbox even when it fails, and nothing uploads its port-forward
       # log, so on failure print the pods, events and that log here, as Install NeMo Helix does for
       # Helm. Pods and BatchSandboxes are listed apart so the pods still print without the CRD.
       run: |
-        if ! e2e/k8s/scripts/install_opensandbox_kind.sh; then
+        if ! e2e/k8s/scripts/install_opensandbox_minikube.sh; then
           for namespace in "${KUBE_NAMESPACE}" opensandbox-system; do
             echo "--- kubectl get pods,batchsandboxes -n ${namespace} ---"
             kubectl get pods -n "${namespace}" -o wide || true

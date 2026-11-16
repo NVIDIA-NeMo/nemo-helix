@@ -132,6 +132,7 @@ jobs:
             --dry-run=client -o yaml | kubectl apply -f -
           KUBE_CONTEXT="kind-${KIND_CLUSTER_NAME}" \
             BATCHSANDBOX_TEMPLATE=e2e/k8s/values/batchsandbox-kind-template.yaml \
+            SANDBOX_PULL_SECRET=builder-registry-pull \
             e2e/k8s/scripts/install_opensandbox_minikube.sh
 
       - name: Pre-pull the platform and build step images

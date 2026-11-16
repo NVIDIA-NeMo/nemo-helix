@@ -13,7 +13,8 @@ SYSTEM_NS="${SYSTEM_NS:-opensandbox-system}"
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 LOCAL_PORT="${LOCAL_PORT:-0}"  # 0 = pick a free port
 READY_TIMEOUT_S="${READY_TIMEOUT_S:-300}"
-# e2e/k8s/scripts/install_opensandbox_kind.sh reads this default to pull it first; keep it a literal.
+# The kind CI action pulls this image first; tests/unit/test_setup_kind_opensandbox_images.py reads
+# this default to check that, so keep it a literal.
 SANDBOX_IMAGE="${SANDBOX_IMAGE:-docker.io/library/busybox:1.36}"
 SANDBOX_TIMEOUT_S="${SANDBOX_TIMEOUT_S:-600}"
 
