@@ -104,7 +104,7 @@ def env(monkeypatch, tmp_path):
     upload_client.upload_fileobj.side_effect = upload_fileobj
     upload_session = MagicMock()
     upload_session.client.return_value = upload_client
-    monkeypatch.setattr(s3_backend.boto3, "Session", lambda: upload_session)
+    monkeypatch.setattr(s3_backend, "boto3", SimpleNamespace(Session=lambda: upload_session))
     monkeypatch.setattr(s3_backend, "download_url_streaming", download)
     monkeypatch.setattr(s3_backend, "get_http_session", lambda: None)
 
