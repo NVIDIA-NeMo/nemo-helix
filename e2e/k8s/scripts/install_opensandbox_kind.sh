@@ -42,7 +42,7 @@
 #                       it names another namespace.
 #   BATCHSANDBOX_TEMPLATE
 #                       BatchSandbox template ConfigMap to apply (default:
-#                       e2e/k8s/values/batchsandbox-kind-template.yaml)
+#                       e2e/k8s/values/batchsandbox-kind-gym-template.yaml)
 #   PULL_SECRET_CHECK   As in install_opensandbox_minikube.sh, but the default is warn.
 #   SKIP_PREPULL        1 or true: do not pull the images onto the node first. Also what happens,
 #                       with a warning, under bash older than 4.4, which prepull_kind_images.sh
@@ -98,7 +98,7 @@ export KUBE_NAMESPACE="${KUBE_NAMESPACE:-default}"
 if [ -n "${NHX_NAMESPACE:-}" ] && [ "${NHX_NAMESPACE}" != "${KUBE_NAMESPACE}" ]; then
     log_warn "Ignoring NHX_NAMESPACE=${NHX_NAMESPACE}: installing for KUBE_NAMESPACE=${KUBE_NAMESPACE}, which the other kind scripts use."
 fi
-export BATCHSANDBOX_TEMPLATE="${BATCHSANDBOX_TEMPLATE:-${REPO_ROOT}/e2e/k8s/values/batchsandbox-kind-template.yaml}"
+export BATCHSANDBOX_TEMPLATE="${BATCHSANDBOX_TEMPLATE:-${REPO_ROOT}/e2e/k8s/values/batchsandbox-kind-gym-template.yaml}"
 export PULL_SECRET_CHECK="${PULL_SECRET_CHECK:-warn}"
 
 # Prints "<component> <image>" for OpenSandbox's own images, read from the values this install

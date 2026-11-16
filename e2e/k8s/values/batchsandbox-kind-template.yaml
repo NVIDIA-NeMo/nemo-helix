@@ -1,10 +1,10 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# BatchSandbox template for the kind sandboxed Gym e2e (e2e/k8s/scripts/install_opensandbox_kind.sh).
-# Same ConfigMap name as k8s/helm/examples/opensandbox/batchsandbox-template.yaml. Like the minikube
-# template, it leaves out that file's node affinity: a kind cluster is one control-plane node, which
-# the affinity would refuse.
+# BatchSandbox template for taskset runs on kind (nightly-taskset-runs-e2e: install_opensandbox_minikube.sh with
+# KUBE_CONTEXT=kind-<name> and BATCHSANDBOX_TEMPLATE set to this file). The sandboxed Gym lane uses
+# batchsandbox-kind-gym-template.yaml. Same ConfigMap name as k8s/helm/examples/opensandbox/batchsandbox-template.yaml.
+# Sized for a 4-CPU runner: task sandboxes ask for 1 CPU.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -27,22 +27,16 @@ data:
           terminationGracePeriodSeconds: 30
           # Task code is untrusted and must not hold a cluster token.
           automountServiceAccountToken: false
-          # Sandbox pods are built from this template by the OpenSandbox server, not by the jobs
-          # controller, so the chart's imagePullSecrets do not reach them. setup_local_kind_cpu.sh
-          # creates ghcr-pull when GITHUB_TOKEN is set. CI also pulls the Gym host image onto the
-          # node first, so a cluster without the Secret still starts sandboxes from loaded images.
+          # Task images are the builder's, in the development registry. Neither Jobs' image_pull_secrets nor the
+          # chart's imagePullSecrets reach a sandbox pod: only this template does.
           imagePullSecrets:
-            - name: ghcr-pull
-          # OpenSandbox v0.2.1 copies only volumeMounts from the container named "sandbox" onto
-          # the sandbox's own container, and ignores every other container field here. A Gym host's
-          # size comes from platformConfig.evals.sandbox_resources (e2e/k8s/values/gym-sandbox.yaml).
+            - name: builder-registry-pull
           containers:
             - name: sandbox
-              volumeMounts:
-                - name: dshm
-                  mountPath: /dev/shm
-          volumes:
-            - name: dshm
-              emptyDir:
-                medium: Memory
-                sizeLimit: 2Gi
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
