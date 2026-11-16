@@ -25,7 +25,7 @@ from nemo_evals.revisions import RevisionNotFoundError
 from nemo_helix_plugin.auth import RuntimeAuthClient, current_auth_client
 from nemo_helix_plugin.auth.workload_delegations import current_workload_service_attributes
 from nemo_helix_plugin.authz import CallerKind, path_rule
-from nemo_helix_plugin.entities import EntityNotFoundError
+from nemo_helix_plugin.entities import EntityConflictError, EntityNotFoundError
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, get_entity_client
 
 _EVALS_SERVICE = "evals"
@@ -98,4 +98,9 @@ async def record_job_image_build(
     build.status = progress.status
     build.images = progress.images
     build.error = progress.error
-    return await records.save(build)
+    # Write against the version the Job read, not the one just loaded, so a late write can't undo a newer one.
+    build._db_version = progress.db_version
+    try:
+        return await records.save(build)
+    except EntityConflictError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, "The image build changed since the Job read it") from e

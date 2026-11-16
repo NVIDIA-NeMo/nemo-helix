@@ -31,15 +31,15 @@ pytestmark = pytest.mark.xdist_group("jobs_auth_propagation")
 
 
 @pytest.fixture(scope="module")
-def client() -> Generator[NemoClient, None, None]:
-    """Typed client with JobsService and FilesService (auth enabled).
+def client(request: pytest.FixtureRequest) -> Generator[NemoClient, None, None]:
+    """Typed client with JobsService and FilesService (auth enabled unless a test asks for ``False`` indirectly).
 
     Jobs service requires FilesService for fileset creation (job storage).
     """
     with create_test_client(
         JobsService,
         FilesService,
-        auth_enabled=True,
+        auth_enabled=getattr(request, "param", True),
         client_type=NemoClient,
     ) as client:
         yield client
@@ -240,3 +240,15 @@ class TestServiceAttributes:
         )
         assert steps[0].auth_context is not None
         assert steps[0].auth_context.service_attributes == {}
+
+
+@pytest.mark.parametrize("client", [False], indirect=True, ids=["auth-off"])
+def test_service_attributes_are_ignored_with_auth_off(client: NemoClient) -> None:
+    """With auth off nobody is a verified service, so a Job is created but stores no attributes."""
+    jobs = JobsClient.from_client(client)
+    job_name = short_unique_name("svc-attrs")
+
+    jobs.create_job(workspace="default", body=_attributed_job(job_name))
+
+    steps = list(jobs.list_steps(name=job_name, workspace="default").items())
+    assert steps[0].auth_context is None or steps[0].auth_context.service_attributes == {}

@@ -13,7 +13,7 @@ from nemo_evals.image_builds.runner import TaskImageBuildSpec
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.endpoint import get, put
 from nemo_helix_plugin.client.method import method
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 JOB_BUILD_PATH = "/job-runtime/tasks/{task}/revisions/{revision_digest}/image-builds/{attempt}"
 _PATH = "/apis/evals/v2/workspaces/{workspace}" + JOB_BUILD_PATH
@@ -34,6 +34,7 @@ class TaskImageBuildProgress(BaseModel):
     status: BuildStatus
     images: list[BuildImage]
     error: str | None = None
+    db_version: int = Field(description="The record's version the Job last read; a newer record refuses the write")
 
 
 @get(_PATH)
@@ -70,5 +71,7 @@ class RuntimeBuildRecords:
         return state.build, state.revision
 
     async def save(self, build: TaskImageBuildEntity) -> TaskImageBuildEntity:
-        progress = TaskImageBuildProgress(status=build.status, images=build.images, error=build.error)
+        progress = TaskImageBuildProgress(
+            status=build.status, images=build.images, error=build.error, db_version=build.db_version
+        )
         return (await self._client.save(**self._path, body=progress)).data()

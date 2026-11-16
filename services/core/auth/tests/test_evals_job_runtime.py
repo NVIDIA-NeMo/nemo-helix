@@ -18,13 +18,14 @@ from nemo_evals.api.service.task_service import TaskService
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition, HarborTaskHash
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity, build_entity_name
-from nemo_evals.image_builds.runner import TaskImageBuildSpec
+from nemo_evals.image_builds.runner import EntityBuildRecords, TaskImageBuildSpec
 from nemo_evals.image_builds.runtime import RuntimeBuildRecords
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
 from nemo_evals.jobs.task_image_build import task_image_build_job_request
 from nemo_evals.revisions import get_revision
 from nemo_evals.service import EvaluatorPluginService
 from nemo_helix_plugin.auth.workload_delegations import SERVICE_ATTRIBUTES_CLAIM
+from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
@@ -43,6 +44,8 @@ from nhx.testing import ClientContext, create_test_client
 
 CREATOR = Principal(id="creator@example.com", email="creator@example.com")
 EVALS_HEADERS = {"X-NHX-Principal-Id": "service:evals", "X-NHX-Internal": "true"}
+EVALS_FOR_CREATOR = EVALS_HEADERS | {"X-NHX-Principal-On-Behalf-Of": CREATOR.id}
+READY = {"status": "ready", "images": [], "db_version": 1}
 
 
 class TestEvalsService(NemoServiceAdapter):
@@ -98,8 +101,8 @@ async def _store_build(ctx: ClientContext, monkeypatch: pytest.MonkeyPatch) -> T
     return await entities.get(TaskImageBuildEntity, name=name, workspace="default", parent=head.id)
 
 
-@pytest.fixture(scope="module")
-def platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Platform]:
+@contextmanager
+def _platform(tmp_path_factory: pytest.TempPathFactory, *, auth_enabled: bool) -> Generator[Platform]:
     tmp = tmp_path_factory.mktemp("job-runtime")
     key_file = tmp / "workload-key.pem"
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -112,7 +115,7 @@ def platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Platform]:
             TestEvalsService,
             EntitiesService,
             client_type=ClientContext,
-            auth_enabled=True,
+            auth_enabled=auth_enabled,
             tmp_dir=tmp,
             workspaces=["default", "other"],
             projects=[],
@@ -126,6 +129,13 @@ def platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Platform]:
             f"/revisions/{build.revision_digest}/image-builds/{build.attempt}"
         )
         yield Platform(ctx, build, path, key_file)
+
+
+@pytest.fixture(scope="module")
+def platform(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Platform]:
+    """Auth on, unless a test asks for ``False`` indirectly; one process runs one platform at a time."""
+    with _platform(tmp_path_factory, auth_enabled=getattr(request, "param", True)) as platform:
+        yield platform
 
 
 @contextmanager
@@ -219,7 +229,7 @@ def test_any_other_workload_is_refused(platform: Platform, mint, granted: str) -
     with _workload_exchange(platform) as auth:
         headers = _bearer(mint(auth, attributes))
         assert platform.ctx.test_client.get(platform.path, headers=headers).status_code == 403
-        refused = platform.ctx.test_client.put(platform.path, headers=headers, json={"status": "ready", "images": []})
+        refused = platform.ctx.test_client.put(platform.path, headers=headers, json=READY)
         assert refused.status_code == 403
 
 
@@ -242,14 +252,52 @@ def test_a_user_cannot_use_the_routes(platform: Platform) -> None:
     )
     assert grant.status_code == 200, grant.text
     assert platform.ctx.test_client.get(platform.path, headers=owner).status_code == 403
-    refused = platform.ctx.test_client.put(platform.path, headers=owner, json={"status": "ready", "images": []})
+    refused = platform.ctx.test_client.put(platform.path, headers=owner, json=READY)
     assert refused.status_code == 403
+
+
+def _record(platform: Platform, headers: dict[str, str], status: str, error: str) -> TaskImageBuildEntity:
+    """Load the build through the routes, record ``status`` and ``error``, and read it back."""
+
+    async def record() -> TaskImageBuildEntity:
+        records = RuntimeBuildRecords(platform.ctx.async_client.with_headers(headers), _spec(platform))
+        loaded, _ = await records.load()
+        await records.save(loaded.model_copy(update={"status": status, "error": error}))
+        return (await records.load())[0]
+
+    return asyncio.run(record())
 
 
 def test_the_evals_service_identity_is_admitted_without_token_exchange(platform: Platform) -> None:
     """Without token exchange a Job authenticates as the Evals service acting for its creator."""
-    headers = EVALS_HEADERS | {"X-NHX-Principal-On-Behalf-Of": CREATOR.id}
-    assert platform.ctx.test_client.get(platform.path, headers=headers).status_code == 200
+    recorded = _record(platform, EVALS_FOR_CREATOR, "failed", "trusted headers")
+    assert (recorded.status, recorded.error) == ("failed", "trusted headers")
+
+
+@pytest.mark.parametrize("platform", [False], indirect=True, ids=["auth-off"])
+def test_the_routes_need_no_grant_with_auth_off(platform: Platform) -> None:
+    recorded = _record(platform, {}, "failed", "auth off")
+    assert (recorded.status, recorded.error) == ("failed", "auth off")
+
+
+def test_a_late_write_cannot_undo_a_newer_one(platform: Platform) -> None:
+    """The Job writes against the version it read: a newer record, e.g. Evals failing an abandoned build, wins."""
+    spec = _spec(platform)
+
+    async def race() -> TaskImageBuildEntity:
+        job = RuntimeBuildRecords(platform.ctx.async_client.with_headers(EVALS_FOR_CREATOR), spec)
+        evals = EntityBuildRecords(
+            EntityClient(AsyncEntitiesClient.from_client(platform.ctx.async_client.with_headers(EVALS_HEADERS))), spec
+        )
+        read, _ = await job.load()
+        newer, _ = await evals.load()
+        await evals.save(newer.model_copy(update={"status": "failed", "error": "job cancelled"}))
+        with pytest.raises(ConflictError):
+            await job.save(read.model_copy(update={"status": "running", "error": None}))
+        return (await evals.load())[0]
+
+    current = asyncio.run(race())
+    assert (current.status, current.error) == ("failed", "job cancelled")
 
 
 def test_a_job_cannot_rewrite_what_its_build_is(platform: Platform) -> None:

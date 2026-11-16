@@ -34,7 +34,8 @@ from nemo_evals.image_builds.runner import (
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
 from nemo_evals.jobs.task_image_build import is_job_for, task_image_build_job_request
 from nemo_evals.revisions import apply_tag, get_revision, publish_revision
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.client.errors import ConflictError, PermissionDeniedError
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 Outcome = Literal["ready", "failed"]
@@ -314,6 +315,40 @@ async def test_a_finished_build_is_left_alone(entity_store, store_task, archive)
 
     assert again == first
     assert builder.submits == []
+
+
+class _RouteBuildRecords(EntityBuildRecords):
+    """Build records as the Job sees them through the job-runtime routes: a stale write is an HTTP 409."""
+
+    async def save(self, build: TaskImageBuildEntity) -> TaskImageBuildEntity:
+        try:
+            return await super().save(build)
+        except NemoEntityConflictError:
+            raise ConflictError(httpx.Response(409, json={"detail": "The image build changed since the Job read it"}))
+
+
+async def test_a_build_ended_by_another_writer_keeps_that_ending(entity_store, store_task, archive) -> None:
+    """Evals fails the build (its Job was cancelled) while the Job builds: the Job's next write conflicts, and it
+    keeps the newer ending instead of overwriting it."""
+    spec = await _start(entity_store, store_task, config={})
+
+    class _CancelledMidBuild(_Builder):
+        async def get_image(self, name: str) -> ContainerImage | None:
+            stored = await _stored_build(entity_store, spec)
+            if stored.status == "running":
+                stored.status, stored.error = "failed", "job cancelled"
+                await entity_store.update(stored)
+            return await super().get_image(name)
+
+    build = await run_task_image_build(
+        _RouteBuildRecords(entity_store, spec),
+        files=Mock(),
+        builder=_CancelledMidBuild({"sort-task/environment": "ready"}),
+        sleep=_no_sleep,
+    )
+
+    assert (build.status, build.error) == ("failed", "job cancelled")
+    assert (await _stored_build(entity_store, spec)).error == "job cancelled"
 
 
 class _RecordingJobs(_Jobs):
