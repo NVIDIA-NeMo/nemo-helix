@@ -28,6 +28,16 @@ export const PinnedRevision: FC<PinnedRevisionProps> = ({
           Behind latest
         </Tag>
       )}
+      {behindLatest === undefined && (
+        <Tag
+          kind="outline"
+          color="gray"
+          readOnly
+          title="The task's revisions couldn't be loaded to compare this pin with latest."
+        >
+          Latest unknown
+        </Tag>
+      )}
     </Flex>
   );
 };

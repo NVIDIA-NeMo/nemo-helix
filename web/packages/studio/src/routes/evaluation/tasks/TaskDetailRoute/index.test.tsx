@@ -2,10 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ROUTES } from '@studio/constants/routes';
+import { server } from '@studio/mocks/node';
 import { TaskDetailRoute } from '@studio/routes/evaluation/tasks/TaskDetailRoute';
 import { renderRoute } from '@studio/tests/util/render';
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+import { useSearchParams } from 'react-router';
+
+const TasksetPage = () => <div>taskset page {useSearchParams()[0].get('task')}</div>;
 
 const renderDetail = (path = 'sort-strings') =>
   renderRoute(undefined, {
@@ -13,7 +18,7 @@ const renderDetail = (path = 'sort-strings') =>
     routes: [
       { path: ROUTES.workspace.taskDetail, element: <TaskDetailRoute /> },
       { path: ROUTES.workspace.taskDetailTab, element: <TaskDetailRoute /> },
-      { path: ROUTES.workspace.tasksetDetail, element: <div>taskset page</div> },
+      { path: ROUTES.workspace.tasksetDetail, element: <TasksetPage /> },
     ],
   });
 
@@ -70,7 +75,18 @@ describe('TaskDetailRoute', () => {
     expect(within(current).queryByText('Behind latest')).not.toBeInTheDocument();
 
     await userEvent.click(within(behind).getByText('sort-suite'));
-    expect(await screen.findByText('taskset page')).toBeInTheDocument();
+    // Opens the member as the taskset pins it, so the drawer shows the pinned revision.
+    expect(
+      await screen.findByText(/^taskset page default\/sort-strings#[0-9a-f]+$/)
+    ).toBeInTheDocument();
+  });
+
+  it("marks a pin's comparison unknown when the task's revisions fail to load", async () => {
+    server.use(http.get('*/tasks/:name/revisions', () => HttpResponse.json({}, { status: 500 })));
+    renderDetail();
+    const pinned = await screen.findByRole('button', { name: /sort-suite/ });
+    expect(await within(pinned).findByText('Latest unknown')).toBeInTheDocument();
+    expect(within(pinned).queryByText('Behind latest')).not.toBeInTheDocument();
   });
 
   it('opens a tab from its path', async () => {

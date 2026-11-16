@@ -13,10 +13,13 @@ export interface TaskListFilters {
 
 /** A taskset that has the task as a member, with the revision it pins. */
 export interface TaskUsageRow extends Taskset {
+  /** The member ref as the taskset stores it, pin included. */
+  memberRef: string;
   /** Content digest of the pinned task revision; absent when the member ref is unpinned. */
   pinnedDigest?: string;
   /** Ordinal of the pinned revision, when it is one of the task's listed revisions. */
   pinnedRevision?: number;
-  /** The pin names content other than the task's latest revision. */
-  behindLatest: boolean;
+  /** The pin names content other than the task's latest revision; undefined when the latest
+   *  revision couldn't be loaded to compare against. */
+  behindLatest?: boolean;
 }

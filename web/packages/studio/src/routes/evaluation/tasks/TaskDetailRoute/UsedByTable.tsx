@@ -20,7 +20,7 @@ import { useNavigate } from 'react-router';
 export const UsedByTable: FC<{ task: Task }> = ({ task }) => {
   const navigate = useNavigate();
   const dataViewState = useStudioDataViewState({ defaultSort: [] });
-  const { ref, rows, totalCount, isFetching, error } = useTaskUsage(task, {
+  const { rows, totalCount, isFetching, error } = useTaskUsage(task, {
     page: dataViewState.pagination.state.pageIndex + 1,
     page_size: dataViewState.pagination.state.pageSize,
   });
@@ -54,7 +54,9 @@ export const UsedByTable: FC<{ task: Task }> = ({ task }) => {
       dataViewState={dataViewState}
       makeColumns={makeColumns}
       onRowClick={(taskset) =>
-        navigate(getTasksetDetailRoute(taskset.workspace, taskset.name, { task: ref }))
+        navigate(
+          getTasksetDetailRoute(taskset.workspace, taskset.name, { task: taskset.memberRef })
+        )
       }
       attributes={{
         DataViewRoot: {

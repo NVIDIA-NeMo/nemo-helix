@@ -21,9 +21,13 @@ export function useTaskUsage(task: Task, page: { page?: number; page_size: numbe
     { ...page, filter: { tasks: ref } },
     { query: { placeholderData: keepPreviousData } }
   );
-  const { data: revisions } = useEvalsListTaskRevisions(task.workspace, task.name, {
-    page_size: REVISION_LOOKUP_SIZE,
-  });
+  const { data: revisions, isError: revisionsFailed } = useEvalsListTaskRevisions(
+    task.workspace,
+    task.name,
+    {
+      page_size: REVISION_LOOKUP_SIZE,
+    }
+  );
 
   const rows = useMemo<TaskUsageRow[]>(() => {
     // Newest first, so a digest published twice (a revert) names its newest revision.
@@ -32,21 +36,28 @@ export function useTaskUsage(task: Task, page: { page?: number; page_size: numbe
     revisions?.data.forEach(({ content_hash, revision }) => {
       if (!ordinals.has(content_hash)) ordinals.set(content_hash, revision);
     });
+    // Unknown only once the lookup has failed; while it loads, nothing is flagged.
+    const isBehind = (pinnedDigest?: string): boolean | undefined => {
+      if (!pinnedDigest) return false;
+      if (latestDigest) return pinnedDigest !== latestDigest;
+      return revisionsFailed ? undefined : false;
+    };
     return (tasksets.data?.data ?? []).map((taskset) => {
-      const pinnedDigest = (taskset.tasks ?? [])
-        .map((member) => parseTaskRef(member, taskset.workspace))
-        .find((parts) => taskRef(parts) === ref)?.version;
+      const memberRef =
+        taskset.tasks?.find((member) => taskRef(parseTaskRef(member, taskset.workspace)) === ref) ??
+        ref;
+      const pinnedDigest = parseTaskRef(memberRef, taskset.workspace).version;
       return {
         ...taskset,
+        memberRef,
         pinnedDigest,
         pinnedRevision: pinnedDigest ? ordinals.get(pinnedDigest) : undefined,
-        behindLatest: Boolean(pinnedDigest && latestDigest && pinnedDigest !== latestDigest),
+        behindLatest: isBehind(pinnedDigest),
       };
     });
-  }, [tasksets.data, revisions, ref]);
+  }, [tasksets.data, revisions, revisionsFailed, ref]);
 
   return {
-    ref,
     rows,
     totalCount: tasksets.data?.pagination?.total_results,
     isFetching: tasksets.isFetching,
