@@ -118,7 +118,7 @@ export const TasksDataView: FC<{ workspace: string }> = ({ workspace }) => {
       dataViewState={dataViewState}
       searchField="name"
       makeColumns={makeColumns}
-      onRowClick={(task) => navigate(getTaskDetailRoute(workspace, task.name))}
+      onRowClick={(task) => navigate(getTaskDetailRoute(task.workspace, task.name))}
       attributes={{
         DataViewSearchBar: { placeholder: 'Search tasks...' },
         DataViewRoot: {
