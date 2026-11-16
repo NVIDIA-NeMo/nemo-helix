@@ -125,10 +125,10 @@ export class ProjectModelsPage {
     // Open delete modal
     await this.openQuickActionsMenu(modelName, 'Delete');
 
-    await this.page.getByRole('button', { name: 'Delete' }).click();
+    await this.page.getByRole('button', { name: 'Delete Model' }).click();
     await waitForLongOperation(this.page);
 
-    await expectToastIsVisible(this.page, `Successfully deleted model ${modelName}`);
+    await expectToastIsVisible(this.page, `Deleted model '${modelName}'.`);
   }
 
   async waitForPageLoad() {
