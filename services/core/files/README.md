@@ -67,6 +67,27 @@ Legacy entries under `cache/s3/` are ignored in favor of `cache/s3-v2/`; no manu
 cleanup is needed to restore fresh reads after upgrading. Legacy files are not
 automatically removed.
 
+### Opt-in S3 cache regression
+
+```bash
+RUN_EXTERNAL_STORAGE_TESTS=1 uv run --frozen pytest \
+  services/core/files/tests/integration/external_storage/test_s3_cache.py -v -n 0
+```
+
+The test runs the Files API in-process, with real S3 requests and disk caching.
+By default it starts a digest-pinned, disposable MinIO container on a random
+loopback port (Docker required; no cloud credentials). To use an existing S3
+server instead, set `S3_TEST_ENDPOINT`, `S3_TEST_ACCESS_KEY`,
+`S3_TEST_SECRET_KEY`, and optionally `S3_TEST_REGION` (default `us-east-1`).
+The credentials must allow bucket creation/deletion and versioning; each case
+cleans up its own bucket, including versions and delete markers.
+
+Cases cover unversioned/versioned buckets with retention limits of one/two,
+API overwrite/delete with the default metadata TTL, direct bucket mutations
+with strict revalidation, ranged reads and headers, signed `If-Match`, ignored
+legacy entries, and an unbuffered reader surviving eviction. No S3 or cache I/O
+is mocked. This is not a full deployed-platform or AWS IAM/KMS test.
+
 ## scripts
 `services/core/files/script` has a few e2e scripts for testing functionality.
 
