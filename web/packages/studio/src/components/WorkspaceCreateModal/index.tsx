@@ -117,7 +117,8 @@ export const WorkspaceCreateModal: FC<WorkspaceCreateModalProps> = ({
 
       if (errorDetail === `Workspace ${data.name} already exists.`) {
         setError('name', { message: errorDetail });
-      } else if (isForbiddenError(error)) {
+      } else if (isForbiddenError(error) && (!errorDetail || errorDetail === 'Forbidden')) {
+        // Authz denials carry a generic detail; business-rule 403s (e.g. reserved names) fall through.
         toast.error(
           "You don't have permission to create workspaces. Ask an administrator for access."
         );
