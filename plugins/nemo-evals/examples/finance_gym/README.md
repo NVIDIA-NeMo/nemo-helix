@@ -109,7 +109,8 @@ uv run --no-project --with datasets --with pillow --with pymupdf --with huggingf
        "hydra_params": {
          "policy_base_url": "http://<api-service>:8080/apis/inference-gateway/v2/workspaces/default/model/<model>/-/v1",
          "policy_api_key": "not-used",
-         "policy_model_name": "<model>"
+         "policy_model_name": "<model>",
+         "policy_model": {"responses_api_models": {"inference_provider": {"uses_reasoning_parser": true}}}
        }
      },
      "labels": {"capability": "visual_ocr"}
@@ -123,6 +124,12 @@ uv run --no-project --with datasets --with pillow --with pymupdf --with huggingf
    `<api-service>` is the NeMo Helix API's in-cluster address, which must be on the sandbox's egress list, and
    `<model>` is the model's name in the gateway. The sandbox sends `policy_api_key`; with auth off the gateway
    ignores it.
+
+   Keep `uses_reasoning_parser`. Without it, Gym's model server drops the reasoning the provider returns
+   separately (`reasoning_content`), and the scorer sees only the content. The cookbook puts that reasoning in
+   front of the content before splitting the answer off at the first `</think>`, so without it the scorer finds
+   answers the cookbook doesn't. On all 2,949 test rows, Super VL with thinking on scored a task accuracy of
+   0.071 without the parser and 0.000 with it, as the cookbook's own scoring gives.
 
 5. When the jobs finish, download each one's results bundle and build the report:
 

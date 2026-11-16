@@ -6,7 +6,7 @@ name = "nhx-agent-hardener-tasks"
 version = "0.0.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "nvidia-agent-hardener==0.0.17",
+    "nvidia-agent-hardener==0.0.18",
 ]
 
 [tool.uv]
