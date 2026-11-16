@@ -28,6 +28,7 @@ import sysconfig
 from pathlib import Path
 
 from nemo_agents_plugin.agent_config import AgentConfig, HarnessConfig
+from nemo_fabric_adapter_catalog import get_adapter_descriptor
 
 logger = logging.getLogger(__name__)
 
@@ -159,3 +160,42 @@ def validate_harness_kinds(config: AgentConfig) -> None:
             resolve_adapter_id(harness.kind)
         except UnknownAdapterError as error:
             raise UnknownAdapterError(f"Harness {name!r}: {error}") from error
+
+
+#: Appended to every rejection of a context the agent's adapter would drop.
+CONTEXT_UNAWARE_HINT = (
+    "Put per-run parameters in the prompt instead, or run the agent on a Fabric adapter "
+    "that reads AgentRunRequest.context."
+)
+
+
+def adapter_reads_request_context(adapter_id: str) -> bool:
+    """Return whether an adapter can use a job's ``AgentRunRequest.context``.
+
+    False is definitive here: we know that stock Fabric adapters do not read it.
+    Other adapters provided by plugins or end users are assumed to read it.
+    """
+    if adapter_id in HARNESS_ADAPTER_IDS.values():
+        return False
+    try:
+        get_adapter_descriptor(adapter_id)
+    except KeyError:
+        return True
+    return False
+
+
+def context_unaware_harness(config: AgentConfig) -> tuple[str, str] | None:
+    """Return ``(harness name, adapter ID)`` when the default harness's adapter drops request context.
+
+    Execute jobs, the only callers that send a context, run the default harness.
+    A workflow config has none and is left alone. Unlike ``resolve_adapter_id``
+    this scans no manifests, so it answers the same for a job that names its
+    own image.
+    """
+    if config.default_harness is None:
+        return None
+    harness = config.harnesses[config.default_harness]
+    adapter_id = HARNESS_ADAPTER_IDS.get(harness.kind, harness.kind)
+    if adapter_reads_request_context(adapter_id):
+        return None
+    return config.default_harness, adapter_id

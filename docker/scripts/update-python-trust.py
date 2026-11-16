@@ -16,6 +16,7 @@ import platform
 import re
 import runpy
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -212,6 +213,19 @@ def replace_binary(binary: Path, source: Path, record: Path) -> None:
             csv.writer(handle).writerows(rows)
 
 
+def prune_cache_files(cache: Path) -> None:
+    """Evict uv's deduplication store without deleting prefetched archive files."""
+    # archive-v0 owns hardlinks to these files, not symlinks. Removing the store
+    # entry leaves those archive/install hardlinks intact. Do not gate eviction
+    # on st_nlink: layered filesystems can retain lower-layer links after an
+    # archive binary is replaced. That left the old W&B executable in the image.
+    # Do not use full `uv cache prune`: RL ships archives used by prefetched venvs.
+    for path in (cache / "files-v0").rglob("*"):
+        info = path.lstat()
+        if stat.S_ISREG(info.st_mode):
+            path.unlink()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", action="append", type=Path)
@@ -267,6 +281,9 @@ def main() -> None:
                     if link.is_symlink() and link.resolve().is_relative_to(archive):
                         link.unlink()
             shutil.rmtree(archive)
+
+    for cache in CACHE_ROOTS:
+        prune_cache_files(cache)
 
 
 if __name__ == "__main__":

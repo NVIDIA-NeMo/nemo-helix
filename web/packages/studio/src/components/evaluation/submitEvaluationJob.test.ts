@@ -182,8 +182,18 @@ describe('buildAgentEvalRequestBody', () => {
       agent: 'a',
       evaluationId: 'nightly-eval-a3f2',
     });
-    // agent_name is omitted deliberately: the backend derives it from the agent target.
-    expect(body.spec.publication).toEqual({ intake: { evaluation_id: 'nightly-eval-a3f2' } });
+    expect(body.spec.publication).toEqual({
+      intake: { evaluation_id: 'nightly-eval-a3f2', agent_name: 'a' },
+    });
+  });
+
+  it('stamps the bare agent name even when the selection is workspace-qualified', () => {
+    const body = buildAgentEvalRequestBody(persisted(), {
+      workspace: 'ws-a',
+      agent: 'ws-a/a',
+      evaluationId: 'eval-1',
+    });
+    expect(body.spec.publication?.intake.agent_name).toBe('a');
   });
 
   it('omits publication entirely when no evaluation is selected', () => {
@@ -221,7 +231,9 @@ describe('buildDatasetEvalRequestBody', () => {
       { workspace: 'ws-a', agent: 'a', evaluationId: 'eval-1' },
       null
     );
-    expect(withPublication.spec.publication).toEqual({ intake: { evaluation_id: 'eval-1' } });
+    expect(withPublication.spec.publication).toEqual({
+      intake: { evaluation_id: 'eval-1', agent_name: 'a' },
+    });
 
     const without = buildDatasetEvalRequestBody(
       datasetConfig,

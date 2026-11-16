@@ -17,6 +17,8 @@ import asyncio
 import copy
 import logging
 from asyncio import sleep as async_sleep
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import PurePosixPath
 from time import monotonic
 from typing import Any
@@ -716,16 +718,17 @@ class DeploymentsRunnerBackend(RunnerBackend):
 
     def __init__(self, config: AgentsConfig) -> None:
         self._config: DeploymentsRunnerConfig = config.deployments
-        self._entities: NemoEntitiesClient | None = None
         self._executor_registry: ExecutorRegistry | None = None
         self._executor_registry_lock = asyncio.Lock()
         self._executor_registry_task: asyncio.Task[ExecutorRegistry] | None = None
 
-    def _entity_client(self) -> NemoEntitiesClient:
-        if self._entities is None:
-            client = get_async_nemo_client(as_service="agents", internal=True)
-            self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
-        return self._entities
+    @asynccontextmanager
+    async def _entity_client(self) -> AsyncGenerator[NemoEntitiesClient]:
+        # The controller and API share this backend but run on different event
+        # loops. Create and close each operation's client on its calling loop
+        # rather than retaining a transport initialized by another loop.
+        async with get_async_nemo_client(as_service="agents", internal=True) as client:
+            yield NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
 
     def _build_registry(self) -> ExecutorRegistry:
         config = DeploymentsConfig.get()
@@ -808,7 +811,6 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 error="No container image provided and no deployments.default_image configured.",
             )
 
-        entities = self._entity_client()
         # Deployment resolution injects the platform's own base URL, which is not
         # necessarily reachable from inside the agent container. Rebase it onto a
         # container-reachable address.
@@ -918,50 +920,51 @@ class DeploymentsRunnerBackend(RunnerBackend):
             logger.error("Refusing to deploy agent %r: %s", name, exc)
             return DeploymentInfo(name=name, status="failed", error=str(exc))
         deployment_config.gateway_providers = providers or {}
-        await entities.create(deployment_config)
-        try:
-            deployment = Deployment(
-                name=name,
-                workspace=workspace,
-                deployment_config=name,
-                executor=executor,
-                desired_state="READY",
-                status="PENDING",
-            ).with_auth_context(auth_context)
-            await entities.create(deployment)
-        except Exception:
-            # Avoid orphaning the config if Deployment create fails.
+        async with self._entity_client() as entities:
+            await entities.create(deployment_config)
             try:
-                await entities.delete(
-                    DeploymentConfig,
+                deployment = Deployment(
                     name=name,
                     workspace=workspace,
-                    expected_db_version=deployment_config.db_version,
-                )
+                    deployment_config=name,
+                    executor=executor,
+                    desired_state="READY",
+                    status="PENDING",
+                ).with_auth_context(auth_context)
+                await entities.create(deployment)
             except Exception:
-                logger.exception(
-                    "Failed to clean up DeploymentConfig '%s/%s' after Deployment create failure",
-                    workspace,
-                    name,
-                )
-            raise
+                # Avoid orphaning the config if Deployment create fails.
+                try:
+                    await entities.delete(
+                        DeploymentConfig,
+                        name=name,
+                        workspace=workspace,
+                        expected_db_version=deployment_config.db_version,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to clean up DeploymentConfig '%s/%s' after Deployment create failure",
+                        workspace,
+                        name,
+                    )
+                raise
 
-        logger.info(
-            "Created deployment entities '%s/%s' (image=%s, mode=%s)",
-            workspace,
-            name,
-            resolved_image,
-            deployment_mode,
-        )
-        return DeploymentInfo(name=name, status="starting", endpoint="", endpoints=[], staged_spec=staged_spec)
+            logger.info(
+                "Created deployment entities '%s/%s' (image=%s, mode=%s)",
+                workspace,
+                name,
+                resolved_image,
+                deployment_mode,
+            )
+            return DeploymentInfo(name=name, status="starting", endpoint="", endpoints=[], staged_spec=staged_spec)
 
     async def get_deployment_status(self, workspace: str, name: str) -> DeploymentInfo | None:
-        entities = self._entity_client()
-        try:
-            deployment = await entities.get(Deployment, name=name, workspace=workspace)
-        except NemoEntityNotFoundError:
-            return None
-        return _info_from_deployment(deployment)
+        async with self._entity_client() as entities:
+            try:
+                deployment = await entities.get(Deployment, name=name, workspace=workspace)
+            except NemoEntityNotFoundError:
+                return None
+            return _info_from_deployment(deployment)
 
     async def delete_deployment(self, workspace: str, name: str) -> bool:
         """Tear down plugin Deployment (+ Config).
@@ -972,60 +975,60 @@ class DeploymentsRunnerBackend(RunnerBackend):
         still present so a later reconcile can finish cleanup. A timed-out
         delete is left FAILED; only a new user delete reopens it.
         """
-        entities = self._entity_client()
-        deployment_present = False
-        try:
-            deployment = await entities.get(Deployment, name=name, workspace=workspace)
-            if deployment.delete_timed_out():
-                return False
-            if deployment.status != "DELETING":
-                deployment.status = "DELETING"
-                deployment.desired_state = "STOPPED"
-                await entities.update(deployment)
-            deployment_present = True
-        except NemoEntityNotFoundError:
-            pass
+        async with self._entity_client() as entities:
+            deployment_present = False
+            try:
+                deployment = await entities.get(Deployment, name=name, workspace=workspace)
+                if deployment.delete_timed_out():
+                    return False
+                if deployment.status != "DELETING":
+                    deployment.status = "DELETING"
+                    deployment.desired_state = "STOPPED"
+                    await entities.update(deployment)
+                deployment_present = True
+            except NemoEntityNotFoundError:
+                pass
 
-        if deployment_present:
-            gone = await self._wait_for_deployment_gone(workspace, name)
-            if not gone:
-                logger.warning(
-                    "Deployment '%s/%s' still present after %.1fs; keeping AgentDeployment "
-                    "and DeploymentConfig so teardown can finish on a later reconcile.",
-                    workspace,
-                    name,
-                    _DELETE_CONFIG_WAIT_S,
+            if deployment_present:
+                gone = await self._wait_for_deployment_gone(workspace, name)
+                if not gone:
+                    logger.warning(
+                        "Deployment '%s/%s' still present after %.1fs; keeping AgentDeployment "
+                        "and DeploymentConfig so teardown can finish on a later reconcile.",
+                        workspace,
+                        name,
+                        _DELETE_CONFIG_WAIT_S,
+                    )
+                    return False
+
+            try:
+                deployment_config = await entities.get(DeploymentConfig, name=name, workspace=workspace)
+                await entities.delete(
+                    DeploymentConfig,
+                    name=name,
+                    workspace=workspace,
+                    expected_db_version=deployment_config.db_version,
                 )
-                return False
-
-        try:
-            deployment_config = await entities.get(DeploymentConfig, name=name, workspace=workspace)
-            await entities.delete(
-                DeploymentConfig,
-                name=name,
-                workspace=workspace,
-                expected_db_version=deployment_config.db_version,
-            )
-        except NemoEntityNotFoundError:
-            pass
-        return True
+            except NemoEntityNotFoundError:
+                pass
+            return True
 
     async def _wait_for_deployment_gone(self, workspace: str, dep_name: str) -> bool:
         """Return True if the Deployment entity disappears within the wait budget."""
-        entities = self._entity_client()
-        deadline = monotonic() + _DELETE_CONFIG_WAIT_S
-        while monotonic() < deadline:
-            try:
-                await entities.get(Deployment, name=dep_name, workspace=workspace)
-            except NemoEntityNotFoundError:
-                return True
-            await async_sleep(_DELETE_CONFIG_POLL_S)
-        return False
+        async with self._entity_client() as entities:
+            deadline = monotonic() + _DELETE_CONFIG_WAIT_S
+            while monotonic() < deadline:
+                try:
+                    await entities.get(Deployment, name=dep_name, workspace=workspace)
+                except NemoEntityNotFoundError:
+                    return True
+                await async_sleep(_DELETE_CONFIG_POLL_S)
+            return False
 
     async def list_deployments(self, workspace: str | None = None) -> list[DeploymentInfo]:
-        entities = self._entity_client()
-        result = await entities.list(Deployment, workspace=workspace or "-")
-        return [_info_from_deployment(deployment) for deployment in result.data]
+        async with self._entity_client() as entities:
+            result = await entities.list(Deployment, workspace=workspace or "-")
+            return [_info_from_deployment(deployment) for deployment in result.data]
 
     async def health_check(self, endpoint: str) -> bool:
         # Container modes trust the deployments-plugin readiness projection; the
@@ -1042,17 +1045,17 @@ class DeploymentsRunnerBackend(RunnerBackend):
         bridge to that implementation so Studio and ``nemo agents`` API callers
         don't have to shell out to substrate-specific CLIs.
         """
-        entities = self._entity_client()
-        try:
-            deployment = await entities.get(Deployment, name=name, workspace=workspace)
-            deployment_config = await entities.get(
-                DeploymentConfig, name=deployment.deployment_config, workspace=workspace
-            )
-        except NemoEntityNotFoundError:
-            return LogResult(lines=[])
-        if deployment_config.labels.get("nemo.agents/deployment") != name:
-            logger.warning("Refusing to read non-agent deployment logs")
-            return LogResult(lines=[])
+        async with self._entity_client() as entities:
+            try:
+                deployment = await entities.get(Deployment, name=name, workspace=workspace)
+                deployment_config = await entities.get(
+                    DeploymentConfig, name=deployment.deployment_config, workspace=workspace
+                )
+            except NemoEntityNotFoundError:
+                return LogResult(lines=[])
+            if deployment_config.labels.get("nemo.agents/deployment") != name:
+                logger.warning("Refusing to read non-agent deployment logs")
+                return LogResult(lines=[])
         try:
             backend = (await self._registry()).resolve(deployment.executor)
         except Exception as exc:
@@ -1071,4 +1074,3 @@ class DeploymentsRunnerBackend(RunnerBackend):
         if self._executor_registry is not None:
             self._executor_registry.shutdown_all()
         self._executor_registry = None
-        self._entities = None

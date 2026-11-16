@@ -23,6 +23,7 @@ from nemo_anonymizer_plugin.app.gliner_detector import (
     build_gliner_anonymizer,
     caller_supplied_entity_detector,
     ensure_gliner_weights,
+    gliner_caches_under,
     stop_gliner_runtime,
 )
 from nemo_anonymizer_plugin.app.input import prepare_anonymizer_input
@@ -102,24 +103,25 @@ def _run_with_step_config(
 
     use_in_process_detector = not caller_supplied_entity_detector(request.selected_models)
     try:
-        if use_in_process_detector:
-            ensure_gliner_weights(service_sdk, on_download_start=_log_download_start)
-        with preserve_root_logging():
+        with gliner_caches_under(ctx.storage.ephemeral / "model-cache"):
             if use_in_process_detector:
-                anonymizer = build_gliner_anonymizer(
-                    model_configs_yaml=step_config.model_configs_yaml,
-                    dd_providers=dd_providers,
-                    artifact_path=storage_path / "anonymizer-artifacts",
-                )
-            else:
-                anonymizer = Anonymizer(
-                    model_configs=step_config.model_configs_yaml,
-                    model_providers=dd_providers,
-                    artifact_path=storage_path / "anonymizer-artifacts",
-                )
-        logger.info("Running anonymizer pipeline")
-        with capture_data_designer_token_usage(ctx.usage):
-            result = anonymizer.run(config=request.config, data=prepared_input.input)
+                ensure_gliner_weights(service_sdk, on_download_start=_log_download_start)
+            with preserve_root_logging():
+                if use_in_process_detector:
+                    anonymizer = build_gliner_anonymizer(
+                        model_configs_yaml=step_config.model_configs_yaml,
+                        dd_providers=dd_providers,
+                        artifact_path=storage_path / "anonymizer-artifacts",
+                    )
+                else:
+                    anonymizer = Anonymizer(
+                        model_configs=step_config.model_configs_yaml,
+                        model_providers=dd_providers,
+                        artifact_path=storage_path / "anonymizer-artifacts",
+                    )
+            logger.info("Running anonymizer pipeline")
+            with capture_data_designer_token_usage(ctx.usage):
+                result = anonymizer.run(config=request.config, data=prepared_input.input)
     finally:
         prepared_input.cleanup()
         if use_in_process_detector:

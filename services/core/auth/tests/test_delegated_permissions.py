@@ -354,6 +354,31 @@ def test_runtime_log_upload_uses_actor_grant_without_user_log_permission(
     pytest.fail("The shipped policy must declare the runtime log-upload operation")
 
 
+@pytest.mark.parametrize("grant", ["actor", "subject", "other-workspace", "none"])
+def test_docker_job_logs_require_explicit_actor_workspace_grant(
+    policy: OPAPolicy, policy_data: dict[str, Any], grant: str
+) -> None:
+    group = "nhx:docker:jobs:private"
+    if grant == "actor":
+        policy_data["authz"]["principals"][group] = {"workspaces": {"private": ["JobRunner"]}}
+    elif grant == "subject":
+        policy_data["authz"]["principals"]["submitter"] = {"workspaces": {"private": ["JobRunner"]}}
+    elif grant == "other-workspace":
+        policy_data["authz"]["principals"][group] = {"workspaces": {"elsewhere": ["JobRunner"]}}
+    policy.set_data(policy_data)
+    result = policy.evaluate(
+        {
+            "principal_id": "job-unique-delegation",
+            "actor_groups": [group],
+            "on_behalf_of_principal_id": "submitter",
+            "method": "POST",
+            "path": "/apis/files/v2/workspaces/private/filesets/job-fileset-test/otlp/v1/logs",
+        },
+        entrypoint=0,
+    )
+    assert result[0]["result"]["allowed"] is (grant == "actor")
+
+
 def test_missing_actor_requirement_is_rejected_before_evaluation(
     policy: OPAPolicy, policy_data: dict[str, Any]
 ) -> None:

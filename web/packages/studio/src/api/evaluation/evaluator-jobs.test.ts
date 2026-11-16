@@ -7,7 +7,7 @@ import { makeEvaluatorJob } from '@studio/mocks/evaluation/jobs';
 import { server } from '@studio/mocks/node';
 import { http, HttpResponse } from 'msw';
 
-it('scopes every job page to both evaluator sources and local registered-agent target forms', async () => {
+it('scopes every job page to both evaluator sources and the local agent by publication or target', async () => {
   const filters: unknown[] = [];
   const pages: number[] = [];
   server.use(
@@ -31,6 +31,11 @@ it('scopes every job page to both evaluator sources and local registered-agent t
         { source: { $in: ['nemo-evals', 'nemo-evals.agent-evaluate'] } },
         {
           $or: [
+            {
+              'spec.publication.intake.agent_name': {
+                $in: ['my-agent', `${DEFAULT_WORKSPACE}/my-agent`],
+              },
+            },
             {
               'spec.target.kind': { $eq: 'agent' },
               'spec.target.agent.name': { $in: ['my-agent', `${DEFAULT_WORKSPACE}/my-agent`] },

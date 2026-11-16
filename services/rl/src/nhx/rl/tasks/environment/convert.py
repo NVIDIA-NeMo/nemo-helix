@@ -194,6 +194,41 @@ def locked_package_versions(rl_root: Path) -> dict[str, str]:
     return pins
 
 
+def environment_lock_versions(rl_root: Path, requirements: list[str]) -> dict[str, str]:
+    """Keep image pins only for dependencies of the environment being packaged.
+
+    Gym builds isolated server venvs, not the entire NeMo-RL environment. In
+    particular, Gym's optional sandbox backends must not constrain a verifiers
+    environment that does not request them (e2b and prime-sandboxes use different
+    connectrpc releases). Explicit RL uv policy still applies separately.
+    """
+    packages = tomllib.loads((rl_root / "uv.lock").read_text(encoding="utf-8")).get("package", [])
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for package in packages:
+        by_name.setdefault(canonicalize_name(package["name"]), []).append(package)
+
+    parsed = [Requirement(line) for line in requirements]
+    pending = [(canonicalize_name(item.name), frozenset(item.extras)) for item in parsed]
+    visited: set[tuple[str, frozenset[str]]] = set()
+    needed: set[str] = set()
+    while pending:
+        name, extras = pending.pop()
+        if (name, extras) in visited:
+            continue
+        visited.add((name, extras))
+        needed.add(name)
+        for package in by_name.get(name, []):
+            dependencies = list(package.get("dependencies", []))
+            for extra in extras:
+                dependencies.extend(package.get("optional-dependencies", {}).get(extra, []))
+            pending.extend(
+                (canonicalize_name(dependency["name"]), frozenset(dependency.get("extra", [])))
+                for dependency in dependencies
+            )
+
+    return {name: version for name, version in locked_package_versions(rl_root).items() if name in needed}
+
+
 def lock_requirement_lines(
     pins: dict[str, str],
     overrides: list[str],
@@ -274,7 +309,9 @@ def _compile_pinned_requirements(
     ]
     if nemo_rl_root is not None:
         overrides, constraints = rl_dependency_policy(nemo_rl_root)
-        constraints.extend(lock_requirement_lines(locked_package_versions(nemo_rl_root), overrides))
+        constraints.extend(
+            lock_requirement_lines(environment_lock_versions(nemo_rl_root, requirement_lines), overrides)
+        )
         override = work_dir / "override.txt"
         constraint = work_dir / "constraint.txt"
         override.write_text("\n".join(overrides) + "\n", encoding="utf-8")
