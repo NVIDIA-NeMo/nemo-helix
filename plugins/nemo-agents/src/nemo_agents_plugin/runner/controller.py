@@ -41,6 +41,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.runner.backend import RunnerBackend
 from nemo_agents_plugin.runner.registry import RunnerBackendRegistry
+from nemo_agents_plugin.runner.startup_logs import capture_startup_logs
 from nemo_deployments_plugin.endpoint_transport import EndpointTransport
 from nemo_helix_plugin.controller import NemoController
 from nemo_helix_plugin.entity_client import (
@@ -612,6 +613,18 @@ class AgentDeploymentController(NemoController):
             info.log_path or "<none>",
         )
 
+    async def _retain_startup_logs(self, dep: AgentDeployment) -> None:
+        """Persist diagnostics before destructive cleanup, without losing the failure reason."""
+        try:
+            tail = await capture_startup_logs(self._backend_for(dep), dep.workspace, dep.name)
+            if tail:
+                dep.startup_log_tail = tail
+        except Exception:
+            logger.exception("Could not capture startup logs for '%s'", dep.name)
+        # Persist before deletion, not just at the end of reconciliation. If saving
+        # fails, leave the runtime intact so the next reconciliation can retry.
+        await self._save(dep)
+
     async def _check_health(self, dep: AgentDeployment) -> None:
         """starting -> running | failed: single-shot check per reconcile cycle.
 
@@ -626,24 +639,25 @@ class AgentDeploymentController(NemoController):
         elapsed = time.monotonic() - since
         remaining = timeout - elapsed
 
-        if remaining <= 0 and key not in self._recovering:
+        backend = self._backend_for(dep)
+        info = await backend.get_deployment_status(dep.workspace, dep.name)
+
+        if remaining <= 0 and key not in self._recovering and not (info is not None and info.status == "failed"):
             dep.status = "failed"
             dep.error = f"Health check timed out after {timeout}s."
+            await self._retain_startup_logs(dep)
             self._starting_since.pop((dep.workspace, dep.name), None)
             try:
                 await self._backend_for(dep).delete_deployment(dep.workspace, dep.name)
             except Exception:
                 logger.exception("Cleanup after health timeout failed for '%s'", dep.name)
-            finally:
-                await self._save(dep)
             logger.warning("Deployment '%s' health check timed out.", dep.name)
             return
 
-        backend = self._backend_for(dep)
-        info = await backend.get_deployment_status(dep.workspace, dep.name)
         if info is not None and info.status == "failed":
             dep.status = "failed"
             dep.error = info.error or "Process exited unexpectedly during startup."
+            await self._retain_startup_logs(dep)
             self._starting_since.pop((dep.workspace, dep.name), None)
             self._recovering.discard(key)
             try:
@@ -651,8 +665,6 @@ class AgentDeploymentController(NemoController):
                     await backend.delete_deployment(dep.workspace, dep.name)
             except Exception:
                 logger.exception("Cleanup after failed startup failed for '%s'", dep.name)
-            finally:
-                await self._save(dep)
             logger.warning(
                 "Deployment '%s' failed during startup: %s (log: %s)",
                 dep.name,

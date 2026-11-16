@@ -36,6 +36,7 @@ import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -137,7 +138,21 @@ async def _resolve_external_log_getter(
         ) from exc
 
     backend = get_runner_registry().backend_for(deployment.deployment_mode)
-    return getattr(backend, "get_logs", None)
+    backend_get_logs = getattr(backend, "get_logs", None)
+    if backend_get_logs is None and not deployment.startup_log_tail:
+        return None
+
+    async def get_logs(*, workspace: str, name: str, tail: int):  # noqa: ANN202
+        # Reload for each SSE poll: failure capture can occur after the stream
+        # opens. Entity lookup preserves workspace scoping across cleanup/restart.
+        current = await entity_client.get(AgentDeployment, name=name, workspace=workspace)
+        if current.startup_log_tail:
+            lines = current.startup_log_tail.splitlines()
+            return SimpleNamespace(lines=lines[-tail:] if tail > 0 else [])
+        assert backend_get_logs is not None
+        return await backend_get_logs(workspace=workspace, name=name, tail=tail)
+
+    return get_logs
 
 
 async def _resolve_external_logs(
