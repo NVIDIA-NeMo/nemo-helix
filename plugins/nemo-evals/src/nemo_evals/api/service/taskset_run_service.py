@@ -16,6 +16,7 @@ from nemo_evals.api.fields import TasksetRef, parse_subentity_ref
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.api.taskset_run_schemas import (
     TasksetRunInput,
+    TasksetRunRejectedTask,
     TasksetRunStatus,
     TasksetRunSubmitResponse,
     TasksetRunTask,
@@ -29,6 +30,7 @@ from nemo_evals.harbor.remote.preparation import (
     ImagePreparer,
     PreparationCheck,
     PreparationClients,
+    PreparationErrorInfo,
     TaskPreparation,
     prepare_task_images,
 )
@@ -118,10 +120,19 @@ async def _all[T](calls: Iterable[Coroutine[Any, Any, T]]) -> list[T]:
     return [task.result() for task in running]
 
 
-def _unprepared(task: ResolvedTask, preparation: TaskPreparation) -> str:
-    if preparation.error is not None:
-        return f"{task.id}: {preparation.error.code}: {preparation.error.detail}"
-    return f"{task.id}: image preparation is still pending"
+def _rejected_task(task: ResolvedTask, error: PreparationErrorInfo | None) -> TasksetRunRejectedTask:
+    """``task`` as submit reports it; no error means its preparation is still pending."""
+    spec = task.spec
+    ref = (
+        f"{spec.provenance.entity_name}#{spec.provenance.revision_digest}"
+        if isinstance(spec, ResolvedHarborTaskDefinition)
+        else None
+    )
+    if error is None:
+        return TasksetRunRejectedTask(
+            task=task.id, ref=ref, reason="image_unavailable", detail="image preparation is still pending"
+        )
+    return TasksetRunRejectedTask(task=task.id, ref=ref, reason=error.code, detail=error.detail)
 
 
 def utc_now() -> datetime:
@@ -131,6 +142,18 @@ def utc_now() -> datetime:
 
 class TasksetRunResolutionError(ValueError):
     """Represent an expected missing or incompatible request input during resolution."""
+
+
+class TasksRejectedError(TasksetRunResolutionError):
+    """Some tasks can't run, so submit accepted nothing.
+
+    Carries each task and why, so the route can list them and a client can resubmit the others.
+    """
+
+    def __init__(self, tasks: list[TasksetRunRejectedTask]) -> None:
+        self.tasks = tasks
+        reasons = "; ".join(f"{t.task}: {t.reason}: {t.detail}" for t in tasks)
+        super().__init__(f"tasks without images: {reasons}")
 
 
 class IntakeUnavailableError(RuntimeError):
@@ -466,7 +489,7 @@ class TasksetRunService:
         at once, so submit time doesn't grow task by task. All or nothing: an exception from any task cancels the others and fails the submit.
 
         Raises:
-            TasksetRunResolutionError: Some task has no images; the message names each one and why.
+            TasksRejectedError: Some task can't run or has no images; it names each one and why.
         """
         clients = PreparationClients(
             client=self._async_client, files=self._store.files_client, image_builds=self._image_builds
@@ -485,19 +508,21 @@ class TasksetRunService:
 
         checks = await _all(check(task) for task in tasks)
         rejected = [
-            f"{task.id}: {result.error.code}: {result.error.detail}"
+            _rejected_task(task, result.error)
             for task, result in zip(tasks, checks, strict=True)
             if result.error is not None
         ]
         if rejected:
-            raise TasksetRunResolutionError(f"tasks without images: {'; '.join(rejected)}")
+            raise TasksRejectedError(rejected)
         notices = [
             f"{task.id}: {notice}" for task, result in zip(tasks, checks, strict=True) for notice in result.notices
         ]
         preparations = await _all(prepare(task) for task in tasks)
-        rejected = [_unprepared(task, p) for task, p in zip(tasks, preparations, strict=True) if p.environment is None]
+        rejected = [
+            _rejected_task(task, p.error) for task, p in zip(tasks, preparations, strict=True) if p.environment is None
+        ]
         if rejected:
-            raise TasksetRunResolutionError(f"tasks without images: {'; '.join(rejected)}")
+            raise TasksRejectedError(rejected)
         return [p.environment for p in preparations if p.environment is not None], notices
 
     def _image_builds(self, workspace: str) -> ImageBuildService:

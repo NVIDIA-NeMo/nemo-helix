@@ -8,6 +8,7 @@ import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from nemo_evals.api.dependencies import get_service_run_store, get_taskset_run_service
 from nemo_evals.api.service.taskset_run_service import (
     IntakeUnavailableError,
@@ -16,10 +17,12 @@ from nemo_evals.api.service.taskset_run_service import (
     RunEvaluationMismatchError,
     TasksetRunResolutionError,
     TasksetRunService,
+    TasksRejectedError,
     utc_now,
 )
 from nemo_evals.api.taskset_run_schemas import (
     TasksetRunInput,
+    TasksetRunRejectedResponse,
     TasksetRunStatus,
     TasksetRunSubmitResponse,
     TasksetRunTask,
@@ -76,7 +79,8 @@ router = APIRouter()
         },
         422: {
             "description": "Invalid request, excessive timeout, missing or incompatible source, "
-            "unconfigured execution, or a task without images."
+            "unconfigured execution, or tasks that can't run here or have no images. For those tasks the body "
+            "also has `rejected_tasks`: each task, its revision and why."
         },
         503: {
             "description": "Reading image builds, or Intake, failed before the run was accepted; "
@@ -92,7 +96,7 @@ async def submit_taskset_run(
     response: Response,
     caller: str = Depends(get_effective_principal_id),
     service: TasksetRunService = Depends(get_taskset_run_service),
-) -> TasksetRunSubmitResponse:
+) -> TasksetRunSubmitResponse | JSONResponse:
     """Freeze and accept a Harbor run, returning its original status on a keyed retry.
 
     The caller must be able to read every source: the taskset, its member tasks, their metrics and
@@ -110,7 +114,8 @@ async def submit_taskset_run(
     Returns:
         Public run status with advisory notices; 201 for acceptance or 200 for replay. Submission starts
         no task Jobs (the run controller does) and no image builds: a task whose image isn't built yet is
-        rejected (422). A keyed replay returns the stored status.
+        rejected (422). A keyed replay returns the stored status. When tasks can't run here or have no
+        images, a 422 whose body lists them in ``rejected_tasks``.
 
     Raises:
         RequestValidationError: The execution budget exceeds the operator maximum.
@@ -145,6 +150,10 @@ async def submit_taskset_run(
             detail=f"run {exc.run_id} exists for this idempotency_key with a different request",
             headers={"x-should-retry": "false"},
         ) from exc
+    except TasksRejectedError as exc:
+        # The usual string detail, plus each task, so a client can resubmit the others without parsing the message.
+        body = TasksetRunRejectedResponse(detail=str(exc), rejected_tasks=exc.tasks)
+        return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
     except TasksetRunResolutionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except IntakeUnavailableError as exc:

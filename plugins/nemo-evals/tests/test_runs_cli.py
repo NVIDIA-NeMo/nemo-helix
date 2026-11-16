@@ -29,6 +29,7 @@ from nemo_evals.runs_cli import (
     CreatedTaskset,
     ScoreRollup,
     SelectionError,
+    SubmitRejectedTasksError,
     TaskJobView,
     TaskStateView,
     _progress_line,
@@ -50,6 +51,7 @@ from nemo_evals.runs_cli import (
     selection_suffix,
     submit_run,
     task_state,
+    tasks_without,
 )
 from nemo_evals.sdk.resources import Evaluator
 from nemo_helix_plugin.client.client import NemoClient
@@ -114,10 +116,10 @@ def submitting(monkeypatch):
         get_image_build=builds.get_image_build,
     )
     tasksets = SimpleNamespace(
-        retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=MEMBERS),
+        retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=MEMBERS, revision=3),
         replace=lambda name, taskset, workspace: seen.published.append(name),
         list_revisions=lambda name, workspace, page_size: SimpleNamespace(
-            data=[SimpleNamespace(content_hash="3" * 64)]
+            data=[SimpleNamespace(revision=3, content_hash="3" * 64)]
         ),
     )
     fake = SimpleNamespace(tasks=tasks, tasksets=tasksets)
@@ -125,11 +127,14 @@ def submitting(monkeypatch):
 
     def submit(client, body, *, workspace, echo):
         seen.bodies.append(body)
+        if seen.reject is not None:
+            raise seen.reject
         if seen.refuse:
             raise RuntimeError('submit failed (422): "tasks without images: ac9/deep-swe-b#..."')
         return {"run_id": "run-1", "phase": seen.phase, "warnings": []}
 
     seen.refuse = False
+    seen.reject = None
     seen.phase = "accepted"
     monkeypatch.setattr("nemo_evals.runs_cli.submit_run", submit)
     client = SimpleNamespace(resolve_workspace=lambda workspace=None: workspace or "ac9")
@@ -201,6 +206,139 @@ def test_a_refused_taskset_submit_says_how_to_check_the_builds(submitting, works
     assert result.exit_code == 1
     stored = f"{workspace}/deep-swe-162c7ea7#" + "2" * 64
     assert f"Check with: nemo evals tasksets build-images {shlex.quote(stored)} --status\n" in result.output
+
+
+def _rejected(*tasks: tuple[str, str]) -> SubmitRejectedTasksError:
+    """The error ``submit_run`` raises for a 422 that rejects ``(member name, reason)`` tasks of ``MEMBERS``."""
+    rejected = [
+        {"task": f"deep-swe-{name}", "ref": f"ac9/deep-swe-{name}#" + "1" * 64, "reason": reason, "detail": "why"}
+        for name, reason in tasks
+    ]
+    return SubmitRejectedTasksError('submit failed (422): "tasks without images: ..."', rejected)
+
+
+def test_a_refused_task_is_listed_with_the_command_that_submits_the_others(submitting):
+    submitting.reject = _rejected(("a", "gpu_unsupported"))
+    result = submitting.invoke("--taskset", STORED, "--sandbox-profile", "large")
+    assert result.exit_code == 1
+    lines = result.output.splitlines()
+    assert lines[-3:] == [
+        "Error: submit refused the run because of 1 of 2 tasks:",
+        "  deep-swe-a  gpu_unsupported  why",
+        # The run's settings stay; --tasks counts the taskset's members in order, so 1 is deep-swe-b.
+        f"Submit the other 1 with: nemo evals runs submit --taskset {shlex.quote(STORED)} --sandbox-profile large "
+        "--tasks 1",
+    ]
+
+
+def test_the_recovery_command_names_the_revision_its_indexes_count_not_a_taskset_that_may_have_moved(submitting):
+    submitting.reject = _rejected(("a", "gpu_unsupported"))
+    result = submitting.invoke("--taskset", "ac9/deep-swe-162c7ea7")  # no digest: the current revision
+    assert result.exit_code == 1
+    assert result.output.splitlines()[-1] == (
+        f"Submit the other 1 with: nemo evals runs submit --taskset 'ac9/deep-swe-162c7ea7#{'3' * 64}' --tasks 1"
+    )
+    assert submitting.bodies[0]["spec"]["tasks"] == "ac9/deep-swe-162c7ea7"  # what's submitted is unchanged
+
+
+def test_a_task_still_waiting_for_its_image_points_to_the_builds_instead(submitting):
+    submitting.reject = _rejected(("a", "build_failed"), ("b", "image_unavailable"))
+    result = submitting.invoke("--taskset", STORED)
+    assert result.exit_code == 1
+    assert f"Check with: nemo evals tasksets build-images {shlex.quote(STORED)} --status" in result.output
+    assert "Submit the other" not in result.output
+
+
+def test_when_every_task_is_refused_no_command_is_offered(submitting):
+    submitting.reject = _rejected(("a", "gpu_unsupported"), ("b", "invalid_compose_file"))
+    result = submitting.invoke("--taskset", STORED)
+    assert result.exit_code == 1 and result.output.splitlines()[-1] == "None of these tasks can run here."
+
+
+def _task_a_build_keeps_failing(monkeypatch) -> None:
+    """``--harbor-dir`` publishes ``STORED`` of ``MEMBERS``, and the image build of task a always fails."""
+    monkeypatch.setattr("nemo_evals.runs_cli.create_taskset", lambda *a, **k: CreatedTaskset(STORED, MEMBERS, 2, None))
+    builds = SimpleNamespace(
+        build_images=lambda name, revision, workspace: _image_build("1", "pending"),
+        get_image_build=lambda name, build_id, revision, workspace: _image_build(
+            build_id, "failed" if name == "deep-swe-a" else "ready"
+        ),
+        list_image_builds=lambda name, revision, workspace: SimpleNamespace(data=[]),
+    )
+    monkeypatch.setattr(
+        "nemo_evals.runs_cli.Evaluator", SimpleNamespace(from_client=lambda _: SimpleNamespace(tasks=builds))
+    )
+
+
+def test_a_build_that_keeps_failing_leaves_the_ready_tasks_to_submit(submitting, monkeypatch):
+    _task_a_build_keeps_failing(monkeypatch)
+    result = submitting.invoke("--harbor-dir", ".", "--poll-seconds", "0")
+    assert result.exit_code == 1 and submitting.bodies == []
+    stored = shlex.quote(STORED)
+    assert result.output.splitlines()[-5:] == [
+        "Error: image builds failed for 1 of 2 tasks:",
+        f"  {MEMBERS[0]}  no Dockerfile",
+        f"Retry the failed builds with: nemo evals tasksets build-images {stored} --wait",
+        f"Once they're ready, submit with: nemo evals runs submit --taskset {stored}",
+        f"Or submit the 1 ready task now with: nemo evals runs submit --taskset {stored} --tasks 1",
+    ]
+
+
+def _spec_file_with_a_spent_key(tmp_path: Path) -> Path:
+    spec = tmp_path / "run.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "spec": {"tasks": "default/full", "target": {"kind": "harbor", "source": {"name": "openhands"}}},
+                "execution": {},
+                "idempotency_key": "spent",
+            }
+        )
+    )
+    return spec
+
+
+def test_recovery_commands_keep_the_key_given_on_the_command_line(submitting, monkeypatch, tmp_path):
+    """Neither attempt was accepted, so its key is unused; without it the command would fall back to the file's."""
+    spec = str(_spec_file_with_a_spent_key(tmp_path))
+    key = ["--idempotency-key", "fresh"]
+
+    submitting.reject = _rejected(("a", "gpu_unsupported"))
+    refused = submitting.invoke("--taskset", STORED, "--spec-file", spec, *key)
+    assert refused.output.splitlines()[-1].endswith("--tasks 1 --idempotency-key fresh")
+    assert "--idempotency-key" not in submitting.invoke("--taskset", STORED, "--spec-file", spec).output
+
+    _task_a_build_keeps_failing(monkeypatch)
+    failed = submitting.invoke("--harbor-dir", ".", "--poll-seconds", "0", "--spec-file", spec, *key)
+    submit_lines = [line for line in failed.output.splitlines() if "runs submit" in line]
+    assert len(submit_lines) == 2
+    assert all(line.endswith("--idempotency-key fresh") for line in submit_lines)
+
+
+def test_tasks_without_counts_sorted_members_and_matches_any_revision():
+    refs = ["w/c#3", "w/a#1", "w/b"]
+    assert tasks_without(refs, ["w/b#9"]) == (2, "0,2")
+    assert tasks_without(refs, []) == (3, "0,1,2")
+    assert tasks_without(refs, ["w/a", "w/b", "w/c#3"]) is None
+
+
+def test_a_422_that_lists_its_tasks_raises_them_and_any_other_refusal_does_not():
+    answers = iter(
+        [
+            httpx.Response(422, json={"detail": "tasks without images: x", "rejected_tasks": [{"task": "x"}]}),
+            httpx.Response(422, json={"detail": "unknown execution.sandbox.profile"}),
+        ]
+    )
+    client = NemoClient(
+        base_url="http://platform.test",
+        http_client=httpx.Client(transport=httpx.MockTransport(lambda request: next(answers))),
+    )
+    with pytest.raises(SubmitRejectedTasksError) as raised:
+        submit_run(client, {"idempotency_key": "k"}, workspace="default", echo=lambda _: None)
+    assert raised.value.tasks == [{"task": "x"}] and "tasks without images" in str(raised.value)
+    with pytest.raises(RuntimeError) as other:
+        submit_run(client, {"idempotency_key": "k"}, workspace="default", echo=lambda _: None)
+    assert not isinstance(other.value, SubmitRejectedTasksError)
 
 
 @pytest.mark.parametrize(
@@ -344,7 +482,7 @@ def test_the_rerun_command_warns_when_the_spec_file_pins_the_key(submitting, mon
     # The rerun drops --idempotency-key (repeating k2 would return this run), so it falls back to the file's key
     explicit = submitting.invoke(*args, "--idempotency-key", "k2").output
     assert "spec file's idempotency_key; pass a new --idempotency-key" in explicit
-    assert "k2" not in explicit.split("Rerun these tasks:", 1)[1].splitlines()[0]
+    assert "--idempotency-key" not in explicit.split("Rerun these tasks:", 1)[1].splitlines()[0]
 
 
 def test_submit_reads_the_spec_file_once(submitting, monkeypatch, tmp_path):

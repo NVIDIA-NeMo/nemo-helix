@@ -367,6 +367,36 @@ class TasksetRunSubmitResponse(TasksetRunStatus):
     )
 
 
+class TasksetRunRejectedTask(BaseModel):
+    """One task that kept submit from accepting the run, and why.
+
+    Listed so a client can tell the user which tasks to leave out and resubmit the rest, instead of the
+    user picking them out of one long error message.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    task: str = Field(description="The task's id in the run: its Harbor task id.")
+    ref: str | None = Field(
+        default=None, description="The stored task revision, workspace/name#digest; None when submit couldn't tell."
+    )
+    reason: str = Field(
+        description="A stable value that describes why the task can't run: e.g. gpu_unsupported, "
+        "invalid_compose_file, build_failed, or image_unavailable (its image isn't built yet)."
+    )
+    detail: str = Field(description="A human-readable explanation of what went wrong with this task.")
+
+
+class TasksetRunRejectedResponse(BaseModel):
+    """The 422 body when submit refuses a run because of some of its tasks.
+
+    ``detail`` is the same message other 422s carry, so clients that read only it keep working.
+    """
+
+    detail: str = Field(description="The refusal as one message, naming every rejected task.")
+    rejected_tasks: list[TasksetRunRejectedTask] = Field(description="Each task that kept the run from being accepted.")
+
+
 def to_status(run: TasksetRunEntity) -> TasksetRunStatus:
     """Project stored domain fields into the public run status.
 

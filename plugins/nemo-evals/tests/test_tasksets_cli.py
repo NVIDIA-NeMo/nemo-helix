@@ -23,10 +23,11 @@ from nemo_evals.runs_cli import (
 )
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.tasksets_cli import STATUS_BUILDING, _print_status, add_tasksets_commands
-from nemo_helix_plugin.client.errors import NemoTransportError
+from nemo_helix_plugin.client.errors import NemoClientError, NemoTransportError
 from typer.testing import CliRunner
 
 DIGEST = "1" * 64
+TASKSET_DIGEST = "4" * 64
 T0 = datetime(2026, 10, 23, 12, 0, tzinfo=UTC)
 
 
@@ -105,7 +106,15 @@ class FakeBuilds:
 
 def evaluator(builds: FakeBuilds, names=("a", "b")) -> Evaluator:
     members = [f"default/{name}#{DIGEST}" for name in names]
-    tasksets = SimpleNamespace(retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=members))
+    revisions = [
+        SimpleNamespace(revision=3, content_hash=TASKSET_DIGEST),
+        SimpleNamespace(revision=2, content_hash="5" * 64),
+    ]
+    tasksets = SimpleNamespace(
+        # Whatever the ref names, the current revision is 3: the one a --tasks index counts.
+        retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=members, revision=3),
+        list_revisions=lambda name, workspace, page_size: SimpleNamespace(data=revisions),
+    )
     return cast(Evaluator, SimpleNamespace(tasks=builds, tasksets=tasksets))
 
 
@@ -263,6 +272,10 @@ def test_status_only_reads_and_its_exit_code_says_where_the_builds_are(cli):
         builds.get_image_build(name, "1", revision=DIGEST, workspace="default")
     failed = cli(builds, "build-images", "default/suite", "--status")
     assert failed.exit_code == 1 and "  failed        default/b#" in failed.output and "no Dockerfile" in failed.output
+    hint = (
+        f"Or submit the 1 ready task with: nemo evals runs submit --taskset 'default/suite#{TASKSET_DIGEST}' --tasks 0"
+    )
+    assert failed.output.splitlines()[-1] == hint
     assert builds.posts == ["a", "b"]  # --status never requests
 
 
@@ -287,10 +300,39 @@ def test_wait_and_status_do_not_combine(cli):
 
 def test_wait_exits_1_when_a_build_failed_and_points_to_submit_when_all_are_ready(cli):
     failed = cli(FakeBuilds({"a": ["fail", "fail"]}), "build-images", "default/suite", "--wait", "--poll-seconds", "0")
-    assert failed.exit_code == 1 and failed.output.splitlines()[-1] == "Rerun this command to retry the failed builds."
+    assert failed.exit_code == 1 and failed.output.splitlines()[-2:] == [
+        "Rerun this command to retry the failed builds.",
+        f"Or submit the 1 ready task with: nemo evals runs submit --taskset 'default/suite#{TASKSET_DIGEST}' --tasks 1",
+    ]
+    every = {name: ["fail", "fail"] for name in ("a", "b")}
+    none_ready = cli(FakeBuilds(every), "build-images", "default/suite", "--wait", "--poll-seconds", "0")
+    assert none_ready.output.splitlines()[-1] == "Rerun this command to retry the failed builds."
     ready = cli(FakeBuilds(), "build-images", "default/suite", "--wait", "--poll-seconds", "0")
     assert ready.exit_code == 0
     assert ready.output.splitlines()[-1] == "Submit with: nemo evals runs submit --taskset default/suite"
+
+
+def test_the_submit_hint_names_the_revision_its_indexes_count_even_when_given_a_pinned_ref(cli):
+    pinned = "default/suite#" + "6" * 64
+    result = cli(FakeBuilds({"a": ["fail", "fail"]}), "build-images", pinned, "--wait", "--poll-seconds", "0")
+    assert result.output.splitlines()[-1] == (
+        f"Or submit the 1 ready task with: nemo evals runs submit --taskset '{pinned}' --tasks 1"
+    )
+
+
+def test_the_submit_hint_falls_back_to_the_given_ref_when_the_revision_digest_cant_be_read(cli, monkeypatch):
+    def unreadable(*args, **kwargs):
+        raise NemoClientError("down")
+
+    builds = FakeBuilds({"a": ["fail", "fail"]})
+    real = evaluator(builds)
+    real.tasksets.list_revisions = unreadable  # ty: ignore[invalid-assignment]
+    monkeypatch.setattr("nemo_evals.tasksets_cli.Evaluator", SimpleNamespace(from_client=lambda _: real))
+    client = SimpleNamespace(resolve_workspace=lambda workspace=None: workspace or "default")
+    app = typer.Typer()
+    add_tasksets_commands(app, lambda: client)  # ty: ignore[invalid-argument-type]
+    result = CliRunner().invoke(app, ["tasksets", "build-images", "default/suite", "--wait", "--poll-seconds", "0"])
+    assert result.output.splitlines()[-1].endswith("--taskset default/suite --tasks 1")
 
 
 def test_ctrl_c_during_wait_leaves_the_builds_running(cli):
