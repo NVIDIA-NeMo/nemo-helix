@@ -2152,6 +2152,13 @@ def test_gym_servers_get_an_output_dir_inside_the_run_work_dir(monkeypatch: pyte
     (expected / "video.mp4").write_text("from a failed run")
     with pytest.raises(FileExistsError, match="already holds Gym output"):
         asyncio.run(runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=Path("run"))))
+
+    linked = tmp_path / "linked" / "gym_run"
+    linked.mkdir(parents=True)
+    (tmp_path / "elsewhere").mkdir()
+    (linked / gym_runtime.OUTPUT_SUBDIR).symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    with pytest.raises(FileExistsError, match="is a symlink"):
+        asyncio.run(runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=Path("linked"))))
     assert observed == [str(expected)]
 
 

@@ -261,16 +261,21 @@ class GymAgentTaskRunner:
         gym = gym_executable()
         env_log = work_dir / ENV_LOG_NAME
 
+        # A symlinked output dir would send Gym's writes outside the bundle, whose upload skips symlinks.
+        output_dir = work_dir / OUTPUT_SUBDIR
+        if output_dir.is_symlink():
+            raise FileExistsError(f"{output_dir} is a symlink; give each run a fresh work_dir")
+        # Absolute because Gym starts each server from its own directory.
+        output_dir = output_dir.resolve()
+        output_dir.mkdir(exist_ok=True)
+        if any(output_dir.iterdir()):
+            raise FileExistsError(f"{output_dir} already holds Gym output; give each run a fresh work_dir")
+
         # Gym launches each server from its own subdir with its own .venv. Ray (>=2.56) otherwise
         # detects a `uv run` ancestor and tries to replicate that uv project onto its workers,
         # asserting the project pyproject.toml lives in the driver's cwd — which aborts startup. That
         # hook is wrong for Gym (servers manage their own deps), so disable it for the subprocesses.
-        # Absolute because Gym starts each server from its own directory.
-        output_dir = (work_dir / OUTPUT_SUBDIR).resolve()
-        output_dir.mkdir(exist_ok=True)
-        if any(output_dir.iterdir()):
-            raise FileExistsError(f"{output_dir} already holds Gym output; give each run a fresh work_dir")
-        # Set last so it always points inside the work dir, which a platform job saves with its bundle.
+        # The output dir is set last so it always points inside the work dir, which a platform job saves.
         subprocess_env = {**gym_invocation_env(cfg, resolved_env), OUTPUT_DIR_ENV: str(output_dir)}
 
         selection = selection_args(cfg, work_dir)
