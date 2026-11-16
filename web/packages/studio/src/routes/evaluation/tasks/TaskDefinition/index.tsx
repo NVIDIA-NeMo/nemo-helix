@@ -55,35 +55,37 @@ const ConfigPairs: FC<{ section: Record<string, unknown>; empty: string }> = ({
 const HarborPanels: FC<{ spec: HarborTaskDefinition }> = ({ spec }) => {
   const archive = parseFilesRef(spec.source.fileset_ref);
   return (
-  <>
-    <DetailPanel title="Instruction">
-      {spec.instruction ? (
-        <MarkdownContent content={spec.instruction} disableImages />
-      ) : (
-        <Prose empty="No instruction." />
-      )}
-    </DetailPanel>
-    <DetailPanel title="Environment">
-      <ConfigPairs section={configSection(spec.config, 'environment')} empty="Harbor defaults." />
-    </DetailPanel>
-    <DetailPanel title="Tests">
-      <Stack gap="density-lg">
-        <ConfigPairs section={configSection(spec.config, 'verifier')} empty="Harbor defaults." />
-        <Text className="text-subtle">
-          The test scripts ship in the task archive at{' '}
-          <Anchor asChild>
-            <Link
-              to={getFilesetDetailRoute(archive.workspace, archive.fileset)}
-              className="break-all"
-            >
-              {spec.source.fileset_ref}
-            </Link>
-          </Anchor>
-          .
-        </Text>
-      </Stack>
-    </DetailPanel>
-  </>
+    <>
+      <DetailPanel title="Instruction">
+        {spec.instruction ? (
+          <MarkdownContent content={spec.instruction} disableImages />
+        ) : (
+          <Prose empty="No instruction." />
+        )}
+      </DetailPanel>
+      <DetailPanel title="Environment">
+        <ConfigPairs section={configSection(spec.config, 'environment')} empty="Harbor defaults." />
+      </DetailPanel>
+      <DetailPanel title="Tests">
+        <Stack gap="density-lg">
+          <ConfigPairs section={configSection(spec.config, 'verifier')} empty="Harbor defaults." />
+          <Text className="text-subtle">
+            The test scripts ship in the task archive at{' '}
+            <Anchor asChild>
+              <Link
+                to={getFilesetDetailRoute(archive.workspace, archive.fileset, {
+                  file: archive.path,
+                })}
+                className="break-all"
+              >
+                {spec.source.fileset_ref}
+              </Link>
+            </Anchor>
+            .
+          </Text>
+        </Stack>
+      </DetailPanel>
+    </>
   );
 };
 
