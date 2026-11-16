@@ -16,6 +16,7 @@ import json
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -1037,8 +1038,14 @@ def test_cancel_checkers_reject_empty_inputs() -> None:
 _DENIED = "PermissionDeniedError: HTTP 403: Not allowed to read entities in workspace 'ws'"
 
 
-def job_body(name: str, status: str, job_id: str) -> dict[str, Any]:
+#: When the fake image-build Jobs were created: after any test's ``since``, unless a test says otherwise.
+NOW = "2999-01-01T00:00:00Z"
+SINCE = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def job_body(name: str, status: str, job_id: str, created_at: str = NOW) -> dict[str, Any]:
     return {
+        "created_at": created_at,
         "id": job_id,
         "attempt_id": f"{job_id}-a1",
         "name": name,
@@ -1110,7 +1117,9 @@ def test_submit_fails_with_the_failed_image_builds_cause(tmp_path: Path, path: s
         driver.submit("test_1", "--harbor-dir", "d", cap=240)
 
     test_1 = evidence_file(driver)["test_1"]
-    assert test_1["image_build_failures"] == [{"job": "task-image-build-abc-1", "status": "error", "error": _DENIED}]
+    assert test_1["image_build_failures"] == [
+        {"job": "task-image-build-abc-1", "status": "error", "error": _DENIED, "pods": ["p1"]}
+    ]
     assert test_1["job_pods"][0]["service_account"] == WORKLOAD_SERVICE_ACCOUNT
 
 
@@ -1135,7 +1144,7 @@ def test_build_failure_never_masks_the_failure_it_explains(tmp_path: Path) -> No
     )
     driver, _ = make_driver(tmp_path, lambda args, timeout: done(), Clock(), client=client)
 
-    assert driver.build_failure("test_1") is None
+    assert driver.build_failure("test_1", SINCE) is None
     assert "gateway down" in evidence_file(driver)["test_1"]["image_build_failures_error"]
 
 
@@ -1143,7 +1152,16 @@ def test_build_failure_without_a_kube_context_uses_the_jobs_error_details(tmp_pa
     job = {**job_body("task-image-build-abc-1", "error", "j"), "error_details": {"message": "exit code 1"}}
     driver, _ = make_driver(tmp_path, lambda args, timeout: done(), Clock(), client=jobs_api(job))
 
-    assert driver.build_failure("build") == "[image-build] task-image-build-abc-1: {'message': 'exit code 1'}"
+    assert driver.build_failure("build", SINCE) == "[image-build] task-image-build-abc-1: {'message': 'exit code 1'}"
+
+
+def test_build_failure_ignores_a_failed_build_from_before_the_call(tmp_path: Path) -> None:
+    """A reused workspace keeps older failed builds; they must not stand in for this call's failure."""
+    old = job_body("task-image-build-old-1", "error", "j", created_at="2025-12-31T23:00:00Z")
+    driver, _ = make_driver(tmp_path, lambda args, timeout: done(), Clock(), client=jobs_api(old))
+
+    assert driver.build_failure("build", SINCE) is None
+    assert "build" not in driver.evidence.data
 
 
 def test_check_workload_identity_passes_when_every_pod_runs_as_the_job_service_account() -> None:

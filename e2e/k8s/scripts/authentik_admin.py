@@ -48,6 +48,7 @@ def app_password(username: str, out_file: str) -> None:
     call("POST", "/api/v3/core/tokens/", body)
     key = call("GET", f"/api/v3/core/tokens/{identifier}/view_key/")["key"]
     fd = os.open(out_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)  # O_CREAT's mode applies only to a new file
     with os.fdopen(fd, "w") as handle:
         handle.write(key)
     print(f"created app password {identifier} for {username}", file=sys.stderr)
