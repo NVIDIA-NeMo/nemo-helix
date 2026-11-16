@@ -76,6 +76,18 @@ describe('takeDatasetSnapshot', () => {
     ]);
   });
 
+  it('records every file in the fileset for a ref without a path', async () => {
+    listFiles([
+      { path: 'a.jsonl', size: 1 },
+      { path: 'nested/b.jsonl', size: 2 },
+    ]);
+
+    expect((await takeDatasetSnapshot('ws', 'ws/data'))?.files).toEqual([
+      { path: 'a.jsonl', size: 1 },
+      { path: 'nested/b.jsonl', size: 2 },
+    ]);
+  });
+
   it('records nothing when no file matches or the fileset is gone', async () => {
     listFiles([{ path: 'other.jsonl', size: 1 }]);
     expect(await takeDatasetSnapshot('ws', FILE_REF)).toBeNull();

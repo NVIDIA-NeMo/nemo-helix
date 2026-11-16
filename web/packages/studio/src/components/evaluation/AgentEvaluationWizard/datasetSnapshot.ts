@@ -57,7 +57,7 @@ const listDatasetFiles = async (
       undefined,
       signal
     );
-    const pattern = pathParts(location.objectPath);
+    const pattern = pathParts(location.objectPath || '**');
     return data
       .filter((file) => matchesGlob(pathParts(file.path), pattern))
       .map(({ path, size }) => ({ path, size }));
