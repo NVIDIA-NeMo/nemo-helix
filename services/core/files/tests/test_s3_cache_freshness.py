@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""S3 freshness, metadata TTL and authorization regressions using a fake S3 transport."""
+"""S3 freshness, authorization and eviction regressions using a fake S3 transport."""
 
 import hashlib
 import json
@@ -34,7 +34,7 @@ from nhx.core.files.app.backends import s3 as s3_backend
 from nhx.core.files.app.backends.base import FileInfo
 from nhx.core.files.app.backends.local import LocalStorageConfig, LocalStorageImpl
 from nhx.core.files.app.backends.s3 import S3BackendError, S3StorageImpl, S3UnavailableError
-from nhx.core.files.app.cache import cache_file_directly, warm_fileset_cache
+from nhx.core.files.app.cache import cache_file_directly, cache_write_lock_key, warm_fileset_cache
 from nhx.core.files.config import FilesConfig
 from nhx.core.files.exceptions import NotFoundError, StorageObjectChangedError
 
@@ -50,6 +50,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(s3_backend, "_metadata_generation", 0)
     config = FilesConfig(s3_metadata_cache_ttl_seconds=0)
     monkeypatch.setattr("nhx.core.files.config.files_config", lambda: config)
+    monkeypatch.setattr("nhx.core.files.app.cache.files_config", lambda: config)
     now = [100.0]
     monkeypatch.setattr(s3_backend, "monotonic", lambda: now[0])
     storage = S3StorageImpl(S3StorageConfig(bucket="bucket", prefix="prefix", use_sdk_auth=True), {})
@@ -310,9 +311,15 @@ async def test_missing_validators_bypass_cache(env, metadata):
     assert (await env.storage.get_file("data.jsonl")).size == 3
 
 
-async def test_warming_and_status_follow_object_identity(env):
-    """A warmed snapshot is cached; a changed object must not inherit that status."""
+async def test_warming_and_status_follow_object_identity_and_writer_lock(env):
+    """Status follows the shared writer lock, completed snapshot, then a changed identity."""
     env.put(b"A", {"ETag": '"opaque/../etag"', "VersionId": "null"})
+    key = await env.storage.get_cache_path_key("data.jsonl")
+    group = cache_write_lock_key(env.storage, key)
+    env.ctx.lock_manager.get_active_locks.return_value = {group}
+    assert await env.status() == {"data.jsonl": CacheStatus.CACHING}
+    env.ctx.lock_manager.get_active_locks.assert_awaited_once_with([group])
+    env.ctx.lock_manager.get_active_locks.return_value = set()
     env.storage.list_files = AsyncMock(return_value=[FileInfo(path="data.jsonl", size=1)])
     await warm_fileset_cache(env.storage, env.ctx.storage, env.ctx.lock_manager)
     assert await env.status() == {"data.jsonl": CacheStatus.CACHED}
@@ -490,3 +497,58 @@ async def test_kms_plaintext_cache_cannot_bypass_content_authorization(env, encr
     data = [chunk async for chunk in download_with_cache(env.storage, "data.jsonl", env.ctx, tasks)]
     assert data == [b"secret"] and not tasks.tasks
     assert len(env.downloads) == before + 3
+
+
+@pytest.mark.parametrize("limit", [1, 2])
+async def test_retention_bounds_versions_without_interrupting_readers(env, limit):
+    """Evict old versions, not open readers, partial uploads, or unrelated objects."""
+    env.config.s3_cache_max_versions_per_object = limit
+    env.ctx.storage.config.read_chunk_size = 1
+    env.put(b"old")
+    key = await env.storage.get_cache_path_key("data.jsonl")
+    assert await env.cache()
+    reader = await env.ctx.storage.download(key, None)
+    assert await anext(reader) == b"o"
+    unopened = await env.ctx.storage.download(key, None)
+    temporary, unrelated = f"{key}.tmp.12345678", "cache/s3-v2/other/object/" + "f" * 64
+    await env.ctx.storage.upload(temporary, chunks(b"partial"), content_length=7)
+    await env.ctx.storage.upload(unrelated, chunks(b"unrelated"), content_length=9)
+    for content in (b"B", b"C", b"D"):
+        env.put(content)
+        key = await env.storage.get_cache_path_key("data.jsonl")
+        assert await env.cache()
+        files = await env.ctx.storage.list_files(key.rsplit("/", 1)[0])
+        completed = {file.path for file in files if file.path != temporary}
+        assert len(completed) <= limit and key in completed
+    assert len(completed) == limit
+    assert b"".join([chunk async for chunk in reader]) == b"ld"
+    with pytest.raises(NotFoundError):
+        await anext(unopened)
+    assert (await env.ctx.storage.get_file(temporary)).size == 7
+    assert (await env.ctx.storage.get_file(unrelated)).size == 9
+
+
+async def test_writers_of_different_versions_share_a_retention_lock(env, monkeypatch):
+    """A second version cannot write or prune while the first writer is active."""
+    env.config.s3_cache_max_versions_per_object = 1
+    env.put(b"A", {"ETag": '"A"', "VersionId": "a"})
+    first = await env.storage.for_download("data.jsonl")
+    env.put(b"B", {"ETag": '"B"', "VersionId": "b"})
+    second = await env.storage.for_download("data.jsonl")
+    entered, release = anyio.Event(), anyio.Event()
+    upload = env.ctx.storage.upload
+
+    async def slow_upload(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        return await upload(*args, **kwargs)
+
+    monkeypatch.setattr(env.ctx.storage, "upload", slow_upload)
+    async with anyio.create_task_group() as tasks:
+        tasks.start_soon(env.cache, first)
+        await entered.wait()
+        assert not await env.cache(second)
+        release.set()
+    assert await env.cache(second)
+    key = await second.get_cache_path_key("data.jsonl")
+    assert len(await env.ctx.storage.list_files(key.rsplit("/", 1)[0])) == 1
