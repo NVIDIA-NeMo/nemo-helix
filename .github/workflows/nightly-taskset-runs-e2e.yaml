@@ -213,6 +213,18 @@ jobs:
           test -n "${NHX_E2E_CLUSTER_URL}"
           e2e/k8s/scripts/wait_for_api.sh "${NHX_E2E_CLUSTER_URL}/cluster-info" 120
 
+      # The client sends a bearer token only over HTTPS or loopback HTTP, and the gateway is plain HTTP on the kind
+      # network: reach the API through a port-forward, kept up for the steps after this one.
+      - name: Reach the API on loopback
+        if: ${{ matrix.auth == 'on' && !matrix.workload_token_exchange }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup bash -c "while true; do kubectl -n '${KUBE_NAMESPACE}' port-forward svc/nemo-helix-api 18090:8080; sleep 1; done" \
+            >"${RUNNER_TEMP}/api-port-forward.log" 2>&1 &
+          e2e/k8s/scripts/wait_for_api.sh http://127.0.0.1:18090/cluster-info 60
+          echo "NHX_E2E_CLUSTER_URL=http://127.0.0.1:18090" >>"${GITHUB_ENV}"
+
       - name: Let the node pull from the development registry
         if: ${{ !matrix.workload_token_exchange }}
         shell: bash
