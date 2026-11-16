@@ -55,8 +55,7 @@ export const TraceDetailView: FC<TraceDetailViewProps> = ({
     session_id: sessionId,
   });
 
-  // The session already owns enough trace data to keep its explorer mounted
-  // while the selected trace's full payload hydrates in the background.
+  // Show the session's summary while full trace details load.
   const resolvedTrace = trace?.session_id === sessionId ? trace : (traceSummary ?? trace);
   const traceNotFound = error?.response?.status === 404;
   const traceAmbiguous = error?.response?.status === 409;

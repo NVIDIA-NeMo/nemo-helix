@@ -88,9 +88,11 @@ flowchart TB
 
 The graph and span details use a draggable divider. The divider is keyboard accessible with Left, Right, Home and End keys.
 
-The Intake detail route is `/intake/sessions/:sessionId`; the Evaluation detail route is `/experiment/:experimentName/:evaluationName/sessions/:sessionId`. Both accept `traceId` and `spanId` query parameters for progressively deeper links and feed the same `SessionDetailView`. The sidebar loads the session's first summary-only page of up to 1,000 spans, combines each trace with its spans and tree in a `SessionTrajectory`, and renders every available hierarchy open and non-collapsible. Selecting a span fetches its full payload for the detail body. Clicking **Session** clears trace/span selection. Direct trace/span links remain available when the span lies outside the summary page.
+The Intake route is `/intake/sessions/:sessionId`. The Evaluation route is `/experiment/:experimentName/:evaluationName/sessions/:sessionId`. Both use `SessionDetailView` and accept `traceId` and `spanId` query parameters to link to a trace or span.
 
-Trace and span detail requests include the selected session ID. The generated query key includes that scope, so reused trace and span IDs in different sessions keep separate cached details. A detail response from another session cannot replace the selected session's summary.
+The sidebar loads up to 1,000 span summaries from the session's first page. Each `SessionTrajectory` holds a trace, its spans, and their tree. All loaded trees stay expanded. Selecting a span fetches its full payload; clicking **Session** clears the selection. Direct links can also load spans outside the first page.
+
+Detail requests and cache keys include the session ID, so reused trace and span IDs stay separate across sessions. Responses from another session are ignored.
 
 Annotations for the whole trace are fetched once (`useListAnnotations` filtered by `session_id`) so each row can show feedback sentiment and annotation counts without per-span queries.
 
