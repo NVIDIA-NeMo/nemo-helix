@@ -899,6 +899,14 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       const seeded: SeededEntities = isNew ? { filesetName } : {};
 
       try {
+        const specDataset =
+          isDatasetEvalSpec(spec) && typeof spec.dataset === 'string' ? spec.dataset : null;
+        const datasetSnapshot = specDataset
+          ? await takeDatasetSnapshot(workspace, specDataset).catch(() => undefined)
+          : undefined;
+        if (datasetSnapshot === null) {
+          throw new Error(`The dataset ${specDataset} no longer exists.`);
+        }
         // The "new experiment" path creates the ExperimentGroup this run lands in, carrying every
         // setting the Experiments page would have offered; the re-run path reuses the picked
         // evaluation's group(s) and records the lineage.
@@ -920,11 +928,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
           parentEvaluationId = selectedEvaluation.id;
         }
 
-        const specDataset =
-          isDatasetEvalSpec(spec) && typeof spec.dataset === 'string' ? spec.dataset : null;
-        const datasetSnapshot = specDataset
-          ? await takeDatasetSnapshot(workspace, specDataset).catch(() => null)
-          : null;
         const evaluationId = await createRunEvaluation(workspace, {
           experimentIds,
           name: formData.evaluationRecordName,

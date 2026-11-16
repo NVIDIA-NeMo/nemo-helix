@@ -9,6 +9,7 @@ import {
   getListExperimentsQueryKey,
 } from '@nemo/sdk/generated/platform/experiments';
 import {
+  filesDeleteFileset,
   filesDownloadFile,
   filesUploadFile,
   getFilesListFilesetFilesQueryKey,
@@ -303,6 +304,24 @@ describe('AgentEvaluationWizard dataset', () => {
         },
       })
     );
+  });
+
+  it('creates nothing when the dataset is gone by the time the run is submitted', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openConfigurationStep(user);
+    await pickDataset(user);
+    await chooseConfigKind(user, 'Upload');
+    await uploadConfig(user);
+    await leaveConfiguration(user);
+    mockListApis([]);
+    await nameAndRun(user);
+
+    await waitFor(() => expect(filesDeleteFileset).toHaveBeenCalled());
+    expect(createExperiment).not.toHaveBeenCalled();
+    expect(createRunEvaluation).not.toHaveBeenCalled();
+    expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
   });
 
   it('names a dataset from another workspace with its workspace', async () => {
@@ -604,6 +623,31 @@ describe('AgentEvaluationWizard guided eval config', () => {
     });
     expect(response).toBeChecked();
     expect(response).toBeDisabled();
+  });
+
+  it('shows the response unchecked once an edited judge prompt stops reading it', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openConfigurationStep(user);
+    await pickDataset(user);
+    await user.click(await screen.findByRole('button', { name: 'Edit Judge Prompt' }));
+    const prompt = screen.getByLabelText('Judge Prompt');
+    await user.clear(prompt);
+    await user.paste('{{ item.expected }}');
+    await user.click(screen.getByRole('button', { name: 'Hide Judge Prompt' }));
+
+    const response = () =>
+      promptFields('Judge Prompt').getByRole('checkbox', {
+        name: 'Agent response (sample.output_text)',
+      });
+    expect(response()).not.toBeChecked();
+
+    await user.click(screen.getByRole('button', { name: 'Edit Judge Prompt' }));
+    await user.click(screen.getByLabelText('Judge Prompt'));
+    await user.paste(' {{ sample.output_text }}');
+    await user.click(screen.getByRole('button', { name: 'Hide Judge Prompt' }));
+    expect(response()).toBeChecked();
   });
 
   it('sends the agent prompt as edited', async () => {

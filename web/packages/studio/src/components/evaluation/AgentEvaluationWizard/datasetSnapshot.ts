@@ -22,13 +22,24 @@ export type DatasetDrift = 'missing' | 'changed' | null;
 
 const REGEX_SPECIAL = /[.*+?^${}()|[\]\\]/g;
 
-const pathPattern = (objectPath: string): RegExp =>
+const segmentPattern = (part: string): RegExp =>
   new RegExp(
-    `^${objectPath
-      .split('*')
-      .map((part) => part.replace(REGEX_SPECIAL, '\\$&'))
-      .join('[^/]*')}$`
+    `^${part.replace(REGEX_SPECIAL, (char) => (char === '*' ? '[^/]*' : char === '?' ? '[^/]' : `\\${char}`))}$`
   );
+
+// ponytail: [...] character classes match literally, not as fnmatch sets.
+const matchesGlob = (path: string[], pattern: string[]): boolean => {
+  if (pattern.length === 0) {
+    return path.length === 0;
+  }
+  const [head, ...rest] = pattern;
+  if (head === '**') {
+    return matchesGlob(path, rest) || (path.length > 0 && matchesGlob(path.slice(1), pattern));
+  }
+  return path.length > 0 && segmentPattern(head).test(path[0]) && matchesGlob(path.slice(1), rest);
+};
+
+const pathParts = (path: string): string[] => path.replace(/^\/+|\/+$/g, '').split('/');
 
 const listDatasetFiles = async (
   workspace: string,
@@ -46,8 +57,10 @@ const listDatasetFiles = async (
       undefined,
       signal
     );
-    const pattern = pathPattern(location.objectPath);
-    return data.filter((file) => pattern.test(file.path)).map(({ path, size }) => ({ path, size }));
+    const pattern = pathParts(location.objectPath);
+    return data
+      .filter((file) => matchesGlob(pathParts(file.path), pattern))
+      .map(({ path, size }) => ({ path, size }));
   } catch (err) {
     if (isNotFoundError(err)) {
       return [];

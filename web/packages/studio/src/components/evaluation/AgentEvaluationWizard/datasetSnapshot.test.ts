@@ -58,6 +58,24 @@ describe('takeDatasetSnapshot', () => {
     });
   });
 
+  it('matches ** across any number of folders and ? within one, as the evaluator does', async () => {
+    listFiles([
+      { path: 'output/a.parquet', size: 1 },
+      { path: 'output/x/y/b.parquet', size: 2 },
+      { path: 'other/c.parquet', size: 3 },
+      { path: 'output/x/shard-1.jsonl', size: 4 },
+      { path: 'output/x/shard-10.jsonl', size: 5 },
+    ]);
+
+    expect((await takeDatasetSnapshot('ws', 'ws/data#output/**/*.parquet'))?.files).toEqual([
+      { path: 'output/a.parquet', size: 1 },
+      { path: 'output/x/y/b.parquet', size: 2 },
+    ]);
+    expect((await takeDatasetSnapshot('ws', 'ws/data#output/**/shard-?.jsonl'))?.files).toEqual([
+      { path: 'output/x/shard-1.jsonl', size: 4 },
+    ]);
+  });
+
   it('records nothing when no file matches or the fileset is gone', async () => {
     listFiles([{ path: 'other.jsonl', size: 1 }]);
     expect(await takeDatasetSnapshot('ws', FILE_REF)).toBeNull();

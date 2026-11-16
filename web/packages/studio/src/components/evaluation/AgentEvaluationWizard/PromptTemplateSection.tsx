@@ -27,6 +27,8 @@ import { hasMalformedBraces } from '@studio/components/evaluation/EvalWizard/jud
 import { type ComponentProps, type FC, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
+const RESPONSE_NAMES = ['sample', 'output_text', 'response'];
+
 interface PromptTemplateFormValues {
   promptTemplate: string | null;
   promptColumns: string[];
@@ -180,7 +182,16 @@ export const PromptTemplateSection: FC<PromptTemplateSectionProps> = ({
               className="max-h-32 overflow-y-auto border border-base rounded-lg p-density-md"
             >
               {withResponse ? (
-                <Checkbox slotLabel="Agent response (sample.output_text)" checked disabled />
+                <Checkbox
+                  slotLabel="Agent response (sample.output_text)"
+                  checked={
+                    !isCustom ||
+                    templateFields(edited, AGENT_PROMPT_NAMES).some((field) =>
+                      RESPONSE_NAMES.includes(field)
+                    )
+                  }
+                  disabled
+                />
               ) : null}
               {columns.map((column) => (
                 <Checkbox
