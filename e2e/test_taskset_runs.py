@@ -35,6 +35,7 @@ import os
 import subprocess
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -220,11 +221,12 @@ def test_taskset_run_on_kubernetes(
 
 def _created_ref(driver: RunDriver, dataset: Path, tasks: str) -> str:
     """Publish ``tasks`` of ``dataset`` as a taskset and build its images; return its ref."""
+    since = datetime.now(UTC)
     out = driver.cli("evals", "tasksets", "create", "--harbor-dir", str(dataset), "--tasks", tasks, cap=120)
     assert out.returncode == 0, f"[build] `tasksets create` exited {out.returncode}: {out.stderr.strip()}"
     ref = out.stdout.strip().splitlines()[-1]  # without --json the last line is the ref
     built = driver.cli("evals", "tasksets", "build-images", ref, "--wait", cap=900)
-    if built.returncode != 0 and (failure := driver.build_failure("build")):
+    if built.returncode != 0 and (failure := driver.build_failure("build", since)):
         raise AssertionError(failure)
     assert built.returncode == 0, f"[build] `build-images {ref}` exited {built.returncode}: {built.stdout[-2000:]}"
     return ref

@@ -43,6 +43,7 @@ token = body.get("access_token")
 if not token:
     sys.exit("token request failed: " + json.dumps({k: v for k, v in body.items() if "token" not in k}))
 fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+os.fchmod(fd, 0o600)  # the O_CREAT mode applies only to a new file
 os.fdopen(fd, "w").write(token)
 ' "${out}"
 log "token for ${user} written to ${out}"

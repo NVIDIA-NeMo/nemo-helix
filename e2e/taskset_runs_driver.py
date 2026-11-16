@@ -22,6 +22,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, is_dataclass, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -92,6 +93,15 @@ class CliFailed(AssertionError):
 
 def _kubectl(args: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["kubectl", *args], capture_output=True, text=True, timeout=timeout, check=False)
+
+
+#: How far the cluster's clock may run behind the test's when ``build_failure`` compares Job creation times.
+_CLOCK_SKEW = timedelta(seconds=5)
+
+
+def _aware(moment: datetime) -> datetime:
+    """A timestamp as UTC; the Jobs API's are UTC, with or without the offset."""
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
 
 def _value(value: object) -> str:
@@ -394,13 +404,14 @@ class RunDriver:
         self.unresolved.append(key)
         self.evidence.record(step, workspace=self.workspace, key=key, phase="submitting")
         started = self._clock()
+        since = datetime.now(UTC)  # image builds this submit started; a reused workspace keeps older ones
         try:
             out = self.cli("evals", "runs", "submit", *args, "--idempotency-key", key, cap=cap)
         except subprocess.TimeoutExpired as exc:  # the run may already be accepted
             parsed = parse_submit(exc.stdout, exc.stderr)
             self._resolve(key, parsed.get("run_id"))
             self.evidence.record(step, phase="timed_out", **parsed)
-            if failure := self.build_failure(step):
+            if failure := self.build_failure(step, since):
                 raise AssertionError(failure) from exc
             raise
         parsed = parse_submit(out.stdout, out.stderr)
@@ -411,7 +422,7 @@ class RunDriver:
             durations_s={"submit": round(self._clock() - started)},
             **parsed,
         )
-        if out.returncode != 0 and (failure := self.build_failure(step)):
+        if out.returncode != 0 and (failure := self.build_failure(step, since)):
             raise AssertionError(failure)
         assert out.returncode == 0 and parsed.get("run_id"), (
             f"[submit] `runs submit` exited {out.returncode} without a run ID: {out.stderr.strip()}"
@@ -551,8 +562,11 @@ class RunDriver:
         assert out.returncode == 0, f"[identity] kubectl get pods failed: {out.stderr.strip()}"
         return parse_job_pods(json.loads(out.stdout))
 
-    def build_failure(self, step: str) -> str | None:
-        """Why an image build failed, when one did: ``[image-build] <job>: <its last error>``, else None.
+    def build_failure(self, step: str, since: datetime) -> str | None:
+        """Why an image build started at or after ``since`` failed, when one did: ``[image-build] <job>: <error>``.
+
+        Only builds the failed call started count: in a reused workspace (``NHX_E2E_WORKSPACE``) an older failed
+        build must not stand in for an unrelated failure. Each failure records the pods matched to its own Job.
 
         A failed image-build Job leaves its build "building" until ``JOB_GRACE`` ends, so ``runs submit`` and
         ``build-images --wait`` fail late, by timeout or exit code, without the cause. This reads it from the
@@ -564,21 +578,32 @@ class RunDriver:
                 workspace=self.workspace,
                 query_params={"filter": {"name": {"$like": "task-image-build-%"}}, "page_size": 100},
             )
-            failed = [job for job in page.page().items if _value(job.status) == "error"]
+            after = since - _CLOCK_SKEW
+            failed = [
+                job for job in page.page().items if _value(job.status) == "error" and _aware(job.created_at) >= after
+            ]
             if not failed:
                 return None
             pods = self.job_pods()
             failures = []
             for job in failed:
                 error = None
-                for pod in (p for p in pods if p.job in {job.id, job.name}):
+                matched = [p for p in pods if p.job in {job.id, job.name}]
+                for pod in matched:
                     log = self._kubectl(
                         ["--context", str(self._kube_context), "logs", "-n", pod.namespace, pod.name,
                          "--all-containers"],
                         self.sec_left(30),
                     )  # fmt: skip
                     error = last_exception(log.stdout) or error
-                failures.append({"job": job.name, "status": "error", "error": error or str(job.error_details)})
+                failures.append(
+                    {
+                        "job": job.name,
+                        "status": "error",
+                        "error": error or str(job.error_details),
+                        "pods": [p.name for p in matched],
+                    }
+                )
             self.evidence.record(step, image_build_failures=failures, job_pods=pods)
         except Exception as exc:  # noqa: BLE001 - a diagnostic must not replace the failure it explains
             self.evidence.record(step, image_build_failures_error=f"{type(exc).__name__}: {exc}")
