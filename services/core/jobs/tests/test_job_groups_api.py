@@ -159,3 +159,24 @@ async def test_recancel_after_group_already_settled_conflicts(job_group_client: 
     assert first.json()["status"] == "cancelling"
     second = await job_group_client.post(f"{_base()}/api-group/cancel")
     assert second.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_retry_group_endpoint_returns_200_for_a_group_with_no_failed_members(job_group_client: AsyncClient):
+    """Retrying a group with nothing in ERROR is a no-op 200 that returns the group unchanged.
+
+    A freshly-created group's members are all CREATED, so there is nothing to rerun. The endpoint
+    records the request and returns the group (not a 409) -- a repeat or racing retry is harmless.
+    The actual per-member rerun fan-out and the group re-open are covered at the dispatcher layer.
+    """
+    create = await job_group_client.post(_base(), json=_create_body())
+    assert create.status_code == 201
+    response = await job_group_client.post(f"{_base()}/api-group/retry")
+    assert response.status_code == 200
+    assert response.json()["name"] == "api-group"
+
+
+@pytest.mark.asyncio
+async def test_retry_missing_group_returns_404(job_group_client: AsyncClient):
+    response = await job_group_client.post(f"{_base()}/missing/retry")
+    assert response.status_code == 404
