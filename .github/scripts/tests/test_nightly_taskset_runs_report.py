@@ -272,6 +272,18 @@ def test_a_failed_row_that_uploaded_no_artifact_is_listed_from_the_runs_jobs() -
     assert "Failed rows: `auth-on-exchange-true-1: [setup]`" in opened["body"]
 
 
+def test_a_failed_job_with_passing_junit_is_listed() -> None:
+    """A job can fail after pytest passed, such as in finalization; its green JUnit must not hide the failure."""
+    jobs = ({"name": "Kind taskset runs e2e (auth-on, exchange-true, 1)", "conclusion": "failure"},)
+    github = FakeGitHub(jobs=jobs)
+
+    report_module.report(github, make_run(RED_TEST), [], JUNIT_GREEN, {"auth-on-exchange-true-1": JUNIT_GREEN})
+
+    opened = github.written(0)
+    assert opened is not None
+    assert "Failed rows: `auth-on-exchange-true-1: [job]`" in opened["body"]
+
+
 def test_a_green_run_lists_no_failed_rows() -> None:
     github = FakeGitHub(open_issue=3)
 

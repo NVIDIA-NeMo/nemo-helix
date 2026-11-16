@@ -32,7 +32,7 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -108,9 +108,9 @@ def failure_stage(needs: Mapping[str, Mapping[str, Any]], junit: str) -> str:
     return "test" if junit else "setup"
 
 
-def failed_rows(rows: Mapping[str, str | None]) -> list[str]:
+def failed_rows(rows: Mapping[str, str | None], failed_jobs: Collection[str] = ()) -> list[str]:
     """``<row>: [<stage>]`` for each row whose JUnit failed or skipped a test, or that has none (it failed before
-    pytest, or uploaded nothing)."""
+    pytest, or uploaded nothing). A row in ``failed_jobs`` whose JUnit passed failed after pytest: ``[job]``."""
     failed = []
     for row, junit in sorted(rows.items()):
         if junit is None:
@@ -121,6 +121,8 @@ def failed_rows(rows: Mapping[str, str | None]) -> list[str]:
             failed.append(f"{row}: [test]")
         elif SKIPPED.search(junit):
             failed.append(f"{row}: [skipped]")
+        elif row in failed_jobs:
+            failed.append(f"{row}: [job]")
     return failed
 
 
@@ -167,8 +169,8 @@ def report(
     if green:
         failed = []
     else:  # every failed matrix job counts, with or without an artifact
-        rows = {**{row: None for row in failed_job_rows(github, run)}, **(rows or {})}
-        failed = failed_rows(rows)
+        failed_jobs = failed_job_rows(github, run)
+        failed = failed_rows({**{row: None for row in failed_jobs}, **(rows or {})}, failed_jobs)
     ids = run_ids(evidence)
     facts = "\n".join(
         [f"Run: {run.url(run.run_id)}", f"Commit: {run.source_sha}"]
