@@ -15,9 +15,8 @@ Keeps a single GitHub issue for the nightly test and posts each night's result t
 - Test passed, but a step was slow -> comment on the issue, opening it if needed.
 - Test passed -> comment "Green again" and close the issue; nothing to do if none is open.
 
-A row that failed only by a known bug (``taskset_runs_known_failure.py``) passes its job and leaves a
-``known-failure.json`` in its artifact. The report lists it, and ignores that row's JUnit when it names the failed
-stage, so a real failure in another row is never reported under the known one.
+A red report also lists each failed matrix row (auth, workload token exchange, copy) with its own stage, so a row
+that stays red, such as one waiting on a bug fix, can't hide a new failure in another.
 
 Reads the workflow's environment (``NEEDS_JSON``, ``SOURCE_SHA``, ``CLASSIFY_FOR``, ``ARTIFACTS`` and GitHub's
 defaults) and calls the API through ``gh api``, which authenticates with ``GH_TOKEN``. Exits 1 on a red report.
@@ -43,9 +42,9 @@ WORKFLOW = "nightly-taskset-runs-e2e.yaml"
 SLOW_SHARE = 0.5  # a green run that used more than this share of a step's cap gets a warning
 FAILING = "Nightly taskset runs e2e is failing"
 SLOWING = "Nightly taskset runs e2e is slowing down"
-KNOWN_FAILURE = "known-failure.json"
 EVIDENCE_NAME = re.compile(r"taskset-runs-e2e-[0-9a-f]{32}\.json$")
 STAGE_IN_FAILURE = re.compile(r'<failure[^>]*message="[^"]*?\[([a-z][a-z-]*)\]')
+ROW_ARTIFACT = re.compile(r"^kind-taskset-runs-e2e-(?P<row>.+)-kubernetes-artifacts$")
 
 
 class GitHub(Protocol):
@@ -104,6 +103,19 @@ def failure_stage(needs: Mapping[str, Mapping[str, Any]], junit: str) -> str:
     return "test" if junit else "setup"
 
 
+def failed_rows(rows: Mapping[str, str | None]) -> list[str]:
+    """``<row>: [<stage>]`` for each row whose JUnit failed, or that has none (it failed before pytest)."""
+    failed = []
+    for row, junit in sorted(rows.items()):
+        if junit is None:
+            failed.append(f"{row}: [setup]")
+        elif match := STAGE_IN_FAILURE.search(junit):
+            failed.append(f"{row}: [{match.group(1)}]")
+        elif "<failure" in junit or "<error" in junit:
+            failed.append(f"{row}: [test]")
+    return failed
+
+
 def run_ids(evidence: Sequence[Mapping[str, Any]]) -> list[str]:
     return [e[step]["run_id"] for e in evidence for step in ("test_1", "test_2") if (e.get(step) or {}).get("run_id")]
 
@@ -125,17 +137,21 @@ def report(
     run: Run,
     evidence: Sequence[Mapping[str, Any]],
     junit: str,
-    known: Sequence[Mapping[str, Any]] = (),
+    rows: Mapping[str, str | None] | None = None,
 ) -> dict[str, Any]:
-    """File this run's outcome on the tracking issue; returns what it did."""
+    """File this run's outcome on the tracking issue; returns what it did.
+
+    ``rows`` maps each matrix row to its own JUnit (None without one), for the failed-rows line.
+    """
     green = all(job.get("result") == "success" for job in run.needs.values())
     stage = None if green else failure_stage(run.needs, junit)
+    failed = [] if green else failed_rows(rows or {})
     ids = run_ids(evidence)
     facts = "\n".join(
         [f"Run: {run.url(run.run_id)}", f"Commit: {run.source_sha}"]
         + ([f"Stage: `[{stage}]`"] if stage else [])
+        + ([f"Failed rows: {'; '.join(f'`{r}`' for r in failed)}"] if failed else [])
         + ([f"Taskset runs: {', '.join(ids)}"] if ids else [])
-        + [f"Known failure, reported only: {k.get('row')}: [{k.get('bug')}]({k.get('url')})" for k in known]
     )
     issues = github("GET", f"repos/{run.repo}/issues?labels={LABEL}&state=open&per_page=10") or []
     issue = issues[0]["number"] if issues else None  # the newest: the API lists newest first
@@ -188,21 +204,23 @@ def report(
     return {"action": "reported", "stage": stage}
 
 
-def read_artifacts(root: Path) -> tuple[list[dict[str, Any]], str, list[dict[str, Any]]]:
-    """The evidence JSONs, the JUnit XML concatenated, and the known-failure markers under ``root``.
+def read_artifacts(root: Path) -> tuple[list[dict[str, Any]], str, dict[str, str | None]]:
+    """The evidence JSONs, the JUnit XML concatenated, and each row's own JUnit under ``root``.
 
-    Each artifact is a directory of ``root``; the JUnit of one with a known-failure marker is left out.
+    Each artifact is a directory of ``root``, named for its matrix row; a row without JUnit maps to None. All empty
+    when ``root`` doesn't exist.
     """
     files = sorted(path for path in root.rglob("*") if path.is_file()) if root.is_dir() else []
-    known_dirs = {path.relative_to(root).parts[0] for path in files if path.name == KNOWN_FAILURE}
     evidence = [json.loads(path.read_text(encoding="utf-8")) for path in files if EVIDENCE_NAME.search(path.name)]
-    junit = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in files
-        if path.suffix == ".xml" and path.relative_to(root).parts[0] not in known_dirs
-    )
-    known = [json.loads(path.read_text(encoding="utf-8")) for path in files if path.name == KNOWN_FAILURE]
-    return evidence, junit, known
+    junit = "\n".join(path.read_text(encoding="utf-8") for path in files if path.suffix == ".xml")
+    rows: dict[str, str | None] = {}
+    for artifact in sorted(path for path in root.iterdir() if path.is_dir()) if root.is_dir() else []:
+        if match := ROW_ARTIFACT.match(artifact.name):
+            xml = [
+                path.read_text(encoding="utf-8") for path in files if path.suffix == ".xml" and artifact in path.parents
+            ]
+            rows[match.group("row")] = "\n".join(xml) if xml else None
+    return evidence, junit, rows
 
 
 def main(env: Mapping[str, str] = os.environ, github: GitHub | None = None) -> int:
@@ -216,8 +234,8 @@ def main(env: Mapping[str, str] = os.environ, github: GitHub | None = None) -> i
         classify_for=env.get("CLASSIFY_FOR", ""),
         dispatch_ref=env.get("DISPATCH_REF") or "main",
     )
-    evidence, junit, known = read_artifacts(Path(env["ARTIFACTS"])) if env.get("ARTIFACTS") else ([], "", [])
-    outcome = report(github, run, evidence, junit, known)
+    evidence, junit, rows = read_artifacts(Path(env["ARTIFACTS"])) if env.get("ARTIFACTS") else ([], "", {})
+    outcome = report(github, run, evidence, junit, rows)
     print(json.dumps(outcome))
     if outcome["action"] == "reported":
         print(f"::error::nightly taskset runs e2e failed at [{outcome['stage']}]")

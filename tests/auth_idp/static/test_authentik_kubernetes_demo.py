@@ -2103,7 +2103,7 @@ def _deep_contains(outer: object, inner: object) -> bool:
 
 
 def test_authentik_taskset_runs_overlay_extends_the_demo_and_the_kind_values() -> None:
-    """The nightly's auth-workload overlay repeats the demo's lists (Helm replaces lists) and the kind row's values."""
+    """The nightly's auth-on-exchange-true overlay repeats the demo's lists (Helm replaces lists) and the kind row's values."""
     overlay = yaml.safe_load(Path("e2e/k8s/values/authentik-taskset-runs.yaml").read_text())["nemo-helix"]
     demo = yaml.safe_load((HELM_DIR / "values.yaml").read_text())["nemo-helix"]
 

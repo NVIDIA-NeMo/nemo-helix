@@ -190,51 +190,62 @@ def test_main_reads_the_artifacts_and_fails_a_red_report(tmp_path: Path) -> None
     assert "Stage: `[dispatch]`" in opened["body"] and "Taskset runs: run-1" in opened["body"]
 
 
-JUNIT_DENIED = (
-    '<testsuite><testcase><failure message="AssertionError: [image-build] task-image-build-x-1: '
-    "PermissionDeniedError: HTTP 403: Not allowed to read entities in workspace 'ws'\"/></testcase></testsuite>"
-)
-KNOWN = {"row": "auth-workload", "bug": "NVBug 7083853", "url": "https://nvbugspro.nvidia.com/bug/7083853"}
+JUNIT_IMAGE_BUILD = '<testcase><failure message="AssertionError: [image-build] task-image-build-x-1: HTTP 403"/>'
+JUNIT_GREEN = '<testsuite failures="0" skipped="0"><testcase name="ok"/></testsuite>'
 
 
-def _artifact(root: Path, name: str, junit: str, known: bool = False) -> None:
-    nested = root / name
-    nested.mkdir()
-    (nested / "junit.xml").write_text(junit)
-    if known:
-        (nested / "known-failure.json").write_text(json.dumps(KNOWN))
+def test_failed_rows_names_each_red_row_and_its_stage() -> None:
+    rows = {
+        "auth-on-exchange-true-1": JUNIT_IMAGE_BUILD,
+        "auth-on-exchange-false-1": JUNIT_GREEN,
+        "auth-off-exchange-false-1": JUNIT_DISPATCH,
+        "auth-off-exchange-false-2": None,  # failed before pytest wrote a report
+        "auth-on-exchange-false-2": '<testcase><error message="boom"/></testcase>',
+    }
+
+    assert report_module.failed_rows(rows) == [
+        "auth-off-exchange-false-1: [dispatch]",
+        "auth-off-exchange-false-2: [setup]",
+        "auth-on-exchange-false-2: [test]",
+        "auth-on-exchange-true-1: [image-build]",
+    ]
 
 
-def test_a_known_auth_workload_failure_does_not_hide_an_auth_off_regression(tmp_path: Path) -> None:
-    """The known row's JUnit names [image-build] first; the report must name auth-off's own stage."""
-    _artifact(tmp_path, "kind-taskset-runs-e2e-auth-workload-1-kubernetes-artifacts", JUNIT_DENIED, known=True)
-    _artifact(tmp_path, "kind-taskset-runs-e2e-auth-off-1-kubernetes-artifacts", JUNIT_DISPATCH)
+def test_a_red_run_lists_every_failed_row_so_one_red_row_cant_hide_another(tmp_path: Path) -> None:
+    for row, junit in [
+        ("auth-on-exchange-true-1", JUNIT_IMAGE_BUILD),
+        ("auth-off-exchange-false-1", JUNIT_DISPATCH),
+        ("auth-on-exchange-false-1", JUNIT_GREEN),
+    ]:
+        nested = tmp_path / f"kind-taskset-runs-e2e-{row}-kubernetes-artifacts"
+        nested.mkdir()
+        (nested / "junit.xml").write_text(junit)
     github = FakeGitHub()
     env = {
         "GITHUB_REPOSITORY": REPO,
         "GITHUB_RUN_ID": "100",
         "SOURCE_SHA": SHA,
-        "NEEDS_JSON": json.dumps(RED_TEST),  # the auth-off leg failed the matrix job
+        "NEEDS_JSON": json.dumps(RED_TEST),
         "ARTIFACTS": str(tmp_path),
     }
 
     assert report_module.main(env, github) == 1
     _, _, opened = github.calls[1]
     assert opened is not None
-    assert "Stage: `[dispatch]`" in opened["body"]
-    assert "Known failure, reported only: auth-workload: [NVBug 7083853]" in opened["body"]
+    assert (
+        "Failed rows: `auth-off-exchange-false-1: [dispatch]`; `auth-on-exchange-true-1: [image-build]`"
+        in opened["body"]
+    )
+    assert "auth-on-exchange-false-1" not in opened["body"]
 
 
-def test_a_green_run_with_a_known_failure_lists_it_when_closing(tmp_path: Path) -> None:
-    _artifact(tmp_path, "kind-taskset-runs-e2e-auth-workload-1-kubernetes-artifacts", JUNIT_DENIED, known=True)
-    evidence, junit, known = report_module.read_artifacts(tmp_path)
+def test_a_green_run_lists_no_failed_rows() -> None:
     github = FakeGitHub(open_issue=3)
 
-    assert junit == "" and known == [KNOWN]
-    assert report_module.report(github, make_run(GREEN), evidence, junit, known) == {"action": "closed"}
-    _, _, closing = github.calls[1]
-    assert closing is not None
-    assert "Known failure, reported only: auth-workload" in closing["body"]
+    report_module.report(github, make_run(GREEN), [], JUNIT_GREEN, {"auth-on-exchange-true-1": JUNIT_GREEN})
+
+    _, _, closed = github.calls[1]
+    assert closed is not None and "Green again" in closed["body"] and "Failed rows" not in closed["body"]
 
 
 def test_main_without_artifacts_reports_the_setup_stage() -> None:

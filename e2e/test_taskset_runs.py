@@ -25,9 +25,10 @@ token that can create workspaces and outlives the run. Without one the test stop
 - ``NHX_E2E_KUBE_CONTEXT``: the cluster's kubectl context. Adds the no-sandbox-left check, and saves sandbox
   diagnostics on failure; it needs cluster-wide read on ``batchsandboxes``. ``NHX_E2E_KUBE_NAMESPACE`` adds that
   namespace's events to them.
-- ``NHX_E2E_WORKLOAD_IDENTITY=1``: the cluster runs Jobs under workload token exchange (the nightly's
-  ``auth-workload`` row). Checks discovery advertises it and every Job pod ran as ``nemo-helix-jobs`` with the
-  workload token; needs ``NHX_E2E_KUBE_CONTEXT``. To run that row locally, see ``e2e/k8s/authentik-taskset-runs.md``.
+- ``NHX_E2E_WORKLOAD_TOKEN_EXCHANGE=true|false``: auth is on, and the cluster runs Jobs with workload token exchange
+  on or off (the nightly's ``auth-on-exchange-*`` rows). Checks discovery agrees, and every Job pod ran as
+  ``nemo-helix-jobs`` with the workload token (true) or without it, as the submitter (false); needs
+  ``NHX_E2E_KUBE_CONTEXT``. To run those rows locally, see ``e2e/k8s/authentik-taskset-runs.md``.
 - ``E2E_SERVICES_LOG_DIR``: where the evidence goes; default ``.pytest_cache/taskset-runs-e2e/``.
 """
 
@@ -149,11 +150,11 @@ def test_taskset_run_on_kubernetes(
     record_property: Callable[[str, object], None],
 ) -> None:
     fresh = driver.evidence.data["fresh_workspace"]
-    workload_identity = os.environ.get("NHX_E2E_WORKLOAD_IDENTITY") == "1"
-    if workload_identity:  # before anything else: without exchange the row would pass while proving nothing
+    exchange = {"true": True, "false": False}.get(os.environ.get("NHX_E2E_WORKLOAD_TOKEN_EXCHANGE", ""))
+    if exchange is not None:  # before anything else: in the wrong mode the row would pass while proving nothing
         discovery = discover_nhx_config(driver.client.base_url)
         driver.evidence.record(workload_token_exchange=discovery.workload_token_exchange_enabled)
-        check_workload_discovery(discovery)
+        check_workload_discovery(discovery, exchange=exchange)
     # The nightly's report warns when a green step used more than half its cap.
     driver.evidence.record("test_1", caps_s={"submit": TEST_1_SUBMIT_CAP, "run": RUN_CAP})
     driver.evidence.record("test_2", caps_s={"submit": TEST_2_CAP, "run": TEST_2_CAP})
@@ -171,12 +172,12 @@ def test_taskset_run_on_kubernetes(
     record_property("task_jobs", task_jobs)
     check_run(status)
 
-    if workload_identity:
+    if exchange is not None:
         with subtests.test("workload identity"):
             pods = driver.job_pods()  # image-build and task Jobs; their pods outlive the test (TTL 1 h)
             driver.evidence.record("test_1", job_pods=pods)
             assert os.environ.get("NHX_E2E_KUBE_CONTEXT"), "[identity] needs NHX_E2E_KUBE_CONTEXT"
-            check_workload_identity(pods)
+            check_workload_identity(pods, exchange=exchange)
 
     with subtests.test("task jobs"):
         jobs, attempts = driver.task_jobs(status)

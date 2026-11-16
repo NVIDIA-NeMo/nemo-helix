@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Taskset runs on the Authentik umbrella release (contrib/auth/authentik/helm), for the nightly's auth-workload row:
-# real OIDC users and workload token exchange, so Jobs run as the nemo-helix-jobs ServiceAccount for the submitter.
+# Taskset runs on the Authentik umbrella release (contrib/auth/authentik/helm), for the nightly's auth-on-exchange-true
+# row: real OIDC users and workload token exchange, so Jobs run as the nemo-helix-jobs ServiceAccount for the submitter.
 # builder.yaml and taskset-runs.yaml, nested under the nemo-helix subchart; applied by
 # setup_authentik_taskset_runs.sh with `helm upgrade --reuse-values`, the registry password by --set-file.
 # tests/auth_idp/static/test_authentik_kubernetes_demo.py keeps it in step with those files and the demo's lists.

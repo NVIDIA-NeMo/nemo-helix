@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The Authentik demo on kind, with taskset runs: real OIDC users and workload token exchange, so Jobs run as the
-# nemo-helix-jobs ServiceAccount for their submitter. For e2e/test_taskset_runs.py in the nightly's auth-workload
-# row, and locally. Idempotent: rerun it to reapply the values after a code or image change.
+# nemo-helix-jobs ServiceAccount for their submitter. For e2e/test_taskset_runs.py in the nightly's
+# auth-on-exchange-true row, and locally. Idempotent: rerun it to reapply the values after a code or image change.
 # How to run it locally, and what trips it up: e2e/k8s/authentik-taskset-runs.md.
 #
 #   1. contrib/auth/authentik/run.sh up k8s: the cluster (created, or reused), Authentik and the platform

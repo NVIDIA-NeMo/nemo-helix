@@ -1165,7 +1165,7 @@ def test_build_failure_ignores_a_failed_build_from_before_the_call(tmp_path: Pat
 
 
 def test_check_workload_identity_passes_when_every_pod_runs_as_the_job_service_account() -> None:
-    check_workload_identity(parse_job_pods({"items": [pod_body("p1", "j1"), pod_body("p2", "j2")]}))
+    check_workload_identity(parse_job_pods({"items": [pod_body("p1", "j1"), pod_body("p2", "j2")]}), exchange=True)
 
 
 @pytest.mark.parametrize(
@@ -1178,7 +1178,17 @@ def test_check_workload_identity_passes_when_every_pod_runs_as_the_job_service_a
 )
 def test_check_workload_identity_fails_on_a_pod_acting_as_the_submitter(pods: list[dict], message: str) -> None:
     with pytest.raises(AssertionError, match=message):
-        check_workload_identity(parse_job_pods({"items": pods}))
+        check_workload_identity(parse_job_pods({"items": pods}), exchange=True)
+
+
+def test_check_workload_identity_without_exchange_wants_no_workload_token() -> None:
+    check_workload_identity(parse_job_pods({"items": [pod_body("p1", "j1", token=False)]}), exchange=False)
+    with pytest.raises(AssertionError, match=r"exchange is off, but \['p2'\] mounted the workload token"):
+        check_workload_identity(
+            parse_job_pods({"items": [pod_body("p1", "j1", token=False), pod_body("p2", "j2")]}), exchange=False
+        )
+    with pytest.raises(AssertionError, match="no Job pods"):
+        check_workload_identity([], exchange=False)
 
 
 def test_check_workload_discovery() -> None:
@@ -1188,7 +1198,16 @@ def test_check_workload_discovery() -> None:
             workload_token_exchange_enabled=True,
             workload_client_id="nemo-helix-workload",
             workload_token_endpoint="https://idp/token",
-        )
+        ),
+        exchange=True,
     )
     with pytest.raises(AssertionError, match=r"\[identity\] workload token exchange is off"):
-        check_workload_discovery(NHXOIDCConfig(auth_enabled=True))
+        check_workload_discovery(NHXOIDCConfig(auth_enabled=True), exchange=True)
+
+
+def test_check_workload_discovery_without_exchange() -> None:
+    check_workload_discovery(NHXOIDCConfig(auth_enabled=True), exchange=False)
+    with pytest.raises(AssertionError, match="expected auth on and workload token exchange off"):
+        check_workload_discovery(NHXOIDCConfig(auth_enabled=True, workload_token_exchange_enabled=True), exchange=False)
+    with pytest.raises(AssertionError, match="expected auth on"):
+        check_workload_discovery(NHXOIDCConfig(auth_enabled=False), exchange=False)
