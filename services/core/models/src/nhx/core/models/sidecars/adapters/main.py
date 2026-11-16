@@ -84,6 +84,13 @@ class AdaptersController(HeartbeatMixin, Controller):
         # NIM, which scans ``NIM_PEFT_SOURCE`` itself.
         self.vllm_endpoint = os.getenv("VLLM_ENDPOINT", "").rstrip("/")
         self.vllm_request_timeout = float(os.getenv("VLLM_LORA_LOAD_TIMEOUT", "120"))
+        # Adapters vLLM has confirmed loaded. An unchanged adapter is not
+        # registered again; a changed one is unloaded and loaded once more.
+        self._vllm_loaded_adapters: set[str] = set()
+        # Adapters whose on-disk weights are newer than the copy vLLM has.
+        # A failed unload must stay here: the next cycle still unloads before
+        # it loads, instead of treating the old weights as current.
+        self._vllm_reload_pending: set[str] = set()
 
         self._stop_signal = stop_signal
 
@@ -143,6 +150,8 @@ class AdaptersController(HeartbeatMixin, Controller):
                     # retried next cycle rather than orphaning a still-loaded adapter
                     # in vLLM until it restarts (the dir is the only state driving GC).
                     if self._unload_vllm_adapter(name):
+                        self._vllm_loaded_adapters.discard(name)
+                        self._vllm_reload_pending.discard(name)
                         shutil.rmtree(f"{self.nim_peft_source}/{name}")
                 finally:
                     # Reaping any directory is progress, including the ones the
@@ -317,35 +326,44 @@ class AdaptersController(HeartbeatMixin, Controller):
         """
         return getattr(adapter, "workspace", None) or base_model_workspace
 
-    def _vllm_api_call(self, route: str, payload: dict) -> tuple[int, str]:
-        """POST ``payload`` to the local vLLM server at ``route``.
+    def _vllm_api_call(self, route: str, payload: dict | None = None, *, method: str = "POST") -> tuple[int, str]:
+        """Call the local vLLM server at ``route``.
 
-        Returns ``(status_code, body)``. HTTP error responses (4xx/5xx) are
-        returned, not raised. Transport-level failures (vLLM not yet reachable)
-        raise ``urllib.error.URLError``/``OSError`` so callers can retry next cycle.
+        POST sends ``payload`` as JSON. GET sends no body, which is how
+        ``/v1/models`` is read. Returns ``(status_code, body)``. HTTP error
+        responses (4xx/5xx) are returned, not raised. Transport-level failures
+        (vLLM not yet reachable) raise ``urllib.error.URLError``/``OSError`` so
+        callers can retry next cycle.
         """
         url = f"{self.vllm_endpoint}{route}"
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        data = None
+        headers: dict[str, str] = {}
+        if method != "GET":
+            data = json.dumps(payload or {}).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=self.vllm_request_timeout) as resp:
                 return resp.status, resp.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode("utf-8", "replace")
 
-    def _load_vllm_adapter(self, lora_name: str, adapter_dir: str) -> None:
+    def _load_vllm_adapter(self, lora_name: str, adapter_dir: str) -> bool:
         """Register an adapter with vLLM via ``POST /v1/load_lora_adapter``.
 
-        Tolerates the "already loaded" response so this is safe to call every
-        reconcile cycle. Raises on transport errors (handled by the caller).
+        Returns ``True`` when vLLM has the adapter: a 200, or a 400 whose body
+        says it is already loaded. Returns ``False`` on any other response so
+        the caller retries next cycle. Raises on transport errors.
         """
         status, body = self._vllm_api_call("/v1/load_lora_adapter", {"lora_name": lora_name, "lora_path": adapter_dir})
         if status == 200:
             logger.info(f"Loaded LoRA adapter {lora_name!r} into vLLM from {adapter_dir}")
-        elif status == 400 and "already" in body.lower():
+            return True
+        if status == 400 and "already" in body.lower():
             logger.debug(f"LoRA adapter {lora_name!r} already loaded in vLLM")
-        else:
-            logger.warning(f"vLLM load_lora_adapter failed for {lora_name!r} (status={status}): {body[:300]}")
+            return True
+        logger.warning(f"vLLM load_lora_adapter failed for {lora_name!r} (status={status}): {body[:300]}")
+        return False
 
     def _unload_vllm_adapter(self, lora_name: str) -> bool:
         """Best-effort ``POST /v1/unload_lora_adapter``; never raises.
@@ -384,6 +402,40 @@ class AdaptersController(HeartbeatMixin, Controller):
         logger.debug(f"vLLM unload_lora_adapter for {lora_name!r} (status={status}): {body[:200]}")
         return True
 
+    def _reconcile_vllm_loaded_adapters(self) -> None:
+        """Drop cache entries vLLM no longer reports.
+
+        The loaded set is local to this process. vLLM can restart without this
+        sidecar restarting, and a name left in the set would then skip
+        ``/v1/load_lora_adapter`` forever. ``GET /v1/models`` lists the base
+        model and each loaded adapter under its ``lora_name``. A successful
+        listing that omits a name drops it so the next load runs. A transport
+        error or an unreadable body leaves the set alone: absence is only
+        meaningful once vLLM has answered.
+        """
+        if not self.vllm_endpoint or not self._vllm_loaded_adapters:
+            return
+        try:
+            status, body = self._vllm_api_call("/v1/models", method="GET")
+        except (urllib.error.URLError, OSError) as e:
+            logger.debug(f"Could not list vLLM models to reconcile loaded adapters: {e}")
+            return
+        if status != 200:
+            return
+        try:
+            payload = json.loads(body)
+            reported = {
+                item["id"]
+                for item in payload.get("data", [])
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            }
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return
+        stale = self._vllm_loaded_adapters - reported
+        if stale:
+            logger.info(f"vLLM no longer reports adapters {sorted(stale)}; will load them again")
+            self._vllm_loaded_adapters -= stale
+
     def _ensure_vllm_adapter_loaded(self, lora_name: str, adapter_dir: str, reload: bool) -> None:
         """Eagerly (re)register a downloaded adapter with vLLM.
 
@@ -394,13 +446,34 @@ class AdaptersController(HeartbeatMixin, Controller):
         """
         if not self.vllm_endpoint:
             return
+        # A replacement that did not finish unloading stays pending across
+        # cycles. The caller only passes reload=True on the cycle that
+        # re-published the directory.
+        reload = reload or lora_name in self._vllm_reload_pending
+        # An unchanged adapter that vLLM already accepted is not registered
+        # again. load_inplace is unnecessary here: the weights have not changed.
+        if not reload and lora_name in self._vllm_loaded_adapters:
+            return
         try:
             if reload:
                 # Adapter dir was (re)written; drop any stale copy so vLLM loads
                 # the new weights rather than keeping the previous version.
-                self._unload_vllm_adapter(lora_name)
-            self._load_vllm_adapter(lora_name, adapter_dir)
+                # A failed unload leaves the previous weights in place. Do not
+                # load, and do not remember the name: a later 400 "already
+                # loaded" would record those old weights as current.
+                if not self._unload_vllm_adapter(lora_name):
+                    self._vllm_loaded_adapters.discard(lora_name)
+                    self._vllm_reload_pending.add(lora_name)
+                    return
+                self._vllm_loaded_adapters.discard(lora_name)
+            if self._load_vllm_adapter(lora_name, adapter_dir):
+                self._vllm_loaded_adapters.add(lora_name)
+                self._vllm_reload_pending.discard(lora_name)
+            elif reload:
+                self._vllm_reload_pending.add(lora_name)
         except (urllib.error.URLError, OSError) as e:
+            if reload:
+                self._vllm_reload_pending.add(lora_name)
             # vLLM may still be initializing; retried on the next reconcile cycle.
             logger.warning(f"Could not reach vLLM to load adapter {lora_name!r}, will retry: {e}")
 
@@ -418,6 +491,7 @@ class AdaptersController(HeartbeatMixin, Controller):
         ``mid.partition("--")``.
         """
         logger.info(f"Fetching adapters for {self.workspace}/{self.model_name}")
+        self._reconcile_vllm_loaded_adapters()
 
         model_entity: ModelEntity = self._models.get_model(name=self.model_name, workspace=self.workspace).data()
         if not model_entity.adapters:
@@ -446,8 +520,8 @@ class AdaptersController(HeartbeatMixin, Controller):
             # adapter whose re-download failed keeps its previous weights, which must
             # not be unloaded. Only unload first when we just re-published over an
             # adapter we already had on disk (``published and dir_existed``); a new
-            # adapter has nothing to unload, and an unchanged or download-failed one
-            # is (idempotently) reloaded so it survives a vLLM restart without flapping.
+            # adapter has nothing to unload. An unchanged adapter is registered
+            # once and then remembered, so later cycles do not call vLLM again.
             if os.path.isdir(adapter_dir):
                 self._ensure_vllm_adapter_loaded(dir_name, adapter_dir, reload=(published and dir_existed))
             self.emit_heartbeat()

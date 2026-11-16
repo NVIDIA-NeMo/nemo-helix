@@ -16,15 +16,6 @@ vi.mock('@studio/components/DatasetCreateModal', () => ({
   }),
 }));
 
-vi.mock('@nemo/common/src/components/DeleteConfirmationModal', () => ({
-  DeleteConfirmationModal: vi.fn(({ open, title }) => {
-    if (!open) {
-      return null;
-    }
-    return <div data-testid="delete-confirmation-modal">{title}</div>;
-  }),
-}));
-
 describe('FilesetActionMenu', () => {
   const fileset: FilesetOutput = {
     id: '123',
@@ -72,8 +63,8 @@ describe('FilesetActionMenu', () => {
     await openMenu(user);
     await user.click(screen.getByText('Delete'));
 
-    expect(screen.getByTestId('delete-confirmation-modal')).toHaveTextContent(
-      'Delete Fileset: test-fileset'
-    );
+    expect(
+      await screen.findByRole('heading', { name: "Delete fileset 'test-fileset'?" })
+    ).toBeInTheDocument();
   });
 });

@@ -157,12 +157,11 @@ export const DeploymentsListRoute: FC = () => {
       {deploymentToDelete ? (
         <DeleteConfirmationModal
           open
-          simpleConfirm
+          entity="deployment"
+          ids={[deploymentToDelete.name]}
+          description="The deployment and its configuration are deleted, and its model stops being served until it's deployed again."
+          successText={`Started deleting deployment '${deploymentToDelete.name}'.`}
           onDelete={handleDeleteDeployment}
-          title={`Delete deployment: ${deploymentToDelete.name}`}
-          confirmationText={deploymentToDelete.name}
-          successText="Deployment deletion started."
-          errorText="Failed to start deleting the deployment. Please try again later."
           onClose={handleModalClose}
         />
       ) : null}

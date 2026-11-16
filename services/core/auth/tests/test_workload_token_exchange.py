@@ -854,14 +854,16 @@ def test_opaque_docker_proof_token_with_missing_row_returns_invalid_request(clie
     assert response.json()["error"] == "invalid_request"
 
 
+@pytest.mark.parametrize("workload_kind", [None, "job"])
 def test_opaque_docker_proof_token_mints_delegated_access_token(
+    workload_kind: str | None,
     client: TestClient,
     exchange_config: AuthConfig,
     exchange_service: exchange.WorkloadTokenExchangeService,
     entity_client: _FakeEntityClient,
 ) -> None:
     subject_token, token_hash = create_opaque_docker_proof_token(_docker_delegation_name())
-    delegation = _delegation_entity(opaque_subject_token_hash=token_hash)
+    delegation = _delegation_entity(opaque_subject_token_hash=token_hash, workload_kind=workload_kind)
     entity_client.entities[delegation.name] = delegation
 
     response = client.post(
@@ -872,7 +874,12 @@ def test_opaque_docker_proof_token_mints_delegated_access_token(
     assert response.status_code == 200
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
     assert claims["sub"] == "creator@example.com"
-    assert claims["act"] == {"sub": delegation.name}
+    assert claims["groups"] == "workspace-editors"
+    # The job actor needs its own grant; submitter roles must not leak into act.
+    assert claims["act"] == {
+        "sub": delegation.name,
+        "groups": f"nhx:docker:jobs:{delegation.workload_workspace}",
+    }
 
 
 def test_opaque_docker_proof_token_mints_delegated_access_token_for_deployment_row(

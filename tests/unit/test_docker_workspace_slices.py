@@ -22,6 +22,10 @@ DOCKER_IMAGE_WANDB_CONFIG_PATHS = (
     Path("docker/unsloth/no_override_requirements.txt"),
 )
 CVE_PACKAGE_FLOORS = (
+    ("thrift", "0.25.0", (Path("docker/automodel/Dockerfile.nhx-automodel-base"),)),
+    ("anyio", "4.14.2", (Path("docker/automodel/Dockerfile.nhx-automodel-base"),)),
+    ("httpx2", "2.12.0", (Path("docker/automodel/Dockerfile.nhx-automodel-base"),)),
+    ("httpcore2", "2.10.0", (Path("docker/automodel/Dockerfile.nhx-automodel-base"),)),
     (
         "virtualenv",
         "21.14.9",
@@ -54,12 +58,13 @@ CVE_PACKAGE_FLOORS = (
             Path("pyproject.toml"),
             Path("services/rl/pyproject.toml"),
             Path("services/unsloth/pyproject.toml"),
-            Path("docker/automodel/Dockerfile.nhx-automodel-base"),
             Path("docker/Dockerfile.nhx-unsloth-training"),
             Path("docker/rl/Dockerfile.nhx-rl-base"),
             Path("docker/locks/nhx-gym-tasks/pyproject.toml"),
         ),
     ),
+    # Automodel 0.7.0's `tracking` extra requires mlflow-skinny 3.16.1, above the CVE floor.
+    ("mlflow-skinny", "3.16.1", (Path("docker/automodel/Dockerfile.nhx-automodel-base"),)),
     (
         "sqlparse",
         "0.6.0",
@@ -190,10 +195,51 @@ def test_ngc_notebook_is_replaced_before_system_copy_cleanup() -> None:
         assert text.index('"notebook>=7.6.3,<8"') < text.index(f"source={removals}")
 
 
+def test_safe_synthesizer_generation_stack_uses_patched_upstream_release() -> None:
+    project = _load_pyproject(ROOT / "plugins/nemo-safe-synthesizer/pyproject.toml")
+    assert "nemo-safe-synthesizer==0.1.17" in project["project"]["dependencies"]
+    dockerfile = ROOT / "docker/Dockerfile.nhx-safe-synthesizer-tasks"
+    assert "nemo-safe-synthesizer[engine,cu129]==0.1.17" in dockerfile.read_text()
+    assert "https://wheels.vllm.ai/0.32.0/cu129" in dockerfile.read_text()
+    assert _package_specs(dockerfile, "vllm") == ["vllm==0.32.0+cu129"]
+    assert _package_specs(dockerfile, "setuptools") == ["setuptools>=83.0.0"]
+    constraints = ROOT / "plugins/nemo-safe-synthesizer/constraints.txt"
+    assert _package_specs(constraints, "setuptools") == ["setuptools>=83.0.0"]
+    for name in ("flashinfer-python", "flashinfer-cubin"):
+        assert _package_specs(dockerfile, name) == [f"{name}==0.7.0.post1"]
+    assert _package_specs(dockerfile, "flashinfer-jit-cache") == ["flashinfer-jit-cache==0.7.0.post1+cu129"]
+
+
 def test_safe_synthesizer_sentence_transformers_security_pin() -> None:
     """The isolated NSS engine must not retain its upstream vulnerable pin."""
     specs = _package_specs(ROOT / "plugins/nemo-safe-synthesizer/constraints.txt", "sentence-transformers")
     assert specs == ["sentence-transformers==5.6.1"]
+
+
+def test_rl_generation_security_upgrade_precedes_prefetch_and_survives_source_copy() -> None:
+    text = (ROOT / "docker/rl/Dockerfile.nhx-rl-base").read_text()
+    upgrade = text.index("RUN uv add --optional vllm --no-sync")
+    warm_cache = text.index("bash /tmp/warm-uv-cache.sh")
+    worker_sync = text.index("bash /tmp/sync-worker-venvs.sh")
+    assert upgrade < warm_cache < worker_sync
+    warm_script = (ROOT / "docker/rl/scripts/warm-uv-cache.sh").read_text()
+    assert 'uv sync ${UV_SYNC_MODE-} --extra vllm --no-install-project "${skip_args[@]}"' in warm_script
+    worker_script = (ROOT / "docker/rl/scripts/sync-worker-venvs.sh").read_text()
+    assert "uv sync ${UV_SYNC_MODE-} --inexact --no-install-project --directory /opt/nemo-rl" in worker_script
+    for worker in ("VllmGenerationWorker", "VllmAsyncGenerationWorker", "SyncRolloutActor"):
+        assert re.search(rf"^sync_venv .*\.{worker} --extra vllm(?: --extra nemo_gym)?$", worker_script, re.MULTILINE)
+    for requirement in (
+        "vllm==0.30.0",
+        "flashinfer-python==0.6.18.post1",
+        "flashinfer-cubin==0.6.18.post1",
+        "flashinfer-jit-cache==0.6.18.post1",
+        "nvidia-cutlass-dsl[cu13]==4.7.1",
+    ):
+        assert f"'{requirement}'" in text
+    backup = text.index("cp pyproject.toml uv.lock /tmp/nhx-nemo-rl-lock/")
+    source_copy = text.index("--exclude=**/.git . /opt/nemo-rl")
+    restore = text.index("RUN cp /tmp/nhx-nemo-rl-lock/pyproject.toml /tmp/nhx-nemo-rl-lock/uv.lock /opt/nemo-rl/")
+    assert upgrade < backup < warm_cache < worker_sync < source_copy < restore
 
 
 def test_rl_virtualenv_patch_precedes_unreferenced_cache_cleanup() -> None:
@@ -212,7 +258,7 @@ def test_automodel_cve_layer_does_not_pin_full_mlflow_with_cryptography() -> Non
     """Full MLflow 3.15 requires cryptography<50 and cannot coinstall with the image floor."""
     text = (ROOT / "docker/automodel/Dockerfile.nhx-automodel-base").read_text(encoding="utf-8")
     assert "cryptography>=50.0.0,<51" in text
-    assert "mlflow-skinny>=3.15.0" in text
+    assert "mlflow-skinny>=3.16.1" in text
     assert not FULL_MLFLOW_SPEC_RE.search(text)
 
 

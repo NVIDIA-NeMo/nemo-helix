@@ -99,8 +99,8 @@ do
 done
 EOF
 
-# wandb-core and the CA bundles are rewritten in the base builder, before its
-# publish COPY. Repeating that here would rewrite /opt/uv_cache into this image.
+# wandb-core and the CA bundles are rewritten in nhx-rl-base. Repeating that here would
+# rewrite /opt/uv_cache into this image.
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 RUN --mount=type=cache,target=/root/.cache/uv \

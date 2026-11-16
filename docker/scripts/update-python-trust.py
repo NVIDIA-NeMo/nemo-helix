@@ -216,15 +216,15 @@ def replace_binary(binary: Path, source: Path, record: Path) -> None:
 
 
 def prune_cache_files(cache: Path) -> None:
-    """Drop orphaned uv content-addressed files without pruning prefetched archives."""
-    # uv 0.13 stores wheel files in files-v0 and hardlinks them into archive-v0,
-    # independently of the environment's install link mode. Replacing wandb-core
-    # detaches those hardlinks but leaves the original vulnerable Go binary here.
-    # Match uv's prune_archive_files rule: retain every file with another hardlink.
+    """Evict uv's deduplication store without deleting prefetched archive files."""
+    # archive-v0 owns hardlinks to these files, not symlinks. Removing the store
+    # entry leaves those archive/install hardlinks intact. Do not gate eviction
+    # on st_nlink: layered filesystems can retain lower-layer links after an
+    # archive binary is replaced. That left the old W&B executable in the image.
     # Do not use full `uv cache prune`: RL ships archives used by prefetched venvs.
     for path in (cache / "files-v0").rglob("*"):
         info = path.lstat()
-        if stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
+        if stat.S_ISREG(info.st_mode):
             path.unlink()
 
 

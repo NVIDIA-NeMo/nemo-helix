@@ -298,6 +298,23 @@ fileset so frozen `eval_beir` is not regenerated). Do not lower
 `train_n_passages` to hide an unmined fileset. Conductor:
 `nemo-retrieval-recipes` `references/sdg.md`.
 
+## Tokenizer fails to load (`MistralCommonBackend`, `No tokenizer file found.`)
+
+Symptom: an Automodel job or a `retrieval-prepare` mining step fails while loading the tokenizer with
+`Some kwargs in {...} are not supported by MistralCommonBackend.from_pretrained` or
+`ValueError: No tokenizer file found.`
+
+Cause: Automodel's default tokenizer route (`nemo_auto`) uses a tokenizer registered for the checkpoint's
+`model_type`. For Mistral-family types (`mistral`, `mistral3`, `ministral3`, ...) that is Mistral's
+`tekken.json` format. A checkpoint of that type that ships only a Hugging Face `tokenizer.json`, such as
+Nemotron 3 Embed 1B (`ministral3`), cannot load it.
+
+Fix: load the checkpoint's Hugging Face tokenizer with `tokenizer_backend: "nemo_wrapped_auto"`:
+- **Embedding and reranker training and mining:** already the default, so remove any `tokenizer_backend: "nemo_auto"` from the job or the `retrieval-prepare` spec.
+- **`sft` or `distillation` on such a checkpoint:** set `training.tokenizer_backend: "nemo_wrapped_auto"`.
+
+Details in `hyperparameters-automodel.md` § **Tokenizer backend**.
+
 ## CLI quick reference
 
 Shared:

@@ -4,7 +4,6 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
-import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { logger } from '@nemo/common/src/utils/logger';
 import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
@@ -12,6 +11,7 @@ import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetC
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
 import { CopyFilesetModal } from '@studio/components/filesets/CopyFilesetModal';
+import { getDeleteFilesetsDescription } from '@studio/constants/filesets';
 import { type FC, useState } from 'react';
 
 interface ActionMenuProps {
@@ -104,10 +104,9 @@ export const ActionMenu: FC<ActionMenuProps> = ({
           open={modalOpen === 'delete'}
           onClose={handleModalClose}
           onDelete={handleDeleteDataset}
-          title={`Delete ${entityLabel}: ${dataset.name}`}
-          confirmationText={dataset.name ?? getEntityReference(dataset)}
-          simpleConfirm
-          successText={`${entityLabel} deleted successfully`}
+          entity={entityLabel.toLowerCase()}
+          ids={[dataset.name]}
+          description={getDeleteFilesetsDescription(entityLabel.toLowerCase(), 1)}
         />
       )}
     </>

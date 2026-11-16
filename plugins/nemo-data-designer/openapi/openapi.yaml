@@ -5569,6 +5569,17 @@ components:
           title: Add Eos Token
           default: false
           type: boolean
+        tokenizer_backend:
+          type: string
+          enum:
+          - nemo_wrapped_auto
+          - nemo_auto
+          title: Tokenizer Backend
+          description: How the mining encoder's tokenizer is loaded. 'nemo_wrapped_auto'
+            uses the checkpoint's Hugging Face tokenizer, the one the encoder is served
+            with. 'nemo_auto' lets Automodel prefer a model-type tokenizer such as
+            Mistral's tekken.json; use it only for an encoder that ships one.
+          default: nemo_wrapped_auto
         dist_backend:
           type: string
           title: Dist Backend

@@ -513,6 +513,7 @@ class ModelEntityRunner:
             image_tag=deploy_params.image_tag,
             gpu=deploy_params.gpu,
             additional_envs=deploy_params.additional_envs,
+            additional_args=deploy_params.additional_args,
         )
         # Unset keeps the executor default.
         if deploy_params.disk_size:

@@ -11,7 +11,7 @@ import logging
 import math
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,7 @@ import jwt
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from httpx import AsyncClient
+from nemo_helix_plugin.auth.workload_identity import docker_job_workload_group
 from nhx.common.auth.access_keys import public_jwk_from_private_key_pem_async
 from nhx.common.auth.signing_keys import RSASigningKey, RSASigningKeyCache
 from nhx.common.auth.token_claims import groups_from_claim
@@ -876,6 +877,17 @@ async def token_exchange(
             if delegation is None:
                 raise _InvalidGrantError("Workload delegation is not ready")
             _validate_delegation_for_exchange(delegation, verified_subject, audience=audience)
+            if (
+                verified_subject.is_opaque_docker_proof
+                and delegation.job_id
+                and delegation.workload_kind in (None, "job")
+            ):
+                # Only a verified, live delegation may assert this actor group. It
+                # carries no permissions unless an admin grants it a workspace role;
+                # never borrow the on-behalf-of submitter's groups for the actor.
+                verified_subject = replace(
+                    verified_subject, groups=[docker_job_workload_group(delegation.workload_workspace)]
+                )
     except _InvalidGrantError as exc:
         logger.info("Workload delegation lookup failed: %s", exc)
         return _oauth_error(400, "invalid_request", "Subject token is not authorized for workload delegation")

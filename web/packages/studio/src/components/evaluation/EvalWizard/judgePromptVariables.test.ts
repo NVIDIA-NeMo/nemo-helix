@@ -79,6 +79,11 @@ describe('classifyJudgePromptVariables', () => {
     expect(classify('Input: {{ input').malformed).toBe(true);
   });
 
+  it('accepts a dict literal but not a bare set of braces inside an expression', () => {
+    expect(classify('{{ {"q": item.q} }} {{ {} }}').malformed).toBe(false);
+    expect(classify('{{{input}}}').malformed).toBe(true);
+  });
+
   it('does not cry malformed over a well-formed prompt', () => {
     expect(classify('{{input}} {{ messages[1].content }} {{sample.output_text}}').malformed).toBe(
       false

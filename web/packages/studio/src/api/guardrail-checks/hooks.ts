@@ -64,7 +64,7 @@ export const useGuardrailChecksForConfig = (
 // Mutations
 // ---------------------------------------------------------------------------
 
-export type UseCreateGuardrailCheckOptions = Omit<
+type UseCreateGuardrailCheckOptions = Omit<
   UseMutationOptions<
     GuardrailCheckEntity,
     Error,
@@ -85,7 +85,7 @@ export const useCreateGuardrailCheck = (options?: UseCreateGuardrailCheckOptions
     },
   });
 
-export type UseUpdateGuardrailCheckOptions = Omit<
+type UseUpdateGuardrailCheckOptions = Omit<
   UseMutationOptions<
     GuardrailCheckEntity,
     Error,
@@ -106,7 +106,7 @@ export const useUpdateGuardrailCheck = (options?: UseUpdateGuardrailCheckOptions
     },
   });
 
-export type UseRunGuardrailChecksOptions = Omit<
+type UseRunGuardrailChecksOptions = Omit<
   UseMutationOptions<
     Awaited<ReturnType<typeof runGuardrailChecks>>,
     Error,

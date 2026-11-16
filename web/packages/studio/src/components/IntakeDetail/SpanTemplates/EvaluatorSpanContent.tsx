@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { asNonEmptyString } from '@nemo/common/src/utils/asString';
 import { Badge } from '@nvidia/foundations-react-core';
 import {
   asBoolean,
   asNumber,
-  asString,
   parseRawAttributes,
 } from '@studio/components/IntakeDetail/SpanTemplates/rawAttributes';
 import {
@@ -23,8 +23,8 @@ import type { FC } from 'react';
  */
 export const EvaluatorSpanContent: FC<SpanTemplateContentProps> = ({ span }) => {
   const attributes = parseRawAttributes(span.raw_attributes);
-  const name = asString(attributes['evaluator.name']);
-  const kind = asString(attributes['evaluator.kind']);
+  const name = asNonEmptyString(attributes['evaluator.name']);
+  const kind = asNonEmptyString(attributes['evaluator.kind']);
   const score = asNumber(attributes['evaluator.score']);
   const passed = asBoolean(attributes['evaluator.passed']);
   const temperature = asNumber(attributes['evaluator.temperature']);

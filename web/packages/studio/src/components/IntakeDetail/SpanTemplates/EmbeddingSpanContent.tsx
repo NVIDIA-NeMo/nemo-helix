@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { asNonEmptyString } from '@nemo/common/src/utils/asString';
 import {
   asNumber,
-  asString,
   parseRawAttributes,
 } from '@studio/components/IntakeDetail/SpanTemplates/rawAttributes';
 import {
@@ -21,7 +21,7 @@ export const EmbeddingSpanContent: FC<SpanTemplateContentProps> = ({ span }) => 
   const attributes = parseRawAttributes(span.raw_attributes);
   const dimensions = asNumber(attributes['embedding.dimensions']);
   const embeddedText =
-    asString(attributes['embedding.embeddings.0.embedding.text']) ?? span.input?.trim();
+    asNonEmptyString(attributes['embedding.embeddings.0.embedding.text']) ?? span.input?.trim();
 
   const fields: TemplateField[] = [
     { label: 'Model', value: span.model ?? undefined },

@@ -41,6 +41,7 @@ export const ROUTE_PARAMS = {
   jobName: 'jobName',
   /** Benchmark entity name segment under evaluation/benchmarks/:name */
   benchmarkName: 'benchmarkName',
+  tasksetName: 'tasksetName',
   experimentName: 'experimentName',
   insightId: 'insightId',
   evaluationName: 'evaluationName',
@@ -86,6 +87,9 @@ export const ROUTES = {
     evaluationBenchmarks: `/workspaces/:${P.workspace}/evaluation/benchmarks`,
     evaluationBenchmarkDetails: `/workspaces/:${P.workspace}/evaluation/benchmarks/:${P.benchmarkName}`,
     evaluationResults: `/workspaces/:${P.workspace}/evaluation/results`,
+    /** Read-only taskset library (gated by VITE_FF_TASKSETS_ENABLED). */
+    tasksets: `/workspaces/:${P.workspace}/evaluation/tasksets`,
+    tasksetDetail: `/workspaces/:${P.workspace}/evaluation/tasksets/:${P.tasksetName}`,
     evaluationResultDetails: `/workspaces/:${P.workspace}/evaluation/results/:${P.evaluationJobId}`,
     /** Empty landing page for the EXPERIMENT feature (gated by VITE_FF_EXPERIMENT). */
     experiment: `/workspaces/:${P.workspace}/experiment`,

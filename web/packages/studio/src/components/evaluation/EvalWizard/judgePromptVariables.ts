@@ -15,7 +15,7 @@ export interface JudgePromptVariableReport {
   malformed: boolean;
 }
 
-const TOKEN_RE = /\{\{\s*([^}]*?)\s*\}\}/g;
+const TOKEN_RE = /\{\{\s*((?:[^{}]|\{[^{}]*\})*?)\s*\}\}/g;
 
 /** The leading identifier of a template expression, or null when it does not
  *  begin with one. */
@@ -28,10 +28,17 @@ export const expressionRoot = (expression: string): string | null => {
 const templateExpressions = (template: string): string[] =>
   [...template.matchAll(TOKEN_RE)].map((match) => match[1]);
 
-/** Braces that nest or do not pair up, which Jinja cannot parse. */
+/** Braces that nest or do not pair up, which Jinja cannot parse. A brace pair inside an
+ *  expression is fine when it is a dict literal (``{{ {"q": item.q} }}``).
+ *  ponytail: one level of dict nesting; a nested dict reads as malformed until this is a real
+ *  tokenizer. */
 export const hasMalformedBraces = (template: string): boolean =>
   /\{\{|\}\}/.test(template.replace(TOKEN_RE, '')) ||
-  templateExpressions(template).some((body) => /[{}]/.test(body));
+  templateExpressions(template).some((body) =>
+    [...body.matchAll(/\{([^{}]*)\}/g)].some(
+      ([, inner]) => inner.trim() !== '' && !inner.includes(':')
+    )
+  );
 
 /**
  * Classifies the variables a judge prompt uses.

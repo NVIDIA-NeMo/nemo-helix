@@ -24,7 +24,7 @@ from nemo_deployments_plugin.backends.k8s.compiler import (
 )
 from nemo_deployments_plugin.backends.k8s.deployments import build_deployment_body
 from nemo_deployments_plugin.backends.k8s.jobs import build_job_body
-from nemo_deployments_plugin.backends.labels import k8s_deployment_secret_name
+from nemo_deployments_plugin.backends.labels import k8s_deployment_secret_name, k8s_volume_resource_name
 from nemo_deployments_plugin.entities import (
     ConfigFile,
     Container,
@@ -85,6 +85,30 @@ def test_compile_job_pod_spec_single_container() -> None:
     assert len(pod_spec["containers"]) == 1
     assert pod_spec["containers"][0]["name"] == "main"
     assert compiled.configmap_body is None
+
+
+def test_compile_job_dotted_model_volume_name_is_a_dns_label() -> None:
+    # A model named qwen3-0.6b produces a weights volume whose logical name
+    # contains a dot. Pod volume names reject dots; the PVC name is already hashed.
+    logical = "sft-deploy-qwen3-0.6b-weights"
+    config = sample_config(restart_policy="Never").model_copy(
+        update={"volume_mounts": [VolumeMount(name=logical, mountPath="/weights")]}
+    )
+    compiled = compile_workload(
+        config=config,
+        workspace="default",
+        deployment_name="sft-deploy-qwen3-0.6b-puller",
+        labels={"managed-by": "nemo-deployments"},
+        k8s_config=None,
+        pod_restart_policy="Never",
+    )
+    pod_spec = _serialized(compiled.pod_spec_kwargs)
+    volume = next(item for item in pod_spec["volumes"] if "persistentVolumeClaim" in item)
+    mount = pod_spec["containers"][0]["volumeMounts"][0]
+    assert "." not in volume["name"]
+    assert volume["name"] == mount["name"]
+    assert volume["name"] != logical
+    assert volume["persistentVolumeClaim"]["claimName"] == k8s_volume_resource_name("default", logical)
 
 
 def test_compile_deployment_includes_init_and_sidecar() -> None:

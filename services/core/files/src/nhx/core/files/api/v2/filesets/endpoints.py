@@ -51,7 +51,9 @@ from nhx.core.files.api.endpoint_helpers import (
     get_fileset,
     list_storage_files,
     require_writable_storage,
+    resolve_download_storage,
     resolve_storage_secrets_for_user,
+    runtime_storage_http_error,
     stream_file_download,
 )
 from nhx.core.files.api.v2.filesets.schemas import (
@@ -851,7 +853,10 @@ async def list_fileset_files(
         # External storage with opt-in: actually check cache
         cache_storage = storage_impl_factory(config.default_storage_config, {})
         lock_manager = _get_cache_lock_manager(entity_store, config)
-        cache_status_map = await get_cache_status_for_files(files, storage, cache_storage, lock_manager)
+        try:
+            cache_status_map = await get_cache_status_for_files(files, storage, cache_storage, lock_manager)
+        except (StorageAccessError, StorageUnavailableError, StorageBackendError) as exc:
+            raise runtime_storage_http_error(exc) from exc
     else:
         # External storage without opt-in: null (didn't check)
         cache_status_map = {}
@@ -886,7 +891,7 @@ async def head_file(
     logger.info(f"HEAD /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
-    storage = storage_impl_factory(fileset.storage, secrets)
+    storage = await resolve_download_storage(storage_impl_factory(fileset.storage, secrets), path)
 
     cache_ctx: CacheContext | None = None
     if fileset.storage.type != config.default_storage_config.type:
@@ -920,7 +925,8 @@ async def head_file(
             "content": {
                 "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
             },
-        }
+        },
+        HTTP_409_CONFLICT: {"description": "Upstream object changed; retry the request", **_HTTP_EXCEPTION_DETAIL},
     },
     response_class=FileResponse,  # coerces SDK into returning a File
 )
@@ -946,7 +952,7 @@ async def download_file(
     fileset = await get_fileset(workspace, name, entity_store)
     with scoped_app_ctx(FilesContext(fileset_name=fileset.name, path=path)):
         secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
-        storage = storage_impl_factory(fileset.storage, secrets)
+        storage = await resolve_download_storage(storage_impl_factory(fileset.storage, secrets), path)
 
         cache_ctx: CacheContext | None = None
         if fileset.storage.type != config.default_storage_config.type:

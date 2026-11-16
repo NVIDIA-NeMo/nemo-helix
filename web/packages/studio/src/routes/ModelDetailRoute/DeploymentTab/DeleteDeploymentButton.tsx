@@ -39,12 +39,10 @@ export const DeleteDeploymentButton: FC<DeleteDeploymentButtonProps> = ({ model,
       {open && (
         <DeleteConfirmationModal
           open
-          title={`Delete deployment: ${deployment.name}`}
-          description={`This deletes the deployment and its configuration. ${model.name} stops being served until it is deployed again.`}
-          confirmationText={deployment.name}
-          simpleConfirm
-          successText={`Deleting deployment ${deployment.name}`}
-          errorText="Failed to delete the deployment. Try again or check your permissions."
+          entity="deployment"
+          ids={[deployment.name]}
+          description={`The deployment and its configuration are deleted, and ${model.name} stops being served until it's deployed again.`}
+          successText={`Started deleting deployment '${deployment.name}'.`}
           onClose={() => setOpen(false)}
           onDelete={handleDelete}
         />

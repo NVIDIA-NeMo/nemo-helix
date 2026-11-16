@@ -7,6 +7,7 @@ from pathlib import Path
 from queue import Queue
 from threading import Thread
 from typing import Any, ClassVar
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -1144,3 +1145,29 @@ async def test_taskset_task_read_authorizer_preserves_caller_access(static_authz
 def test_policy_snapshot_rejects_shorthand_before_publication() -> None:
     with pytest.raises(ValueError, match="shorthand"):
         set_policy_data({"authz": {"endpoints": {"/api/x": {"get": {"permissions": []}}}}})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preloaded", [False, True])
+async def test_policy_reload_only_applies_bootstrap_on_cold_start(static_authz_data, monkeypatch, preloaded):
+    """A warm reload must never swap loaded role bindings for bootstrap-only data mid-flight."""
+    import nhx.core.auth.app.embedded_pdp.data as pdp_data
+
+    full = {**static_authz_data, "authz": {**static_authz_data["authz"], "principals": {"admin@example.com": {}}}}
+
+    async def build(client):
+        return static_authz_data if client is None else full
+
+    applied: list[bool] = []
+
+    def record(data):
+        applied.append(bool(data["authz"].get("principals")))
+        set_policy_data(data)
+
+    if preloaded:
+        set_policy_data(full)
+    monkeypatch.setattr(pdp_data, "build_authorization_data", build)
+    monkeypatch.setattr(pdp_data, "set_policy_data", record)
+
+    assert await pdp_data.load_policy_data(MagicMock())
+    assert applied == ([True] if preloaded else [False, True])

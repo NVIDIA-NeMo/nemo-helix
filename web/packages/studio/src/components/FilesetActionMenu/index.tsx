@@ -3,13 +3,13 @@
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
-import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { logger } from '@nemo/common/src/utils/logger';
 import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
+import { getDeleteFilesetsDescription } from '@studio/constants/filesets';
 import { type FC, useState } from 'react';
 
 export interface FilesetActionMenuProps {
@@ -78,10 +78,9 @@ export const FilesetActionMenu: FC<FilesetActionMenuProps> = ({
           open={modalOpen === 'delete'}
           onClose={handleModalClose}
           onDelete={handleDeleteFileset}
-          title={`Delete Fileset: ${fileset.name}`}
-          confirmationText={fileset.name ?? getEntityReference(fileset)}
-          simpleConfirm
-          successText="Fileset deleted successfully"
+          entity="fileset"
+          ids={[fileset.name]}
+          description={getDeleteFilesetsDescription('fileset', 1)}
         />
       )}
     </>

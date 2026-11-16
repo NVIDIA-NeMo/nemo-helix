@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 from nemo_helix_plugin.client.errors import NemoTransportError
+from nemo_helix_plugin.workspaces.types import WorkspaceLimits
 from nhx.common.auth.models import AuthContext
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
@@ -43,6 +44,20 @@ def _step(
     )
 
 
+def _workspaces_client(limits: dict[str, int] | None = None) -> MagicMock:
+    """Workspaces client whose workspaces carry ``limits`` (name -> max_concurrent_jobs); others are unset."""
+    client = MagicMock()
+
+    def get_workspace(*, name: str):
+        cap = (limits or {}).get(name)
+        response = MagicMock()
+        response.data.return_value.limits = WorkspaceLimits(max_concurrent_jobs=cap) if cap is not None else None
+        return response
+
+    client.get_workspace.side_effect = get_workspace
+    return client
+
+
 def _admission(
     jobs_client,
     in_flight: list[HelixJobStepWithContext],
@@ -50,10 +65,12 @@ def _admission(
     executor: int = 100,
     workspace: int = 100,
     user: int = 100,
+    workspace_caps: dict[str, int] | None = None,
 ) -> ConcurrencyAdmission:
     jobs_client.list_steps.return_value = paginated_response(in_flight)
     admission = ConcurrencyAdmission(
         jobs_client,
+        _workspaces_client(workspace_caps),
         executor_limits={EXECUTOR: executor},
         max_active_jobs_per_workspace=workspace,
         max_active_jobs_per_user=user,
@@ -148,11 +165,57 @@ def test_workspace_limit_uses_default_for_every_workspace(mock_jobs_client, test
     assert admission.workspace_limit("anything-else") == 7
 
 
+def test_workspace_limit_prefers_configured_value(mock_jobs_client, test_step_created):
+    admission = _admission(mock_jobs_client, [], workspace=7, workspace_caps={"capped": 2})
+
+    assert admission.workspace_limit("capped") == 2
+    assert admission.workspace_limit("other") == 7
+
+
+def test_defers_at_configured_workspace_cap_below_default(mock_jobs_client, test_step_created):
+    running = [_step(test_step_created, "r1", status=HelixJobStatus.ACTIVE)]
+    admission = _admission(mock_jobs_client, running, workspace=100, workspace_caps={"default": 1})
+
+    decision = admission.check(_step(test_step_created, "new"))
+
+    assert not decision.admitted
+    assert decision.reason is not None and "workspace" in decision.reason
+
+
+def test_defers_when_workspace_limits_cannot_be_read(mock_jobs_client, test_step_created):
+    request = httpx.Request("GET", "http://localhost/apis/entities/v2/workspaces/default")
+    admission = _admission(mock_jobs_client, [])
+    admission._workspaces.get_workspace.side_effect = NemoTransportError(httpx.ConnectError("refused", request=request))
+
+    assert not admission.check(_step(test_step_created, "new")).admitted
+
+
+def test_failed_workspace_lookup_is_not_repeated_within_a_pass_but_retried_next_pass(
+    mock_jobs_client, test_step_created
+):
+    request = httpx.Request("GET", "http://localhost/apis/entities/v2/workspaces/default")
+    admission = _admission(mock_jobs_client, [])
+    get_workspace = admission._workspaces.get_workspace
+    healthy = get_workspace.side_effect
+    get_workspace.side_effect = NemoTransportError(httpx.ConnectError("refused", request=request))
+
+    assert not admission.check(_step(test_step_created, "n1")).admitted
+    assert not admission.check(_step(test_step_created, "n2")).admitted
+    assert get_workspace.call_count == 1
+
+    get_workspace.side_effect = healthy
+    admission.begin_pass()
+
+    assert admission.check(_step(test_step_created, "n3")).admitted
+    assert get_workspace.call_count == 2
+
+
 def test_defers_when_load_cannot_be_counted(mock_jobs_client, test_step_created):
     request = httpx.Request("GET", "http://localhost/apis/jobs/v2/workspaces/-/jobs/-/steps")
     mock_jobs_client.list_steps.side_effect = NemoTransportError(httpx.ConnectError("refused", request=request))
     admission = ConcurrencyAdmission(
         mock_jobs_client,
+        _workspaces_client(),
         executor_limits={EXECUTOR: 1},
         max_active_jobs_per_workspace=1,
         max_active_jobs_per_user=1,
@@ -182,6 +245,7 @@ def test_scheduler_shares_scarce_capacity_across_users(
     bob = [_step(test_step_created, "b1", user="bob")]
     admission = ConcurrencyAdmission(
         mock_jobs_client,
+        _workspaces_client(),
         executor_limits={EXECUTOR: 2},
         max_active_jobs_per_workspace=100,
         max_active_jobs_per_user=100,

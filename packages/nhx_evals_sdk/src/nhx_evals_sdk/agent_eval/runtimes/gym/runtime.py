@@ -57,6 +57,10 @@ from nhx_evals_sdk.values.results import AggregateScore
 
 logger = logging.getLogger(__name__)
 
+OUTPUT_DIR_ENV = "NHX_GYM_OUTPUT_DIR"
+"""Names the directory, under the run's work dir, where Gym servers write outputs to keep with the run."""
+OUTPUT_SUBDIR = "outputs"
+
 
 class GymAgentTaskRunner:
     """An :class:`AgentTaskRunner` that runs an existing Gym env, then adapts its rollouts.
@@ -257,11 +261,22 @@ class GymAgentTaskRunner:
         gym = gym_executable()
         env_log = work_dir / ENV_LOG_NAME
 
+        # A symlinked output dir would send Gym's writes outside the bundle, whose upload skips symlinks.
+        output_dir = work_dir / OUTPUT_SUBDIR
+        if output_dir.is_symlink():
+            raise FileExistsError(f"{output_dir} is a symlink; give each run a fresh work_dir")
+        # Absolute because Gym starts each server from its own directory.
+        output_dir = output_dir.resolve()
+        output_dir.mkdir(exist_ok=True)
+        if any(output_dir.iterdir()):
+            raise FileExistsError(f"{output_dir} already holds Gym output; give each run a fresh work_dir")
+
         # Gym launches each server from its own subdir with its own .venv. Ray (>=2.56) otherwise
         # detects a `uv run` ancestor and tries to replicate that uv project onto its workers,
         # asserting the project pyproject.toml lives in the driver's cwd — which aborts startup. That
         # hook is wrong for Gym (servers manage their own deps), so disable it for the subprocesses.
-        subprocess_env = gym_invocation_env(cfg, resolved_env)
+        # The output dir is set last so it always points inside the work dir, which a platform job saves.
+        subprocess_env = {**gym_invocation_env(cfg, resolved_env), OUTPUT_DIR_ENV: str(output_dir)}
 
         selection = selection_args(cfg, work_dir)
 
@@ -324,6 +339,10 @@ class GymAgentTaskRunner:
             str(cfg.num_repeats),
             "--concurrency",
             str(cfg.concurrency),
+            # A failed agent `/run` becomes a row in Gym's `<output>_failures.jsonl`, which
+            # `trials_from_rollouts` turns into a FAILED trial with its cause, instead of ending the
+            # collection and losing every rollout. Before `selection`, so `hydra_params` can still turn it off.
+            "++route_failures_to_sidecar=true",
             *selection,
         ]
         stdout_log = work_dir / "gym_eval.stdout.log"

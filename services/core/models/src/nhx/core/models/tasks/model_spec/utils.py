@@ -141,6 +141,11 @@ def _infer_head_type_from_hf_dir(model_path: Path) -> tuple[ModelHeadType, str]:
         if artifact_path.is_file():
             embedding_signals.append(f"artifact:{artifact}")
 
+    # Sentence Transformers writes the same artifacts for a CrossEncoder, and says so here.
+    sentence_transformers_config = _load_config(model_path / "config_sentence_transformers.json")
+    if sentence_transformers_config.get("model_type") == "CrossEncoder":
+        cross_encoder_signals.append("artifact:config_sentence_transformers.json:CrossEncoder")
+
     config = _load_config(model_path / "config.json")
     architectures = _load_architectures(model_path / "config.json")
     sequence_classification_architectures: list[str] = []

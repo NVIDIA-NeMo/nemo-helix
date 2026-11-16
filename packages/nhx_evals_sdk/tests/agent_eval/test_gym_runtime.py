@@ -2040,6 +2040,24 @@ async def test_collection_uses_the_authored_selection(tmp_path: Path) -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_collection_keeps_going_past_a_failed_rollout(tmp_path: Path) -> None:
+    # Gym's default raises on the first failed agent `/run` and ends every rollout still in flight. Routed, the
+    # failure lands in `<output>_failures.jsonl`, which `trials_from_rollouts` reads as a FAILED trial.
+    config = _config(hydra_params={"mcqa": {"port": 8123}})
+    gym = _stub_gym(tmp_path, exit_code=0, message="done")
+    selection = selection_args(config, tmp_path)
+
+    await GymAgentTaskRunner(config=config)._collect_rollouts(
+        gym, selection, tmp_path / "in.jsonl", tmp_path / "out.jsonl", tmp_path, {}
+    )
+
+    argv = (tmp_path / "argv.txt").read_text().splitlines()
+    assert "++route_failures_to_sidecar=true" in argv
+    # Ahead of the selection, so a `hydra_params` override of it would still win.
+    assert argv.index("++route_failures_to_sidecar=true") < len(argv) - len(selection)
+
+
 def test_leftover_captures_refuse_a_second_run_into_the_same_dir(tmp_path: Path) -> None:
     # The sandboxed runner writes captures *before* `rollouts.jsonl`, so a run that died in between
     # leaves them with no file above to catch it. Capture names repeat across runs of one dataset,
@@ -2107,6 +2125,41 @@ def test_workspace_secret_prefers_prefixed_variable_then_bare_fallback(monkeypat
     with pytest.raises(RuntimeError, match="stop before start"):
         asyncio.run(runner.run_tasks(tasks))
     assert observed == ["workspace-value", "bare-value"]
+
+
+def test_gym_servers_get_an_output_dir_inside_the_run_work_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from nhx_evals_sdk.agent_eval.runtimes.gym import runtime as gym_runtime
+    from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig
+
+    monkeypatch.setattr(gym_runtime, "gym_executable", lambda: "gym")
+    runner = GymAgentTaskRunner(config=_config(env_vars={gym_runtime.OUTPUT_DIR_ENV: "/elsewhere"}))
+    observed: list[str] = []
+
+    async def capture_env(gym, selection, subprocess_env, work_dir):
+        observed.append(subprocess_env[gym_runtime.OUTPUT_DIR_ENV])
+        raise RuntimeError("stop before start")
+
+    monkeypatch.setattr(runner, "_validate_config", capture_env)
+    monkeypatch.chdir(tmp_path)
+    tasks = discover_gym_tasks(EXAMPLE)[:1]
+    with pytest.raises(RuntimeError, match="stop before start"):
+        asyncio.run(runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=Path("run"))))
+
+    expected = tmp_path.resolve() / "run" / "gym_run" / gym_runtime.OUTPUT_SUBDIR
+    assert observed == [str(expected)]
+    assert expected.is_dir()
+
+    (expected / "video.mp4").write_text("from a failed run")
+    with pytest.raises(FileExistsError, match="already holds Gym output"):
+        asyncio.run(runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=Path("run"))))
+
+    linked = tmp_path / "linked" / "gym_run"
+    linked.mkdir(parents=True)
+    (tmp_path / "elsewhere").mkdir()
+    (linked / gym_runtime.OUTPUT_SUBDIR).symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    with pytest.raises(FileExistsError, match="is a symlink"):
+        asyncio.run(runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=Path("linked"))))
+    assert observed == [str(expected)]
 
 
 def test_custom_secret_resolver_supplies_gym_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:

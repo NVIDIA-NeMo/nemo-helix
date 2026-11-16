@@ -2451,12 +2451,14 @@ components:
           - quack
         rope_fusion:
           title: Rope Fusion
-          description: Fuse the rotary embedding into the attention kernel.
+          description: Fuse the rotary embedding into the attention kernel. Automodel
+            v0.7.0 turns this off for every model, so true has no effect.
+          default: false
           type: boolean
         experts:
           title: Experts
-          description: MoE expert compute kernel. 'gmm' is the grouped-matmul path
-            used by the large MoE recipes.
+          description: MoE expert compute kernel. 'torch_mm' is the grouped-matmul
+            path used by the large MoE recipes; 'gmm' is a deprecated alias for it.
           type: string
           enum:
           - torch
@@ -2494,13 +2496,13 @@ components:
       description: 'Which implementation Automodel uses for each model component.
 
 
-        Every field defaults to ``None``, meaning "leave it to Automodel". Its own
-        defaults
+        Every field except ``rope_fusion`` defaults to ``None``, meaning "leave it
+        to Automodel".
 
-        depend on what the training node has available (Transformer Engine, DeepEP,
-        CUDA), so
+        Its own defaults depend on what the training node has available (Transformer
+        Engine,
 
-        only explicitly set values are forwarded.'
+        DeepEP, CUDA), so only explicitly set values are forwarded.'
     AutomodelBatchSpec:
       properties:
         global_batch_size:
@@ -3040,7 +3042,7 @@ components:
         use_repeated_layer:
           title: Use Repeated Layer
           description: Share one weight-tied layer across the prediction depths. Only
-            some Automodel models accept it (Nemotron-H in r0.6.0); omit it for others.
+            some Automodel models accept it (Nemotron-H in r0.7.0); omit it for others.
           type: boolean
         loss_scaling_factor:
           title: Loss Scaling Factor
@@ -3289,6 +3291,14 @@ components:
           description: Literal prefix prepended to each passage. Empty string disables
             prefixing.
           default: 'passage: '
+        temperature:
+          title: Temperature
+          description: 'Softmax temperature of the training loss: contrastive for
+            bi_encoder, listwise for cross_encoder. Omit for 0.02 (bi_encoder) or
+            1.0 (cross_encoder). A Qwen3 causal reranker scores with raw yes/no logits,
+            so this is its only temperature setting.'
+          type: number
+          exclusiveMinimum: 0.0
         export:
           allOf:
           - $ref: '#/components/schemas/AutomodelExportSpec'
@@ -3446,6 +3456,30 @@ components:
           - $ref: '#/components/schemas/AutomodelBackendSpec'
           description: Low-level kernel selection for the model's components. Omit
             to let Automodel choose based on the hardware it lands on.
+        tokenizer_backend:
+          title: Tokenizer Backend
+          description: How Automodel loads the tokenizer. Omit unless the default
+            fails or does not match how the model is served. Omitted, bi_encoder and
+            cross_encoder use 'nemo_wrapped_auto' (the checkpoint's Hugging Face tokenizer)
+            and every other recipe uses Automodel's own default, 'nemo_auto', which
+            prefers a model-specific tokenizer such as Mistral's tekken.json when
+            Automodel has one for the model type. 'transformers_auto' is Hugging Face
+            AutoTokenizer without Automodel's wrapper; 'tokenizers' reads tokenizer.json
+            directly. Not supported for vision-language models, which load a processor.
+          type: string
+          enum:
+          - nemo_auto
+          - nemo_wrapped_auto
+          - transformers_auto
+          - tokenizers
+        mask_generation_prompt:
+          type: boolean
+          title: Mask Generation Prompt
+          description: 'Leave out of the loss the tokens the chat template writes
+            before each assistant reply: the role header and any empty reasoning block
+            such as ''<think></think>''. The model never generates them. Chat-format
+            (messages) datasets only.'
+          default: false
       additionalProperties: false
       type: object
       title: AutomodelTrainingSpec
@@ -3626,6 +3660,14 @@ components:
           additionalProperties:
             type: string
           type: object
+        additional_args:
+          items:
+            type: string
+          type: array
+          title: Additional Args
+          description: Raw arguments appended to the engine serve command. For vLLM
+            this is the `vllm serve` argument vector, for example ['--max-model-len',
+            '8192'].
         disk_size:
           title: Disk Size
           description: Disk size for the deployment.

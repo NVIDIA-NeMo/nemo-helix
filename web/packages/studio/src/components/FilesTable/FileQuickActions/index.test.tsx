@@ -164,6 +164,8 @@ describe('FileQuickActions', () => {
     await openMenu();
     const deleteButton = screen.getByText('Delete');
     await user.click(deleteButton);
-    expect(screen.getByText('Delete File')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: "Delete file 'test.json'?" })
+    ).toBeInTheDocument();
   });
 });

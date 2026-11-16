@@ -118,7 +118,7 @@ def test_replace_binary_detaches_shared_files_and_updates_record(tmp_path: Path,
 
 
 @pytest.mark.parametrize("referenced", [False, True])
-def test_rebuild_prunes_only_unreferenced_content_addressed_files(
+def test_rebuild_evicts_content_store_without_deleting_other_consumers(
     tmp_path: Path, monkeypatch, referenced: bool
 ) -> None:
     cache = tmp_path / "cache"
@@ -148,13 +148,13 @@ def test_rebuild_prunes_only_unreferenced_content_addressed_files(
     trust.main()
 
     assert binary.read_bytes() == replacement.read_bytes()
-    assert blob.exists() is referenced
+    assert not blob.exists()
     assert metadata.exists()
     if referenced:
         assert other.read_bytes() == b"old Go executable"
 
 
-def test_content_addressed_cleanup_preserves_symlinks_and_referenced_files(tmp_path: Path) -> None:
+def test_content_addressed_cleanup_preserves_symlinks_and_installed_hardlinks(tmp_path: Path) -> None:
     files = tmp_path / "files-v0/ab"
     files.mkdir(parents=True)
     orphan = files / "orphan"
@@ -172,7 +172,8 @@ def test_content_addressed_cleanup_preserves_symlinks_and_referenced_files(tmp_p
     trust.prune_cache_files(tmp_path)
 
     assert not orphan.exists()
-    assert referenced.exists()
+    assert not referenced.exists()
+    assert (tmp_path / "installed").exists()
     assert symlink.is_symlink()
     assert external.read_bytes() == b"preserve"
     assert directory.is_dir()

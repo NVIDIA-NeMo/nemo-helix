@@ -1261,6 +1261,26 @@ def test_kubernetes_job_rejects_reserved_step_auth_env_vars(kubernetes_job, cpu_
         kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
 
 
+@pytest.mark.parametrize(
+    ("name", "from_secret", "match"),
+    [
+        ("NHX_PRINCIPAL", None, "NHX_PRINCIPAL"),
+        ("NEMO_JOB_SECRETS", None, "NEMO_JOB_SECRETS"),
+        ('NHX_PRINCIPAL={"id":"service:jobs","x":"', None, "must not contain"),
+        ("X=default/a,NHX_PRINCIPAL", HelixJobSecretEnvironmentVariableRef(name="b"), "must match"),
+    ],
+)
+def test_kubernetes_job_rejects_platform_injected_and_malformed_step_env_names(
+    kubernetes_job, cpu_execution_provider, test_step_pending, name, from_secret, match
+):
+    test_step_pending.step_spec.environment.append(
+        HelixJobEnvironmentVariable(name=name, value=None if from_secret else "attacker", from_secret=from_secret)
+    )
+
+    with pytest.raises(ValueError, match=match):
+        kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
+
+
 def test_kubernetes_job_injects_projected_workload_identity_token_when_exchange_enabled(
     kubernetes_job, cpu_execution_provider, test_step_pending_with_auth_context, workload_exchange_auth_config
 ):

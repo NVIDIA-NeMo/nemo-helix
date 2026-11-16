@@ -45,7 +45,7 @@ spec:
 {{- end }}
       serviceAccountName: {{ include "nhx-core.controllerServiceAccountName" . }}
       securityContext:
-        {{- include "nemo-common.podSecurityContext" (dict "global" .Values.podSecurityContext "local" .Values.core.controller.podSecurityContext) | nindent 8 }}
+        {{- include "nemo-common.podSecurityContext" (dict "global" .Values.podSecurityContext "local" .Values.core.controller.podSecurityContext "globalIds" true) | nindent 8 }}
       containers:
         - name: nhx-core
           securityContext:

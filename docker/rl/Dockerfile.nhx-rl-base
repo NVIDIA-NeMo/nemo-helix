@@ -177,7 +177,7 @@ ARG PACKAGE_FLOORS='{ \
     "hydra-core": "hydra-core>=1.3.7,<1.4", \
     "gitpython": "gitpython>=3.1.62", \
     "wandb": "wandb>=0.31.0" \
-}'
+    }'
 
 # Packages left out of every uv sync, as a JSON array. Mooncake is unused by RL; its wheel bundles
 # Go/etcd libraries.
@@ -194,12 +194,27 @@ ARG NO_INSTALL_PACKAGES='[ \
     "mooncake-transfer-engine", \
     "mooncake-transfer-engine-cuda13", \
     "nemo-sandboxed-gym" \
-]'
+    ]'
+
+# The pinned RL fork still declares vLLM 0.29.0, affected by CVE-2026-105759.
+# vLLM 0.30.0 retains torch 2.13.0 and requires FlashInfer 0.6.18.post1
+# plus CUTLASS DSL 4.7.1; update those coordinated generation pins together.
+# Update the actual vllm extra and lock together before any frozen sync, so
+# prefetched workers and later uv invocations cannot restore the vulnerable pin.
+# Remove this adaptation when the upstream RL source pin carries these versions.
+RUN uv add --optional vllm --no-sync \
+        'vllm==0.30.0' \
+        'flashinfer-python==0.6.18.post1' \
+        'flashinfer-cubin==0.6.18.post1' \
+        'flashinfer-jit-cache==0.6.18.post1' \
+        'nvidia-cutlass-dsl[cu13]==4.7.1' && \
+    mkdir -p /tmp/nhx-nemo-rl-lock && \
+    cp pyproject.toml uv.lock /tmp/nhx-nemo-rl-lock/
 
 # Warm the uv cache. Extras conflict, so each sync prunes the last; the cache is what remains.
 # The two combined syncs match the worker venvs: mcore+nemo_gym and vllm+nemo_gym.
-# RL's own pyproject.toml and uv.lock are used as-is. These nine packages are left out of
-# the sync and installed from rl-cuda-ext-wheel after prefetch.
+# Use RL's manifest/lock with the generation security update above. NO_INSTALL_PACKAGES
+# excludes unused packages and CUDA extensions installed from rl-cuda-ext-wheel after prefetch.
 #
 # `uv sync` is EXACT, so these do NOT accumulate - each --extra prunes the previous one and the base
 # venv ends up with default deps + groups only. The populated cache is the real product.
@@ -275,6 +290,10 @@ RUN --mount=from=rl-cuda-ext-wheel,source=/wheels,target=/mnt/wheels,readonly \
 # After the worker syncs, so a source-only bump reuses that layer.
 # Exclude submodule .git dirs here; a later rm would still leave them in this layer.
 COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/nemo-rl
+# The full-source copy includes the upstream manifests. Restore the exact inputs
+# used for the prefetched venvs rather than shipping the old generation pins.
+RUN cp /tmp/nhx-nemo-rl-lock/pyproject.toml /tmp/nhx-nemo-rl-lock/uv.lock /opt/nemo-rl/ && \
+    rm -rf /tmp/nhx-nemo-rl-lock
 
 # Upstream's tokenizer assert already allows the 5.17.0 override (<5.20). The
 # verifiers pin and wrapper-dir patch stay so a later run of prefetch_venvs.py
@@ -299,7 +318,7 @@ EOF
 # ---- Per-environment Gym venvs, separate from /opt/ray_venvs. Off unless listed. ----
 ARG NEMO_GYM_PREFETCH_CONFIGS=""
 # Gym pins vllm==0.25.1, the CUDA 12 wheel. Override it to the cu130 build.
-# RL's own vllm extra stays 0.29.0.
+# RL's own vllm extra is patched to 0.30.0 above.
 ARG NEMO_GYM_CUDA=cu130
 ARG NEMO_GYM_VLLM_VERSION=0.25.1
 ARG TARGETARCH
@@ -342,9 +361,8 @@ RUN /opt/nemo_rl_venv/bin/python tools/generate_fingerprint.py \
     > /opt/nemo_rl_container_fingerprint
 
 # Last prune before publish copies this stage. The copy reads the merged view,
-# so archives this hides (including Megatron-Bridge's build-env setuptools
-# and files-v0 blobs left behind by the trust update) are not in nhx-rl-base.
-# A prune after the copy would only hide them again.
+# so archives this hides (including Megatron-Bridge's build-env setuptools)
+# are not in nhx-rl-base. A prune after the copy would only hide them again.
 RUN prune-unreferenced-uv-archives.sh
 
 # ---- publish: one copy of the merged builder tree ----
@@ -436,11 +454,13 @@ EOF
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 # Update each installed Python environment and rebuild embedded Go TLS clients.
+# Prune in the same layer: the archives this orphans would otherwise stay in the image.
 RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
     --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
-    GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
+    GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py \
+    && prune-unreferenced-uv-archives.sh
 
 RUN --mount=type=cache,target=/root/.cache/uv <<'EOF' bash -eu
 source_dir=/usr/share/nemo-helix/source-distributions/nhx-rl-base
