@@ -40,7 +40,9 @@ describe('SecretsDataView', () => {
     expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
 
     await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
-    expect(await screen.findByRole('dialog')).toHaveTextContent(/Delete: /);
+    expect(
+      await screen.findByRole('heading', { name: "Delete secret 'openai-api-key'?" })
+    ).toBeInTheDocument();
   });
 
   describe('Data display', () => {

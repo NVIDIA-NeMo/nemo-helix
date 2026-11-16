@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# BatchSandbox template for kind (install_opensandbox_kind.sh). Same ConfigMap name as
+# k8s/helm/examples/opensandbox/batchsandbox-template.yaml. Sized for a 4-CPU runner: task sandboxes ask for 1 CPU.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensandbox-batchsandbox-template
+  namespace: opensandbox-system
+  labels:
+    app.kubernetes.io/part-of: opensandbox
+    opensandbox.nvidia.com/isolation-class: shared-kernel
+data:
+  batchsandbox-template.yaml: |
+    metadata:
+      labels:
+        opensandbox.nvidia.com/isolation-class: shared-kernel
+        opensandbox.nvidia.com/runtime: shared-kernel
+    spec:
+      replicas: 1
+      template:
+        spec:
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 30
+          # Task code is untrusted and must not hold a cluster token.
+          automountServiceAccountToken: false
+          # Task images are the builder's, in the development registry. Neither Jobs' image_pull_secrets nor the
+          # chart's imagePullSecrets reach a sandbox pod: only this template does.
+          imagePullSecrets:
+            - name: builder-registry-pull
+          containers:
+            - name: sandbox
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
