@@ -94,7 +94,7 @@ class SettleController(NemoController):
         assert self._entities is not None
         for build in await self._every(QueuedBuild):
             try:
-                await self._entities.delete(QueuedBuild, build.name, workspace=build.workspace)
+                await self._entities.delete_by_id(QueuedBuild, build.id, expected_db_version=build.db_version)
             except EntityNotFoundError:
                 pass
             except Exception:

@@ -63,8 +63,9 @@ class FakeEntities:
         data = matching[(page - 1) * self.page_size : page * self.page_size]
         return SimpleNamespace(data=data, pagination=SimpleNamespace(total_pages=pages))
 
-    async def delete(self, entity_type: type, name: str, *, workspace: str) -> None:
+    async def delete_by_id(self, entity_type: type, entity_id: str, *, expected_db_version: int | None) -> None:
         assert entity_type is QueuedBuild
+        name = entity_id.removeprefix("id-")
         self.events.append(f"delete:{name}")
         if name in self.undeletable:
             raise RuntimeError("entity store down")
@@ -122,7 +123,9 @@ class TestAPass:
 
 
 def _queued_build(name: str) -> QueuedBuild:
-    return QueuedBuild(name=name, workspace="ws-a")
+    build = QueuedBuild(name=name, workspace="ws-a")
+    build._id = f"id-{name}"
+    return build
 
 
 class TestWhat010Left:
