@@ -45,6 +45,15 @@ describe('WorkspaceCreateModal', () => {
     );
   });
 
+  it('shows the server detail for a business-rule 403', async () => {
+    const detail = "Workspace names beginning with 'sample-' are reserved for the sample flow";
+    await submitWithError(axiosErrorWithStatus(403, detail));
+
+    expect(await screen.findByTestId('mock-toast-error')).toHaveTextContent(
+      `Failed to create workspace: ${detail}`
+    );
+  });
+
   it('shows the server detail for other failures', async () => {
     await submitWithError(axiosErrorWithStatus(500, 'database unavailable'));
 
