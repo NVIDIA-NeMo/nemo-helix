@@ -279,6 +279,37 @@ def test_secret_route_requires_both_distinct_permissions(
     assert result[0]["result"]["allowed"] is expected
 
 
+_JOB_SA = "system:serviceaccount:jobs:nemo-helix-jobs"
+
+
+@pytest.mark.parametrize(
+    ("job_runner", "subject", "expected"),
+    [
+        (True, "viewer", True),
+        (True, "non-member", False),
+        (False, "viewer", False),
+        (True, None, False),
+    ],
+    ids=["for-a-reader", "for-a-non-member", "without-job-runner", "direct"],
+)
+def test_a_job_reads_a_secret_only_for_a_submitter_who_may(
+    policy: OPAPolicy, policy_data: dict[str, Any], job_runner: bool, subject: str | None, expected: bool
+) -> None:
+    """A Job's workload identity, not a service, may fetch a secret value only acting for its submitter."""
+    if job_runner:
+        policy_data["authz"]["principals"][_JOB_SA] = {"workspaces": {"private": ["JobRunner"]}}
+        policy.set_data(policy_data)
+    request: dict[str, Any] = {
+        "principal_id": _JOB_SA,
+        "method": "GET",
+        "path": "/apis/secrets/v2/workspaces/private/secrets/example/access",
+    }
+    if subject:
+        request["on_behalf_of_principal_id"] = subject
+    result = policy.evaluate(request, entrypoint=0)
+    assert result[0]["result"]["allowed"] is expected
+
+
 @pytest.mark.parametrize("scopes", [["models:read"], ["entities:read"]])
 def test_actor_admin_does_not_bypass_route_scopes(policy: OPAPolicy, scopes: list[str]) -> None:
     result = policy.evaluate(

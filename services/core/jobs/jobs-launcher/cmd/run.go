@@ -191,11 +191,36 @@ func fetchSecrets(apiBaseURL string, principal *nhxclient.Principal, secretRefs 
 	return fetchSecretsWithClient(nhxclient.NewSecretClient(apiBaseURL, principal), secretRefs)
 }
 
-func fetchSecretsWithEndpoint(endpoint nhxclient.Endpoint, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
+func fetchSecretsWithEndpoint(
+	ctx context.Context, endpoint nhxclient.Endpoint, principal *nhxclient.Principal, secretRefs []secretReference,
+) ([]string, error) {
+	httpClient, err := secretFetchHTTPClient(ctx, endpoint)
+	if err != nil {
+		return nil, err
+	}
 	return fetchSecretsWithClient(
-		nhxclient.NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, secretEndpointHTTPClient(endpoint)),
+		nhxclient.NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, httpClient),
 		secretRefs,
 	)
+}
+
+// secretFetchHTTPClient sends the exchanged workload token when the pod has a workload identity: the pod then has no
+// NHX_PRINCIPAL for the secret client's principal headers, and the gateway rejects a request without credentials.
+func secretFetchHTTPClient(ctx context.Context, endpoint nhxclient.Endpoint) (*http.Client, error) {
+	httpClient := secretEndpointHTTPClient(endpoint)
+	if os.Getenv(workloadIdentityTokenFileEnv) == "" {
+		return httpClient, nil
+	}
+	tokenSource, err := newOTLPLogWorkloadAuthTokenSource(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("configure workload identity auth for secrets: %w", err)
+	}
+	httpClient.Transport = &authHeadersTransport{
+		source:          tokenSource,
+		authDescription: "workload identity auth for secrets",
+		base:            httpClient.Transport,
+	}
+	return httpClient, nil
 }
 
 func secretEndpointHTTPClient(endpoint nhxclient.Endpoint) *http.Client {
@@ -298,7 +323,7 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 			// Build auth context from NHX_PRINCIPAL JSON env var set by the jobs controller
 			principal := nhxclient.PrincipalFromEnv()
 
-			secretEnvVars, err := fetchSecretsWithEndpoint(secretEndpoint, principal, secretRefs)
+			secretEnvVars, err := fetchSecretsWithEndpoint(ctx, secretEndpoint, principal, secretRefs)
 			if err != nil {
 				logger.Printf("Error fetching secrets: %v\n", err)
 				return 1, err

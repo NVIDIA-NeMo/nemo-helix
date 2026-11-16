@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -649,5 +650,75 @@ func restoreEnvVars(envVars map[string]envVarState) {
 		} else {
 			os.Unsetenv(key)
 		}
+	}
+}
+
+func TestFetchSecretsWithEndpointSendsTheWorkloadTokenUnderWorkloadIdentity(t *testing.T) {
+	subjectTokenPath := filepath.Join(t.TempDir(), "subject.jwt")
+	if err := os.WriteFile(subjectTokenPath, []byte("subject-token\n"), 0o600); err != nil {
+		t.Fatalf("failed to write subject token: %v", err)
+	}
+
+	var serverURL string
+	var secretAuthorization, secretPrincipal string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/apis/auth/discovery":
+			fmt.Fprintf(w, `{"oidc":{"workload_token_exchange_enabled":true,"workload_client_id":"nemo-helix-workload","workload_token_endpoint":%q}}`, serverURL+"/apis/auth/token")
+		case "/apis/auth/token":
+			fmt.Fprintln(w, `{"access_token":"access.token.value","expires_in":120}`)
+		case "/apis/secrets/v2/workspaces/system/secrets/registry-password/access":
+			secretAuthorization = r.Header.Get("Authorization")
+			secretPrincipal = r.Header.Get("X-NHX-Principal-Id")
+			fmt.Fprintln(w, `{"value":"s3cret"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+	t.Setenv(nhxBaseURLEnv, server.URL)
+	t.Setenv(workloadIdentityTokenFileEnv, subjectTokenPath)
+	endpoint, err := nhxclient.ParseEndpoint(server.URL)
+	if err != nil {
+		t.Fatalf("ParseEndpoint returned error: %v", err)
+	}
+
+	envVars, err := fetchSecretsWithEndpoint(
+		context.Background(), endpoint, nil,
+		[]secretReference{{envVarName: "REGISTRY_PASSWORD", workspace: "system", secretName: "registry-password"}},
+	)
+	if err != nil {
+		t.Fatalf("fetchSecretsWithEndpoint returned error: %v", err)
+	}
+	if !reflect.DeepEqual(envVars, []string{"REGISTRY_PASSWORD=s3cret"}) {
+		t.Fatalf("unexpected env vars: %v", envVars)
+	}
+	if secretAuthorization != "Bearer access.token.value" {
+		t.Fatalf("expected the exchanged workload token on the secret request, got %q", secretAuthorization)
+	}
+	if secretPrincipal != "" {
+		t.Fatalf("expected no principal headers without NHX_PRINCIPAL, got %q", secretPrincipal)
+	}
+}
+
+func TestFetchSecretsWithEndpointFailsWhenWorkloadAuthCannotBeConfigured(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "discovery unavailable", http.StatusBadGateway)
+	}))
+	defer server.Close()
+	t.Setenv(nhxBaseURLEnv, server.URL)
+	t.Setenv(workloadIdentityTokenFileEnv, filepath.Join(t.TempDir(), "subject.jwt"))
+	endpoint, err := nhxclient.ParseEndpoint(server.URL)
+	if err != nil {
+		t.Fatalf("ParseEndpoint returned error: %v", err)
+	}
+
+	_, err = fetchSecretsWithEndpoint(
+		context.Background(), endpoint, nil,
+		[]secretReference{{envVarName: "REGISTRY_PASSWORD", workspace: "system", secretName: "registry-password"}},
+	)
+	if err == nil || !strings.Contains(err.Error(), "configure workload identity auth for secrets") {
+		t.Fatalf("expected workload auth setup error, got %v", err)
 	}
 }
