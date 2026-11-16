@@ -156,6 +156,71 @@ class HelixJobStatus(str, Enum):
         return new_status in valid_transitions.get(self, set())
 
 
+class JobGroupStatus(str, Enum):
+    """Aggregate status of a :class:`JobGroup`, rolled up from its member jobs.
+
+    A group is terminal only once every member is terminal. The group ``status``
+    is persisted on the group entity (not recomputed on every read): it is set
+    at create time with :func:`aggregate_job_group_status` and kept current by
+    the controller's group roll-up as members change.
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLING = "cancelling"
+    CANCELLED = "cancelled"
+
+    @staticmethod
+    def terminals() -> list["JobGroupStatus"]:
+        return [JobGroupStatus.COMPLETED, JobGroupStatus.FAILED, JobGroupStatus.CANCELLED]
+
+    def is_terminal(self) -> bool:
+        return self in JobGroupStatus.terminals()
+
+
+def aggregate_job_group_status(member_statuses: list[HelixJobStatus]) -> JobGroupStatus:
+    """Roll up member job statuses into a single :class:`JobGroupStatus`.
+
+    Rules:
+    - An empty group (no members) is ``PENDING`` -- nothing has run.
+    - The group is terminal only when *every* member is terminal.
+      - ``FAILED`` if any member errored.
+      - ``CANCELLED`` if every terminal member was cancelled (and none errored).
+      - ``COMPLETED`` only when every member completed successfully.
+    - Otherwise the group is non-terminal and is ``RUNNING`` (any member past
+      ``CREATED`` but not all terminal) or ``PENDING`` (every member still in
+      ``CREATED``).
+
+    This function does NOT return ``CANCELLING``. ``CANCELLING`` is a group-level
+    *intent* that the group-cancel path sets on the group entity when a caller
+    cancels the whole group; it is not inferred from member statuses. A single
+    member being cancelled (e.g. a user cancelled one member, or fail_fast
+    cancelled one) must not color the whole group ``CANCELLING`` -- while
+    siblings are still running such a group is ``RUNNING``. Once a group-cancel
+    completes and all members are terminal, this rolls up to ``CANCELLED``.
+    """
+    if not member_statuses:
+        return JobGroupStatus.PENDING
+
+    all_terminal = all(status.is_terminal() for status in member_statuses)
+    any_error = any(status == HelixJobStatus.ERROR for status in member_statuses)
+    any_cancelled = any(status == HelixJobStatus.CANCELLED for status in member_statuses)
+
+    if all_terminal:
+        if any_error:
+            return JobGroupStatus.FAILED
+        if any_cancelled:
+            return JobGroupStatus.CANCELLED
+        return JobGroupStatus.COMPLETED
+
+    if all(status == HelixJobStatus.CREATED for status in member_statuses):
+        return JobGroupStatus.PENDING
+
+    return JobGroupStatus.RUNNING
+
+
 class HelixJobTaskStatusResponse(BaseModel):
     id: str
     name: str
