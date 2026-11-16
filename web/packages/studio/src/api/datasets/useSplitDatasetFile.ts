@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { MIME_TYPES, toJsonl } from '@nemo/common/src/utils/download';
 import { getFileExtension } from '@nemo/common/src/utils/file';
 import { isDefined } from '@nemo/common/src/utils/isDefined';
 import { filesUploadFile } from '@nemo/sdk/generated/platform/files';
@@ -9,7 +10,7 @@ import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { parseFileContent } from '@studio/util/files';
 import { splitRandomDistribution, splitSequentialDistribution } from '@studio/util/list';
-import { useMutation, UseMutationOptions } from '@tanstack/react-query';
+import { useMutation, type UseMutationOptions } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
 interface FileSplitsProps {
@@ -60,12 +61,7 @@ export const useSplitDatasetFile = ({ onError, onSuccess }: Props) => {
       const outputName = `${baseName}.${isJson ? 'json' : 'jsonl'}`;
       const toUpload = splits
         .map((_, index) => {
-          let content = splitList[index]
-            .map((row) => JSON.stringify(row))
-            .join(isJson ? ',\n' : '\n');
-          if (isJson) {
-            content = '[' + content + ']';
-          }
+          const content = isJson ? JSON.stringify(splitList[index]) : toJsonl(splitList[index]);
           if (content.length === 0) {
             return undefined;
           }
@@ -78,7 +74,9 @@ export const useSplitDatasetFile = ({ onError, onSuccess }: Props) => {
 
       const results = await Promise.all(
         toUpload.map(async (details) => {
-          const blob = new Blob([details.content], { type: 'application/json' });
+          const blob = new Blob([details.content], {
+            type: MIME_TYPES[isJson ? 'json' : 'jsonl'],
+          });
           return filesUploadFile(workspace, datasetName, details.path, blob);
         })
       );

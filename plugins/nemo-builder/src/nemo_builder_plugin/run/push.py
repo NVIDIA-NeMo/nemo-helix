@@ -219,7 +219,7 @@ def validate_layout(layout: Path) -> str:
 def read_runtime_config(layout: Path, digest: str) -> ImageRuntimeConfig | None:
     """Read how the image ``digest`` starts by default from its config in ``layout``; None if it can't be read.
 
-    The config holds the image's ``ENTRYPOINT``, ``CMD`` and ``WORKDIR`` as the build resolved them, including what
+    The config holds the image's ``ENTRYPOINT``, ``CMD``, ``WORKDIR`` and ``USER`` as the build resolved them, including what
     the image inherits from its base image. Call after :func:`validate_layout`. The config's bytes are checked
     against the digest its manifest names, so the values describe the image being pushed. A config that can't be
     read is logged and recorded as None rather than refusing the push: the image itself is fine.
@@ -245,6 +245,8 @@ def read_runtime_config(layout: Path, digest: str) -> ImageRuntimeConfig | None:
             entrypoint=settings.get("Entrypoint") or None,
             cmd=settings.get("Cmd") or None,
             working_dir=settings.get("WorkingDir") or None,
+            # Always recorded, empty when the image sets none: None means a record from before it was read.
+            user=settings.get("User") or "",
         )
     except (OSError, LayoutRejected, ValidationError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         logger.warning("can't read how %s starts; recording none: %s", sanitize_for_log(digest), sanitize_for_log(exc))

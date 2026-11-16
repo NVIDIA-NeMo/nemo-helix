@@ -30,8 +30,9 @@ from nemo_deployments_plugin.entities import (
     VolumeStatus,
     WorkloadIdentitySpec,
 )
+from nemo_deployments_plugin.quantity import quantity_bytes
 from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _default_request_access_modes() -> list[AccessMode]:
@@ -113,9 +114,25 @@ class CreateDeploymentConfigRequest(BaseModel):
     drift_recovery: DriftRecoveryPolicy | None = Field(default=None, alias="driftRecovery")
     labels: dict[str, str] = Field(default_factory=dict)
     backend_config: DeploymentBackendConfig = Field(default_factory=DeploymentBackendConfig, alias="backendConfig")
+    shm_size: str | None = Field(
+        default="8Gi",
+        alias="shmSize",
+        description=(
+            "Size of /dev/shm in the main containers (e.g. '32Gi'). Defaults to 8Gi because the runtime default "
+            "of 64Mi is too small for multi-process workloads. Memory is used only as files are written. "
+            "Null keeps the runtime default."
+        ),
+    )
     workload_identity: WorkloadIdentitySpec | None = Field(default=None, alias="workloadIdentity")
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("shm_size")
+    @classmethod
+    def validate_shm_size(cls, value: str | None) -> str | None:
+        if value is not None:
+            quantity_bytes(value)
+        return value
 
     @model_validator(mode="after")
     def validate_docker_network(self) -> CreateDeploymentConfigRequest:

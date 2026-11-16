@@ -84,12 +84,46 @@ class HarborSandboxProfileConfig(BaseModel):
             "None applies each task's value as given."
         ),
     )
+    max_gpus: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Most GPUs a sandbox may request (task.toml gpus); 0 refuses GPU tasks. A sandbox gets them as "
+            "nvidia.com/gpu, so the cluster needs GPU nodes the sandboxes can be scheduled on."
+        ),
+    )
+    gpu_types: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "GPU types this profile's sandboxes get, as tasks name them in gpu_types (e.g. A100). A task "
+            "that accepts only other types is refused, so it never runs on a GPU it didn't ask for. Sandboxes "
+            "aren't pinned to a type: list only types that every GPU node they can land on has."
+        ),
+    )
 
 
 class HarborTaskJobsConfig(BaseModel):
     """Operator settings that enable Kubernetes taskset runs (``evals.runs.harbor``)."""
 
     model_config = ConfigDict(extra="forbid")
+
+    agent_layers: bool = Field(
+        default=True,
+        description=(
+            "Start each trial from its task's agent layer (the task's image with the run's agent already installed) "
+            "when one is ready, so the trial's setup only checks the install and opens no setup egress. Submit starts "
+            "the layers that aren't built yet, and each task waits for its own. False runs every trial on the plain "
+            "task image."
+        ),
+    )
+    agent_layer_wait_seconds: int = Field(
+        default=1_800,
+        gt=0,
+        description=(
+            "How long a run's tasks wait for agent layers still building at submit (30 min). Past it, a task whose "
+            "layer isn't ready runs on the plain task image and installs the agent in setup."
+        ),
+    )
 
     dispatcher_image: str | None = Field(
         default=None,

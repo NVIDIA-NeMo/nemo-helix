@@ -13,7 +13,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useEvaluationJob } from '@studio/routes/EvaluationDetailRoute/useEvaluationJob';
 import { tooltipClassName } from '@studio/styles/common';
 import { formatCost } from '@studio/util/intakeTelemetry';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { Link } from 'react-router';
 
 const JOB_NAME_MAX_LENGTH = 20;

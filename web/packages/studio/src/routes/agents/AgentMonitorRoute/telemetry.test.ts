@@ -32,6 +32,12 @@ describe('parseSpans', () => {
     expect(span.__agent).toBe('agent-x');
     expect(span.__runId).toBe('run-7');
   });
+
+  it('skips non-object lines instead of throwing when tagging', () => {
+    expect(
+      parseSpans('null\n42\n{"payload":{"event_type":"WORKFLOW_END"}}', 'agent-x')
+    ).toHaveLength(1);
+  });
 });
 
 describe('agentFromPath / runIdFromPath', () => {

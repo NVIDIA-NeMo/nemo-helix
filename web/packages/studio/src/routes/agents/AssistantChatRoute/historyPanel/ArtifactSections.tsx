@@ -15,7 +15,7 @@ import type {
   AssistantChatSelectionArtifact,
 } from '@studio/routes/agents/AssistantChatRoute/types';
 import { getJobProgressDetailRoute } from '@studio/routes/agents/AssistantChatRoute/utils/jobProgress';
-import { type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
 export const ToolCallSummary = ({ toolCalls }: { toolCalls: string[] }) => {

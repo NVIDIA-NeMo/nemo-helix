@@ -13,9 +13,12 @@ TODO(M2 story 6b): replace the agent evaluation with a dedicated dispatcher.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
 import os
 from collections.abc import Mapping, MutableMapping
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
@@ -30,6 +33,8 @@ from nemo_evals.harbor.agent_setup_egress import (
 from nemo_evals.harbor.compose.models import ComposeError
 from nemo_evals.harbor.compose.spec import compose_services_kwarg
 from nemo_evals.harbor.remote.profile import resource_defaults
+from nemo_evals.harbor.trial_progress import Publish, TrialProgressReporter
+from nemo_evals.intake.mapping import session_id_for
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.gateway_models import (
@@ -39,13 +44,18 @@ from nemo_evals.jobs.gateway_models import (
     check_tasks_reach_the_gateway,
 )
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec, PreparedHarborEnvironment
+from nemo_evals.jobs.run_outcome import report_status_details
 from nemo_evals.jobs.secret_env import build_task_environment
 from nemo_evals.taskset_runs.identifiers import task_job_name
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import ContainerSpec, CPUExecutionProviderSpec, HelixJobSpec, HelixJobStep
-from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborEnvironmentConfig, HarborRuntimeConfig
+from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import (
+    HarborEnvironmentConfig,
+    HarborJobScope,
+    HarborRuntimeConfig,
+)
 from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import HARBOR_TASK_DIR_KEY
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_sandbox.compose_env import externalize_env
@@ -127,6 +137,8 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
     - Runs under its own name as the SDK run id, so trials it publishes to the run's Intake Evaluation
       have stable sessions (``<run_id>-task-<i>:<trial>``) and a re-publish replaces them.
     - Never writes the shared Evaluation's metadata: the run controller stamps the run's duration once.
+    - Reports each trial's progress in its status details as Harbor runs it, for the run's task pages and the
+      controller's per-task trial counts.
     """
 
     discard_agent_files: ClassVar[bool] = False
@@ -169,6 +181,34 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
 
     def _configure_harbor_runtime(self, config: HarborRuntimeConfig, ctx: JobContext) -> HarborRuntimeConfig:
         return configure_runtime(config, ctx, self._task_spec, self._compose_services)
+
+    def _trial_progress_scope(
+        self, config: HarborRuntimeConfig, ctx: JobContext, async_client: AsyncNemoClient | None
+    ) -> HarborJobScope | None:
+        run_id = task_job_name(self._task_spec.run_id, self._task_spec.task_index)
+        reporter = TrialProgressReporter(
+            status_details_writer(ctx, async_client),
+            reward_key=config.reward_key,
+            session_id=lambda trial: session_id_for(run_id, trial),
+        )
+        return reporter.job_scope()
+
+
+def status_details_writer(ctx: JobContext, async_client: AsyncNemoClient | None) -> Publish:
+    """Writes the task Job's status details one at a time, in the order they were made.
+
+    Each write replaces the whole trial list. The reporter stops waiting on a slow write but can't stop
+    the write itself, so with more than one thread an older list could land after a newer one. One
+    thread keeps them in order; the write is synchronous, so it stays off Harbor's event loop.
+    """
+    writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="trial-progress")
+
+    async def publish(details: dict[str, Any]) -> None:
+        write = functools.partial(report_status_details, details, ctx=ctx, async_client=async_client)
+        # Shielded: when the reporter stops waiting, the write keeps its place in line rather than being dropped.
+        await asyncio.shield(asyncio.get_running_loop().run_in_executor(writer, write))
+
+    return publish
 
 
 def check_execution_deadline(spec: HarborTaskJobSpec, now: datetime | None = None) -> None:
@@ -283,7 +323,8 @@ def configure_runtime(
         "sandbox_expires_at": deadline.isoformat(),
         "trusted_allowed_hosts": [*policy.egress_allow, *policy.request_egress_allow],
         AGENT_CHANNEL_HOSTS_KWARG: list(policy.agent_channel),
-        "agent_setup_hosts": list(policy.agent_setup_egress),
+        # A trial on its agent layer finds the agent installed: its setup reaches no setup host.
+        "agent_setup_hosts": [] if spec.environment.agent_preinstalled else list(policy.agent_setup_egress),
         "egress_verification": policy.egress_verification,
         "enforce_disk_limit": policy.enforce_disk_limit,
         "max_disk_mb": policy.max_disk_mb,
@@ -302,7 +343,9 @@ def configure_runtime(
     environment = HarborEnvironmentConfig(import_path=OPENSANDBOX_ENVIRONMENT, kwargs=kwargs)
     update: dict[str, Any] = {"environment": environment, "n_concurrent_trials": 1}
     agent = config.agent_import_path or config.agent_name or "oracle"
-    if policy.agent_setup_egress and (config.agent_dir is not None or agent in UNWRAPPED_AGENTS):
+    if spec.environment.agent_preinstalled:
+        logger.info("Agent %s starts from its agent layer: setup runs without the agent setup egress window", agent)
+    elif policy.agent_setup_egress and (config.agent_dir is not None or agent in UNWRAPPED_AGENTS):
         reason = "a loose agent file (agent_dir)" if config.agent_dir is not None else "it installs nothing"
         logger.info("Agent %s runs setup without the agent setup egress window: %s", agent, reason)
     elif policy.agent_setup_egress:

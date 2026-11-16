@@ -113,7 +113,7 @@ def test_get_shared_gpu_pool_recovers_running_allocations() -> None:
 
     with (
         patch.object(gpu_module, "detect_gpu_device_ids", return_value=[0, 1]),
-        patch("docker.from_env", return_value=mock_client),
+        patch.object(gpu_module, "_docker_from_env", return_value=mock_client),
     ):
         pool = get_shared_gpu_pool()
 
@@ -130,7 +130,7 @@ def test_get_shared_gpu_pool_retries_after_recovery_failure() -> None:
 
     with (
         patch.object(gpu_module, "detect_gpu_device_ids", return_value=[0, 1]),
-        patch("docker.from_env", return_value=mock_client),
+        patch.object(gpu_module, "_docker_from_env", return_value=mock_client),
     ):
         assert get_shared_gpu_pool() is None
         assert gpu_module._pool is None

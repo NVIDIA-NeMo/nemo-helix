@@ -113,6 +113,7 @@ const computeInputHash = (): string => {
     path.join(ORVAL_DIR, 'generateCustomFetcher.ts'),
     path.join(ORVAL_DIR, 'operationNameOverride.ts'),
     path.join(ORVAL_DIR, 'generate-capabilities.ts'),
+    path.join(ORVAL_DIR, 'generate-schema-extensions.ts'),
     path.join(__dirname, 'generateAll.ts'),
   ];
   for (const file of generatorSources) {

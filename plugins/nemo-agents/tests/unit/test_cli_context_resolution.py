@@ -43,7 +43,7 @@ def _install_mock_transport(handler) -> AbstractContextManager[Any]:
             kwargs["transport"] = transport
             super().__init__(*args, **kwargs)
 
-    return patch("nemo_agents_plugin.cli.httpx.Client", _Client)
+    return patch("nemo_helix_plugin.client.client.Client", _Client)
 
 
 def _empty_page() -> dict[str, Any]:

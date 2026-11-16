@@ -36,6 +36,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
+from nemo_guardrails_plugin.legacy_streaming import relax_legacy_streaming_defaults
 from nemo_helix_plugin.guardrail.types import OutputRailsStreamingConfig
 from nemo_helix_plugin.guardrail.types import RailsConfig as HelixRailsConfig
 from nemo_helix_plugin.inference_middleware import OpenAICompatibleInferenceTarget
@@ -288,7 +289,7 @@ def stabilize(
     ``Model`` validator during ``model_validate`` below, so
     :func:`_resolve_model_target` never sees an empty model ID.
     """
-    payload = rails.model_dump(exclude_none=True)
+    payload = relax_legacy_streaming_defaults(rails.model_dump(exclude_none=True))
     # See class docstring: ``models`` is required by the library schema but
     # optional under the IGW Plugin architecture. Coerce here so a user can
     # post the minimum-viable config (e.g. just ``{"rails": {...}}``).

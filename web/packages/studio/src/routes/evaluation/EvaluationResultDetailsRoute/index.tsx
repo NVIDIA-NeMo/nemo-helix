@@ -30,7 +30,7 @@ import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getEvaluationResultsRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { datasetEvalExport } from '@studio/util/resultExports';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 const isTerminal = (status?: string) =>
   !!status && HelixJobTerminalStatuses.includes(status as never);

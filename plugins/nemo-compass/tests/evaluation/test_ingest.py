@@ -26,7 +26,7 @@ def test_mint_agent_id_uses_utc(monkeypatch):
             return cls(2026, 7, 14, 20, 42, 1, tzinfo=tz)
 
     monkeypatch.setattr(ingest, "datetime", _Clock)
-    monkeypatch.setattr(ingest.os, "urandom", lambda _size: b"\xab\xcd")
+    monkeypatch.setattr(ingest, "urandom", lambda _size: b"\xab\xcd")
 
     assert mint_agent_id("agent") == "agent-20260714-204201-abcd"
 
@@ -108,7 +108,7 @@ def test_poll_visible_closes_client_it_creates(monkeypatch: pytest.MonkeyPatch):
     import evaluation.ingest as ingest
 
     created = _PollClient([{"session_id": "s1"}])
-    monkeypatch.setattr(ingest.httpx, "Client", lambda **_kwargs: created)
+    monkeypatch.setattr(ingest, "Client", lambda **_kwargs: created)
     seen = ingest.poll_visible("http://x", "w", {"s1"}, sleep=lambda _s: None)
     assert seen == {"s1"}
     assert created.closed is True

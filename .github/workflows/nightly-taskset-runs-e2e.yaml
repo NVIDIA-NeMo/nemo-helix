@@ -1,0 +1,260 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Taskset runs on kind, end to end: e2e/test_taskset_runs.py against a platform with the run controller, the builder
+# and OpenSandbox. Nightly and on dispatch, never on PRs or the merge queue: it gates no merge.
+
+name: Nightly taskset runs e2e
+
+on:
+  schedule:
+    - cron: "0 10 * * *"  # 10:00 UTC (02:00 PST), ahead of the 16:00 America/Los_Angeles RC cut
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: Copies to run, each on its own runner and kind cluster.
+        required: false
+        type: number
+        default: 1
+      source_sha:
+        description: >-
+          Commit to build and test; default the dispatched ref's head. Use a commit on main: images are tagged with
+          this SHA, which an open PR's builds also use for its head, with different code (its merge commit).
+        required: false
+        type: string
+        default: ""
+      classify_for:
+        description: Set by `report` only. The scheduled run this one classifies as flaky or a regression.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.13.4"
+  TOOLCHAIN: system
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.plan.outputs.source_sha }}
+      copies: ${{ steps.plan.outputs.copies }}
+    steps:
+      - id: plan
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+          REPEAT: ${{ inputs.repeat || 1 }}
+        run: |
+          set -euo pipefail
+          [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "source_sha must be a full commit SHA" >&2; exit 1; }
+          if ! [[ "${REPEAT}" =~ ^[0-9]+$ ]] || (( REPEAT < 1 || REPEAT > 20 )); then
+            echo "repeat must be 1-20" >&2
+            exit 1
+          fi
+          echo "source_sha=${SOURCE_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "copies=$(python3 -c "import json, sys; print(json.dumps(list(range(1, int(sys.argv[1]) + 1))))" "${REPEAT}")" >> "${GITHUB_OUTPUT}"
+
+  build-images:
+    name: Build images
+    needs: [plan]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      source_sha: ${{ needs.plan.outputs.source_sha }}
+      checkout_ref: ${{ needs.plan.outputs.source_sha }}  # build exactly the commit under test
+      publish: true
+
+  kind-taskset-runs-e2e:
+    name: Kind taskset runs e2e (${{ matrix.copy }})
+    needs: [plan, build-images]
+    runs-on: ubuntu-latest
+    # kind, OpenSandbox and the pre-pulls, then pytest's 49-minute timeout.
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        copy: ${{ fromJSON(needs.plan.outputs.copies) }}
+    env:
+      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-taskset-runs-${{ matrix.copy }}
+      KUBE_NAMESPACE: nemo-helix
+      NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-images.outputs.image_registry }}
+      NHX_E2E_IMAGE_TAG: ${{ needs.build-images.outputs.image_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.source_sha }}
+
+      - name: Make a password for the development registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          password="$(openssl rand -hex 16)"
+          echo "::add-mask::${password}"
+          printf '%s' "${password}" > "${RUNNER_TEMP}/builder-registry-password"
+
+      - name: Set up kind
+        uses: ./.github/actions/setup-kind-cluster
+        with:
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          kube-namespace: ${{ env.KUBE_NAMESPACE }}
+          install-nemo-helix: "false"
+          image-registry: ${{ env.NHX_E2E_IMAGE_REGISTRY }}
+          image-tag: ${{ env.NHX_E2E_IMAGE_TAG }}
+          kind-image-pull-token: ${{ github.token }}
+          kind-image-pull-user: ${{ github.actor }}
+
+      - name: Install OpenSandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl create namespace "${KUBE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+          # Sandboxes pull the builder's images from the development registry with this.
+          kubectl -n "${KUBE_NAMESPACE}" create secret docker-registry builder-registry-pull \
+            --docker-server="nemo-helix-builder-registry.${KUBE_NAMESPACE}.svc.cluster.local:5000" \
+            --docker-username=builder \
+            --docker-password="$(cat "${RUNNER_TEMP}/builder-registry-password")" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          KUBE_CONTEXT="kind-${KIND_CLUSTER_NAME}" \
+            BATCHSANDBOX_TEMPLATE=e2e/k8s/values/batchsandbox-kind-template.yaml \
+            SANDBOX_PULL_SECRET=builder-registry-pull \
+            e2e/k8s/scripts/install_opensandbox_minikube.sh
+
+      - name: Pre-pull the platform and build step images
+        shell: bash
+        env:
+          KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
+          KIND_IMAGE_PULL_USER: ${{ github.actor }}
+        run: |
+          e2e/k8s/scripts/prepull_kind_images.sh \
+            "${NHX_E2E_IMAGE_REGISTRY}/nhx-api:${NHX_E2E_IMAGE_TAG}" \
+            "${NHX_E2E_IMAGE_REGISTRY}/nhx-tasks:${NHX_E2E_IMAGE_TAG}" \
+            "${NHX_E2E_IMAGE_REGISTRY}/nhx-builder-tasks:${NHX_E2E_IMAGE_TAG}" \
+            "${NHX_E2E_IMAGE_REGISTRY}/nhx-kaniko:${NHX_E2E_IMAGE_TAG}"
+
+      - name: Install NeMo Helix with the builder and taskset runs
+        shell: bash
+        env:
+          NAMESPACE: ${{ env.KUBE_NAMESPACE }}
+          NHX_E2E_REGISTRY: ${{ env.NHX_E2E_IMAGE_REGISTRY }}
+          NHX_E2E_TAG: ${{ env.NHX_E2E_IMAGE_TAG }}
+          HELM_VALUES: e2e/k8s/values/kind.yaml
+          HELM_EXTRA_ARGS: >-
+            -f e2e/k8s/values/builder.yaml
+            --set-file builder.devRegistry.password=${{ runner.temp }}/builder-registry-password
+            -f e2e/k8s/values/taskset-runs.yaml
+          REQUIRE_NHX_E2E_IMAGES: "true"
+          POSTGRES_IMAGE: docker.io/library/postgres
+          BUSYBOX_IMAGE: docker.io/library/busybox:stable
+          GITHUB_TOKEN: ${{ github.token }}
+        run: e2e/k8s/scripts/install_helm_e2e.sh
+
+      - name: Wait for the API
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${NHX_E2E_CLUSTER_URL}"
+          e2e/k8s/scripts/wait_for_api.sh "${NHX_E2E_CLUSTER_URL}/cluster-info" 120
+
+      - name: Let the node pull from the development registry
+        shell: bash
+        run: e2e/k8s/scripts/kind_dev_registry_mirror.sh
+
+      - name: Create the builder's push secrets in the system workspace
+        shell: bash
+        env:
+          NHX_BASE_URL: ${{ env.NHX_E2E_CLUSTER_URL }}
+        run: |
+          set -euo pipefail
+          key="${RUNNER_TEMP}/builder-signing-key.pem"
+          openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "${key}"
+          uv run --frozen nemo secrets create builder-registry-username --workspace system --value builder
+          uv run --frozen nemo secrets create builder-registry-password --workspace system \
+            --from-file "${RUNNER_TEMP}/builder-registry-password"
+          uv run --frozen nemo secrets create builder-signing-key --workspace system --from-file "${key}"
+
+      - name: Run taskset runs e2e
+        shell: bash
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
+          NHX_E2E_KUBE_CONTEXT: kind-${{ env.KIND_CLUSTER_NAME }}
+          NHX_E2E_KUBE_NAMESPACE: ${{ env.KUBE_NAMESPACE }}
+        run: |
+          set -euo pipefail
+          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
+          # record_property needs xunit1 to include per-test metadata without schema warnings.
+          uv run --frozen pytest \
+            e2e/test_taskset_runs.py \
+            -v \
+            -m "taskset_runs_e2e or taskset_runs_cancel_e2e" \
+            --feature taskset-runs \
+            --feature taskset-runs-cancel \
+            --run-e2e \
+            --no-cov \
+            -o junit_family=xunit1 \
+            --junitxml=report-kubernetes-taskset-runs-e2e.xml
+          # A skipped step, such as the leftover-sandbox check, is a check that didn't run: fail, as
+          # run-taskset-run-controller-integration.sh does.
+          if ! grep -q ' skipped="0"' report-kubernetes-taskset-runs-e2e.xml; then
+            echo "::error::taskset runs e2e skipped a test or step" >&2
+            exit 1
+          fi
+
+      - name: Finalize
+        if: always()
+        uses: ./.github/actions/finalize-kind-e2e
+        with:
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          artifact-name: kind-taskset-runs-e2e-${{ matrix.copy }}-kubernetes-artifacts
+          junit-report: report-kubernetes-taskset-runs-e2e.xml
+          services-log-dir: ${{ runner.temp }}/e2e-services-logs
+
+  report:
+    name: Report
+    needs: [plan, build-images, kind-taskset-runs-e2e]
+    # Its own job: a job whose dependency failed is skipped, so an alert inside the e2e job would miss a failed build.
+    if: always() && (github.event_name == 'schedule' || inputs.classify_for != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout the report helper
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Download the e2e artifacts
+        if: needs.kind-taskset-runs-e2e.result != 'skipped'
+        continue-on-error: true  # a run that failed before the test uploads none
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: kind-taskset-runs-e2e-*-kubernetes-artifacts
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJson(needs) }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          CLASSIFY_FOR: ${{ inputs.classify_for }}
+          ARTIFACTS: ${{ runner.temp }}/artifacts
+        run: python3 .github/scripts/nightly_taskset_runs_report.py

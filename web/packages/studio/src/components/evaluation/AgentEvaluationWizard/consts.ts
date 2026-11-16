@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export const DATASET_FILE_ACCEPT = '.jsonl,.json,.csv,.parquet';
+import type { AcceptedFileType } from '@nemo/common/src/components/DatasetFileSelect/DatasetFileSelect';
+
+export const DATASET_FILE_TYPES: AcceptedFileType[] = ['.jsonl', '.json', '.csv', '.parquet'];
 
 /** Job filesets keep their log shards here, beside the job's actual output. */
 export const JOB_LOGS_PREFIX = 'logs/';

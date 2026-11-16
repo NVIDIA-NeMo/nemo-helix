@@ -31,13 +31,14 @@ import logging
 import re
 import shutil
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
+from nemo_agent_hardener_plugin.project_resolver import HERMES_RUNTIME_ENV, derive_binaries, dockerfile_env
 from nemo_agents_plugin.sdk import AgentsResource
 from nemo_helix_plugin.client.client import NemoClient
 
@@ -250,6 +251,19 @@ def detect_custom_components(agent_config: dict[str, Any]) -> list[str]:
     return sorted({str(path) for path in paths if isinstance(path, str)}) if isinstance(paths, list) else []
 
 
+def _declared_models(agent_config: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Yield model declarations from shared and harness-specific configuration."""
+    models = agent_config.get("models")
+    for model in models.values() if isinstance(models, dict) else ():
+        if isinstance(model, dict):
+            yield model
+    harnesses = agent_config.get("harnesses")
+    for harness in harnesses.values() if isinstance(harnesses, dict) else ():
+        model = harness.get("model") if isinstance(harness, dict) else None
+        if isinstance(model, dict):
+            yield model
+
+
 def derive_secret_names(agent_config: dict[str, Any], extra: list[str] | None = None) -> list[str]:
     """Collect the env-var names the victim needs at run time.
 
@@ -262,9 +276,8 @@ def derive_secret_names(agent_config: dict[str, Any], extra: list[str] | None = 
     """
     found: set[str] = set(extra or [])
 
-    models = agent_config.get("models")
-    for model_cfg in models.values() if isinstance(models, dict) else ():
-        if isinstance(model_cfg, dict) and isinstance(model_cfg.get("api_key_env"), str):
+    for model_cfg in _declared_models(agent_config):
+        if isinstance(model_cfg.get("api_key_env"), str):
             found.add(model_cfg["api_key_env"])
 
     servers = agent_config.get("mcp", {}).get("servers") if isinstance(agent_config.get("mcp"), dict) else None
@@ -333,9 +346,12 @@ def derive_egress(agent_config: dict[str, Any]) -> list[str]:
         if isinstance(url, str) and "://" in url:
             found.extend(_egress_host_entries(url))
 
-    models = agent_config.get("models")
-    for model_cfg in models.values() if isinstance(models, dict) else ():
-        base_url = model_cfg.get("base_url") if isinstance(model_cfg, dict) else None
+    for model_cfg in _declared_models(agent_config):
+        base_url = model_cfg.get("base_url")
+        # Match Fabric's legacy endpoint promotion without mutating the inspected config.
+        if base_url is None:
+            settings = model_cfg.get("settings")
+            base_url = settings.get("base_url") if isinstance(settings, dict) else None
         if isinstance(base_url, str) and "://" in base_url:
             found.extend(_egress_host_entries(base_url))
 
@@ -383,6 +399,7 @@ def build_manifest_dict(
     relay_artifacts: str | None = None,
     harness: str | None = None,
     env: dict[str, str] | None = None,
+    binaries: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the ``agent-hardener.yaml`` mapping (mirrors ``agent_hardener.manifest.build_manifest``).
 
@@ -398,7 +415,7 @@ def build_manifest_dict(
         "harness": harness,
         "dockerfile": DOCKERFILE_FILENAME,
         "start_command": fabric_start_command(port),
-        "binaries": list(VICTIM_BINARIES),
+        "binaries": list(VICTIM_BINARIES) if binaries is None else binaries,
         "port": port,
         "secrets": secrets,
         "secrets_file": secrets_file,
@@ -653,6 +670,7 @@ def resolve_agent_to_manifest(
     port: int | None = None,
     secrets: list[str] | None = None,
     backends: list[dict[str, Any]] | None = None,
+    env: dict[str, str] | None = None,
 ) -> ResolvedManifest:
     """Resolve a deployed-agent reference into a ready Agent Hardener manifest.
 
@@ -712,6 +730,19 @@ def resolve_agent_to_manifest(
         dockerfile_override=shipped_dockerfile(client, name, workspace),
         bundle=lambda destination: download_agent_bundle(client, name, workspace, destination),
     )
+    runtime_env = {**derive_agent_env(agent_config), **(env or {})}
+    binaries = list(VICTIM_BINARIES)
+    if harness == "hermes":
+        image_env = dockerfile_env((project_path / DOCKERFILE_FILENAME).read_text(encoding="utf-8"))
+        runtime_env = {**{key: image_env[key] for key in HERMES_RUNTIME_ENV if key in image_env}, **runtime_env}
+        interpreter_binaries = derive_binaries("", runtime_env)
+        if not interpreter_binaries:
+            raise AgentResolutionError(
+                "Cannot determine the Hermes runtime paths. Supply literal absolute paths for ADAPTER_PYTHON, "
+                "UV_PYTHON_INSTALL_DIR and HERMES_NEMO_RELAY_PLUGINS_TOML where configured, "
+                "or use --project-dir with --binary for an interpreter installed elsewhere."
+            )
+        binaries.extend(interpreter_binaries)
     # The deployment's secret-backed env vars are victim secrets too, even if the config never names them.
     secrets = list(dict.fromkeys([*(secrets or derive_secret_names(agent_config)), *deployed_secret_refs]))
 
@@ -726,7 +757,8 @@ def resolve_agent_to_manifest(
         egress=egress,
         backends=[*([gw_backend] if gw_backend else []), *(backends or [])],
         harness=harness,
-        env=derive_agent_env(agent_config),
+        env=runtime_env,
+        binaries=binaries,
     )
 
     return ResolvedManifest(

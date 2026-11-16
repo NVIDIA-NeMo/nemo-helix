@@ -4,7 +4,6 @@
 import { isVersionConflictError } from '@nemo/common/src/api/common/utils';
 import {
   entitiesCreateEntity,
-  entitiesDeleteEntityByName,
   entitiesGetEntityById,
   entitiesGetEntityByName,
   entitiesListEntities,
@@ -66,26 +65,12 @@ export async function listGuardrailChecks(
   return { ...page, data: page.data as GuardrailCheckEntity[] };
 }
 
-/** Primary access pattern: the checks belonging to a single guardrail config. */
-export function listGuardrailChecksForConfig(
-  workspace: string,
-  configId: string,
-  params?: Omit<EntitiesListEntitiesParams, 'filter'>,
-  signal?: AbortSignal
-): Promise<GuardrailChecksPage> {
-  return listGuardrailChecks(
-    workspace,
-    { ...params, filter: guardrailChecksForConfigFilter(configId) },
-    signal
-  );
-}
-
 /**
  * Fetch a single guardrail check by name. Checks are hard children of a config,
  * so the lookup must be scoped by `parent` (the owning config's entity id) —
  * otherwise a name collision across configs could resolve the wrong entity.
  */
-export async function getGuardrailCheck(
+async function getGuardrailCheck(
   workspace: string,
   name: string,
   parent: string,
@@ -156,18 +141,6 @@ export async function updateGuardrailCheck(
   return entity as GuardrailCheckEntity;
 }
 
-/**
- * Delete a guardrail check by name. Requires `parent` (the owning config's entity id)
- * so the correct child entity is addressed when names collide across configs.
- */
-export async function deleteGuardrailCheck(
-  workspace: string,
-  name: string,
-  parent: string
-): Promise<void> {
-  await entitiesDeleteEntityByName(workspace, GUARDRAIL_CHECKS_ENTITY_TYPE, name, { parent });
-}
-
 // ---------------------------------------------------------------------------
 // Execution / orchestration
 // ---------------------------------------------------------------------------
@@ -196,7 +169,7 @@ export function resolveConfigModel(config: RailsConfig | undefined, configLabel:
 }
 
 /** What the run targeted, for stamping onto the record. */
-export interface RunRecordContext {
+interface RunRecordContext {
   /** Parent config db_version. Omitted for a draft run — a draft has no version. */
   configVersion?: number;
   /** True when the run targeted an unsaved draft. */
@@ -206,7 +179,7 @@ export interface RunRecordContext {
 }
 
 /** Map a /checks response to a persisted run record. */
-export function responseToRunRecord(
+function responseToRunRecord(
   response: GuardrailCheckResponse,
   runAt: string,
   context: RunRecordContext = {}
@@ -225,7 +198,7 @@ export function responseToRunRecord(
 }
 
 /** Low-level: run a request against /checks and return the raw response. Does NOT persist. */
-export function executeGuardrailCheck(
+function executeGuardrailCheck(
   workspace: string,
   request: GuardrailCheckRequest,
   signal?: AbortSignal

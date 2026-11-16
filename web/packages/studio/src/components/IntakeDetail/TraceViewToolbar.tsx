@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ChevronUpDown } from '@nemo/icons/icons';
+import { Collapse, ChevronUpDown } from '@nemo/icons/icons';
 import { Button, Flex, SegmentedControl } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
@@ -44,7 +44,7 @@ export const TraceViewToolbar: FC<TraceViewToolbarProps> = ({
           title="Collapse all"
           onClick={onCollapseAll}
         >
-          <ChevronUpDown size="14" aria-hidden />
+          <Collapse size="14" aria-hidden />
         </Button>
         <Button
           kind="tertiary"

@@ -32,7 +32,7 @@ rules:
   verbs: ["get", "list", "create", "delete"]
 - apiGroups: [""]
   resources: ["configmaps"]
-  verbs: ["get", "list", "create", "delete"]
+  verbs: ["get", "list", "create", "patch", "delete"]
 - apiGroups: [""]
   resources: ["services"]
   verbs: ["get", "list", "create", "delete"]
@@ -49,6 +49,11 @@ rules:
   resources: ["networkpolicies"]
   verbs: ["create", "patch", "delete"]
 {{- end }}
+# Legacy ConfigMaps do not record their backend. Both Job APIs must be checked
+# before deletion, even when this deployment does not schedule Volcano workloads.
+- apiGroups: ["batch.volcano.sh"]
+  resources: ["jobs"]
+  verbs: ["get"]
 {{- if .Values.rbac.volcanoEnabled }}
 # Volcano
 - apiGroups: ["batch.volcano.sh"]

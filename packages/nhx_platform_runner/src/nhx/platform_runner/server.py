@@ -10,12 +10,12 @@ import inspect
 import logging
 import os
 import threading
+from asyncio import run as asyncio_run
 from collections.abc import Callable, Mapping, MutableMapping
 from contextlib import asynccontextmanager
 from typing import cast
 
 import httpx
-import uvicorn
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -27,6 +27,7 @@ from nhx.common.observability import initialize_obs, setup_fastapi_instrumentati
 from nhx.common.observability.context import create_app_context_dependency
 from nhx.common.pyleak import detect_blocking
 from nhx.common.service import Service
+from nhx.common.version import OPENAPI_SPEC_VERSION
 from nhx.platform_runner.config import DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS, HelixAppConfig
 from nhx.platform_runner.controller_threads import (
     join_and_untrack_runner_threads,
@@ -51,6 +52,9 @@ from nhx.platform_runner.registry import (
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
+from uvicorn import Config as UvicornConfig
+from uvicorn import Server as UvicornServer
+from uvicorn import run as uvicorn_run
 
 logger = logging.getLogger(__name__)
 
@@ -260,7 +264,7 @@ def create_app(
     app = QueryParamSchemaFastAPI(
         title="NeMo Helix API",
         description="API for NeMo Helix services",
-        version="0.0.1",
+        version=OPENAPI_SPEC_VERSION,
         lifespan=lifespan,
     )
     app.add_middleware(ConflictRetryMiddleware)
@@ -402,7 +406,7 @@ def run_server(
             keep_alive_timeout_seconds=keep_alive_timeout_seconds,
         )
     else:
-        uvicorn.run(
+        uvicorn_run(
             app,
             host=host,
             port=port,
@@ -420,7 +424,7 @@ def _run_server_on_bound_sockets(
     docker_host: str | None = None,
     keep_alive_timeout_seconds: int = DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS,
 ) -> None:
-    config = uvicorn.Config(
+    config = UvicornConfig(
         app,
         host=host,
         port=port,
@@ -431,12 +435,12 @@ def _run_server_on_bound_sockets(
         uds_socket = None
         try:
             if socket_path:
-                uds_socket = uvicorn.Config(
+                uds_socket = UvicornConfig(
                     app, uds=socket_path, log_config=None, timeout_keep_alive=keep_alive_timeout_seconds
                 ).bind_socket()
                 sockets.append(uds_socket)
             logger.info("Platform HTTP listeners: %s", [sock.getsockname() for sock in sockets])
-            asyncio.run(uvicorn.Server(config).serve(sockets=sockets))
+            asyncio_run(UvicornServer(config).serve(sockets=sockets))
         finally:
             if uds_socket is not None:
                 uds_socket.close()
@@ -461,7 +465,7 @@ def run_server_with_reload(
     if docker_host:
         from uvicorn.supervisors import ChangeReload
 
-        config = uvicorn.Config(
+        config = UvicornConfig(
             app_factory,
             host=host,
             port=port,
@@ -474,9 +478,9 @@ def run_server_with_reload(
             timeout_keep_alive=keep_alive_timeout_seconds,
         )
         with tcp_listener_sockets(host, port, docker_host=docker_host) as sockets:
-            ChangeReload(config, target=uvicorn.Server(config).run, sockets=sockets).run()
+            ChangeReload(config, target=UvicornServer(config).run, sockets=sockets).run()
     else:
-        uvicorn.run(
+        uvicorn_run(
             app_factory,
             host=host,
             port=port,
@@ -520,6 +524,8 @@ def create_default_app() -> FastAPI:
     services = []
     for service_name in service_names:
         service_value = available_services.get(service_name)
+        if service_value is None and not service_names_env:
+            continue  # An installed plugin that failed to load (already logged); only named ones are errors.
         if service_value is None:
             available = ", ".join(sorted(available_services))
             raise ValueError(
@@ -535,6 +541,8 @@ def create_default_app() -> FastAPI:
     controller_run_funcs: dict[str, ControllerRunFunc] = {}
     for controller_name in controller_names:
         controller_value = available_controllers.get(controller_name)
+        if controller_value is None and not controller_names_env:
+            continue  # An installed plugin that failed to load (already logged); only named ones are errors.
         if controller_value is None:
             available = ", ".join(sorted(available_controllers))
             raise ValueError(

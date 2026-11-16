@@ -34,8 +34,8 @@ def workspaces_client(nhx_base_url: str) -> Generator[WorkspacesClient, None, No
 
 @pytest.fixture(scope="module")
 def mcp_server(nhx_base_url: str) -> Generator[FastMCP, None, None]:
-    """Create entities MCP server instance."""
-    server = create_server(nhx_base_url)
+    """Create entities MCP server instance with the destructive tools enabled."""
+    server = create_server(nhx_base_url, enable_destructive_tools=True)
     yield server
 
 
@@ -66,6 +66,14 @@ class TestEntitiesMCPServerSmoke:
         assert "list_workspaces" in tool_names
         assert "create_workspace" in tool_names
         assert "delete_workspace" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_delete_workspace_not_registered_by_default(self, nhx_base_url: str) -> None:
+        """Verify the destructive tool is opt-in."""
+        tools = await create_server(nhx_base_url).list_tools()
+        tool_names = [t.name for t in tools]
+        assert "list_workspaces" in tool_names
+        assert "delete_workspace" not in tool_names
 
     @pytest.mark.asyncio
     async def test_list_workspaces_matches_api(self, mcp_server: FastMCP, workspaces_client: WorkspacesClient) -> None:

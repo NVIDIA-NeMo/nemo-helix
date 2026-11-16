@@ -5,7 +5,7 @@
 
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -164,6 +164,15 @@ def build_wandb_config(ctx: IntegrationRuntimeContext) -> dict[str, Any] | None:
     return wandb_config
 
 
+def _mlflow_client_class() -> Callable[..., Any] | None:
+    """Return ``mlflow.tracking.MlflowClient``, or ``None`` when MLflow isn't installed."""
+    try:
+        from mlflow.tracking import MlflowClient
+    except ImportError:
+        return None
+    return MlflowClient
+
+
 def find_mlflow_run_id(mlflow_config: Mapping[str, Any] | None) -> str | None:
     """Return the ID of this job's existing MLflow run, if it has one.
 
@@ -181,12 +190,11 @@ def find_mlflow_run_id(mlflow_config: Mapping[str, Any] | None) -> str | None:
     job_uid = (mlflow_config.get("tags") or {}).get(MLFLOW_JOB_UID_TAG)
     if not job_uid:
         return None
-    try:
-        from mlflow.tracking import MlflowClient
-    except ImportError:
+    mlflow_client_class = _mlflow_client_class()
+    if mlflow_client_class is None:
         return None
     try:
-        client = MlflowClient(tracking_uri=mlflow_config["tracking_uri"])
+        client = mlflow_client_class(tracking_uri=mlflow_config["tracking_uri"])
         experiment = client.get_experiment_by_name(mlflow_config["experiment_name"])
         if experiment is None:
             return None

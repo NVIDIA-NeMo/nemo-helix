@@ -27,7 +27,6 @@ from datasets import Dataset, DatasetDict, load_dataset
 from filesets import FilesetFileSystem, parse_fileset_ref
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client_provider import get_nemo_client
-from nemo_helix_plugin.config import get_platform_config
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.client import JobsClient
@@ -335,10 +334,6 @@ def run_config(
             original_max_retries = http_backoff.__kwdefaults__.get("max_retries")
             http_backoff.__kwdefaults__["max_retries"] = 0
 
-        if not enable_synthesis:
-            job_config.config.data.holdout = 0
-            job_config.config.data.max_holdout = 0
-
         if enable_synthesis and is_adapter_reuse_requested(job_config):
             location = adapter_location or job_config.config.training.pretrained_model
             return run_generation_from_prior_adapter(
@@ -350,9 +345,17 @@ def run_config(
 
         nss_config = job_config.config
         if not enable_synthesis:
-            nss_config = nss_config.model_copy(deep=True)
-            if "dataset.size" not in nss_config.preflight.disabled_checks:
-                nss_config.preflight.disabled_checks.append("dataset.size")
+            disabled_checks = list(nss_config.preflight.disabled_checks)
+            if "dataset.size" not in disabled_checks:
+                disabled_checks.append("dataset.size")
+            # Auto-config resolution rebuilds from exclude_unset=True. Patch both
+            # sections explicitly so overrides survive even with a sparse spec.
+            nss_config = nss_config.with_config_patch(
+                {
+                    "data": {"holdout": 0, "max_holdout": 0},
+                    "preflight": {"disabled_checks": disabled_checks},
+                }
+            )
 
         ss: SafeSynthesizer = SafeSynthesizer(config=nss_config, save_path=save_path).with_data_source(data_source)
         if enable_synthesis:
@@ -385,17 +388,13 @@ def run_from_env() -> None:
     initialize_observability()
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "default")
     client = get_nemo_client()
-    files_url = get_platform_config().get_service_url("files")
-    if files_url:
-        logger.info("Initializing model weights from Files API...")
-        results = init_models_sync(files_api_url=files_url)
-        failed = [m for m, success in results.items() if not success]
-        if failed:
-            logger.warning("Some models failed to download: %s", failed)
-        else:
-            logger.info("Successfully initialized %d model(s)", len(results))
+    logger.info("Initializing model weights from Files API...")
+    results = init_models_sync()
+    failed = [m for m, success in results.items() if not success]
+    if failed:
+        logger.warning("Some models failed to download: %s", failed)
     else:
-        logger.debug("Files API URL not configured, skipping model initialization")
+        logger.info("Successfully initialized %d model(s)", len(results))
 
     _setup_classify_endpoint()
 

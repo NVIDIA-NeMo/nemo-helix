@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
+from httpx import AsyncClient, Client
 from rich.console import Console
 from rich.panel import Panel
 
@@ -140,7 +141,7 @@ class DeviceFlow:
 
     async def start_device_authorization(self) -> DeviceCodeResponse:
         """Start the device authorization flow."""
-        async with httpx.AsyncClient(**httpx_tls_config_from_env(self.certificate_authority)) as client:
+        async with AsyncClient(**httpx_tls_config_from_env(self.certificate_authority)) as client:
             request_data = {
                 "client_id": self.client_id,
                 "scope": self.scope,
@@ -187,7 +188,7 @@ class DeviceFlow:
         """Poll the token endpoint until authorization is complete."""
         start_time = time.time()
 
-        async with httpx.AsyncClient(**httpx_tls_config_from_env(self.certificate_authority)) as client:
+        async with AsyncClient(**httpx_tls_config_from_env(self.certificate_authority)) as client:
             while time.time() - start_time < expires_in:
                 await _async_pause(interval)
 
@@ -393,7 +394,7 @@ def authenticate_with_password_grant(
         "password": password,
         "scope": scope,
     }
-    with httpx.Client(**httpx_tls_config_from_env(certificate_authority)) as client:
+    with Client(**httpx_tls_config_from_env(certificate_authority)) as client:
         response = client.post(token_endpoint, data=data, timeout=30.0)
 
     if response.status_code != 200:

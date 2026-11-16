@@ -10,7 +10,7 @@ import {
 } from '@nvidia/foundations-react-core';
 import { CollapsedNavItem } from '@studio/components/Layouts/NavigationDrawer/components/CollapsedNavItem';
 import { NavItem } from '@studio/components/Layouts/NavigationDrawer/components/NavItem';
-import { Props } from '@studio/components/Layouts/NavigationDrawer/types';
+import type { Props } from '@studio/components/Layouts/NavigationDrawer/types';
 import { flattenForRail, toGroups } from '@studio/components/Layouts/NavigationDrawer/utils';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { NAV_ACCORDION_STATE_KEY } from '@studio/util/localStorage';

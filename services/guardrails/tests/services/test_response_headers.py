@@ -35,7 +35,7 @@ class TestXModelResponseHeader(unittest.TestCase):
         self.http_request_uid_patcher.start()
 
         # Mock OpenAI client and its response
-        self.openai_patcher = patch("openai.OpenAI")
+        self.openai_patcher = patch("nhx.guardrails.app.llms.chat.nim.OpenAI")
         self.mock_openai_client_class = self.openai_patcher.start()
         self.mock_openai_client = MagicMock()
         self.mock_openai_client_class.return_value = self.mock_openai_client

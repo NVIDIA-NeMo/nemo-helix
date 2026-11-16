@@ -5,6 +5,11 @@ import { parseDataFile, serializeDataFile } from '@studio/components/FileRowEdit
 import { ROW_ID_KEY } from '@studio/components/FileRowEditor/types';
 
 describe('parseDataFile (csv)', () => {
+  it('splits rows on mixed line endings but keeps quoted line breaks', () => {
+    const rows = parseDataFile('name\r\nx\ny\r"a\r\nb"\n', 'csv');
+    expect(rows.map((row) => row.name)).toEqual(['x', 'y', 'a\r\nb']);
+  });
+
   it('keeps zero-padded identifiers as strings instead of coercing to numbers', () => {
     const rows = parseDataFile('id,qty\n007,3\n00501,0\n42,-5', 'csv');
 

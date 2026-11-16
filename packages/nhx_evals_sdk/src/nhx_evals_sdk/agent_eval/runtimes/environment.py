@@ -16,9 +16,9 @@ import abc
 import asyncio
 import os
 import re
-import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from subprocess import TimeoutExpired, run
 from typing import Literal, Protocol, runtime_checkable
 
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
@@ -146,8 +146,8 @@ def _docker_run(image: str, spec: EnvRunSpec) -> EnvCommandResult:
 
     print(f"[agent-eval-runtime] $ {_redact_for_logging(cmd)}")
     try:
-        result = subprocess.run(cmd, check=False, text=True, timeout=spec.timeout)
-    except subprocess.TimeoutExpired:
+        result = run(cmd, check=False, text=True, timeout=spec.timeout)
+    except TimeoutExpired:
         return EnvCommandResult(exit_code=124, timed_out=True)
     return EnvCommandResult(exit_code=result.returncode)
 

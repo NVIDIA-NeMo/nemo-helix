@@ -112,6 +112,14 @@ opensandbox:
     serverServiceAccount: "opensandbox-server"
     # -- The Kata server's ServiceAccount. Empty if you don't run one.
     kataServerServiceAccount: ""
+  # -- Ingress isolation for OpenSandbox sandbox pods, a second layer over the per-sandbox execd token Harbor evaluations set. It also covers ports other than execd, such as Compose services, and sandboxes from other clients. OpenSandbox's egress sidecar filters only what leaves a sandbox, so without this policy any pod that can reach a sandbox's IP can connect to it.
+  # Rendered whenever `sandboxClusterCapable` or `platformConfig.platform.sandbox_cluster_capable` is true, whatever `networkPolicies.enabled` says, and has no off switch. It admits sandbox pod ingress only from `opensandbox.namespace`; add other sources to `extraIngress`. Needs a CNI that enforces NetworkPolicy.
+  # @default -- This object has the following default values for sandbox pod ingress isolation.
+  sandboxNetworkPolicy:
+    # -- Pod selector for the OpenSandbox server pods within `opensandbox.namespace`. Empty admits every pod in that namespace. Required when the server runs in the sandbox namespace.
+    serverPodSelector: {}
+    # -- Extra NetworkPolicy ingress rules appended to the sandbox policy, such as a gateway in ingress gateway mode. `[{}]` admits all ingress.
+    extraIngress: []
 
 # -- RBAC configuration settings for optional dependencies
 rbac:
@@ -131,10 +139,12 @@ builder:
   # `ttl_seconds_before_active`. Longer than the 30-minute profile default: a burst of builds (113 for one DeepSWE run)
   # queues steps behind the Jobs controller, and that queue time counts.
   ttlSecondsBeforeActive: 3600
-  # -- Most builds running at once, across all workspaces: the builder's `max_concurrent_builds`. Set, every submit
-  # returns its images `queued`, and they start oldest first while fewer than this many run. Size it to
-  # `resourceQuota`: each running build holds a sandbox and a step pod. Null skips the queue and starts every build
-  # as it is submitted; builds the quota then rejects fail without a retry.
+  # -- Most build steps running at once on each build profile, across all workspaces: the profiles' `max_active_jobs`.
+  # Jobs starts a build step only while fewer than this many run on its profile, and queues the rest; their images stay
+  # `pending` meanwhile. It caps steps, not builds: at most this many sandboxes and this many step pods per profile run,
+  # but a build between steps holds no slot, so a burst's contexts pile up on the work volume. Size `resourceQuota` to
+  # it, and `workVolume` to the largest burst. Null leaves the profiles at Jobs' own default, and a sandbox the quota
+  # then refuses fails its build.
   maxConcurrentBuilds: 3
   # -- Extra labels for the build namespace, such as one that has a cluster tool copy an image pull secret into it.
   namespaceLabels: {}
@@ -264,6 +274,13 @@ networkPolicies:
     # -- Extra NetworkPolicy ingress rules appended to the API policy, for cluster-specific ingress controllers, gateways, monitoring, or debugging pods.
     extraIngress: []
 
+  # -- Ingress isolation for embedded PostgreSQL. Requires a NetworkPolicy-enforcing CNI and the top-level switch. Only same-release API and controller pods are allowed by default.
+  postgresql:
+    # -- Create the embedded PostgreSQL ingress policy.
+    enabled: true
+    # -- Additional ingress rules for cluster-specific database clients. Kubernetes NetworkPolicy allowances are additive.
+    extraIngress: []
+
   # -- NetworkPolicy configuration for the core controller pods.
   # @default -- This object has the following default values for core controller pod ingress isolation.
   controller:
@@ -334,7 +351,10 @@ networkPolicies:
   # -- Per-step ingress NetworkPolicies created by the jobs controller for steps that declare `network`, such as sandboxed GRPO training.
   # @default -- This object has the following default values for per-step ingress isolation.
   jobSteps:
-    # -- Opt in to per-step ingress NetworkPolicies. Off by default; set true to write jobs.executor_defaults step_network_policies_enabled, which lets the jobs controller create and delete those policies. The ValidatingAdmissionPolicy that limits the controller to those policies is installed from that resolved flag, including a platformConfig override, so enabling this needs Kubernetes 1.30+ (or 1.28+ with the ValidatingAdmissionPolicy feature and v1beta1 API enabled) and permission to create cluster-scoped admission resources.
+    # -- Opt in to per-step ingress NetworkPolicies.
+    # Off by default; set true to write jobs.executor_defaults step_network_policies_enabled, which lets the jobs controller create and delete those policies.
+    # The ValidatingAdmissionPolicy that limits the controller to those policies is installed from that resolved flag,
+    # including a platformConfig override, so enabling this needs Kubernetes 1.30+ (or 1.28+ with the ValidatingAdmissionPolicy feature and v1beta1 API enabled) and permission to create cluster-scoped admission resources.
     enabled: false
     # -- TCP ports a job step may open to pods outside its own job, besides the generation range. The episode broker. Must include DEFAULT_BROKER_PORT.
     allowedIngressTcpPorts: [51234]
@@ -405,7 +425,8 @@ postgresql:
   # -- PostgreSQL authentication configuration.
   auth:
     username: nemo
-    password: nemo
+    # -- PostgreSQL password. If unset, generate a random password on install and reuse the existing Secret on upgrade. This does not rotate passwords in an initialized database; coordinate role password changes and workload restarts separately.
+    password: ""
     database: nemohelix
     # -- Name of an existing secret containing the PostgreSQL password. If set, the chart does not create a secret.
     existingSecret: ""
@@ -729,6 +750,10 @@ baseHelixConfig: |
   # -- garak is the configuration specific to the Garak service
   garak: {}
 
+  # -- tavily is the configuration for the Tavily web-search plugin. Set `enabled: false` to mount no routes.
+  tavily:
+    enabled: true
+
   # -- data_designer is the configuration specific to the Data Designer service
   data_designer:
     model_provider_registry:
@@ -1018,10 +1043,26 @@ api:
   # -- Pod-level security context settings for the API service.
   # @default -- This object has the following default values for the pod security context.
   podSecurityContext:
+    # -- UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. An explicit global `podSecurityContext.runAsUser` / `runAsGroup` takes precedence over this default.
+    runAsUser: 1000
+    # -- GID of the `nvs` user.
+    runAsGroup: 1000
     # -- The file system group ID to use for all containers.
     fsGroup: 1000
   # -- Container-level security context settings for the API service.
-  securityContext: {}
+  # @default -- This object has the following default values for the container security context.
+  securityContext:
+    # -- Refuse to start if the image resolves to UID 0.
+    runAsNonRoot: true
+    # -- Block setuid binaries from gaining privileges.
+    allowPrivilegeEscalation: false
+    # -- Linux capabilities to drop.
+    capabilities:
+      drop:
+        - ALL
+    # -- Seccomp profile applied to the container.
+    seccompProfile:
+      type: RuntimeDefault
   # -- Service configuration for the API service.
   # @default -- This object has the following default values for the service configuration.
   service:
@@ -1259,10 +1300,26 @@ core:
     # -- Pod-level security context settings for the controller service.
     # @default -- This object has the following default values for the pod security context.
     podSecurityContext:
+      # -- UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. An explicit global `podSecurityContext.runAsUser` / `runAsGroup` takes precedence over this default.
+      runAsUser: 1000
+      # -- GID of the `nvs` user.
+      runAsGroup: 1000
       # -- The file system group ID to use for all containers.
       fsGroup: 1000
     # -- Container-level security context settings for the controller service.
-    securityContext: {}
+    # @default -- This object has the following default values for the container security context.
+    securityContext:
+      # -- Refuse to start if the image resolves to UID 0.
+      runAsNonRoot: true
+      # -- Block setuid binaries from gaining privileges.
+      allowPrivilegeEscalation: false
+      # -- Linux capabilities to drop.
+      capabilities:
+        drop:
+          - ALL
+      # -- Seccomp profile applied to the container.
+      seccompProfile:
+        type: RuntimeDefault
     # -- Kubernetes deployment resources configuration for the controller service.
     resources: {}
 

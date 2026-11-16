@@ -20,7 +20,7 @@ The Anonymizer page lists the anonymizer jobs in the current workspace and polls
 | View details | Row actions > **View details** | Opens the job detail page. |
 | Search | Name search bar | Filters the list to jobs whose names match the query. |
 | Filter | **Status**, **Created At**, and **Updated At** filters | Narrows the list by job status or date range. |
-| Cancel a job | Row actions > **Cancel** | Available while the job is in a cancellable state. |
+| Cancel a job | Row actions > **Cancel** | Available while the job is in a cancellable state. Asks for confirmation before stopping the job. |
 | Delete jobs | Row actions > **Delete**, or select rows and delete | Removes the selected jobs. |
 
 The table shows each job's name, description, creation time, and status. The **Updated** column is hidden by default and can be enabled from the column controls.
@@ -96,4 +96,4 @@ The job detail page polls until the job reaches a terminal state.
 | Failed Records | Records the job could not anonymize, when there are any. |
 | Logs | Job logs, with a download action. |
 
-Use the actions menu in the page header to cancel a running job or delete the job.
+Use the actions menu in the page header to cancel a running job (you're asked to confirm first) or delete the job.

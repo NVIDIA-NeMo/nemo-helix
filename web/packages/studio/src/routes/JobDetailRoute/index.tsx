@@ -19,7 +19,7 @@ import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { ArtifactFilesPanel } from '@studio/routes/JobDetailRoute/components/ArtifactFilesPanel';
 import { getWorkspaceJobsRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 export const JobDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();

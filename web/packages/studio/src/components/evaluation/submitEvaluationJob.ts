@@ -142,9 +142,13 @@ export interface SubmitSelections {
 }
 
 /** ``spec.publication`` for a run that asked to publish, or nothing at all. ``agent_name`` is
- *  left off deliberately: the backend derives it from the agent target. */
-const publicationSpec = (evaluationId: string | undefined) =>
-  evaluationId ? { publication: { intake: { evaluation_id: evaluationId } } } : {};
+ *  stamped so the job can be matched to its agent: the dataset target has no ``kind`` to match
+ *  on, and the backend only derives the name at publish time without persisting it. It must stay
+ *  the bare name — Intake's ``agent_name`` filter matches it exactly. */
+const publicationSpec = (evaluationId: string | undefined, agent: string) =>
+  evaluationId
+    ? { publication: { intake: { evaluation_id: evaluationId, agent_name: bareName(agent) } } }
+    : {};
 
 /** ``{ name }`` for the job, stemmed from the experiment it belongs to and falling back to the
  *  fileset for a submit that names no experiment. Absent when neither is known. */
@@ -228,16 +232,28 @@ export const buildAgentEvalRequestBody = (
     target: buildAgentTarget(selections.workspace, selections.agent, selections.parallelism),
     max_concurrent_tasks: spec.max_concurrent_tasks ?? DEFAULT_MAX_CONCURRENT_TASKS,
     ...(selections.filesetName ? { labels: { eval_config_fileset: selections.filesetName } } : {}),
-    ...publicationSpec(selections.evaluationId),
+    ...publicationSpec(selections.evaluationId, selections.agent),
   },
 });
 
 /** The bare agent target for ``evaluate/jobs``. Unlike the agent-evaluate target
  *  this is NOT wrapped in {kind, agent}: EvaluateInputSpec forbids extra keys and
- *  takes the agent object directly. The body renders the row-based ``prompt``
- *  rather than a task ``instruction``. */
-export const buildDatasetAgentTarget = (workspace: string, agent: string) =>
-  agentEndpoint(workspace, agent, 'prompt');
+ *  takes the agent object directly. The body renders the row-based request rather
+ *  than a task ``instruction``: a chat-messages ``prompt_template`` renders to
+ *  ``{messages}`` and is passed through whole, anything else renders to ``{prompt}``
+ *  — the same ``"messages" in request`` split the evaluator makes for a model. */
+export const buildDatasetAgentTarget = (
+  workspace: string,
+  agent: string,
+  promptTemplate: DatasetEvalSpec['prompt_template']
+) => {
+  const target = agentEndpoint(workspace, agent, 'prompt');
+  const isChatPrompt =
+    typeof promptTemplate === 'object' && promptTemplate !== null && 'messages' in promptTemplate;
+  return isChatPrompt
+    ? { ...target, body: { ...target.body, messages: '{{ messages }}' } }
+    : target;
+};
 
 /** Build the ``evaluate/jobs`` POST body from a dataset-driven config. ``params``
  *  must be exactly RunConfigOnline for an agent target, and ``prompt_template``
@@ -253,11 +269,11 @@ export const buildDatasetEvalRequestBody = (
     metrics: judgeModel
       ? spec.metrics.map((metric) => injectJudgeModel(metric, judgeModel))
       : spec.metrics,
-    target: buildDatasetAgentTarget(selections.workspace, selections.agent),
+    target: buildDatasetAgentTarget(selections.workspace, selections.agent, spec.prompt_template),
     prompt_template: spec.prompt_template,
     ...(spec.field_mapping ? { field_mapping: spec.field_mapping } : {}),
     params: agentRunParams(selections.parallelism),
-    ...publicationSpec(selections.evaluationId),
+    ...publicationSpec(selections.evaluationId, selections.agent),
   },
 });
 

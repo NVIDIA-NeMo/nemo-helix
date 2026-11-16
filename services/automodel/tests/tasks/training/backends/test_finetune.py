@@ -37,6 +37,7 @@ _STUBBED_MODULES = (
     "nemo_automodel.recipes.llm.train_ft",
     "nemo_automodel.recipes.retrieval.train_bi_encoder",
     "nemo_automodel.recipes.retrieval.train_cross_encoder",
+    "nemo_automodel.recipes.vlm.finetune",
 )
 _FINETUNE = "nhx.automodel.tasks.training.backends.finetune"
 
@@ -104,6 +105,15 @@ def test_a_causal_checkpoint_still_uses_the_compiled_cross_encoder_recipe(finetu
     finetune.create_automodel_recipe(cfg)
 
     finetune.TrainCrossEncoderRecipe.assert_called_once_with(cfg)
+    finetune.TrainFinetuneRecipeForNextTokenPrediction.assert_not_called()
+
+
+def test_the_compiled_vlm_recipe_selects_the_vision_recipe(finetune: ModuleType) -> None:
+    cfg = {"_recipe": "vlm_sft"}
+
+    finetune.create_automodel_recipe(cfg)
+
+    finetune.FinetuneRecipeForVLM.assert_called_once_with(cfg)
     finetune.TrainFinetuneRecipeForNextTokenPrediction.assert_not_called()
 
 
@@ -691,7 +701,7 @@ def test_a_pause_signals_this_process(
     """Automodel shares the signal with every rank at the next step, so rank 0's own pid is enough."""
     monkeypatch.setenv("RANK", "0")
     sent: list[tuple[int, int]] = []
-    monkeypatch.setattr(finetune.os, "kill", lambda pid, sig: sent.append((pid, sig)))
+    monkeypatch.setattr(finetune, "kill", lambda pid, sig: sent.append((pid, sig)))
     wrapper, _ = _wrapper(finetune, monkeypatch, _FakeRecipe())
     wrapper.run_train_validation_loop()
 

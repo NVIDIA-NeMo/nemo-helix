@@ -8,18 +8,20 @@ from contextlib import asynccontextmanager
 from math import ceil
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+from urllib.parse import urlencode
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from nemo_agent_hardener_plugin.api.v2.jobs import router, synth_router
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
 from nemo_agent_hardener_plugin.jobs.synth_benign import AgentHardenerSynthBenignJob
 from nemo_helix_plugin.agent_hardener.types import SynthBenignSpec, WarGameSpec
-from nemo_helix_plugin.api.filter import ComparisonOperation, LogicalOperation, parse_json_filter
+from nemo_helix_plugin.api.parsed_filter import make_filter_dep
 from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client, get_request_authorizer
 from nemo_helix_plugin.jobs import api_factory
 from nemo_helix_plugin.jobs.schemas import FileStorageType, HelixJobResultResponse
 from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
+from nhx.core.jobs.api.v2.jobs.schemas import HelixJobsListFilter
 from sqlalchemy import JSON, create_engine, func, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.pool import StaticPool
@@ -61,14 +63,6 @@ def _response(value):
     return SimpleNamespace(data=lambda: value)
 
 
-def _entity_filter(operation):
-    # Same core Jobs namespace translation: source/spec live in entity data.
-    if isinstance(operation, ComparisonOperation):
-        return operation.model_copy(update={"field": f"data.{operation.field}"})
-    assert isinstance(operation, LogicalOperation)
-    return operation.model_copy(update={"operations": [_entity_filter(op) for op in operation.operations]})
-
-
 @pytest.fixture
 def mixed_jobs(monkeypatch):
     war = WarGameSpec(config="/project/agent-hardener.yaml").model_dump(mode="json")
@@ -77,12 +71,15 @@ def mixed_jobs(monkeypatch):
     records = {
         "old-war": _job("old-war", war),
         "old-service-war": _job("old-service-war", service_war),
+        "old-war-null-sibling": _job("old-war-null-sibling", {**war, "interview": None}),
+        "old-synth-null-sibling": _job("old-synth-null-sibling", {**synth, "stop_after_synth": None}),
         "old-synth": _job("old-synth", synth),
         "new-war": _job("new-war", {**war, "_nemo_job_route": "war-game"}),
         "new-synth": _job("new-synth", {**synth, "_nemo_job_route": "synth-benign"}),
         "foreign": _job("foreign", war, "other"),
         "ambiguous": _job("ambiguous", {**war, **synth}),
         "unknown": _job("unknown", {"manifest_id": "manifest"}),
+        "null-kinds": _job("null-kinds", {"stop_after_synth": None, "interview": None}),
         "unknown-marker": _job("unknown-marker", {**war, "_nemo_job_route": "future"}),
     }
     engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
@@ -96,8 +93,15 @@ def mixed_jobs(monkeypatch):
     jobs.get_job.side_effect = lambda *, name, workspace: _response(records[name])
     jobs.with_retry = Mock(return_value=jobs)
 
+    core_jobs_filter = make_filter_dep(HelixJobsListFilter)
+
     async def list_jobs(*, workspace, query_params):
-        operation = _entity_filter(parse_json_filter(query_params["filter"]))
+        # Exercise the real core Jobs validation and translation boundary. Merely
+        # prefixing fields with data. lets invalid bare-spec HAS_KEY filters pass.
+        request = Request({"type": "http", "query_string": urlencode(query_params).encode()})
+        parsed = await core_jobs_filter(request)
+        operation = parsed.operation
+        assert operation is not None
         condition = operation.apply(SQLAlchemyFilterRepository(_StoredJob, dialect_name="sqlite"))
         page, size = query_params["page"], query_params["page_size"]
         with Session(engine) as session:
@@ -142,8 +146,8 @@ def mixed_jobs(monkeypatch):
 @pytest.mark.parametrize(
     "collection,expected",
     [
-        ("", {"old-war", "old-service-war", "new-war"}),
-        ("/synth-benign", {"old-synth", "new-synth"}),
+        ("", {"old-war", "old-service-war", "old-war-null-sibling", "new-war"}),
+        ("/synth-benign", {"old-synth", "old-synth-null-sibling", "new-synth"}),
     ],
 )
 @pytest.mark.parametrize(
@@ -170,7 +174,10 @@ def test_mixed_sql_lists_filter_before_pagination(mixed_jobs, collection, expect
 
 @pytest.mark.parametrize(
     "collection,own_names",
-    [("", {"old-war", "old-service-war", "new-war"}), ("/synth-benign", {"old-synth", "new-synth"})],
+    [
+        ("", {"old-war", "old-service-war", "old-war-null-sibling", "new-war"}),
+        ("/synth-benign", {"old-synth", "old-synth-null-sibling", "new-synth"}),
+    ],
 )
 def test_named_access_preserves_legacy_and_rejects_siblings(mixed_jobs, collection, own_names):
     client, _, records = mixed_jobs

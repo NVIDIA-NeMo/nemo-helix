@@ -10,11 +10,11 @@ training where multiple pods/containers run the same entry point.
 
 import logging
 import os
-import shutil
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from shutil import rmtree
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ class DistributedContext:
             # workers start waiting, so we do it here at initialization.
             if role == DistributedRole.COORDINATOR and barrier_dir.exists():
                 logger.info(f"Cleaning up stale barriers from previous run: {barrier_dir}")
-                shutil.rmtree(barrier_dir, ignore_errors=True)
+                rmtree(barrier_dir, ignore_errors=True)
 
             barrier_dir.mkdir(parents=True, exist_ok=True)
 
@@ -131,7 +131,7 @@ class DistributedContext:
         if not self.is_distributed or not self.is_coordinator:
             return
         try:
-            shutil.rmtree(self.barrier_dir)
+            rmtree(self.barrier_dir)
         except FileNotFoundError:
             pass
         logger.info(f"Cleared barriers: {self.barrier_dir}")

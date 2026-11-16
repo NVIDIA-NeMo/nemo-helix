@@ -5,7 +5,7 @@ import { RadioCard } from '@nemo/common/src/components/RadioCard';
 import { Label, RadioGroupRoot, Stack, Text } from '@nvidia/foundations-react-core';
 import { OUTPUT_FORMATS } from '@studio/components/transform/formats';
 import type { TransformMapping } from '@studio/components/transform/useTransformMapping';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface Props {
   mapping: TransformMapping;

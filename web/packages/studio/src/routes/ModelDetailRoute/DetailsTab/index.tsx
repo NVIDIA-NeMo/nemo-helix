@@ -5,7 +5,7 @@ import { isBaseModel } from '@nemo/common/src/utils/models';
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Grid, Stack } from '@nvidia/foundations-react-core';
 import type { ModelLineage } from '@studio/hooks/useModelLineage';
-import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
+import { getModelTabLink, ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { AdaptersSection } from '@studio/routes/ModelDetailRoute/DetailsTab/AdaptersSection';
 import {
   getAdapterFields,
@@ -52,10 +52,7 @@ export const DetailsTab: FC<DetailsTabProps> = ({ model, adapter, lineage, jobRe
           isLoading: lineage.job.isLoading,
           status: jobRecord?.status,
           createdAt: jobRecord?.created_at,
-          to: getModelDetailRoute(workspace, model.name, {
-            adapterName: adapter?.name,
-            tab: ModelDetailTab.Training,
-          }),
+          to: getModelTabLink(ModelDetailTab.Training),
         };
 
   return (
@@ -65,10 +62,7 @@ export const DetailsTab: FC<DetailsTabProps> = ({ model, adapter, lineage, jobRe
         job={jobCard}
         fileset={lineage.fileset}
         deployment={lineage.deployment}
-        deploymentTo={getModelDetailRoute(workspace, model.name, {
-          adapterName: adapter?.name,
-          tab: ModelDetailTab.Deployment,
-        })}
+        deploymentTo={getModelTabLink(ModelDetailTab.Deployment)}
         isAdapter={Boolean(adapter)}
       />
 

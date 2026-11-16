@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 import uuid
 import zipfile
+from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -59,8 +60,23 @@ def download_fileset(sdk: SyncHelixClient, ref: str, dest: Path) -> Path:
     return dest
 
 
+@dataclass(frozen=True)
+class UploadedFileset:
+    """The read reference and immutable allocation ID returned by Files."""
+
+    ref: str
+    fileset_id: str
+
+
 def upload_file_to_fileset(sdk: SyncHelixClient, local_path: Path, *, workspace: str, prefix: str = "hitlog") -> str:
-    """Upload a single file into a freshly-created fileset and return its ``workspace/name`` ref.
+    """Upload a durable artifact and return its read reference."""
+    return _upload_file_to_fileset(sdk, local_path, workspace=workspace, prefix=prefix).ref
+
+
+def _upload_file_to_fileset(
+    sdk: SyncHelixClient, local_path: Path, *, workspace: str, prefix: str = "hitlog"
+) -> UploadedFileset:
+    """Upload a single file and return its read reference and allocation ID.
 
     Used to persist a war-game's produced garak hitlog so a later run can replay it: platform
     persistent job storage is per-job, so the hitlog must live in a fileset to survive across runs.
@@ -70,14 +86,14 @@ def upload_file_to_fileset(sdk: SyncHelixClient, local_path: Path, *, workspace:
     """
     files = client_from_platform(sdk, FilesClient)
     fileset_name = f"{prefix}-{uuid.uuid4().hex[:8]}"
-    files.create_fileset(workspace=workspace, body=CreateFilesetRequest(name=fileset_name))
+    allocated = files.create_fileset(workspace=workspace, body=CreateFilesetRequest(name=fileset_name)).data()
     files.upload_file(
         name=fileset_name,
         workspace=workspace,
         path=local_path.name,
         content=local_path.read_bytes(),
     )
-    return f"{workspace}/{fileset_name}"
+    return UploadedFileset(ref=f"{workspace}/{fileset_name}", fileset_id=allocated.id)
 
 
 def _is_excluded(relative_path: Path) -> bool:
@@ -92,19 +108,12 @@ def _is_excluded(relative_path: Path) -> bool:
     return False
 
 
-def delete_fileset(sdk: SyncHelixClient, ref: str) -> None:
-    """Delete a fileset by ``workspace/name`` ref; never raises.
-
-    Called when a manifest is deleted so its victim bundle doesn't outlive it. Best-effort by
-    design: a manifest the user asked to delete should go even if its bundle is already gone.
-    """
-    workspace, _, name = ref.partition("/")
-    if not workspace or not name:
-        return
+def delete_fileset_by_id(client: SyncHelixClient, *, workspace: str, fileset_id: str) -> None:
+    """Delete the captured allocation; log failures so manifest cleanup can finish."""
     try:
-        client_from_platform(sdk, FilesClient).delete_fileset(name=name, workspace=workspace)
-    except Exception:  # already deleted, or storage unavailable — the manifest still goes
-        logger.warning("failed to delete fileset %s", ref, exc_info=True)
+        client_from_platform(client, FilesClient).delete_fileset_by_id(fileset_id=fileset_id, workspace=workspace)
+    except Exception:
+        logger.error("Failed to delete fileset ID %s in workspace %s", fileset_id, workspace, exc_info=True)
 
 
 def _git_listed_files(root: Path) -> list[Path] | None:
@@ -129,8 +138,8 @@ def _git_listed_files(root: Path) -> list[Path] | None:
     return [root / name for name in proc.stdout.decode(errors="replace").split("\0") if name]
 
 
-def upload_project_dir(sdk: SyncHelixClient, project_dir: Path, *, workspace: str) -> str:
-    """Zip a local NAT project and upload it as a fileset; return its ``workspace/name`` ref.
+def upload_project_dir(sdk: SyncHelixClient, project_dir: Path, *, workspace: str) -> UploadedFileset:
+    """Zip a local NAT project and return the uploaded fileset reference and allocation ID.
 
     The counterpart to :func:`download_and_extract_project`: the manifest API and the war-game both
     take a project as a single-zip fileset, so a CLI user's local directory has to become one.
@@ -161,7 +170,7 @@ def upload_project_dir(sdk: SyncHelixClient, project_dir: Path, *, workspace: st
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
             for path in files:
                 bundle.write(path, path.relative_to(root))
-        return upload_file_to_fileset(sdk, archive, workspace=workspace, prefix="project")
+        return _upload_file_to_fileset(sdk, archive, workspace=workspace, prefix="project")
 
 
 def extract_zip_safely(zip_path: Path, dest: Path) -> Path:

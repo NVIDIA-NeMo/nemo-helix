@@ -20,6 +20,12 @@ import { detectorOptions } from '@studio/routes/AnonymizerBuilderRoute/utils';
 import { useMemo, useState, type FC } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
+/**
+ * Sampling roles keep the standalone ParamsDropdown rather than ModelSelectV2's integrated params:
+ * their options come from the providers' served models, since the job sends each model's served
+ * name, and the shared picker's catalogue search does not carry it. The entity detector also lists
+ * a built-in GLiNER2 option that is not a model.
+ */
 export const ModelSettingsSection: FC = () => {
   const { control, setValue } = useFormContext<AnonymizerFormData>();
   const strategy = useWatch({ control, name: 'strategy' });

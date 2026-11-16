@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { queryClientConfig } from '@studio/api/queryClient';
-import { QueryClient, QueryClientConfig, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, type QueryClientConfig, QueryClientProvider } from '@tanstack/react-query';
 import * as React from 'react';
 
 const testQueryClientConfig: QueryClientConfig = {

@@ -173,7 +173,7 @@ If `make bootstrap` has already run, just start the services. `nemo setup` does 
 
 ```bash
 uv run nemo services run \
-  --services entities,models,inference-gateway,secrets \
+  --services entities,models,inference-gateway,secrets,tavily \
   --controllers models
 ```
 
@@ -192,7 +192,7 @@ address outside the platform's network namespace is not bound automatically.
 ```bash
 # Start with LOG_LEVEL=DEBUG to see routing decisions.
 LOG_LEVEL=DEBUG uv run nemo services run \
-  --services entities,models,inference-gateway,secrets \
+  --services entities,models,inference-gateway,secrets,tavily \
   --controllers models
 ```
 
@@ -266,6 +266,7 @@ Plugin-provided (appear once the plugin is installed):
 - **`garak`** — vulnerability scanning, audit configs/targets/jobs, red-team probes. From `plugins/nemo-garak`.
 - **`nemo-evals`** / **`evaluator-plugin`** — metrics, sync/async evaluations, llm-judge, benchmark jobs. From `plugins/nemo-evals`.
 - **`data-designer`** — synthetic dataset generation pipelines. From `plugins/nemo-data-designer`.
+- **`nemo-tavily-web-search`** — web search for agents via [Tavily](https://github.com/tavily-ai/nemo-helix-tavily). Its proxy is on in Helm; in a source checkout run the `tavily` service with `NEMO_TAVILY_ENABLED=true`.
 - **`nemo-entities`**, **`nemo-files`**, **`nemo-secrets`**, **`nemo-auth`**, **`nemo-inference-gateway`** — CLI references for the matching services.
 
 ### Installing skills into the coding agent on demand

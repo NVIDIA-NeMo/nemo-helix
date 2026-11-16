@@ -24,15 +24,15 @@ import { queryClient } from '@studio/api/queryClient';
 import {
   EXPERIMENT_SETTINGS_NAMES,
   experimentSettingsPayload,
-} from '@studio/components/evaluation/shared/experimentSettings';
-import { ExperimentSettingsFields } from '@studio/components/evaluation/shared/ExperimentSettingsFields';
+} from '@studio/components/evaluation/experimentSettings';
+import { ExperimentSettingsFields } from '@studio/components/evaluation/ExperimentSettingsFields';
 import {
   experimentCreateDefaults,
   experimentCreateSchema,
   type ExperimentCreateFormFields,
 } from '@studio/components/ExperimentCreateModal/constants';
 import { AxiosError } from 'axios';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { useController, useForm, type SubmitHandler } from 'react-hook-form';
 
 export interface ExperimentCreateModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {

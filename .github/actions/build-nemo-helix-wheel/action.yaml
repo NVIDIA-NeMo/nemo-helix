@@ -10,7 +10,7 @@ description: >
   package's hatch_build.py; this action only handles environment setup,
   the pre-build version override, and capturing the produced wheel.
 
-  Both ci.yaml's wheel-test job and release-bundle.yaml's build-sdks matrix
+  Both ci.yaml's wheel-build job and release-bundle.yaml's build-sdks matrix
   call this action so the test wheel and the published wheel come out of
   one code path.
 

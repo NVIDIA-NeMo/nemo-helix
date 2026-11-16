@@ -3,7 +3,7 @@
 
 import { CheckmarkBadge, CheckCircle, Play } from '@nemo/icons/icons';
 import { Flex } from '@nvidia/foundations-react-core';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 /**
  * An enum of the files in a Data Store fileset needed to create a customization.
@@ -12,17 +12,6 @@ export enum CustomizationFileType {
   Training = 'Training',
   Validation = 'Validation',
 }
-
-/**
- * A wrapper around the native File type that includes what kind of CustomizationFileType
- * it is. The reason for a wrapper file instead of a Record is because there are some
- * instances where we may want to have information about the filetype where only one
- * file is relevant, and Records/keyof patterns require that all enum values be present.
- */
-export type FileWithType = {
-  type?: CustomizationFileType;
-  file: File;
-};
 
 // https://developer.mozilla.org/en-US/docs/Web/HTTP/MIME_types/Common_types
 export const CUSTOMIZATION_FILESET_FILE_ACCEPT = {

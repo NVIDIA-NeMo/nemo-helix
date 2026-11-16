@@ -3,8 +3,9 @@
 
 """References in caller-supplied context schemas."""
 
+import json
+from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 from nemo_agents_plugin.context_schema import check_context_schema, validate_context
@@ -56,13 +57,14 @@ def test_a_schema_without_references_is_accepted() -> None:
     validate_context({"since": "2026-10-01T00:00:00Z"}, schema)
 
 
-def test_validation_never_fetches_a_remote_reference() -> None:
+def test_validation_never_fetches_a_remote_reference(tmp_path: Path) -> None:
     """The backstop for a schema that skipped ``check_context_schema``: unresolvable, never requested."""
-    # Records calls rather than raising: ``referencing`` wraps any error a
-    # retrieval raises as ``Unresolvable``, which would hide an assertion here.
-    urlopen = MagicMock(side_effect=OSError("network disabled in tests"))
-    schema = {"properties": {"since": {"$ref": "http://169.254.169.254/latest/meta-data/schema.json"}}}
+    # A ``file://`` reference to a real schema stands in for a remote one without
+    # touching the network: a resolver that fetched references would retrieve it
+    # and validate against it instead of raising ``Unresolvable``.
+    remote = tmp_path / "schema.json"
+    remote.write_text(json.dumps({"type": "string"}), encoding="utf-8")
+    schema = {"properties": {"since": {"$ref": remote.as_uri()}}}
 
-    with patch("urllib.request.urlopen", urlopen), pytest.raises(Unresolvable):
+    with pytest.raises(Unresolvable):
         validate_context({"since": "x"}, schema)
-    urlopen.assert_not_called()

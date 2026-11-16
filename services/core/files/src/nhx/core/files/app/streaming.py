@@ -10,6 +10,7 @@ from typing import AsyncIterator, TypeVar
 
 import aiohttp
 import anyio
+from aiohttp import ClientSession
 from anyio import to_thread
 from anyio.streams.memory import MemoryObjectSendStream
 from fastapi import Request
@@ -89,6 +90,7 @@ async def streaming_file_upload(
     chunk_processor: ChunkProcessor,
     queue_size: int = DEFAULT_QUEUE_SIZE,
     inactivity_timeout_seconds: float = DEFAULT_INACTIVITY_TIMEOUT_SECONDS,
+    content_length: int | None = None,
 ) -> AsyncIterator[AsyncIterator[bytes]]:
     """
     A context manager for streaming file uploads without spooling to disk.
@@ -106,6 +108,7 @@ async def streaming_file_upload(
         inactivity_timeout_seconds: Timeout in seconds for receiving data. If no bytes
             are received within this period, the connection will be terminated with
             InactivityTimeoutError.
+        content_length: Expected request size, including multipart framing.
 
     Usage:
         >>> async with streaming_file_upload(request, OctetStreamChunkProcessor()) as upload:
@@ -118,11 +121,17 @@ async def streaming_file_upload(
         """Background task that reads from request stream and sends data with timeout monitoring."""
         async with send_stream:
             try:
+                received = 0
                 async for raw_chunk in await iter_with_inactivity_timeout(
                     request.stream(),
                     inactivity_timeout_seconds,
                 ):
+                    received += len(raw_chunk)
+                    if content_length is not None and received > content_length:
+                        raise ValueError("Request body exceeds Content-Length")
                     await chunk_processor.process(raw_chunk, send_stream)
+                if content_length is not None and received != content_length:
+                    raise ValueError("Request body does not match Content-Length")
                 await chunk_processor.process_remaining_buffer(send_stream)
 
             except ClientDisconnect:
@@ -361,7 +370,7 @@ async def download_url(
     if headers is None:
         headers = {}
 
-    async with aiohttp.ClientSession() as session:
+    async with ClientSession() as session:
         # Use encoded=True to prevent aiohttp/yarl from re-encoding
         # already-percent-encoded query parameters in the URL.
         async with session.get(URL(url, encoded=True), headers=headers) as response:
@@ -400,7 +409,7 @@ async def upload_url_streaming(
         headers = {}
 
     if session is None:
-        session_cm = aiohttp.ClientSession()
+        session_cm = ClientSession()
     else:
         session_cm = nullcontext(session)
 

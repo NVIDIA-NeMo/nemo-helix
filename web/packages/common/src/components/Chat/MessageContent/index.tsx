@@ -9,6 +9,7 @@ import { splitMessageWithLabels } from '@nemo/common/src/components/Chat/Message
 import { CodeDisplay } from '@nemo/common/src/components/CodeDisplay';
 import { simpleHash } from '@nemo/common/src/utils/simpleHash';
 import { Stack, Text } from '@nvidia/foundations-react-core';
+import cn from 'classnames';
 import { decode } from 'html-entities';
 import { type FC, type PropsWithChildren, useMemo } from 'react';
 import Markdown, { type Components } from 'react-markdown';
@@ -41,12 +42,15 @@ export const MessageContent: FC<PropsWithChildren<MessageContentProps>> = ({
     [markdownLinkComponent, markdownTableOptions]
   );
 
-  return snippets.map((descriptor) => {
+  return snippets.map((descriptor, index) => {
     const contentHash = simpleHash(descriptor.value);
     if (descriptor.type === 'plaintext') {
       return (
         <div
-          className="max-w-full whitespace-normal text-sm font-normal leading-6 text-primary"
+          className={cn(
+            'max-w-full whitespace-normal text-sm font-normal leading-6 text-primary [&_blockquote>:first-child]:mt-0 [&_li>:first-child]:mt-0',
+            index === 0 && '[&>:first-child]:mt-0'
+          )}
           data-testid="chat-message-content-text"
           key={`plaintext-${contentHash}`}
         >

@@ -10,7 +10,7 @@ import type { FileListItem } from '@nemo/common/src/components/FileList';
 import { MarkdownContent } from '@nemo/common/src/components/MarkdownContent';
 import { ScrollTable } from '@nemo/common/src/components/ScrollTable';
 import { getFileExtension } from '@nemo/common/src/utils/file';
-import { Flex, Spinner, TableRowDefinition, Text } from '@nvidia/foundations-react-core';
+import { Flex, Spinner, type TableRowDefinition, Text } from '@nvidia/foundations-react-core';
 import Papa from 'papaparse';
 import { type FC, lazy, Suspense, useEffect, useMemo, useState } from 'react';
 

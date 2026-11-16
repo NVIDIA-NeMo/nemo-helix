@@ -4,7 +4,7 @@
 import { Badge, Stack, Text } from '@nvidia/foundations-react-core';
 import { formatScore, scoreColor } from '@studio/components/evaluation/utils';
 import { isNaNScore } from '@studio/util/functions';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface MetricScoreChipProps {
   label: string;

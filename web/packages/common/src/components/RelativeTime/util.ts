@@ -44,17 +44,6 @@ export type UnitsOfTime =
   | 'seconds'
   | 'milliseconds';
 
-/** It is desired to wrap around the compareDesc to allow
- * the acceptance of ISO formatted datetime strings when using compareDesc
- * @param stringOne - first datestring to compare
- * @param stringTwo - second datestring to compare
- *
- * @returns Compare the two dates and return -1 if the first date is after the second,
- * 1 if the first date is before the second or 0 if dates are equal.
- */
-export const compareDescStringISO = (stringOne: DateStringISO, stringTwo: DateStringISO) =>
-  DateFns.compareDesc(parseISOWithUTCFallback(stringOne), parseISOWithUTCFallback(stringTwo));
-
 export const getDifferenceBetween = (a: Date, b: Date): Record<UnitsOfTime, number> => {
   const milliseconds = DateFns.differenceInMilliseconds(a, b);
   const seconds = DateFns.differenceInSeconds(a, b);
@@ -76,14 +65,6 @@ export const getDifferenceBetween = (a: Date, b: Date): Record<UnitsOfTime, numb
     years,
   };
 };
-/** It is desired to wrap around the isBefore func to allow
- * the use of ISO formatted string and compare to now
- * @param stringISO - first datestring to use
- *
- * @returns Boolean - Is the first date before the second one
- */
-export const isBeforeNowStringISO = (stringISO: DateStringISO) =>
-  DateFns.compareDesc(parseISOWithUTCFallback(stringISO), new Date());
 
 /** Get a shorthand version of formatDistance
  * If the distance is more than a month we will show the international date.
@@ -129,17 +110,6 @@ export const getShorthandDistance = ({ start, end, addSuffix }: TimeDistance) =>
   return `${amount}${getUnitShorthand(unit)}`;
 };
 
-type TimeDistanceToNow = {
-  date: TimeDistance['start'];
-  addSuffix?: TimeDistance['addSuffix'];
-};
-export const getShorthandDistanceToNow = ({ date, addSuffix }: TimeDistanceToNow) =>
-  getShorthandDistance({
-    start: date,
-    end: new Date().toISOString(),
-    addSuffix,
-  });
-
 /** Crafting shorthand for twitter like 10s, 20m, 1hr
  * @param unit - String longhand version of unit
  *
@@ -164,13 +134,6 @@ export const getUnitShorthand = (unit: string) => {
     // If we've gotten to months they should be seeing date shorthand instead.
   }
 };
-
-/**
- * I need the start date of the next month
- * @returns String - The first of the next month in ISO format
- */
-export const getStartOfNextMonth = (): DateStringISO =>
-  DateFns.formatISO(DateFns.startOfMonth(DateFns.addMonths(new Date(), 1)));
 
 /**
  * Formats a timestamp as an absolute datetime according to RFC spec.

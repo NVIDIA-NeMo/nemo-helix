@@ -7,7 +7,7 @@ import { useAuthTokenStatus } from '@studio/providers/auth/useAuthTokenStatus';
 import { WorkspaceContext } from '@studio/providers/workspace/WorkspaceContext';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { SELECTED_WORKSPACE_KEY } from '@studio/util/localStorage';
-import { FC, ReactNode, useCallback, useEffect, useMemo } from 'react';
+import { type FC, type ReactNode, useCallback, useEffect, useMemo } from 'react';
 import { useParams } from 'react-router';
 
 interface WorkspaceProviderProps {

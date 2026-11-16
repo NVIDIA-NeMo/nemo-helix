@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { Trash } from '@nemo/icons/icons';
 import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Button } from '@nvidia/foundations-react-core';
 import { useMutateMany } from '@studio/api/common/useMutateMany';
-import { BulkDeleteModal as GenericBulkDeleteModal } from '@studio/components/BulkDeleteModal';
+import { getDeleteFilesetsDescription } from '@studio/constants/filesets';
 import {
   cloneElement,
   isValidElement,
@@ -27,6 +28,8 @@ interface DatasetBulkDeleteModalProps {
   onSettled: () => void;
   /** Custom trigger element; when provided, used instead of the default Button */
   slotTrigger?: ReactNode;
+  /** What the selected rows are called in the title (default: Dataset) */
+  entityLabel?: string;
 }
 
 export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
@@ -34,8 +37,10 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
   onConfirmSuccess,
   onSettled,
   slotTrigger,
+  entityLabel = 'Dataset',
 }) => {
-  const [open, setOpen] = useState(false);
+  const [datasets, setDatasets] = useState<FilesetOutput[]>([]);
+  const entity = entityLabel.toLowerCase();
 
   const { mutateAsync: deleteDataset } = useFilesDeleteFileset();
   const deleteDatasetWithMessage = async (variables: { workspace: string; name: string }) => {
@@ -54,7 +59,7 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
     action: 'delete',
   });
 
-  const handleDelete = async (datasets: FilesetOutput[]) => {
+  const handleDelete = async () => {
     const datasetsToDelete = datasets.filter(
       (dataset): dataset is FilesetOutput & { workspace: string; name: string } =>
         !!(dataset.workspace && dataset.name)
@@ -67,12 +72,13 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
         datasetsToDelete.map((dataset) => ({ workspace: dataset.workspace, name: dataset.name }))
       );
       onConfirmSuccess();
+      return true;
     } finally {
       onSettled();
     }
   };
 
-  const openTrigger = () => setOpen(true);
+  const openTrigger = () => setDatasets(selectedDatasets);
 
   const trigger = isValidElement<TriggerProps>(slotTrigger) ? (
     cloneElement(slotTrigger, {
@@ -91,13 +97,16 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
   return (
     <>
       {trigger}
-      <GenericBulkDeleteModal
-        items={selectedDatasets}
-        open={open}
-        onDelete={handleDelete}
-        title={(count) => `Delete ${count} Dataset${count !== 1 ? 's' : ''}`}
-        onClose={() => setOpen(false)}
-      />
+      {datasets.length > 0 && (
+        <DeleteConfirmationModal
+          open
+          entity={entity}
+          ids={datasets.map((dataset) => dataset.name)}
+          description={getDeleteFilesetsDescription(entity, datasets.length)}
+          onDelete={handleDelete}
+          onClose={() => setDatasets([])}
+        />
+      )}
     </>
   );
 };

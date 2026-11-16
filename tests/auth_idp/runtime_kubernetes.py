@@ -16,6 +16,8 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from subprocess import Popen
+from subprocess import run as run_process
 from time import monotonic
 from time import sleep as pause
 from typing import TypeVar
@@ -23,6 +25,9 @@ from urllib.parse import urlparse
 
 import httpx
 import pytest
+from certifi import where as certifi_bundle_path
+from httpx import Client as HttpClient
+from httpx import get as http_get
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig
 from nemo_helix_plugin.client.client import NemoClient
 from nhx.common.auth.token_claims import groups_from_claim
@@ -239,7 +244,7 @@ def _require_tool(name: str) -> None:
 
 
 def _run(args: list[str], *, timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(
+    completed = run_process(
         args,
         cwd=REPO_ROOT,
         text=True,
@@ -260,7 +265,7 @@ def _run(args: list[str], *, timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS) -
 def _run_with_input(
     args: list[str], input_text: str, *, timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS
 ) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(
+    completed = run_process(
         args,
         cwd=REPO_ROOT,
         text=True,
@@ -312,7 +317,7 @@ def _write_diagnostic_process(
     *,
     timeout: float = DIAGNOSTIC_COMMAND_TIMEOUT_SECONDS,
 ) -> None:
-    completed = subprocess.run(
+    completed = run_process(
         args,
         cwd=REPO_ROOT,
         text=True,
@@ -451,7 +456,7 @@ def _collect_kubernetes_diagnostics(context: str, cluster_name: str, kubeconfig:
         kubeconfig,
     )
     try:
-        pods = subprocess.run(
+        pods = run_process(
             pod_discovery_args,
             cwd=REPO_ROOT,
             text=True,
@@ -661,7 +666,7 @@ def _kind_import_image_via_ctr(cluster_name: str, image: str) -> None:
             timeout=IMAGE_LOAD_TIMEOUT_SECONDS,
         )
         with Path(image_archive.name).open("rb") as archive:
-            completed = subprocess.run(
+            completed = run_process(
                 [
                     "docker",
                     "exec",
@@ -709,7 +714,7 @@ def _kind_load_docker_image(cluster_name: str, image: str) -> None:
 
 def _docker_image_exists(image: str) -> bool:
     return (
-        subprocess.run(
+        run_process(
             ["docker", "image", "inspect", image],
             cwd=REPO_ROOT,
             stdout=subprocess.DEVNULL,
@@ -873,7 +878,46 @@ def _reconcile_secret(
             kubeconfig,
         )
     )
-    _apply_manifest(context, rendered.stdout, kubeconfig)
+    # Server-side: client-side apply copies the secret into an annotation capped at 256 KiB, and
+    # the job CA bundle alone is larger.
+    _run_with_input(
+        _kubectl_command(context, ["apply", "--server-side", "--force-conflicts", "-f", "-"], kubeconfig),
+        rendered.stdout,
+    )
+
+
+PUBLIC_CA_BUNDLE_ENV = "NHX_HARNESS_PUBLIC_CA_BUNDLE"
+_PUBLIC_CA_BUNDLE_CANDIDATES = (
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/cert.pem",
+)
+
+
+def _job_trust_bundle(tls_dir: Path) -> Path:
+    """The job pods' SSL_CERT_FILE: public roots with the gateway CA appended.
+
+    run.sh writes it into the prepared TLS directory. A directory prepared some other way may not
+    have one, so build it the same way: SSL_CERT_FILE replaces a client's trust store, and the
+    gateway CA alone would stop jobs from reaching public hosts such as PyPI.
+    """
+    prepared = tls_dir / "ca-bundle.crt"
+    if prepared.is_file():
+        return prepared
+    candidates = [os.environ.get(PUBLIC_CA_BUNDLE_ENV, ""), *_PUBLIC_CA_BUNDLE_CANDIDATES, certifi_bundle_path()]
+    public = next(
+        (Path(path) for path in candidates if path and Path(path).is_file() and Path(path).stat().st_size), None
+    )
+    if public is None:
+        raise RuntimeError(f"no public CA bundle found for job pods; set {PUBLIC_CA_BUNDLE_ENV} to a PEM bundle")
+    public_roots = public.read_text(encoding="utf-8")
+    if "BEGIN CERTIFICATE" not in public_roots:
+        raise RuntimeError(f"public CA bundle has no PEM certificates: {public}; set {PUBLIC_CA_BUNDLE_ENV}")
+    bundle = Path(tempfile.mkdtemp(prefix="nhx-job-ca-")) / "ca-bundle.crt"
+    bundle.write_text(
+        public_roots.rstrip("\n") + "\n" + (tls_dir / "ca.crt").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    return bundle
 
 
 def _prepare_precreated_secrets(context: str, kubeconfig: Path | None = None) -> None:
@@ -896,6 +940,7 @@ def _prepare_precreated_secrets(context: str, kubeconfig: Path | None = None) ->
             f"--from-file=tls.crt={tls_dir / 'tls.crt'}",
             f"--from-file=tls.key={tls_dir / 'tls.key'}",
             f"--from-file=ca.crt={tls_dir / 'ca.crt'}",
+            f"--from-file=ca-bundle.crt={_job_trust_bundle(tls_dir)}",
         ],
         kubeconfig,
     )
@@ -984,7 +1029,7 @@ def _get_json_with_retries(
     request_tls_config: HttpxTLSConfig = {} if tls_config is None else tls_config
 
     def get_json(remaining: float) -> dict | None:
-        response = httpx.get(url, timeout=min(HTTP_REQUEST_TIMEOUT_SECONDS, remaining), **request_tls_config)
+        response = http_get(url, timeout=min(HTTP_REQUEST_TIMEOUT_SECONDS, remaining), **request_tls_config)
         if response.status_code >= 500:
             return None
         response.raise_for_status()
@@ -1102,7 +1147,7 @@ def _start_port_forward_service(
         log_handle.flush()
         stdout = log_handle
     try:
-        process = subprocess.Popen(
+        process = Popen(
             command,
             cwd=REPO_ROOT,
             stdout=stdout,
@@ -1119,7 +1164,7 @@ def _start_port_forward_service(
         if process.poll() is not None:
             assert process.returncode is not None
             raise AssertionError(_port_forward_exit_message(process.returncode, log_file))
-        return httpx.get(
+        return http_get(
             gateway_url + GATEWAY_READY_PATH,
             timeout=min(PORT_FORWARD_HTTP_TIMEOUT_SECONDS, remaining),
             **tls_config,
@@ -1312,7 +1357,7 @@ class KubernetesAuthIdpRuntime:
         password: str,
         tls_config: HttpxTLSConfig,
     ) -> JsonObject:
-        with httpx.Client(follow_redirects=False, **tls_config) as client:
+        with HttpClient(follow_redirects=False, **tls_config) as client:
             return self._oidc_test_driver.authenticate_device_flow(
                 client,
                 device_authorization_endpoint=device_authorization_endpoint,
@@ -1331,7 +1376,7 @@ class KubernetesAuthIdpRuntime:
         password: str,
         tls_config: HttpxTLSConfig,
     ) -> str:
-        with httpx.Client(follow_redirects=False, **tls_config) as client:
+        with HttpClient(follow_redirects=False, **tls_config) as client:
             return self._oidc_test_driver.complete_authorization(
                 client,
                 authorization_url=authorization_url,
@@ -1505,6 +1550,6 @@ class KubernetesAuthIdpRuntime:
             base_url=self.gateway_base_url,
             auth=token,
             timeout=PLATFORM_API_REQUEST_TIMEOUT_SECONDS,
-            http_client=httpx.Client(verify=self.verify),
+            http_client=HttpClient(verify=self.verify),
             owns_http_client=True,
         )

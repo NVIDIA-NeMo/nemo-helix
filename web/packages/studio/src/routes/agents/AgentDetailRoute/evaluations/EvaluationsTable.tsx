@@ -6,6 +6,7 @@ import {
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { ElapsedTime } from '@nemo/common/src/components/ElapsedTime';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
@@ -336,7 +337,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           },
         }),
         rowActionsColumn({
-          rowActions: (row) => {
+          cell: ({ row: { original: row } }) => {
             const { evaluation, job } = row;
             const rerunAgent = agentName ?? evaluation?.agent_names?.[0];
             const actions = [
@@ -345,7 +346,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
               ...(evaluation && evaluationFilesetName(evaluation) && rerunAgent
                 ? [
                     {
-                      children: 'New evaluation from this configuration',
+                      label: 'New evaluation from this configuration',
                       onSelect: () =>
                         navigate(
                           getAgentRunEvaluationRoute(workspace, rerunAgent, evaluation.name)
@@ -356,13 +357,13 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
               ...(job
                 ? [
                     {
-                      children: 'View job',
+                      label: 'View job',
                       onSelect: () => navigate(getWorkspaceJobDetailRoute(workspace, job.name)),
                     },
                   ]
                 : []),
             ];
-            return actions.length > 0 ? actions : false;
+            return actions.length > 0 ? <QuickActionsMenuRoot actions={actions} /> : null;
           },
         }),
       ],

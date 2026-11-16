@@ -47,6 +47,7 @@ def _token_exchange_config(tmp_path: Path) -> AuthConfig:
         ),
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             workload=OIDCWorkloadConfig(
                 client_id="nemo-workload",
                 audience="nemo-helix",
@@ -125,6 +126,7 @@ async def test_workload_subject_token_resolves_with_configured_subject_issuer(tm
         ),
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.test/application/o/nemo/",
             workload=OIDCWorkloadConfig(
                 client_id="nemo-helix-workload",

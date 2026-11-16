@@ -41,32 +41,6 @@ describe('DatasetBulkDeleteModal', () => {
       expect(triggerButton).toBeInTheDocument();
     });
 
-    it('displays correct dataset count in singular form', () => {
-      render(
-        <DatasetBulkDeleteModal
-          selectedDatasets={[bulkDeleteTestDatasets[0]]}
-          onConfirmSuccess={mockOnConfirmSuccess}
-          onSettled={mockOnSettled}
-        />
-      );
-
-      const triggerButton = screen.getByTestId('bulk-delete-modal-trigger-button');
-      expect(triggerButton).toBeInTheDocument();
-    });
-
-    it('displays correct dataset count in plural form', () => {
-      render(
-        <DatasetBulkDeleteModal
-          selectedDatasets={bulkDeleteTestDatasets}
-          onConfirmSuccess={mockOnConfirmSuccess}
-          onSettled={mockOnSettled}
-        />
-      );
-
-      const triggerButton = screen.getByTestId('bulk-delete-modal-trigger-button');
-      expect(triggerButton).toBeInTheDocument();
-    });
-
     it('renders with empty dataset array', () => {
       render(
         <DatasetBulkDeleteModal
@@ -99,11 +73,13 @@ describe('DatasetBulkDeleteModal', () => {
       // Check if modal is open by looking for modal content
       expect(await screen.findByRole('dialog')).toBeInTheDocument();
 
-      // Check modal heading
-      expect(screen.getByText(/Delete 3 Datasets/)).toBeInTheDocument();
-
-      // Check modal content
-      expect(screen.getByText('Are you sure you want to delete this?')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Delete 3 datasets?' })).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "The datasets and their files are removed from this workspace and can't be restored."
+        )
+      ).toBeInTheDocument();
+      expect(screen.getByText('dataset-1')).toBeInTheDocument();
     });
 
     it('displays singular form in modal heading for single dataset', async () => {
@@ -120,7 +96,28 @@ describe('DatasetBulkDeleteModal', () => {
       const triggerButton = screen.getByTestId('bulk-delete-modal-trigger-button');
       await user.click(triggerButton);
 
-      expect(await screen.findByText(/Delete 1 Dataset$/)).toBeInTheDocument();
+      expect(
+        await screen.findByRole('heading', { name: "Delete dataset 'dataset-1'?" })
+      ).toBeInTheDocument();
+    });
+
+    it('names the rows with entityLabel in the modal heading', async () => {
+      const user = userEvent.setup();
+
+      render(
+        <DatasetBulkDeleteModal
+          entityLabel="Fileset"
+          selectedDatasets={bulkDeleteTestDatasets}
+          onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
+        />
+      );
+
+      await user.click(screen.getByTestId('bulk-delete-modal-trigger-button'));
+
+      expect(
+        await screen.findByRole('heading', { name: 'Delete 3 filesets?' })
+      ).toBeInTheDocument();
     });
 
     it('closes modal when cancel button is clicked', async () => {
@@ -186,7 +183,7 @@ describe('DatasetBulkDeleteModal', () => {
 
       // Click delete
       const deleteButton = within(screen.getByRole('dialog')).getByRole('button', {
-        name: 'Delete',
+        name: /^delete/i,
       });
       await user.click(deleteButton);
 
@@ -229,7 +226,7 @@ describe('DatasetBulkDeleteModal', () => {
 
       // Click delete
       const deleteButton = within(screen.getByRole('dialog')).getByRole('button', {
-        name: 'Delete',
+        name: /^delete/i,
       });
       await user.click(deleteButton);
 
@@ -272,7 +269,7 @@ describe('DatasetBulkDeleteModal', () => {
 
       // Click delete
       const deleteButton = within(screen.getByRole('dialog')).getByRole('button', {
-        name: 'Delete',
+        name: /^delete/i,
       });
       await user.click(deleteButton);
 
@@ -306,7 +303,7 @@ describe('DatasetBulkDeleteModal', () => {
 
       await user.click(screen.getByTestId('bulk-delete-modal-trigger-button'));
       const deleteButton = within(await screen.findByRole('dialog')).getByRole('button', {
-        name: 'Delete',
+        name: /^delete/i,
       });
       await user.click(deleteButton);
 
@@ -341,7 +338,7 @@ describe('DatasetBulkDeleteModal', () => {
 
       await user.click(screen.getByTestId('bulk-delete-modal-trigger-button'));
       const deleteButton = within(await screen.findByRole('dialog')).getByRole('button', {
-        name: 'Delete',
+        name: /^delete/i,
       });
       await user.click(deleteButton);
 
@@ -387,7 +384,7 @@ describe('DatasetBulkDeleteModal', () => {
 
       // Click delete
       const deleteButton = within(screen.getByRole('dialog')).getByRole('button', {
-        name: 'Delete',
+        name: /^delete/i,
       });
       await user.click(deleteButton);
 
@@ -442,7 +439,7 @@ describe('DatasetBulkDeleteModal', () => {
 
       // Click delete
       const deleteButton = within(screen.getByRole('dialog')).getByRole('button', {
-        name: 'Delete',
+        name: /^delete/i,
       });
       await user.click(deleteButton);
 
@@ -486,7 +483,7 @@ describe('DatasetBulkDeleteModal', () => {
 
       // Click delete
       const deleteButton = within(screen.getByRole('dialog')).getByRole('button', {
-        name: 'Delete',
+        name: /^delete/i,
       });
       await user.click(deleteButton);
 
@@ -530,7 +527,7 @@ describe('DatasetBulkDeleteModal', () => {
 
       // Click delete
       const deleteButton = within(screen.getByRole('dialog')).getByRole('button', {
-        name: 'Delete',
+        name: /^delete/i,
       });
       await user.click(deleteButton);
 

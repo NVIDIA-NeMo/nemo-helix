@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
-import { toCopyName } from '@nemo/common/src/utils/entityName';
+import { sanitizeEntityName, toCopyName } from '@nemo/common/src/utils/entityName';
 import type {
   CreateJob as DataDesignerJob,
   CreateJobRequest as DataDesignerJobRequest,
+  ModelConfig,
 } from '@nemo/sdk/generated/data-designer/schema';
 import type { ModelEntity, ModelProvider } from '@nemo/sdk/generated/platform/schema';
 
@@ -62,16 +63,43 @@ export function modelsFromProviders(providers: ModelProvider[]): DataDesignerMod
   return [...byId.values()];
 }
 
-/**
- * Sanitize job request name for API: no spaces (replace with hyphens), collapse runs, trim edges.
- * Entity names typically must not contain spaces.
- */
+/** Rewrite the job request name to satisfy the entity name pattern, when anything valid remains. */
 export function sanitizeJobRequestName(request: DataDesignerJobRequest): DataDesignerJobRequest {
-  const name = request.name?.trim();
-  if (name == null || name === '') return request;
-  const slug = name.replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-  if (slug === '') return request;
+  const slug = request.name ? sanitizeEntityName(request.name) : undefined;
+  if (slug === undefined || slug === request.name) {
+    return request;
+  }
   return { ...request, name: slug };
+}
+
+type JobColumnConfig = DataDesignerJobRequest['spec']['config']['columns'][number];
+
+const columnModelAliases = (columns: JobColumnConfig[]): string[] => [
+  ...new Set(
+    columns.flatMap((column) => {
+      const alias = 'model_alias' in column ? column.model_alias?.trim() : undefined;
+      return alias ? [alias] : [];
+    })
+  ),
+];
+
+/** Declared-order grammars write model_configs before columns, so a later alias can't be declared. */
+export function addMissingAliasConfigs(
+  configs: ModelConfig[],
+  columns: JobColumnConfig[]
+): ModelConfig[] {
+  const defined = new Set(configs.map((config) => config.alias.trim()));
+  const template = configs[0];
+  const missing = columnModelAliases(columns).filter((alias) => !defined.has(alias));
+  return [
+    ...configs,
+    ...missing.map((alias) => ({
+      ...template,
+      alias,
+      model: template?.model ?? '',
+      provider: template?.provider ?? '',
+    })),
+  ];
 }
 
 /**
@@ -140,11 +168,6 @@ export function buildClonedJobRequest(job: DataDesignerJob): DataDesignerJobRequ
   };
 }
 
-/** Navigation state passed to the new-job route to pre-fill the form from an existing job. */
-export interface DataDesignerCloneState {
-  cloneJobRequest: DataDesignerJobRequest;
-}
-
 /**
  * Narrow an unknown router location state to the cloned job request, if present.
  * Returns null when the state is absent or not shaped like a clone payload.
@@ -168,9 +191,14 @@ export function applyFormModelToJobRequest(
   servedModelName: string
 ): DataDesignerJobRequest {
   const config = jobRequest.spec?.config;
-  if (!config?.model_configs?.length) return jobRequest;
+  if (!config) {
+    return jobRequest;
+  }
+  const firstModelConfig = config.model_configs?.[0];
+  if (!firstModelConfig && columnModelAliases(config.columns).length === 0) {
+    return jobRequest;
+  }
 
-  const firstModelConfig = config.model_configs[0];
   const columnsWithFormModel = config.columns.map((col) => {
     const hasModelAlias = 'model_alias' in col && col.model_alias;
     return hasModelAlias ? { ...col, model_alias: formModelRef } : col;

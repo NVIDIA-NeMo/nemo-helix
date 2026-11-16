@@ -6,14 +6,16 @@
 import ast
 import importlib.util
 import json
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 
-from e2e.customizer import mine_embedding_data, stage_assets
+from e2e.customizer import customizer_jobs, mine_embedding_data, stage_assets
 from e2e.customizer.assets_manifest import load, local_only_formats, repo_root
 from e2e.customizer.generate_grpo_assets import (
     ADAPTER_ENV_FORMAT,
@@ -26,6 +28,21 @@ from e2e.customizer.generate_grpo_assets import (
 from e2e.customizer.mine_embedding_data import _download_resumable, _write_subsampled, _write_training_sample
 
 _PAYLOAD = bytes(range(256)) * 40  # 10,240 bytes
+
+
+def test_vllm_deployment_uses_qualified_model_entity_id() -> None:
+    """The config identity must match vLLM's namespace/name discovery identity."""
+    client = MagicMock()
+    with (
+        patch.object(customizer_jobs.ModelsClient, "from_client") as from_client,
+        patch.object(customizer_jobs, "wait_until_routable"),
+    ):
+        customizer_jobs.deploy_vllm_model(client, "e2e-ws", "base-model")
+
+    request = from_client.return_value.create_deployment_config.call_args.kwargs["body"]
+    assert request.model_entity_id == "e2e-ws/base-model"
+    assert request.model_spec.model_namespace == "e2e-ws"
+    assert request.model_spec.model_name == "base-model"
 
 
 class _DroppingStream(httpx.SyncByteStream):
@@ -231,8 +248,8 @@ GRPO_BUILT_FORMATS = {
     "grpo_math_env",
     "grpo_math_env_native",
     "grpo_math_env_native_ref",
-    "grpo_ascii_tree_env",
-    "grpo_ascii_tree_smoke",
+    "grpo_deepscaler_env",
+    "grpo_deepscaler_smoke",
 }
 
 
@@ -281,6 +298,78 @@ def test_sync_dataset_format_reads_unpublished_dataset_locally(tmp_path: Path) -
     (local_dir / "training.jsonl").write_text("{}\n")
 
     assert stage_assets.sync_dataset_format("embedding_nvdocs", manifest=_unpublished_manifest(tmp_path)) == local_dir
+
+
+def test_aws_sync_reuses_populated_cache_only_when_opted_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    staged = tmp_path / "datasets" / "chat_format"
+    staged.mkdir(parents=True)
+    (staged / "training.jsonl").write_text("{}\n")
+    s3_uri = "s3://bucket/datasets/chat_format/"
+
+    monkeypatch.delenv("E2E_ASSETS_REUSE_LOCAL", raising=False)
+    with patch.object(stage_assets.subprocess, "run") as run:
+        run.side_effect = subprocess.CalledProcessError(255, "aws")
+        with pytest.raises(pytest.fail.Exception, match="S3 sync failed"):
+            stage_assets._aws_sync(s3_uri, staged)
+    assert run.called
+
+    monkeypatch.setenv("E2E_ASSETS_REUSE_LOCAL", "1")
+    with patch.object(stage_assets.subprocess, "run") as run:
+        stage_assets._aws_sync(s3_uri, staged)
+    run.assert_not_called()
+
+
+def test_reuse_local_skips_only_a_complete_model_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("E2E_ASSETS_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("E2E_ASSETS_REUSE_LOCAL", "1")
+    snapshot = tmp_path / "models" / "qwen3-0.6b"
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}\n")
+    manifest = {"s3": {"bucket": "bucket"}, "models": []}
+
+    with patch.object(stage_assets.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+        stage_assets.sync_model("qwen3-0.6b", manifest=manifest)
+    run.assert_called_once()
+    (snapshot / "model.safetensors").write_bytes(b"weights")
+    with patch.object(stage_assets.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+        stage_assets.sync_model("qwen3-0.6b", manifest=manifest)
+    run.assert_called_once()  # weights without a tokenizer still sync
+    (snapshot / "tokenizer.json").write_text("{}\n")
+    with patch.object(stage_assets.subprocess, "run") as run:
+        stage_assets.sync_model("qwen3-0.6b", manifest=manifest)
+    run.assert_not_called()
+
+    (snapshot / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"a": "model-00001-of-00002.safetensors", "b": "model-00002-of-00002.safetensors"}})
+    )
+    (snapshot / "model-00001-of-00002.safetensors").write_bytes(b"a")
+    with patch.object(stage_assets.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+        stage_assets.sync_model("qwen3-0.6b", manifest=manifest)
+    run.assert_called_once()
+    (snapshot / "model-00002-of-00002.safetensors").write_bytes(b"b")
+    with patch.object(stage_assets.subprocess, "run") as run:
+        stage_assets.sync_model("qwen3-0.6b", manifest=manifest)
+    run.assert_not_called()
+
+
+@pytest.mark.parametrize("reuse", ["1", None])
+def test_malformed_weight_map_syncs_with_or_without_reuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reuse: str | None
+) -> None:
+    monkeypatch.setenv("E2E_ASSETS_CACHE_DIR", str(tmp_path))
+    if reuse:
+        monkeypatch.setenv("E2E_ASSETS_REUSE_LOCAL", reuse)
+    else:
+        monkeypatch.delenv("E2E_ASSETS_REUSE_LOCAL", raising=False)
+    snapshot = tmp_path / "models" / "qwen3-0.6b"
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}\n")
+    (snapshot / "tokenizer.json").write_text("{}\n")
+    (snapshot / "model.safetensors.index.json").write_text(json.dumps({"weight_map": {"a": ["x.safetensors"]}}))
+
+    with patch.object(stage_assets.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+        stage_assets.sync_model("qwen3-0.6b", manifest={"s3": {"bucket": "bucket"}, "models": []})
+    run.assert_called_once()
 
 
 def test_sync_dataset_format_fails_when_unpublished_dataset_missing(tmp_path: Path) -> None:

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -452,3 +453,15 @@ class TestRequestHasImageUrls:
         """Parts that are not dicts are silently skipped."""
         messages = [{"role": "user", "content": ["not-a-dict", None, 42]}]
         assert _request_has_image_urls(messages) is False
+
+
+@pytest.mark.parametrize(("upstream_status", "expected"), [(401, 401), (503, 503), (None, 502), (200, 502)])
+async def test_model_engine_error_maps_upstream_status(upstream_status: int | None, expected: int) -> None:
+    """IORails model failures keep the upstream status; an unreachable model is a bad gateway."""
+    from nemoguardrails.guardrails.model_engine import ModelEngineError
+    from nhx.guardrails.app.exceptions.exception_handlers import model_engine_error_handler
+
+    response = await model_engine_error_handler(MagicMock(), ModelEngineError("boom", "safety-judge", upstream_status))
+
+    assert response.status_code == expected
+    assert "safety-judge" in response.body.decode()

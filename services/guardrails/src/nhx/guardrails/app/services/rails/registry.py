@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from nemoguardrails import LLMRails
+from nhx.guardrails.app.services.rails.engine import RailsEngine, retire_rails_engine
 from nhx.guardrails.app.utils.key_generator import generate_key
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RailsCacheEntry:
-    llm_rails: LLMRails
+    llm_rails: RailsEngine
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -41,7 +41,7 @@ class RailsRegistry:
         engine: str,
         model_name: str,
         token_hash=None,
-    ) -> LLMRails | None:
+    ) -> RailsEngine | None:
         cache_key = self._generate_cache_key(config_ids)
 
         if cache_key not in self._llm_rails_instances:
@@ -63,13 +63,16 @@ class RailsRegistry:
         engine: str,
         model_name: str,
         token_hash,
-        llm_rails: LLMRails,
+        llm_rails: RailsEngine,
     ):
         model_key = generate_model_key(engine, model_name, token_hash)
 
         cache_key = self._generate_cache_key(config_ids)
 
         logger.debug(f"Adding rails instance for config_ids {config_ids} and model key {model_key}")
+
+        if (replaced := self._llm_rails_instances[cache_key].get(model_key)) and replaced.llm_rails is not llm_rails:
+            retire_rails_engine(replaced.llm_rails)
 
         self._llm_rails_instances[cache_key][model_key] = RailsCacheEntry(llm_rails=llm_rails)
 
@@ -131,9 +134,13 @@ class RailsRegistry:
 
         logger.debug(f"No rails instance found for config_ids {config_ids} and model key {model_key}")
 
-    def set_cache(self, config_ids: List[str], value: Dict[str, LLMRails]):
+    def set_cache(self, config_ids: List[str], value: Dict[str, RailsEngine]):
         """Sets the cache."""
         key = self._generate_cache_key(config_ids)
+        kept = {id(llm_rails) for llm_rails in value.values()}
+        for entry in self._llm_rails_instances.get(key, {}).values():
+            if id(entry.llm_rails) not in kept:
+                retire_rails_engine(entry.llm_rails)
         self._llm_rails_instances[key] = {
             model_key: RailsCacheEntry(llm_rails=llm_rails) for model_key, llm_rails in value.items()
         }
@@ -146,6 +153,8 @@ class RailsRegistry:
         key = self._generate_cache_key(config_ids)
         if key not in self._llm_rails_instances:
             raise KeyError(f"No rails instance found for config_ids {config_ids}")
+        for entry in self._llm_rails_instances[key].values():
+            retire_rails_engine(entry.llm_rails)
         del self._llm_rails_instances[key]
 
 

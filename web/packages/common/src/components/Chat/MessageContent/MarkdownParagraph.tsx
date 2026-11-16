@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Text } from '@nvidia/foundations-react-core';
-import { type FC, type PropsWithChildren } from 'react';
+import type { FC, PropsWithChildren } from 'react';
 
 export const MarkdownParagraph: FC<PropsWithChildren> = ({ children }) => (
   <Text asChild kind="body/regular/md">

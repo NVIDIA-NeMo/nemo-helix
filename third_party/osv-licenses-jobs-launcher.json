@@ -217,7 +217,7 @@
         {
           "package": {
             "name": "golang.org/x/net",
-            "version": "0.58.0",
+            "version": "0.60.0",
             "ecosystem": "Go"
           },
           "licenses": [
@@ -227,7 +227,7 @@
         {
           "package": {
             "name": "golang.org/x/sys",
-            "version": "0.47.0",
+            "version": "0.48.0",
             "ecosystem": "Go"
           },
           "licenses": [
@@ -237,7 +237,7 @@
         {
           "package": {
             "name": "golang.org/x/text",
-            "version": "0.41.0",
+            "version": "0.42.0",
             "ecosystem": "Go"
           },
           "licenses": [
@@ -267,7 +267,7 @@
         {
           "package": {
             "name": "google.golang.org/grpc",
-            "version": "1.83.2",
+            "version": "1.84.0",
             "ecosystem": "Go"
           },
           "licenses": [
@@ -287,7 +287,7 @@
         {
           "package": {
             "name": "stdlib",
-            "version": "1.26.7",
+            "version": "1.26.10",
             "ecosystem": "Go"
           },
           "licenses": [

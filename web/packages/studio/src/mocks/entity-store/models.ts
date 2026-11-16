@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
+import type {
   ModelsListModelsParams,
   ModelEntity,
   ModelEntitysPage,
@@ -128,10 +128,6 @@ export const entityStoreModelWithFileset: ModelEntity = {
 
 export const emptyModelEntitysPage: ModelEntitysPage = {
   data: [],
-};
-
-export const mixedModelEntitysPage: ModelEntitysPage = {
-  data: [entityStoreBaseModel1, entityStorePromptTunedModel1, entityStoreCustomizedModel1],
 };
 
 export const getEntityStoreLlmModels = (query?: ModelsListModelsParams) => {

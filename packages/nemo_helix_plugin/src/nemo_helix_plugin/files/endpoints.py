@@ -121,3 +121,13 @@ def upload_otlp_logs(
 @post("/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query")
 @abstractmethod
 def query_otlp_logs(*, workspace: str | None = None, name: str, body: OtlpLogQueryRequest) -> HelixJobLogPage: ...
+
+
+@get("/apis/files/v2/workspaces/{workspace}/filesets/by-id/{fileset_id}")
+@abstractmethod
+def get_fileset_by_id(*, workspace: str | None = None, fileset_id: str) -> FilesetOutput: ...
+
+
+@delete("/apis/files/v2/workspaces/{workspace}/filesets/by-id/{fileset_id}")
+@abstractmethod
+def delete_fileset_by_id(*, workspace: str | None = None, fileset_id: str) -> FilesetOutput: ...

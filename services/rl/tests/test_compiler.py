@@ -144,6 +144,7 @@ def test_training_step_config_maps_exposed_knobs() -> None:
         val_at_end=True,
         ref_policy_kl_penalty=0.2,
         max_grad_norm=2.0,
+        parallelism=ParallelismParams(expert_parallel_size=4),
     )
     sc = _build_training_step_config(_make_job_output(t), trust_remote_code=True)
 
@@ -152,6 +153,7 @@ def test_training_step_config_maps_exposed_knobs() -> None:
     assert sc.optimizer.eps == 3e-7
     # Memory / checkpoint / validation knobs.
     assert sc.parallelism.activation_checkpointing is True
+    assert sc.parallelism.expert_parallel_size == 4
     assert sc.schedule.keep_top_k == 5
     assert sc.schedule.val_at_end is True
     # DPO hyperparameters + passthrough.
@@ -303,6 +305,24 @@ def test_grpo_lora_uses_adapter_shm(sandbox_capable: None) -> None:
     assert actual == "8Gi"
 
 
+def test_grpo_lora_merged_uses_adapter_shm(sandbox_capable: None) -> None:
+    job = RlJobOutput(
+        model="default/base-model",
+        dataset="default/prefs",
+        environment="default/env",
+        training=GRPOTraining(
+            type="grpo",
+            finetuning_type="lora_merged",
+            parallelism=ParallelismParams(num_nodes=1, num_gpus_per_node=1),
+        ),
+        output=OutputResponse(name="my-merged", type=OutputNameType.MODEL, fileset="my-merged-fs"),
+    )
+    step = _build_training_step(job, [], trust_remote_code=False, profile=None)
+    resources = step["executor"]["resources"]
+    actual = resources.shm_size if hasattr(resources, "shm_size") else resources["shm_size"]
+    assert actual == "8Gi"
+
+
 def test_multi_node_requires_shared_storage(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.multinode_shared_storage_path", None, raising=False)
     job = _make_job_output(DPOTraining(type="dpo", parallelism=ParallelismParams(num_nodes=2, num_gpus_per_node=2)))
@@ -410,6 +430,44 @@ async def test_compiler_emits_four_steps(
 
 
 @pytest.mark.asyncio
+async def test_dpo_text_moe_compiles_with_the_default_expert_parallel(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationHelixClients,
+) -> None:
+    from nemo_helix_plugin.models.types import ModelSpec
+
+    entity = _make_model_entity()
+    entity.spec = ModelSpec.model_construct(num_experts=8, has_vision_tower=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.fetch_model_entity", AsyncMock(return_value=entity))
+    job = _make_job_output(DPOTraining(type="dpo", parallelism=ParallelismParams(num_gpus_per_node=4)))
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[1]["name"] == "dpo-training"
+
+
+@pytest.mark.asyncio
+async def test_grpo_text_moe_keeps_the_default_expert_parallel(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationHelixClients,
+    sandbox_capable: None,
+) -> None:
+    from nemo_helix_plugin.models.types import ModelSpec
+
+    entity = _make_model_entity()
+    entity.spec = ModelSpec.model_construct(num_experts=8, has_vision_tower=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.fetch_model_entity", AsyncMock(return_value=entity))
+    job = _make_job_output(
+        GRPOTraining(type="grpo", parallelism=ParallelismParams(num_gpus_per_node=4)),
+        environment="default/env",
+    )
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[1]["name"] == "grpo-training"
+
+
+@pytest.mark.asyncio
 async def test_compiler_rejects_model_without_fileset(
     monkeypatch: pytest.MonkeyPatch,
     platform_clients: AsyncCustomizationHelixClients,
@@ -428,6 +486,31 @@ def test_grpo_download_includes_environment() -> None:
     dests = [item.dest for item in cfg.download]
     assert "/var/run/scratch/job/environment" in dests
     assert len(cfg.download) == 3
+
+
+def test_grpo_training_step_copies_recorded_vision_traits(sandbox_capable: None) -> None:
+    from nemo_helix_plugin.models.types import ModelSpec
+    from nhx.customization_common.schemas.checkpoint import traits_from_model_spec
+
+    spec = ModelSpec.model_construct(
+        has_vision_tower=True,
+        has_audio_tower=True,
+        num_experts=16,
+        num_nextn_predict_layers=1,
+        checkpoint_model_name="NemotronH_Omni",
+        head_type="causal_lm",
+    )
+    sc = _build_training_step_config(
+        _make_job_output(GRPOTraining(type="grpo"), environment="default/env"),
+        trust_remote_code=False,
+        traits=traits_from_model_spec(spec),
+    )
+
+    assert sc.model.has_vision_tower is True
+    assert sc.model.has_audio_tower is True
+    assert sc.model.num_experts == 16
+    assert sc.model.num_nextn_predict_layers == 1
+    assert sc.model.checkpoint_model_name == "NemotronH_Omni"
 
 
 def test_grpo_training_step_config_sandboxed(sandbox_capable: None) -> None:
@@ -483,6 +566,23 @@ def test_grpo_lora_model_entity_peft(sandbox_capable: None) -> None:
     assert cfg.peft.rank == 8
     assert cfg.peft.alpha == 16
     assert cfg.peft.type is FinetuningType.LORA
+
+
+def test_grpo_lora_merged_model_entity_is_a_full_model(sandbox_capable: None) -> None:
+    from nhx.rl.app.jobs.compiler import _build_model_entity_config
+    from nhx.rl.schemas import LoRAParams
+
+    job = RlJobOutput(
+        model="default/base-model",
+        dataset="default/prefs",
+        environment="default/env",
+        training=GRPOTraining(type="grpo", finetuning_type="lora_merged", lora=LoRAParams(rank=8, alpha=16)),
+        output=OutputResponse(name="my-merged", type=OutputNameType.MODEL, fileset="my-merged-fs"),
+    )
+    cfg = _build_model_entity_config("default", job, trust_remote_code=False)
+    assert cfg.peft is not None
+    assert cfg.peft.type is FinetuningType.LORA_MERGED
+    assert job.trains_lora_adapter is False
 
 
 def test_grpo_compile_succeeds_when_platform_sandbox_capable(monkeypatch: pytest.MonkeyPatch) -> None:

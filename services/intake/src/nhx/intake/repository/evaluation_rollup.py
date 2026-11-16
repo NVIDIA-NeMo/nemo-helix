@@ -5,6 +5,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,10 @@ class EvaluationRollup:
         return sorted(self.evaluator_scores)
 
 
+class MissingCreatedAfterError(KeyError):
+    """A requested Evaluation name has no ``created_after_by_name`` entry."""
+
+
 class EvaluationRollupRepository(ABC):
     """Domain-facing interface for Evaluation rollup reads."""
 
@@ -46,6 +51,7 @@ class EvaluationRollupRepository(ABC):
         *,
         workspace: str,
         evaluation_names: list[str],
+        created_after_by_name: dict[str, datetime | None],
     ) -> dict[str, EvaluationRollup]:
-        """Return rollups keyed by Evaluation name."""
+        """Return rollups keyed by Evaluation name, each bounded to runs ingested since its ``created_after``."""
         pass

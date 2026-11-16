@@ -84,6 +84,7 @@ class BackendFormat(str, Enum):
 
     OPENAI_CHAT = "OPENAI_CHAT"
     ANTHROPIC_MESSAGES = "ANTHROPIC_MESSAGES"
+    SYSTEMONE = "SYSTEMONE"
 
 
 # ---------------------------------------------------------------------------

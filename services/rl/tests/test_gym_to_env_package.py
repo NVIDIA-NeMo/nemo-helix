@@ -178,6 +178,25 @@ constraint-dependencies = ["urllib3>=2.7.0"]
     assert overrides == ["setuptools<81,>=80.10.2"]
 
 
+def test_rl_dependency_policy_skips_package_scoped_overrides(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[tool.uv]
+override-dependencies = [
+  "setuptools>=80.10.2",
+  { package = { name = "vllm", version = "0.29.0" }, dependencies = ["flashinfer-python==0.6.18.post1"] },
+]
+constraint-dependencies = ["urllib3>=2.7.0"]
+""",
+        encoding="utf-8",
+    )
+
+    overrides, constraints = MODULE.rl_dependency_policy(tmp_path)
+
+    assert overrides == ["setuptools<81,>=80.10.2"]
+    assert constraints == ["urllib3>=2.7.0"]
+
+
 def test_rl_dependency_policy_rejects_a_checkout_without_uv_limits(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.uv]\nmanaged = true\n", encoding="utf-8")
 
@@ -250,3 +269,34 @@ version = "2.13.0"
         {"math-verify": {"latex2sympy2-extended"}},
         expand_dependencies_of=["math-verify==0.8.0"],
     ) == ["aiohttp==3.14.3"]
+
+
+def test_external_server_dir_copies_under_resources_servers(tmp_path: Path) -> None:
+    source = tmp_path / "vlm"
+    (source / "configs").mkdir(parents=True)
+    (source / "app.py").write_text("print('server')\n", encoding="utf-8")
+    (source / "requirements.txt").write_text("numpy\n", encoding="utf-8")
+    (source / "configs" / "clevr_cogent.yaml").write_text("clevr: {}\n", encoding="utf-8")
+    (source / "tests").mkdir()
+    (source / "tests" / "test_rewards.py").write_text("pass\n", encoding="utf-8")
+    (source / "sample.jsonl").write_text("{}\n", encoding="utf-8")
+
+    rel, resolved = MODULE.resolve_external_server(str(source))
+    out = tmp_path / "pkg"
+    out.mkdir()
+    copied = MODULE.copy_server(resolved, out, rel)
+
+    assert rel == Path("resources_servers") / "vlm"
+    assert (copied / "app.py").read_text(encoding="utf-8") == "print('server')\n"
+    assert (copied / "configs" / "clevr_cogent.yaml").is_file()
+    assert not (copied / "tests").exists()
+    assert not list(copied.rglob("*.jsonl"))
+
+
+def test_external_server_dir_requires_an_install_marker(tmp_path: Path) -> None:
+    source = tmp_path / "vlm"
+    source.mkdir()
+    (source / "app.py").write_text("pass\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="requirements.txt"):
+        MODULE.resolve_external_server(str(source))

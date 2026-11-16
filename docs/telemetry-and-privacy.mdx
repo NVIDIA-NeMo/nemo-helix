@@ -113,6 +113,17 @@ touch ~/.config/nemoguardrails/do_not_track
 Changing the environment variable or creating the `do_not_track` marker after
 the library has started does not stop an already-running heartbeat thread.
 
+## Third-Party Services
+
+The third-party Tavily web-search plugin is included in NeMo Helix images, and
+the Helm chart serves its proxy by default. Nothing goes to Tavily until a
+workspace stores a Tavily API key. From then on, requests from agents with
+Tavily enabled and from `nemo tavily search` and `nemo tavily extract` reach
+`mcp.tavily.com` through the proxy, under Tavily's terms. To turn the proxy off,
+set `platformConfig.tavily.enabled: false` (Helm) or `NEMO_TAVILY_ENABLED=false`,
+then restart the platform. The setting is read at startup, so changing it on a
+running platform does not remove the routes.
+
 ## Third-Party Endpoints
 
 NeMo Helix and bundled library plugins can use third-party inference endpoints

@@ -6,7 +6,7 @@ import {
   FILE_CHANGE_ADDITION_CLASS,
   FILE_CHANGE_DELETION_CLASS,
 } from '@nemo/common/src/components/AssistantChat/toolCall/constants';
-import { ChevronRight, Rename, DocumentNew } from '@nemo/icons/icons';
+import { ChevronRight, Pencil, DocumentNew } from '@nemo/icons/icons';
 import { Text } from '@nvidia/foundations-react-core';
 
 interface FileChangeToolCallCardProps {
@@ -20,7 +20,7 @@ interface FileChangeToolCallCardProps {
 }
 
 export const FileChangeToolCallCard = ({ summary }: FileChangeToolCallCardProps) => {
-  const Icon = summary.action === 'Wrote' ? DocumentNew : Rename;
+  const Icon = summary.action === 'Wrote' ? DocumentNew : Pencil;
 
   return (
     <div

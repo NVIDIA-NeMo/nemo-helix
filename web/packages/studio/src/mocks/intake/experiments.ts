@@ -23,7 +23,7 @@ export const mockExperiment = (name: string): ExperimentResponse => ({
 });
 
 /** Evaluation names that live in the mock group (each fans out one runs query). */
-export const MOCK_EVALUATION_NAMES = ['my-experiment', 'my-experiment-v2'] as const;
+const MOCK_EVALUATION_NAMES = ['my-experiment', 'my-experiment-v2'] as const;
 
 const mockEvaluation = (name: string): EvaluationResponse => ({
   id: `eval_${name}`,

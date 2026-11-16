@@ -19,7 +19,7 @@ import {
 import { FileSplitAdvancedOptions } from '@studio/components/FilesTable/CreateFileSplitsModal/FileSplitAdvancedOptions';
 import { FileSplitsSliders } from '@studio/components/FilesTable/CreateFileSplitsModal/FileSplitsSliders';
 import {
-  CreateFileSplitsFormFields,
+  type CreateFileSplitsFormFields,
   createFileSplitsSchema,
 } from '@studio/components/FilesTable/CreateFileSplitsModal/types';
 import { MiddleTruncatedPath } from '@studio/components/MiddleTruncatedPath';
@@ -28,7 +28,7 @@ import { useSelectedDatasetId } from '@studio/hooks/useSelectedDatasetId';
 import { tooltipClassName } from '@studio/styles/common';
 import { getContentSchema } from '@studio/util/files';
 import { getTextWithCount } from '@studio/util/strings';
-import { ComponentProps, FC, useMemo } from 'react';
+import { type ComponentProps, type FC, useMemo } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 
 interface Props extends Pick<ComponentProps<typeof FormModal>, 'open' | 'onClose'> {

@@ -41,14 +41,17 @@ profile, or ``default_profile`` when the request did not choose one.
 
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from nemo_helix_plugin.authz import AuthzScope
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.dependencies import RequestAuthorizer
 from nemo_helix_plugin.job import job_collection_path_for
 from nemo_helix_plugin.jobs.api_factory import (
+    DeferWrite,
     HelixJobResultRoute,
     JobRouteOption,
     _submit_control_kwargs,
@@ -244,7 +247,11 @@ def _adapt_to_spec(job_cls: type["NemoJob"]) -> "Callable[..., Any]":
     ``(input_spec, *, workspace, entity_client, async_sdk)`` (no
     ``job_name``); ``async_sdk`` is the job-facing name for that async
     platform handle. The shim adapts and awaits the ``async classmethod``.
+    It forwards the caller's ``authorize`` and the factory's ``defer`` only to a
+    ``to_spec`` that declares those keywords.
     """
+
+    accepted = inspect.signature(job_cls.to_spec).parameters
 
     async def to_spec_adapter(
         original_spec: Any,
@@ -252,6 +259,9 @@ def _adapt_to_spec(job_cls: type["NemoJob"]) -> "Callable[..., Any]":
         entity_client: Any,
         job_name: str | None,
         async_client: AsyncNemoClient,
+        *,
+        authorize: RequestAuthorizer | None = None,
+        defer: DeferWrite | None = None,
     ) -> Any:
         del job_name  # NemoJob.to_spec doesn't use it (names belong to the Jobs service)
         return await job_cls.to_spec(
@@ -260,6 +270,7 @@ def _adapt_to_spec(job_cls: type["NemoJob"]) -> "Callable[..., Any]":
             entity_client=entity_client,
             async_sdk=async_client,
             is_local=False,
+            **{name: value for name, value in (("authorize", authorize), ("defer", defer)) if name in accepted},
         )
 
     return to_spec_adapter

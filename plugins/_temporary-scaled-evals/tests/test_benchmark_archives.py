@@ -20,8 +20,8 @@ pytest.importorskip("scaled_evals")
 
 from api_test_fixture import app, v1
 from scaled_evals.api import artifacts
-from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
-from scaled_evals.api.db import Database, get_db, get_stream_database_factory
+from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveWorkerRepository
+from scaled_evals.api.db import RequestDatabase, get_request_db, get_request_stream_database_factory
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.settings import settings
 from scaled_evals.benchmark_archive import BenchmarkArchiveError, build_benchmark_archive
@@ -221,18 +221,18 @@ def test_export_rejects_changed_source_size(monkeypatch):
 
 @pytest.fixture
 def api_db():
-    db = MagicMock(spec=Database)
+    db = MagicMock(spec=RequestDatabase)
     db.benchmark_runs.exists.return_value = True
-    v1.dependency_overrides[get_db] = lambda: db
+    v1.dependency_overrides[get_request_db] = lambda: db
 
     @contextmanager
     def _stream():
         yield db
 
-    v1.dependency_overrides[get_stream_database_factory] = lambda: _stream
+    v1.dependency_overrides[get_request_stream_database_factory] = lambda: _stream
     yield db
-    v1.dependency_overrides.pop(get_db)
-    v1.dependency_overrides.pop(get_stream_database_factory, None)
+    v1.dependency_overrides.pop(get_request_db)
+    v1.dependency_overrides.pop(get_request_stream_database_factory, None)
 
 
 def test_api_queues_and_reports_snapshot_without_private_storage_fields(api_db):
@@ -286,7 +286,7 @@ def test_api_missing_and_ready_archive(api_db, monkeypatch):
         assert not checkout_active, "download retained its database checkout while streaming"
         yield b"archive"
 
-    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    v1.dependency_overrides[get_request_stream_database_factory] = lambda: stream_db
     monkeypatch.setattr(artifacts, "stream_object", stream_object)
     response = client.get("/v1/benchmark-runs/bmr_1/archive/download")
     assert response.content == b"archive"
@@ -294,8 +294,8 @@ def test_api_missing_and_ready_archive(api_db, monkeypatch):
 
 
 def test_worker_records_build_and_failure(monkeypatch):
-    repo = MagicMock(spec=BenchmarkArchiveStore)
-    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveStore", lambda: repo)
+    repo = MagicMock(spec=BenchmarkArchiveWorkerRepository)
+    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveWorkerRepository", lambda: repo)
 
     worker = Dispatcher()
     builder = MagicMock(return_value={"object_key": "key", "size_bytes": 123})
@@ -487,9 +487,9 @@ def test_archive_heartbeat_distinguishes_transient_errors_from_lost_ownership(mo
     import threading
     from types import SimpleNamespace
 
-    repo = MagicMock(spec=BenchmarkArchiveStore)
+    repo = MagicMock(spec=BenchmarkArchiveWorkerRepository)
     repo.heartbeat.side_effect = [False] if ownership_lost else [RuntimeError("temporary DB failure"), True]
-    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveStore", lambda: repo)
+    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveWorkerRepository", lambda: repo)
     stop = MagicMock()
     stop.wait.side_effect = [False, False, True]
     lost = threading.Event()

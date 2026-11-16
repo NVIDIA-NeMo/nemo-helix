@@ -1,11 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
-
-import { getJobRefetchInterval } from './query';
-import { JOB_POLLING_INTERVAL_MS } from '../constants';
-import { CJobTerminalStatuses } from '../constants/query';
+import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { CJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 
 describe('getJobRefetchInterval', () => {
   it('should return JOB_POLLING_INTERVAL_MS if status is undefined', () => {

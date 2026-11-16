@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { BadgeStatus, badgeStatus } from '@nemo/common/src/components/StatusBadge/badgeStatus';
+import { type BadgeStatus, badgeStatus } from '@nemo/common/src/components/StatusBadge/badgeStatus';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge/index';
 import * as customQueries from '@nemo/common/src/tests/customQueries';
 import { CheckCircle } from '@nemo/icons/icons';

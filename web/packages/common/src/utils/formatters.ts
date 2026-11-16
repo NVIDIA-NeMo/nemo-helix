@@ -18,61 +18,6 @@ export const getTextWithCount = (text: string, count: number, plural?: string) =
   return `${count} ${count !== 1 ? pluralForm : text}`;
 };
 
-/**
- * Truncates a long string of text to the length specified by `maxCharacters` by replacing a
- * section of the text with an ellipsis.
- *
- * @param text the text to truncate
- * @param maxCharacters the maximum number of characters (including 3 chars for ...)
- * @param mode specifies where to put the ellipses
- */
-export const truncateText = (
-  text: string,
-  maxCharacters: number,
-  mode: 'start' | 'middle' | 'end' = 'end'
-) => {
-  if (text.length <= maxCharacters) return text; // No truncation needed
-
-  const ellipsis = '...';
-  const charsToShow = maxCharacters - ellipsis.length;
-
-  if (charsToShow <= 0) return ellipsis; // Edge case: maxCharacters is too small to include text
-
-  switch (mode) {
-    case 'start': {
-      return `${ellipsis}${text.slice(-charsToShow)}`;
-    }
-    case 'middle': {
-      const half = Math.floor(charsToShow / 2);
-      return `${text.slice(0, half)}${ellipsis}${text.slice(-half)}`;
-    }
-    case 'end':
-    default: {
-      return `${text.slice(0, charsToShow)}${ellipsis}`;
-    }
-  }
-};
-
-/**
- * Converts an unknown value to a string. Useful when displaying unknown values in a UI.
- * @param value - The value to convert.
- * @returns A string representation of the value.
- */
-export const unknownToString = (value: unknown) => {
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint')
-    return value.toString();
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      // Fallback for circular structures or `toJSON` failures
-      return String(value);
-    }
-  }
-  return String(value);
-};
-
 import type { FinetuningType } from '@nemo/sdk/generated/platform/schema';
 
 /** Maps FinetuningType enum values to their correct display labels. */
@@ -136,13 +81,4 @@ export const toScientificNotation = (value: number) => {
 export const formatEvaluatorScore = (value: number | null | undefined): string => {
   if (value == null || !Number.isFinite(value)) return '-';
   return value.toFixed(3).replace(/\.?0+$/, '');
-};
-
-const COLORS = ['#76b900', '#9525c6', '#ef9100', '#d2308e', '#1dbba4'];
-/**
- * Returns a color array of length N using the secondary color palette from KUI. Repeats past 5 colors.
- * @param length - The length of the array.
- */
-export const getColorsFromLength = (length: number) => {
-  return Array.from({ length }, (_, index) => COLORS[index % COLORS.length]);
 };

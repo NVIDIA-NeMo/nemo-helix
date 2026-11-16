@@ -4,12 +4,12 @@
 import { IconError } from '@nemo/icons/icons';
 import {
   StatusMessage,
-  StatusMessageProps,
+  type StatusMessageProps,
   Flex,
   Stack,
   Button,
 } from '@nvidia/foundations-react-core';
-import { FC, ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
 export interface ErrorMessageProps {

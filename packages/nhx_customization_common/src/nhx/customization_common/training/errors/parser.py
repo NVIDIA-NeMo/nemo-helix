@@ -57,11 +57,14 @@ _SHUTDOWN_EXCEPTION_TYPES = {"CancelledError", "KeyboardInterrupt", "SystemExit"
 _SHUTDOWN_MESSAGES = ("sys.meta_path is None", "Python is likely shutting down")
 
 # Failures that some processes report without an exception line, or on a detail line under one, such
-# as Ray's memory monitor, a vLLM worker, NCCL, or torchrun's report of a worker killed by a signal. A
-# line with one of these becomes an exception named ``LogMessage``.
+# as Ray's memory monitor, a raylet that shut down because its agent died, a vLLM worker, NCCL, or
+# torchrun's report of a worker killed by a signal. A line with one of these becomes an exception
+# named ``LogMessage``.
 _FAILURE_LINE_RE = re.compile(
     r"CUDA out of memory|running low on memory|OOM killer|No space left on device|Disk quota exceeded"
     r"|Error while creating shared memory segment|Signal \d+ \(SIG[A-Z]+\) received by PID"
+    r"|runtime_env_agent failed and raylet fate-shares with it"
+    r"|dashboard_agent failed and raylet fate-shares with it"
 )
 LOG_MESSAGE_TYPE = "LogMessage"
 

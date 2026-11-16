@@ -28,7 +28,7 @@ from nemo_helix_plugin.openshell.types import (
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from openshell._proto import datamodel_pb2 as dm
 from openshell._proto import openshell_pb2 as pb
-from pydantic import JsonValue, SecretStr
+from pydantic import JsonValue
 
 from .authorization import authorize_secret_binding
 
@@ -119,8 +119,8 @@ class DeploymentProviderProvisioner:
         """Return provider names for the backend to attach, or renew attached providers.
 
         Initial calls create providers or reuse matching registrations. With
-        renew=True, Helix-managed renewal rechecks access and replaces credentials
-        using fresh signed requests; it never recreates a missing provider.
+        renew=True, Helix-managed renewal rechecks access and triggers credential
+        resolution through the existing handles; it never recreates a missing provider.
 
         Permission loss during renewal records revocation before detaching and
         deleting the affected provider. This removes service access, not the
@@ -242,21 +242,20 @@ class DeploymentProviderProvisioner:
             try:
                 for key, ref in binding.credentials.items():
                     secret_workspace, secret_name = parse_qualified_name(ref, default_workspace=workload_workspace)
-                    ticket = await self._issue_ticket(
-                        BindingScope(
-                            gateway_id=self.config.gateway_id,
-                            gateway_workspace=self.workspace,
-                            provider=name,
-                            credential_key=key,
-                            secret_workspace=secret_workspace,
-                            secret_name=secret_name,
-                            job_id=workload_id,
-                            principal_id=principal,
-                            workload=workload,
-                        ),
-                        requester_secrets=secrets_client,
+                    scope = BindingScope(
+                        gateway_id=self.config.gateway_id,
+                        gateway_workspace=self.workspace,
+                        provider=name,
+                        credential_key=key,
+                        secret_workspace=secret_workspace,
+                        secret_name=secret_name,
+                        job_id=workload_id,
+                        principal_id=principal,
+                        workload=workload,
                     )
-                    credentials[key] = ticket.get_secret_value()
+                    await self._authorize_binding(scope, requester_secrets=secrets_client)
+                    if not renew:
+                        credentials[key] = self.tickets.sign(scope).get_secret_value()
             except (PermissionError, PermissionDeniedError, NotFoundError):
                 if not renew or existing is None:
                     raise
@@ -273,6 +272,23 @@ class DeploymentProviderProvisioner:
                 await self._finish_revocation(name, workload_id)
                 revoked = True
                 continue
+            if renew:
+                # Preserve the gateway's optimistic-concurrency version and
+                # immutable provider identity. Never forward redacted values or
+                # caller-supplied handles from GetProvider back to UpdateProvider.
+                assert existing is not None
+                updated = dm.Provider()
+                updated.CopyFrom(existing.provider)
+                updated.credentials.clear()
+                updated.credential_handles.clear()
+                # Advancing the provider version refreshes resolved values
+                # without replacing the handles used by concurrent readers.
+                updated.config[_RENEWED] = str(self.clock())
+                await self.client.update_provider(
+                    pb.UpdateProviderRequest(workspace_scope=self._scope(), provider=updated)
+                )
+                names.append(name)
+                continue
             provider = dm.Provider(
                 metadata=dm.ObjectMeta(
                     name=name,
@@ -284,24 +300,6 @@ class DeploymentProviderProvisioner:
                 credentials=credentials,
                 config={_RENEWED: str(self.clock())},
             )
-            if renew:
-                # Preserve the gateway's optimistic-concurrency version and
-                # immutable provider identity. Never forward redacted values or
-                # caller-supplied handles from GetProvider back to UpdateProvider.
-                assert existing is not None
-                updated = dm.Provider()
-                updated.CopyFrom(existing.provider)
-                updated.credentials.clear()
-                updated.credential_handles.clear()
-                updated.credentials.update(credentials)
-                # Commit the renewal timestamp with the credentials so restarted
-                # controllers observe the last successful update.
-                updated.config[_RENEWED] = str(self.clock())
-                await self.client.update_provider(
-                    pb.UpdateProviderRequest(workspace_scope=self._scope(), provider=updated)
-                )
-                names.append(name)
-                continue
             try:
                 await self.client.create_provider(
                     pb.CreateProviderRequest(workspace_scope=self._scope(), provider=provider)
@@ -329,15 +327,14 @@ class DeploymentProviderProvisioner:
             raise ProviderAccessRevoked("Gateway provider access was removed. Start a new workload to restore access.")
         return names
 
-    async def _issue_ticket(self, scope: BindingScope, *, requester_secrets: AsyncSecretsClient) -> SecretStr:
-        """Check creator permission and secret metadata before signing the registration request."""
+    async def _authorize_binding(self, scope: BindingScope, *, requester_secrets: AsyncSecretsClient) -> None:
+        """Check creator permission and secret metadata before registration or renewal."""
         await authorize_secret_binding(
             workspace=scope.secret_workspace,
             name=scope.secret_name,
             principal_id=scope.principal_id,
             secrets_client=requester_secrets,
         )
-        return self.tickets.sign(scope)
 
     async def _finish_revocation(self, name: str, sandbox_name: str) -> None:
         """Detach the provider from the sandbox, then delete the provider from OpenShell."""

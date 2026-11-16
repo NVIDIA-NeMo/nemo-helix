@@ -25,7 +25,6 @@ from nemo_helix_plugin.authz import (
 )
 from nemo_helix_plugin.authz_discovery import (
     _derive_service_contribution,
-    _method_from_dict,
     clear_plugin_authz_cache,
     discover_plugin_authz,
 )
@@ -52,11 +51,10 @@ def _patch_services(monkeypatch: pytest.MonkeyPatch, entry_points: dict[str, _Fa
     monkeypatch.setattr("nemo_helix_plugin.discovery.discover_entry_points", lambda group: entry_points)
 
 
-def test_deny_field_round_trips_through_wire_format() -> None:
+def test_deny_field_survives_contract_serialization() -> None:
     contrib = AuthzContribution(endpoints={"/x": {"get": AuthzEndpointMethod(permissions=[], deny=True)}})
     serialized = contrib.to_dict()["endpoints"]["/x"]["get"]
     assert serialized["deny"] is True
-    assert _method_from_dict(serialized).deny is True
     # Absent deny defaults to False (and is omitted from the wire form).
     assert (
         "deny"
@@ -64,7 +62,6 @@ def test_deny_field_round_trips_through_wire_format() -> None:
             "endpoints"
         ]["/x"]["get"]
     )
-    assert _method_from_dict({"permissions": []}).deny is False
 
 
 def test_permissions_outside_service_namespace_fail_closed() -> None:

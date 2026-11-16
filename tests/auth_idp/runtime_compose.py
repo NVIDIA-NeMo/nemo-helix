@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Callable
 
 import httpx
+from httpx import post as http_post
 from nemo_helix_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
 from nemo_helix_plugin.client.client import NemoClient
 
@@ -83,7 +84,7 @@ class ComposeAuthIdpRuntime:
         assert self.workload_token_endpoint is not None
         assert self.provider.workload_provider_password_grant is not None
         workload_grant = self.provider.workload_provider_password_grant
-        response = httpx.post(
+        response = http_post(
             self.workload_token_endpoint,
             data={
                 "grant_type": TOKEN_EXCHANGE_GRANT_TYPE,

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
 import { ProgressSection } from '@studio/routes/SafeSynthesizerJobDetailsRoute/components/ProgressSection';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';

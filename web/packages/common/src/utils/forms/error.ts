@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { logger } from '@nemo/common/src/utils/logger';
-import { FieldErrors } from 'react-hook-form';
+import type { FieldErrors } from 'react-hook-form';
 
 /**
  * Use as a sane default for form errors.

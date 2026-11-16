@@ -78,6 +78,12 @@ from nemo_evals.gateway.usage import CallApi, TokenUsage, model_from_payload, us
             TokenUsage(uncached_input_tokens=10, cached_input_tokens=30, output_tokens=15),
             id="messages-stream",
         ),
+        pytest.param(
+            CallApi.SYSTEMONE,
+            [{"answers": {}, "usage": {"input_tokens": 121, "output_tokens": 1, "decision_positions": 1}}],
+            TokenUsage(uncached_input_tokens=121, output_tokens=1),
+            id="systemone-body",
+        ),
     ],
 )
 def test_usage_is_read_from_every_api_and_stream_shape(
@@ -133,6 +139,7 @@ def test_input_total_counts_every_class_once() -> None:
         ("v1/chat/completions", CallApi.CHAT_COMPLETIONS),
         ("/v1/responses", CallApi.RESPONSES),
         ("v1/messages", CallApi.MESSAGES),
+        ("v1/systemone", CallApi.SYSTEMONE),
         ("v1/embeddings", CallApi.OTHER),
     ],
 )

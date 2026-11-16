@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { asNonEmptyString } from '@nemo/common/src/utils/asString';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import type { RoutingStrategyId } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/formValues';
 import {
   downloadText,
   locateJobResultFiles,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
-import { isPlainObject } from '@studio/util/functions';
 import YAML from 'yaml';
 
 /** Written by the nemo-switchyard plugin's `switchyard` strategy beside one agent YAML per route. */
@@ -35,9 +36,6 @@ export interface SwitchyardResults {
   location: { workspace: string; fileset: string };
 }
 
-const asString = (value: unknown): string | undefined =>
-  typeof value === 'string' && value ? value : undefined;
-
 /** The index's `agent_config` is a file name beside the index itself. */
 const siblingPath = (indexPath: string, fileName: string): string => {
   const slash = indexPath.lastIndexOf('/');
@@ -56,18 +54,18 @@ export const parseSwitchyardIndex = (
   const combinations = Array.isArray(raw.combinations) ? raw.combinations : [];
   const routes = combinations.flatMap<SwitchyardRoute>((entry) => {
     if (!isPlainObject(entry)) return [];
-    const virtualModel = asString(entry.virtual_model);
-    const capable = asString(entry.capable);
-    const efficient = asString(entry.efficient);
+    const virtualModel = asNonEmptyString(entry.virtual_model);
+    const capable = asNonEmptyString(entry.capable);
+    const efficient = asNonEmptyString(entry.efficient);
     if (!virtualModel || !capable || !efficient) return [];
-    const agentConfig = asString(entry.agent_config);
+    const agentConfig = asNonEmptyString(entry.agent_config);
     return [
       {
         virtualModel,
-        configType: asString(entry.config_type) ?? 'random_routing',
+        configType: asNonEmptyString(entry.config_type) ?? 'random_routing',
         capable,
         efficient,
-        judge: asString(entry.judge) ?? null,
+        judge: asNonEmptyString(entry.judge) ?? null,
         config: isPlainObject(entry.config) ? entry.config : {},
         agentConfigPath: agentConfig ? siblingPath(indexPath, agentConfig) : undefined,
       },
@@ -75,8 +73,8 @@ export const parseSwitchyardIndex = (
   });
 
   return {
-    agent: asString(raw.agent) ?? '',
-    workspace: asString(raw.workspace) ?? fallbackWorkspace,
+    agent: asNonEmptyString(raw.agent) ?? '',
+    workspace: asNonEmptyString(raw.workspace) ?? fallbackWorkspace,
     routes,
     location,
   };

@@ -13,10 +13,53 @@ from nemo_deployments_plugin.entities import Deployment, Prerequisite, StatusEve
 from nemo_deployments_plugin.reconciler.deployment_reconciler import DeploymentReconciler
 from nemo_deployments_plugin.reconciler.orphan_cleanup import reconcile_orphans
 from nemo_deployments_plugin.types import DeploymentStatus
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding, ProviderAccessRevoked
 from reconciler.conftest import MockDeploymentBackend
 
 NO_VOLUMES: dict[tuple[str, str], Volume] = {}
+
+
+@pytest.mark.parametrize(
+    "status,error",
+    [
+        ("STARTING", RuntimeError),
+        ("STARTING", ProviderAccessRevoked),
+        ("READY", RuntimeError),
+        ("READY", ProviderAccessRevoked),
+        ("SUCCEEDED", RuntimeError),
+        ("FAILED", RuntimeError),
+    ],
+)
+async def test_provider_renewal_retries_without_recreating_workload(deployment_reconciler, mock_backend, status, error):
+    dep = make_deployment()
+    dep.status = "READY"
+    dep.with_auth_context(AuthContext(principal_id="user-1"))
+    cfg = make_deployment_config()
+    cfg.gateway_providers = {
+        "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "token"})
+    }
+    deployment_reconciler.set_config_cache({("default", "cfg1"): cfg})
+    mock_backend.supports_gateway_providers = True
+    mock_backend.read_status_result = BackendStatusUpdate(status=status)
+    mock_backend.renew_gateway_credentials = AsyncMock(side_effect=error("sensitive RPC detail"))
+    await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+    assert dep.status == status
+    assert not mock_backend.create_calls
+    if status in ("STARTING", "READY"):
+        args = mock_backend.renew_gateway_credentials.call_args.kwargs
+        assert args["workload"].id == dep.id
+        assert args["auth_context"].principal_id == "user-1"
+        assert ("access was removed" if error is ProviderAccessRevoked else "retrying") in dep.status_message
+        assert "sensitive" not in dep.status_message
+        mock_backend.renew_gateway_credentials.side_effect = None
+        mock_backend.read_status_result = BackendStatusUpdate(status="READY", status_message="running")
+        await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+        assert dep.status_message == "running"
+    else:
+        mock_backend.renew_gateway_credentials.assert_not_awaited()
+
 
 NOW = datetime(2026, 6, 30, 12, 0, 0, tzinfo=timezone.utc)
 STARTING_TIMEOUT_SECONDS = 60
@@ -417,7 +460,7 @@ async def test_desired_stopped_deletes(
     await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
 
     assert mock_backend.deployment_delete_calls == [("default", "dep1")]
-    mock_entities.delete.assert_awaited_once()
+    mock_entities.delete_by_id.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -430,17 +473,12 @@ async def test_desired_stopped_delete_conflict_is_handled_for_retry(
     dep.desired_state = "STOPPED"
     cfg = make_deployment_config()
     deployment_reconciler.set_config_cache({("default", "cfg1"): cfg})
-    mock_entities.delete.side_effect = NemoEntityConflictError("conflict")
+    mock_entities.delete_by_id.side_effect = NemoEntityConflictError("conflict")
 
     await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
 
     assert mock_backend.deployment_delete_calls == [("default", "dep1")]
-    mock_entities.delete.assert_awaited_once_with(
-        Deployment,
-        name="dep1",
-        workspace="default",
-        expected_db_version=dep.db_version,
-    )
+    mock_entities.delete_by_id.assert_awaited_once_with(Deployment, dep.id, expected_db_version=dep.db_version)
 
 
 @pytest.mark.asyncio
@@ -456,7 +494,7 @@ async def test_delete_proceeds_when_config_missing(
     await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
 
     assert mock_backend.deployment_delete_calls == [("default", "dep1")]
-    mock_entities.delete.assert_awaited_once()
+    mock_entities.delete_by_id.assert_awaited_once()
 
 
 def _deployment_stuck_deleting(*, elapsed_seconds: int) -> Deployment:
@@ -493,7 +531,7 @@ async def test_delete_retains_deleting_when_backend_returns_failed(
     await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
 
     assert dep.status == "DELETING"
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -522,7 +560,7 @@ async def test_delete_retry_surfaces_backend_reason_without_resetting_timeout(
     assert dep.status_message == "Waiting for backend to delete deployment: docker paused"
     assert dep.status_history == history
     mock_entities.update.assert_awaited_once()
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -553,12 +591,7 @@ async def test_delete_uses_db_version_from_deleting_save(
 
     await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
 
-    mock_entities.delete.assert_awaited_once_with(
-        Deployment,
-        name="dep1",
-        workspace="default",
-        expected_db_version=saved.db_version,
-    )
+    mock_entities.delete_by_id.assert_awaited_once_with(Deployment, saved.id, expected_db_version=saved.db_version)
 
 
 @pytest.mark.asyncio
@@ -575,7 +608,7 @@ async def test_delete_timeout_fails_at_boundary(
     assert dep.status == "FAILED"
     assert dep.error_details is not None
     assert dep.error_details["reason"] == "deleting_timeout"
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -599,7 +632,7 @@ async def test_delete_timeout_keeps_deleting_reason(
     assert dep.error_details["last_status_message"] == (
         "Waiting for backend to delete deployment: container still stopping"
     )
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -621,7 +654,7 @@ async def test_delete_timeout_failure_is_not_re_evaluated(
     await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
 
     mock_entities.update.assert_not_awaited()
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -642,7 +675,7 @@ async def test_delete_reopened_after_timeout_retries_backend(
     assert dep.status_history[-1].status == "DELETING"
     assert dep.status_history[-1].timestamp == NOW.isoformat()
     assert dep.error_details is None
-    mock_entities.delete.assert_awaited_once()
+    mock_entities.delete_by_id.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -655,10 +688,15 @@ async def test_delete_timeout_before_boundary_stays_deleting(
     dep = _deployment_stuck_deleting(elapsed_seconds=DELETING_TIMEOUT_SECONDS - 1)
     mock_backend.delete_status = BackendStatusUpdate(status="DELETING", status_message="still terminating")
 
+    original_history = list(dep.status_history)
     await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
 
     assert dep.status == "DELETING"
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
+    assert dep.error_details is None
+    assert dep.status_history == original_history
+    assert dep.status_message == "Waiting for backend to delete deployment: still terminating"
+    mock_entities.update.assert_awaited_once_with(dep)
 
 
 @pytest.mark.asyncio
@@ -677,7 +715,7 @@ async def test_delete_timeout_disabled_when_zero(
     await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
 
     assert dep.status == "DELETING"
-    mock_entities.delete.assert_awaited_once()
+    mock_entities.delete_by_id.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -693,7 +731,7 @@ async def test_delete_retains_deleting_when_backend_delete_fails(
     await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
 
     assert dep.status == "DELETING"
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1027,3 +1065,33 @@ async def test_succeeded_prerequisite_in_index_allows_create(
 
     assert server.status == "STARTING"
     assert len(mock_backend.create_calls) == 1
+
+
+@pytest.mark.parametrize("create_failed", [False, True])
+async def test_provider_cleanup_survives_restart_and_deletion_timeout(
+    patch_reconciler_now, mock_entities, mock_backend, create_failed
+):
+    dep = _deployment_stuck_deleting(elapsed_seconds=DELETING_TIMEOUT_SECONDS - 1)
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    mock_backend.delete_status = BackendStatusUpdate(
+        status="DELETING",
+        status_message="Retrying sandbox and provider cleanup.",
+        error_details={"reason": "provider_cleanup_pending"},
+    )
+    if create_failed:
+        dep.status = "PENDING"
+        dep.desired_state = "READY"
+        dep.status_history = []
+        mock_backend.create_deployment = AsyncMock(return_value=mock_backend.delete_status)
+    await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
+    mock_entities.update.assert_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
+    dep = Deployment.model_validate(dep.model_dump())
+    patch_reconciler_now.now.return_value = NOW + timedelta(seconds=DELETING_TIMEOUT_SECONDS * 2)
+    restarted = _starting_timeout_reconciler(mock_entities, mock_backend)
+    await _reconcile_stuck_deleting(restarted, mock_backend, dep)
+    assert dep.status == "DELETING"
+    mock_entities.delete_by_id.assert_not_awaited()
+    mock_backend.delete_status = BackendStatusUpdate(status="SUCCEEDED")
+    await _reconcile_stuck_deleting(restarted, mock_backend, dep)
+    mock_entities.delete_by_id.assert_awaited_once()

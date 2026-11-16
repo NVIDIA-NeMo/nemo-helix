@@ -3,10 +3,10 @@
 
 import {
   uploadModalReducer,
-  initialState,
-  UploadModalState,
+  uploadModalInitialState,
+  type UploadModalState,
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalReducer';
-import { UploadFile } from '@nemo/common/src/components/UploadModal/types';
+import type { UploadFile } from '@nemo/common/src/components/UploadModal/types';
 
 describe('uploadModalReducer', () => {
   describe('SET_FILES with auto-select', () => {
@@ -19,7 +19,7 @@ describe('uploadModalReducer', () => {
           file: { path: 'README.md', size: 1, file_ref: 'r' } as never,
         };
         const state: UploadModalState = {
-          ...initialState,
+          ...uploadModalInitialState,
           acceptableFileTypes: ['.json', '.jsonl', '.csv'],
           invalidFileMode,
         };
@@ -46,7 +46,7 @@ describe('uploadModalReducer', () => {
         file: new File(['content'], 'test.jsonl', { type: 'application/jsonl' }),
       };
 
-      const newState = uploadModalReducer(initialState, {
+      const newState = uploadModalReducer(uploadModalInitialState, {
         type: 'SET_FILES',
         payload: [mockFile],
       });
@@ -68,7 +68,7 @@ describe('uploadModalReducer', () => {
         file: new File(['content2'], 'test2.jsonl', { type: 'application/jsonl' }),
       };
 
-      const newState = uploadModalReducer(initialState, {
+      const newState = uploadModalReducer(uploadModalInitialState, {
         type: 'SET_FILES',
         payload: [mockFile1, mockFile2],
       });
@@ -79,7 +79,7 @@ describe('uploadModalReducer', () => {
 
     it('should NOT auto-select when allowMultipleFileSelection is true', () => {
       const stateWithMultiSelect: UploadModalState = {
-        ...initialState,
+        ...uploadModalInitialState,
         allowMultipleFileSelection: true,
       };
 
@@ -111,7 +111,7 @@ describe('uploadModalReducer', () => {
       };
 
       // First, add one file (should auto-select)
-      const stateWithOneFile = uploadModalReducer(initialState, {
+      const stateWithOneFile = uploadModalReducer(uploadModalInitialState, {
         type: 'SET_FILES',
         payload: [mockFile1],
       });
@@ -133,7 +133,7 @@ describe('uploadModalReducer', () => {
   describe('RESET action', () => {
     it('should preserve configuration props when resetting', () => {
       const customState: UploadModalState = {
-        ...initialState,
+        ...uploadModalInitialState,
         acceptableFileTypes: ['.jsonl', '.csv', '.parquet'],
         acceptableFileSize: 100 * 1024 * 1024,
         allowMultipleFileSelection: true,
@@ -170,7 +170,7 @@ describe('uploadModalReducer', () => {
   describe('SET_DATASET action', () => {
     it('should clear files and selectedFiles when setting a dataset', () => {
       const stateWithFiles: UploadModalState = {
-        ...initialState,
+        ...uploadModalInitialState,
         files: [
           {
             id: 'file1',
@@ -204,7 +204,7 @@ describe('uploadModalReducer', () => {
   describe('SET_FILES with auto-naming dataset', () => {
     it('should auto-set dataset name from first file when name is empty', () => {
       const stateWithNewDataset: UploadModalState = {
-        ...initialState,
+        ...uploadModalInitialState,
         dataset: {
           type: 'new',
           name: '',
@@ -231,7 +231,7 @@ describe('uploadModalReducer', () => {
 
     it('should NOT auto-set dataset name when name is already set', () => {
       const stateWithNamedDataset: UploadModalState = {
-        ...initialState,
+        ...uploadModalInitialState,
         dataset: {
           type: 'new',
           name: 'existing-name',
@@ -257,7 +257,7 @@ describe('uploadModalReducer', () => {
 
     it('should NOT auto-set dataset name when dataset type is existing', () => {
       const stateWithExistingDataset: UploadModalState = {
-        ...initialState,
+        ...uploadModalInitialState,
         dataset: {
           type: 'existing',
           dataset: {
@@ -307,7 +307,7 @@ describe('uploadModalReducer', () => {
 
     it('should NOT auto-set dataset name when files already exist', () => {
       const stateWithFilesAndDataset: UploadModalState = {
-        ...initialState,
+        ...uploadModalInitialState,
         dataset: {
           type: 'new',
           name: '',
@@ -341,7 +341,7 @@ describe('uploadModalReducer', () => {
 
     it('should handle files without extensions correctly', () => {
       const stateWithNewDataset: UploadModalState = {
-        ...initialState,
+        ...uploadModalInitialState,
         dataset: {
           type: 'new',
           name: '',

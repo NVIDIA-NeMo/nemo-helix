@@ -40,6 +40,7 @@ from nhx_evals_sdk.metrics.retrieval import (
 )
 from nhx_evals_sdk.metrics.rouge import ROUGEMetric
 from nhx_evals_sdk.metrics.runner_rewards import GymRewardMetric, HarborRewardMetric
+from nhx_evals_sdk.metrics.sequence_similarity import SequenceSimilarityMetric
 from nhx_evals_sdk.metrics.string_check import StringCheckMetric
 from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
 from nhx_evals_sdk.metrics.tunable_rag_evaluator import TunableRagEvaluatorMetric
@@ -58,6 +59,7 @@ MetricVariants: TypeAlias = (
     | RetrievalPrecisionMetric
     | RetrievalMAPMetric
     | ROUGEMetric
+    | SequenceSimilarityMetric
     | StringCheckMetric
     | ToolCallingMetric
     | TunableRagEvaluatorMetric

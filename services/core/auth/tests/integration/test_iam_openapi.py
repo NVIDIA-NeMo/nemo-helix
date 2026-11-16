@@ -45,6 +45,7 @@ class TestIAMOpenAPI:
         # Verify role binding schemas are present
         assert "RoleBinding" in schemas
         assert "RoleBindingInput" in schemas
+        assert schemas["RoleBindingInput"]["properties"]["principal"]["maxLength"] == 256
 
     def test_authz_error_schema_models_only_structured_400_detail(self, http_client: TestClient):
         headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}

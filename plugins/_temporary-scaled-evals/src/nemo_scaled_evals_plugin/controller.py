@@ -25,9 +25,9 @@ from nemo_scaled_evals_plugin.jobs.specs import BenchmarkArchiveBuildSpec, TaskI
 from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
 from nemo_scaled_evals_plugin.submitter import EvaluationSubmitter
 from scaled_evals.api import entity_store
-from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
+from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveWorkerRepository
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
-from scaled_evals.api.evaluation_store import EvaluationStore
+from scaled_evals.api.evaluation_store import EvaluationWorkerRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.api.task_store import TaskBuildJob, TaskStore
 from scaled_evals.dispatch.worker import Dispatcher, _retry_delay_seconds, teardown_orphaned_execution
@@ -246,7 +246,7 @@ class ScaledEvalsJobsController(NemoController):
         return await asyncio.to_thread(self._cleanup_execution)
 
     def _cleanup_execution(self) -> bool:
-        cleanup = EvaluationStore().claim_cleanup(
+        cleanup = EvaluationWorkerRepository().claim_cleanup(
             worker_id=self._worker_id, claim_timeout=CLEANUP_CLAIM_TIMEOUT_SECONDS
         )
         if cleanup is None:
@@ -296,13 +296,13 @@ class ScaledEvalsJobsController(NemoController):
                     await asyncio.to_thread(self._skip_benchmark_archive_attempt, row)
 
     def _list_claimable_benchmark_archives(self) -> list[dict[str, Any]]:
-        return BenchmarkArchiveStore().list_claimable(
+        return BenchmarkArchiveWorkerRepository().list_claimable(
             claim_timeout=Dispatcher.claim_timeout,
             limit=settings.platform_jobs_phase_batch_size,
         )
 
     def _skip_benchmark_archive_attempt(self, row: dict[str, Any]) -> None:
-        BenchmarkArchiveStore().skip_attempt(
+        BenchmarkArchiveWorkerRepository().skip_attempt(
             str(row["benchmark_run_id"]),
             generation=str(row["generation"]),
             attempts=int(row["attempts"]),
@@ -312,7 +312,7 @@ class ScaledEvalsJobsController(NemoController):
         return await asyncio.to_thread(self._cleanup_benchmark_archive)
 
     def _cleanup_benchmark_archive(self) -> bool:
-        run_id = BenchmarkArchiveStore().claim_cleanup(
+        run_id = BenchmarkArchiveWorkerRepository().claim_cleanup(
             interval_seconds=settings.benchmark_archive_cleanup_interval_seconds,
         )
         if run_id is None:
@@ -390,7 +390,7 @@ class ScaledEvalsJobsController(NemoController):
         )
 
     def _claim_stale_evaluation(self) -> dict[str, Any] | None:
-        return EvaluationStore().claim_stale_dispatch_job(
+        return EvaluationWorkerRepository().claim_stale_dispatch_job(
             stale_seconds=settings.dispatch_job_reconcile_stale_seconds,
             claim_timeout=TaskBuildWorker.claim_timeout,
             worker_id=self._worker_id,
@@ -399,7 +399,7 @@ class ScaledEvalsJobsController(NemoController):
     def _fail_evaluation_job(self, row: dict[str, Any], detail: str) -> None:
         evaluation_id = str(row["id"])
         execution_number = int(row["current_execution"])
-        EvaluationStore().record_dispatch_job_infrastructure_failure(
+        EvaluationWorkerRepository().record_dispatch_job_infrastructure_failure(
             evaluation_id,
             execution_number=execution_number,
             dispatch_job_name=str(row["dispatch_job_name"]),
@@ -410,11 +410,11 @@ class ScaledEvalsJobsController(NemoController):
         )
 
     def _list_cancelled_evaluations(self) -> list[dict[str, Any]]:
-        return EvaluationStore().list_cancelled_platform_jobs()
+        return EvaluationWorkerRepository().list_cancelled_platform_jobs()
 
     def _settle_cancel_teardown(self, row: dict[str, Any], job_name: str) -> None:
         """Terminalize teardown for a cancelled evaluation whose Job has ended."""
-        store = EvaluationStore()
+        store = EvaluationWorkerRepository()
         if row.get("backend_handle"):
             # The Job is gone, so no task will release the sandbox. Record the
             # failure rather than leaving the evaluation pending forever at the

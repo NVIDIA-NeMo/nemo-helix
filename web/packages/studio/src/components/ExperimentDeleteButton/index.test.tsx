@@ -36,7 +36,9 @@ it.each([false, true])(
           name: asMenu ? `More actions for experiment ${NAME}` : `Delete experiment ${NAME}`,
         })
       );
-      if (asMenu) await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+      if (asMenu) {
+        await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+      }
     };
     await openDelete();
     const dialog = await screen.findByRole('dialog');
@@ -57,6 +59,17 @@ it.each([false, true])(
     expect(navigate).not.toHaveBeenCalled();
   }
 );
+
+it('shows only Delete, styled as danger, in the menu', async () => {
+  render(<ExperimentDeleteButton workspace={DEFAULT_WORKSPACE} name={NAME} asMenu />);
+  await userEvent.click(
+    screen.getByRole('button', { name: `More actions for experiment ${NAME}` })
+  );
+
+  const items = await screen.findAllByTestId('quick-actions-menu-item');
+  expect(items.map((item) => item.textContent)).toEqual(['Delete']);
+  expect(items[0]).toHaveClass('nv-menu-item--danger');
+});
 
 it('surfaces deletion errors without navigating away', async () => {
   const deleted = vi.fn();

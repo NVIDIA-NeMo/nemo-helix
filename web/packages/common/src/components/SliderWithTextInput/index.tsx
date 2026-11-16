@@ -3,22 +3,22 @@
 
 import { toScientificNotation } from '@nemo/common/src/utils/formatters';
 import { clamp } from '@nemo/common/src/utils/math';
-import { InfoCircle, Retry } from '@nemo/icons/icons';
+import { InfoCircle, Reset } from '@nemo/icons/icons';
 import {
   Block,
   Button,
   Flex,
   FormField,
-  FormFieldProps,
+  type FormFieldProps,
   Slider,
   Stack,
   Text,
   TextInput,
-  TextInputProps,
+  type TextInputProps,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { ComponentProps, ReactNode, useState } from 'react';
-import { FieldValues } from 'react-hook-form';
+import { type ComponentProps, type ReactNode, useState } from 'react';
+import type { FieldValues } from 'react-hook-form';
 
 type SliderProps = ComponentProps<typeof Slider>;
 
@@ -26,6 +26,8 @@ export type SliderWithTextInputProps = {
   field: FieldValues;
   defaultValue?: number;
   unsetPlaceholder?: string;
+  /** Where the thumb rests while the field is unset, when that is not `defaultValue`. */
+  unsetValue?: number;
   max: number;
   min: number;
   step?: number;
@@ -47,6 +49,7 @@ export const SliderWithTextInput = ({
   field,
   defaultValue,
   unsetPlaceholder,
+  unsetValue,
   formFieldProps,
   max,
   min,
@@ -61,6 +64,10 @@ export const SliderWithTextInput = ({
   displayName,
 }: SliderWithTextInputProps) => {
   const [draftValue, setDraftValue] = useState<string | null>(null);
+  // Name the controls after the visible label (it is not tied to them), or displayName when it is not text.
+  const accessibleLabel =
+    (typeof formFieldProps?.slotLabel === 'string' ? formFieldProps.slotLabel : undefined) ||
+    displayName;
 
   const handleSliderChange = (newValue: number) => {
     const clampedValue = clamp(newValue, min, max);
@@ -85,22 +92,27 @@ export const SliderWithTextInput = ({
   const handleTextInputBlur = (event: React.FocusEvent<HTMLInputElement>) => {
     const rawValue = draftValue;
     setDraftValue(null);
+    const numberValue = rawValue === null || rawValue === '' ? NaN : parseFloat(rawValue);
+    if (!Number.isNaN(numberValue)) {
+      const clampedValue = clamp(numberValue, min, max);
+      if (clampedValue !== field.value) {
+        field.onChange(clampedValue);
+        attributes?.Slider?.onValueChange?.(clampedValue);
+      }
+    }
+    // After the clamp, so the handler reads the committed value.
     attributes?.TextInput?.onBlur?.(event);
-    if (rawValue === null || rawValue === '') return;
-    const numberValue = parseFloat(rawValue);
-    if (Number.isNaN(numberValue)) return;
-    const clampedValue = clamp(numberValue, min, max);
-    if (clampedValue === field.value) return;
-    field.onChange(clampedValue);
-    attributes?.Slider?.onValueChange?.(clampedValue);
   };
   const handleReset = () => {
     setDraftValue(null);
     field.onChange(defaultValue);
     // Nothing numeric to forward when the field resets to unset.
-    if (defaultValue !== undefined) attributes?.Slider?.onValueChange?.(defaultValue);
+    if (defaultValue !== undefined) {
+      attributes?.Slider?.onValueChange?.(defaultValue);
+      attributes?.Slider?.onValueCommit?.(defaultValue);
+    }
   };
-  const fallback = defaultValue ?? min;
+  const fallback = defaultValue ?? unsetValue ?? min;
   const isFieldValueNumber = typeof field.value === 'number' && !Number.isNaN(field.value);
   const safeFieldValue = isFieldValueNumber ? field.value : fallback;
   const textInputValue = draftValue ?? (isFieldValueNumber ? field.value.toString() : '');
@@ -158,7 +170,7 @@ export const SliderWithTextInput = ({
           disabled={disabled}
           stepPosition={showStepMarkers ? (attributes?.Slider?.stepPosition ?? 'end') : undefined}
           customSteps={attributes?.Slider?.customSteps ?? [min, max]}
-          aria-label="Controlled slider"
+          aria-label={accessibleLabel || 'Controlled slider'}
           stepFormatFn={attributes?.Slider?.stepFormatFn ?? toScientificNotation}
           {...attributes?.Slider}
           onValueChange={handleSliderChange}
@@ -182,7 +194,9 @@ export const SliderWithTextInput = ({
         onBlur={handleTextInputBlur}
         attributes={{
           Input: {
-            'aria-label': `${id || 'slider'}_text_input`,
+            'aria-label': accessibleLabel
+              ? `${accessibleLabel} value`
+              : `${id || 'slider'}_text_input`,
             className: 'text-center',
           },
         }}
@@ -192,13 +206,13 @@ export const SliderWithTextInput = ({
         <Button
           kind="tertiary"
           size="small"
-          aria-label={`Reset ${displayName || field.name} to default value`}
+          aria-label={`Reset ${accessibleLabel || field.name} to default value`}
           disabled={disabled}
           onClick={handleReset}
           className="shrink-0"
           type="button"
         >
-          <Retry />
+          <Reset />
         </Button>
       )}
       {slotEnd}

@@ -12,6 +12,7 @@ import tempfile
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
+from subprocess import run
 
 from evaluation.registry import Subject
 
@@ -84,7 +85,7 @@ def _aws(store: StateStore, *args: str, env: Mapping[str, str] | None = None) ->
     command_env.pop("AWS_SESSION_TOKEN", None)
     command_env.pop("AWS_SECURITY_TOKEN", None)
     try:
-        return subprocess.run(
+        return run(
             ["aws", "--endpoint-url", store.endpoint, "--region", store.region, *args],
             check=True,
             capture_output=True,

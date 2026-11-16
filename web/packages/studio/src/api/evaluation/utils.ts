@@ -1,13 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { asNonEmptyString } from '@nemo/common/src/utils/asString';
 import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
+import { agentNameForTarget } from '@studio/api/evaluation/agentTarget';
 import { type EvalRunOutcome, evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import {
   getAgentEvaluationDetailRoute,
   getEvaluationResultDetailsRoute,
 } from '@studio/routes/utils';
-import { isPlainObject } from '@studio/util/functions';
+import { asRecord } from '@studio/util/guards';
 
 export type EvalJobKind = 'task' | 'dataset';
 
@@ -26,32 +28,22 @@ export interface EvalJobRow {
   outcome: EvalRunOutcome | null;
 }
 
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  isPlainObject(value) ? value : undefined;
-
-const asNonEmptyString = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.length > 0 ? value : undefined;
-
 const specOf = (job: HelixJobResponse): Record<string, unknown> => job.spec ?? {};
 
 export const evalJobKind = (job: HelixJobResponse): EvalJobKind =>
   specOf(job).dataset !== undefined ? 'dataset' : 'task';
 
-const stripWorkspacePrefix = (name: string, workspace?: string): string => {
-  const prefix = workspace ? `${workspace}/` : '';
-  return prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name;
+const publishedAgentName = (job: HelixJobResponse): string | undefined => {
+  const intake = asRecord(asRecord(specOf(job).publication)?.intake);
+  const name = asNonEmptyString(intake?.agent_name);
+  const prefix = `${job.workspace}/`;
+  return name?.startsWith(prefix) ? name.slice(prefix.length) : name;
 };
 
-export const targetNameForEvalJob = (job: HelixJobResponse): string | null => {
-  const target = asRecord(specOf(job).target);
-  if (!target) return null;
-  const name =
-    target.kind === 'agent'
-      ? asNonEmptyString(asRecord(target.agent)?.name)
-      : asNonEmptyString(target.name);
-  if (!name) return null;
-  return stripWorkspacePrefix(name, job.workspace);
-};
+/** The agent a job's results publish under: an explicit ``publication.intake.agent_name`` first,
+ *  as the evaluator itself prefers it, else the registered agent its target names. */
+export const targetNameForEvalJob = (job: HelixJobResponse): string | null =>
+  publishedAgentName(job) ?? agentNameForTarget(specOf(job).target, job.workspace);
 
 export const evalJobConfigLabel = (job: HelixJobResponse): string | null => {
   const spec = specOf(job);
@@ -63,9 +55,6 @@ export const evalJobConfigLabel = (job: HelixJobResponse): string | null => {
   }
   return asNonEmptyString(asRecord(spec.benchmark)?.eval_config_fileset) ?? null;
 };
-
-export const hasMixedEvalKinds = (rows: EvalJobRow[]): boolean =>
-  new Set(rows.map((row) => row.kind)).size > 1;
 
 export const evalJobDetailRoute = (workspace: string, row: EvalJobRow): string =>
   row.kind === 'dataset'

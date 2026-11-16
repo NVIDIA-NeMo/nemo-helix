@@ -214,7 +214,7 @@ def test_run_failed_subprocess_skips_fileset_upload(tmp_path: Path, ctx: JobCont
     cpe = subprocess.CalledProcessError(returncode=2, cmd=["nat", "eval"])
     with (
         patch.object(EvaluateAgentJob, "_upload_to_fileset") as upload,
-        patch("nemo_agents_plugin.jobs.evaluate_agent.subprocess.run", side_effect=cpe),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.run", side_effect=cpe),
     ):
         result = EvaluateAgentJob().run(spec, ctx=ctx, sdk=sdk)
 
@@ -239,7 +239,7 @@ def test_run_subprocess_timeout_skips_fileset_upload(tmp_path: Path, ctx: JobCon
     timeout = subprocess.TimeoutExpired(cmd=["nat", "eval"], timeout=3600)
     with (
         patch.object(EvaluateAgentJob, "_upload_to_fileset") as upload,
-        patch("nemo_agents_plugin.jobs.evaluate_agent.subprocess.run", side_effect=timeout),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.run", side_effect=timeout),
     ):
         result = EvaluateAgentJob().run(spec, ctx=ctx, sdk=sdk)
 

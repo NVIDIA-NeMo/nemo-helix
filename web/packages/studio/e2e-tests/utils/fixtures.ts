@@ -5,12 +5,12 @@ import { DatasetsAPI } from '@e2e-tests/api/datasets';
 import { EvaluationsAPI } from '@e2e-tests/api/evaluations';
 import { ModelsAPI } from '@e2e-tests/api/models';
 import { WorkspacesAPI } from '@e2e-tests/api/workspaces';
-import {
+import type {
   CreateModelEntityRequest,
   ModelEntity,
   Workspace,
 } from '@nemo/sdk/generated/platform/schema';
-import { APIRequestContext } from '@playwright/test';
+import type { APIRequestContext } from '@playwright/test';
 
 /** Dataset shape for e2e fixtures. */
 type Dataset = { files_url?: string; name?: string; namespace?: string; [key: string]: unknown };

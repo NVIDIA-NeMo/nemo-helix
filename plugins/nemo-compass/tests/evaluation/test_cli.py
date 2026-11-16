@@ -610,7 +610,7 @@ def test_analyze_all_runs_every_pinned_analyzable_subject_in_sorted_order(
         runtime.mkdir(parents=True, exist_ok=True)
         (runtime / f"insights_{name}.yaml").write_text(f"insights: [{name}]\n", encoding="utf-8")
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "run", fake_run)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -670,7 +670,7 @@ def test_analyze_all_validates_every_pin_before_subprocess_execution(monkeypatch
     subjects["zeta"] = dataclasses.replace(subjects["zeta"], config={"workspace": "z"})
     calls: list[list[str]] = []
     monkeypatch.setattr(cli, "load_registry", lambda _path: subjects)
-    monkeypatch.setattr(cli.subprocess, "run", lambda command, *, check: calls.append(command))
+    monkeypatch.setattr(cli, "run", lambda command, *, check: calls.append(command))
     monkeypatch.setattr(sys, "argv", ["evaluation", "analyze", "all"])
 
     with pytest.raises(SystemExit, match="missing: zeta"):
@@ -701,7 +701,7 @@ def test_analyze_all_child_failure_leaves_checked_in_directory_unchanged(
         runtime.mkdir(parents=True, exist_ok=True)
         (runtime / f"insights_{name}.yaml").write_text("new alpha\n", encoding="utf-8")
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "run", fake_run)
     monkeypatch.setattr(sys, "argv", ["evaluation", "analyze", "all"])
 
     with pytest.raises(SystemExit, match="zeta failed with exit code 7"):
@@ -730,7 +730,7 @@ def test_analyze_all_missing_child_output_leaves_checked_in_directory_unchanged(
             runtime.mkdir(parents=True, exist_ok=True)
             (runtime / "insights_alpha.yaml").write_text("new alpha\n", encoding="utf-8")
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "run", fake_run)
     monkeypatch.setattr(sys, "argv", ["evaluation", "analyze", "all"])
 
     with pytest.raises(SystemExit, match="without Insights output for: zeta"):
@@ -764,7 +764,7 @@ def test_analyze_all_stale_output_cannot_mask_missing_child_output(
         if name == "alpha":
             (runtime / "insights_alpha.yaml").write_text("new alpha\n", encoding="utf-8")
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "run", fake_run)
     monkeypatch.setattr(sys, "argv", ["evaluation", "analyze", "all"])
 
     with pytest.raises(SystemExit, match="without Insights output for: zeta"):
@@ -791,7 +791,7 @@ def test_analyze_all_top_level_no_baseline_update_skips_promotion(monkeypatch, t
         runtime.mkdir(parents=True, exist_ok=True)
         (runtime / f"insights_{name}.yaml").write_text(f"new {name}\n", encoding="utf-8")
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "run", fake_run)
     monkeypatch.setattr(sys, "argv", ["evaluation", "analyze", "all", "--no-baseline-update"])
 
     cli.main()
@@ -822,7 +822,7 @@ def test_analyze_all_successfully_swaps_complete_set_and_removes_stale_yaml(
         runtime.mkdir(parents=True, exist_ok=True)
         (runtime / f"insights_{name}.yaml").write_text(f"insights: [{name}]\n", encoding="utf-8")
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "run", fake_run)
     monkeypatch.setattr(sys, "argv", ["evaluation", "analyze", "all"])
 
     cli.main()
@@ -878,8 +878,8 @@ def test_analyze_all_swap_failure_rolls_back_old_directory(
             raise OSError("simulated swap failure")
         real_replace(source, destination)
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
-    monkeypatch.setattr(cli.os, "replace", fail_staging_swap)
+    monkeypatch.setattr(cli, "run", fake_run)
+    monkeypatch.setattr(cli, "replace", fail_staging_swap)
     monkeypatch.setattr(sys, "argv", ["evaluation", "analyze", "all"])
 
     with pytest.raises(OSError, match="simulated swap failure"):
@@ -901,7 +901,7 @@ def test_analyze_all_swap_failure_rolls_back_old_directory(
 def test_analyze_all_rejects_incompatible_flags_before_execution(monkeypatch, flags):
     calls: list[list[str]] = []
     monkeypatch.setattr(cli, "load_registry", lambda _path: _analyze_all_subjects())
-    monkeypatch.setattr(cli.subprocess, "run", lambda command, *, check: calls.append(command))
+    monkeypatch.setattr(cli, "run", lambda command, *, check: calls.append(command))
     monkeypatch.setattr(sys, "argv", ["evaluation", "analyze", "all", *flags])
 
     with pytest.raises(SystemExit, match="cannot be combined"):
@@ -969,7 +969,7 @@ def test_load_dotenv_missing_file_is_noop(tmp_path, monkeypatch):
 
 def test_aws_cli_version(monkeypatch):
     result = subprocess.CompletedProcess([], 0, stdout="aws-cli/2.36.24 Python/3.13.11", stderr="")
-    monkeypatch.setattr(cli.subprocess, "run", lambda *args, **kwargs: result)
+    monkeypatch.setattr(cli, "run", lambda *args, **kwargs: result)
     assert cli._aws_cli_version("/usr/bin/aws") == (2, 36, 24)
 
 
@@ -983,14 +983,14 @@ def test_aws_cli_version_probe_failure(monkeypatch, failure):
             raise failure
         return failure
 
-    monkeypatch.setattr(cli.subprocess, "run", fail)
+    monkeypatch.setattr(cli, "run", fail)
     assert cli._aws_cli_version("/usr/bin/aws") is None
 
 
 def test_doctor_ready(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr("evaluation.adapters.IntakeAdapter.check", lambda self: [])
-    monkeypatch.setattr(cli.shutil, "which", lambda _name: "/usr/bin/aws")
+    monkeypatch.setattr(cli, "which", lambda _name: "/usr/bin/aws")
     monkeypatch.setattr(cli, "_aws_cli_version", lambda _executable: (2, 33, 0))
     monkeypatch.setenv(cli.release.ACCESS_KEY_ENV, "team-test")
     monkeypatch.setenv(cli.release.SECRET_KEY_ENV, "secret")
@@ -1007,7 +1007,7 @@ def test_doctor_flags_missing_aws(monkeypatch, capsys):
     """Pinned/--state analyze shells out to AWS CLI; doctor must flag its absence."""
     monkeypatch.setattr(cli, "_load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr("evaluation.adapters.IntakeAdapter.check", lambda self: [])
-    monkeypatch.setattr(cli.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(cli, "which", lambda _name: None)
     monkeypatch.setenv(cli.release.ACCESS_KEY_ENV, "team-test")
     monkeypatch.setenv(cli.release.SECRET_KEY_ENV, "secret")
     monkeypatch.setattr(sys, "argv", ["evaluation", "doctor", "nvq"])
@@ -1023,7 +1023,7 @@ def test_doctor_flags_missing_aws(monkeypatch, capsys):
 )
 def test_doctor_flags_unsupported_aws(monkeypatch, capsys, version, message):
     monkeypatch.setattr("evaluation.adapters.IntakeAdapter.check", lambda self: [])
-    monkeypatch.setattr(cli.shutil, "which", lambda _name: "/usr/bin/aws")
+    monkeypatch.setattr(cli, "which", lambda _name: "/usr/bin/aws")
     monkeypatch.setattr(cli, "_aws_cli_version", lambda _executable: version)
     monkeypatch.setenv(cli.release.ACCESS_KEY_ENV, "team-test")
     monkeypatch.setenv(cli.release.SECRET_KEY_ENV, "secret")

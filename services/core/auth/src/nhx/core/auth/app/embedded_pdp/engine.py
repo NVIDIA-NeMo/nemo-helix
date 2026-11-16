@@ -9,6 +9,7 @@ import threading
 from functools import cache
 from typing import Any, Dict, List, Optional, cast
 
+from nemo_helix_plugin.authz_format import validate_static_authz_data
 from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm
 from nhx.core.auth.app.scope_families import with_scope_families
 from wasmtime import Config, Engine, Func, FuncType, Instance, Limits, Memory, MemoryType, Module, Store, ValType
@@ -122,6 +123,7 @@ class OPAPolicy:
     def set_data(self, data: Dict[str, Any]) -> None:
         """Set the base data document."""
         self._assert_owner_thread()
+        validate_static_authz_data(data)
         self.store.set_fuel(DATA_LOADING_FUEL)
         self._export_func("opa_heap_ptr_set")(self.store, self._base_heap)
         self._data_addr = self._write_json(data)
@@ -217,8 +219,13 @@ class _PolicyRuntimeManager:
             if generation == self._generation_snapshot():
                 return policy
 
+    def has_data(self) -> bool:
+        """Return whether any policy data has been loaded."""
+        return self._data_snapshot()[2]
+
     def set_data(self, data: Dict[str, Any]) -> None:
         """Set policy data (principals, roles, etc.)."""
+        validate_static_authz_data(data)
         with self._lock:
             self._data = data
             self._data_loaded = True
@@ -256,6 +263,11 @@ def get_policy() -> OPAPolicy:
 def set_policy_data(data: Dict[str, Any]) -> None:
     """Set policy data (principals, roles, etc.), deriving ``authz.scope_families`` for scopes.rego."""
     _policy_runtime.set_data(with_scope_families(data))
+
+
+def has_policy_data() -> bool:
+    """Return whether the embedded PDP already holds a policy document."""
+    return _policy_runtime.has_data()
 
 
 def reload_policy() -> None:

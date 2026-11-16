@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Robot, ChartPerformance, Cog, Upload } from '@nemo/icons/icons';
+import { Robot, PerformanceMedium, Cog, Upload } from '@nemo/icons/icons';
 import { Grid } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
 import { DashboardPanel } from '@studio/routes/WorkspaceDashboardRoute/DashboardPanel';
@@ -31,7 +31,7 @@ export const Default: Story = {
     description: 'Register an agent you already run and route it through the gateway.',
     actions: [
       { icon: <Upload size="14" />, label: 'Upload an Agent', href: '#' },
-      { icon: <ChartPerformance size="14" />, label: 'Evaluate Performance', href: '#' },
+      { icon: <PerformanceMedium size="14" />, label: 'Evaluate Performance', href: '#' },
       { icon: <Cog size="14" />, label: 'Optimize', href: '#' },
     ],
   },
@@ -55,7 +55,7 @@ export const ManyActions: Story = {
     description: 'An arbitrary number of quick actions can be attached to a card.',
     actions: [
       { icon: <Upload size="14" />, label: 'Upload an Agent', href: '#' },
-      { icon: <ChartPerformance size="14" />, label: 'Evaluate Performance', href: '#' },
+      { icon: <PerformanceMedium size="14" />, label: 'Evaluate Performance', href: '#' },
       { icon: <Cog size="14" />, label: 'Optimize', href: '#' },
       { icon: <Robot size="14" />, label: 'Deploy', href: '#' },
       { icon: <Upload size="14" />, label: 'Publish', href: '#' },
@@ -72,7 +72,7 @@ export const LongContent: Story = {
       'This is a very long description that tests how the card handles overflow across multiple lines while keeping the actions aligned to the bottom.',
     actions: [
       { icon: <Upload size="14" />, label: 'Upload an Agent', href: '#' },
-      { icon: <ChartPerformance size="14" />, label: 'Evaluate Performance', href: '#' },
+      { icon: <PerformanceMedium size="14" />, label: 'Evaluate Performance', href: '#' },
       { icon: <Cog size="14" />, label: 'Optimize', href: '#' },
     ],
   },

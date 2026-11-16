@@ -23,8 +23,9 @@ pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from scaled_evals.api.config_profile_store import ConfigProfileStore
-from scaled_evals.api.db import Database, get_stream_database_factory
-from scaled_evals.api.evaluation_store import EvaluationStore
+from scaled_evals.api.db import RequestDatabase, get_request_stream_database_factory
+from scaled_evals.api.evaluation_store import EvaluationRequestRepository, EvaluationWorkerRepository
+from scaled_evals.api.resource_access import INTERNAL_ACCESS
 from scaled_evals.api.routers import evaluations as evaluations_router
 from scaled_evals.api.runnability import caller_secret_readable
 from scaled_evals.api.schemas.common import decode_cursor
@@ -125,12 +126,14 @@ def _stream_polls(monkeypatch: pytest.MonkeyPatch, batches: list[list[dict]], st
     """Store the evaluation and serve one event batch, and one status, per SSE poll."""
     _seed(_eval_row())
     batch, status = iter(batches), iter(statuses)
-    monkeypatch.setattr(EvaluationStore, "load_event_batch", lambda _self, *_args, **_kwargs: next(batch, []))
-    monkeypatch.setattr(EvaluationStore, "load_stream_status", lambda _self, _id: next(status, "running"))
+    monkeypatch.setattr(
+        EvaluationRequestRepository, "load_event_batch", lambda _self, *_args, **_kwargs: next(batch, [])
+    )
+    monkeypatch.setattr(EvaluationRequestRepository, "load_stream_status", lambda _self, _id: next(status, "running"))
 
 
 def _loaded(evaluation_id: str) -> dict:
-    row = EvaluationStore().load_for_dispatch(evaluation_id)
+    row = EvaluationWorkerRepository().load_for_dispatch(evaluation_id)
     assert row is not None
     return row
 
@@ -172,7 +175,7 @@ def _sse_events(text: str) -> list[dict]:
 def _cleanup_overrides() -> Iterator[None]:
     evaluations_router._sse_active_connections = 0
     yield
-    v1.dependency_overrides.pop(get_stream_database_factory, None)
+    v1.dependency_overrides.pop(get_request_stream_database_factory, None)
     evaluations_router._sse_active_connections = 0
 
 
@@ -209,7 +212,7 @@ def _disable_dispatch_artifact_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _stub_execution_snapshot(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
-        EvaluationStore,
+        EvaluationRequestRepository,
         "_capture_execution_snapshot",
         MagicMock(
             return_value={
@@ -1040,7 +1043,7 @@ def test_retry_queues_next_execution_on_same_benchmark_member() -> None:
     assert body["status"] == "queued"
     assert body["current_execution"] == 2
     assert body["links"]["retry"] == "/evaluations/ev_test123/retry"
-    events = EvaluationStore().list_events("ev_test123", limit=10, cursor=None, offset=0)
+    events = EvaluationWorkerRepository().list_events("ev_test123", limit=10, cursor=None, offset=0)
     assert [(event["type"], event["status"]) for event in events] == [("retry", "queued")]
 
 
@@ -1476,17 +1479,17 @@ def test_events_stream_releases_database_between_polls(monkeypatch) -> None:  # 
     checkouts = 0
 
     @contextmanager
-    def stream_db() -> Iterator[Database]:
+    def stream_db() -> Iterator[RequestDatabase]:
         nonlocal active, checkouts
         assert active == 0, "an SSE poll retained its previous database checkout"
         active += 1
         checkouts += 1
         try:
-            yield Database()
+            yield RequestDatabase(INTERNAL_ACCESS)
         finally:
             active -= 1
 
-    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    v1.dependency_overrides[get_request_stream_database_factory] = lambda: stream_db
 
     response = client.get("/v1/evaluations/ev_test123/events/stream")
 
@@ -1560,11 +1563,11 @@ def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
     checkout_active = False
 
     @contextmanager
-    def stream_db() -> Iterator[Database]:
+    def stream_db() -> Iterator[RequestDatabase]:
         nonlocal checkout_active
         checkout_active = True
         try:
-            yield Database()
+            yield RequestDatabase(INTERNAL_ACCESS)
         finally:
             checkout_active = False
 
@@ -1572,7 +1575,7 @@ def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
         assert not checkout_active, "artifact download retained its database checkout"
         yield b"artifact content"
 
-    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    v1.dependency_overrides[get_request_stream_database_factory] = lambda: stream_db
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.stream_object", stream_object)
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: True)
 
@@ -1589,10 +1592,10 @@ def test_get_artifact_missing_object_returns_404(monkeypatch) -> None:  # noqa: 
     _seed(_eval_row())
 
     @contextmanager
-    def stream_db() -> Iterator[Database]:
-        yield Database()
+    def stream_db() -> Iterator[RequestDatabase]:
+        yield RequestDatabase(INTERNAL_ACCESS)
 
-    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    v1.dependency_overrides[get_request_stream_database_factory] = lambda: stream_db
     # The object does not exist in the backing Files store; the route must map that
     # to a clean 404 up front rather than a 200 with a stream that fails mid-iteration.
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: False)

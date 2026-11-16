@@ -13,7 +13,7 @@ Covers:
 - Proxy by agent name resolves the active deployment endpoint
 - Proxy by deployment name targets the deployment directly
 
-Mocking strategy: patch ``httpx.AsyncClient`` so tests run with no real network.
+Mocking strategy: patch the gateway module's ``AsyncClient`` so tests run with no real network.
 The mock replicates the async-context-manager chain::
 
     async with httpx.AsyncClient(...) as client:
@@ -49,6 +49,8 @@ from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 
 OWNER_PRINCIPAL_ID = "session-owner"
+SESSION_ID = "agent-session-RFppQd3GgwudZJeKDx5t8K"
+SESSION_UUID = "c46d3588-d205-497f-b96b-37f938263064"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -209,7 +211,7 @@ class TestProxyByDeploymentName:
         upstream_body = b'{"answer": 42}'
         httpx_mock = _make_httpx_mock(200, upstream_body, "application/json")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={"messages": [{"role": "user", "content": "hi"}]},
@@ -217,6 +219,7 @@ class TestProxyByDeploymentName:
 
         assert resp.status_code == 200
         assert resp.content == upstream_body
+        assert SESSION_ID_HEADER not in resp.headers
 
     def test_5xx_from_agent_becomes_502(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         """Agent 5xx responses must be translated to 502 Bad Gateway."""
@@ -226,7 +229,7 @@ class TestProxyByDeploymentName:
         error_body = b"Internal server error in agent"
         httpx_mock = _make_httpx_mock(500, error_body)
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={"messages": []},
@@ -242,7 +245,7 @@ class TestProxyByDeploymentName:
 
         httpx_mock = _make_httpx_mock(503, b"Service Unavailable")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -257,7 +260,7 @@ class TestProxyByDeploymentName:
 
         httpx_mock = _make_httpx_mock(422, b'{"detail": "invalid input"}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -272,7 +275,7 @@ class TestProxyByDeploymentName:
 
         httpx_mock = _make_httpx_mock(204, b"")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -286,7 +289,7 @@ class TestProxyByDeploymentName:
 
         httpx_mock = _make_httpx_mock(200, b"data: hello\n\n", "text/event-stream")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.get(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/stream",
             )
@@ -303,7 +306,7 @@ class TestProxyByDeploymentName:
             response_headers={SESSION_ID_HEADER: "runtime-session-1"},
         )
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -321,7 +324,7 @@ class TestProxyByDeploymentName:
         client_cm.__aenter__ = AsyncMock(side_effect=httpx.ConnectError("refused"))
         client_cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=client_cm):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=client_cm):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -400,7 +403,7 @@ class TestProxyByAgentName:
 
         httpx_mock = _make_httpx_mock(200, b'{"ok": true}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
                 json={"messages": []},
@@ -442,7 +445,7 @@ class TestProxyByAgentName:
 
         httpx_mock = _make_httpx_mock(500, b"agent crashed")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
                 json={},
@@ -464,14 +467,16 @@ class TestSessionAwareRouting:
             ("text/event-stream", b"data: done\n\n"),
         ],
     )
+    @pytest.mark.parametrize("header_session_id", [SESSION_ID, SESSION_UUID])
     def test_persists_session_activity_at_proxy_start_and_finish(
         self,
+        header_session_id: str,
         content_type: str,
         body: bytes,
         client: TestClient,
         mock_entity_client: AsyncMock,
     ) -> None:
-        session = _make_session(session_id="session-1", deployment_id="deployment-1")
+        session = _make_session(session_id=SESSION_ID, deployment_id="deployment-1")
         deployment = _make_deployment(deployment_id="deployment-1")
         mock_entity_client.find_one = AsyncMock(side_effect=[session, deployment])
         updates: list[AgentSession] = []
@@ -485,27 +490,33 @@ class TestSessionAwareRouting:
             datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
             datetime(2026, 8, 25, 12, 5, tzinfo=UTC),
         ]
-        httpx_mock = _make_httpx_mock(200, body, content_type)
+        httpx_mock = _make_httpx_mock(200, body, content_type, response_headers={SESSION_ID_HEADER: SESSION_ID})
 
         with (
             patch.object(gateway_module, "_utc_now", side_effect=timestamps),
-            patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock),
+            patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock),
         ):
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-                headers={SESSION_ID_HEADER: "session-1"},
+                headers={SESSION_ID_HEADER: header_session_id},
                 json={"stream": content_type == "text/event-stream"},
             )
 
         assert response.status_code == 200
+        assert response.headers.get_list(SESSION_ID_HEADER) == [SESSION_UUID]
+        stream_call = httpx_mock.__aenter__.return_value.stream.call_args
+        assert stream_call.kwargs["headers"][SESSION_ID_HEADER] == SESSION_ID
         assert [update.first_active_at for update in updates] == [timestamps[0], timestamps[0]]
         assert [update.last_active_at for update in updates] == timestamps
         assert [update.expires_at for update in updates] == [
             timestamp + timedelta(seconds=30 * 60) for timestamp in timestamps
         ]
 
-    def test_agent_route_uses_session_bound_deployment(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
-        session = _make_session(session_id="session-2", deployment_id="deployment-2")
+    @pytest.mark.parametrize("header_session_id", [SESSION_ID, SESSION_UUID])
+    def test_agent_route_uses_session_bound_deployment(
+        self, header_session_id: str, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        session = _make_session(session_id=SESSION_ID, deployment_id="deployment-2")
         bound_deployment = _make_deployment(
             name="calc-v2",
             agent="calc",
@@ -515,19 +526,20 @@ class TestSessionAwareRouting:
         mock_entity_client.find_one = AsyncMock(side_effect=[session, bound_deployment])
         httpx_mock = _make_httpx_mock(200, b'{"ok": true}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-                headers={SESSION_ID_HEADER: "session-2"},
+                headers={SESSION_ID_HEADER: header_session_id},
                 json={"messages": []},
             )
 
         assert resp.status_code == 200
+        assert resp.headers[SESSION_ID_HEADER] == SESSION_UUID
         assert mock_entity_client.find_one.await_args_list == [
             call(
                 AgentSession,
                 workspace="default",
-                filter_obj={"id": "session-2", "created_by": OWNER_PRINCIPAL_ID},
+                filter_obj={"id": SESSION_ID, "created_by": OWNER_PRINCIPAL_ID},
             ),
             call(AgentDeployment, workspace="default", filter_obj={"id": "deployment-2"}),
         ]
@@ -535,14 +547,14 @@ class TestSessionAwareRouting:
         mock_entity_client.list.assert_not_awaited()
         stream_call = httpx_mock.__aenter__.return_value.stream.call_args
         assert stream_call.kwargs["url"] == "http://localhost:9002/v1/chat/completions"
-        assert stream_call.kwargs["headers"][SESSION_ID_HEADER] == "session-2"
+        assert stream_call.kwargs["headers"][SESSION_ID_HEADER] == SESSION_ID
 
     def test_noauth_route_resolves_service_owned_session_without_owner_filter(
         self, client: TestClient, test_app: FastAPI, mock_entity_client: AsyncMock
     ) -> None:
         test_app.dependency_overrides[get_effective_principal_id] = lambda: ""
         session = _make_session(
-            session_id="session-2",
+            session_id=SESSION_ID,
             deployment_id="deployment-2",
             created_by="service:platform",
         )
@@ -555,10 +567,10 @@ class TestSessionAwareRouting:
         mock_entity_client.find_one = AsyncMock(side_effect=[session, bound_deployment])
         httpx_mock = _make_httpx_mock(200, b'{"ok": true}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-                headers={SESSION_ID_HEADER: "session-2"},
+                headers={SESSION_ID_HEADER: SESSION_ID},
                 json={"messages": []},
             )
 
@@ -566,7 +578,7 @@ class TestSessionAwareRouting:
         assert mock_entity_client.find_one.await_args_list[0] == call(
             AgentSession,
             workspace="default",
-            filter_obj={"id": "session-2"},
+            filter_obj={"id": SESSION_ID},
         )
 
     def test_retries_start_activity_once_after_optimistic_conflict(
@@ -574,9 +586,9 @@ class TestSessionAwareRouting:
         client: TestClient,
         mock_entity_client: AsyncMock,
     ) -> None:
-        session = _make_session(session_id="session-1", deployment_id="deployment-1")
+        session = _make_session(session_id=SESSION_ID, deployment_id="deployment-1")
         deployment = _make_deployment(deployment_id="deployment-1")
-        refreshed = _make_session(session_id="session-1", deployment_id="deployment-1")
+        refreshed = _make_session(session_id=SESSION_ID, deployment_id="deployment-1")
         mock_entity_client.find_one = AsyncMock(side_effect=[session, deployment])
         mock_entity_client.get_by_id = AsyncMock(return_value=refreshed)
         update_count = 0
@@ -591,16 +603,16 @@ class TestSessionAwareRouting:
         mock_entity_client.update.side_effect = update
         httpx_mock = _make_httpx_mock(200, b'{"ok": true}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-                headers={SESSION_ID_HEADER: "session-1"},
+                headers={SESSION_ID_HEADER: SESSION_ID},
                 json={},
             )
 
         assert response.status_code == 200
         assert update_count == 3
-        mock_entity_client.get_by_id.assert_awaited_once_with(AgentSession, "session-1")
+        mock_entity_client.get_by_id.assert_awaited_once_with(AgentSession, SESSION_ID)
 
     def test_due_session_wins_start_activity_conflict(
         self,
@@ -623,7 +635,7 @@ class TestSessionAwareRouting:
                 "_utc_now",
                 side_effect=[activity_at - timedelta(seconds=1), activity_at],
             ),
-            patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient") as httpx_client,
+            patch("nemo_agents_plugin.api.v2.gateway.AsyncClient") as httpx_client,
         ):
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
@@ -653,7 +665,7 @@ class TestSessionAwareRouting:
         mock_entity_client.update.side_effect = NemoEntityConflictError("conflict")
         mock_entity_client.get_by_id = AsyncMock(return_value=closed)
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient") as httpx_client:
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient") as httpx_client:
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
                 headers={SESSION_ID_HEADER: "session-1"},
@@ -674,7 +686,7 @@ class TestSessionAwareRouting:
         mock_entity_client.find_one = AsyncMock(side_effect=[session, deployment])
         mock_entity_client.update.side_effect = RuntimeError("entity store unavailable")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient") as httpx_client:
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient") as httpx_client:
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
                 headers={SESSION_ID_HEADER: "session-1"},
@@ -690,7 +702,7 @@ class TestSessionAwareRouting:
         client: TestClient,
         mock_entity_client: AsyncMock,
     ) -> None:
-        session = _make_session(session_id="session-1", deployment_id="deployment-1")
+        session = _make_session(session_id=SESSION_ID, deployment_id="deployment-1")
         deployment = _make_deployment(deployment_id="deployment-1")
         mock_entity_client.find_one = AsyncMock(side_effect=[session, deployment])
         update_count = 0
@@ -705,10 +717,10 @@ class TestSessionAwareRouting:
         mock_entity_client.update.side_effect = update
         httpx_mock = _make_httpx_mock(200, b'{"ok": true}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-                headers={SESSION_ID_HEADER: "session-1"},
+                headers={SESSION_ID_HEADER: SESSION_ID},
                 json={},
             )
 
@@ -728,7 +740,7 @@ class TestSessionAwareRouting:
         client_context.__aenter__ = AsyncMock(side_effect=httpx.ConnectError("refused"))
         client_context.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=client_context):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=client_context):
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
                 headers={SESSION_ID_HEADER: "session-1"},
@@ -760,30 +772,32 @@ class TestSessionAwareRouting:
         assert updated.expires_at == expires_at
         mock_entity_client.update.assert_not_awaited()
 
+    @pytest.mark.parametrize("header_session_id", [SESSION_ID, SESSION_UUID])
     def test_direct_route_accepts_session_for_same_deployment(
-        self, client: TestClient, mock_entity_client: AsyncMock
+        self, header_session_id: str, client: TestClient, mock_entity_client: AsyncMock
     ) -> None:
         deployment = _make_deployment(deployment_id="deployment-1")
-        session = _make_session(session_id="session-1", deployment_id="deployment-1")
+        session = _make_session(session_id=SESSION_ID, deployment_id="deployment-1")
         mock_entity_client.get = AsyncMock(return_value=deployment)
         mock_entity_client.find_one = AsyncMock(return_value=session)
         httpx_mock = _make_httpx_mock(200, b'{"ok": true}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
-                headers={SESSION_ID_HEADER: "session-1"},
+                headers={SESSION_ID_HEADER: header_session_id},
                 json={"messages": []},
             )
 
         assert resp.status_code == 200
+        assert resp.headers[SESSION_ID_HEADER] == SESSION_UUID
         mock_entity_client.find_one.assert_awaited_once_with(
             AgentSession,
             workspace="default",
-            filter_obj={"id": "session-1", "created_by": OWNER_PRINCIPAL_ID},
+            filter_obj={"id": SESSION_ID, "created_by": OWNER_PRINCIPAL_ID},
         )
         stream_call = httpx_mock.__aenter__.return_value.stream.call_args
-        assert stream_call.kwargs["headers"][SESSION_ID_HEADER] == "session-1"
+        assert stream_call.kwargs["headers"][SESSION_ID_HEADER] == SESSION_ID
 
     def test_unknown_session_returns_404(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.find_one = AsyncMock(side_effect=NemoEntityNotFoundError("not found"))
@@ -799,12 +813,15 @@ class TestSessionAwareRouting:
         mock_entity_client.get.assert_not_awaited()
         mock_entity_client.list.assert_not_awaited()
 
-    def test_cross_workspace_session_returns_404(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
-        mock_entity_client.find_one = AsyncMock(return_value=_make_session(session_id="session-1", workspace="other"))
+    @pytest.mark.parametrize("header_session_id", [SESSION_ID, SESSION_UUID])
+    def test_cross_workspace_session_returns_404(
+        self, header_session_id: str, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        mock_entity_client.find_one = AsyncMock(return_value=_make_session(session_id=SESSION_ID, workspace="other"))
 
         resp = client.post(
             "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-            headers={SESSION_ID_HEADER: "session-1"},
+            headers={SESSION_ID_HEADER: header_session_id},
             json={},
         )
 
@@ -819,8 +836,10 @@ class TestSessionAwareRouting:
             ("POST", "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/invoke"),
         ],
     )
+    @pytest.mark.parametrize("header_session_id", [SESSION_ID, SESSION_UUID])
     def test_foreign_owned_session_returns_404_on_every_gateway_route(
         self,
+        header_session_id: str,
         client: TestClient,
         mock_entity_client: AsyncMock,
         method: str,
@@ -828,44 +847,48 @@ class TestSessionAwareRouting:
     ) -> None:
         mock_entity_client.get = AsyncMock(return_value=_make_deployment(deployment_id="deployment-id"))
         mock_entity_client.find_one = AsyncMock(
-            return_value=_make_session(session_id="session-1", created_by="other-principal")
+            return_value=_make_session(session_id=SESSION_ID, created_by="other-principal")
         )
 
         resp = client.request(
             method,
             path,
-            headers={SESSION_ID_HEADER: "session-1"},
+            headers={SESSION_ID_HEADER: header_session_id},
             json={} if method == "POST" else None,
         )
 
         assert resp.status_code == 404
-        assert resp.json()["detail"] == "Session ID 'session-1' not found in workspace 'default'."
+        assert resp.json()["detail"] == f"Session ID '{SESSION_ID}' not found in workspace 'default'."
         mock_entity_client.find_one.assert_awaited_once_with(
             AgentSession,
             workspace="default",
-            filter_obj={"id": "session-1", "created_by": OWNER_PRINCIPAL_ID},
+            filter_obj={"id": SESSION_ID, "created_by": OWNER_PRINCIPAL_ID},
         )
 
     @pytest.mark.parametrize(
         "status",
         [SessionStatus.EXPIRED, SessionStatus.LOST, SessionStatus.CLOSED],
     )
+    @pytest.mark.parametrize("header_session_id", [SESSION_ID, SESSION_UUID])
     def test_non_active_session_returns_409(
         self,
+        header_session_id: str,
         status: SessionStatus,
         client: TestClient,
         mock_entity_client: AsyncMock,
     ) -> None:
-        mock_entity_client.find_one = AsyncMock(return_value=_make_session(session_id="session-1", status=status))
+        mock_entity_client.find_one = AsyncMock(return_value=_make_session(session_id=SESSION_ID, status=status))
 
         resp = client.post(
             "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-            headers={SESSION_ID_HEADER: "session-1"},
+            headers={SESSION_ID_HEADER: header_session_id},
             json={},
         )
 
         assert resp.status_code == 409
-        assert resp.json()["detail"] == (f"Session ID 'session-1' has status '{status.value}' and cannot be invoked.")
+        assert resp.json()["detail"] == (
+            f"Session ID '{SESSION_ID}' has status '{status.value}' and cannot be invoked."
+        )
 
     def test_active_session_at_expiration_deadline_returns_409(
         self,
@@ -879,7 +902,7 @@ class TestSessionAwareRouting:
 
         with (
             patch.object(gateway_module, "_utc_now", return_value=deadline),
-            patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient") as httpx_client,
+            patch("nemo_agents_plugin.api.v2.gateway.AsyncClient") as httpx_client,
         ):
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
@@ -897,15 +920,15 @@ class TestSessionAwareRouting:
         client: TestClient,
         mock_entity_client: AsyncMock,
     ) -> None:
-        session = _make_session(session_id="session-1", deployment_id="deployment-1")
+        session = _make_session(session_id=SESSION_ID, deployment_id="deployment-1")
         deployment = _make_deployment(deployment_id="deployment-1")
         mock_entity_client.find_one = AsyncMock(side_effect=[session, deployment])
         httpx_mock = _make_httpx_mock(200, b'{"status": "ok"}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             response = client.get(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/health",
-                headers={SESSION_ID_HEADER: "session-1"},
+                headers={SESSION_ID_HEADER: SESSION_ID},
             )
 
         assert response.status_code == 200
@@ -986,7 +1009,7 @@ class TestModelNamePatching:
         body = json.dumps({"model": "unknown-model", "choices": [{"message": {"content": "hi"}}]}).encode()
         httpx_mock = _make_httpx_mock(200, body, "application/json")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/agents/my-agent/-/v1/chat/completions",
                 json={"messages": [{"role": "user", "content": "hi"}]},
@@ -1006,7 +1029,7 @@ class TestModelNamePatching:
         garbled = b"this is not json"
         httpx_mock = _make_httpx_mock(200, garbled, "application/json")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
                 json={"messages": []},
@@ -1024,7 +1047,7 @@ class TestModelNamePatching:
         body = json.dumps({"model": "gpt-4o", "choices": []}).encode()
         httpx_mock = _make_httpx_mock(200, body, "application/json")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
                 json={"messages": []},
@@ -1041,7 +1064,7 @@ class TestModelNamePatching:
         sse_body = b'data: {"model":"unknown-model","choices":[]}\n\n'
         httpx_mock = _make_httpx_mock(200, sse_body, "text/event-stream")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={"messages": [], "stream": True},
@@ -1058,7 +1081,7 @@ class TestModelNamePatching:
         body = json.dumps({"model": "unknown-model", "choices": []}).encode()
         httpx_mock = _make_httpx_mock(200, body, "application/json")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-v2/-/v1/chat/completions",
                 json={"messages": []},
@@ -1091,7 +1114,7 @@ class TestRequestModelStripping:
         mock_entity_client.get = AsyncMock(return_value=dep)
         httpx_mock = _make_httpx_mock(200, b'{"choices": []}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={"model": "calc-dep", "messages": [{"role": "user", "content": "2+2"}], "stream": False},
@@ -1108,7 +1131,7 @@ class TestRequestModelStripping:
         mock_entity_client.list = AsyncMock(return_value=_list_response([dep]))
         httpx_mock = _make_httpx_mock(200, b'{"choices": []}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
                 json={"model": "default/calc", "messages": []},
@@ -1123,7 +1146,7 @@ class TestRequestModelStripping:
         httpx_mock = _make_httpx_mock(200, b'{"choices": []}')
         payload = {"model": "calc-dep", "messages": []}
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json=payload,
@@ -1139,7 +1162,7 @@ class TestRequestModelStripping:
         httpx_mock = _make_httpx_mock(200, b"{}")
         payload = {"model": "calc-dep", "input_message": "hi"}
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             client.post("/apis/agents/v2/workspaces/default/deployments/calc-dep/-/generate", json=payload)
 
         assert json.loads(_forwarded_request(httpx_mock)["content"]) == payload
@@ -1156,7 +1179,7 @@ class TestRequestModelStripping:
         mock_entity_client.get = AsyncMock(return_value=dep)
         httpx_mock = _make_httpx_mock(200, b"{}")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 content=raw,
@@ -1208,7 +1231,7 @@ class TestContainerModeByDeploymentName:
 
         httpx_mock = _make_httpx_mock(200, b'{"answer": 42}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock) as mock_cls:
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock) as mock_cls:
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={"messages": []},
@@ -1243,7 +1266,7 @@ class TestContainerModeByDeploymentName:
         with (
             patch("nemo_agents_plugin.api.v2.gateway.get_deployment_transport", return_value=transport),
             patch.object(EndpointTransport, "client_kwargs", return_value={"verify": tls_context}),
-            patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock) as mock_cls,
+            patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock) as mock_cls,
         ):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
@@ -1262,7 +1285,7 @@ class TestContainerModeByDeploymentName:
         mock_entity_client.get = AsyncMock(return_value=dep)
         httpx_mock = _make_httpx_mock(200, b"{}")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock) as mock_cls:
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock) as mock_cls:
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={"messages": []},
@@ -1284,7 +1307,7 @@ class TestContainerModeByDeploymentName:
 
         httpx_mock = _make_httpx_mock(200, b'{"ok": true}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={"messages": []},
@@ -1358,7 +1381,7 @@ class TestContainerModeByAgentName:
 
         httpx_mock = _make_httpx_mock(200, b'{"ok": true}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
                 json={"messages": []},
@@ -1399,7 +1422,7 @@ class TestOpenAICompatibleErrors:
         mock_entity_client.get = AsyncMock(return_value=_make_deployment(status="running"))
         httpx_mock = _make_httpx_mock(503, b'{"detail": "boom"}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1418,7 +1441,7 @@ class TestOpenAICompatibleErrors:
         mock_entity_client.get = AsyncMock(return_value=_make_deployment(status="running"))
         httpx_mock = _make_httpx_mock(503, json.dumps({"detail": RELAY_FAILURE_DETAIL}).encode())
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1437,7 +1460,7 @@ class TestOpenAICompatibleErrors:
         upstream = json.dumps({"error": {"message": "rate limited", "code": "slow_down"}}).encode()
         httpx_mock = _make_httpx_mock(500, upstream)
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1452,7 +1475,7 @@ class TestOpenAICompatibleErrors:
         mock_entity_client.get = AsyncMock(return_value=_make_deployment(status="running"))
         httpx_mock = _make_httpx_mock(500, b"Internal server error in agent")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1468,7 +1491,7 @@ class TestOpenAICompatibleErrors:
         long_detail = "x" * 5000
         httpx_mock = _make_httpx_mock(500, json.dumps({"detail": long_detail}).encode())
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1496,7 +1519,7 @@ class TestOpenAICompatibleErrors:
         client_cm.__aenter__ = AsyncMock(side_effect=httpx.ConnectError("refused"))
         client_cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=client_cm):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=client_cm):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1536,7 +1559,7 @@ class TestOpenAICompatibleErrors:
         mock_entity_client.get = AsyncMock(return_value=_make_deployment(status="running"))
         httpx_mock = _make_httpx_mock(503, b'{"detail": "boom"}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1551,7 +1574,7 @@ class TestOpenAICompatibleErrors:
         mock_entity_client.get = AsyncMock(return_value=_make_deployment(status="running"))
         httpx_mock = _make_httpx_mock(503, b'{"detail": "boom"}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/health",
                 json={},
@@ -1566,7 +1589,7 @@ class TestOpenAICompatibleErrors:
         upstream_body = b'{"id": "chatcmpl-1", "model": "calc-dep"}'
         httpx_mock = _make_httpx_mock(200, upstream_body)
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1582,7 +1605,7 @@ class TestOpenAICompatibleErrors:
         mock_entity_client.get = AsyncMock(return_value=_make_deployment(status="running"))
         httpx_mock = _make_httpx_mock(422, b'{"detail": "invalid input"}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1604,7 +1627,7 @@ class TestOpenAICompatibleErrors:
         detail = "Fabric session 'abc' was not found."
         httpx_mock = _make_httpx_mock(404, json.dumps({"detail": detail}).encode())
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1622,7 +1645,7 @@ class TestOpenAICompatibleErrors:
         upstream = json.dumps({"detail": [{"loc": ["body"], "msg": "field required"}]}).encode()
         httpx_mock = _make_httpx_mock(422, upstream)
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1640,7 +1663,7 @@ class TestOpenAICompatibleErrors:
         ).encode()
         httpx_mock = _make_httpx_mock(401, upstream)
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1653,7 +1676,7 @@ class TestOpenAICompatibleErrors:
         mock_entity_client.get = AsyncMock(return_value=_make_deployment(status="running"))
         httpx_mock = _make_httpx_mock(400, b"Bad Request", content_type="text/plain")
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
                 json={},
@@ -1669,7 +1692,7 @@ class TestOpenAICompatibleErrors:
         mock_entity_client.get = AsyncMock(return_value=_make_deployment(status="running"))
         httpx_mock = _make_httpx_mock(422, b'{"detail": "invalid input"}')
 
-        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+        with patch("nemo_agents_plugin.api.v2.gateway.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/health",
                 json={},

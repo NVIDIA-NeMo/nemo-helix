@@ -4,7 +4,7 @@
 import { configureLogger } from '@nemo/common/src/utils/logger';
 import {
   ThemeProvider as KaizenThemeProvider,
-  Theme,
+  type Theme,
   TooltipProvider,
 } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';

@@ -30,6 +30,7 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
+from httpx import get, post
 from nemo_helix_plugin.client.constants import (
     DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE as _DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE,
 )
@@ -410,7 +411,7 @@ def parse_nhx_config(data: object) -> NHXOIDCConfig:
 
 def discover_nhx_config(base_url: str, timeout: float = 10.0) -> NHXOIDCConfig:
     """Fetch OIDC configuration from the NeMo Helix auth discovery endpoint."""
-    response = httpx.get(
+    response = get(
         f"{base_url.rstrip('/')}/apis/auth/discovery",
         timeout=timeout,
         **httpx_tls_config_from_env(),
@@ -548,7 +549,7 @@ def refresh_token_grant(
     _validate_token_endpoint(token_endpoint)
     tls_config = httpx_tls_config_from_env(certificate_authority)
     if refresh_kind == "broker":
-        response = httpx.post(
+        response = post(
             token_endpoint,
             json={"grant_type": "refresh_token", "refresh_token": refresh_token},
             timeout=timeout,
@@ -562,7 +563,7 @@ def refresh_token_grant(
         }
         if scope:
             data["scope"] = scope
-        response = httpx.post(
+        response = post(
             token_endpoint,
             data=data,
             timeout=timeout,
@@ -626,7 +627,7 @@ def token_exchange_grant(
     if scope:
         data["scope"] = scope
 
-    response = httpx.post(token_endpoint, data=data, timeout=timeout, **httpx_tls_config_from_env())
+    response = post(token_endpoint, data=data, timeout=timeout, **httpx_tls_config_from_env())
     if response.status_code != 200:
         error_data: dict[str, object] = {}
         if response.headers.get("content-type", "").startswith("application/json"):

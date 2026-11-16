@@ -14,11 +14,11 @@ import asyncio
 import logging
 import os
 import re
-import shutil
 import signal
 from collections import deque
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from shutil import which
 
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import GymRuntimeConfig
 
@@ -50,7 +50,7 @@ def gym_executable() -> str:
     and nemo-helix excludes Ray by constraint over an unfixed CVE. Install Gym separately and put
     its ``bin`` on PATH; in a job image, the image owns PATH and this resolves normally.
     """
-    resolved = shutil.which(_GYM_CLI)
+    resolved = which(_GYM_CLI)
     if resolved is None:
         raise RuntimeError(
             f"The {_GYM_CLI!r} CLI was not found on PATH. Install NeMo Gym in its own environment "

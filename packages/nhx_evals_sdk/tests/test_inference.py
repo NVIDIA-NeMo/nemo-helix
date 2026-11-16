@@ -1,7 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from unittest.mock import AsyncMock, Mock, patch
+from collections.abc import Generator
+from contextlib import contextmanager
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import openai
 import pytest
@@ -22,7 +25,7 @@ from nhx_evals_sdk.inference import (
 )
 from nhx_evals_sdk.values.models import Model
 from nhx_evals_sdk.values.params import RunConfigOnlineModel
-from openai import AsyncStream
+from openai import AsyncOpenAI, AsyncStream
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
 from pytest_mock import MockerFixture
@@ -98,6 +101,32 @@ def mock_chat_completion() -> ChatCompletion:
     )
 
 
+def _chat_stubbed_client_class(mock_chat: MagicMock) -> type[AsyncOpenAI]:
+    """An ``AsyncOpenAI`` whose instances answer ``chat`` with ``mock_chat``."""
+
+    class _ChatStubbedAsyncOpenAI(AsyncOpenAI):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self.__dict__["chat"] = mock_chat
+
+    return _ChatStubbedAsyncOpenAI
+
+
+def _stub_chat(mocker: MockerFixture) -> MagicMock:
+    """Make the clients ``make_inference_request`` builds answer ``chat`` with the returned mock."""
+    mock_chat = MagicMock()
+    mocker.patch("nhx_evals_sdk.inference.AsyncOpenAI", _chat_stubbed_client_class(mock_chat))
+    return mock_chat
+
+
+@contextmanager
+def _patched_chat() -> Generator[MagicMock]:
+    """Context-manager form of :func:`_stub_chat`."""
+    mock_chat = MagicMock()
+    with patch("nhx_evals_sdk.inference.AsyncOpenAI", _chat_stubbed_client_class(mock_chat)):
+        yield mock_chat
+
+
 def get_mock_args(mock_fn: AsyncMock) -> dict:
     call_args = mock_fn.call_args
     return call_args[1] if call_args[1] else call_args[0][0] if call_args[0] else {}
@@ -116,7 +145,7 @@ class TestMakeInferenceRequest:
     async def test_uses_model_default_headers_as_request_extra_headers(self, mocker: MockerFixture):
         model = self._make_model(default_headers={"X-Trace-Id": "trace-123"})
 
-        mock_chat = mocker.patch("nhx_evals_sdk.inference.AsyncOpenAI.chat")
+        mock_chat = _stub_chat(mocker)
         mock_chat.completions.create = AsyncMock(return_value=mock_chat_completion())
 
         await make_inference_request(model, {"messages": [{"role": "user", "content": "hi"}]})
@@ -128,7 +157,7 @@ class TestMakeInferenceRequest:
     async def test_a_streamed_response_is_closed_and_rejected_with_the_streaming_error(self, mocker: MockerFixture):
         stream = Mock(spec=AsyncStream)
         stream.close = AsyncMock()
-        mock_chat = mocker.patch("nhx_evals_sdk.inference.AsyncOpenAI.chat")
+        mock_chat = _stub_chat(mocker)
         mock_chat.completions.create = AsyncMock(return_value=stream)
 
         with pytest.raises(StreamingNotSupportedError, match="streaming is not supported"):
@@ -142,7 +171,7 @@ class TestMakeInferenceRequest:
     async def test_redacts_extra_headers_from_persisted_request_log(self, mocker: MockerFixture):
         model = self._make_model(default_headers={"X-Trace-Id": "trace-123"})
 
-        mock_chat = mocker.patch("nhx_evals_sdk.inference.AsyncOpenAI.chat")
+        mock_chat = _stub_chat(mocker)
         mock_chat.completions.create = AsyncMock(return_value=mock_chat_completion())
 
         request_log: list[dict] = []
@@ -165,7 +194,7 @@ class TestMakeInferenceRequest:
     async def test_filters_cookie_headers_from_persisted_request_log(self, mocker: MockerFixture):
         model = self._make_model()
 
-        mock_chat = mocker.patch("nhx_evals_sdk.inference.AsyncOpenAI.chat")
+        mock_chat = _stub_chat(mocker)
         mock_chat.completions.create = AsyncMock(return_value=mock_chat_completion())
 
         request_log: list[dict] = []
@@ -188,7 +217,7 @@ class TestMakeInferenceRequest:
     async def test_omits_logged_extra_headers_when_all_headers_are_auth_style(self, mocker: MockerFixture):
         model = self._make_model()
 
-        mock_chat = mocker.patch("nhx_evals_sdk.inference.AsyncOpenAI.chat")
+        mock_chat = _stub_chat(mocker)
         mock_chat.completions.create = AsyncMock(return_value=mock_chat_completion())
 
         request_log: list[dict] = []
@@ -218,7 +247,7 @@ class TestMakeInferenceRequest:
     async def test_per_call_headers_override_model_default_headers(self, mocker: MockerFixture):
         model = self._make_model(default_headers={"X-Trace-Id": "model", "X-Model": "judge"})
 
-        mock_chat = mocker.patch("nhx_evals_sdk.inference.AsyncOpenAI.chat")
+        mock_chat = _stub_chat(mocker)
         mock_chat.completions.create = AsyncMock(return_value=mock_chat_completion())
 
         await make_inference_request(
@@ -497,7 +526,7 @@ async def test_make_inference_request_with_query_params():
         ],
     )
 
-    with patch("nhx_evals_sdk.inference.AsyncOpenAI.chat") as mock_chat:
+    with _patched_chat() as mock_chat:
         mock_chat.completions.create = AsyncMock(return_value=mock_chat_completion)
 
         # Make the inference request
@@ -546,7 +575,7 @@ async def test_make_inference_request_without_query_params():
         ],
     )
 
-    with patch("nhx_evals_sdk.inference.AsyncOpenAI.chat") as mock_chat:
+    with _patched_chat() as mock_chat:
         mock_chat.completions.create = AsyncMock(return_value=mock_chat_completion)
 
         # Make the inference request
@@ -587,7 +616,7 @@ async def test_make_inference_request_bad_request_error_includes_context():
         body=None,
     )
 
-    with patch("nhx_evals_sdk.inference.AsyncOpenAI.chat") as mock_chat:
+    with _patched_chat() as mock_chat:
         mock_chat.completions.create = AsyncMock(side_effect=bad_request_error)
 
         # Make the inference request and expect ClientInferenceError
@@ -627,7 +656,7 @@ async def test_make_inference_request_api_status_error_includes_context():
         body=None,
     )
 
-    with patch("nhx_evals_sdk.inference.AsyncOpenAI.chat") as mock_chat:
+    with _patched_chat() as mock_chat:
         mock_chat.completions.create = AsyncMock(side_effect=api_status_error)
 
         # Make the inference request and expect ClientInferenceError
@@ -668,7 +697,7 @@ async def test_make_inference_request_error_with_empty_details():
         body=None,
     )
 
-    with patch("nhx_evals_sdk.inference.AsyncOpenAI.chat") as mock_chat:
+    with _patched_chat() as mock_chat:
         mock_chat.completions.create = AsyncMock(side_effect=api_status_error)
 
         # Make the inference request and expect ClientInferenceError

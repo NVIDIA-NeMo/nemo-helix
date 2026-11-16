@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { FileSystemNode } from '@studio/components/FilesTable/utils';
+import type { FileSystemNode } from '@studio/components/FilesTable/utils';
 import { useCallback, useEffect, useState } from 'react';
 
 const getItemId = (item: FileSystemNode) => [item.type, item.path].join('::');

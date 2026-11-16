@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { TextInputSpinner } from '@nemo/common/src/components/form/TextInputSpinner';
-import { UseControllerComponentProps } from '@nemo/common/src/types';
+import type { UseControllerComponentProps } from '@nemo/common/src/types';
 import { Filter } from '@nemo/icons/icons';
 import {
   Block,
@@ -11,7 +11,7 @@ import {
   SelectContent,
   SelectItem,
   SelectListbox,
-  SelectProps,
+  type SelectProps,
   SelectRoot,
   SelectTrigger,
   Spinner,
@@ -21,9 +21,9 @@ import {
   Tooltip,
 } from '@nvidia/foundations-react-core';
 import {
-  ChangeEvent,
-  FC,
-  ReactNode,
+  type ChangeEvent,
+  type FC,
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,

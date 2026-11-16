@@ -1676,7 +1676,7 @@ def test_access_key_lifecycle_openapi_documents_error_responses(client):
         "minimum": 1,
         "default": 1,
         "title": "Page",
-        "description": "Page number to retrieve.",
+        "description": "Page number.",
     }
     assert list_parameters["page_size"]["schema"] == {
         "type": "integer",
@@ -1684,7 +1684,7 @@ def test_access_key_lifecycle_openapi_documents_error_responses(client):
         "minimum": 1,
         "default": 100,
         "title": "Page Size",
-        "description": "Number of keys to retrieve per page.",
+        "description": "Page size.",
     }
     list_responses = list_operation["responses"]
     assert list_responses["200"]["content"]["application/json"]["schema"] == {

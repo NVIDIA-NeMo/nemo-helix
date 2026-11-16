@@ -26,7 +26,9 @@ import posixpath
 import shlex
 import signal
 import uuid
+from asyncio import create_subprocess_exec
 from dataclasses import dataclass
+from os import getpgid, killpg
 from pathlib import Path
 
 from nhx_evals_sdk.agent_eval.runtimes.environment import _redact_for_logging
@@ -103,7 +105,7 @@ class DockerSandboxProvider:
         Enforces the timeout with ``asyncio.wait_for`` and kills the whole process group so
         no child lingers. Raises :class:`TimeoutError` on timeout.
         """
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.PIPE if stdin is not None else None,
             stdout=asyncio.subprocess.PIPE,
@@ -114,7 +116,7 @@ class DockerSandboxProvider:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(input=stdin), timeout=timeout_s)
         except (asyncio.TimeoutError, TimeoutError) as exc:
             with contextlib.suppress(ProcessLookupError):
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                killpg(getpgid(proc.pid), signal.SIGKILL)
             with contextlib.suppress(Exception):
                 await proc.wait()
             # Redact argv: it can carry `-e KEY=<secret>` (e.g. NVIDIA_API_KEY), and this error is

@@ -15,10 +15,5 @@ export const baseTestConfig = defineConfig({
   test: {
     environment: 'happy-dom',
     globals: true,
-    server: {
-      deps: {
-        inline: ['@nvidia/foundations-react-core'],
-      },
-    },
   },
 });

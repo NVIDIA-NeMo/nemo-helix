@@ -5,7 +5,7 @@ import { CodeEditor } from '@nemo/common/src/components/CodeEditor';
 import { ContentType } from '@nemo/common/src/components/CodeEditor/constants';
 import { useFilePreview } from '@nemo/common/src/components/DatasetFileSelect/hooks/useFilePreview';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
-import { FileList, FileListItem } from '@nemo/common/src/components/FileList';
+import { FileList, type FileListItem } from '@nemo/common/src/components/FileList';
 import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import {
   getEntityReference,
@@ -42,7 +42,7 @@ import {
   resolveTrainingType,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
-import { FC, useEffect, useMemo } from 'react';
+import { type FC, useEffect, useMemo } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 
 const NEW_DATASET_VALUE = '__new_dataset__';

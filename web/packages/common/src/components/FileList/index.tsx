@@ -3,9 +3,9 @@
 
 import { ListItem } from '@nemo/common/src/components/FileList/ListItem';
 import { IconDocument, Eye, Trash } from '@nemo/icons/icons';
-import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Divider, Text, Button, Flex, Stack } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 const numberFormatter = new Intl.NumberFormat('en-US');
 

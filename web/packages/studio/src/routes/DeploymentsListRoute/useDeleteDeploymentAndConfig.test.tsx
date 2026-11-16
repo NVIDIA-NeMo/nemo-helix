@@ -12,7 +12,8 @@ import {
   modelsGetLatestDeployment,
 } from '@nemo/sdk/generated/platform/model-deployments';
 import { modelsDeleteModel, modelsGetModel } from '@nemo/sdk/generated/platform/models';
-import { ModelDeploymentStatus, type ModelDeployment } from '@nemo/sdk/generated/platform/schema';
+import type { ModelDeployment } from '@nemo/sdk/generated/platform/schema';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 import {
   HUGGING_FACE_DEPLOYMENT_SOURCE_FIELD,
   HUGGING_FACE_DEPLOYMENT_SOURCE_VALUE,

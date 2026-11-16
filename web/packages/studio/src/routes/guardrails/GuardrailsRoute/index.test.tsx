@@ -75,7 +75,9 @@ describe('GuardrailsRoute', () => {
       await user.click(screen.getByRole('button', { name: 'Delete selected guardrails' }));
 
       const dialog = await screen.findByRole('dialog');
-      expect(within(dialog).getByText(/Delete 2 guardrail configs\?/i)).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole('heading', { name: 'Delete 2 guardrail configs?' })
+      ).toBeInTheDocument();
     });
 
     it('calls DELETE for each selected config and closes the modal on confirm', async () => {
@@ -99,7 +101,7 @@ describe('GuardrailsRoute', () => {
 
       await user.click(screen.getByRole('button', { name: 'Delete selected guardrails' }));
       const dialog = await screen.findByRole('dialog');
-      await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+      await user.click(within(dialog).getByRole('button', { name: 'Delete 2 Guardrail Configs' }));
 
       await waitFor(() =>
         expect([...deletedNames].sort()).toEqual(['pii-filter', 'toxicity-guard'])
@@ -119,7 +121,9 @@ describe('GuardrailsRoute', () => {
       await user.click(screen.getByRole('button', { name: 'Delete selected guardrails' }));
 
       const dialog = await screen.findByRole('dialog');
-      expect(within(dialog).getByText(/Delete 1 guardrail config\?/i)).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole('heading', { name: "Delete guardrail config 'pii-filter'?" })
+      ).toBeInTheDocument();
     });
   });
 });

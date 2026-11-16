@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ConfirmationModal } from '@nemo/common/src/components/ConfirmationModal';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface Props {
   onClose: () => void;

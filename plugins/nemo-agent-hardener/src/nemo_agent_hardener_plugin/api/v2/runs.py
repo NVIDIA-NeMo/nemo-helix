@@ -31,9 +31,11 @@ from nemo_agent_hardener_plugin.authz import scope
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest, AgentHardenerRun
 from nemo_agent_hardener_plugin.jobs.defenses import compose_defense
 from nemo_agents_plugin.entities import Agent
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
+    NemoEntityConflictError,
     NemoEntityNotFoundError,
     get_entity_client,
 )
@@ -60,8 +62,7 @@ _run_filter_dep = make_filter_dep(RunFilter)
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AgentHardenerRunPerms.LIST])
 async def list_runs(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: RunFilter = Depends(_run_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -72,8 +73,8 @@ async def list_runs(
         result = await entity_client.list(
             AgentHardenerRun,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_obj=filter_dict or None,
         )
@@ -295,11 +296,16 @@ async def delete_run(
 ) -> None:
     """Delete a war-game run record. The underlying platform job is cancelled/deleted separately."""
     try:
-        await entity_client.delete(AgentHardenerRun, name=name, workspace=workspace)
+        _delete_target = await entity_client.get(AgentHardenerRun, name=name, workspace=workspace)
+        await entity_client.delete_by_id(
+            AgentHardenerRun, _delete_target.id, expected_db_version=_delete_target.db_version
+        )
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404, detail=f"AgentHardenerRun '{name}' not found in workspace '{workspace}'."
         ) from exc
+    except NemoEntityConflictError as exc:
+        raise HTTPException(status_code=409, detail="Run changed during deletion; refresh and retry.") from exc
     except Exception as exc:
         logger.exception("Failed to delete agent-hardener run '%s'", sanitize_for_log(name))
         raise HTTPException(status_code=500, detail="Failed to delete agent-hardener run.") from exc

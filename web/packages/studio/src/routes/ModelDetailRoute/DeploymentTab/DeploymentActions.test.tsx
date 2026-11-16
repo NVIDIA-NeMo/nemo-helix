@@ -2,11 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useModelsGetLatestDeployment } from '@nemo/sdk/generated/platform/model-deployments';
-import {
-  type ModelDeployment,
-  ModelDeploymentStatus,
-  type ModelEntity,
-} from '@nemo/sdk/generated/platform/schema';
+import type { ModelDeployment, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 import type { DeploymentIndicatorState } from '@studio/hooks/useModelDeploymentStatuses';
 import { useDeleteDeploymentAndConfig } from '@studio/routes/DeploymentsListRoute/useDeleteDeploymentAndConfig';
 import { DeploymentActions } from '@studio/routes/ModelDetailRoute/DeploymentTab/DeploymentActions';
@@ -49,7 +46,10 @@ describe('DeploymentActions', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
     const dialog = await screen.findByRole('dialog');
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    expect(
+      within(dialog).getByRole('heading', { name: "Delete deployment 'my-deployment'?" })
+    ).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete Deployment' }));
 
     expect(deleteDeploymentAndConfig).toHaveBeenCalledWith(deployment);
   });

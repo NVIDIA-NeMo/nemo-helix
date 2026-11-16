@@ -49,12 +49,6 @@ pytestmark = [pytest.mark.integration]
 
 
 @pytest.mark.parametrize("direct", [False, True], ids=["taskset", "direct-list"])
-@pytest.mark.parametrize(
-    "subprocess_platform",
-    [["--services", "auth,entities,files,jobs,secrets,evals", "--controllers", "jobs,entities"]],
-    indirect=True,
-    ids=["harbor-services"],
-)
 @pytest.mark.timeout(900)
 def test_publish_stored_harbor_source_and_execute(subprocess_platform, tmp_path, direct):
     """Publish a stored task, submit it directly or through a taskset, and verify the real job's trials and reward."""

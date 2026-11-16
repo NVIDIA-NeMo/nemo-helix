@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal';
+import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import { useDatasetFileRename } from '@studio/api/datasets/useDatasetFileRename';
 import { useSelectedDatasetId } from '@studio/hooks/useSelectedDatasetId';
-import { FC } from 'react';
-import { SubmitHandler, useForm } from 'react-hook-form';
+import type { FC } from 'react';
+import { type SubmitHandler, useForm } from 'react-hook-form';
 
 interface FormFields {
   name: string;

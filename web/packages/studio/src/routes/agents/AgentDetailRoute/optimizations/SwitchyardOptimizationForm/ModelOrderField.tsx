@@ -6,7 +6,7 @@ import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { ArrowDown, ArrowUp, Close } from '@nemo/icons/icons';
 import { Badge, Button, Divider, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import type { SwitchyardFormValues } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/formValues';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { useController } from 'react-hook-form';
 
 export interface ModelOrderFieldProps {

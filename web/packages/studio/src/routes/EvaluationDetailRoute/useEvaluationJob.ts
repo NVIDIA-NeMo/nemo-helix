@@ -3,14 +3,9 @@
 
 import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
-import type { EvaluationResponse, HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
-import { fetchEvaluatorJobs } from '@studio/api/evaluation/evaluator-jobs';
-import {
-  type EvalJobRow,
-  evalDurationMs,
-  publishedEvaluationName,
-  toEvalJobRow,
-} from '@studio/api/evaluation/utils';
+import type { EvaluationResponse } from '@nemo/sdk/generated/platform/schema';
+import { fetchEvaluationJob } from '@studio/api/evaluation/evaluator-jobs';
+import { type EvalJobRow, evalDurationMs, toEvalJobRow } from '@studio/api/evaluation/utils';
 import { useQuery } from '@tanstack/react-query';
 
 /** A run that reached Intake carries its recorded duration and its ingested test cases. Before that
@@ -25,8 +20,7 @@ const isPublished = (evaluation?: EvaluationResponse): boolean =>
  *  writes, so the job is the only place a run's outcome is recorded; a published run whose job has
  *  been pruned falls back to completed, which publishing guarantees.
  *
- *  Jobs carry no evaluation filter, so the job is found by scanning evaluator jobs newest-first and
- *  stopping at the first match. */
+ *  The job is matched server-side on the evaluation it publishes to (`spec.publication.intake`). */
 export const useEvaluationJob = (
   workspace: string,
   evaluationName: string,
@@ -37,10 +31,7 @@ export const useEvaluationJob = (
   const { data: job } = useQuery({
     queryKey: ['evaluation-job', workspace, evaluationName] as const,
     queryFn: async ({ signal }) => {
-      const matches = (candidate: HelixJobResponse) =>
-        publishedEvaluationName(candidate) === evaluationName;
-      const jobs = await fetchEvaluatorJobs(workspace, signal, (all) => all.some(matches));
-      const found = jobs.find(matches);
+      const found = await fetchEvaluationJob(workspace, evaluationName, signal);
       return found ? toEvalJobRow(found) : null;
     },
     enabled: !!workspace && !!evaluationName,

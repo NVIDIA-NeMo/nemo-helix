@@ -10,8 +10,8 @@
  * its affiliates is strictly prohibited.
  */
 
-import { ControlledCombobox } from '@nemo/common/src/components/form/ControlledCombobox';
-import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
+import type { ControlledCombobox } from '@nemo/common/src/components/form/ControlledCombobox';
+import type { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import type { ComponentProps } from 'react';
 
 export type KeyValueComboboxPassthrough = Omit<

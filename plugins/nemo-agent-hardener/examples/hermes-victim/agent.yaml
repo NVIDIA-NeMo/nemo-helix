@@ -45,9 +45,8 @@ mcp:
 
 # NO `telemetry:` block — on purpose, and this is the whole subtlety of a Hermes victim.
 #
-# Relay is an opt-in Hermes *plugin*, so Hermes reads its config only from the file named by
-# HERMES_NEMO_RELAY_PLUGINS_TOML — the one the Dockerfile points at /etc/nemo-relay/plugins.toml,
+# The Dockerfile points Hermes' HERMES_NEMO_RELAY_PLUGINS_TOML override at /etc/nemo-relay/plugins.toml,
 # which is where Agent Hardener uploads each round's guardrails. If `telemetry: {provider: relay}`
 # were declared here, the Fabric Hermes adapter would pop that env var and repoint it at its own
 # generated config, and the uploaded guardrails would never be read. Declaring nothing leaves the
-# Dockerfile wiring in charge. The Dockerfile beside this file explains both lines.
+# Dockerfile wiring in charge.

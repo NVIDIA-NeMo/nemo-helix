@@ -13,7 +13,7 @@ import { useAuthTokenStatus } from '@studio/providers/auth/useAuthTokenStatus';
 import { useSelectedWorkspace } from '@studio/providers/workspace';
 import { AssistantChatProvider } from '@studio/routes/agents/AssistantChatRoute/context/AssistantChatProvider';
 import { WorkspaceGuard } from '@studio/routes/RootLayout/WorkspaceGuard';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 const SignedOutView = ({ onSignIn }: { onSignIn: () => void }) => (
   <main className="flex min-h-screen items-center justify-center bg-surface-sunken px-6 text-primary">

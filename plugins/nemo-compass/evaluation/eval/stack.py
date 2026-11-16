@@ -12,6 +12,7 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+from subprocess import run
 from urllib.parse import urlsplit
 
 PLATFORM_ROOT = Path(__file__).resolve().parents[4]
@@ -49,7 +50,7 @@ def _intake_clickhouse_container(clickhouse_url: str = CLICKHOUSE_URL) -> str:
     for filter_value in (*_CLICKHOUSE_LABEL_FILTERS, f"publish={host_port}"):
         command.extend(("--filter", filter_value))
     command.extend(("--format", "{{.Names}}"))
-    result = subprocess.run(command, check=True, capture_output=True, text=True)
+    result = run(command, check=True, capture_output=True, text=True)
     names = [name for name in result.stdout.splitlines() if name]
     if len(names) != 1:
         detail = "none found" if not names else f"found {', '.join(names)}"
@@ -75,7 +76,7 @@ def main() -> None:
     (state / "nhx").mkdir(parents=True, exist_ok=True)
     log = runner_temp / "platform.log"
 
-    subprocess.run(
+    run(
         [str(PLATFORM_ROOT / "services/intake/scripts/spans/run_clickhouse.sh")],
         check=True,
         env={
@@ -87,12 +88,12 @@ def main() -> None:
     if not _wait(f"{CLICKHOUSE_URL}/ping", attempts=30, delay=2):
         sys.exit("ClickHouse never became ready")
     clickhouse_container = _intake_clickhouse_container()
-    subprocess.run(
+    run(
         ["docker", "exec", clickhouse_container, "clickhouse-client", "--query", "SYSTEM STOP TTL MERGES"],
         check=True,
     )
 
-    subprocess.run(["uv", "sync"], check=True, cwd=PLATFORM_ROOT)
+    run(["uv", "sync"], check=True, cwd=PLATFORM_ROOT)
     with open(log, "ab") as fh:
         subprocess.Popen(
             [

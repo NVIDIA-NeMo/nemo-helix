@@ -13,7 +13,7 @@ import { SwitchyardOptimizationForm } from '@studio/routes/agents/AgentDetailRou
 import { useSubmitSwitchyardOptimization } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/useSubmitSwitchyardOptimization';
 import { OptimizationView } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 export interface OptimizationsTabProps {
   agentName?: string;

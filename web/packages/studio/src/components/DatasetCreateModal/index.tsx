@@ -5,30 +5,29 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { ControlledCombobox } from '@nemo/common/src/components/form/ControlledCombobox';
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal';
+import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { FilesetFileUploadError } from '@nemo/common/src/datasets/constants';
-import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import { useFilesUpdateFilesetMetadata } from '@nemo/sdk/generated/platform/files';
-import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Select, Stack } from '@nvidia/foundations-react-core';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { useDatasetCreate } from '@studio/api/datasets/useDatasetCreate';
 import {
   DATASET_CREATE_DEFAULT_VALUES,
   DATASET_CREATE_MODAL_CONTENT,
-  DatasetCreateFormData,
+  type DatasetCreateFormData,
   datasetCreateFormSchema,
   DatasetCreateModalMode,
 } from '@studio/components/DatasetCreateModal/constants';
 import { DatasetFileUpload } from '@studio/components/DatasetFileUpload';
 import { CUSTOMIZATION_FILESET_FILE_PREFIXES } from '@studio/constants/customization';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getFilesetDetailsRoute } from '@studio/routes/utils';
+import { getFilesetDetailRoute } from '@studio/routes/utils';
 import { renameFile } from '@studio/util/files';
-import { FC, useState } from 'react';
-import { Controller, SubmitHandler, useForm } from 'react-hook-form';
+import { type FC, useState } from 'react';
+import { Controller, type SubmitHandler, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 
 interface DatasetCreateModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
@@ -75,7 +74,7 @@ export const DatasetCreateModal: FC<DatasetCreateModalProps> = ({
     onSuccess: (dataset: FilesetOutput) => {
       reset();
       onDatasetCreated?.(dataset);
-      navigate(getFilesetDetailsRoute(workspace, getEntityReference(dataset), undefined, true));
+      navigate(getFilesetDetailRoute(workspace, dataset.name));
     },
   });
 

@@ -7,11 +7,11 @@ import {
   getEntitiesListWorkspacesQueryKey,
   useEntitiesDeleteWorkspace,
 } from '@nemo/sdk/generated/platform/entity-store';
-import { WorkspacesPage } from '@nemo/sdk/generated/platform/schema';
+import type { WorkspacesPage } from '@nemo/sdk/generated/platform/schema';
 import { queryClient } from '@studio/api/queryClient';
 import { useRecentWorkspaces } from '@studio/components/WorkspaceDropdown/useRecentWorkspaces';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
-import { FC } from 'react';
+import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
 interface DeleteWorkspaceModalProps {
@@ -57,12 +57,10 @@ export const DeleteWorkspaceModal: FC<DeleteWorkspaceModalProps> = ({
     <DeleteConfirmationModal
       open={open}
       onClose={onClose}
-      title={`Delete ${workspace}`}
-      description="Once deleted, this workspace and its contents cannot be recovered. Are you sure you want to delete this?"
+      entity="workspace"
+      ids={[workspace]}
+      description="The workspace and everything in it are deleted and can't be restored."
       onDelete={handleDelete}
-      simpleConfirm
-      successText={`Workspace "${workspace}" deleted successfully.`}
-      errorText="Failed to delete workspace. Please try again."
     />
   );
 };

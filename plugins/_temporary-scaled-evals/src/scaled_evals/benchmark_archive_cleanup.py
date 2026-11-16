@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from pathlib import PurePosixPath
 
 from scaled_evals.api import artifacts
-from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
+from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveWorkerRepository
 from scaled_evals.archive_validation import benchmark_archive_object_key, validate_archive_id
 
 
@@ -44,7 +44,7 @@ def cleanup_benchmark_archives(
     if not candidates:
         return 0
     deleted = 0
-    row = BenchmarkArchiveStore().for_cleanup(run_id)
+    row = BenchmarkArchiveWorkerRepository().for_cleanup(run_id)
     if row is None:
         return 0
     protected = {row.get("object_key")}

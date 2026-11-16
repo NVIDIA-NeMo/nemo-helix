@@ -134,6 +134,7 @@ class EntityRepositoryInterface(ABC):
         name: str | None = None,
         project: str | None = None,
         updated_by: str | None = None,
+        expected_db_version: int | None = None,
         session: AsyncSession | None = None,
     ) -> Entity:
         """Update an entity by ID, optionally changing its name."""
@@ -181,6 +182,7 @@ class EntityRepositoryInterface(ABC):
         self,
         *,
         entity_id: str,
+        expected_db_version: int | None = None,
         session: AsyncSession | None = None,
     ) -> int:
         """Delete an entity by ID."""

@@ -4,7 +4,7 @@
 import { InfoCircle } from '@nemo/icons/icons';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { CUSTOMIZER_AUTO_VAL_SPLIT_RATIO } from '@studio/constants/customization';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 const numberFormatter = new Intl.NumberFormat('en-US');
 const percentFormatter = new Intl.NumberFormat('en-US', {

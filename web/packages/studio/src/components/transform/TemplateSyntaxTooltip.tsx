@@ -4,7 +4,7 @@
 import { HelpCircle } from '@nemo/icons/icons';
 import { Button, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { tooltipClassName } from '@studio/styles/common';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 const Tip: FC<{ children: React.ReactNode }> = ({ children }) => (
   <Text kind="body/regular/sm">{children}</Text>

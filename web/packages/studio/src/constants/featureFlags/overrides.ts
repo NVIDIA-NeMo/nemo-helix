@@ -31,7 +31,7 @@
  */
 
 import { logger } from '@nemo/common/src/utils/logger';
-import { EnvConfig, FlagDescriptor } from '@studio/constants/featureFlags/utils';
+import type { EnvConfig, FlagDescriptor } from '@studio/constants/featureFlags/utils';
 import { FEATURE_FLAG_OVERRIDES_KEY } from '@studio/util/localStorage';
 
 /** Raw string values keyed by flag name, exactly as stored. */

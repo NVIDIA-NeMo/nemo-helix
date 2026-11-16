@@ -10,17 +10,11 @@
  * its affiliates is strictly prohibited.
  */
 
-import { Palette } from '@nemo/icons/icons';
-
-export const CHAT_DEFAULT_MAX_TOKENS = 4096;
 export const DEFAULT_LARGE_PAGE_SIZE = 1000;
 export const DATASET_NAME_REGEX = /^[a-zA-Z0-9._-]+$/;
 export const DEFAULT_MODEL_NAME = 'nvidia/nemotron-3.5-lightning-30b-a3b';
 export const DEFAULT_NAMESPACE = 'default';
-export const DEFAULT_API_ERR_MSG = 'Invalid API response. Please try again later.';
-export const DEFAULT_TOOLS_FILE_NAME = 'tools.json';
 export const EMPTY_FIELD_VALUE = '-';
-export const EMPTY_FIELD_EMDASH_VALUE = '—';
 /**
  * Model *entity* names, not served model names: the models service normalizes discovered model
  * ids to entity names (`normalize_model_entity_name`), turning `/` and `.` into `-` — so
@@ -105,5 +99,3 @@ export const KNOWN_TEXT_EXTENSIONS = new Set([
   'dockerfile',
   'makefile',
 ]);
-
-export const DataDesignerIconFc = Palette;

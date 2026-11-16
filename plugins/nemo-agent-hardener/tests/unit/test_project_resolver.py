@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from nemo_agent_hardener_plugin.project_resolver import (
     derive_binaries,
     derive_port,
@@ -80,6 +81,23 @@ def test_binaries_include_the_system_interpreter_the_venv_resolves_to():
     binaries = derive_binaries(FABRIC_DOCKERFILE, dockerfile_env(FABRIC_DOCKERFILE))
     assert "/workspace/.venv/bin/**" in binaries
     assert "/usr/local/bin/python*" in binaries
+
+
+@pytest.mark.parametrize("install_dir", ["/custom/python", None])
+def test_hermes_project_uses_adapter_overrides(tmp_path: Path, install_dir: str | None):
+    dockerfile = FABRIC_DOCKERFILE + "ENV ADAPTER_PYTHON=/image/hermes/bin/python\n"
+    if install_dir:
+        dockerfile += f"ENV UV_PYTHON_INSTALL_DIR={install_dir}\n"
+    derived = inspect_project(
+        _project(tmp_path, dockerfile), env_overrides={"ADAPTER_PYTHON": "/custom/hermes/bin/python"}
+    )
+    assert derived["env"]["ADAPTER_PYTHON"] == "/custom/hermes/bin/python"
+    if install_dir:
+        assert "/custom/hermes/bin/python" in derived["binaries"]
+        assert "/custom/python/**/bin/python*" in derived["binaries"]
+    else:
+        assert not derived["binaries"]
+        assert "binaries" in derived["unresolved"]
 
 
 def test_port_prefers_env_over_expose():

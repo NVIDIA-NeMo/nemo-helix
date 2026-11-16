@@ -22,11 +22,8 @@ import {
   getEvalsListEvaluateJobsQueryKey,
   useEvalsListEvaluateJobs,
 } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
-import {
-  type EvaluateJob,
-  type EvaluateJobsListFilter,
-  EvaluateJobsSortField,
-} from '@nemo/sdk/generated/evals/schema';
+import type { EvaluateJob, EvaluateJobsListFilter } from '@nemo/sdk/generated/evals/schema';
+import { EvaluateJobsSortField } from '@nemo/sdk/generated/evals/schema/EvaluateJobsSortField';
 import { Flex } from '@nvidia/foundations-react-core';
 import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
@@ -34,7 +31,7 @@ import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationResultDetailsRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { ComponentProps } from 'react';
+import type { ComponentProps } from 'react';
 
 const STATUS_OPTIONS_WITH_ALL = [{ value: '', label: 'All' }, ...STATUS_FILTER_OPTIONS];
 

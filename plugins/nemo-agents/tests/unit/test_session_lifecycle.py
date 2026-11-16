@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from nemo_agents_plugin.entities import AgentDeployment, AgentSession, Endpoint, SessionStatus
 from nemo_agents_plugin.session_lifecycle import cleanup_fabric_runtime, session_expiration_is_due
+from nemo_agents_plugin.session_protocol import session_id_to_uuid, session_uuid_to_id
 from nemo_deployments_plugin.endpoint_transport import EndpointTransport
 
 
@@ -67,7 +68,7 @@ async def test_cleanup_dials_a_gateway_routed_deployment_through_its_gateway() -
     with (
         patch("nemo_agents_plugin.session_lifecycle.get_deployment_transport", return_value=transport),
         patch.object(EndpointTransport, "client_kwargs", return_value={"verify": tls_context}),
-        patch("nemo_agents_plugin.session_lifecycle.httpx.AsyncClient", return_value=client_cm) as client_cls,
+        patch("nemo_agents_plugin.session_lifecycle.AsyncClient", return_value=client_cm) as client_cls,
     ):
         await cleanup_fabric_runtime(entity_client, session)
 
@@ -93,3 +94,29 @@ async def test_cleanup_logs_transport_resolution_failure_without_raising(caplog:
     assert session.status == SessionStatus.CLOSED
     assert "invalid executor configuration" in caplog.text
     assert "Fabric runtime cleanup failed" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("session_id", "session_uuid"),
+    [
+        ("agent-session-RFppQd3GgwudZJeKDx5t8K", "c46d3588-d205-497f-b96b-37f938263064"),
+        ("agent-session-1111111111111112", "00000000-0000-0000-0000-000000000001"),
+    ],
+)
+def test_session_id_uuid_round_trip(session_id: str, session_uuid: str) -> None:
+    assert session_id_to_uuid(session_id) == session_uuid
+    assert session_uuid_to_id(session_uuid) == session_id
+
+
+@pytest.mark.parametrize(
+    "session_id",
+    ["deployment-RFppQd3GgwudZJeKDx5t8K", "agent-session-0", "agent-session-1"],
+)
+def test_invalid_session_id(session_id: str) -> None:
+    with pytest.raises(ValueError):
+        session_id_to_uuid(session_id)
+
+
+def test_invalid_session_uuid() -> None:
+    with pytest.raises(ValueError):
+        session_uuid_to_id("not-a-uuid")

@@ -19,7 +19,7 @@ import {
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
-  TooltipProps,
+  type TooltipProps,
   XAxis,
   YAxis,
 } from 'recharts';

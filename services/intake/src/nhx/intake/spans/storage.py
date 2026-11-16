@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from nhx.common.api.common import PaginationData
@@ -22,6 +22,16 @@ from nhx.intake.spans.domain import (
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def to_unix_micros(value: datetime) -> int:
+    """Datetime to Unix microseconds for ``fromUnixTimestamp64Micro``; naive values are UTC.
+
+    Integer arithmetic, because a float seconds product loses microseconds at current epoch scale.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return (value - datetime(1970, 1, 1, tzinfo=timezone.utc)) // timedelta(microseconds=1)
 
 
 def stable_id(*parts: str, prefix: str | None = None) -> str:

@@ -65,6 +65,9 @@ class EgressAllowlist(BaseModel):
         public_dns_allow: Extra suffixes consulted only when ``allow_internet`` is set.
         resolver_addresses: Nameservers to keep out of the deny ranges. ``None`` means use this
             process's own resolvers; an empty tuple deliberately carves nothing out.
+        name_only_targets: Hostnames allowed by name only, as a wildcard is: allowed, but their
+            addresses are not carved out of the deny ranges, so one that resolves into private
+            space stays denied. For hosts an untrusted caller narrowed from a trusted wildcard.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -73,6 +76,7 @@ class EgressAllowlist(BaseModel):
     allow_internet: bool = False
     public_dns_allow: tuple[str, ...] = ()
     resolver_addresses: tuple[str, ...] | None = None
+    name_only_targets: tuple[str, ...] = ()
 
 
 # Domain suffixes an allowlist gets when it sets ``allow_internet``; public space is reached only by name.
@@ -271,7 +275,7 @@ def build_egress_policy(allowlist: EgressAllowlist) -> EgressPolicy:
         if allowlist.resolver_addresses is None
         else _unique_targets(allowlist.resolver_addresses)
     )
-    policy_allow_targets = _unique_targets((*allow_targets, *resolvers))
+    policy_allow_targets = _unique_targets((*allow_targets, *allowlist.name_only_targets, *resolvers))
     rules = [EgressRule(target=target, action="allow") for target in policy_allow_targets]
     rules.extend(EgressRule(target=target, action="deny") for target in denied_cidrs(allow_targets, resolvers))
     return EgressPolicy(default_action="deny", rules=tuple(rules))

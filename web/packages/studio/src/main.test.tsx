@@ -18,7 +18,7 @@ vi.mock('@studio/routes', () => ({
 // This test verifies the main entry point of the app, and that the app is rendered in the DOM.
 describe('main', () => {
   const renderApp = async () => {
-    await act(async () => await import('./main'));
+    await act(async () => await import('@studio/main'));
     expect(document.getElementById('app')).toBeInTheDocument();
   };
 

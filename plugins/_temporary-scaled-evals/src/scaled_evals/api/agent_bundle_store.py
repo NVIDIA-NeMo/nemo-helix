@@ -125,12 +125,7 @@ class AgentBundleStore:
         if entity is None or not (include_all or (entity.owner_id == owner_id and entity.visibility == "private")):
             return False
         try:
-            self._client.delete(
-                ScaledEvalsAgentBundle,
-                bundle_id,
-                workspace=entity_store.private_workspace(),
-                expected_db_version=entity.db_version,
-            )
+            self._client.delete_by_id(ScaledEvalsAgentBundle, entity.id, expected_db_version=entity.db_version)
         except EntityNotFoundError:
             return False
         except EntityConflictError as exc:

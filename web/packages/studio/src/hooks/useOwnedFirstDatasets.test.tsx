@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { type FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { useOwnedFirstDatasets } from '@studio/hooks/useOwnedFirstDatasets';
 import { server } from '@studio/mocks/node';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { renderHook, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { type PropsWithChildren } from 'react';
+import type { PropsWithChildren } from 'react';
 
 const ME = 'me@example.com';
 vi.mock('@studio/providers/auth/useAuthProfile', () => ({ useAuthProfile: () => ({ id: ME }) }));

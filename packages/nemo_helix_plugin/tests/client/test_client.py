@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from nemo_helix_plugin.client import client as client_module
 from nemo_helix_plugin.client.client import (
     DEFAULT_TIMEOUT,
     AsyncNemoClient,
@@ -814,7 +815,7 @@ def test_owned_transport_verifies_with_the_configured_ca_bundle(
 ) -> None:
     monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/nemo-ca.pem")
     built = MagicMock()
-    monkeypatch.setattr(httpx, httpx_cls, built)
+    monkeypatch.setattr(client_module, httpx_cls, built)
 
     client_cls(base_url="https://gateway.example")
 

@@ -54,7 +54,12 @@ def parse_ethos(markdown: str, *, strict: bool = False) -> Ethos:
     if front_match is None:
         raise EthosParseError("missing YAML front matter")
 
-    front = yaml.safe_load(front_match.group(1)) or {}
+    try:
+        front = yaml.safe_load(front_match.group(1)) or {}
+    except (yaml.YAMLError, ValueError) as exc:
+        # SafeLoader also constructs unquoted timestamps, whose invalid date
+        # components raise ValueError before our datetime coercion runs.
+        raise EthosParseError(f"invalid YAML front matter: {exc}") from exc
     if not isinstance(front, dict):
         raise EthosParseError("YAML front matter must be a mapping")
 

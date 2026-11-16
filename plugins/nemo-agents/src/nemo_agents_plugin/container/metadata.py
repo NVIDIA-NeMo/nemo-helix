@@ -17,6 +17,7 @@ from pathlib import Path
 
 import yaml
 from nemo_agents_plugin.entities import NEMO_AGENTS_SPEC_CONFIG_FORMAT
+from yaml import safe_load
 
 NEMO_HELIX_AGENT_FRAMEWORK = "nemo_helix_agent"
 
@@ -111,7 +112,7 @@ def _load_pyproject(pyproject: Path | None) -> dict:
 def _parse_config(config_text: str) -> dict:
     """Parse agent YAML once for all metadata field resolvers."""
     try:
-        data = yaml.safe_load(config_text)
+        data = safe_load(config_text)
     except yaml.YAMLError:
         return {}
     return data if isinstance(data, dict) else {}

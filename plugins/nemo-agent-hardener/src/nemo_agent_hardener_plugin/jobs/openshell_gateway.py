@@ -13,10 +13,11 @@ config dir and hands the agent-hardener subprocess that dir as ``XDG_CONFIG_HOME
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from shutil import which
+from subprocess import run
 from urllib.parse import urlsplit
 
 from nemo_agent_hardener_plugin.cli.checks import OPENSHELL_GATEWAY
@@ -58,7 +59,7 @@ def register_openshell_gateway(
     endpoint = plugin_config.openshell_gateway_endpoint
     if not endpoint:
         return {}
-    openshell = shutil.which("openshell")
+    openshell = which("openshell")
     if openshell is None:
         raise AgentHardenerRunError(
             CATEGORY_PROVISIONING,
@@ -79,9 +80,7 @@ def register_openshell_gateway(
     env = {name: value for name in _CLI_ENVVARS if (value := os.environ.get(name))}
     env[XDG_CONFIG_HOME_ENVVAR] = str(config_home)
     try:
-        result = subprocess.run(
-            args, env=env, capture_output=True, text=True, timeout=_REGISTER_TIMEOUT_SECONDS, check=False
-        )
+        result = run(args, env=env, capture_output=True, text=True, timeout=_REGISTER_TIMEOUT_SECONDS, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise AgentHardenerRunError(
             CATEGORY_PROVISIONING, f"Could not register the OpenShell gateway at {endpoint}: {exc}"

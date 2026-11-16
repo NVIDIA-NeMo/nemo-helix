@@ -19,7 +19,7 @@ def _capture_client_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]
         captured.update(kwargs)
         return real_client()
 
-    monkeypatch.setattr(auth_proxy.httpx, "AsyncClient", fake_client)
+    monkeypatch.setattr(auth_proxy, "AsyncClient", fake_client)
     return captured
 
 

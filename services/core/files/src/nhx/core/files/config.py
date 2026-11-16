@@ -61,6 +61,22 @@ class FilesConfig(create_service_config_class("files")):  # type: ignore
         description="Maximum concurrent downloads during cache warming",
     )
 
+    s3_metadata_cache_ttl_seconds: float = Field(
+        default=10.0,
+        ge=0.0,
+        allow_inf_nan=False,
+        description="Seconds to reuse S3 object metadata before checking freshness with HEAD. "
+        "0 checks every request. API mutations invalidate this process's metadata immediately; "
+        "direct bucket changes and writes through other processes may remain stale until expiry.",
+    )
+
+    s3_cache_max_versions_per_object: int = Field(
+        default=2,
+        ge=1,
+        description="Maximum completed versions retained per S3 object in the local content cache. "
+        "Superseded versions are pruned after a successful cache write.",
+    )
+
     hf_retry_attempts: int = Field(
         default=4,
         ge=1,

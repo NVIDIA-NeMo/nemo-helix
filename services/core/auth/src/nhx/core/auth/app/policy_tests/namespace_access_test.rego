@@ -38,25 +38,25 @@ workspace_access_test_data := {
     "endpoints": {
         "/apis/entities/v2/workspaces": {
             "get": {
-                "permissions": ["workspaces.list"],
+                "direct": {"actor_perms": ["workspaces.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.list"]},
                 "scopes": ["platform:read"]
             },
             "post": {
-                "permissions": ["workspaces.create"],
+                "direct": {"actor_perms": ["workspaces.create"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.create"]},
                 "scopes": ["entities:write", "platform:write"]
             }
         },
         "/apis/entities/v2/workspaces/{name}": {
             "get": {
-                "permissions": ["workspaces.read"],
+                "direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]},
                 "scopes": ["platform:read"]
             },
             "put": {
-                "permissions": ["workspaces.update"],
+                "direct": {"actor_perms": ["workspaces.update"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.update"]},
                 "scopes": ["platform:write"]
             },
             "delete": {
-                "permissions": ["workspaces.delete"],
+                "direct": {"actor_perms": ["workspaces.delete"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.delete"]},
                 "scopes": ["platform:write"]
             }
         }
@@ -84,7 +84,7 @@ workspace_access_test_data := {
 test_list_workspaces_without_system_permission_denied if {
     # Listing workspaces now requires workspaces.list in the SYSTEM workspace. A user
     # with no such grant is denied — previously this rule allowed any authenticated user.
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "test-user",
             "principal_email": "test@example.com",
@@ -108,7 +108,7 @@ test_list_workspaces_without_system_permission_denied if {
 
 test_create_workspace_allowed if {
     # Workspace creation is authorized through a system-scoped role binding.
-    result := authz.allow 
+    result := data.authz.allow
         with input as {
             "principal_id": "user123",
             "principal_email": "creator@example.com",
@@ -183,7 +183,7 @@ test_creator_workspace_update_permission if {
 
 test_creator_get_workspace_middleware_allowed if {
     # Creator should be allowed at middleware level
-    result := authz.allow 
+    result := data.authz.allow
         with input as {
             "principal_id": "user123",
             "principal_email": "creator@example.com",
@@ -220,7 +220,7 @@ test_creator_get_workspace_storage_permission if {
 
 test_other_user_get_workspace_denied if {
     # User without access should be denied
-    result := authz.allow 
+    result := data.authz.allow
         with input as {
             "principal_id": "user456",
             "principal_email": "other@example.com",
@@ -244,7 +244,7 @@ test_other_user_get_workspace_denied if {
 
 test_creator_list_workspaces_allowed if {
     # Creator should be allowed to list workspaces
-    result := authz.allow 
+    result := data.authz.allow
         with input as {
             "principal_id": "user123",
             "principal_email": "creator@example.com",
@@ -268,7 +268,7 @@ test_creator_list_workspaces_allowed if {
 test_other_user_list_workspaces_denied if {
     # A user with only workspace-scoped (or no) roles lacks workspaces.list in the system
     # workspace, so they can no longer list workspaces.
-    result := authz.allow
+    result := data.authz.allow
         with input as {
             "principal_id": "user456",
             "principal_email": "other@example.com",
@@ -292,7 +292,7 @@ test_other_user_list_workspaces_denied if {
 
 test_list_workspaces_missing_scope if {
     # Request without proper scope should be denied
-    result := authz.allow 
+    result := data.authz.allow
         with input as {
             "principal_id": "user123",
             "principal_email": "creator@example.com",
@@ -315,7 +315,7 @@ test_list_workspaces_missing_scope if {
 
 test_list_multiple_workspaces if {
     # User with access to multiple workspaces should be allowed
-    result := authz.allow 
+    result := data.authz.allow
         with input as {
             "principal_id": "multi-user",
             "principal_email": "multi@example.com",
@@ -353,7 +353,7 @@ test_list_multiple_workspaces if {
 
 test_list_workspaces_unauthenticated if {
     # Unauthenticated request (empty principal_id) should be denied
-    result := authz.allow 
+    result := data.authz.allow
         with input as {
             "principal_id": "",
             "method": "GET",
@@ -370,7 +370,7 @@ test_list_workspaces_unauthenticated if {
 
 test_create_workspace_unauthenticated if {
     # Unauthenticated request should be denied
-    result := authz.allow 
+    result := data.authz.allow
         with input as {
             "principal_id": "",
             "method": "POST",

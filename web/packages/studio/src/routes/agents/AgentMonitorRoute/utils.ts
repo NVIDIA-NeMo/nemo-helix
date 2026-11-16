@@ -3,8 +3,8 @@
 
 import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import {
-  RunSummary,
-  TelemetrySpan,
+  type RunSummary,
+  type TelemetrySpan,
   agentFromPath,
   parseSpans,
   reduceSpansToRuns,

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from typing import cast
 
 import pytest
@@ -26,11 +27,17 @@ def _sample_rollup(evaluation_name: str) -> EvaluationRollup:
 
 class _FakeRollupRepo:
     def __init__(self, *, error: Exception | None = None) -> None:
-        self.calls: list[tuple[str, list[str]]] = []
+        self.calls: list[tuple[str, list[str], dict[str, datetime | None]]] = []
         self._error = error
 
-    async def get_rollups(self, *, workspace: str, evaluation_names: list[str]) -> dict[str, EvaluationRollup]:
-        self.calls.append((workspace, list(evaluation_names)))
+    async def get_rollups(
+        self,
+        *,
+        workspace: str,
+        evaluation_names: list[str],
+        created_after_by_name: dict[str, datetime | None],
+    ) -> dict[str, EvaluationRollup]:
+        self.calls.append((workspace, list(evaluation_names), dict(created_after_by_name)))
         if self._error is not None:
             raise self._error
         return {evaluation_name: _sample_rollup(evaluation_name) for evaluation_name in evaluation_names}
@@ -43,20 +50,31 @@ class _FakeEntityClient:
         get_error: Exception | None = None,
         update_error: Exception | None = None,
         existing: Experiment | None = None,
+        created_at: datetime | None = None,
+        replace_after_first_get: Experiment | Exception | None = None,
     ) -> None:
         self.updated: list[Experiment] = []
         self.get_calls: list[tuple[str, str]] = []
         self._get_error = get_error
         self._update_error = update_error
         self._existing = existing
+        self._created_at = created_at
+        self._replace_after_first_get = replace_after_first_get
 
     async def get(self, entity_type: type[Experiment], *, name: str, workspace: str) -> Experiment:
         self.get_calls.append((name, workspace))
+        # Later gets see the entity as replaced (or deleted) during the rollup.
+        if self._replace_after_first_get is not None and len(self.get_calls) > 1:
+            if isinstance(self._replace_after_first_get, Exception):
+                raise self._replace_after_first_get
+            return self._replace_after_first_get
         if self._get_error is not None:
             raise self._get_error
         if self._existing is not None:
             return self._existing
-        return Experiment(name=name, workspace=workspace, experiment_ids=["grp"], dataset_name="ds")
+        entity = Experiment(name=name, workspace=workspace, experiment_ids=["grp"], dataset_name="ds")
+        entity._created_at = self._created_at
+        return entity
 
     async def update(self, entity: Experiment) -> Experiment:
         if self._update_error is not None:
@@ -85,9 +103,10 @@ async def test_flush_writes_denormalized_facets() -> None:
 
     # One batched rollup query for the workspace, covering both dirty evaluations.
     assert len(repo.calls) == 1
-    workspace, ids = repo.calls[0]
+    workspace, ids, created_after_by_name = repo.calls[0]
     assert workspace == "default"
     assert set(ids) == {"eval-a", "eval-b"}
+    assert created_after_by_name == {"eval-a": None, "eval-b": None}
 
     # Each evaluation got its name facets written, and the dirty set is drained.
     assert {entity.name for entity in entity_client.updated} == {"eval-a", "eval-b"}
@@ -133,13 +152,95 @@ async def test_flush_noop_when_clean() -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_evaluation_is_skipped() -> None:
-    entity_client = _FakeEntityClient(get_error=EntityNotFoundError("gone"))
-    refresher = _refresher(_FakeRollupRepo(), entity_client)
+async def test_flush_bounds_rollups_by_each_entity_created_at() -> None:
+    created_at = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    repo = _FakeRollupRepo()
+    entity_client = _FakeEntityClient(created_at=created_at)
+    refresher = _refresher(repo, entity_client)
+
     refresher.mark_dirty(workspace="default", evaluation_name="eval-a")
     await refresher.flush()
+
+    assert repo.calls == [("default", ["eval-a"], {"eval-a": created_at})]
+
+
+def _deleted_evaluation() -> Experiment:
+    entity = Experiment(name="eval-a", workspace="default", experiment_ids=["grp"], dataset_name="ds")
+    entity.is_deleted = True
+    return entity
+
+
+@pytest.mark.parametrize(
+    "entity_client_kwargs",
+    [
+        pytest.param({"get_error": EntityNotFoundError("gone")}, id="missing"),
+        pytest.param({"existing": _deleted_evaluation()}, id="deleted"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_missing_or_deleted_evaluation_is_skipped_before_the_rollup(entity_client_kwargs: dict) -> None:
+    repo = _FakeRollupRepo()
+    entity_client = _FakeEntityClient(**entity_client_kwargs)
+    refresher = _refresher(repo, entity_client)
+    refresher.mark_dirty(workspace="default", evaluation_name="eval-a")
+    await refresher.flush()
+    assert repo.calls == []
     assert entity_client.updated == []
-    assert refresher.pending() == set()  # not re-queued; the evaluation no longer exists
+    assert refresher.pending() == set()
+
+
+@pytest.mark.asyncio
+async def test_recreated_namesake_during_rollup_is_requeued_not_written() -> None:
+    created_at = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    old = Experiment(name="eval-a", workspace="default", experiment_ids=["grp"], dataset_name="ds")
+    old._created_at = created_at
+    old._id = "old-entity-id"
+    replacement = Experiment(name="eval-a", workspace="default", experiment_ids=["grp"], dataset_name="ds-new")
+    replacement._id = "new-entity-id"
+    repo = _FakeRollupRepo()
+    entity_client = _FakeEntityClient(existing=old, replace_after_first_get=replacement)
+    refresher = _refresher(repo, entity_client)
+
+    refresher.mark_dirty(workspace="default", evaluation_name="eval-a")
+    await refresher.flush()
+
+    assert repo.calls == [("default", ["eval-a"], {"eval-a": created_at})]
+    assert entity_client.updated == []
+    assert refresher.pending() == {("default", "eval-a")}
+
+
+@pytest.mark.asyncio
+async def test_facets_are_written_onto_the_entity_read_after_the_rollup() -> None:
+    before = Experiment(name="eval-a", workspace="default", experiment_ids=["grp"], dataset_name="ds")
+    before._id = "entity-id"
+    edited = Experiment(
+        name="eval-a", workspace="default", experiment_ids=["grp"], dataset_name="ds", description="edited"
+    )
+    edited._id = "entity-id"
+    entity_client = _FakeEntityClient(existing=before, replace_after_first_get=edited)
+    refresher = _refresher(_FakeRollupRepo(), entity_client)
+
+    refresher.mark_dirty(workspace="default", evaluation_name="eval-a")
+    await refresher.flush()
+
+    assert entity_client.updated == [edited]
+    assert edited.description == "edited"
+    assert edited.agent_names == ["agent-x"]
+    assert before.agent_names != ["agent-x"]
+
+
+@pytest.mark.asyncio
+async def test_evaluation_deleted_during_rollup_is_skipped() -> None:
+    repo = _FakeRollupRepo()
+    entity_client = _FakeEntityClient(replace_after_first_get=EntityNotFoundError("gone"))
+    refresher = _refresher(repo, entity_client)
+
+    refresher.mark_dirty(workspace="default", evaluation_name="eval-a")
+    await refresher.flush()
+
+    assert repo.calls == [("default", ["eval-a"], {"eval-a": None})]
+    assert entity_client.updated == []
+    assert refresher.pending() == set()
 
 
 @pytest.mark.asyncio

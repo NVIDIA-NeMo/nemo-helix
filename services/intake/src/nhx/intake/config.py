@@ -91,6 +91,19 @@ class IntakeConfig(_BaseIntakeConfig):
         le=MAX_ATIF_MAX_SUBAGENT_DEPTH,
         description="Maximum number of trajectory levels accepted for recursive ATIF subagents.",
     )
+    atif_ingest_workers: int = Field(
+        default=2,
+        ge=1,
+        description="Worker processes that map ATIF trajectories into insert rows off the request event loop.",
+    )
+    atif_ingest_max_pending: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "Maximum ATIF ingest requests mapping or queued for a worker at once. Further requests get "
+            "503 with Retry-After until a slot frees."
+        ),
+    )
     denormalization_interval_seconds: float = Field(
         default=60.0,
         gt=0,

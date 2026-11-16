@@ -24,7 +24,7 @@ def test_run_with_isolated_async_client_passes_cloned_client(mocker: MockerFixtu
     http_client = mocker.AsyncMock(name="http_client")
     http_client.__aenter__.return_value = http_client
     http_client.__aexit__.return_value = None
-    mocker.patch("nemo_evals.jobs.utils.httpx.AsyncClient", return_value=http_client)
+    mocker.patch("nemo_evals.jobs.utils.AsyncClient", return_value=http_client)
 
     seen: list[AsyncFilesClient] = []
 
@@ -59,7 +59,7 @@ def test_run_with_isolated_async_client_preserves_request_event_hooks(mocker: Mo
     )
     async_client_cls = httpx.AsyncClient
     mocker.patch(
-        "nemo_evals.jobs.utils.httpx.AsyncClient",
+        "nemo_evals.jobs.utils.AsyncClient",
         side_effect=partial(async_client_cls, transport=httpx.MockTransport(record)),
     )
 
@@ -98,7 +98,7 @@ def test_async_client_from_sync_client_preserves_headers_timeout_and_request_eve
     )
     async_client_cls = httpx.AsyncClient
     mocker.patch(
-        "nemo_evals.jobs.utils.httpx.AsyncClient",
+        "nemo_evals.jobs.utils.AsyncClient",
         side_effect=partial(async_client_cls, transport=httpx.MockTransport(record)),
     )
 
@@ -140,7 +140,7 @@ def test_async_client_from_sync_client_ignores_missing_event_hook_mapping(mocker
         http_client=source_http_client,
     )
     isolated_http_client = mocker.AsyncMock(spec=httpx.AsyncClient)
-    async_client_ctor = mocker.patch("nemo_evals.jobs.utils.httpx.AsyncClient", return_value=isolated_http_client)
+    async_client_ctor = mocker.patch("nemo_evals.jobs.utils.AsyncClient", return_value=isolated_http_client)
 
     with async_client_from_sync_client(sync_client) as async_client:
         assert isinstance(async_client, AsyncNemoClient)

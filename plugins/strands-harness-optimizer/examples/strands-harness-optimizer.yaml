@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Strategy config for `nemo agents optimize run-strategy --strategy strands-harness-optimizer`.
+# Upload this file and the dataset it names into one fileset; `dataset` is relative to this file.
+dataset: dataset.jsonl
+epochs: 2
+batch_size: 8
+num_workers: 1
+# max_samples: 16
+# optimizer_model: nvidia-nemotron-3-5-lightning-30b-a3b   # reflection model; defaults to the agent's own

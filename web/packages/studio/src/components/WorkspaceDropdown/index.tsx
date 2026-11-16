@@ -4,7 +4,7 @@
 import { logger } from '@nemo/common/src/utils/logger';
 import { Add, Filter } from '@nemo/icons/icons';
 import { useEntitiesListWorkspaces } from '@nemo/sdk/generated/platform/entity-store';
-import { Workspace } from '@nemo/sdk/generated/platform/schema';
+import type { Workspace } from '@nemo/sdk/generated/platform/schema';
 import {
   Block,
   DropdownContent,
@@ -26,7 +26,15 @@ import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
 import cn from 'classnames';
-import { ChangeEvent, FC, lazy, startTransition, Suspense, useMemo, useState } from 'react';
+import {
+  type ChangeEvent,
+  type FC,
+  lazy,
+  startTransition,
+  Suspense,
+  useMemo,
+  useState,
+} from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 
 const loadWorkspaceCreateModal = () => import('@studio/components/WorkspaceCreateModal');

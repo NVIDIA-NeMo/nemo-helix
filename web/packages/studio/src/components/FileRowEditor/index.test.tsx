@@ -4,10 +4,51 @@
 import { FileRowEditor } from '@studio/components/FileRowEditor';
 import { SAMPLE_ROWS } from '@studio/components/FileRowEditor/sampleRows';
 import type { DataFileColumn, DataFileRow } from '@studio/components/FileRowEditor/types';
-import { render, screen, waitFor } from '@studio/tests/util/render';
+import { menuFor } from '@studio/tests/util/menuFor';
+import { render, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 
 describe('FileRowEditor', () => {
+  it('shows row actions with Delete row styled as danger', async () => {
+    const user = userEvent.setup();
+    render(<FileRowEditor initialRows={SAMPLE_ROWS} />);
+
+    const [trigger] = screen.getAllByRole('button', { name: 'Open quick actions menu' });
+    await user.click(trigger);
+
+    const items = within(menuFor(trigger)).getAllByTestId('quick-actions-menu-item');
+    expect(items.map((item) => item.textContent)).toEqual([
+      'Edit row',
+      'Duplicate row',
+      'Delete row',
+    ]);
+    expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
+  });
+
+  it('opens the row editor from the Edit row action', async () => {
+    const user = userEvent.setup();
+    render(<FileRowEditor initialRows={SAMPLE_ROWS} />);
+
+    const [trigger] = screen.getAllByRole('button', { name: 'Open quick actions menu' });
+    await user.click(trigger);
+    await user.click(within(menuFor(trigger)).getByRole('menuitem', { name: 'Edit row' }));
+
+    expect(screen.getByText('Edit Row')).toBeInTheDocument();
+    expect(screen.getByLabelText('topic')).toHaveValue('CUDA streams');
+  });
+
+  it('adds a copy of the row from the Duplicate row action', async () => {
+    const user = userEvent.setup();
+    render(<FileRowEditor initialRows={SAMPLE_ROWS} />);
+
+    expect(screen.getByText(/^10 rows/)).toBeInTheDocument();
+    const [trigger] = screen.getAllByRole('button', { name: 'Open quick actions menu' });
+    await user.click(trigger);
+    await user.click(within(menuFor(trigger)).getByRole('menuitem', { name: 'Duplicate row' }));
+
+    expect(await screen.findByText(/^11 rows/)).toBeInTheDocument();
+  });
+
   it('renders the file header and sample rows', () => {
     render(<FileRowEditor initialRows={SAMPLE_ROWS} />);
 

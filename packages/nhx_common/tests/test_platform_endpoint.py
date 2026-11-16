@@ -502,7 +502,7 @@ def test_platform_endpoint_logs_path_without_raw_url(
 def test_sync_http_client_omits_unset_timeout() -> None:
     endpoint = parse_platform_endpoint("http://127.0.0.1:8080")
 
-    with patch("nhx.common.platform_endpoint.httpx.Client") as client:
+    with patch("nhx.common.platform_endpoint.Client") as client:
         endpoint.sync_http_client()
 
     client.assert_called_once_with(follow_redirects=True)
@@ -511,7 +511,7 @@ def test_sync_http_client_omits_unset_timeout() -> None:
 def test_sync_http_client_passes_explicit_timeout() -> None:
     endpoint = parse_platform_endpoint("http://127.0.0.1:8080")
 
-    with patch("nhx.common.platform_endpoint.httpx.Client") as client:
+    with patch("nhx.common.platform_endpoint.Client") as client:
         endpoint.sync_http_client(timeout=2.0)
 
     client.assert_called_once_with(follow_redirects=True, timeout=2.0)
@@ -523,7 +523,7 @@ def test_sync_http_client_uses_client_ca_from_env(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", str(cert_file))
     endpoint = parse_platform_endpoint("https://platform.example.test")
 
-    with patch("nhx.common.platform_endpoint.httpx.Client") as client:
+    with patch("nhx.common.platform_endpoint.Client") as client:
         endpoint.sync_http_client(timeout=2.0)
 
     client.assert_called_once_with(follow_redirects=True, timeout=2.0, verify=str(cert_file))
@@ -580,7 +580,7 @@ def test_sync_sdk_http_client_can_disable_redirects() -> None:
 def test_uds_sync_http_client_keeps_transport_and_omits_unset_timeout() -> None:
     endpoint = parse_platform_endpoint("unix:///tmp/nemo-helix.sock")
 
-    with patch("nhx.common.platform_endpoint.httpx.Client") as client:
+    with patch("nhx.common.platform_endpoint.Client") as client:
         endpoint.sync_http_client()
 
     kwargs = client.call_args.kwargs
@@ -630,7 +630,7 @@ def test_sync_routing_transport_prebuilds_uds_service_transports() -> None:
             if self.uds is not None:
                 closed_transports.append(self)
 
-    with patch("nhx.common.platform_endpoint.httpx.HTTPTransport", FakeHTTPTransport):
+    with patch("nhx.common.platform_endpoint.HTTPTransport", FakeHTTPTransport):
         routing_transport = _SyncHelixEndpointRoutingTransport(
             endpoint=HelixEndpoint(
                 connect_base_url="http://platform:8080",
@@ -667,7 +667,7 @@ def test_sync_routing_transport_routes_api_path_to_service_url(
             pass
 
     endpoint = resolve_platform_endpoint(platform_config_with_service_discovery)
-    with patch("nhx.common.platform_endpoint.httpx.HTTPTransport", FakeHTTPTransport):
+    with patch("nhx.common.platform_endpoint.HTTPTransport", FakeHTTPTransport):
         routing_transport = _SyncHelixEndpointRoutingTransport(endpoint=endpoint)
         request = httpx.Request("GET", "http://platform:8080/apis/entities/v2/workspaces")
         routing_transport.handle_request(request)
@@ -693,7 +693,7 @@ def test_sync_routing_transport_preserves_non_api_service_status_url(
             pass
 
     endpoint = resolve_platform_endpoint(platform_config_with_service_discovery)
-    with patch("nhx.common.platform_endpoint.httpx.HTTPTransport", FakeHTTPTransport):
+    with patch("nhx.common.platform_endpoint.HTTPTransport", FakeHTTPTransport):
         routing_transport = _SyncHelixEndpointRoutingTransport(endpoint=endpoint)
         request = httpx.Request("GET", "http://entities-service:8080/status")
         routing_transport.handle_request(request)
@@ -781,7 +781,7 @@ async def test_async_routing_transport_routes_api_path_to_service_url(
             pass
 
     endpoint = resolve_platform_endpoint(platform_config_with_service_discovery)
-    with patch("nhx.common.platform_endpoint.httpx.AsyncHTTPTransport", FakeAsyncHTTPTransport):
+    with patch("nhx.common.platform_endpoint.AsyncHTTPTransport", FakeAsyncHTTPTransport):
         routing_transport = _AsyncHelixEndpointRoutingTransport(endpoint=endpoint)
         request = httpx.Request("GET", "http://platform:8080/apis/jobs/v2/workspaces/default/jobs")
         await routing_transport.handle_async_request(request)
@@ -819,8 +819,8 @@ def test_routing_transports_pass_custom_ca_to_tcp_transport(monkeypatch: pytest.
         )
     )
     with (
-        patch("nhx.common.platform_endpoint.httpx.HTTPTransport", FakeHTTPTransport),
-        patch("nhx.common.platform_endpoint.httpx.AsyncHTTPTransport", FakeAsyncHTTPTransport),
+        patch("nhx.common.platform_endpoint.HTTPTransport", FakeHTTPTransport),
+        patch("nhx.common.platform_endpoint.AsyncHTTPTransport", FakeAsyncHTTPTransport),
     ):
         _SyncHelixEndpointRoutingTransport(endpoint=endpoint, limits=limits)
         _AsyncHelixEndpointRoutingTransport(endpoint=endpoint, limits=limits)
@@ -832,7 +832,7 @@ def test_routing_transports_pass_custom_ca_to_tcp_transport(monkeypatch: pytest.
 def test_async_http_client_omits_unset_timeout() -> None:
     endpoint = parse_platform_endpoint("http://127.0.0.1:8080")
 
-    with patch("nhx.common.platform_endpoint.httpx.AsyncClient") as client:
+    with patch("nhx.common.platform_endpoint.AsyncClient") as client:
         endpoint.async_http_client()
 
     client.assert_called_once_with(follow_redirects=True)
@@ -841,7 +841,7 @@ def test_async_http_client_omits_unset_timeout() -> None:
 def test_async_http_client_passes_explicit_timeout() -> None:
     endpoint = parse_platform_endpoint("http://127.0.0.1:8080")
 
-    with patch("nhx.common.platform_endpoint.httpx.AsyncClient") as client:
+    with patch("nhx.common.platform_endpoint.AsyncClient") as client:
         endpoint.async_http_client(timeout=2.0)
 
     client.assert_called_once_with(follow_redirects=True, timeout=2.0)
@@ -853,7 +853,7 @@ def test_async_http_client_uses_client_ca_from_env(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", str(cert_file))
     endpoint = parse_platform_endpoint("https://platform.example.test")
 
-    with patch("nhx.common.platform_endpoint.httpx.AsyncClient") as client:
+    with patch("nhx.common.platform_endpoint.AsyncClient") as client:
         endpoint.async_http_client(timeout=2.0)
 
     client.assert_called_once_with(follow_redirects=True, timeout=2.0, verify=str(cert_file))
@@ -922,7 +922,7 @@ def test_async_sdk_http_client_can_disable_redirects() -> None:
 def test_uds_async_http_client_keeps_transport_and_omits_unset_timeout() -> None:
     endpoint = parse_platform_endpoint("unix:///tmp/nemo-helix.sock")
 
-    with patch("nhx.common.platform_endpoint.httpx.AsyncClient") as client:
+    with patch("nhx.common.platform_endpoint.AsyncClient") as client:
         endpoint.async_http_client()
 
     kwargs = client.call_args.kwargs

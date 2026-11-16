@@ -10,7 +10,11 @@ BEARER_AUTH_OPENAPI = {"security": [{BEARER_SCHEME_NAME: []}]}
 BEARER_SECURITY_SCHEME = {
     "type": "http",
     "scheme": "bearer",
-    "description": "Supply a raw Helix access token. The Authorization header's Bearer prefix is added automatically.",
+    "description": (
+        "Send `Authorization: Bearer <token>` when setting the HTTP header directly (for example, with curl). "
+        "In a bearer-auth token field, supply only the raw Helix access token; "
+        "the client adds the Bearer prefix."
+    ),
     "x-fern-bearer": {
         "name": "accessToken",
         "env": "NHX_ACCESS_TOKEN",

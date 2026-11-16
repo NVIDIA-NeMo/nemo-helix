@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
-import { FC } from 'react';
+import type { FC } from 'react';
 import { useLocation } from 'react-router';
 
 /**

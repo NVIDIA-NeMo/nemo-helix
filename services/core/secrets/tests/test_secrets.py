@@ -1,11 +1,17 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from unittest.mock import AsyncMock
+
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from nhx.common.config import HelixConfig
+from nhx.common.entities import EntityConflictError, EntityNotFoundError
 from nhx.core.secrets.api.v2.secrets import endpoints as secrets_endpoints
 from nhx.core.secrets.app.encryptor import EncryptionProviderNotConfiguredError
 from nhx.core.secrets.config import SecretsServiceConfig
+from nhx.core.secrets.entities import HelixSecret
 from nhx.core.secrets.service import SecretsService
 from nhx.testing import create_test_client
 
@@ -165,3 +171,30 @@ def test_secret_value_operations_without_encryption_provider_return_422(test_cli
     )
     assert described.status_code == 200
     assert described.json()["description"] == "metadata only"
+
+
+@pytest.mark.parametrize("phase", ["lookup", "delete"])
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [(EntityNotFoundError("gone"), 404), (EntityConflictError("changed"), 409)],
+)
+async def test_delete_secret_maps_entity_races(phase: str, error: Exception, expected_status: int) -> None:
+    selected = HelixSecret(name="test-secret", workspace="default")
+    selected._id = "selected-secret-id"
+    store = AsyncMock()
+    store.get.return_value = selected
+    if phase == "lookup":
+        store.get.side_effect = error
+    else:
+        store.delete_by_id.side_effect = error
+
+    with pytest.raises(HTTPException) as caught:
+        await secrets_endpoints.delete_secret(
+            name=selected.name, workspace=selected.workspace, entity_store=store, platform_config=HelixConfig()
+        )
+
+    assert caught.value.status_code == expected_status
+    if phase == "lookup":
+        store.delete_by_id.assert_not_awaited()
+    else:
+        store.delete_by_id.assert_awaited_once_with(HelixSecret, selected.id, expected_db_version=selected.db_version)

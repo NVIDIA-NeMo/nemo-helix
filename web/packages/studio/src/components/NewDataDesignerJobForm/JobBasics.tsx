@@ -4,7 +4,7 @@
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import { type Control, type FieldValues, type Path } from 'react-hook-form';
+import type { Control, FieldValues, Path } from 'react-hook-form';
 
 export interface JobBasicsProps<T extends FieldValues = FieldValues> {
   control: Control<T>;

@@ -8,20 +8,21 @@ on:
     branches: [main]
   pull_request:
     branches: [main, "release/*"]
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
     inputs:
       image_tag:
-        description: Optional CPU smoke image tag. Defaults to the commit SHA.
+        description: Optional CI image tag. Defaults to the commit SHA.
         required: false
         type: string
         default: ""
       publish:
-        description: Publish CPU smoke images to GHCR.
+        description: Publish CPU smoke images to GHCR on manual runs.
         required: false
         type: boolean
-        default: true
+        default: false
 
 permissions:
   actions: read
@@ -43,6 +44,7 @@ jobs:
     name: Detect Path Changes
     runs-on: ubuntu-latest
     outputs:
+      post-merge: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
       openapi: ${{ steps.changes.outputs.openapi }}
       test: ${{ steps.changes.outputs.test }}
       deps: ${{ steps.changes.outputs.deps }}
@@ -52,7 +54,6 @@ jobs:
       evaluator-sdk-closure: ${{ steps.changes.outputs.evaluator-sdk-closure }}
       evaluator-integration: ${{ steps.changes.outputs.evaluator-integration }}
       scaled-evals: ${{ steps.changes.outputs.scaled-evals }}
-      e2e: ${{ steps.changes.outputs.e2e }}
       docs: ${{ steps.changes.outputs.docs }}
       web-studio: ${{ steps.changes.outputs.web-studio }}
       customizer-skill-references: ${{ steps.changes.outputs.customizer-skill-references }}
@@ -65,8 +66,10 @@ jobs:
       deployments-openshell: ${{ steps.changes.outputs.deployments-openshell }}
       jobs-openshell: ${{ steps.changes.outputs.jobs-openshell }}
       ngc-metadata: ${{ steps.changes.outputs.ngc-metadata }}
+      nightly-taskset-runs-report: ${{ steps.changes.outputs.nightly-taskset-runs-report }}
       auth-idp: ${{ steps.changes.outputs.auth-idp }}
       customization-auth: ${{ steps.changes.outputs.customization-auth }}
+      builder-e2e: ${{ steps.changes.outputs.builder-e2e }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -113,6 +116,27 @@ jobs:
       - name: Run NGC metadata unit tests
         run: uv run --no-cache .github/scripts/tests/test_ngc_metadata.py
 
+  nightly-taskset-runs-report-test:
+    name: Test nightly taskset-runs report
+    needs: [changes]
+    if: >
+      !cancelled() &&
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.nightly-taskset-runs-report == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+      - name: Run nightly report unit tests
+        run: uv run --no-cache .github/scripts/tests/test_nightly_taskset_runs_report.py
+
   test-gates:
     name: Check test gates
     # Deliberately unconditional. An orphaned gate arrives by editing a test file, not by editing
@@ -134,7 +158,7 @@ jobs:
         run: uv run --no-cache .github/scripts/check_test_gates.py
 
   uv-lock:
-    name: Check uv lock
+    name: Dependency checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -143,6 +167,7 @@ jobs:
           persist-credentials: false
 
       - name: Install platform uv
+        id: uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
@@ -155,26 +180,8 @@ jobs:
       - name: Check lock with platform uv
         run: bash script/uv-lock.sh --check
 
-  uv-compatibility:
-    name: Check configured uv compatibility
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Install configured uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: false
-          python-version: "3.13"
-
-      - name: Show uv version
-        run: uv --version
-
       - name: Check sync with configured uv
+        if: ${{ !cancelled() && steps.uv.outcome == 'success' }}
         run: uv sync --frozen --all-packages
 
   docker-bake-graph:
@@ -204,6 +211,8 @@ jobs:
           make docker-print TARGET=nhx-automodel
           make docker-print TARGET=nhx-unsloth
 
+  # Keep the build steps aligned with e2e.yaml. CI validates image builds without
+  # requiring E2E opt-in; E2E builds independently to avoid cross-workflow races.
   build-cpu-smoke-images:
     name: Build CPU smoke images
     needs: [changes]
@@ -212,167 +221,31 @@ jobs:
         github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.auth-idp == 'true' ||
-        needs.changes.outputs.customization-auth == 'true'
+        needs.changes.outputs.customization-auth == 'true' ||
+        needs.changes.outputs.builder-e2e == 'true'
       )
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
-    outputs:
-      image_registry: ${{ steps.bake-vars.outputs.image_registry }}
-      image_tag: ${{ steps.bake-vars.outputs.image_tag }}
-      publish_images: ${{ steps.bake-vars.outputs.publish_images }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Free disk space
-        uses: ./.github/actions/free-disk-space
-        with:
-          disable_swap: "true"
-          remove_haskell: "true"
-          remove_java: "true"
-          remove_ruby: "true"
-          remove_swift: "true"
-          prune_docker: "true"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-        with:
-          name: nhx-builder
-          driver: docker-container
-          cleanup: true
-
-      - name: Configure bake variables
-        id: bake-vars
-        shell: bash
-        env:
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          INPUT_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
-          INPUT_PUBLISH: ${{ inputs.publish }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -euo pipefail
-
-          image_registry="ghcr.io/${GITHUB_REPOSITORY,,}"
-          source_sha="${SOURCE_SHA:-$GITHUB_SHA}"
-          bake_tag="${INPUT_IMAGE_TAG:-$source_sha}"
-          fastembed_cache_dir="${RUNNER_TEMP}/fastembed-cache"
-          publish_images="false"
-
-          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
-            publish_images="true"
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPOSITORY" = "$GITHUB_REPOSITORY" ]; then
-            publish_images="true"
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
-            publish_images="true"
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$INPUT_PUBLISH" = "true" ]; then
-            publish_images="true"
-          fi
-
-          {
-            printf 'IMAGE_REGISTRY=%s\n' "$image_registry"
-            printf 'BASE_REGISTRY=%s\n' "$image_registry"
-            printf 'CACHE_REGISTRY=%s\n' "$image_registry"
-            printf 'BAKE_TAG=%s\n' "$bake_tag"
-            printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
-            printf 'FASTEMBED_CACHE_CONTEXT=%s\n' "$fastembed_cache_dir"
-            printf 'FASTEMBED_CACHE_DIR=%s\n' "$fastembed_cache_dir"
-            printf 'DOCKER_BAKE_ALLOW_FS_READ=%s\n' "$fastembed_cache_dir"
-            printf 'FASTEMBED_MODEL_REPO=%s\n' "qdrant/all-MiniLM-L6-v2-onnx"
-            printf 'FASTEMBED_MODEL_REVISION=%s\n' "main"
-            printf 'PUBLISH_IMAGES=%s\n' "$publish_images"
-          } >> "$GITHUB_ENV"
-          {
-            printf 'image_registry=%s\n' "$image_registry"
-            printf 'image_tag=%s\n' "$bake_tag"
-            printf 'publish_images=%s\n' "$publish_images"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Prepare fastembed model cache directory
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "${FASTEMBED_CACHE_DIR}"
-          touch "${FASTEMBED_CACHE_DIR}/.cache-context"
-
-      - name: Restore fastembed model cache
-        id: fastembed-cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ${{ runner.temp }}/fastembed-cache
-          key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
-
-      - name: Install uv for fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          cache-dependency-glob: uv.lock
-
-      - name: Populate fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          HF_HUB_DISABLE_UPDATE_CHECK=1 uv run --no-project --with 'huggingface-hub>=1.0.1,<2.0.0' hf download \
-            "${FASTEMBED_MODEL_REPO}" \
-            --revision "${FASTEMBED_MODEL_REVISION}" \
-            --cache-dir "${FASTEMBED_CACHE_DIR}" \
-            --format quiet
-          find "${FASTEMBED_CACHE_DIR}/models--qdrant--all-MiniLM-L6-v2-onnx/snapshots" \
-            -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .
-
-      - name: Log in to GHCR
-        if: env.PUBLISH_IMAGES == 'true'
-        shell: bash
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-
-      - name: Print Docker bake graph
-        shell: bash
-        run: |
-          target=docker-cpu
-          if [ "${PUBLISH_IMAGES}" = "true" ]; then
-            target=docker-cpu-ci
-          fi
-          make docker-print TARGET="${target}"
-
-      - name: Build CPU images
-        if: env.PUBLISH_IMAGES != 'true'
-        shell: bash
-        run: make docker-load TARGET=docker-cpu
-
-      - name: Build and publish CPU images
-        if: env.PUBLISH_IMAGES == 'true'
-        shell: bash
-        run: make docker-push TARGET=docker-cpu-ci
-
-      - name: Save fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}/fastembed-cache
-          key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
+    # Shared with e2e.yaml and nightly-taskset-runs-e2e.yaml.
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+      # Publish on a push to main, a same-repo PR, the merge queue, or a dispatch that asks to.
+      publish: >-
+        ${{
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+          github.event_name == 'merge_group' ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish)
+        }}
 
   build-garak-test-image:
     name: Build garak test image
     needs: [changes]
     if: >
-      !cancelled() && (
+      !cancelled() && needs.changes.outputs.post-merge == 'true' && (
         github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.cpu-smoke == 'true'
       )
@@ -380,6 +253,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -403,11 +277,20 @@ jobs:
           driver: docker-container
           cleanup: true
 
+      - name: Resolve bake cache branch
+        id: cache-branch
+        uses: ./.github/actions/bake-cache-branch
+        with:
+          base-ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.base_ref || github.ref_name }}
+          event-name: ${{ github.event_name }}
+
       - name: Configure bake variables
         shell: bash
         env:
           INPUT_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CACHE_SOURCE_BRANCH: ${{ steps.cache-branch.outputs.source-branch }}
+          CACHE_TARGET_BRANCH: ${{ steps.cache-branch.outputs.target-branch }}
         run: |
           set -euo pipefail
 
@@ -421,7 +304,17 @@ jobs:
             printf 'CACHE_REGISTRY=%s\n' "$image_registry"
             printf 'BAKE_TAG=%s\n' "$bake_tag"
             printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
+            printf 'BAKE_CACHE_SOURCE_BRANCH=%s\n' "$CACHE_SOURCE_BRANCH"
+            printf 'BAKE_CACHE_TARGET_BRANCH=%s\n' "$CACHE_TARGET_BRANCH"
           } >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Print Docker bake graph
         shell: bash
@@ -435,7 +328,7 @@ jobs:
     name: Build Safe Synthesizer test image
     needs: [changes]
     if: >
-      !cancelled() && (
+      !cancelled() && needs.changes.outputs.post-merge == 'true' && (
         github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.cpu-smoke == 'true'
       )
@@ -443,6 +336,7 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -470,11 +364,20 @@ jobs:
           driver: docker-container
           cleanup: true
 
+      - name: Resolve bake cache branch
+        id: cache-branch
+        uses: ./.github/actions/bake-cache-branch
+        with:
+          base-ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.base_ref || github.ref_name }}
+          event-name: ${{ github.event_name }}
+
       - name: Configure bake variables
         shell: bash
         env:
           INPUT_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CACHE_SOURCE_BRANCH: ${{ steps.cache-branch.outputs.source-branch }}
+          CACHE_TARGET_BRANCH: ${{ steps.cache-branch.outputs.target-branch }}
         run: |
           set -euo pipefail
 
@@ -488,7 +391,17 @@ jobs:
             printf 'CACHE_REGISTRY=%s\n' "$image_registry"
             printf 'BAKE_TAG=%s\n' "$bake_tag"
             printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
+            printf 'BAKE_CACHE_SOURCE_BRANCH=%s\n' "$CACHE_SOURCE_BRANCH"
+            printf 'BAKE_CACHE_TARGET_BRANCH=%s\n' "$CACHE_TARGET_BRANCH"
           } >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Print Docker bake graph
         shell: bash
@@ -497,339 +410,6 @@ jobs:
       - name: Build Safe Synthesizer image
         shell: bash
         run: make docker-build TARGET=docker-gpu
-
-  kind-cpu-smoke:
-    name: Kind CPU smoke test
-    needs: [changes, build-cpu-smoke-images]
-    if: >
-      !cancelled() &&
-      needs.build-cpu-smoke-images.result == 'success' &&
-      needs.build-cpu-smoke-images.outputs.publish_images == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      packages: read
-    env:
-      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-kind-smoke
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Setup Kind cluster with NeMo Helix
-        uses: ./.github/actions/setup-kind-cluster
-        with:
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-          kind-image-pull-token: ${{ github.token }}
-          kind-image-pull-user: ${{ github.actor }}
-
-      - name: Run CPU job e2e smoke test
-        shell: bash
-        env:
-          _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
-          NGC_API_KEY: not-used-for-ghcr-cpu-smoke
-          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-        run: |
-          test -n "${NHX_E2E_CLUSTER_URL}"
-          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
-          uv run --frozen pytest \
-            e2e/test_jobs.py::test_job_using_secret_environment_variable \
-            e2e/test_models_deployments_plugin.py::test_generic_model_deployment_lifecycle \
-            -v \
-            --run-e2e \
-            --no-cov \
-            --junitxml=report-kubernetes-smoke.xml
-
-      - name: Finalize Kind e2e
-        if: always()
-        uses: ./.github/actions/finalize-kind-e2e
-        with:
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          artifact-name: kind-smoke-kubernetes-artifacts
-          junit-report: report-kubernetes-smoke.xml
-          services-log-dir: ${{ runner.temp }}/e2e-services-logs
-
-  kind-cpu-e2e:
-    name: Kind CPU e2e
-    needs: [changes, build-cpu-smoke-images]
-    if: >
-      !cancelled() &&
-      needs.build-cpu-smoke-images.result == 'success' &&
-      needs.build-cpu-smoke-images.outputs.publish_images == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      packages: read
-    env:
-      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-kind-e2e
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Setup Kind cluster with NeMo Helix
-        uses: ./.github/actions/setup-kind-cluster
-        with:
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-          kind-image-pull-token: ${{ github.token }}
-          kind-image-pull-user: ${{ github.actor }}
-
-      - name: Pre-pull agent E2E image into Kind
-        shell: bash
-        env:
-          KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
-          KIND_IMAGE_PULL_USER: ${{ github.actor }}
-          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-        run: |
-          e2e/k8s/scripts/prepull_kind_images.sh \
-            "${NHX_E2E_IMAGE_REGISTRY}/nhx-agents-deepagents-e2e:${NHX_E2E_IMAGE_TAG}"
-
-      - name: Run jobs and data-designer e2e tests
-        shell: bash
-        env:
-          _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
-          NGC_API_KEY: not-used-for-ghcr-cpu-e2e
-          # Let the k8s-mode agent deployment e2e (test_nemo_agents_k8s.py) learn
-          # the agent image ref. The Helm platform is configured with a k8s
-          # deployments executor (e2e/k8s/values/kind.yaml) and this same
-          # nhx-agents-deepagents-e2e image is pre-pulled into the kind nodes, so the agent pod
-          # resolves it node-locally under IfNotPresent.
-          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-        run: |
-          test -n "${NHX_E2E_CLUSTER_URL}"
-          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
-          uv run --frozen pytest \
-            e2e \
-            -v \
-            -m "not gym_e2e and not full_e2e and not customization_auth_e2e" \
-            --run-e2e \
-            --no-cov \
-            --junitxml=report-kubernetes-e2e.xml
-
-      - name: Finalize Kind e2e
-        if: always()
-        uses: ./.github/actions/finalize-kind-e2e
-        with:
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          artifact-name: kind-e2e-kubernetes-artifacts
-          junit-report: report-kubernetes-e2e.xml
-          services-log-dir: ${{ runner.temp }}/e2e-services-logs
-
-  kind-gym-e2e:
-    name: Kind Gym agent-evaluate e2e
-    needs: [changes, build-cpu-smoke-images]
-    if: >
-      !cancelled() &&
-      needs.build-cpu-smoke-images.result == 'success' &&
-      needs.build-cpu-smoke-images.outputs.publish_images == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      packages: read
-    env:
-      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-kind-gym-e2e
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Setup Kind cluster for Gym evaluation
-        uses: ./.github/actions/setup-kind-cluster
-        with:
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-          kind-image-pull-token: ${{ github.token }}
-          kind-image-pull-user: ${{ github.actor }}
-
-      - name: Pre-pull Gym task image
-        shell: bash
-        env:
-          KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
-          KIND_IMAGE_PULL_USER: ${{ github.actor }}
-          IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-        run: e2e/k8s/scripts/prepull_kind_images.sh "${IMAGE_REGISTRY}/nhx-gym-tasks:${IMAGE_TAG}"
-
-      - name: Run GRPO sandbox workspace permissions regression
-        shell: bash
-        env:
-          NHX_GYM_WORKSPACE_KIND: ${{ env.KIND_CLUSTER_NAME }}
-        run: |
-          uv run --frozen pytest \
-            -c pytest.ini \
-            services/rl/tests/test_gym_workspace_kubernetes_integration.py \
-            -v -s \
-            --no-cov \
-            --junitxml=report-kubernetes-gym-workspace.xml
-
-      - name: Run Gym agent-evaluate e2e test
-        shell: bash
-        env:
-          _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
-        run: |
-          test -n "${NHX_E2E_CLUSTER_URL}"
-          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
-          uv run --frozen pytest \
-            e2e/test_evaluator_plugin.py \
-            -v \
-            -m gym_e2e \
-            --run-e2e \
-            --no-cov \
-            --junitxml=report-kubernetes-gym-e2e.xml
-
-      - name: Finalize Kind Gym e2e
-        if: always()
-        uses: ./.github/actions/finalize-kind-e2e
-        with:
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          artifact-name: kind-gym-e2e-kubernetes-artifacts
-          junit-report: report-kubernetes-gym-*.xml
-          services-log-dir: ${{ runner.temp }}/e2e-services-logs
-  
-  kind-customizer-auth-e2e:
-    name: Kind customizer auth e2e
-    needs: [changes, build-cpu-smoke-images]
-    if: >
-      !cancelled() &&
-      needs.build-cpu-smoke-images.result == 'success' &&
-      needs.build-cpu-smoke-images.outputs.publish_images == 'true' &&
-      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.customization-auth == 'true')
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      packages: read
-    env:
-      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-kind-customizer-auth
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Setup Kind cluster with auth enabled
-        uses: ./.github/actions/setup-kind-cluster
-        with:
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-          kind-image-pull-token: ${{ github.token }}
-          kind-image-pull-user: ${{ github.actor }}
-          helm-extra-args: -f e2e/k8s/values/auth-overlay.yaml
-
-      - name: Run customizer auth e2e tests
-        shell: bash
-        env:
-          _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
-        run: |
-          test -n "${NHX_E2E_CLUSTER_URL}"
-          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
-          uv run --frozen pytest \
-            e2e/test_customization_auth.py \
-            -v \
-            -m customization_auth_e2e \
-            --run-e2e \
-            --no-cov \
-            --junitxml=report-kubernetes-customizer-auth-e2e.xml
-
-      - name: Finalize Kind customizer auth e2e
-        if: always()
-        uses: ./.github/actions/finalize-kind-e2e
-        with:
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          artifact-name: kind-customizer-auth-e2e-kubernetes-artifacts
-          junit-report: report-kubernetes-customizer-auth-e2e.xml
-          services-log-dir: ${{ runner.temp }}/e2e-services-logs
-
-  kind-network-policy-smoke:
-    name: Kind NetworkPolicy smoke
-    needs: [changes, build-cpu-smoke-images]
-    if: >
-      !cancelled() &&
-      needs.build-cpu-smoke-images.result == 'success' &&
-      needs.build-cpu-smoke-images.outputs.publish_images == 'true' && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.helm == 'true' ||
-        needs.changes.outputs.e2e == 'true'
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      packages: read
-    env:
-      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-network-policy
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Setup Kind cluster with NetworkPolicy enforcement
-        uses: ./.github/actions/setup-kind-cluster
-        with:
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-          kind-image-pull-token: ${{ github.token }}
-          kind-image-pull-user: ${{ github.actor }}
-          kind-enable-gateway: "false"
-          kind-enable-network-policies: "true"
-          helm-extra-args: -f e2e/k8s/values/network-policies.yaml
-          wait-for-api: "false"
-
-      - name: Run NetworkPolicy smoke test
-        shell: bash
-        env:
-          NAMESPACE: nemo-helix
-          CHAINSAW_REPORT_FORMAT: XML
-          CHAINSAW_REPORT_NAME: report-network-policy-smoke
-          CHAINSAW_REPORT_PATH: .
-        run: |
-          if e2e/k8s/scripts/test_network_policies.sh; then
-            if [ ! -f report-network-policy-smoke.xml ]; then
-              printf '<testsuite name="network-policy-smoke" tests="1" failures="0"/>%s' $'\n' > report-network-policy-smoke.xml
-            fi
-            exit 0
-          fi
-          status="$?"
-          if [ ! -f report-network-policy-smoke.xml ]; then
-            cat > report-network-policy-smoke.xml <<'EOF'
-          <testsuite name="network-policy-smoke" tests="1" failures="1">
-            <testcase name="network-policy-smoke">
-              <failure message="network policy smoke test failed">See the workflow log and Kubernetes artifact bundle.</failure>
-            </testcase>
-          </testsuite>
-          EOF
-          fi
-          exit "${status}"
-
-      - name: Finalize Kind e2e
-        if: always()
-        uses: ./.github/actions/finalize-kind-e2e
-        with:
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          artifact-name: kind-network-policy-smoke-artifacts
-          junit-report: report-network-policy-smoke.xml
-          services-log-dir: ${{ runner.temp }}/e2e-services-logs
 
   helm-lint:
     name: Helm lint
@@ -1033,6 +613,14 @@ jobs:
       - name: Install web dependencies
         working-directory: web
         run: pnpm install --frozen-lockfile
+      # Unit tests skip the vendor bundler; exercise the same production mode
+      # as the Studio image so asset/loader failures are caught before merge.
+      - name: Build Studio production assets
+        working-directory: web
+        timeout-minutes: 5
+        env:
+          NODE_ENV: production
+        run: pnpm --filter nemo-studio-ui --fail-if-no-match build:fastapi
       - name: Run Lint
         uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
         env:
@@ -1057,19 +645,34 @@ jobs:
             diff.txt
 
   policy-wasm:
-    name: Build OPA policy WASM
+    name: OPA policy build and tests
     runs-on: ubuntu-latest
+    outputs:
+      # Preserve the raw outcome: continue-on-error makes the conclusion success.
+      policy-test-outcome: ${{ steps.policy-test.outcome }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - uses: ./.github/actions/build-policy-wasm
+        id: build
       - name: Upload policy WASM
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: policy-wasm
           retention-days: 1
           path: services/core/auth/src/nhx/core/auth/assets/policy.wasm
+      - name: Test OPA policy
+        id: policy-test
+        # Test failures must fail CI status, not block consumers of a valid WASM.
+        continue-on-error: true
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
+        with:
+          dir: ./tools/open-policy-agent
+          command: |
+            opa test services/core/auth/src/nhx/core/auth/app/policies services/core/auth/src/nhx/core/auth/app/policy_tests services/core/auth/src/nhx/core/auth/assets/static-authz.yaml -v
 
   python-unit-test-tools:
     name: Python unit tests (tools)
@@ -1106,7 +709,7 @@ jobs:
           path: report.xml
 
   python-unit-test:
-    name: Python unit tests (py${{ matrix.python-version }})
+    name: Python unit tests (py${{ matrix.python-version }}, ${{ matrix.group }})
     needs: [policy-wasm]
     runs-on: ubuntu-latest
     permissions:
@@ -1118,6 +721,9 @@ jobs:
         # the only one that answers "does the code work here". Packaging and install are
         # covered elsewhere; running them is not the same as running the tests.
         python-version: ["3.12", "3.13", "3.14"]
+        # Path-based groups balanced by JUnit durations (tests/unit_groups.py); each group
+        # also skips importing the others' test files.
+        group: [core, plugins, misc]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1141,21 +747,35 @@ jobs:
           EXTRA: cpu
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           PYTEST_WORKERS: "4"
+          PYTEST_EXTRA: --unit-group=${{ matrix.group }}
+          # coverage-comment reads only py3.12; tracing the other legs only slows them.
+          PYTEST_COVERAGE: ${{ matrix.python-version == '3.12' }}
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-unit-test-results-py${{ matrix.python-version }}
+          name: python-unit-test-results-py${{ matrix.python-version }}-${{ matrix.group }}
           retention-days: 30
+          include-hidden-files: true
           path: |
             report.xml
             coverage.xml
             coverage.json
             coverage-html/
+            .coverage
+      - name: Upload worker crash dumps
+        # Separate artifact so coverage-comment keeps receiving exactly the files it expects.
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-unit-crash-dumps-py${{ matrix.python-version }}-${{ matrix.group }}
+          retention-days: 30
+          if-no-files-found: ignore
+          path: crash-dumps/
 
   # The `main-and-release-checks` ruleset requires a check named exactly "Python unit tests".
-  # Now that the job is a matrix, its legs report "Python unit tests (py3.12)" and friends, and
+  # Now that the job is a matrix, its legs report "Python unit tests (py3.12, core)" and friends, and
   # nothing carries the bare name -- the required check would sit on "Expected — Waiting for
   # status to be reported" forever. This job reports that name, and is red whenever any leg is.
   # Removing it means updating the ruleset, which needs repository admin.
@@ -1238,7 +858,10 @@ jobs:
             # install to the workspace .venv.
             uv pip install --python "$venv/bin/python" -r "$requirements" . pytest pytest-asyncio
             echo "::group::Harbor $version"
-            "$venv/bin/python" -m pytest -p no:cacheprovider -v \
+            # The repository's shared-patch guard, with nhx_sandbox counted as first-party although
+            # this venv installs it as a wheel.
+            PYTHONPATH="$GITHUB_WORKSPACE" "$venv/bin/python" -m pytest -p no:cacheprovider -v \
+              -p tests.shared_patch_guard --shared-patch-guard=strict -o shared_patch_first_party=nhx_sandbox \
               tests/test_harbor_opensandbox_environment.py tests/test_harbor_opensandbox_driver.py \
               tests/test_harbor_opensandbox_compose_services.py
             echo "::endgroup::"
@@ -1374,9 +997,14 @@ jobs:
             packages/nhx_evals_sdk/tests/test_lazy_public_api.py::test_agent_eval_import_does_not_pull_the_execution_stack -v
 
   python-integration-test:
-    name: Python integration tests
+    name: Python integration tests (${{ matrix.group }})
     needs: [policy-wasm]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Whole-package allocation based on JUnit durations; see tests/integration_groups.py.
+        group: [services, platform]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1416,26 +1044,25 @@ jobs:
           NHX_FILES_HF_RETRY_MAX_DELAY_SECONDS: "30"
           PYTEST_WORKERS: "4"
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          # Per-worker crash dumps; pytest's own faulthandler would point them at stderr, which
-          # xdist never forwards. See conftest.py.
-          PYTEST_CRASH_DUMP_DIR: crash-dumps
-          PYTEST_EXTRA: -p no:faulthandler
+          PYTEST_EXTRA: --integration-group=${{ matrix.group }}
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-integration-test-results
+          name: python-integration-test-results-${{ matrix.group }}
           retention-days: 30
+          include-hidden-files: true
           path: |
             report.xml
             coverage.xml
             coverage.json
+            .coverage
       - name: Upload worker crash dumps
         # Separate artifact so coverage-comment keeps receiving exactly the files it expects.
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-integration-crash-dumps
+          name: python-integration-crash-dumps-${{ matrix.group }}
           retention-days: 30
           if-no-files-found: ignore
           path: crash-dumps/
@@ -1480,6 +1107,30 @@ jobs:
           -m integration -n 4 --dist loadgroup -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      # test_taskset_run_controller.py tests platforms it does not start, so it skips in the step above.
+      # The script hosts one per auth mode at the URLs below and runs only that file against them; every
+      # test has to run here, and a skip fails the step.
+      - name: Run taskset-run controller integration
+        id: controller-integration
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: bash .github/scripts/run-taskset-run-controller-integration.sh
+        env:
+          NHX_AGENT_BASE_URL: http://localhost:18090
+          NHX_AGENT_AUTH_BASE_URL: http://localhost:18092
+          UV_FROZEN: "1"
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      - name: Upload taskset-run controller diagnostics
+        if: ${{ !cancelled() && steps.controller-integration.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: taskset-run-controller-results
+          retention-days: 14
+          if-no-files-found: warn
+          # Logs and results only: the platforms' data directories sit beside them.
+          path: |
+            ${{ runner.temp }}/controller-platforms/*.log
+            ${{ runner.temp }}/controller-platforms/junit.xml
       # Run separately from xdist: the shared platform fixture binds one port.
       # Keep opt-in and plugin isolation scoped to this step, not the general suite.
       - name: Run Harbor taskset integration
@@ -1566,174 +1217,16 @@ jobs:
             coverage.xml
             coverage.json
 
-  python-auth-idp-e2e-test:
-    name: Python auth-idp ${{ matrix.runtime }} tests
-    needs: [changes, policy-wasm, build-cpu-smoke-images, python-auth-idp-static-test]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.cpu-smoke == 'true' ||
-        needs.changes.outputs.auth-idp == 'true'
-      ) &&
-      needs.policy-wasm.result == 'success' &&
-      needs.build-cpu-smoke-images.result == 'success' &&
-      needs.build-cpu-smoke-images.outputs.publish_images == 'true' &&
-      needs.python-auth-idp-static-test.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    permissions:
-      contents: read
-      packages: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - provider: authentik
-            runtime: authentik-compose
-            backend: compose
-            command: test compose --gateway-port 18080
-            namespace: nemo-authentik
-          - provider: authentik
-            runtime: authentik-kubernetes
-            backend: kubernetes
-            command: test k8s --runtime kind --gateway-port 18082
-            namespace: nemo-authentik
-          - provider: zitadel
-            runtime: zitadel-kubernetes
-            backend: kubernetes
-            command: test k8s --runtime kind --gateway-port 18084
-            namespace: nemo-zitadel
-    env:
-      AUTH_IDP_K8S_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runtime }}
-      AUTH_IDP_K8S_NAMESPACE: ${{ matrix.namespace }}
-      NHX_AUTHENTIK_K8S_RUNTIME: kind
-      NHX_AUTHENTIK_K8S_NAMESPACE: ${{ matrix.namespace }}
-      NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET: ghcr-pull
-      NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET: ngc-api
-      NHX_AUTHENTIK_K8S_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runtime }}
-      NHX_AUTHENTIK_K8S_REUSE_CLUSTER: "1"
-      NHX_ZITADEL_K8S_RUNTIME: kind
-      NHX_ZITADEL_K8S_NAMESPACE: ${{ matrix.namespace }}
-      NHX_ZITADEL_K8S_IMAGE_PULL_SECRET: ghcr-pull
-      NHX_ZITADEL_K8S_NGC_EXISTING_SECRET: ngc-api
-      NHX_ZITADEL_K8S_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runtime }}
-      NHX_ZITADEL_K8S_REUSE_CLUSTER: "1"
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - name: Free disk space
-        uses: ./.github/actions/free-disk-space
-      - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          python-version: "3.13"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Install auth browser
-        run: uv run --frozen --group auth-idp-e2e playwright install --with-deps chromium
-      - name: Setup Kind cluster
-        if: matrix.backend == 'kubernetes'
-        uses: ./.github/actions/setup-kind-cluster
-        with:
-          kind-cluster-name: ${{ env.AUTH_IDP_K8S_CLUSTER_NAME }}
-          install-nemo-helix: "false"
-          kube-namespace: ${{ env.AUTH_IDP_K8S_NAMESPACE }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-          kind-image-pull-token: ${{ github.token }}
-          kind-image-pull-user: ${{ github.actor }}
-      - name: Log in to GHCR
-        if: matrix.backend == 'compose' && needs.build-cpu-smoke-images.outputs.publish_images == 'true'
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      - name: Install Helm
-        if: matrix.backend == 'kubernetes'
-        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
-      - name: Lint Authentik umbrella Helm chart
-        if: matrix.provider == 'authentik' && matrix.backend == 'kubernetes'
-        shell: bash
-        run: |
-          helm repo add authentik https://charts.goauthentik.io --force-update
-          helm dependency build k8s/helm
-          helm dependency build contrib/auth/authentik/helm
-          helm lint --strict contrib/auth/authentik/helm
-      - name: Verify official Authentik Helm chart is reachable
-        if: matrix.provider == 'authentik' && matrix.backend == 'kubernetes'
-        shell: bash
-        run: |
-          helm show chart authentik --repo https://charts.goauthentik.io --version 2026.5.4
-      - name: Lint ZITADEL umbrella Helm chart
-        if: matrix.provider == 'zitadel' && matrix.backend == 'kubernetes'
-        shell: bash
-        run: |
-          helm repo add zitadel https://charts.zitadel.com --force-update
-          helm dependency build k8s/helm
-          helm dependency build contrib/auth/zitadel/helm
-          helm lint --strict contrib/auth/zitadel/helm
-      - name: Verify official ZITADEL Helm chart is reachable
-        if: matrix.provider == 'zitadel' && matrix.backend == 'kubernetes'
-        shell: bash
-        run: |
-          helm show chart zitadel --repo https://charts.zitadel.com --version 10.0.6
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
-      - name: Run auth-idp ${{ matrix.runtime }} tests
-        run: >
-          contrib/auth/${{ matrix.provider }}/run.sh
-          ${{ matrix.command }}
-          --image "${IMAGE_REGISTRY}/nhx-api:${BAKE_TAG}"
-        env:
-          _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
-          IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          BAKE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-          NHX_AUTHENTIK_K8S_JUNIT_XML: report-auth-idp-${{ matrix.runtime }}.xml
-          NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET: ${{ env.NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET }}
-          NHX_AUTHENTIK_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}
-          NHX_ZITADEL_K8S_JUNIT_XML: report-auth-idp-${{ matrix.runtime }}.xml
-          NHX_ZITADEL_K8S_IMAGE_PULL_SECRET: ${{ env.NHX_ZITADEL_K8S_IMAGE_PULL_SECRET }}
-          NHX_ZITADEL_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}
-      # run.sh writes cluster diagnostics into E2E_SERVICES_LOG_DIR before it deletes the cluster.
-      - name: Upload test artifacts
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: python-auth-idp-${{ matrix.runtime }}-test-results
-          retention-days: 30
-          if-no-files-found: ignore
-          path: |
-            report-auth-idp-${{ matrix.runtime }}.xml
-            ${{ runner.temp }}/e2e-services-logs/
-      - name: Delete kind cluster
-        if: always() && matrix.backend == 'kubernetes'
-        shell: bash
-        run: |
-          docker rm -f "cloud-provider-kind-${AUTH_IDP_K8S_CLUSTER_NAME}" || true
-          kind delete cluster --name "${AUTH_IDP_K8S_CLUSTER_NAME}" || true
-
-  # Build wheels for all packages × python versions. Downstream jobs
-  # (wheel-test, python-e2e-test) download these artifacts instead
-  # of rebuilding.
   wheel-build:
-    name: ${{ matrix.package }} wheel build (py${{ matrix.python-version }})
+    name: Wheel build and install tests (py${{ matrix.python-version }})
     needs: [policy-wasm]
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        package: [nemo-helix, nemo-helix-plugin]
         python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout code
@@ -1741,268 +1234,100 @@ jobs:
         with:
           persist-credentials: false
       - name: Download policy WASM
-        if: matrix.package == 'nemo-helix'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: policy-wasm
           path: services/core/auth/src/nhx/core/auth/assets
-      - name: Build ${{ matrix.package }} wheel
-        id: build
+      - name: Build nemo-helix wheel
+        id: helix
         uses: ./.github/actions/build-nemo-helix-wheel
         with:
-          package: ${{ matrix.package }}
-          out-dir: ${{ github.workspace }}/dist
+          package: nemo-helix
+          out-dir: ${{ github.workspace }}/dist/nemo-helix
           cadence: rc
           # Sentinel epoch — the wheel version is meaningless for a CI test
           # build, but stamp_sdk_version.py requires \d{14}.
           rc-timestamp: "19700101000000"
           python-version: ${{ matrix.python-version }}
-      - name: Upload wheel
+      - name: Upload nemo-helix wheel
+        if: ${{ !cancelled() && steps.helix.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.package }}-wheel-py${{ matrix.python-version }}
-          path: ${{ steps.build.outputs.wheel-path }}
+          name: nemo-helix-wheel-py${{ matrix.python-version }}
+          path: ${{ steps.helix.outputs.wheel-path }}
           retention-days: 7
           if-no-files-found: error
-
-  # Test each wheel: install from the artifact and run basic CLI /
-  # import checks.
-  wheel-test:
-    name: ${{ matrix.package }} wheel build + test (py${{ matrix.python-version }}, ${{ matrix.install-method }})
-    needs: [wheel-build]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        package: [nemo-helix, nemo-helix-plugin]
-        python-version: ["3.12", "3.13", "3.14"]
-        # `uv tool install` is the documented front door for the CLI; `venv`
-        # covers installs into an environment the user owns. The plugin is a
-        # library with no CLI entry point, so it only gets the venv leg.
-        install-method: [venv, tool]
-        exclude:
-          - package: nemo-helix-plugin
-            install-method: tool
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Build nemo-helix-plugin wheel
+        id: plugin
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/build-nemo-helix-wheel
         with:
-          persist-credentials: false
-      - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
+          package: nemo-helix-plugin
+          out-dir: ${{ github.workspace }}/dist/nemo-helix-plugin
+          cadence: rc
+          rc-timestamp: "19700101000000"
           python-version: ${{ matrix.python-version }}
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Download wheel
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ matrix.package }}-wheel-py${{ matrix.python-version }}
-          path: ${{ runner.temp }}/wheelcheck
-
-      - name: Install + test nemo-helix CLI
-        if: matrix.package == 'nemo-helix'
-        shell: bash
-        env:
-          PYTHON_VERSION: ${{ matrix.python-version }}
-          INSTALL_METHOD: ${{ matrix.install-method }}
-          NHX_DATA_DIR: ${{ runner.temp }}/nemo-data
-          NHX_AUTH_ENABLED: "false"
-          _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          UV_TOOL_BIN_DIR: ${{ runner.temp }}/wheelcheck/tool-bin
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          wheels=("${RUNNER_TEMP}"/wheelcheck/*.whl)
-          if [[ "${#wheels[@]}" -ne 1 ]]; then
-            echo "::error::Expected exactly one wheel, found ${#wheels[@]}"
-            exit 1
-          fi
-          WHEEL="${wheels[0]}"
-          # Supply-chain: partial-pin the wheel's direct external deps to a committed constraints
-          # file. Regenerate with tools/wheel-constraints/compile-wheel-constraints.sh.
-          CONSTRAINTS="${GITHUB_WORKSPACE}/tools/wheel-constraints/nemo-helix-services.txt"
-          # --no-config: this step runs inside the checkout, so uv would otherwise apply the
-          # repo's [tool.uv] override-dependencies and resolve a dependency set no user can get.
-          if [[ "${INSTALL_METHOD}" == "tool" ]]; then
-            uv tool install --no-config --python "${PYTHON_VERSION}" \
-              --constraints "${CONSTRAINTS}" \
-              "${WHEEL}[services]"
-            BIN_DIR="${UV_TOOL_BIN_DIR}"
-          else
-            VENV="${RUNNER_TEMP}/wheelcheck/.venv"
-            uv venv "${VENV}" --python "${PYTHON_VERSION}"
-            uv pip install --no-config --python "${VENV}/bin/python" \
-              --constraint "${CONSTRAINTS}" \
-              "${WHEEL}[services]"
-            BIN_DIR="${VENV}/bin"
-          fi
-          cd "${RUNNER_TEMP}/wheelcheck"
-          unset PYTHONPATH VIRTUAL_ENV
-          export PATH="${BIN_DIR}:${PATH}"
-          bash "${GITHUB_WORKSPACE}/script/test-nemo-cli.sh"
-
-      - name: Install + test nemo-helix-plugin
-        if: matrix.package == 'nemo-helix-plugin'
-        shell: bash
-        env:
-          PYTHON_VERSION: ${{ matrix.python-version }}
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          wheels=("${RUNNER_TEMP}"/wheelcheck/*.whl)
-          if [[ "${#wheels[@]}" -ne 1 ]]; then
-            echo "::error::Expected exactly one wheel, found ${#wheels[@]}"
-            exit 1
-          fi
-          WHEEL="${wheels[0]}"
-          # Supply-chain: partial-pin direct external deps via a committed constraints file
-          # (see the nemo-helix CLI step above).
-          cd "${RUNNER_TEMP}/wheelcheck"
-          uv venv .venv --python "${PYTHON_VERSION}"
-          uv pip install --no-config --python .venv/bin/python \
-            --constraint "${GITHUB_WORKSPACE}/tools/wheel-constraints/nemo-helix-plugin.txt" \
-            "${WHEEL}"
-          unset PYTHONPATH VIRTUAL_ENV
-          # Import the package + a couple of representative submodules
-          # (cli, commands). These are the surfaces a plugin author would
-          # touch first; if any of them fail to import, the wheel is
-          # broken in a way that surfaces immediately on day one.
-          .venv/bin/python -c "
-          import nemo_helix_plugin
-          import nemo_helix_plugin.cli
-          import nemo_helix_plugin.commands
-          print('nemo_helix_plugin', getattr(nemo_helix_plugin, '__version__', '<no __version__>'))
-          "
-
-  # E2E tests: start services from the workspace venv and run the e2e
-  # suite against the real process.
-  python-e2e-test:
-    name: Python e2e tests
-    needs: [policy-wasm]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
-      - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          python-version: "3.13"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Run e2e tests
-        # Two workers, one services pool per worker (see register_services_pool_items).
-        run: make test-e2e PYTEST_EXTRA='-m "not full_e2e" -n 2 --dist loadgroup --durations=25'
-        env:
-          _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
-          NGC_API_KEY: ${{ secrets.NGC_REGISTRY_READ_TOKEN }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          NHX_FILES_HF_RETRY_ATTEMPTS: "7"
-          NHX_FILES_HF_RETRY_INITIAL_DELAY_SECONDS: "1"
-          NHX_FILES_HF_RETRY_MAX_DELAY_SECONDS: "30"
-      - name: Dump server logs
-        if: always()
-        run: |
-          echo "::group::Server logs"
-          for f in "${{ runner.temp }}/e2e-services-logs"/*.log; do
-            [ -f "$f" ] && echo "--- $(basename "$f") ---" && cat "$f" || echo "No server logs found"
-          done
-          echo "::endgroup::"
-      - name: Upload test artifacts
-        if: always()
+      - name: Upload nemo-helix-plugin wheel
+        if: ${{ !cancelled() && steps.plugin.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-e2e-test-results
-          retention-days: 30
-          path: |
-            report.xml
-            ${{ runner.temp }}/e2e-services-logs/
+          name: nemo-helix-plugin-wheel-py${{ matrix.python-version }}
+          path: ${{ steps.plugin.outputs.wheel-path }}
+          retention-days: 7
+          if-no-files-found: error
+      # Independent steps preserve all install results even if an earlier method fails.
+      # The helper isolates venvs, uv tool state, and CLI data from the build workspace.
+      - name: Install and test CLI (venv)
+        if: ${{ !cancelled() && steps.helix.outcome == 'success' }}
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          WHEEL: ${{ steps.helix.outputs.wheel-path }}
+        run: bash tests/packaging/test-wheel-install.sh nemo-helix venv
+      - name: Install and test CLI (tool)
+        if: ${{ !cancelled() && steps.helix.outcome == 'success' }}
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          WHEEL: ${{ steps.helix.outputs.wheel-path }}
+        run: bash tests/packaging/test-wheel-install.sh nemo-helix tool
+      - name: Install and test plugin (venv)
+        if: ${{ !cancelled() && steps.plugin.outcome == 'success' }}
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          WHEEL: ${{ steps.plugin.outputs.wheel-path }}
+        run: bash tests/packaging/test-wheel-install.sh nemo-helix-plugin venv
 
-  # E2E tests that run on the subprocess harness but need the prebuilt
-  # DeepAgents image available in the local Docker daemon. Marked
-  # `needs_agents_e2e_image`; the plain python-e2e-test job skips them because
-  # NHX_E2E_IMAGE_REGISTRY / NHX_E2E_IMAGE_TAG are unset there.
-  python-e2e-image-test:
-    name: Python e2e tests (prebuilt image)
-    needs: [policy-wasm, build-cpu-smoke-images]
+  post-merge-image-status:
+    name: Post-merge image status
+    needs:
+      - changes
+      - policy-wasm
+      - python-auth-idp-static-test
+      - build-cpu-smoke-images
+      - build-garak-test-image
+      - build-safe-synthesizer-test-image
+    # E2E runs in its own workflow; this notification covers only CI image builds
+    # and prerequisites. E2E has its own main-push notification.
     if: >
-      !cancelled() &&
-      needs.build-cpu-smoke-images.result == 'success' &&
-      needs.build-cpu-smoke-images.outputs.publish_images == 'true'
+      always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     permissions:
       contents: read
-      packages: read
-    env:
-      NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-      NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
     steps:
-      - name: Checkout code
+      - name: Checkout notification helper
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
-      - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          python-version: "3.13"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Log in to GHCR
-        shell: bash
+      - name: Report results and alert on failure
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          GHCR_TOKEN: ${{ github.token }}
-        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-      - name: Pull agent E2E image (timed)
-        shell: bash
-        run: |
-          image="${NHX_E2E_IMAGE_REGISTRY}/nhx-agents-deepagents-e2e:${NHX_E2E_IMAGE_TAG}"
-          echo "Pulling ${image}"
-          start=$(date +%s)
-          docker pull "$image"
-          echo "agent E2E image pull took $(( $(date +%s) - start ))s"
-      - name: Run e2e tests (needs_agents_e2e_image)
-        run: make test-e2e PYTEST_EXTRA="-m needs_agents_e2e_image"
-        env:
-          _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
-      - name: Dump server logs
-        if: always()
-        run: |
-          echo "::group::Server logs"
-          for f in "${{ runner.temp }}/e2e-services-logs"/*.log; do
-            [ -f "$f" ] && echo "--- $(basename "$f") ---" && cat "$f" || echo "No server logs found"
-          done
-          echo "::endgroup::"
-      - name: Upload test artifacts
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          NEEDS_JSON: ${{ toJson(needs) }}
+          CHECKS_NAME: image
+          SLACK_ALERTS_WEBHOOK: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
         with:
-          name: python-e2e-image-test-results
-          retention-days: 30
-          path: |
-            report.xml
-            ${{ runner.temp }}/e2e-services-logs/
+          script: |
+            const { reportPostMergeResults } = require("./.github/scripts/ci-post-merge-notification.cjs");
+            await reportPostMergeResults({ core, context, env: process.env, fetchImpl: fetch });
 
   github-scripts:
     name: GitHub JavaScript checks
@@ -2033,7 +1358,7 @@ jobs:
         run: web/node_modules/.bin/prettier --check .github/scripts
 
   web-typecheck:
-    name: Web typecheck
+    name: Web type and SDK checks
     needs: [changes]
     if: >
       !cancelled() && (
@@ -2056,7 +1381,9 @@ jobs:
       - name: Install pnpm via corepack
         run: npm i -g corepack@0.31.0 && corepack enable pnpm
       - name: Install dependencies
+        id: deps
         run: pnpm install --frozen-lockfile
+      # Check the committed sources before generation can modify them.
       - name: Typecheck web packages
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ needs.changes.outputs.openapi }}" != "true" ]; then
@@ -2065,6 +1392,16 @@ jobs:
           else
             pnpm run --recursive --parallel --if-present typecheck
           fi
+      - name: Generate SDK from OpenAPI specs
+        id: sdk
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: pnpm --filter @nemo/sdk gen:all-force
+      - name: Typecheck SDK generated output
+        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
+        run: pnpm --filter @nemo/sdk typecheck
+      - name: Typecheck web packages against regenerated SDK
+        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
+        run: pnpm run --recursive --parallel --if-present typecheck
 
   web-test:
     name: Web tests
@@ -2105,8 +1442,8 @@ jobs:
             pnpm run --recursive --parallel --if-present test:ci
           fi
 
-  web-format:
-    name: Web format check
+  web-static:
+    name: Web static checks
     needs: [changes]
     if: >
       !cancelled() && (
@@ -2128,158 +1465,22 @@ jobs:
       - name: Install pnpm via corepack
         run: npm i -g corepack@0.31.0 && corepack enable pnpm
       - name: Install dependencies
+        id: deps
         run: pnpm install --frozen-lockfile
       - name: Check formatting
         run: pnpm format
-
-  web-lint:
-    name: Web lint
-    needs: [changes]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.web-studio == 'true'
-      )
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-        shell: bash
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
       - name: Lint
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: pnpm lint
-
-  web-sdk-gen:
-    name: Web SDK generation check
-    needs: [changes]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.openapi == 'true' ||
-        needs.changes.outputs.web-studio == 'true'
-      )
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-        shell: bash
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Generate SDK from OpenAPI specs
-        run: pnpm --filter @nemo/sdk gen:all-force
-      - name: Typecheck SDK generated output
-        run: pnpm --filter @nemo/sdk typecheck
-      - name: Typecheck web packages against regenerated SDK
-        run: pnpm run --recursive --parallel --if-present typecheck
-
-  web-plugin-types:
-    name: Web plugin surface types check
-    needs: [changes]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.web-studio == 'true'
-      )
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-        shell: bash
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Regenerate the plugin surface types
-        run: pnpm --filter @nemo/common types:plugin
-      # Out-of-tree plugins vendor this file, so a stale copy types them against
-      # a surface that no longer exists — and still compiles, which is the whole
-      # problem. Fail the change that moved the surface, not the plugin later.
-      - name: Check the committed artifact is up to date
-        run: git diff --exit-code -- packages/common/plugin-types
-
-  web-studio-deps:
-    name: Web studio deps check
-    needs: [changes]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.web-studio == 'true'
-      )
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-        shell: bash
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
       - name: Check studio deps
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: pnpm deps:studio
-
-  web-studio-e2e:
-    name: Studio UI E2E tests
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-        shell: bash
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Install Playwright browsers
-        run: pnpm --filter nemo-studio-ui exec playwright install --with-deps
-      - name: Run E2E tests
-        run: CI=1 pnpm --filter nemo-studio-ui test:e2e
-      - name: Upload E2E artifacts
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: studio-e2e-results
-          retention-days: 7
-          path: web/packages/studio/playwright-report/
+      - name: Regenerate and check plugin surface types
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: |
+          pnpm --filter @nemo/common types:plugin
+          # Out-of-tree plugins vendor this artifact; it must stay current.
+          git diff --exit-code -- packages/common/plugin-types
 
   agents-mini-swe-agent-tests:
     name: Mini-SWE-Agent adapter integration tests
@@ -2432,18 +1633,19 @@ jobs:
           ADAPTER_PYTHON: ${{ github.workspace }}/.venv-hermes/bin/python
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
-  deployments-openshell-tests:
-    # Path-filtered job that runs only the OpenShell deployment backend tests.
-    name: Deployments OpenShell backend tests
+  openshell-tests:
+    # Share setup between backend suites while retaining each suite's path filter.
+    name: OpenShell backend tests
     needs: [changes]
     if: >
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.deps == 'true' ||
-        needs.changes.outputs.deployments-openshell == 'true'
+        needs.changes.outputs.deployments-openshell == 'true' ||
+        needs.changes.outputs.jobs-openshell == 'true'
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -2452,6 +1654,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install uv
+        id: uv
         # No python-version pin: uv resolves the interpreter from the workspace
         # requires-python (>=3.12), so this job can never fall back to an
         # unsupported version.
@@ -2460,36 +1663,24 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - name: Run OpenShell backend unit tests
+      - name: Run OpenShell deployment backend tests
+        if: >-
+          !cancelled() && steps.uv.outcome == 'success' && (
+            github.event_name == 'workflow_dispatch' ||
+            needs.changes.outputs.deps == 'true' ||
+            needs.changes.outputs.deployments-openshell == 'true'
+          )
         run: make test-deployments-openshell
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
-  jobs-openshell-tests:
-    name: Jobs OpenShell backend tests
-    needs: [changes]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.deps == 'true' ||
-        needs.changes.outputs.jobs-openshell == 'true'
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Run OpenShell job backend unit tests
+      - name: Run OpenShell job backend tests
+        if: >-
+          !cancelled() && steps.uv.outcome == 'success' && (
+            github.event_name == 'workflow_dispatch' ||
+            needs.changes.outputs.deps == 'true' ||
+            needs.changes.outputs.jobs-openshell == 'true'
+          )
         run: make test-jobs-openshell
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
@@ -2627,21 +1818,50 @@ jobs:
       pull-requests: write
       contents: read
     steps:
+      - name: Checkout sources for combined coverage reporting
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - name: Download unit test coverage
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          # One interpreter's results, so the coverage table stays a single number. Pinned
-          # rather than globbed: this download is `continue-on-error`, so a name that stops
-          # matching would quietly render "N/A" instead of failing.
-          name: python-unit-test-results-py3.12
-          path: unit-coverage
+          # One interpreter's groups, so the coverage table stays a single number. The combine
+          # step below renders "N/A" unless every group's data is present.
+          pattern: python-unit-test-results-py3.12-*
+          path: unit-coverage/groups
       - name: Download integration test coverage
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: python-integration-test-results
-          path: integration-coverage
+          pattern: python-integration-test-results-*
+          path: integration-coverage/groups
+      - name: Install uv for coverage reporting
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: false
+      - name: Combine unit coverage
+        # Never report one group's coverage as coverage of the whole suite.
+        continue-on-error: true
+        shell: bash
+        run: |
+          for group in core plugins misc; do
+            test -s "unit-coverage/groups/python-unit-test-results-py3.12-${group}/.coverage"
+          done
+          uvx --from coverage==7.15.3 coverage combine --keep unit-coverage/groups/*/.coverage
+          uvx --from coverage==7.15.3 coverage xml -o unit-coverage/coverage.xml
+      - name: Combine integration coverage
+        # Never report one group's coverage as coverage of the whole suite.
+        continue-on-error: true
+        shell: bash
+        run: |
+          for group in services platform; do
+            test -s "integration-coverage/groups/python-integration-test-results-${group}/.coverage"
+          done
+          uvx --from coverage==7.15.3 coverage combine --keep integration-coverage/groups/*/.coverage
+          uvx --from coverage==7.15.3 coverage xml -o integration-coverage/coverage.xml
       - name: Prepare coverage table
         run: |
           extract_coverage() {
@@ -2674,25 +1894,6 @@ jobs:
           header: coverage-report
           path: summary.md
 
-  opa-policy-test:
-    name: Test OPA Policy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - name: Install Deps
-        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # v2.4.0
-        with:
-          disable-metrics: "true"
-      - name: Policy Test
-        uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
-        with:
-          dir: ./tools/open-policy-agent
-          command: |
-            opa test services/core/auth/src/nhx/core/auth/app/policies services/core/auth/src/nhx/core/auth/app/policy_tests services/core/auth/src/nhx/core/auth/assets/static-authz.yaml -v
-
   # Required-check pin: branch protection should require this final aggregate.
   # Skipped jobs count as pass so conditional jobs can remain optional.
   ci-status:
@@ -2701,18 +1902,14 @@ jobs:
       - changes
       - actionlint
       - uv-lock
-      - uv-compatibility
       - docker-bake-graph
       - build-cpu-smoke-images
-      - kind-cpu-smoke
-      - kind-gym-e2e
-      - kind-customizer-auth-e2e
-      - kind-network-policy-smoke
       - helm-lint
       - helm-chart-verifier
       - lint
       - evaluator-integration-test
       - ngc-metadata-test
+      - nightly-taskset-runs-report-test
       - test-gates
       - policy-wasm
       - python-unit-test-tools
@@ -2728,18 +1925,12 @@ jobs:
       # Enable if you want this required
       # - python-integration-test
       - wheel-build
-      - wheel-test
-      - python-e2e-test
+      - python-auth-idp-static-test
       - github-scripts
       - web-typecheck
       - web-test
-      - web-format
-      - web-lint
-      - web-sdk-gen
-      - web-plugin-types
-      - web-studio-deps
-      - web-studio-e2e
-      - opa-policy-test
+      - web-static
+      - openshell-tests
       - guardrails-benchmark
       - guardrails-benchmark-analyze
     if: always()
@@ -2765,3 +1956,12 @@ jobs:
 
           printf '%s\n' "${NEEDS_JSON}" \
             | jq -e 'to_entries | map(.value.result) | all(. as $result | ["success", "skipped"] | any($result == .))'
+
+      - name: Check OPA policy test outcome
+        if: always()
+        shell: bash
+        env:
+          POLICY_TEST_OUTCOME: ${{ needs.policy-wasm.outputs.policy-test-outcome }}
+        run: |
+          printf 'OPA policy tests: %s\n' "${POLICY_TEST_OUTCOME:-missing}"
+          test "${POLICY_TEST_OUTCOME}" = success

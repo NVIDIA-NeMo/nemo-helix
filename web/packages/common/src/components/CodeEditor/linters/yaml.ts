@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Diagnostic, linter } from '@codemirror/lint';
+import { type Diagnostic, linter } from '@codemirror/lint';
 
 export const yamlLinter = linter(async (view) => {
   const diagnostics: Diagnostic[] = [];

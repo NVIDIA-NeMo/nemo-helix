@@ -193,7 +193,7 @@ def test_run_services_daemon_mode_starts_sidecar_in_process(
     monkeypatch.setattr("nemo_helix_ext.local.services.process.write_descriptor", lambda *a, **kw: None)
     monkeypatch.setattr("nemo_helix_ext.local.services.process.remove_descriptor", lambda *a, **kw: None)
     monkeypatch.setattr("nemo_helix_ext.local.services.serve_embedded_app", fake_serve)
-    monkeypatch.setattr("nemo_helix_ext.local.services.os.close", lambda fd: None)
+    monkeypatch.setattr("nemo_helix_ext.local.services.close", lambda fd: None)
 
     cfg = ServiceRunConfig(
         mode=services.ServiceMode.DAEMON,

@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Only use after the training image installs a venv-local fixed fsspec.
+/usr/local/lib/python3.12/dist-packages/fsspec
+/usr/local/lib/python3.12/dist-packages/fsspec-*.dist-info

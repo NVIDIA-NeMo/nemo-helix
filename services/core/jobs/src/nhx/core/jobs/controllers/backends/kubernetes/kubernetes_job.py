@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+from collections.abc import Callable
 from typing import Generic, Literal, TypeVar
 
 from kubernetes import client
+from kubernetes.client import BatchV1Api, CoreV1Api, NetworkingV1Api
 from kubernetes.client.models import V1Job, V1JobStatus
 from kubernetes.client.rest import ApiException
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
@@ -69,6 +71,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     update_all_tasks,
     update_tasks_with_pause_outcome,
 )
+from nhx.core.jobs.controllers.backends.kubernetes.configmaps import StepConfigMapSweeper, adopt_step_configmap
 from nhx.core.jobs.controllers.backends.kubernetes.workload_delegations import (
     KubernetesPodBoundWorkloadDelegationManager,
     KubernetesPodBoundWorkloadDelegationTarget,
@@ -115,10 +118,16 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
     def init(self) -> None:
         """Initialize Kubernetes client and determine namespace."""
         load_kubernetes_config()
-        self._batch_v1 = client.BatchV1Api()
-        self._core_v1 = client.CoreV1Api()
-        self._networking_v1 = client.NetworkingV1Api()
+        self._batch_v1 = BatchV1Api()
+        self._core_v1 = CoreV1Api()
+        self._networking_v1 = NetworkingV1Api()
         self.namespace = self._execution_profile_config.namespace or get_namespace_from_environment()
+        self._configmap_sweeper = StepConfigMapSweeper(
+            self._core_v1,
+            self._batch_v1,
+            self.namespace,
+            self.check_step_is_terminal,
+        )
         self._workload_delegation_store = create_authenticated_workload_delegation_store(self._nemo_client)
         self._workload_delegations = KubernetesPodBoundWorkloadDelegationManager(
             core_v1=self._core_v1,
@@ -315,6 +324,12 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 )
             raise
         logger.info("Scheduled job step with Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace})
+        adopt_step_configmap(
+            self._core_v1,
+            self.namespace,
+            configmap_name,
+            client.V1OwnerReference(api_version="batch/v1", kind="Job", name=job_name, uid=created.metadata.uid),
+        )
         if network_policy_name and created.metadata and created.metadata.uid:
             adopt_step_network_policy(
                 self._networking_v1,
@@ -683,9 +698,16 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             pod_security_context=self._execution_profile_config.pod_security_context,
         )
 
-    def cleanup_steps(self):
+    def cleanup_steps(self, on_progress: Callable[[], None] | None = None):
+        self._configmap_sweeper.sweep(on_progress)
         jobs = self.get_kubernetes_job_list_by_labels(labels=KUBE_JOB_SELECTOR_LABELS)
-        for job in jobs:
+        jobs_by_name = {job.metadata.name: job for job in jobs}
+        labels_by_name = {name: job.metadata.labels or {} for name, job in jobs_by_name.items()}
+        for name in self.cancelled_step_workloads(labels_by_name, on_progress):
+            self.terminate_job(jobs_by_name.pop(name))
+            if on_progress is not None:
+                on_progress()
+        for job in jobs_by_name.values():
             # Cleanup completed jobs immediately if the config says to. Otherwise rely on k8s job TTL.
             if (
                 self._execution_profile_config.cleanup_completed_jobs_immediately

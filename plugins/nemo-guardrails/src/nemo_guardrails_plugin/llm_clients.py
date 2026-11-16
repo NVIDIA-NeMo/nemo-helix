@@ -24,6 +24,7 @@ from types import MappingProxyType
 from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
+from nemo_guardrails_plugin.constants import W3C_TRACE_CONTEXT_HEADERS
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client_provider import get_forwarding_headers
 from nemoguardrails.integrations.langchain.llm_adapter import LangChainLLMAdapter
@@ -49,7 +50,9 @@ def get_request_headers() -> RequestHeaders:
 
 
 @contextmanager
-def platform_headers_context(client: AsyncNemoClient) -> Generator[None, None, None]:
+def platform_headers_context(
+    client: AsyncNemoClient, request_headers: Mapping[str, str]
+) -> Generator[None, None, None]:
     """Make platform headers visible to rail model calls in this context.
 
     Model calls happen deep inside nemoguardrails/LangChain library code that
@@ -61,11 +64,17 @@ def platform_headers_context(client: AsyncNemoClient) -> Generator[None, None, N
         client: The client whose forwarding headers should be propagated.
             For per-request auth, pass a request-scoped client built via
             ``client.with_options(headers=...)``.
+        request_headers: The headers the caller sent to the gateway. Only the W3C Trace
+            Context headers are taken from them. The client's own headers never carry the
+            caller's trace, so without this a rail model call starts a new, unrelated trace.
+            Other caller headers are left out on purpose: task models are separate upstreams
+            and must not see them.
 
     The data flow is:
 
     1. ``get_forwarding_headers(client)`` extracts the per-request
-       service-principal, on-behalf-of, and tracing headers.
+       service-principal and on-behalf-of headers, and the caller's W3C trace
+       headers are added from ``request_headers``.
     2. This context manager stores them in ``_request_headers_ctx`` for the
        current execution context.
     3. Non-streaming rails run via ``asyncio.to_thread``; Python copies the
@@ -78,7 +87,14 @@ def platform_headers_context(client: AsyncNemoClient) -> Generator[None, None, N
        ``_prepare_inputs_and_payload`` override reads ``_request_headers_ctx``
        and merges those headers into the request.
     """
-    headers = _request_headers_ctx.set(get_forwarding_headers(client))
+    forwarding_headers = get_forwarding_headers(client)
+    taken = {name.lower() for name in forwarding_headers}
+    trace_headers = {
+        name: value
+        for name, value in request_headers.items()
+        if name.lower() in W3C_TRACE_CONTEXT_HEADERS and name.lower() not in taken
+    }
+    headers = _request_headers_ctx.set({**trace_headers, **forwarding_headers})
     try:
         yield
     finally:

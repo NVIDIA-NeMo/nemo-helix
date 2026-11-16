@@ -3,7 +3,7 @@
 
 import { isNotFoundError } from '@nemo/common/src/api/common/utils';
 import { filesListFilesetFiles, filesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 
 /**
  * Storage backends whose `upload` is actually implemented server-side (see

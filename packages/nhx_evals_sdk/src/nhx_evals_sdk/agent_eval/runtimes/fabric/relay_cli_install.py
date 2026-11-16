@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 import urllib.error
-import urllib.request
+from urllib.request import urlopen
 
 _ARCHITECTURES = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}
 
@@ -28,7 +28,7 @@ _ARCHITECTURES = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "
 def _fetch(url: str, timeout: float, delays: list[float]) -> bytes:
     for attempt, delay in enumerate([*delays, None], start=1):
         try:
-            return urllib.request.urlopen(url, timeout=timeout).read()
+            return urlopen(url, timeout=timeout).read()
         except urllib.error.HTTPError as error:
             if error.code < 500 or delay is None:
                 raise SystemExit(f"could not download {url}: {error} (attempts: {attempt})") from error

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LONG_OPERATION_TIMEOUT } from '@e2e-tests/utils/constants';
-import { Page, expect } from '@playwright/test';
+import { type Page, expect } from '@playwright/test';
 import { TOUR_SEEN_KEY } from '@studio/util/localStorage';
 
 export const disableAuthForTest = async (page: Page) => {

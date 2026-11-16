@@ -39,6 +39,11 @@ EVALUATOR_RESULT_SORT_COLUMNS = {
 }
 
 
+def evaluator_result_rows_for_insert(results: list[EvaluatorResult]) -> list[list[Any]]:
+    """Build ClickHouse insert rows for evaluator results, in EVALUATOR_RESULT_COLUMNS order."""
+    return [dict_to_row(_evaluator_result_to_row(result), EVALUATOR_RESULT_COLUMNS) for result in results]
+
+
 class ClickHouseEvaluatorResultsRepository(EvaluatorResultsRepository):
     def __init__(self, executor: ClickHouseExecutor) -> None:
         self._executor = executor
@@ -46,7 +51,10 @@ class ClickHouseEvaluatorResultsRepository(EvaluatorResultsRepository):
     async def save_evaluator_results(self, results: list[EvaluatorResult]) -> None:
         if not results:
             return
-        rows = [dict_to_row(_evaluator_result_to_row(result), EVALUATOR_RESULT_COLUMNS) for result in results]
+        await self.insert_evaluator_result_rows(evaluator_result_rows_for_insert(results))
+
+    async def insert_evaluator_result_rows(self, rows: list[list[Any]]) -> None:
+        """Insert rows prebuilt by ``evaluator_result_rows_for_insert``; column order is fixed."""
         await self._executor.insert(
             ClickHouseInsert(
                 name="evaluator_results.save",

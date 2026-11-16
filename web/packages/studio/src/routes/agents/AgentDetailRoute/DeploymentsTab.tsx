@@ -11,7 +11,7 @@ import { PendingImageBuildRow } from '@studio/routes/agents/AgentDetailRoute/com
 import { NoHealthyDeploymentsBanner } from '@studio/routes/agents/AgentDetailRoute/NoHealthyDeploymentsBanner';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { PackageAgentControl } from '@studio/routes/agents/AgentDetailRoute/PackageAgentControl';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface DeploymentsTabProps {
   agentName?: string;

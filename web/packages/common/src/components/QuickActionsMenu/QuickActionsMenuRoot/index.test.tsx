@@ -37,4 +37,17 @@ describe('QuickActionsMenu', () => {
 
     expect(screen.getAllByTestId('quick-actions-menu-item')).toHaveLength(2);
   });
+  it('should use the given accessible name and disabled state for the trigger', () => {
+    render(<QuickActionsMenuRoot actions={[]} ariaLabel="Open dataset actions menu" disabled />);
+
+    expect(screen.getByRole('button', { name: 'Open dataset actions menu' })).toBeDisabled();
+  });
+  it('should render the delete action', async () => {
+    const user = userEvent.setup();
+    render(<QuickActionsMenuRoot actions={[]} deleteAction={{ onSelect: vi.fn() }} />);
+
+    await user.click(screen.getByTestId('quick-actions-menu-trigger'));
+
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+  });
 });

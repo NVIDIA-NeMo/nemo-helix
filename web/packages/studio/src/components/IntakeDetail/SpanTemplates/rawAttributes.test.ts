@@ -6,7 +6,6 @@ import {
   asBoolean,
   asList,
   asNumber,
-  asString,
   collectIndexedEntries,
   extractRerankedDocuments,
   extractRetrievedDocuments,
@@ -113,13 +112,6 @@ describe('readRawAttribute', () => {
 });
 
 describe('typed raw readers', () => {
-  it('asString returns non-empty strings, else undefined', () => {
-    expect(asString('safe')).toBe('safe');
-    expect(asString('')).toBeUndefined();
-    expect(asString(3)).toBeUndefined();
-    expect(asString(undefined)).toBeUndefined();
-  });
-
   it('asNumber returns finite numbers, else undefined', () => {
     expect(asNumber(0)).toBe(0);
     expect(asNumber(0.2)).toBe(0.2);

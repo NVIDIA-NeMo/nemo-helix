@@ -34,7 +34,7 @@ class TestRemoteMetric:
         async_client = mocker.Mock()
         async_client.__aenter__ = mocker.AsyncMock(return_value=client)
         async_client.__aexit__ = mocker.AsyncMock(return_value=None)
-        mocker.patch("nhx_evals_sdk.metrics.remote.httpx.AsyncClient", return_value=async_client)
+        mocker.patch("nhx_evals_sdk.metrics.remote.AsyncClient", return_value=async_client)
 
         async def passthrough(_endpoint_key, callback, *, max_attempts):
             assert max_attempts == 3
@@ -55,7 +55,7 @@ class TestRemoteMetric:
     @pytest.mark.asyncio
     async def test_post_to_remote_endpoint_logs_and_reraises_failures(self, mocker: MockerFixture):
         logger = mocker.Mock()
-        mocker.patch("nhx_evals_sdk.metrics.remote.httpx.AsyncClient")
+        mocker.patch("nhx_evals_sdk.metrics.remote.AsyncClient")
         mocker.patch(
             "nhx_evals_sdk.metrics.remote.run_with_resilience",
             side_effect=RuntimeError("boom"),

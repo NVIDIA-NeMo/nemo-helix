@@ -7,11 +7,14 @@ import asyncio
 import logging
 from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote
 
 from fastapi import HTTPException
+from nemo_evals.agent_layers.models import AgentLayer
+from nemo_evals.agent_layers.run_agents import agent_layer_request, setup_network_is_public
+from nemo_evals.agent_layers.service import AgentLayerService, AgentNotLayerableError, agent_layer_key
 from nemo_evals.api.fields import TasksetRef, parse_subentity_ref
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.api.taskset_run_schemas import (
@@ -19,12 +22,14 @@ from nemo_evals.api.taskset_run_schemas import (
     TasksetRunStatus,
     TasksetRunSubmitResponse,
     TasksetRunTask,
+    TasksetRunTaskDetail,
     request_digest,
     to_status,
     to_task,
 )
 from nemo_evals.config import EvaluatorConfig, HarborTaskJobsConfig, platform_config
 from nemo_evals.entities import TasksetEntity, TasksetRevisionEntity
+from nemo_evals.harbor.remote.images import PreparedImage
 from nemo_evals.harbor.remote.preparation import (
     ImagePreparer,
     PreparationCheck,
@@ -35,19 +40,26 @@ from nemo_evals.harbor.remote.preparation import (
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
 from nemo_evals.harbor.remote.resources import defaulted_resources_notice
 from nemo_evals.harbor.remote.sandbox_policy import SandboxPolicyError, resolve_sandbox_policy
-from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
+from nemo_evals.image_builds.planning import ImagePlanError
+from nemo_evals.image_builds.service import (
+    ImageBuildForbiddenError,
+    ImageBuildService,
+    JobsServiceBuildJobs,
+    builder_authorizer,
+)
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalSpec,
-    HarborRunnerTarget,
     ResolvedTask,
+    registered_agent_files_receipt,
     registered_agent_source,
     target_agent_identity,
 )
-from nemo_evals.jobs.gateway_models import closed_book_run, platform_gateway_url_override, require_closed_book_route
+from nemo_evals.jobs.gateway_models import open_book_notice, platform_gateway_url_override, require_closed_book_route
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment
 from nemo_evals.revisions import RevisionNotFoundError, get_revision
 from nemo_evals.source_authorization import remember_allowed
+from nemo_evals.task_identity import UnsupportedTaskKindError
 from nemo_evals.taskset_runs.entities import MemberPhase, TasksetRunEntity
 from nemo_evals.taskset_runs.identifiers import derive_run_id
 from nemo_evals.taskset_runs.plan_storage import delete_fileset_ref
@@ -59,10 +71,11 @@ from nemo_evals.taskset_runs.run_evaluation import (
     RunEvaluations,
     ensure_run_evaluation,
 )
-from nemo_evals.taskset_runs.specs import RunIntakePublication, TasksetRunPlan
+from nemo_evals.taskset_runs.specs import PlannedAgentLayers, RunIntakePublication, TasksetRunPlan
 from nemo_evals.taskset_runs.store import PlanStorageError, RunAcceptance, RunRequestConflict, TasksetRunStore
 from nemo_evals.taskset_runs.submission import check_timeout, resolve_deadlines
 from nemo_evals.taskset_runs.task_jobs import JobsServiceTaskJobs, TaskJobs
+from nemo_evals.taskset_runs.trials import count_trials, reported_trials
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import AuthenticationError, NemoClientError, PermissionDeniedError
@@ -82,6 +95,13 @@ logger = logging.getLogger(__name__)
 
 MAX_CONCURRENT_IMAGE_PREPARATIONS = 10
 """Image checks or preparations one submit runs at once (each reads a task archive or an image build)."""
+
+MAX_CONCURRENT_PROGRESS_READS = 10
+"""How many runs the run list counts progress for at the same time.
+
+Counting a run's progress reads all of its tasks from the Entity Store, so this limits how many of those reads
+one list request makes at once.
+"""
 
 
 @dataclass(frozen=True)
@@ -211,7 +231,7 @@ class TasksetRunService:
             clock: Aware acceptance clock, invoked after resolution.
             platform: Platform configuration naming the OpenSandbox server and the default dispatcher image.
             preparer: Checks every task, then reads each one's images, before acceptance.
-            task_jobs: Jobs operations submit's checks need; defaults to the Jobs service as the caller.
+            task_jobs: Jobs reads for submit's checks and task trials; defaults to the Jobs service as the caller.
             evaluations: Intake operations for a run's Evaluation; defaults to Intake as the caller.
             auth_context: The caller's full principal, stored on each new run for the run controller to
                 create on the caller's behalf; None with auth off.
@@ -254,6 +274,7 @@ class TasksetRunService:
         mine: bool = False,
         page: int = 1,
         page_size: int = 100,
+        progress: bool = False,
     ) -> Page[TasksetRunStatus]:
         """Project one independently filtered workspace run page into public statuses.
 
@@ -264,6 +285,7 @@ class TasksetRunService:
             mine: Restrict to the effective caller's runs when True.
             page: One-based page number.
             page_size: Maximum records on the requested page.
+            progress: Include each run's progress, counted from its tasks the same way as getting a single run.
 
         Returns:
             Newest-first status page preserving the store's pagination and sort.
@@ -276,8 +298,20 @@ class TasksetRunService:
             page=page,
             page_size=page_size,
         )
+
+        statuses = [to_status(run) for run in result.data]
+        if progress:
+            reads = asyncio.Semaphore(MAX_CONCURRENT_PROGRESS_READS)
+
+            async def with_progress(run: TasksetRunEntity, status: TasksetRunStatus) -> TasksetRunStatus:
+                async with reads:
+                    members = await self._store.list_all_members(run)
+                return status.model_copy(update={"progress": build_progress(members) if members else None})
+
+            statuses = await _all(with_progress(run, status) for run, status in zip(result.data, statuses, strict=True))
+
         return Page(
-            data=[to_status(run) for run in result.data],
+            data=statuses,
             pagination=result.pagination,
             sort=result.sort,
             filter=result.filter,
@@ -317,11 +351,129 @@ class TasksetRunService:
             filter=result.filter,
         )
 
+    async def _start_agent_layers(
+        self,
+        spec: AgentEvalSpec,
+        harbor: HarborTaskJobsConfig,
+        prepared: list[PreparedHarborEnvironment],
+        *,
+        timeout: int,
+    ) -> PlannedAgentLayers | None:
+        """Start each task's agent layer for the run's agent, as the caller; None when no task can get one.
+
+        A layer saves the run's trials their install, so nothing here fails the submit: a task that can't be given a
+        layer, or a caller who may not build, leaves its trials installing the agent in setup. A new layer lives as
+        long as the run may: ``timeout`` seconds.
+        """
+        agent = agent_layer_request(spec.target) if harbor.agent_layers else None
+        if agent is None:
+            return None
+        # Keyed by name and digest: provenance models don't hash, and two members may name one revision. Each maps to
+        # the environment image the run prepared for it (in task order): a prebuilt image's tag may have moved since.
+        revisions = {
+            (task.spec.provenance.entity_name, task.spec.provenance.revision_digest): environment.agent
+            for task, environment in zip(spec.tasks, prepared, strict=True)
+            if isinstance(task.spec, ResolvedHarborTaskDefinition) and setup_network_is_public(task.spec.config)
+        }
+        if restricted := sorted(
+            {
+                task.spec.provenance.entity_name
+                for task in spec.tasks
+                if isinstance(task.spec, ResolvedHarborTaskDefinition) and not setup_network_is_public(task.spec.config)
+            }
+        ):
+            logger.info(
+                "Tasks %s get no agent layer: their setup network isn't public; their trials install the agent",
+                ", ".join(restricted),
+            )
+        limit = asyncio.Semaphore(MAX_CONCURRENT_IMAGE_PREPARATIONS)
+        now = self._clock()
+
+        async def start(revision: tuple[str, str], environment: PreparedImage) -> AgentLayer | None:
+            entity_name, digest = revision
+            task_workspace, _, name = entity_name.partition("/")
+            jobs = JobsServiceBuildJobs(AsyncJobsClient.from_client(self._async_client), workspace=task_workspace)
+            service = AgentLayerService(self._entities, jobs, builder_authorizer(self._authorizer))
+            async with limit:
+                try:
+                    return await service.request_layer(
+                        task_workspace,
+                        name,
+                        digest,
+                        agent,
+                        environment=environment,
+                        ttl=timedelta(seconds=timeout),
+                        now=now,
+                    )
+                except (
+                    ImagePlanError,
+                    UnsupportedTaskKindError,
+                    ImageBuildForbiddenError,
+                    AgentNotLayerableError,
+                ) as exc:
+                    logger.info("Task %s gets no agent layer; its trials install the agent: %s", entity_name, exc)
+                    return None
+                except Exception:
+                    logger.warning(
+                        "Starting task %s's agent layer failed; its trials install the agent",
+                        entity_name,
+                        exc_info=True,
+                    )
+                    return None
+
+        layers = await _all(start(revision, environment) for revision, environment in revisions.items())
+        if all(layer is None for layer in layers):
+            return None
+        wait = timedelta(seconds=harbor.agent_layer_wait_seconds)
+        return PlannedAgentLayers(key=agent_layer_key(agent), wait_until=self._clock() + wait)
+
+    async def get_task(self, workspace: str, run_id: str, task_index: int) -> TasksetRunTaskDetail | None:
+        """Read one task of a run, with its trials read from its task Job on this request.
+
+        The Job is read as the caller. If the caller can't read it, the Job no longer exists or can't be reached,
+        it isn't the Job the run registered for this task, or it reported no trials, the task is returned without
+        ``trials``.
+
+        Returns:
+            The task with its trials, or None when the run or that task's member doesn't exist.
+        """
+        run = await self._store.find(workspace, run_id)
+        if run is None:
+            return None
+
+        member = await self._store.find_member(run, task_index)
+        if member is None:
+            return None
+
+        task = TasksetRunTaskDetail.model_validate(to_task(member).model_dump())
+        if member.task_job is None:
+            return task
+
+        try:
+            job = await self._task_jobs.job_details(workspace, member.task_job)
+        except NemoClientError as exc:
+            # Trials are display-only: a Jobs read that fails mustn't fail a read of the stored task.
+            logger.info("Can't read the trials of task Job %s: %s", member.task_job, type(exc).__name__)
+            return task
+
+        # Only the Job the member registered speaks for it. The name outlives that Job once it ends and is deleted,
+        # and a foreign Job may hold the name from before registration; either would show another Job's trials as
+        # this task's. A member with no job_id never registered one, so no Job under its name is its own.
+        if job is None or member.job_id is None or job.job_id != member.job_id:
+            return task
+
+        trials = reported_trials(job.status_details)
+        if not trials:
+            return task
+
+        # Count from the list just read, so the counts agree with it instead of the controller's last copy.
+        return task.model_copy(update={"trials": trials, "trial_counts": count_trials(trials)})
+
     async def submit(self, req: TasksetRunInput, *, workspace: str, caller: str) -> SubmitOutcome:
         """Authorize, freeze and atomically accept a run, or replay its stored status.
 
         Submit starts no task Jobs and no image builds: the controller starts the task Jobs, and every task's
-        image must be built already.
+        image must be built already. It does start the tasks' agent layers, which the tasks wait for.
 
         Args:
             req: Validated Kubernetes Harbor taskset submission, with its idempotency_key set (the route
@@ -360,21 +512,17 @@ class TasksetRunService:
             return SubmitOutcome(TasksetRunSubmitResponse(**to_status(replay).model_dump()), created=False)
 
         pinned, spec = await self._resolve(req, workspace)
-        source = registered_agent_source(spec.target)
-        snapshot = source.files if source is not None else None
+        snapshot = registered_agent_files_receipt(spec.target)
         acceptance_started = False
         try:
-            configs = [(t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
             try:
-                await require_closed_book_route(
-                    spec.target, configs, async_sdk=self._async_client, authorize=self._authorizer
-                )
+                await require_closed_book_route(spec.target, async_sdk=self._async_client, authorize=self._authorizer)
             except ValueError as exc:
                 raise TasksetRunResolutionError(str(exc)) from exc
-            if isinstance(spec.target, HarborRunnerTarget) and closed_book_run(spec.target, configs):
-                spec = spec.model_copy(update={"target": spec.target.model_copy(update={"closed_book": True})})
             intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
             prepared, task_notices = await self._prepare_images(spec.tasks, policy, caller=caller)
+            # The run's members wait in image_preparing for their layers, while the ones not ready yet are built.
+            agent_layers = await self._start_agent_layers(spec, harbor, prepared, timeout=timeout)
             plan = TasksetRunPlan(
                 run_id=run_id,
                 workspace=workspace,
@@ -387,6 +535,7 @@ class TasksetRunService:
                 task_environments=prepared,
                 intake=intake,
                 gateway_url_override=platform_gateway_url_override(),
+                agent_layers=agent_layers,
             )
             # Before accept, so every stored run has its Evaluation. An accept that fails after this leaves the
             # Evaluation behind; a retry with the same idempotency_key derives the same run id and adopts it.
@@ -407,7 +556,7 @@ class TasksetRunService:
                 timeout_seconds=timeout,
                 execution_deadline_at=execution,
                 finalization_deadline_at=finalization,
-                discard_on_loss=(snapshot.root,) if snapshot is not None else (),
+                discard_on_loss=(snapshot,) if snapshot is not None else (),
                 auth_context=self._auth_context,
             )
             acceptance_started = True
@@ -417,7 +566,7 @@ class TasksetRunService:
             raise
         except Exception as exc:
             if snapshot is not None and (not acceptance_started or isinstance(exc, PlanStorageError)):
-                await delete_fileset_ref(self._store.files_client, snapshot.root)
+                await delete_fileset_ref(self._store.files_client, snapshot.ref, fileset_id=snapshot.fileset_id)
             # Even a subsequent absent lookup cannot prove a create did not commit.
             raise
 
@@ -425,6 +574,8 @@ class TasksetRunService:
         configs = [(t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
         if (resources := defaulted_resources_notice(configs, policy)) is not None:
             notices.append(resources)
+        if (open_book := open_book_notice(spec.target, configs)) is not None:
+            notices.append(open_book)
         status = TasksetRunSubmitResponse(**to_status(result.run).model_dump(), warnings=[*warnings, *notices])
         return SubmitOutcome(status, created=result.created)
 
@@ -462,7 +613,11 @@ class TasksetRunService:
         return harbor, policy, profile
 
     async def _prepare_images(
-        self, tasks: list[ResolvedTask], policy: ResolvedHarborSandboxPolicy, *, caller: str
+        self,
+        tasks: list[ResolvedTask],
+        policy: ResolvedHarborSandboxPolicy,
+        *,
+        caller: str,
     ) -> tuple[list[PreparedHarborEnvironment], list[str]]:
         """Each task's prepared images, in task order, and the checks' notices, each prefixed with its task's id.
 
@@ -473,7 +628,9 @@ class TasksetRunService:
             TasksetRunResolutionError: Some task has no images; the message names each one and why.
         """
         clients = PreparationClients(
-            client=self._async_client, files=self._store.files_client, image_builds=self._image_builds
+            client=self._async_client,
+            files=self._store.files_client,
+            image_builds=self._image_builds,
         )
         limit = asyncio.Semaphore(MAX_CONCURRENT_IMAGE_PREPARATIONS)
 

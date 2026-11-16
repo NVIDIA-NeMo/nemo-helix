@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Text } from '@nvidia/foundations-react-core';
-import { ComponentProps, FC, PropsWithChildren } from 'react';
+import type { ComponentProps, FC, PropsWithChildren } from 'react';
 
 /**
  * Sometimes we have to make our own input component that KUI just doesn't offer

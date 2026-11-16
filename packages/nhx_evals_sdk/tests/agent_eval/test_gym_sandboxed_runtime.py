@@ -109,14 +109,14 @@ class _FakeHost:
 
 
 def bind_http_transport(monkeypatch: pytest.MonkeyPatch, transport: httpx.MockTransport) -> None:
-    """Point ``httpx.AsyncClient`` at ``transport``. Typed kwargs so ty can check the call."""
+    """Point the runner's ``AsyncClient`` at ``transport``. Typed kwargs so ty can check the call."""
     original = httpx.AsyncClient
 
     def bound(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
         kwargs["transport"] = transport
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(httpx, "AsyncClient", bound)
+    monkeypatch.setattr(sandboxed, "AsyncClient", bound)
 
 
 def runner_against(host: _FakeHost, monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> SandboxedGymAgentTaskRunner:
@@ -178,14 +178,15 @@ async def test_without_a_collector_the_whole_run_is_one_post_of_examples(tasks, 
 async def test_an_injected_collector_replaces_the_post(tasks, tmp_path, monkeypatch) -> None:
     """A caller holding a session collects through it instead, e.g. chunked with retries."""
     host = _FakeHost(rewards={0: 1.0, 1: 0.0}, model_calls=[_model_call("c0", 1788534870.5)])
-    bind_http_transport(monkeypatch, host.transport())
+    transport = host.transport()
+    bind_http_transport(monkeypatch, transport)
     batches: list[list[dict[str, Any]]] = []
 
     async def collect(examples: list[dict[str, Any]]) -> list[Any]:
         batches.append(examples)
         records: list[Any] = []
         for start in range(0, len(examples), 3):
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(transport=transport) as client:
                 response = await client.post(ROLLOUT_URL, json={"examples": examples[start : start + 3]})
             records.extend(response.json()["results"])
         return [*records, "not a record"]
@@ -438,6 +439,37 @@ async def test_a_gym_failure_record_is_a_failed_trial_not_a_zero_score(tasks, tm
     }
     assert failed.evidence is not None
     assert failed.evidence.require("rollout_failures").ref == str(tmp_path / "gym_run" / "rollouts_failures.jsonl")
+
+
+async def test_a_routed_run_failure_is_a_failed_trial_that_names_its_cause(tasks, tmp_path, monkeypatch) -> None:
+    """What Gym 0.7 builds for a failed agent `/run` once the host routes failures: no reward, no response.
+
+    Gym's message is the transport error, which names only the status and URL; the cause is in the reply
+    the agent's server sent, here the Inference Gateway refusing a missing image.
+    """
+    cause = '{"detail":"Image file default/finance-ocr-test#images/missing.png not found."}'
+    failure = {
+        "_ng_failure_class": "agent_run_error",
+        "_ng_failure_type": "ClientResponseError",
+        "_ng_failure_message": "500, message='Internal Server Error', url='http://127.0.0.1:5106/run'",
+        "_ng_failure_http_status": 500,
+        "_ng_failure_response_body": cause,
+    }
+    _host_answering(monkeypatch, {0: {"reward": 1.0, "response": "answer-0"}, 1: failure})
+    runner = SandboxedGymAgentTaskRunner(config=SandboxedGymRuntimeConfig(rollout_url=ROLLOUT_URL))
+
+    trials = await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    by_task = {trial.task_id: trial for trial in trials}
+    scored, failed = by_task[tasks[0].id], by_task[tasks[1].id]
+    assert scored.status == AgentEvalTrialStatus.COMPLETED
+    assert scored.metadata["reward"] == 1.0
+    assert failed.status == AgentEvalTrialStatus.FAILED
+    assert failed.metadata["reward"] is None
+    assert failed.error is not None
+    assert failed.error.type == "ClientResponseError"
+    assert failed.error.message is not None
+    assert "missing.png not found" in failed.error.message
 
 
 async def test_a_kill_shaped_gym_record_keeps_its_diagnosis(tasks, tmp_path, monkeypatch) -> None:

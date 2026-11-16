@@ -7,7 +7,9 @@ import asyncio
 import logging
 from typing import List
 
+from fastapi import FastAPI
 from nhx.common.service import RouterConfig, Service
+from nhx.core.entities.api.error_handlers import register_entity_exception_handlers
 from nhx.core.entities.app.repository import dispose_async_engine, initialize_async_engine, ping_database
 from nhx.core.entities.config import EntitiesConfig
 from nhx.core.entities.initialize import initialize_database
@@ -57,6 +59,11 @@ class EntitiesService(Service[EntitiesConfig]):
                 description="Operations related to workspaces",
             ),
         ]
+
+    def _setup_dependencies(self, app: FastAPI) -> None:
+        """Configure service dependencies and the entity-data error boundary."""
+        super()._setup_dependencies(app)
+        register_entity_exception_handlers(app)
 
     async def _db_health_loop(self) -> None:
         """Background loop that pings the database on an interval and updates _db_conn_healthy."""

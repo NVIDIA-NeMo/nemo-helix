@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Cancel paths. The oracle sleeps 180 s (SLOW_SECONDS in e2e/test_taskset_runs.py), so its Job stays active
+# while the test cancels around it. The agent timeout is that sleep plus the usual 120 s: a timed-out oracle
+# would still end its Job `completed`, with a trial that never wrote its answer.
+schema_version = "1.1"
+
+[task]
+name = "taskset-e2e/slow-2"
+
+[agent]
+timeout_sec = 300.0
+
+[verifier]
+timeout_sec = 60.0
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 512

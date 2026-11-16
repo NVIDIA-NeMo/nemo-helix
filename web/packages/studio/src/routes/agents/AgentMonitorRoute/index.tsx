@@ -11,7 +11,7 @@ import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { InferenceLogsTable } from '@studio/routes/agents/AgentMonitorRoute/components/InferenceLogsTable';
 import { SummaryCards } from '@studio/routes/agents/AgentMonitorRoute/components/SummaryCards';
 import { TokenUsageChart } from '@studio/routes/agents/AgentMonitorRoute/components/TokenUsageChart';
-import { RunSummary } from '@studio/routes/agents/AgentMonitorRoute/telemetry';
+import type { RunSummary } from '@studio/routes/agents/AgentMonitorRoute/telemetry';
 import {
   FILESET_NAME,
   fetchTelemetryRuns,

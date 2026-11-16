@@ -17,6 +17,13 @@ from typing import Any
 
 from nemo_automodel._transformers.registry import ModelRegistry
 from nhx.automodel.app.constants import PAUSE_SENTINEL_FILE_NAME, PAUSE_SIGNAL
+from nhx.automodel.tasks.training.backends.checkpoints import auto_torch_dtype
+from nhx.automodel.tasks.training.backends.registry import (
+    causal_reranker_class,
+    causal_reranker_collator,
+    is_causal_reranker_checkpoint,
+)
+from nhx.automodel.tasks.training.backends.vlm import CONVERSATION_DATASET_TARGET, rewrite_fileset_rows
 from nhx.automodel.tasks.training.chat_templates import resolve_chat_template
 from nhx.automodel.tasks.training.datasets.preparation import (
     DatasetSchema,
@@ -42,6 +49,12 @@ from nhx.automodel.tasks.training.sequence_packing import (
     calculate_optimal_pack_size,
     calculate_target_packing_factor,
     estimate_dataset_sequence_lengths,
+)
+from nhx.customization_common.schemas.checkpoint import (
+    VLM_LORA_EXCLUDE_MODULES,
+    CheckpointTraits,
+    lora_uses_default_targets,
+    traits_from_step_model,
 )
 from nhx.customization_common.service.context import NHXJobContext
 
@@ -100,6 +113,11 @@ def compile_automodel_config(
     recipe = resolve_compiled_recipe(customizer_config)
     if recipe in _RETRIEVAL_RECIPES:
         cfg = _compile_retrieval_config(customizer_config, workspace_dir, job_ctx, recipe)
+    elif recipe == TrainingRecipe.SFT and traits_from_step_model(customizer_config.model).has_vision_tower:
+        # The fileset can be entirely text. The checkpoint is still image-text,
+        # so the causal-LM class cannot load it.
+        cfg = _compile_vlm_config(customizer_config, workspace_dir, job_ctx)
+        recipe = TrainingRecipe.VLM_SFT
     else:
         cfg = _compile_llm_config(customizer_config, workspace_dir, job_ctx, recipe)
     cfg["_recipe"] = recipe.value  # ours; create_automodel_recipe reads this
@@ -159,7 +177,10 @@ def _compile_retrieval_config(
     # Retrieval recipes construct StatefulRNG from the seed internally, so they
     # take a bare seed rather than the LLM recipe's full rng config object.
     cfg["seed"] = seed
-    cfg["temperature"] = 0.02 if is_bi_encoder else 1.0
+    if retrieval_config.temperature is not None:
+        cfg["temperature"] = retrieval_config.temperature
+    else:
+        cfg["temperature"] = 0.02 if is_bi_encoder else 1.0
 
     _build_base_model(cfg, customizer_config)
     cfg["model"].update(
@@ -179,13 +200,28 @@ def _compile_retrieval_config(
         cfg["model"]["do_distributed_inbatch_negative"] = retrieval_config.do_distributed_inbatch_negative
     else:
         cfg["model"]["num_labels"] = 1
-        cfg["model"]["temperature"] = 1.0
+        if is_causal_reranker_checkpoint(customizer_config.model.path):
+            # Automodel scores this causal LM by its yes/no next-token logits. That reranker
+            # has no classifier head to pool for, and takes the recipe's temperature (above).
+            del cfg["model"]["pooling"]
+            if customizer_config.model.precision is None:
+                # Its from_pretrained passes every kwarg through the config loader, which stores
+                # "auto" as the config dtype; transformers then fails to resolve it. Send the dtype
+                # "auto" would have resolved to instead.
+                cfg["model"]["torch_dtype"] = auto_torch_dtype(customizer_config.model.path)
+        else:
+            cfg["model"]["temperature"] = 1.0
     if customizer_config.model.attn_implementation:
         cfg["model"]["attn_implementation"] = customizer_config.model.attn_implementation
 
     cfg["tokenizer"] = {
         "_target_": "nemo_automodel._transformers.auto_tokenizer.NeMoAutoTokenizer.from_pretrained",
         "pretrained_model_name_or_path": customizer_config.model.path,
+        # Default to the checkpoint's Hugging Face tokenizer, the one Retriever/Ranking NIM and vLLM
+        # serve with. Automodel's own default prefers a tokenizer registered for the model type, which
+        # the checkpoint may not ship: Nemotron 3 Embed is model type ministral3, mapped to Mistral's
+        # tekken.json, but carries only tokenizer.json.
+        "tokenizer_backend": customizer_config.model.tokenizer_backend or "nemo_wrapped_auto",
     }
 
     _build_distributed(
@@ -281,6 +317,13 @@ def _compile_llm_config(
     _build_checkpoint(cfg, customizer_config, workspace_dir)
 
     _configure_datasets(cfg, customizer_config, prepared, effective_seq_length, seed, recipe, None)
+    if customizer_config.model.tokenizer_backend is not None:
+        # Only when asked: without this block Automodel builds its default tokenizer, as it always
+        # has. The recipe builds one tokenizer from it for both the training and validation loaders.
+        cfg["dataset"]["tokenizer"] = {
+            "pretrained_model_name_or_path": customizer_config.model.path,
+            "tokenizer_backend": customizer_config.model.tokenizer_backend,
+        }
 
     cfg["dataloader"] = {
         "_target_": "torchdata.stateful_dataloader.StatefulDataLoader",
@@ -293,6 +336,7 @@ def _compile_llm_config(
     }
 
     _build_peft(cfg, customizer_config)
+    _keep_full_weight_kd_student_in_fp32(cfg, customizer_config)
 
     cfg["loss_fn"] = {
         "_target_": "nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy",
@@ -300,7 +344,7 @@ def _compile_llm_config(
 
     # Check for custom Automodel implementations (e.g., MoE models) and
     # configure backend/parallelizer settings.
-    _configure_moe_backend(cfg, customizer_config, trust_remote_code=trust_remote_code)
+    _configure_moe_backend(cfg, customizer_config)
 
     if customizer_config.training.training_type == TrainingType.DISTILLATION:
         _configure_kd(cfg, customizer_config, trust_remote_code=trust_remote_code)
@@ -308,6 +352,191 @@ def _compile_llm_config(
     _build_integrations(cfg, customizer_config, job_ctx)
 
     return cfg
+
+
+def _compile_vlm_config(
+    customizer_config: TrainingStepConfig,
+    workspace_dir: Path,
+    job_ctx: NHXJobContext,
+) -> dict[str, Any]:
+    """Compile FinetuneRecipeForVLM for a checkpoint that has a vision tower.
+
+    Text rows and image rows share this recipe. The causal-LM target cannot
+    load an image-text checkpoint, and a mixed fileset cannot be two recipes.
+    """
+    if customizer_config.training.training_type == TrainingType.DISTILLATION:
+        raise ValueError(
+            "Knowledge distillation is not supported for a vision-language checkpoint; "
+            "use the 'sft' recipe without a teacher model."
+        )
+    if customizer_config.batch.sequence_packing:
+        raise ValueError("Sequence packing is not supported for a vision-language checkpoint.")
+
+    traits = traits_from_step_model(customizer_config.model)
+    customizer_config = _with_vlm_expert_parallel(customizer_config, traits)
+    trust_remote_code = customizer_config.model.trust_remote_code
+    seed = _resolve_seed(customizer_config)
+    cfg: dict[str, Any] = {}
+
+    _build_dist_env(cfg)
+    # FinetuneRecipeForVLM.setup reads cfg.seed. The LLM rng block is not consulted.
+    cfg["seed"] = seed
+
+    _build_base_model(cfg, customizer_config)
+    cfg["model"].update(
+        {
+            "_target_": "nemo_automodel.NeMoAutoModelForImageTextToText.from_pretrained",
+            "attn_implementation": customizer_config.model.attn_implementation,
+        }
+    )
+    caller_set_nextn = (
+        customizer_config.training.mtp is not None
+        and customizer_config.training.mtp.num_nextn_predict_layers is not None
+    )
+    if traits.declares_nextn_predict_layers and not caller_set_nextn:
+        cfg["model"]["num_nextn_predict_layers"] = 0
+
+    cfg["processor"] = {
+        "_target_": "transformers.AutoProcessor.from_pretrained",
+        "pretrained_model_name_or_path": customizer_config.model.path,
+        "trust_remote_code": trust_remote_code,
+    }
+    freeze_config: dict[str, bool] = {
+        "freeze_vision_tower": True,
+        "freeze_language_model": False,
+    }
+    if traits.has_audio_tower:
+        freeze_config["freeze_audio_tower"] = True
+    cfg["freeze_config"] = freeze_config
+
+    _build_distributed(
+        cfg,
+        customizer_config,
+        activation_checkpointing=customizer_config.training.activation_checkpointing,
+    )
+
+    prepared = _prepare_and_validate_dataset(customizer_config, workspace_dir, allow_multimodal=True)
+    max_steps = _build_schedule(cfg, customizer_config, prepared, packing_factor=None)
+    _build_optimizer(
+        cfg,
+        customizer_config,
+        max_steps=max_steps,
+        optimizer_target=_resolve_optimizer_target(customizer_config, TrainingRecipe.SFT),
+    )
+    _build_checkpoint(cfg, customizer_config, workspace_dir)
+    _configure_vlm_datasets(cfg, customizer_config, prepared, workspace_dir)
+
+    cfg["dataloader"] = {
+        "_target_": "torchdata.stateful_dataloader.StatefulDataLoader",
+        "shuffle": customizer_config.dataset.shuffle,
+        "num_workers": 0,
+    }
+    cfg["validation_dataloader"] = {
+        "_target_": "torchdata.stateful_dataloader.StatefulDataLoader",
+        "num_workers": 0,
+    }
+
+    _build_peft(cfg, customizer_config)
+    _apply_vlm_lora_excludes(cfg, customizer_config)
+
+    cfg["loss_fn"] = {
+        "_target_": "nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy",
+    }
+    _configure_moe_backend(cfg, customizer_config)
+    _build_integrations(cfg, customizer_config, job_ctx)
+    return cfg
+
+
+def _with_vlm_expert_parallel(
+    customizer_config: TrainingStepConfig,
+    traits: CheckpointTraits,
+) -> TrainingStepConfig:
+    """Keep expert parallel inside the node. One GPU stays at size 1."""
+    parallelism = customizer_config.parallelism
+    total_gpus = parallelism.num_nodes * parallelism.num_gpus_per_node
+    requested = parallelism.expert_parallel_size
+    if requested is not None and requested > parallelism.num_gpus_per_node:
+        raise ValueError(
+            f"expert_parallel_size ({requested}) must stay inside the node "
+            f"(num_gpus_per_node={parallelism.num_gpus_per_node})."
+        )
+    is_moe = traits.expert_count is not None and traits.expert_count > 1
+    if is_moe and total_gpus > 1 and requested is None:
+        if parallelism.num_gpus_per_node <= 1:
+            raise ValueError(
+                f"MoE model detected (num_experts={traits.expert_count}) but num_gpus_per_node is 1. "
+                "Expert parallel stays inside the node and needs more than one GPU on the node."
+            )
+        requested = parallelism.num_gpus_per_node
+    elif requested is None:
+        requested = 1
+    if requested == parallelism.expert_parallel_size:
+        return customizer_config
+    return customizer_config.model_copy(
+        update={"parallelism": parallelism.model_copy(update={"expert_parallel_size": requested})}
+    )
+
+
+def _apply_vlm_lora_excludes(cfg: dict[str, Any], customizer_config: TrainingStepConfig) -> None:
+    peft = cfg.get("peft")
+    if not isinstance(peft, dict):
+        return
+    lora = customizer_config.training.lora
+    target = None if lora is None else lora.target_modules
+    exclude = None if lora is None else lora.exclude_modules
+    if not lora_uses_default_targets(target, exclude):
+        return
+    peft.pop("target_modules", None)
+    peft["match_all_linear"] = False
+    peft["exclude_modules"] = list(VLM_LORA_EXCLUDE_MODULES)
+
+
+def _configure_vlm_datasets(
+    cfg: dict[str, Any],
+    customizer_config: TrainingStepConfig,
+    prepared: PreparedDataset,
+    workspace_dir: Path,
+) -> None:
+    """Rewrite fileset rows into Automodel conversation JSONL."""
+    schema, column_keys = detect_dataset_schema(
+        prepared.train_file,
+        prompt_template=customizer_config.dataset.prompt_template,
+    )
+    if schema == DatasetSchema.EMBEDDING:
+        raise ValueError(
+            "Dataset is in retrieval format (query/pos_doc/neg_doc), but the checkpoint "
+            "has a vision tower. Select 'bi_encoder' or 'cross_encoder', or provide a chat fileset."
+        )
+    dataset_path = Path(customizer_config.dataset.path)
+    dataset_root = dataset_path if dataset_path.is_dir() else dataset_path.parent
+    image_dir = workspace_dir / "dataset" / "images"
+    train_out = workspace_dir / "dataset" / "vlm_train.jsonl"
+    val_out = workspace_dir / "dataset" / "vlm_validation.jsonl"
+    rewrite_fileset_rows(
+        prepared.train_file,
+        train_out,
+        dataset_root=dataset_root,
+        image_dir=image_dir,
+        column_keys=column_keys,
+    )
+    rewrite_fileset_rows(
+        prepared.validation_file,
+        val_out,
+        dataset_root=dataset_root,
+        image_dir=image_dir,
+        column_keys=column_keys,
+    )
+    chat_template = resolve_chat_template(
+        model_path=customizer_config.model.path,
+        model_name=customizer_config.model.name,
+        user_template=customizer_config.model.chat_template,
+    )
+    cfg["dataset"] = {"_target_": CONVERSATION_DATASET_TARGET, "path_or_dataset": str(train_out)}
+    cfg["validation_dataset"] = {"_target_": CONVERSATION_DATASET_TARGET, "path_or_dataset": str(val_out)}
+    if chat_template:
+        cfg["dataset"]["chat_template"] = chat_template
+        cfg["validation_dataset"]["chat_template"] = chat_template
+    cfg["_resolved_chat_template"] = chat_template
 
 
 def _resolve_seed(customizer_config: TrainingStepConfig) -> int:
@@ -340,7 +569,7 @@ def _build_base_model(cfg: dict[str, Any], customizer_config: TrainingStepConfig
     if mtp is not None:
         # Automodel reads these off the model block as model constructor arguments, and
         # support differs per model (``mtp_use_repeated_layer`` is Nemotron-H only in
-        # r0.6.0). Forward only what the caller set, so an unset field keeps the
+        # r0.7.0). Forward only what the caller set, so an unset field keeps the
         # checkpoint's own value instead of reaching a model that does not accept it.
         for field_name, model_key in _MTP_MODEL_KEYS.items():
             value = getattr(mtp, field_name)
@@ -394,6 +623,7 @@ def _build_distributed(
 def _prepare_and_validate_dataset(
     customizer_config: TrainingStepConfig,
     workspace_dir: Path,
+    allow_multimodal: bool = False,
 ) -> PreparedDataset:
     """Discover, merge, and optionally split dataset files."""
     split_kwargs = (
@@ -411,7 +641,10 @@ def _prepare_and_validate_dataset(
         f"Prepared dataset: train={prepared.train_samples} samples, validation={prepared.validation_samples} samples, files: "
         f"train={prepared.train_file.absolute()}, validation={prepared.validation_file.absolute()}"
     )
-    validator = DatasetValidator(training_type=customizer_config.training.training_type)
+    validator = DatasetValidator(
+        training_type=customizer_config.training.training_type,
+        allow_multimodal=allow_multimodal,
+    )
     validator.validate_dataset(str(prepared.train_file))
     validator.validate_dataset(str(prepared.validation_file))
     logger.info("Validated datasets successfully")
@@ -602,7 +835,6 @@ def _build_checkpoint(
         # Required for models with quantized base weights (e.g., GPT-OSS)
         # Safe to enable even for non-quantized models
         "dequantize_base_checkpoint": True,
-        "v4_compatible": customizer_config.model.v4_compatible,
     }
 
 
@@ -654,6 +886,12 @@ def _build_integrations(
         framework="automodel",
     )
     if wandb_config:
+        # Automodel passes its own ``settings=`` to ``wandb.init``, so a ``settings`` entry here
+        # would raise a duplicate-keyword TypeError. A self-hosted server reaches the workers as
+        # WANDB_BASE_URL instead, which the launcher sets from ``_wandb_base_url``.
+        settings = wandb_config.pop("settings", None) or {}
+        if base_url := settings.get("base_url"):
+            cfg["_wandb_base_url"] = base_url
         cfg["wandb"] = wandb_config
         logger.info(f"WandB enabled: project={wandb_config.get('project')}")
 
@@ -699,102 +937,147 @@ def resolve_warmup_steps(*, warmup_steps: int, max_steps: int) -> int:
     return clamped_warmup_steps
 
 
-def _configure_moe_backend(
-    cfg: dict[str, Any], customizer_config: TrainingStepConfig, trust_remote_code: bool = False
-) -> None:
+def _configure_moe_backend(cfg: dict[str, Any], customizer_config: TrainingStepConfig) -> None:
     """
     Configure custom Automodel model implementations for MoE models.
 
-    Automodel has optimized implementations for certain model architectures.
-    Only MoE models (those with num_local_experts, num_experts, or n_routed_experts in config)
-    require additional backend and parallelizer configuration.
+    The model-spec task records the architecture name and expert count when it has them.
+    A model entity with no spec leaves both unset; those fall back to AutoConfig.
+    Only MoE models require additional backend and parallelizer configuration.
 
     Dense models like LlamaForCausalLM may have custom Automodel implementations
     (for combined QKV projections, etc.) but don't need MoE-specific config.
 
     This function:
-    1. Detects if the model is an MoE model via config attributes
+    1. Detects if the model is an MoE model from the step config, or from AutoConfig
     2. Only for MoE: Configures the backend (torch dispatcher, i.e. DeepEP off, for stability)
     3. Only for MoE: Configures the parallelizer for expert distribution
     """
-    # Import here to avoid ModuleNotFoundError in environments where
-    # transformers is not installed (e.g., during test collection)
-    from transformers import AutoConfig
+    architecture, num_experts = _recorded_or_loaded_moe_traits(customizer_config)
+    if not architecture:
+        logger.debug(
+            "No architecture name on the step config for %s. Using the standard HuggingFace model implementation.",
+            customizer_config.model.path,
+        )
+        return
 
-    model_path = customizer_config.model.path
+    has_custom_impl = architecture in ModelRegistry.model_arch_name_to_cls
+
+    if has_custom_impl:
+        is_moe_model = num_experts is not None and num_experts > 1
+        if is_moe_model:
+            logger.info(
+                f"Detected MoE model with custom Automodel implementation for architecture: {architecture}. "
+                f"Adding MoE-specific configurations (num_experts={num_experts})."
+            )
+
+            # Validate MoE parallelism constraints.
+            # Automodel's MoE parallelizer does not support tensor parallelism:
+            #   assert tp_axis_name is None or world_mesh[tp_axis_name].size() == 1
+            # See: nemo_automodel/components/moe/parallelizer.py
+            p = customizer_config.parallelism
+            total_gpus = p.num_nodes * p.num_gpus_per_node
+            if total_gpus > 1:
+                if p.tensor_parallel_size > 1:
+                    raise ValueError(
+                        f"Tensor parallelism (tensor_parallel_size={p.tensor_parallel_size}) is not supported for MoE models."
+                    )
+                ep = p.expert_parallel_size
+                if ep is None or ep <= 1:
+                    raise ValueError(
+                        f"MoE model detected (num_experts={num_experts}) but expert_parallel_size "
+                        f"is {ep or 'not set'}. Multi-GPU MoE training requires expert_parallel_size > 1."
+                    )
+
+            # Backend configuration for MoE models. DeepEP is disabled by default for
+            # stability by routing tokens with the torch dispatcher; Automodel no longer
+            # honors ``enable_deepep`` (it is ignored with a warning, and
+            # ``enable_deepep=False`` used to mean ``dispatcher="torch"``). Anything the job
+            # spec asked for explicitly wins -- this runs after _build_base_model, which
+            # already wrote the requested settings.
+            requested = cfg.setdefault("model", {}).get("backend", {})
+            cfg["model"]["backend"] = {
+                "_target_": _BACKEND_CONFIG_TARGET,
+                "dispatcher": "torch",
+                **{k: v for k, v in requested.items() if k != "_target_"},
+            }
+
+        else:
+            logger.info(
+                f"Detected custom Automodel implementation for architecture: {architecture}. "
+                "Not an MoE model, skipping MoE-specific configurations."
+            )
+    else:
+        logger.debug(
+            "No custom Automodel implementation found for %s. Using standard HuggingFace model implementation.",
+            architecture,
+        )
+
+
+def _config_value(config: Any, name: str) -> Any:
+    return config.get(name) if isinstance(config, dict) else getattr(config, name, None)
+
+
+def _expert_count_from_config(root: Any) -> int | None:
+    """First positive expert count on the root config or a nested language config.
+
+    Mirrors the model-spec checkpoint inspector: Nemotron Omni keeps
+    ``n_routed_experts`` on a nested language config, which may be a dict or an object.
+    """
+    blocks = [root]
+    seen = {id(root)}
+    while blocks:
+        block = blocks.pop(0)
+        for key in ("num_local_experts", "num_experts", "n_routed_experts"):
+            value = _config_value(block, key)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return value
+        for key in ("text_config", "thinker_config", "language_config", "llm_config"):
+            child = _config_value(block, key)
+            if child is None or id(child) in seen or isinstance(child, (str, int, float, bool, list, tuple)):
+                continue
+            seen.add(id(child))
+            blocks.append(child)
+    return None
+
+
+def _recorded_or_loaded_moe_traits(customizer_config: TrainingStepConfig) -> tuple[str | None, int | None]:
+    """Architecture class and expert count. A class name plus an expert count skips AutoConfig.
+
+    A hub id or path contains ``/`` and is not a class, so the loaded architecture replaces it.
+    A failed load leaves the recorded values in place.
+    """
+    architecture = customizer_config.model.checkpoint_model_name
+    num_experts = customizer_config.model.num_experts
+    # Hub ids and paths are not architecture classes.
+    if architecture and "/" not in architecture and num_experts is not None:
+        return architecture, num_experts
 
     try:
-        hf_config = AutoConfig.from_pretrained(model_path, trust_remote_code=trust_remote_code)
-        architectures = getattr(hf_config, "architectures", None)
+        # Import here so test collection does not require transformers.
+        from transformers import AutoConfig
 
-        # Check if model has a custom Automodel implementation
-        has_custom_impl = (
-            architectures and len(architectures) > 0 and architectures[0] in ModelRegistry.model_arch_name_to_cls
+        hf_config = AutoConfig.from_pretrained(
+            customizer_config.model.path,
+            trust_remote_code=customizer_config.model.trust_remote_code,
         )
-
-        if has_custom_impl:
-            # Check if model is MoE by looking for expert-related config attributes
-            # MoE models use num_local_experts (Mixtral-style), num_experts (older), or n_routed_experts (NemotronH)
-            num_experts = (
-                getattr(hf_config, "num_local_experts", None)
-                or getattr(hf_config, "num_experts", None)
-                or getattr(hf_config, "n_routed_experts", None)
-            )
-            is_moe_model = num_experts is not None and num_experts > 1
-            if is_moe_model:
-                logger.info(
-                    f"Detected MoE model with custom Automodel implementation for architecture: {architectures[0]}. "
-                    f"Adding MoE-specific configurations (num_experts={num_experts})."
-                )
-
-                # Validate MoE parallelism constraints.
-                # Automodel's MoE parallelizer does not support tensor parallelism:
-                #   assert tp_axis_name is None or world_mesh[tp_axis_name].size() == 1
-                # See: nemo_automodel/components/moe/parallelizer.py
-                p = customizer_config.parallelism
-                total_gpus = p.num_nodes * p.num_gpus_per_node
-                if total_gpus > 1:
-                    if p.tensor_parallel_size > 1:
-                        raise ValueError(
-                            f"Tensor parallelism (tensor_parallel_size={p.tensor_parallel_size}) is not supported for MoE models."
-                        )
-                    ep = p.expert_parallel_size
-                    if ep is None or ep <= 1:
-                        raise ValueError(
-                            f"MoE model detected (num_experts={num_experts}) but expert_parallel_size "
-                            f"is {ep or 'not set'}. Multi-GPU MoE training requires expert_parallel_size > 1."
-                        )
-
-                # Backend configuration for MoE models. DeepEP is disabled by default for
-                # stability by routing tokens with the torch dispatcher; Automodel no longer
-                # honors ``enable_deepep`` (it is ignored with a warning, and
-                # ``enable_deepep=False`` used to mean ``dispatcher="torch"``). Anything the job
-                # spec asked for explicitly wins -- this runs after _build_base_model, which
-                # already wrote the requested settings.
-                requested = cfg.setdefault("model", {}).get("backend", {})
-                cfg["model"]["backend"] = {
-                    "_target_": _BACKEND_CONFIG_TARGET,
-                    "dispatcher": "torch",
-                    **{k: v for k, v in requested.items() if k != "_target_"},
-                }
-
-            else:
-                logger.info(
-                    f"Detected custom Automodel implementation for architecture: {architectures[0]}. "
-                    "Not an MoE model, skipping MoE-specific configurations."
-                )
-        else:
-            logger.debug(
-                f"No custom Automodel implementation found for {model_path}. "
-                "Using standard HuggingFace model implementation."
-            )
-    except ValueError:
-        raise  # Re-raise validation errors
-    except Exception as e:
-        # Don't fail training if we can't check for custom implementations
+    except Exception as exc:
         logger.warning(
-            f"Failed to check for custom model implementation: {e}. Using standard HuggingFace model implementation."
+            "Failed to check for custom model implementation: %s. Using standard HuggingFace model implementation.",
+            exc,
         )
+        return architecture, num_experts
+
+    architectures = getattr(hf_config, "architectures", None)
+    loaded_architecture = architectures[0] if isinstance(architectures, (list, tuple)) and architectures else None
+    if not isinstance(loaded_architecture, str):
+        loaded_architecture = None
+    loaded_experts = num_experts
+    if loaded_experts is None:
+        loaded_experts = _expert_count_from_config(hf_config)
+    if loaded_architecture and (not architecture or "/" in architecture):
+        architecture = loaded_architecture
+    return architecture, loaded_experts
 
 
 def _configure_datasets(
@@ -917,6 +1200,9 @@ def _configure_chat_dataset(
         "seq_length": seq_length,
         "padding": "do_not_pad" if not pp_enabled else "max_length",
     }
+    if customizer_config.dataset.mask_generation_prompt:
+        cfg["dataset"]["mask_generation_prompt"] = True
+        cfg["validation_dataset"]["mask_generation_prompt"] = True
 
     # Add chat template if available
     if chat_template:
@@ -941,6 +1227,10 @@ def _configure_sft_dataset(
     seq_length: int,
 ) -> None:
     """Configure ColumnMappedTextInstructionDataset for SFT/custom format."""
+    if customizer_config.dataset.mask_generation_prompt:
+        raise ValueError(
+            "mask_generation_prompt applies to chat-format (messages) data; this dataset has prompt/completion rows."
+        )
     logger.info(
         f"Configuring SFT dataset with columns: question={question_col}, answer={answer_col}, seq_length={seq_length}"
     )
@@ -1004,11 +1294,17 @@ def _configure_retrieval_dataset(
     """
 
     model_type = "bi_encoder" if recipe == TrainingRecipe.BI_ENCODER else "cross_encoder"
-    collator_target = (
-        "nemo_automodel.components.datasets.llm.BiEncoderCollator"
-        if recipe == TrainingRecipe.BI_ENCODER
-        else "nemo_automodel.components.datasets.llm.CrossEncoderCollator"
+    causal_reranker = (
+        causal_reranker_class(customizer_config.model.path) if recipe == TrainingRecipe.CROSS_ENCODER else None
     )
+    if recipe == TrainingRecipe.BI_ENCODER:
+        collator_target = "nemo_automodel.components.datasets.llm.BiEncoderCollator"
+    elif causal_reranker is not None:
+        # The reranker's own prompt, so training reads the yes/no logits where the model and vLLM's
+        # template for it expect them. Resolved here so an unknown reranker fails before data loads.
+        collator_target = causal_reranker_collator(causal_reranker)
+    else:
+        collator_target = "nemo_automodel.components.datasets.llm.CrossEncoderCollator"
     logger.info(
         "Configuring %s dataset with train_n_passages=%s",
         model_type,
@@ -1017,12 +1313,15 @@ def _configure_retrieval_dataset(
 
     def collator_config(*, validation: bool = False) -> dict[str, Any]:
         if recipe == TrainingRecipe.CROSS_ENCODER:
-            return {
+            reranker: dict[str, Any] = {
                 "_target_": collator_target,
                 "rerank_max_length": retrieval_config.passage_max_length,
-                "prompt_template": "question:{query} \n \n passage:{passage}",
                 "pad_to_multiple_of": 8,
             }
+            if causal_reranker is None:
+                # A causal reranker's collator writes its own prompt and takes no prompt_template.
+                reranker["prompt_template"] = "question:{query} \n \n passage:{passage}"
+            return reranker
         result: dict[str, Any] = {
             "_target_": collator_target,
             "q_max_len": retrieval_config.query_max_length,
@@ -1108,6 +1407,21 @@ def _verify_tokenizer_compatibility(student_path: str, teacher_path: str, trust_
         # Log but don't fail for other tokenizer loading issues
         # (e.g., network issues, missing files) - the training will fail later with a clearer error
         logger.warning(f"Could not verify tokenizer compatibility: {e}")
+
+
+def _keep_full_weight_kd_student_in_fp32(cfg: dict[str, Any], customizer_config: TrainingStepConfig) -> None:
+    """Store a full-weight distillation student in fp32 when the job sets no precision.
+
+    torch.optim optimizers keep no fp32 master copy, so bf16 parameters mean bf16 updates and
+    Adam state. Automodel r0.6.0's KD recipe stored such a student in fp32; v0.7.0 dropped that.
+    """
+    if (
+        customizer_config.training.training_type == TrainingType.DISTILLATION
+        and "peft" not in cfg
+        and customizer_config.model.precision is None
+        and str(cfg["optimizer"]["_target_"]).startswith("torch.optim.")
+    ):
+        cfg["model"]["torch_dtype"] = "float32"
 
 
 def _configure_kd(cfg: dict[str, Any], customizer_config: TrainingStepConfig, trust_remote_code: bool = False) -> None:

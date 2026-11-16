@@ -12,7 +12,7 @@ import anthropic.types.message_create_params as anthropic_params
 import openai.types.chat.completion_create_params as openai_chat_params
 import openai.types.responses.response_create_params as openai_responses_params
 from nemo_helix_plugin.inference_middleware import InferenceRequest
-from nemo_helix_plugin.inference_middleware_types import TypedRequest
+from nemo_helix_plugin.inference_middleware_types import SYSTEMONE_PATH, SystemOneRequest, TypedRequest
 from pydantic import TypeAdapter, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ _REQUEST_ADAPTERS: dict[str, TypeAdapter] = {
     "v1/chat/completions": TypeAdapter(openai_chat_params.CompletionCreateParamsBase),
     "v1/messages": TypeAdapter(anthropic_params.MessageCreateParamsBase),
     "v1/responses": TypeAdapter(openai_responses_params.ResponseCreateParamsBase),
+    SYSTEMONE_PATH: TypeAdapter(SystemOneRequest),
 }
 
 

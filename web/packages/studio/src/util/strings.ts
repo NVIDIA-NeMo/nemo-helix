@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { logger } from '@nemo/common/src/utils/logger';
-import { Row } from '@studio/util/files';
+import type { Row } from '@studio/util/files';
 import Papa from 'papaparse';
 
 export { getTextWithCount } from '@nemo/common/src/utils/formatters';

@@ -20,7 +20,7 @@ import {
   customLabelCandidate,
 } from '@studio/routes/AnonymizerBuilderRoute/entityItems';
 import type { AnonymizerFormData } from '@studio/routes/AnonymizerBuilderRoute/schema';
-import { FC, useMemo, useState } from 'react';
+import { type FC, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 export const EntitiesSection: FC = () => {

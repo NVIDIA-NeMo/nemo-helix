@@ -19,7 +19,7 @@ import {
   type UploadRootProps,
 } from '@nvidia/foundations-react-core';
 import { collectFolderPathsFromDatasetFiles } from '@studio/util/files';
-import { FC, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useEffect, useMemo, useRef, useState } from 'react';
 
 // `FileUploadItem` isn't re-exported from the package root, so derive it.
 type FileUploadItem = NonNullable<Extract<UploadRootProps, { multiple: true }>['value']>[number];

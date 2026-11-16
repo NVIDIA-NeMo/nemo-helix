@@ -42,7 +42,7 @@ def test_alembic_upgrade_accepts_url_encoded_password(monkeypatch, tmp_path):
     def fake_upgrade(cfg, revision):
         captured["url"] = cfg.get_main_option("sqlalchemy.url")
 
-    monkeypatch.setattr(initialize.command, "upgrade", fake_upgrade)
+    monkeypatch.setattr(initialize, "alembic_upgrade", fake_upgrade)
     ini = tmp_path / "alembic.ini"
     ini.write_text("[alembic]\n")
 

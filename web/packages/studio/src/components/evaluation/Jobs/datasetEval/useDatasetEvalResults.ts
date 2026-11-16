@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { parseJsonl } from '@nemo/common/src/utils/parseRecords';
 import { useEvalsGetEvalResult } from '@nemo/sdk/generated/evals/evals-plugin-eval-results-routes';
 import { useEvalsGetEvaluateJobResult } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import type { DatasetEvalRow } from '@studio/components/evaluation/Jobs/datasetEval/DatasetEvalRowResultsPanel';
 import { useQuery } from '@tanstack/react-query';
@@ -13,16 +14,7 @@ import { useQuery } from '@tanstack/react-query';
  *  one artifact is still fetched by URL. A malformed line is skipped rather than
  *  discarding every other row alongside it. */
 const parseRowScores = (text: string): DatasetEvalRow[] =>
-  text
-    .split('\n')
-    .filter((line) => line.trim())
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line) as DatasetEvalRow];
-      } catch {
-        return [];
-      }
-    });
+  parseJsonl<DatasetEvalRow>(text, { skipInvalid: true });
 
 const downloadText = async (url: string, label: string): Promise<string> => {
   const response = await platformFetch(url);

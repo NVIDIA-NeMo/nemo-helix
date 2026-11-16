@@ -65,6 +65,7 @@ from typing import ClassVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -129,8 +130,7 @@ def _build_widgets_router() -> APIRouter:
     @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[WidgetPerms.LIST])
     async def list_widgets(
         workspace: str,
-        page: int = Query(default=1, ge=1),
-        page_size: int = Query(default=20, ge=1, le=100),
+        page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
         sort: str = Query(default="-created_at"),
         filter: WidgetFilter = Depends(_filter_dep),
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -140,8 +140,8 @@ def _build_widgets_router() -> APIRouter:
             result = await entity_client.list(
                 Widget,
                 workspace=workspace,
-                page=page,
-                page_size=page_size,
+                page=page_params.page,
+                page_size=page_params.page_size,
                 sort=sort,
                 filter_obj=filter_dict or None,
             )

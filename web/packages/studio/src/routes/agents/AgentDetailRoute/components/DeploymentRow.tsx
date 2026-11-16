@@ -9,13 +9,13 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useAgentsGetDeployment } from '@nemo/sdk/generated/agents/agent-deployments';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Badge, Block, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { type AgentSpecSource } from '@studio/api/agents/useAgentSpecFileset';
+import type { AgentSpecSource } from '@studio/api/agents/useAgentSpecFileset';
 import {
   deploymentModeLabel,
   deploymentUrl,
   shortRevision,
 } from '@studio/routes/agents/AgentDetailRoute/helpers';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface DeploymentRowProps {
   deployment: AgentDeployment;

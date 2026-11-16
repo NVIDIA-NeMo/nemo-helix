@@ -3,13 +3,15 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
+import { CancelJobModal } from '@nemo/common/src/components/CancelJobModal';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
-import * as DataView from '@nemo/common/src/components/DataView/internal';
+import type * as DataView from '@nemo/common/src/components/DataView/internal';
 import {
   ROW_ACTIONS_COLUMN_SIZE,
   ROW_SELECTION_COLUMN_SIZE,
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
@@ -17,6 +19,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { ScoreGauge } from '@nemo/common/src/components/ScoreGauge';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { useAnnounceCancellation } from '@nemo/common/src/hooks/useAnnounceCancellation';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
@@ -27,16 +30,15 @@ import {
   getSafeSynthesizerListJobsQueryKey,
   useSafeSynthesizerListJobs,
 } from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
-import {
+import type {
   GenerateJob,
   GenerateJobsListFilter,
   GenerateJobsSortField,
 } from '@nemo/sdk/generated/safe-synthesizer/schema';
-import { Banner, Button, Stack } from '@nvidia/foundations-react-core';
-import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
+import { Button, Stack } from '@nvidia/foundations-react-core';
 import { isCancellableJob } from '@studio/components/dataViews/SafeSynthesizerJobsDataView/utils';
 import { FilesetFilePreviewLink } from '@studio/components/SafeSynthesizerFilesetPreview/FilesetFilePreviewLink';
-import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
+import { getDeleteJobsDescription, STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import {
   getNewSafeSynthesizerRoute,
@@ -44,7 +46,7 @@ import {
   getGenerateJobRoute,
 } from '@studio/routes/utils';
 import { keepPreviousData, useQueries, useQueryClient } from '@tanstack/react-query';
-import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
+import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
 type GenerateJobWithId = GenerateJob & { id: string };
@@ -60,7 +62,8 @@ export const GenerateJobsDataView: FC = () => {
   });
 
   const [deleteJobs, setDeleteJobs] = useState<GenerateJob[]>([]);
-  const [cancelError, setCancelError] = useState<string | undefined>(undefined);
+  const [cancelTarget, setCancelTarget] = useState<GenerateJob | undefined>(undefined);
+  const announceCancellation = useAnnounceCancellation();
 
   const deleteJobMutation = useJobsDeleteJob({
     mutation: {
@@ -71,15 +74,15 @@ export const GenerateJobsDataView: FC = () => {
     },
   });
 
-  const handleDeleteJobs = async (jobsToDelete: GenerateJob[]) => {
-    const invalid = jobsToDelete.filter((job) => !job.workspace || !job.name);
+  const handleDeleteJobs = async () => {
+    const invalid = deleteJobs.filter((job) => !job.workspace || !job.name);
     if (invalid.length > 0) {
       throw new Error(
         `Cannot delete ${invalid.length} job${invalid.length !== 1 ? 's' : ''}: missing workspace or name.`
       );
     }
     await Promise.all(
-      jobsToDelete.map(async (job) => {
+      deleteJobs.map(async (job) => {
         try {
           await deleteJobMutation.mutateAsync({ workspace: job.workspace!, name: job.name });
         } catch (error) {
@@ -89,36 +92,20 @@ export const GenerateJobsDataView: FC = () => {
         }
       })
     );
+    return true;
   };
 
   // Cancel job mutation
   const cancelJobMutation = useJobsCancelJob({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (job, variables) => {
+        announceCancellation(variables.workspace, { name: variables.name, status: job.status });
         queryClient.resetQueries({
           queryKey: getSafeSynthesizerListJobsQueryKey(workspace),
         });
-        setCancelError(undefined);
-      },
-      onError: (error) => {
-        setCancelError(error instanceof Error ? error.message : 'Failed to cancel job');
       },
     },
   });
-
-  const handleCancelJob = useCallback(
-    async (job: GenerateJob) => {
-      if (job.workspace && job.name) {
-        try {
-          setCancelError(undefined);
-          await cancelJobMutation.mutateAsync({ workspace: job.workspace, name: job.name });
-        } catch {
-          // Error is handled by onError callback
-        }
-      }
-    },
-    [cancelJobMutation]
-  );
 
   // Fetch jobs using dataViewState for pagination, sorting, search, and filters
   const {
@@ -315,36 +302,27 @@ export const GenerateJobsDataView: FC = () => {
                       },
                     ]
                   : []),
-                {
-                  label: 'Delete',
-                  onSelect: () => setDeleteJobs([row.original]),
-                },
                 ...(isCancellableJob(row.original.status)
                   ? [
                       {
                         label: 'Cancel',
-                        onSelect: () => handleCancelJob(row.original),
+                        onSelect: () => setCancelTarget(row.original),
                       },
                     ]
                   : []),
               ]}
+              deleteAction={{ onSelect: () => setDeleteJobs([row.original]) }}
             />
           ),
         }),
       ],
-      [handleCancelJob, navigate, summaryDataMap, summaryQueries, workspace]
+      [navigate, summaryDataMap, summaryQueries, workspace]
     );
 
   const totalResults = safeSynthesizerResponse?.pagination?.total_results ?? 0;
 
   return (
     <Stack className="flex-1 min-h-0">
-      {cancelError && (
-        <Banner kind="inline" status="error">
-          {cancelError}
-        </Banner>
-      )}
-
       <StudioDataView<GenerateJobWithId>
         dataViewState={dataViewState}
         searchField="name"
@@ -411,16 +389,35 @@ export const GenerateJobsDataView: FC = () => {
         }}
       />
 
-      <BulkDeleteModal
-        items={deleteJobs}
-        open={deleteJobs.length > 0}
-        onDelete={handleDeleteJobs}
-        title={(count) => `Delete ${count} Safe Synthesizer Job${count !== 1 ? 's' : ''}`}
-        onClose={() => {
-          setDeleteJobs([]);
-          dataViewState.rowSelection.set({});
-        }}
-      />
+      {deleteJobs.length > 0 && (
+        <DeleteConfirmationModal
+          open
+          entity="Safe Synthesizer job"
+          ids={deleteJobs.map((job) => job.name)}
+          description={getDeleteJobsDescription(deleteJobs.length)}
+          onDelete={handleDeleteJobs}
+          onClose={() => {
+            setDeleteJobs([]);
+            dataViewState.rowSelection.set({});
+          }}
+        />
+      )}
+
+      {cancelTarget && (
+        <CancelJobModal
+          open
+          jobName={cancelTarget.name ?? ''}
+          onClose={() => setCancelTarget(undefined)}
+          onConfirm={async () => {
+            if (cancelTarget.workspace && cancelTarget.name) {
+              await cancelJobMutation.mutateAsync({
+                workspace: cancelTarget.workspace,
+                name: cancelTarget.name,
+              });
+            }
+          }}
+        />
+      )}
     </Stack>
   );
 };

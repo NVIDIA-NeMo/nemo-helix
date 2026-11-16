@@ -4,11 +4,14 @@
 """Execute explicit Intake samples with mocked transports and validate runtime payloads."""
 
 import base64
+import builtins
 import json
 import shutil
 import subprocess
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
-from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from nhx.intake.api.v2.experiments.schemas import EvaluationPatchRequest
@@ -22,6 +25,24 @@ CASES = [
     ("post", "/apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/traces", True),
     ("patch", "/apis/intake/v2/workspaces/{workspace}/evaluations/{name}", True),
 ]
+
+
+def _exec_with_fake_requests(source: str, request: Mock) -> None:
+    """Run a Python sample whose ``import requests`` resolves to a fake, inside the sample only."""
+    real_import = builtins.__import__
+
+    def sample_import(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "requests":
+            return SimpleNamespace(request=request)
+        return real_import(name, globals, locals, fromlist, level)
+
+    exec(source, {"__builtins__": {**vars(builtins), "__import__": sample_import}})
 
 
 def _validate_payload(path, body):
@@ -70,8 +91,8 @@ def test_intake_samples_send_runtime_valid_payloads(method, path, reads_body, la
         response = Mock(status_code=201)
         if not reads_body:
             response.json.side_effect = AssertionError("Empty 201 response must not be decoded")
-        with patch("requests.request", return_value=response) as send:
-            exec(source, {})
+        send = Mock(return_value=response)
+        _exec_with_fake_requests(source, send)
         assert send.call_args.args == (method.upper(), request.url)
         assert send.call_args.kwargs["headers"] == request.headers
         body = send.call_args.kwargs["data"]

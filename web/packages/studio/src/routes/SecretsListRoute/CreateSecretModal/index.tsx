@@ -23,7 +23,10 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import type { FC } from 'react';
 
-interface CreateSecretModalProps extends Pick<BaseProps, 'open' | 'onClose'> {
+interface CreateSecretModalProps extends Pick<
+  BaseProps,
+  'open' | 'onClose' | 'instruction' | 'initialValues' | 'valueHelp'
+> {
   workspace: string;
   /** Optional. After create, called with the new secret name (e.g. create-dataset flow sets the Secret Key field). */
   onSecretCreated?: (secretName: string) => void;
@@ -34,6 +37,7 @@ export const CreateSecretModal: FC<CreateSecretModalProps> = ({
   open,
   onClose,
   onSecretCreated,
+  ...guidance
 }) => {
   const queryClient = useQueryClient();
 
@@ -57,6 +61,7 @@ export const CreateSecretModal: FC<CreateSecretModalProps> = ({
 
   return (
     <CreateSecretModalBase
+      {...guidance}
       open={open}
       onClose={handleClose}
       onCreate={handleCreate}

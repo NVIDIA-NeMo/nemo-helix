@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { CancelJobModal } from '@nemo/common/src/components/CancelJobModal';
 import {
   type QuickActionItem,
   QuickActionsMenuRoot,
 } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
+import { useAnnounceCancellation } from '@nemo/common/src/hooks/useAnnounceCancellation';
 import {
   getAnonymizerListRunJobsQueryKey,
   useAnonymizerCancelRunJob,
@@ -15,37 +17,34 @@ import { DeleteJobModal } from '@studio/components/dataViews/AnonymizerJobsDataV
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAnonymizerJobRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
-import { type FC, useCallback, useMemo, useState } from 'react';
+import { type FC, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 interface AnonymizerJobActionsMenuProps {
   job: AnonymizerJob;
   includeViewDetails?: boolean;
   onDeleted?: () => void;
-  onCancelError?: (message: string | undefined) => void;
 }
 
 export const AnonymizerJobActionsMenu: FC<AnonymizerJobActionsMenuProps> = ({
   job,
   includeViewDetails = false,
   onDeleted,
-  onCancelError,
 }) => {
   const navigate = useNavigate();
   const workspace = useWorkspaceFromPath();
   const queryClient = useQueryClient();
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const announceCancellation = useAnnounceCancellation();
 
   const cancelJobMutation = useAnonymizerCancelRunJob({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (job, variables) => {
         queryClient.resetQueries({
           queryKey: getAnonymizerListRunJobsQueryKey(workspace),
         });
-        onCancelError?.(undefined);
-      },
-      onError: (error) => {
-        onCancelError?.(error instanceof Error ? error.message : 'Failed to cancel job');
+        announceCancellation(variables.workspace, { name: variables.name, status: job.status });
       },
     },
   });
@@ -54,50 +53,48 @@ export const AnonymizerJobActionsMenu: FC<AnonymizerJobActionsMenuProps> = ({
 
   const handleCancel = useCallback(async () => {
     if (!job.workspace || !job.name) return;
-    try {
-      onCancelError?.(undefined);
-      await cancelJob({ workspace: job.workspace, name: job.name });
-    } catch {
-      // Error is surfaced via the mutation's onError callback.
-    }
-  }, [job.workspace, job.name, cancelJob, onCancelError]);
+    await cancelJob({ workspace: job.workspace, name: job.name });
+  }, [job.workspace, job.name, cancelJob]);
 
   const isCancellable = job.status != null && CJobCancellableStatuses.includes(job.status);
 
-  const actions = useMemo<QuickActionItem[]>(
-    () => [
-      ...(includeViewDetails
-        ? [
-            {
-              label: 'View details',
-              onSelect: () => {
-                if (job.name) {
-                  navigate(getAnonymizerJobRoute(workspace, job.name));
-                }
-              },
+  const actions: QuickActionItem[] = [
+    ...(includeViewDetails
+      ? [
+          {
+            label: 'View details',
+            onSelect: () => {
+              if (job.name) {
+                navigate(getAnonymizerJobRoute(workspace, job.name));
+              }
             },
-          ]
-        : []),
-      ...(isCancellable
-        ? [
-            {
-              label: 'Cancel',
-              onSelect: handleCancel,
-            },
-          ]
-        : []),
-      {
-        label: 'Delete',
-        onSelect: () => setShowDeleteModal(true),
-        danger: true,
-      },
-    ],
-    [includeViewDetails, isCancellable, handleCancel, navigate, workspace, job.name]
-  );
+          },
+        ]
+      : []),
+    ...(isCancellable
+      ? [
+          {
+            label: 'Cancel',
+            onSelect: () => setShowCancelModal(true),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <>
-      <QuickActionsMenuRoot actions={actions} />
+      <QuickActionsMenuRoot
+        actions={actions}
+        deleteAction={{ onSelect: () => setShowDeleteModal(true) }}
+      />
+      {showCancelModal && (
+        <CancelJobModal
+          open
+          jobName={job.name ?? ''}
+          onClose={() => setShowCancelModal(false)}
+          onConfirm={handleCancel}
+        />
+      )}
       {showDeleteModal && (
         <DeleteJobModal
           jobs={[job]}

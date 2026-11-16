@@ -8,6 +8,7 @@ import {
   ROW_SELECTION_COLUMN_SIZE,
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
@@ -27,14 +28,13 @@ import type {
   CreateJobsListFilter as DataDesignerJobsListFilter,
   CreateJobsSortField as DataDesignerJobsSortField,
 } from '@nemo/sdk/generated/data-designer/schema';
-import { Banner, Button, Text } from '@nvidia/foundations-react-core';
-import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
+import { Button, Text } from '@nvidia/foundations-react-core';
 import { DataDesignerJobActionsMenu } from '@studio/components/DataDesignerJobActionsMenu';
-import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
+import { getDeleteJobsDescription, STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getDataDesignerJobDetailsRoute, getNewDataDesignerJobRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
+import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 type DataDesignerJobWithId = DataDesignerJob & { id: string };
@@ -52,7 +52,6 @@ export const DataDesignerJobsDataView: FC = () => {
   const queryClient = useQueryClient();
 
   const [deleteJobs, setDeleteJobs] = useState<DataDesignerJob[]>([]);
-  const [cancelError, setCancelError] = useState<string | undefined>(undefined);
 
   const deleteJobMutation = useDataDesignerDeleteCreateJob({
     mutation: {
@@ -63,15 +62,15 @@ export const DataDesignerJobsDataView: FC = () => {
     },
   });
 
-  const handleDeleteJobs = async (jobsToDelete: DataDesignerJob[]) => {
-    const invalid = jobsToDelete.filter((job) => !job.workspace || !job.name);
+  const handleDeleteJobs = async () => {
+    const invalid = deleteJobs.filter((job) => !job.workspace || !job.name);
     if (invalid.length > 0) {
       throw new Error(
         `Cannot delete ${invalid.length} job${invalid.length !== 1 ? 's' : ''}: missing workspace or name.`
       );
     }
     await Promise.all(
-      jobsToDelete.map(async (job) => {
+      deleteJobs.map(async (job) => {
         try {
           await deleteJobMutation.mutateAsync({ workspace: job.workspace!, name: job.name });
         } catch (error) {
@@ -81,6 +80,7 @@ export const DataDesignerJobsDataView: FC = () => {
         }
       })
     );
+    return true;
   };
 
   const {
@@ -183,13 +183,7 @@ export const DataDesignerJobsDataView: FC = () => {
     rowActionsColumn({
       size: 70,
       enableResizing: false,
-      cell: ({ row }) => (
-        <DataDesignerJobActionsMenu
-          job={row.original}
-          includeViewDetails
-          onCancelError={setCancelError}
-        />
-      ),
+      cell: ({ row }) => <DataDesignerJobActionsMenu job={row.original} includeViewDetails />,
     }),
   ];
 
@@ -197,12 +191,6 @@ export const DataDesignerJobsDataView: FC = () => {
 
   return (
     <>
-      {cancelError && (
-        <Banner kind="inline" status="error">
-          {cancelError}
-        </Banner>
-      )}
-
       <StudioDataView<DataDesignerJobWithId>
         dataViewState={dataViewState}
         searchField="name"
@@ -267,16 +255,19 @@ export const DataDesignerJobsDataView: FC = () => {
         }}
       />
 
-      <BulkDeleteModal
-        items={deleteJobs}
-        open={deleteJobs.length > 0}
-        onDelete={handleDeleteJobs}
-        title={(count) => `Delete ${count} Data Designer Job${count !== 1 ? 's' : ''}`}
-        onClose={() => {
-          setDeleteJobs([]);
-          dataViewState.rowSelection.set({});
-        }}
-      />
+      {deleteJobs.length > 0 && (
+        <DeleteConfirmationModal
+          open
+          entity="Data Designer job"
+          ids={deleteJobs.map((job) => job.name)}
+          description={getDeleteJobsDescription(deleteJobs.length)}
+          onDelete={handleDeleteJobs}
+          onClose={() => {
+            setDeleteJobs([]);
+            dataViewState.rowSelection.set({});
+          }}
+        />
+      )}
     </>
   );
 };

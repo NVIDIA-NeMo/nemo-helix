@@ -10,15 +10,14 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, TypeVar
+from typing import Any, Protocol
 
 from nemo_builder_plugin.backend import Backend, BackendRejectedError
-from nemo_builder_plugin.entities import ContainerImage, Provenance, QueuedBuild, UpstreamImage
+from nemo_builder_plugin.entities import ContainerImage, Provenance, UpstreamImage
 from nemo_builder_plugin.identity import ImageReference
 from nemo_builder_plugin.plan import BuildPlan, PlannedImage
 from nemo_builder_plugin.schema import BuildSet
 from nemo_builder_plugin.upstream import UpstreamError, UpstreamNotFound
-from nemo_helix_plugin.auth import current_auth_context
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.entities import EntityConflictError, EntityNotFoundError
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
@@ -30,11 +29,8 @@ logger = logging.getLogger(__name__)
 JOB_SOURCE = "builder.build"
 
 
-_Row = TypeVar("_Row", ContainerImage, QueuedBuild)
-
-
 class _EntityWriter(Protocol):
-    async def create(self, entity: _Row) -> _Row: ...
+    async def create(self, entity: ContainerImage) -> ContainerImage: ...
 
     async def get(self, entity_type: type[ContainerImage], *, name: str, workspace: str) -> ContainerImage: ...
 
@@ -96,12 +92,12 @@ class SubmitResult:
     images: list[ContainerImage]
 
 
-def _rows_for(plan: BuildPlan, digest: str, status: Literal["queued", "pending"]) -> list[ContainerImage]:
+def _rows_for(plan: BuildPlan, digest: str) -> list[ContainerImage]:
     return [
         ContainerImage(
             name=image.name,
             workspace=plan.workspace,
-            status=status,
+            status="pending",
             registry=image.placed.registry,
             repository=image.placed.repository,
             provenance=Provenance(
@@ -176,13 +172,8 @@ async def submit_build_set(
     secret_readable: SecretReadable,
     resolve_upstream: ResolveUpstream,
     default_platform: str,
-    queue: bool = False,
 ) -> SubmitResult:
-    """Resolve, check, place, compile; then write the rows and create the job. In that order.
-
-    With ``queue``, the rows are written ``queued`` and the job is left to the queue controller as a
-    :class:`QueuedBuild`, rather than created here.
-    """
+    """Resolve, check, place, compile; then write the rows and create the job. In that order."""
     # Filled in before anything reads the set, the request digest included: a spec that names no platform is the
     # same request as one naming the default, as it was when the default was fixed at linux/amd64.
     build_set = build_set.with_default_platform(default_platform)
@@ -211,7 +202,7 @@ async def submit_build_set(
 
     images: list[ContainerImage] = []
     created: list[ContainerImage] = []
-    for row in _rows_for(plan, digest, "queued" if queue else "pending"):
+    for row in _rows_for(plan, digest):
         try:
             created.append(await entity_client.create(row))
             images.append(created[-1])
@@ -234,22 +225,6 @@ async def submit_build_set(
         platform_spec=platform_spec,
         custom_fields={"images": [image.name for image in images], "request_digest": digest},
     )
-    if queue:
-        # Rows adopted already past ``queued`` mean the job exists; a resubmit of a queued one is queued already.
-        if any(image.status == "queued" for image in images):
-            queued = QueuedBuild(
-                name=plan.job_name,
-                workspace=workspace,
-                request=request.model_dump(mode="json"),
-                images=[image.name for image in images],
-            )
-            queued._auth_context = current_auth_context()
-            try:
-                await entity_client.create(queued)
-            except EntityConflictError:
-                logger.info("build %s is already queued", sanitize_for_log(plan.job_name))
-        return SubmitResult(job=plan.job_name, images=images)
-
     try:
         await create_job(request)
     except ConflictError:
@@ -280,7 +255,7 @@ async def fail_rows(entity_client: _EntityWriter, rows: list[ContainerImage], de
     """
     settled = True
     for row in rows:
-        if row.status not in ("queued", "pending"):
+        if row.status != "pending":
             continue
         row.status = "failed"
         row.status_detail = detail

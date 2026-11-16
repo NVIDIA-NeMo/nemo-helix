@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from nemo_evals.api.dependencies import get_image_build_service
 from nemo_evals.api.v2.tasks import TaskPerms
 from nemo_evals.authz import scope
@@ -19,6 +19,7 @@ from nemo_evals.image_builds.planning import ImagePlanError
 from nemo_evals.image_builds.service import ImageBuildForbiddenError, ImageBuildJobConflictError, ImageBuildService
 from nemo_evals.revisions import RevisionNotFoundError
 from nemo_evals.task_identity import UnsupportedTaskKindError
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.client.errors import NemoHTTPError, PermissionDeniedError
 from nemo_helix_plugin.schema import Page
@@ -102,13 +103,14 @@ async def list_task_image_builds(
     workspace: str,
     name: TaskName,
     revision: RevisionSelector,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     service: ImageBuildService = Depends(get_image_build_service),
 ) -> Page[ImageBuild]:
     """List the container image builds of a task revision."""
     try:
-        builds = await service.list_builds(workspace, name, revision, page=page, page_size=page_size)
+        builds = await service.list_builds(
+            workspace, name, revision, page=page_params.page, page_size=page_params.page_size
+        )
     except RevisionNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     if builds is None:

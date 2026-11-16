@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 
 from nemo_builder_plugin.identity import ImageReference, normalize_reference
 from nemo_builder_plugin.schema import JOB_NAME_PREFIX, BuildSet, BuildSpec, FileSetSource, ImageSource
-from nemo_builder_plugin.steps import ContextSource
+from nemo_builder_plugin.steps import ContextSource, SandboxMount
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +62,15 @@ class PlannedImage:
         source = self.spec.source
         if not isinstance(source, FileSetSource):
             raise ValueError(f"{self.name} copies an image and has no build context")
+        return self._qualified(source)
+
+    @property
+    def mounts(self) -> tuple[SandboxMount, ...]:
+        return tuple(
+            SandboxMount(source=self._qualified(mount.source), target=mount.target) for mount in self.spec.mounts
+        )
+
+    def _qualified(self, source: FileSetSource) -> ContextSource:
         return ContextSource(
             fileset=source.fileset if "/" in source.fileset else f"{self.workspace}/{source.fileset}",
             archive=source.archive or None,
@@ -130,15 +139,25 @@ class BuildPlan:
     def copies(self) -> tuple[PlannedImage, ...]:
         return tuple(image for image in self.images if image.upstream is not None)
 
-    def groups(self) -> list[tuple[ContextSource, tuple[PlannedImage, ...]]]:
-        """Each group builds in its own sandbox, so a Dockerfile never sees another source's context."""
-        grouped: dict[tuple[str, str | None, str | None], list[PlannedImage]] = {}
+    def groups(self) -> list[tuple[ContextSource, tuple[SandboxMount, ...], tuple[PlannedImage, ...]]]:
+        """Each group builds in its own sandbox, so a Dockerfile never sees another source's context or mounts."""
+        grouped: dict[str, tuple[ContextSource, tuple[SandboxMount, ...], list[PlannedImage]]] = {}
         for image in self.images:
             if image.upstream is not None:
                 continue
-            source = image.source
-            grouped.setdefault((source.fileset, source.archive, source.context_path), []).append(image)
-        return [
-            (ContextSource(fileset=fileset, archive=archive, context_path=context_path), tuple(images))
-            for (fileset, archive, context_path), images in grouped.items()
-        ]
+            source, mounts = image.source, image.mounts
+            key = "\0".join(m.model_dump_json() for m in (source, *mounts))
+            grouped.setdefault(key, (source, mounts, []))[2].append(image)
+        return [(source, mounts, tuple(images)) for source, mounts, images in grouped.values()]
+
+    @property
+    def sources(self) -> list[ContextSource]:
+        """Every context and mount the builds read, each once, in the order the specs name them."""
+        sources: list[ContextSource] = []
+        for image in self.images:
+            if image.upstream is not None:
+                continue
+            for source in (image.source, *(mount.source for mount in image.mounts)):
+                if source not in sources:
+                    sources.append(source)
+        return sources

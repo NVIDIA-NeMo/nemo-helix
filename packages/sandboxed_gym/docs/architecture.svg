@@ -46,7 +46,7 @@
 <text class="th coral-t" x="182" y="352" text-anchor="middle">Gym host server</text>
 <text class="ts coral-s" x="182" y="370" text-anchor="middle">health · /rollouts/run</text>
 <rect class="coral-box" x="56" y="392" width="252" height="48" rx="4"/>
-<text class="th coral-t" x="182" y="412" text-anchor="middle">NeMo-Gym 0.5.0</text>
+<text class="th coral-t" x="182" y="412" text-anchor="middle">NeMo-Gym 0.7.0</text>
 <text class="ts coral-s" x="182" y="430" text-anchor="middle">agent · model · env servers</text>
 
 <rect class="zone" x="356" y="300" width="284" height="170" rx="8"/>

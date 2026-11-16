@@ -40,6 +40,7 @@ import os
 import threading
 from ipaddress import ip_address
 from pathlib import Path
+from threading import Thread
 
 import httpx
 import uvicorn
@@ -55,6 +56,7 @@ from nhx.common.auth import Principal
 from nhx.common.auth.principal_identifier import normalize_service_principal_identifier
 from nhx.common.controller import Controller, ControllerManager, Loop, TimedLoopWaiter
 from nhx.common.platform_endpoint import parse_platform_endpoint, require_authorization_header_endpoint
+from uvicorn import Server
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +211,7 @@ def run(parent_stop_signal: threading.Event | None = None) -> None:
             raise
         _log_startup(host=host, port=port, base_url=base_url, principal=principal, on_behalf_of=on_behalf_of)
 
-        thread = threading.Thread(target=server.run, name="auth-proxy-uvicorn", daemon=True)
+        thread = Thread(target=server.run, name="auth-proxy-uvicorn", daemon=True)
 
         health_loop = Loop(
             waiter=TimedLoopWaiter(sleep_secs=1.0, stop_signal=parent_stop_signal),
@@ -286,7 +288,7 @@ def _build_server() -> tuple[str, str, str | None, str, int, uvicorn.Server]:
     port = int(os.environ.get(AUTH_PROXY_PORT_ENVVAR, str(DEFAULT_AUTH_PROXY_PORT)))
     app = build_app(base_url=base_url, principal=principal, on_behalf_of=on_behalf_of)
     config = uvicorn.Config(app, host=host, port=port, log_level="info", access_log=False)
-    return base_url, principal, on_behalf_of, host, port, uvicorn.Server(config)
+    return base_url, principal, on_behalf_of, host, port, Server(config)
 
 
 def _is_loopback_host(host: str) -> bool:

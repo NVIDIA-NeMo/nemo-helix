@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { parseJsonOrJsonl } from '@nemo/common/src/utils/parseRecords';
 import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import type { EvaluationResponse } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -43,18 +44,10 @@ export const parseDatasetRecords = (text: string, path = ''): Record<string, unk
   }
   let records: unknown[];
   try {
-    const parsed: unknown = JSON.parse(text.trim());
-    records = Array.isArray(parsed) ? parsed : [parsed];
-  } catch {
-    records = text.split('\n').flatMap((line, index) => {
-      if (!line.trim()) return [];
-      try {
-        return [JSON.parse(line)];
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        throw new Error(`Could not parse ${path || 'the dataset'} line ${index + 1}: ${reason}`);
-      }
-    });
+    ({ records } = parseJsonOrJsonl(text));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not parse ${path || 'the dataset'} ${reason}`);
   }
   return records.map((value) => {
     const record = asRecord(value);

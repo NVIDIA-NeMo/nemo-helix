@@ -103,8 +103,13 @@ PROVIDER_LOST_THRESHOLD_SECONDS = 900
 _AUTH_FAILURE_STATUS_PREFIX = "Provider discovery failed (auth): "
 
 
-def _infer_backend_format(model_name: str) -> str:
-    """Infer backend_format from a model name. Defaults to OPENAI_CHAT."""
+_SYSTEMONE_DISCOVERY_MODE = "evaluation"
+
+
+def _infer_backend_format(model_name: str, mode: str | None = None) -> str:
+    """Infer backend_format from the discovered ``mode`` and model name. Defaults to OPENAI_CHAT."""
+    if mode == _SYSTEMONE_DISCOVERY_MODE:
+        return BackendFormat.SYSTEMONE.value
     lower = model_name.lower()
     if lower.startswith("claude-") or lower.startswith(("anthropic.", "anthropic/")):
         return BackendFormat.ANTHROPIC_MESSAGES.value
@@ -150,6 +155,7 @@ class DiscoveredModel(TypedDict, total=False):
     root: str | None
     parent: str | None
     owned_by: str | None
+    mode: str | None
 
 
 class ApiEndpointDict(TypedDict):
@@ -335,6 +341,18 @@ def _resolve_base_backend_model_id(
     """
     if config and config.model_entity_id:
         model_workspace, model_name, _revision = parse_model_name_revision(model_name=config.model_entity_id)
+        if not model_workspace:
+            # Explicit relative IDs are preserved by the config API, but deployment
+            # backends advertise namespace/name. Resolve the namespace before comparing
+            # discovery IDs or the provider silently serves nothing (and gets no VirtualModel).
+            if base_model_entity is not None:
+                model_workspace = base_model_entity.workspace
+            elif config.model_spec is not None:
+                model_workspace, _, _ = parse_model_name_revision(
+                    model_namespace=config.model_spec.model_namespace,
+                    model_name=config.model_spec.model_name,
+                    model_revision=config.model_spec.model_revision,
+                )
         if model_workspace and model_name:
             return f"{model_workspace}/{model_name}"
         return config.model_entity_id
@@ -935,11 +953,13 @@ class ModelProviderReconciler:
                 root = model.get("root")
                 parent = model.get("parent")
                 owned_by = model.get("owned_by")
+                mode = model.get("mode")
                 discovered_model: DiscoveredModel = {
                     "id": model_id,
                     "root": root if isinstance(root, str) else None,
                     "parent": parent if isinstance(parent, str) else None,
                     "owned_by": owned_by if isinstance(owned_by, str) else None,
+                    "mode": mode if isinstance(mode, str) else None,
                 }
                 models.append(discovered_model)
 
@@ -1051,13 +1071,15 @@ class ModelProviderReconciler:
                 f"{skipped_models}"
             )
 
-        for _model_id, normalized in valid_pairs:
+        modes = {m["id"]: m.get("mode") for m in result.models if "id" in m}
+        for model_id, normalized in valid_pairs:
             await self._ensure_model_entity_for_provider(
                 model_workspace=provider.workspace,
                 model_name=normalized,
                 provider=provider,
                 provider_id=provider_id,
                 ctx=ctx,
+                mode=modes.get(model_id),
             )
             self._emit_heartbeat()
 
@@ -1215,9 +1237,9 @@ class ModelProviderReconciler:
                 served.append(ServedModelMapping(model_entity_id=model_entity_id, served_model_name=served_model_name))
                 continue
 
-            # Prompt-tuned: parent is null, root equals base, id != base (the
-            # ``mid == base_id`` case was already handled by the base branch above).
-            if parent is None and root == base_id:
+            # Prompt-tuned: parent is null, root equals the qualified or bare base id,
+            # id != base (handled by the base branch above). Keep base_id qualified.
+            if parent is None and root in (base_id, base_id.rsplit("/", 1)[-1]):
                 model_entity_id = f"{workspace}/{mid.removeprefix(f'{workspace}/')}"
                 served.append(ServedModelMapping(model_entity_id=model_entity_id, served_model_name=mid))
                 continue
@@ -1241,6 +1263,7 @@ class ModelProviderReconciler:
         provider: ModelProvider,
         provider_id: str,
         ctx: ModelContext,
+        mode: str | None = None,
     ) -> None:
         """Ensure a Model Entity exists for an autodiscovered model and link it to the provider.
 
@@ -1257,6 +1280,7 @@ class ModelProviderReconciler:
                 Note: ctx.model_entity is the entity from the provider's config, not necessarily
                 the entity for this specific model_name (since we may be creating entities for
                 multiple discovered models like LoRAs)
+            mode: The model's ``mode`` from GET /v1/models, when the provider reports one.
         """
         # Read through the cache so the entity behind every served model does not
         # cost a round trip, and so several providers contributing to the same
@@ -1282,7 +1306,7 @@ class ModelProviderReconciler:
                 model_workspace,
                 model_name,
                 description=f"Auto-discovered model from provider {provider_id}",
-                backend_format=_infer_backend_format(model_name),
+                backend_format=_infer_backend_format(model_name, mode),
             )
             self._entity_cache.stage_provider_link(model_workspace, model_name, provider_id)
             self._entity_cache.stage_field_updates(
@@ -1303,8 +1327,15 @@ class ModelProviderReconciler:
             updates["fileset"] = fileset
         if details.api_endpoint and not existing_model_entity.api_endpoint:
             updates["api_endpoint"] = details.api_endpoint
+        inferred_format = _infer_backend_format(model_name, mode)
         if not _has_backend_format(existing_model_entity):
-            updates["backend_format"] = _infer_backend_format(model_name)
+            updates["backend_format"] = inferred_format
+        elif (
+            inferred_format == BackendFormat.SYSTEMONE.value
+            and existing_model_entity.backend_format == BackendFormat.OPENAI_CHAT.value
+        ):
+            # A System One model cannot serve chat, so OPENAI_CHAT is never a deliberate value for it.
+            updates["backend_format"] = inferred_format
         if updates:
             self._entity_cache.stage_field_updates(model_workspace, model_name, **updates)
 

@@ -8,8 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import papermill
 import pytest
+from nhx.testing import notebooks
 from nhx.testing.notebooks import cleanup_notebook_deployments, execute_notebook
 
 
@@ -68,7 +68,7 @@ def test_execute_markdown_notebook(tmp_path, monkeypatch, suffix, execution_fail
         if execution_fails:
             raise RuntimeError("execution failed")
 
-    monkeypatch.setattr(papermill, "execute_notebook", fake_execute)
+    monkeypatch.setattr(notebooks, "_papermill", lambda: SimpleNamespace(execute_notebook=fake_execute))
     if execution_fails:
         with pytest.raises(RuntimeError, match="execution failed"):
             execute_notebook(source, execution_timeout=123)

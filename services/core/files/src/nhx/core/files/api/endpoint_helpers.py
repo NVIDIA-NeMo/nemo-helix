@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import AsyncIterator
 
+import anyio
 from fastapi import BackgroundTasks, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -20,7 +21,7 @@ from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
 from nhx.common.secrets.exceptions import SecretAccessDeniedError, SecretNotFoundError
 from nhx.core.files.app.backends import FileInfo, StorageConfig
 from nhx.core.files.app.backends.base import ByteRange, StorageImpl
-from nhx.core.files.app.cache import CacheStatus, cache_file_directly
+from nhx.core.files.app.cache import CacheStatus, cache_file_directly, cache_write_lock_key
 from nhx.core.files.app.file_lock import FileLockManager
 from nhx.core.files.app.range_requests import (
     download_response_status_and_headers,
@@ -37,12 +38,14 @@ from nhx.core.files.exceptions import (
     NotFoundError,
     StorageAccessError,
     StorageBackendError,
+    StorageObjectChangedError,
     StorageServerFault,
     StorageUnavailableError,
 )
 from starlette.status import (
     HTTP_400_BAD_REQUEST,
     HTTP_404_NOT_FOUND,
+    HTTP_409_CONFLICT,
     HTTP_416_RANGE_NOT_SATISFIABLE,
     HTTP_502_BAD_GATEWAY,
 )
@@ -54,6 +57,27 @@ UPSTREAM_STORAGE_ACCESS_DETAIL = (
     "up to date, and have access to the requested resource."
 )
 UPSTREAM_STORAGE_UNAVAILABLE_DETAIL = "Failed to connect to upstream storage backend"
+
+
+HTTP_EXCEPTION_DETAIL = {
+    "content": {
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {"detail": {"type": "string"}},
+            }
+        }
+    }
+}
+
+
+def require_writable_storage(storage: StorageConfig) -> None:
+    """Reject unsupported mutations before resolving secrets or consuming a body."""
+    if storage.read_only:
+        raise HTTPException(
+            status_code=HTTP_409_CONFLICT,
+            detail=f"Fileset storage type '{storage.type}' is read-only",
+        )
 
 
 @dataclass
@@ -98,6 +122,18 @@ async def get_file_info(
         raise runtime_storage_http_error(exc) from exc
 
 
+async def resolve_download_storage(storage: StorageImpl, path: str) -> StorageImpl:
+    """Resolve a download snapshot before choosing headers or consulting the cache."""
+    try:
+        return await storage.for_download(path)
+    except NotFoundError as exc:
+        raise HTTPException(HTTP_404_NOT_FOUND, f"File '{path}' not found") from exc
+    except InvalidPathError as exc:
+        raise HTTPException(HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except (StorageAccessError, StorageUnavailableError, StorageBackendError) as exc:
+        raise runtime_storage_http_error(exc) from exc
+
+
 async def get_download_file_info(
     storage: StorageImpl,
     path: str,
@@ -108,6 +144,8 @@ async def get_download_file_info(
     if cache_ctx is not None:
         try:
             cache_path_key = await storage.get_cache_path_key(path)
+        except NotFoundError as exc:
+            raise HTTPException(HTTP_404_NOT_FOUND, f"File '{path}' not found") from exc
         except InvalidPathError as exc:
             raise HTTPException(HTTP_400_BAD_REQUEST, str(exc)) from exc
         except (StorageAccessError, StorageUnavailableError, StorageBackendError) as exc:
@@ -135,6 +173,8 @@ async def list_storage_files(storage: StorageImpl, path: str | None = None) -> l
 
 def runtime_storage_http_error(exc: Exception) -> HTTPException:
     """Translate runtime storage backend errors to stable HTTP responses."""
+    if isinstance(exc, StorageObjectChangedError):
+        return HTTPException(HTTP_409_CONFLICT, "Upstream object changed during download; retry the request")
     if isinstance(exc, StorageAccessError):
         logger.exception("Runtime storage access error")
         return HTTPException(HTTP_502_BAD_GATEWAY, UPSTREAM_STORAGE_ACCESS_DETAIL)
@@ -255,6 +295,7 @@ async def download_with_cache(
     Yields:
         bytes chunks of file content
     """
+    storage = await storage.for_download(path)
     cache_path_key = await storage.get_cache_path_key(path)
 
     # Try to serve from cache if cacheable
@@ -371,10 +412,28 @@ async def get_cache_status_for_files(
 
     # Generate cache path keys for each file
     cache_paths: dict[str, str] = {}
-    for f in files:
-        cache_key = await source_storage.get_cache_path_key(f.path)
-        if cache_key:
-            cache_paths[f.path] = cache_key
+    pending = iter(files)
+    errors: list[Exception] = []
+
+    async def lookup_keys() -> None:
+        """Use a fixed worker pool instead of serial HEADs or one task per file."""
+        while (file := next(pending, None)) is not None:
+            try:
+                cache_key = await source_storage.get_cache_path_key(file.path)
+            except NotFoundError:
+                continue  # An object disappeared after listing.
+            except Exception as exc:
+                errors.append(exc)
+                workers.cancel_scope.cancel()
+                return
+            if cache_key:
+                cache_paths[file.path] = cache_key
+
+    async with anyio.create_task_group() as workers:
+        for _ in range(min(8, len(files))):
+            workers.start_soon(lookup_keys)
+    if errors:
+        raise errors[0]
 
     if not cache_paths:
         return {}
@@ -385,14 +444,15 @@ async def get_cache_status_for_files(
 
     # Only query locks for files that aren't cached
     uncached_keys = [ck for ck in cache_paths.values() if ck not in cached_keys]
-    active_locks = await lock_manager.get_active_locks(uncached_keys) if uncached_keys else set()
+    lock_keys = list(dict.fromkeys(cache_write_lock_key(source_storage, key) for key in uncached_keys))
+    active_locks = await lock_manager.get_active_locks(lock_keys) if lock_keys else set()
 
     # Determine status for each file
     result: dict[str, CacheStatus] = {}
     for file_path, cache_key in cache_paths.items():
         if cache_key in cached_keys:
             result[file_path] = CacheStatus.CACHED
-        elif cache_key in active_locks:
+        elif cache_write_lock_key(source_storage, cache_key) in active_locks:
             result[file_path] = CacheStatus.CACHING
         else:
             result[file_path] = CacheStatus.NOT_CACHED

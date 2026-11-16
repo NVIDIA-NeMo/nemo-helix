@@ -3,7 +3,7 @@
 
 import { AssistantRuntimeProvider } from '@assistant-ui/react';
 import { AssistantChatThread as BaseAssistantChatThread } from '@nemo/common/src/components/AssistantChat/AssistantChatThread';
-import { type AgentBlockingInputSubmission } from '@studio/components/agents/AgentBlockingInput';
+import type { AgentBlockingInputSubmission } from '@studio/components/agents/AgentBlockingInput';
 import {
   AgentDecisionInput,
   type AgentDecisionChoice,

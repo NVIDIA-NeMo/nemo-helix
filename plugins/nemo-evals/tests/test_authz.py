@@ -43,7 +43,12 @@ def test_evaluator_authz_derivation_has_no_problems() -> None:
     assert binding.callers == [CallerKind.PRINCIPAL]
     assert binding.scopes == ["evaluator:write", "platform:write"]
 
-    for path, permission in [(runs, "list"), (f"{runs}/{{run_id}}", "read"), (f"{runs}/{{run_id}}/tasks", "read")]:
+    for path, permission in [
+        (runs, "list"),
+        (f"{runs}/{{run_id}}", "read"),
+        (f"{runs}/{{run_id}}/tasks", "read"),
+        (f"{runs}/{{run_id}}/tasks/{{task_index}}", "read"),
+    ]:
         binding = contrib.endpoints[path]["get"]
         assert binding.permissions == [f"evaluator.taskset-runs.{permission}"]
         assert binding.callers == [CallerKind.PRINCIPAL]

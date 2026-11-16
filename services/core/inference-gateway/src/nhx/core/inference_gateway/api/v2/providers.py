@@ -1,13 +1,16 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import logging
 import uuid
 from typing import Annotated
 
 from aiohttp import ClientSession
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.inference_middleware import InferenceAccessRequest
+from nhx.common.service.dependencies import get_nemo_client
 from nhx.core.inference_gateway.api.authz import (
     PROVIDER_EXEC_PERMISSION,
     PROVIDER_READ_PERMISSION,
@@ -20,6 +23,7 @@ from nhx.core.inference_gateway.api.dependencies import (
     global_model_cache,
 )
 from nhx.core.inference_gateway.api.errors import raise_unresolved_provider_secret
+from nhx.core.inference_gateway.api.images import FILESET_URL_PREFIX, resolve_fileset_images
 from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry, execute_access_checks
 from nhx.core.inference_gateway.api.mock_provider import (
     handle_mock_request,
@@ -128,6 +132,7 @@ async def provider_proxy(
     name: str,
     trailing_uri: Annotated[str, Path(examples=["v1/chat/completions"])],
     http_client: Annotated[ClientSession, Depends(global_http_client)],
+    nemo_client: Annotated[AsyncNemoClient, Depends(get_nemo_client)],
     model_cache: Annotated[ModelCache, Depends(global_model_cache)],
     registry: Annotated[MiddlewareRegistry, Depends(global_middleware_registry)],
 ) -> Response:
@@ -170,10 +175,23 @@ async def provider_proxy(
             default_extra_headers=model_info.model_provider.default_extra_headers,
         )
 
+    # The body is forwarded as sent, except that fileset image references are inlined, as on the
+    # model routes. Only bodies that mention one are parsed.
+    body = None
+    if request.method in ("POST", "PUT", "PATCH") and FILESET_URL_PREFIX.encode() in await request.body():
+        try:
+            parsed = json.loads(await request.body())
+        except json.JSONDecodeError:
+            parsed = None  # Not JSON: forwarded unchanged.
+        if isinstance(parsed, dict):
+            await resolve_fileset_images(parsed, workspace=workspace, request_nemo_client=nemo_client)
+            body = parsed
+
     next_request_info = await build_next_request(
         request,
         host_url=model_info.model_provider.host_url,
         trailing_uri=trailing_uri,
+        body=body,
         auth_token=model_info.secret_value,
         auth_header_format=model_info.model_provider.auth_header_format,
         default_extra_body=model_info.model_provider.default_extra_body,

@@ -3,7 +3,7 @@
 
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import { logger } from '@nemo/common/src/utils/logger';
-import { FieldErrors } from 'react-hook-form';
+import type { FieldErrors } from 'react-hook-form';
 
 // Mock the websiteLogger
 vi.mock('@nemo/common/src/utils/logger', () => ({

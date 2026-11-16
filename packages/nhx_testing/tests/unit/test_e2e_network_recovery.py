@@ -16,7 +16,7 @@ EXHAUSTED = "all predefined address pools have been fully subnetted"
 def test_normal_creation_never_prunes(monkeypatch):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     docker = MagicMock()
-    monkeypatch.setattr(backend.docker, "from_env", docker)
+    monkeypatch.setattr(backend, "docker_from_env", docker)
     network = MagicMock()
     backend._create_test_network(network)
     network.create.assert_called_once()
@@ -30,7 +30,7 @@ def test_ci_exhaustion_prunes_only_old_unused_testcontainers_networks(monkeypatc
     client = SimpleNamespace(networks=MagicMock(), close=MagicMock())
     docker = MagicMock(return_value=client)
     client.networks.prune.return_value = {"NetworksDeleted": ["stale"]}
-    monkeypatch.setattr(backend.docker, "from_env", docker)
+    monkeypatch.setattr(backend, "docker_from_env", docker)
     network = MagicMock()
     network.create.side_effect = [APIError(EXHAUSTED), None]
     backend._create_test_network(network)
@@ -45,7 +45,7 @@ def test_ci_exhaustion_prunes_only_old_unused_testcontainers_networks(monkeypatc
 def test_local_or_unrelated_errors_are_not_recovered(monkeypatch, ci, error):
     monkeypatch.setenv("GITHUB_ACTIONS", "true" if ci else "false")
     docker = MagicMock()
-    monkeypatch.setattr(backend.docker, "from_env", docker)
+    monkeypatch.setattr(backend, "docker_from_env", docker)
     network = MagicMock()
     network.create.side_effect = APIError(error)
     with pytest.raises(APIError, match=error):
@@ -58,7 +58,7 @@ def test_continued_exhaustion_is_not_ignored(monkeypatch):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     client = SimpleNamespace(networks=MagicMock(), close=MagicMock())
     docker = MagicMock(return_value=client)
-    monkeypatch.setattr(backend.docker, "from_env", docker)
+    monkeypatch.setattr(backend, "docker_from_env", docker)
     network = MagicMock()
     network.create.side_effect = APIError(EXHAUSTED)
     with pytest.raises(APIError, match=EXHAUSTED):
@@ -72,7 +72,7 @@ def test_prune_failure_closes_client_and_does_not_retry(monkeypatch):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     client = SimpleNamespace(networks=MagicMock(), close=MagicMock())
     client.networks.prune.side_effect = APIError("prune denied")
-    monkeypatch.setattr(backend.docker, "from_env", lambda: client)
+    monkeypatch.setattr(backend, "docker_from_env", lambda: client)
     network = MagicMock()
     network.create.side_effect = APIError(EXHAUSTED)
     with pytest.raises(APIError, match="prune denied"):

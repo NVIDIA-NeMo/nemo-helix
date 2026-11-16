@@ -67,9 +67,4 @@ export const toolSchema = z.object({
   }),
 });
 
-/**
- * Schema for array of tools/functions
- */
-export const toolsArraySchema = z.array(toolSchema);
-
 export type ChatCompletionToolsParam = z.infer<typeof toolSchema>;

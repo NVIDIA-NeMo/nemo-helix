@@ -11,12 +11,15 @@ would take the session down with the handler's re-raise.
 from __future__ import annotations
 
 import asyncio
-import atexit
 import signal
+import subprocess
+import sys
+import textwrap
 from collections.abc import Callable, Mapping
 from typing import Any
 
 import pytest
+import sandboxed_gym.orchestrator as orchestrator_module
 from sandboxed_gym.config import JOB_ID_METADATA_KEY
 from sandboxed_gym.job_reaper import reap_job_sandboxes
 from sandboxed_gym.orchestrator import (
@@ -28,28 +31,24 @@ from sandboxed_gym.orchestrator import (
 
 
 @pytest.fixture(autouse=True)
-def restore_process_state():
+def restore_process_state(monkeypatch: pytest.MonkeyPatch):
     """Undo the process-global handlers, atexit hooks, and the once-per-job guard."""
     original = {signum: signal.getsignal(signum) for signum in TERMINATION_SIGNALS}
+    # Tests replace signal.signal through the same monkeypatch, which is undone only after this
+    # teardown, so restore the handlers with the real function.
+    set_handler = signal.signal
     registered: list[Callable[..., object]] = []
-    real_register = atexit.register
     installed = set(_INSTALLED)
     prior_shutdowns = list(_TERMINATION_SHUTDOWNS)
     _TERMINATION_SHUTDOWNS.clear()
 
-    def _tracking_register(func, *args, **kwargs):
-        registered.append(func)
-        return real_register(func, *args, **kwargs)
-
-    atexit.register = _tracking_register  # ty: ignore[invalid-assignment]
+    # Record the hooks instead of registering them, so the test process never runs them at exit.
+    monkeypatch.setattr(orchestrator_module, "register_atexit", registered.append)
     try:
         yield registered
     finally:
-        atexit.register = real_register
-        for func in registered:
-            atexit.unregister(func)
         for signum, handler in original.items():
-            signal.signal(signum, handler)
+            set_handler(signum, handler)
         _INSTALLED.clear()
         _INSTALLED.update(installed)
         _TERMINATION_SHUTDOWNS.clear()
@@ -57,12 +56,15 @@ def restore_process_state():
 
 
 class _Driver:
+    """A fake OpenSandbox driver that records the metadata it is asked to match."""
+
     def __init__(self, *, connection: Mapping[str, str] | None = None, **kwargs: object) -> None:
         self.connection = dict(connection or {})
         self.metadata: dict[str, str] = {}
         self.error: BaseException | None = None
 
     async def destroy_sandboxes_matching(self, metadata: Mapping[str, str]) -> tuple[str, ...]:
+        """Hang long past any caller timeout."""
         self.metadata = dict(metadata)
         if self.error is not None:
             raise self.error
@@ -110,6 +112,30 @@ def test_reap_logs_a_control_plane_failure_and_returns(
     assert "failed to reap sandboxes for job rl-1" in caplog.text
 
 
+def test_reap_gives_up_after_the_callers_timeout(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A caller inside a termination grace period bounds the sweep so its own teardown still runs."""
+
+    class _Hung(_Driver):
+        """A driver whose sweep never finishes."""
+
+        async def destroy_sandboxes_matching(self, metadata: Mapping[str, str]) -> tuple[str, ...]:
+            """Hang long past any caller timeout."""
+            await asyncio.sleep(60)
+            return ()
+
+    monkeypatch.setattr(
+        "sandboxed_gym.backends._opensandbox_driver.OpenSandboxDriver",
+        lambda *, connection=None, **kwargs: _Hung(connection=connection),
+    )
+
+    with caplog.at_level("ERROR"):
+        assert reap_job_sandboxes("rl-1", host_provider="opensandbox", timeout_s=0.05) == ()
+
+    assert "failed to reap sandboxes for job rl-1" in caplog.text
+
+
 def test_reap_logs_an_unknown_provider_and_returns(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("ERROR"):
         assert reap_job_sandboxes("rl-1", host_provider="no-such-provider") == ()
@@ -153,10 +179,43 @@ def test_reap_completes_when_called_inside_a_running_event_loop(
     assert "failed to reap" not in caplog.text
 
 
+def test_reap_resolves_the_control_plane_from_a_real_atexit_hook() -> None:
+    """Thread pools refuse work before atexit hooks run, and DNS resolution runs on the loop's pool.
+
+    A subprocess, because only a real interpreter exit puts the pools in that state. The hook also
+    refuses new threads, as CPython 3.12.0 does during atexit, so the reap must not start one.
+    """
+    script = textwrap.dedent(
+        """
+        import asyncio, atexit, threading
+        import sandboxed_gym.job_reaper as job_reaper
+
+        class _Provider:
+            async def destroy_job_sandboxes(self, job_id):
+                await asyncio.get_running_loop().getaddrinfo("localhost", 80)
+                return ("gym-host-1",)
+
+        def _refuse_threads(self):
+            raise RuntimeError("can't create new thread at interpreter shutdown")
+
+        def _reap_at_exit():
+            threading.Thread.start = _refuse_threads
+            print("removed", job_reaper.reap_job_sandboxes("rl-1", host_provider="opensandbox"))
+
+        job_reaper.get_host_provider = lambda name, options=None: _Provider()
+        atexit.register(_reap_at_exit)
+        """
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=True)
+
+    assert "removed ('gym-host-1',)" in result.stdout
+    assert "failed to reap" not in result.stderr
+
+
 def test_exit_and_cancel_both_reap(monkeypatch: pytest.MonkeyPatch, restore_process_state) -> None:
     """atexit covers a failed process. SIGTERM covers a cancel, which does not run atexit."""
     calls: list[str] = []
-    monkeypatch.setattr("os.kill", lambda pid, sig: calls.append(f"kill:{sig}"))
+    monkeypatch.setattr(orchestrator_module, "kill", lambda pid, sig: calls.append(f"kill:{sig}"))
     monkeypatch.setattr(
         "sandboxed_gym.job_reaper.reap_job_sandboxes",
         lambda job_id, **kwargs: calls.append(job_id) or (),

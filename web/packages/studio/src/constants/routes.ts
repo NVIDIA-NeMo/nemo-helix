@@ -17,6 +17,7 @@ export const ROUTE_PARAMS = {
   customizationJobName: 'customizationJobName',
   filesetId: 'filesetId',
   filesetName: 'filesetName',
+  filesetTab: 'filesetTab',
   filePathEncoded: 'filePathEncoded',
   folderPathEncoded: 'folderPathEncoded',
   workspace: 'workspace',
@@ -40,6 +41,7 @@ export const ROUTE_PARAMS = {
   jobName: 'jobName',
   /** Benchmark entity name segment under evaluation/benchmarks/:name */
   benchmarkName: 'benchmarkName',
+  tasksetName: 'tasksetName',
   experimentName: 'experimentName',
   insightId: 'insightId',
   evaluationName: 'evaluationName',
@@ -71,7 +73,7 @@ export const ROUTES = {
      */
     newCustomizationJobScratch: `/workspaces/:${P.workspace}/fine-tune/new/scratch`,
     baseModels: `/workspaces/:${P.workspace}/base-models`,
-    /** Base models list with a specific model panel open (model name in path) */
+    /** Model detail page; with model details off, the catalog with that model's panel open */
     baseModelsModel: `/workspaces/:${P.workspace}/base-models/:${P.modelName}`,
     evaluation: `/workspaces/:${P.workspace}/evaluation`,
     /** Dataset-driven model evaluation builder. */
@@ -85,6 +87,9 @@ export const ROUTES = {
     evaluationBenchmarks: `/workspaces/:${P.workspace}/evaluation/benchmarks`,
     evaluationBenchmarkDetails: `/workspaces/:${P.workspace}/evaluation/benchmarks/:${P.benchmarkName}`,
     evaluationResults: `/workspaces/:${P.workspace}/evaluation/results`,
+    /** Read-only taskset library (gated by VITE_FF_TASKSETS_ENABLED). */
+    tasksets: `/workspaces/:${P.workspace}/evaluation/tasksets`,
+    tasksetDetail: `/workspaces/:${P.workspace}/evaluation/tasksets/:${P.tasksetName}`,
     evaluationResultDetails: `/workspaces/:${P.workspace}/evaluation/results/:${P.evaluationJobId}`,
     /** Empty landing page for the EXPERIMENT feature (gated by VITE_FF_EXPERIMENT). */
     experiment: `/workspaces/:${P.workspace}/experiment`,
@@ -96,16 +101,25 @@ export const ROUTES = {
     /** Nested under fine-tune so the Fine-tuning nav item stays active. */
     modelDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}`,
     modelAdapterDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}/adapters/:${P.adapterName}`,
+    /** Filesets scoped to `purpose: dataset`. */
+    datasets: `/workspaces/:${P.workspace}/datasets`,
+    /** The fileset detail page for a dataset, kept under the Datasets section. */
+    datasetDetail: `/workspaces/:${P.workspace}/datasets/:${P.filesetName}`,
+    datasetDetailTab: `/workspaces/:${P.workspace}/datasets/:${P.filesetName}/:${P.filesetTab}`,
     filesets: `/workspaces/:${P.workspace}/filesets`,
-    filesetNew: `/workspaces/:${P.workspace}/filesets/new`,
-    filesetDetails: `/workspaces/:${P.workspace}/filesets/:${P.filesetId}`,
-    filesetFile: `/workspaces/:${P.workspace}/filesets/:${P.filesetId}/file/:${P.filePathEncoded}`,
     /**
-     * Unified fileset detail page (gated by VITE_FF_FILESET_DETAILS_ENABLED).
-     * One route serves all purposes — the page branches on `fileset.purpose`
-     * to render Model/Dataset/Generic card content.
+     * Create Fileset form. `~new`, not `new`, so it can't shadow a fileset named
+     * `new` at `filesetDetail` (same reasoning as `deploymentsNew`).
      */
-    filesetDetail: `/workspaces/:${P.workspace}/filesets/:${P.filesetName}/detail`,
+    filesetNew: `/workspaces/:${P.workspace}/filesets/~new`,
+    /**
+     * Unified fileset detail page. One route serves all purposes — the page
+     * branches on `fileset.purpose` to render Model/Dataset/Generic card content.
+     * On its own it redirects to the default tab.
+     */
+    filesetDetail: `/workspaces/:${P.workspace}/filesets/:${P.filesetName}`,
+    /** A tab of the fileset detail page; `filesetTab` is a `FilesetDetailTab`. */
+    filesetDetailTab: `/workspaces/:${P.workspace}/filesets/:${P.filesetName}/:${P.filesetTab}`,
     inferenceProviders: `/workspaces/:${P.workspace}/inference-providers`,
     virtualModels: `/workspaces/:${P.workspace}/virtual-models`,
     virtualModelDetail: `/workspaces/:${P.workspace}/virtual-models/:${P.virtualModelName}`,

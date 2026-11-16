@@ -18,7 +18,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { FC, useEffect, useRef } from 'react';
+import { type FC, useEffect, useRef } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 

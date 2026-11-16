@@ -3,11 +3,12 @@
 
 """Unit tests for quickstart preflight checks."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from docker.errors import DockerException
 from nemo_helix_ext.quickstart.config import QuickstartConfig
+from nemo_helix_ext.quickstart.container import ContainerManager
 from nemo_helix_ext.quickstart.preflight import CheckStatus, PreflightChecker
 from nemo_helix_ext.quickstart.validators import ValidationResult, validate_image_registry_access
 from pydantic import SecretStr
@@ -69,7 +70,7 @@ def test_validate_image_registry_access_inspects_manifest():
     """Manifest validation checks registry access without pulling image layers."""
     completed = MagicMock(returncode=0, stdout="{}", stderr="")
 
-    with patch("nemo_helix_ext.quickstart.validators.subprocess.run", return_value=completed) as run:
+    with patch("nemo_helix_ext.quickstart.validators.run", return_value=completed) as run:
         result = validate_image_registry_access("registry.example.com/org/image:tag")
 
     assert result.valid
@@ -86,7 +87,7 @@ def test_validate_image_registry_access_reports_manifest_failure():
     """Manifest validation returns the Docker error when access fails."""
     completed = MagicMock(returncode=1, stdout="", stderr="unauthorized")
 
-    with patch("nemo_helix_ext.quickstart.validators.subprocess.run", return_value=completed):
+    with patch("nemo_helix_ext.quickstart.validators.run", return_value=completed):
         result = validate_image_registry_access("registry.example.com/org/image:tag")
 
     assert not result.valid
@@ -100,7 +101,9 @@ def test_preflight_treats_private_registry_image_inspection_error_as_pull_requir
         ngc_api_key=None,
     )
 
-    with patch("docker.from_env", side_effect=DockerException("local inspect failed")):
+    with patch.object(
+        ContainerManager, "client", new_callable=PropertyMock, side_effect=DockerException("local inspect failed")
+    ):
         result, pull_required = _container_image_result(config)
 
     assert result.status is CheckStatus.PASS
@@ -117,7 +120,9 @@ def test_preflight_reraises_non_docker_image_inspection_error():
     )
 
     with (
-        patch("docker.from_env", side_effect=RuntimeError("programming error")),
+        patch.object(
+            ContainerManager, "client", new_callable=PropertyMock, side_effect=RuntimeError("programming error")
+        ),
         pytest.raises(RuntimeError, match="programming error"),
     ):
         _container_image_result(config)

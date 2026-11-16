@@ -13,6 +13,7 @@ from typing import Optional
 
 from nemo_helix_plugin.iam.types import RoleBinding as RoleBinding
 from nemo_helix_plugin.iam.types import RoleBindingInput as RoleBindingInput
+from nhx.common.auth.principal_identifier import MAX_PRINCIPAL_ID_LENGTH
 from nhx.common.entities.values import Filter, StringFilter
 from pydantic import BaseModel, Field
 
@@ -47,7 +48,9 @@ class RoleBindingFilter(Filter):
 class WorkspaceMemberInput(BaseModel):
     """Input schema for adding a workspace member."""
 
-    principal: str = Field(description="The principal identifier (email, user ID, or group ID)")
+    principal: str = Field(
+        max_length=MAX_PRINCIPAL_ID_LENGTH, description="The principal identifier (email, user ID, or group ID)"
+    )
     roles: list[str] = Field(default=["Editor"], description="List of roles to grant to the principal")
 
 

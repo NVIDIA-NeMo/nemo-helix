@@ -391,9 +391,13 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
         )
         ensure_success("Installing the nemo-relay CLI failed", result)
 
+    async def _run_harness(self, instruction: str, environment: Any, context: Any) -> None:
+        """Run Fabric's own harness; a seam so tests can stand in for it without patching ``FabricAgent``."""
+        await super().run(instruction, environment, context)
+
     async def run(self, instruction: str, environment: Any, context: Any) -> None:
         if self.fabric_config.relay is None:
-            await super().run(instruction, environment, context)
+            await self._run_harness(instruction, environment, context)
             return
         python = shlex.quote(self._runner_python)
         helpers = [
@@ -422,7 +426,7 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
         )
         ensure_success("The helpers Relay needs beside the harness did not start", result)
         try:
-            await super().run(instruction, environment, context)
+            await self._run_harness(instruction, environment, context)
         finally:
             try:
                 await environment.exec(

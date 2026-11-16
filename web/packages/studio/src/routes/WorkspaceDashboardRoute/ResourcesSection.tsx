@@ -15,7 +15,7 @@ import {
 import { ReportTraceModal } from '@studio/components/ReportTraceModal';
 import { TELEMETRY_ENABLED } from '@studio/constants/environment';
 import { LINK_DOCS_SDK, LINK_DOCS_STUDIO, LINK_GITHUB_ISSUES } from '@studio/constants/links';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 
 export const ResourcesSection: FC = () => {
   const [isTraceModalOpen, setIsTraceModalOpen] = useState(false);

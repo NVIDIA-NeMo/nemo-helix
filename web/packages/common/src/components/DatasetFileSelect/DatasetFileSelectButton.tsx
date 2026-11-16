@@ -4,7 +4,7 @@
 import { ListItem } from '@nemo/common/src/components/FileList/ListItem';
 import { Db } from '@nemo/icons/icons';
 import { Button, Flex, Stack } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface DatasetFileSelectButtonProps {
   datasetName?: string;

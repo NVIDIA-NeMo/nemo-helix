@@ -4,14 +4,15 @@
 import { ModelDropdownList } from '@nemo/common/src/components/ModelSelectV2/ModelDropdownList';
 import { ModelDropdownSearch } from '@nemo/common/src/components/ModelSelectV2/ModelDropdownSearch';
 import type {
-  ModelSelectV2Props,
+  ModelSelectParamsProps,
+  ModelSelectProps,
   ModelSelection,
   ModelType,
 } from '@nemo/common/src/components/ModelSelectV2/types';
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { getPartsFromReference, getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { filterModel, isBaseModel } from '@nemo/common/src/utils/models';
-import { ChevronDown, HourglassMid } from '@nemo/icons/icons';
+import { ChevronDown, CircleTick } from '@nemo/icons/icons';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import {
   Button,
@@ -35,8 +36,8 @@ const DEFAULT_SEARCH_DEBOUNCE_MS = 300;
 const isCustomModel = (model: ModelEntity): boolean => !isBaseModel(model);
 
 type ModelDropdownProps = Omit<
-  ModelSelectV2Props,
-  'showParams' | 'inferenceParams' | 'onInferenceParamsChange' | 'onOpenChange' | 'aria-label'
+  ModelSelectProps,
+  keyof ModelSelectParamsProps | 'onOpenChange' | 'aria-label'
 > & {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -163,7 +164,7 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
                 creatorToIcon(selectedWorkspace, { className: 'text-base flex-shrink-0' })}
               {loading && !selectedName ? (
                 <>
-                  <HourglassMid size="16" className="animate-spin shrink-0" />
+                  <CircleTick size="16" className="animate-spin shrink-0" />
                   <Text className="truncate">{placeholder}</Text>
                 </>
               ) : (

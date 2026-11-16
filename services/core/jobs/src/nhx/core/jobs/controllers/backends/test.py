@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+from collections.abc import Callable
 from typing import Generic, TypeVar
 
 from nemo_helix_plugin.jobs.execution_profiles import E2EJobExecutionProfile as E2EJobExecutionProfile
@@ -68,7 +69,7 @@ class TestE2EJobBackend(JobBackend[ProviderT, JobExecutionProfileConfig], Generi
     def sync(self, step: HelixJobStepWithContext) -> JobUpdate:
         return self.mock.sync(step)
 
-    def cleanup_steps(self):
+    def cleanup_steps(self, on_progress: Callable[[], None] | None = None):
         return
 
 
@@ -90,7 +91,7 @@ class MockDockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig
     def sync(self, step: HelixJobStepWithContext) -> JobUpdate:
         return self.mock.sync(step)
 
-    def cleanup_steps(self):
+    def cleanup_steps(self, on_progress: Callable[[], None] | None = None):
         return
 
 
@@ -112,7 +113,7 @@ class MockKubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfi
     def sync(self, step: HelixJobStepWithContext) -> JobUpdate:
         return self.mock.sync(step)
 
-    def cleanup_steps(self):
+    def cleanup_steps(self, on_progress: Callable[[], None] | None = None):
         return
 
 

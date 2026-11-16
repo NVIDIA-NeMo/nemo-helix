@@ -13,11 +13,11 @@ the defaults).
   before any disk clamp.
 - ``max_disk_mb`` (with ``enforce_disk_limit``) clamps task.toml's storage, and rejects only an override
   above it, so the sandbox never gets less disk than the run asked for.
-
-TODO(M2 story 3): egress overrides.
+- ``max_gpus`` and ``gpu_types`` bound each sandbox's task.toml ``gpus`` and the GPU types it accepts.
 """
 
 from decimal import Decimal
+from typing import Literal
 
 from harbor.models.task.config import TaskConfig
 from nemo_evals.config import HarborSandboxProfileConfig, HarborTaskJobsConfig
@@ -109,6 +109,50 @@ def task_resources_violation(task_config: TaskConfig, policy: ResolvedHarborSand
                     f"{sandbox.role} sandbox {field}={value} ({source}) exceeds sandbox profile "
                     f"{policy.profile!r}'s max_{field}={limit}"
                 )
+    return None
+
+
+GpuRefusal = Literal["invalid_task_config", "gpu_unsupported", "gpu_request_exceeds_policy", "unsupported_gpu_type"]
+
+
+def task_gpus_violation(task_config: TaskConfig, policy: ResolvedHarborSandboxPolicy) -> tuple[GpuRefusal, str] | None:
+    """Why the profile can't give one of the task's sandboxes the GPUs it asks for, as a refusal code and detail.
+
+    A separate verifier asks for its own GPUs. A task's ``gpu_types`` lists the types it accepts, so one that
+    names none of the profile's types is refused rather than run on another GPU; one that names none accepts any.
+    A negative count is a malformed task: Harbor accepts any integer, but sandboxes only get GPUs for a positive
+    count, so letting it through would run the task without the GPUs it appears to ask for.
+    """
+    profile_types = {gpu_type.casefold() for gpu_type in policy.gpu_types}
+    for sandbox in task_sandboxes(task_config, policy):
+        gpus = sandbox.config.gpus or 0
+
+        # Checked before the profile's limits, so a negative count is malformed whatever the profile offers.
+        if gpus < 0:
+            return "invalid_task_config", f"{sandbox.role} sandbox gpus={gpus} must not be negative"
+
+        if gpus == 0:
+            continue
+
+        if policy.max_gpus == 0:
+            return "gpu_unsupported", f"sandbox profile {policy.profile!r} has no GPUs (max_gpus=0)"
+
+        if gpus > policy.max_gpus:
+            return (
+                "gpu_request_exceeds_policy",
+                f"{sandbox.role} sandbox gpus={gpus} exceeds sandbox profile {policy.profile!r}'s "
+                f"max_gpus={policy.max_gpus}",
+            )
+
+        accepted = sandbox.config.gpu_types or []
+        if accepted and not profile_types & {gpu_type.casefold() for gpu_type in accepted}:
+            offered = ", ".join(policy.gpu_types) or "none listed"
+            return (
+                "unsupported_gpu_type",
+                f"{sandbox.role} sandbox accepts GPU types {', '.join(accepted)}; sandbox profile "
+                f"{policy.profile!r} has {offered}",
+            )
+
     return None
 
 

@@ -56,3 +56,4 @@ packages = ["src/nemo_example_plugin"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["src"]
+markers = ["integration: tests backed by platform services"]

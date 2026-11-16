@@ -3,7 +3,7 @@
 
 import { Warning, CheckCircle, CloseCircle } from '@nemo/icons/icons';
 import { Flex, Text } from '@nvidia/foundations-react-core';
-import { FC, ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 
 // Validation rows are strictly binary: pass (green check), warn (yellow triangle),
 // or fail (red X). Anything we can't actually evaluate is hidden by the panel

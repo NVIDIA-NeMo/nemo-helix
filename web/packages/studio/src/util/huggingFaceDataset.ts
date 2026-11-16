@@ -1,19 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { MIME_TYPES, toJsonl } from '@nemo/common/src/utils/download';
 import { filesetRowsQueryOptions } from '@studio/api/datasets/filesetParquetRows';
 import type { CustomizationTemplateDataset } from '@studio/constants/customizationTemplates';
 import type { QueryClient } from '@tanstack/react-query';
 
-/** Parquet INT64 (and similar) columns decode as BigInt; JSON.stringify rejects those by default. */
-function jsonReplacer(_key: string, value: unknown): unknown {
-  return typeof value === 'bigint' ? value.toString() : value;
-}
-
 const toJsonlBlob = (rows: Record<string, unknown>[]): Blob =>
-  new Blob([rows.map((row) => JSON.stringify(row, jsonReplacer)).join('\n')], {
-    type: 'application/x-ndjson',
-  });
+  new Blob([toJsonl(rows)], { type: MIME_TYPES.jsonl });
 
 /** Which stage of the fetch is running, so the caller can word its own status copy. */
 export type FetchDatasetPhase = 'locating' | 'downloading' | 'converting';

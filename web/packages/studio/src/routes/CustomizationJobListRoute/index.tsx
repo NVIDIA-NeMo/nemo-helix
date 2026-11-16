@@ -7,7 +7,10 @@ import { Button, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core'
 import { CustomModelsDataView } from '@studio/components/dataViews/CustomModelsDataView';
 import { CustomizeModelButton } from '@studio/components/dataViews/CustomModelsDataView/CustomizeModelButton';
 import { InProgressCustomizationsTable } from '@studio/components/dataViews/InProgressCustomizationsTable';
-import { ModelPanel, ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
+import {
+  ModelPanel,
+  type ModelPanelTab,
+} from '@studio/components/sidePanels/ModelPanels/ModelPanel';
 import { INTAKE_ENABLED, MODEL_DETAILS_ENABLED } from '@studio/constants/environment';
 import { useCustomizationJobForModel } from '@studio/hooks/useCustomizationJobForModel';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

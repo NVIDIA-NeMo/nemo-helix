@@ -180,7 +180,7 @@ def test_run_job_injects_operator_env_when_shell_env_absent(tmp_path: Path, monk
         captured["env"] = kwargs["env"]
         return types.SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr("nemo_agent_hardener_plugin.jobs._common.subprocess.run", fake_run)
+    monkeypatch.setattr("nemo_agent_hardener_plugin.jobs._common.run", fake_run)
 
     manifest = tmp_path / "agent-hardener.yaml"
     manifest.write_text("agent:\n  name: calc\n  port: 1\n", encoding="utf-8")
@@ -213,7 +213,7 @@ def test_run_job_does_not_override_explicit_shell_env(tmp_path: Path, monkeypatc
         captured["env"] = kwargs["env"]
         return types.SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr("nemo_agent_hardener_plugin.jobs._common.subprocess.run", fake_run)
+    monkeypatch.setattr("nemo_agent_hardener_plugin.jobs._common.run", fake_run)
 
     manifest = tmp_path / "agent-hardener.yaml"
     manifest.write_text("agent:\n  name: calc\n  port: 1\n", encoding="utf-8")

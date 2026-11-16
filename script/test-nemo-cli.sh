@@ -9,7 +9,7 @@
 # the caller's concern. This script only exercises the CLI and the platform
 # it boots.
 #
-# Used by .github/workflows/ci.yaml's wheel-test job; runs locally too.
+# Used by .github/workflows/ci.yaml's wheel-build job; runs locally too.
 #
 # Env vars:
 #   WHEEL_TEST_TIMEOUT   seconds to wait for platform health (default: 60)

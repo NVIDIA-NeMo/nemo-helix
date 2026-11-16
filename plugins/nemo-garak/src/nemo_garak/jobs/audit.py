@@ -23,10 +23,11 @@ import json
 import logging
 import os
 import shutil
-import signal
 import subprocess
-import sys
 from pathlib import Path
+from signal import SIGTERM, signal
+from subprocess import run as run_subprocess
+from sys import exit as sys_exit
 from typing import Annotated, ClassVar, TypeVar, cast
 from uuid import uuid4
 
@@ -293,7 +294,7 @@ def _aggregate_reports(
     agg_dir.mkdir(parents=True, exist_ok=True)
     agg_jsonl = agg_dir / f"{report_prefix}.report.jsonl"
 
-    result = subprocess.run(
+    result = run_subprocess(
         [garak_python, "-m", "garak.analyze.aggregate_reports", "-o", str(agg_jsonl)] + jsonls,
         capture_output=True,
         text=True,
@@ -306,7 +307,7 @@ def _aggregate_reports(
 
     agg_html = agg_dir / f"{report_prefix}.report.html"
     with agg_html.open("w") as html_fd:
-        result = subprocess.run(
+        result = run_subprocess(
             [garak_python, "-m", "garak.analyze.report_digest", "-r", str(agg_jsonl)],
             stdout=html_fd,
             stderr=subprocess.PIPE,
@@ -509,10 +510,10 @@ class AuditJob(NemoJob):
                     _collect_report_artifacts(agg_dir, spec.config.reporting.report_prefix, ctx.results)
                 except Exception as exc:
                     logger.error("Partial aggregation failed during SIGTERM: %s", exc)
-                sys.exit(0)
+                sys_exit(0)
 
             try:
-                signal.signal(signal.SIGTERM, _on_sigterm)
+                signal(SIGTERM, _on_sigterm)
             except ValueError:
                 # Only supported by jobs scheduler.
                 pass
@@ -592,7 +593,7 @@ class AuditJob(NemoJob):
                         details={"probe": probe_name, "retry": str(retry_n)},
                     )
                     with run_log_path.open("a") as run_log_fd:
-                        completed = subprocess.run(
+                        completed = run_subprocess(
                             cmd,
                             env=probe_env,
                             stdout=run_log_fd,

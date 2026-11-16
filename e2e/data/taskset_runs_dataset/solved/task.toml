@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The oracle writes the right answer; the verifier shares the agent's sandbox.
+schema_version = "1.1"
+
+[task]
+name = "taskset-e2e/solved"
+
+[agent]
+timeout_sec = 120.0
+
+[verifier]
+timeout_sec = 60.0
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 512

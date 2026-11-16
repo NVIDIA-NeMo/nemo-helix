@@ -11,6 +11,11 @@ FROM ${NHX_PYTHON_BASE} AS builder
 COPY --from=nhx-workspace . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --only-group cpu-tasks --no-editable
+# Both OpenShell and Agent Hardener inherit this venv. Keep the release
+# workspace frozen and pin the urllib3 fix without re-resolving its dependencies.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv --no-config pip install --python /app/.venv/bin/python --no-deps "urllib3==2.8.0"
+
 # Harbor task Jobs (nemo-evals) run trials in nhx-sandbox's OpenSandbox environment; fail the build
 # if the image can't import it.
 RUN /app/.venv/bin/python -c 'import nemo_evals.harbor.opensandbox_environment'

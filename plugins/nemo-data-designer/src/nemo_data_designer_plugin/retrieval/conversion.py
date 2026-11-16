@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Literal
 from nemo_data_designer_plugin.retrieval.manifest import resolve_generation_input
 
 if TYPE_CHECKING:
-    from data_designer_retrieval_sdg import ConversionResult
+    from data_designer_retrieval_sdg import ConversionResult, ConversionRunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def execute_conversion(
 ) -> ConversionResult:
     """Convert Stage 0 JSONL (or a generation manifest) into train/eval BEIR artifacts."""
     try:
-        from data_designer_retrieval_sdg import ConversionRunConfig, run_conversion_with_config
+        from data_designer_retrieval_sdg import ConversionRunConfig
     except ImportError as exc:
         raise ImportError("Retrieval prepare requires nemo-data-designer-plugin[retrieval-sdg].") from exc
 
@@ -52,12 +52,19 @@ def execute_conversion(
         use_group_id_in_eval=use_group_id_in_eval,
         split_strategy=split_strategy,
     )
-    conversion = run_conversion_with_config(config)
+    conversion = _run_conversion(config)
     for qrels_path in output_dir.resolve().glob("**/qrels/test.tsv"):
         dropped = dedupe_beir_qrels(qrels_path)
         if dropped:
             logger.info("Dropped %s duplicate qrel rows from %s", dropped, qrels_path)
     return conversion
+
+
+def _run_conversion(config: ConversionRunConfig) -> ConversionResult:
+    """Run the upstream conversion; a seam so tests can replace it without patching the library."""
+    from data_designer_retrieval_sdg import run_conversion_with_config
+
+    return run_conversion_with_config(config)
 
 
 def dedupe_beir_qrels(path: Path) -> int:

@@ -49,6 +49,7 @@ auth:
   oidc:
     enabled: true
     issuer: "https://idp.example.com"
+    audience: "<token-audience>"
     server_sessions:
       encryption_key_env_var: NHX_AUTH_SESSION_ENCRYPTION_KEY
     confidential_client:

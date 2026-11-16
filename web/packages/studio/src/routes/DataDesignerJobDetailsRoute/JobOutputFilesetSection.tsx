@@ -15,7 +15,7 @@ import { Empty } from '@studio/components/Empty';
 import { FilesetFilePreviewPanel } from '@studio/components/FilesetFilePreviewPanel';
 import type { FileSystemFile } from '@studio/components/FilesTable/utils';
 import { useDataDesignerArtifactsFileset } from '@studio/routes/DataDesignerJobDetailsRoute/useDataDesignerArtifactsFileset';
-import { getFilesetDetailsRoute } from '@studio/routes/utils';
+import { getFilesetDetailRoute } from '@studio/routes/utils';
 import { getHumanReadableFileSize } from '@studio/util/files';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -122,17 +122,17 @@ export const JobOutputFilesetSection: FC = () => {
     setPreviewFile(fileRowToSystemFile(row));
   }, []);
 
-  const filesetId = `${filesetWorkspace}/${filesetName}`;
-
   const handleDatasetClickFromPreview = useCallback(() => {
-    navigate(getFilesetDetailsRoute(filesetWorkspace, filesetId));
-  }, [navigate, filesetWorkspace, filesetId]);
+    navigate(getFilesetDetailRoute(filesetWorkspace, filesetName));
+  }, [navigate, filesetWorkspace, filesetName]);
 
   const handleFolderClickFromPreview = useCallback(
     (folderPath: string) => {
-      navigate(getFilesetDetailsRoute(filesetWorkspace, filesetId, folderPath));
+      navigate(
+        getFilesetDetailRoute(filesetWorkspace, filesetName, { folder: folderPath || undefined })
+      );
     },
-    [navigate, filesetWorkspace, filesetId]
+    [navigate, filesetWorkspace, filesetName]
   );
 
   const handleFileDeleteSuccess = useCallback(() => {
@@ -222,7 +222,7 @@ export const JobOutputFilesetSection: FC = () => {
               label="Fileset"
               value={
                 <Anchor>
-                  <Link to={getFilesetDetailsRoute(filesetWorkspace, filesetId)}>
+                  <Link to={getFilesetDetailRoute(filesetWorkspace, filesetName)}>
                     {filesetName}
                   </Link>
                 </Anchor>

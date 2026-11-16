@@ -14,7 +14,7 @@ import {
   compassListInsights,
 } from '@nemo/sdk/generated/compass/compass-insights';
 import type { AnalysisRunResponse } from '@nemo/sdk/generated/compass/schema';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { analysisJobStatus } from '@studio/api/insightsAnalysis';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';

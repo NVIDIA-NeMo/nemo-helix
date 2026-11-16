@@ -130,7 +130,7 @@ def extension(monkeypatch: pytest.MonkeyPatch, server: Server) -> _Extension:
         extension.timeouts.append(kwargs["timeout"])
         return real_client(transport=httpx.MockTransport(handle), **kwargs)
 
-    monkeypatch.setattr(environment_module.httpx, "AsyncClient", client)
+    monkeypatch.setattr(environment_module, "AsyncClient", client)
     return extension
 
 

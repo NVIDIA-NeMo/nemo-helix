@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import {
   getAnonymizerListRunJobsQueryKey,
   useAnonymizerDeleteRunJob,
 } from '@nemo/sdk/generated/anonymizer/anonymizer';
 import type { RunJob as AnonymizerJob } from '@nemo/sdk/generated/anonymizer/schema';
-import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
+import { getDeleteJobsDescription } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useQueryClient } from '@tanstack/react-query';
 import type { FC } from 'react';
@@ -30,15 +31,15 @@ export const DeleteJobModal: FC<DeleteJobModalProps> = ({ jobs, onClose, onDelet
     },
   });
 
-  const handleDelete = async (jobsToDelete: AnonymizerJob[]) => {
-    const invalid = jobsToDelete.filter((job) => !job.workspace || !job.name);
+  const handleDelete = async () => {
+    const invalid = jobs.filter((job) => !job.workspace || !job.name);
     if (invalid.length > 0) {
       throw new Error(
         `Cannot delete ${invalid.length} job${invalid.length !== 1 ? 's' : ''}: missing workspace or name.`
       );
     }
     await Promise.all(
-      jobsToDelete.map(async (job) => {
+      jobs.map(async (job) => {
         try {
           await deleteJobMutation.mutateAsync({ workspace: job.workspace!, name: job.name });
         } catch (error) {
@@ -49,14 +50,16 @@ export const DeleteJobModal: FC<DeleteJobModalProps> = ({ jobs, onClose, onDelet
       })
     );
     onDeleted?.();
+    return true;
   };
 
   return (
-    <BulkDeleteModal
-      items={jobs}
+    <DeleteConfirmationModal
       open={jobs.length > 0}
+      entity="Anonymizer job"
+      ids={jobs.map((job) => job.name)}
+      description={getDeleteJobsDescription(jobs.length)}
       onDelete={handleDelete}
-      title={(count) => `Delete ${count} Anonymizer Job${count !== 1 ? 's' : ''}`}
       onClose={onClose}
     />
   );

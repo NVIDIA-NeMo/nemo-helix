@@ -3,7 +3,7 @@
 
 import { useRelativeTimeSince } from '@nemo/common/src/components/RelativeTime';
 import { Text } from '@nvidia/foundations-react-core';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface UpdatedAtProps {
   datetime: string;

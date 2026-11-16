@@ -103,3 +103,13 @@ class RequestAuthorizer(Protocol):
 def get_request_authorizer() -> RequestAuthorizer:
     """Platform-injected authorization; never falls back to service-principal permissions."""
     raise RuntimeError("get_request_authorizer must be supplied by the platform")
+
+
+def get_submission_authorizer() -> RequestAuthorizer | None:
+    """The caller's authorizer for what a job submission reads or writes on the caller's behalf.
+
+    The platform supplies the same caller-bound, scope-preserving authorizer as
+    :func:`get_request_authorizer`. Outside the platform, such as a standalone plugin app, it is
+    ``None`` and the submission checks nothing beyond what its own calls are authorized for.
+    """
+    return None

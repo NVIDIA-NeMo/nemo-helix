@@ -222,14 +222,14 @@ def test_direct_builder_sends_default_headers_on_the_wire() -> None:
 
 
 def test_direct_builder_uses_the_certificate_authority_for_verification(tmp_path: Path) -> None:
-    with patch("nemo_helix_ext.client.bootstrap.httpx.Client") as client_cls:
+    with patch("nemo_helix_ext.client.bootstrap.Client") as client_cls:
         build_direct_nemo_client(base_url="https://nhx.example", certificate_authority="/etc/nhx/ca.pem")
 
     assert client_cls.call_args.kwargs["verify"] == "/etc/nhx/ca.pem"
 
 
 def test_direct_builder_verifies_by_default() -> None:
-    with patch("nemo_helix_ext.client.bootstrap.httpx.Client") as client_cls:
+    with patch("nemo_helix_ext.client.bootstrap.Client") as client_cls:
         build_direct_nemo_client(base_url="https://nhx.example")
 
     assert client_cls.call_args.kwargs["verify"] is True
@@ -240,7 +240,7 @@ def test_direct_builder_prefers_the_env_ca_bundle(tmp_path: Path, monkeypatch: p
     env_ca.write_text("cert")
     monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, str(env_ca))
 
-    with patch("nemo_helix_ext.client.bootstrap.httpx.Client") as client_cls:
+    with patch("nemo_helix_ext.client.bootstrap.Client") as client_cls:
         build_direct_nemo_client(base_url="https://nhx.example", certificate_authority="/other/ca.pem")
 
     assert client_cls.call_args.kwargs["verify"] == str(env_ca)
@@ -309,7 +309,7 @@ def test_oauth_builder_reuses_discovery_transport_and_attaches_auth(tmp_path: Pa
         built_clients.append(client)
         return client
 
-    with patch("nemo_helix_ext.client.bootstrap.httpx.Client", side_effect=client_factory):
+    with patch("nemo_helix_ext.client.bootstrap.Client", side_effect=client_factory):
         client = build_nemo_client(config_path=config)
         shared_transport = client._http
         client.send(probe())
@@ -366,7 +366,7 @@ async def test_async_oauth_builder_reuses_discovery_transport_and_attaches_auth(
         built_clients.append(client)
         return client
 
-    with patch("nemo_helix_ext.client.bootstrap.httpx.AsyncClient", side_effect=client_factory):
+    with patch("nemo_helix_ext.client.bootstrap.AsyncClient", side_effect=client_factory):
         client = build_async_nemo_client(config_path=config)
         shared_transport = client._http
         await client.send(probe())
@@ -516,7 +516,7 @@ def test_no_auth_builder_does_not_use_oauth_discovery(discover, tmp_path: Path) 
 @pytest.mark.asyncio
 @patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
 async def test_async_no_auth_builder_does_not_create_sync_discovery_client(discover, tmp_path: Path) -> None:
-    with patch("nemo_helix_ext.client.bootstrap.httpx.Client") as sync_client_cls:
+    with patch("nemo_helix_ext.client.bootstrap.Client") as sync_client_cls:
         client = build_async_nemo_client(config_path=_no_auth_config(tmp_path))
 
     try:

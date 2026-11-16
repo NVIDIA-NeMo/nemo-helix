@@ -15,20 +15,20 @@ import {
 import { PLATFORM_BASE_URL } from '@e2e-tests/utils/environment';
 import {
   testDatasetFilesFixture,
-  TestDatasetFilesFixture,
+  type TestDatasetFilesFixture,
   testDatasetFixture,
-  TestDatasetFixture,
+  type TestDatasetFixture,
   testEvaluationConfigFixture,
-  TestEvaluationConfigFixture,
+  type TestEvaluationConfigFixture,
   testWorkspaceFixture,
-  TestWorkspaceFixture,
+  type TestWorkspaceFixture,
 } from '@e2e-tests/utils/fixtures';
 import { disableAuthForTest } from '@e2e-tests/utils/pageUtils';
 import {
   DEFAULT_LLM_JUDGE_DEFAULTS,
   EVALUATION_DEFAULT_OUTPUT_TEMPLATE_STRING,
   METRIC_LABELS,
-  MetricNameApi,
+  type MetricNameApi,
 } from '@nemo/common/src/constants/metrics';
 import { generateLLMJudgeUserMessage } from '@nemo/common/src/utils/evaluation';
 import { expect, test as baseTest } from '@playwright/test';

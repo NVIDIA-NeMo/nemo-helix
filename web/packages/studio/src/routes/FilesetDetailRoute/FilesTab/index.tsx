@@ -3,11 +3,8 @@
 
 import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
 import { isSchemaAssignableFile } from '@nemo/common/src/utils/jsonSchema';
-import {
-  FilesetPurpose,
-  type FilesetFileOutput,
-  type FilesetOutput,
-} from '@nemo/sdk/generated/platform/schema';
+import type { FilesetFileOutput, FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { Flex, Text } from '@nvidia/foundations-react-core';
 import { FilesetFilePreviewContent } from '@studio/components/FilesetFilePreviewPanel/FilesetFilePreviewContent';
 import {

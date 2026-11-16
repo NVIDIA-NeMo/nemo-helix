@@ -14,11 +14,11 @@ import {
 } from '@e2e-tests/utils/constants';
 import {
   testDatasetFilesFixture,
-  TestDatasetFilesFixture,
+  type TestDatasetFilesFixture,
   testDatasetFixture,
-  TestDatasetFixture,
+  type TestDatasetFixture,
   testWorkspaceFixture,
-  TestWorkspaceFixture,
+  type TestWorkspaceFixture,
 } from '@e2e-tests/utils/fixtures';
 import { disableAuthForTest, waitForLongOperation } from '@e2e-tests/utils/pageUtils';
 import { expect, test as baseTest } from '@playwright/test';

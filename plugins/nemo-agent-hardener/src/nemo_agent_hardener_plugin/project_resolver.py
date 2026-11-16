@@ -36,6 +36,8 @@ _SECRET_NAME = re.compile(r"(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)", re.IGNO
 
 _URL = re.compile(r"https?://([A-Za-z0-9.-]+)")
 
+HERMES_RUNTIME_ENV = ("ADAPTER_PYTHON", "UV_PYTHON_INSTALL_DIR", "HERMES_NEMO_RELAY_PLUGINS_TOML")
+
 
 def _iter_dockerfiles(root: Path) -> list[Path]:
     """Every Dockerfile in the project, nearest the root first."""
@@ -180,6 +182,22 @@ def derive_binaries(text: str, env: dict[str, str]) -> list[str]:
         match = re.search(r"python\s+-m\s+venv\s+(\S+)", text)
         venv = match.group(1) if match else ""
     globs = [f"{venv.rstrip('/')}/bin/**"] if venv else []
+    if "ADAPTER_PYTHON" in env or "HERMES_NEMO_RELAY_PLUGINS_TOML" in env:
+        for key in HERMES_RUNTIME_ENV:
+            if key in env and (
+                not env[key].startswith("/")
+                or env[key].startswith("//")
+                or any(char in env[key] for char in "$\r\n*?[]")
+            ):
+                return []
+        adapter_python = env.get("ADAPTER_PYTHON")
+        python_install_dir = env.get("UV_PYTHON_INSTALL_DIR", "").rstrip("/")
+        if adapter_python:
+            if not python_install_dir and not adapter_python.startswith(("/usr/local/bin/python", "/usr/bin/python")):
+                return []
+            globs.append(adapter_python)
+        if python_install_dir:
+            globs.append(f"{python_install_dir}/**/bin/python*")
     return [*globs, "/usr/local/bin/python*", "/usr/bin/python*"]
 
 
@@ -204,12 +222,15 @@ def derive_secrets(env: dict[str, str], project_root: Path) -> list[str]:
     return sorted(names)
 
 
-def inspect_project(project_root: Path, *, dockerfile: str | None = None) -> dict[str, Any]:
+def inspect_project(
+    project_root: Path, *, dockerfile: str | None = None, env_overrides: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Read an extracted project bundle and report what it states, and what it cannot.
 
     Args:
         project_root: Directory the uploaded bundle was extracted into.
         dockerfile: Caller's choice, when the project holds more than one.
+        env_overrides: Runtime environment applied before deriving interpreter paths.
 
     Returns:
         A mapping matching ``InspectProjectResponse``: derived values plus ``unresolved``.
@@ -245,7 +266,7 @@ def inspect_project(project_root: Path, *, dockerfile: str | None = None) -> dic
         }
 
     text = chosen.read_text(encoding="utf-8", errors="replace")
-    env = dockerfile_env(text)
+    env = {**dockerfile_env(text), **(env_overrides or {})}
     start_command = derive_start_command(text, env)
     if not start_command:
         warnings.append(
@@ -279,14 +300,21 @@ def inspect_project(project_root: Path, *, dockerfile: str | None = None) -> dic
             "dropped mid-run."
         )
 
-    unresolved = [name for name, value in (("start_command", start_command),) if not value]
+    binaries = derive_binaries(text, env)
+    if not binaries:
+        warnings.append(
+            "Cannot determine the Hermes runtime paths. Supply literal absolute paths for ADAPTER_PYTHON, "
+            "UV_PYTHON_INSTALL_DIR and HERMES_NEMO_RELAY_PLUGINS_TOML where configured, "
+            "or use --binary for an interpreter installed elsewhere."
+        )
+    unresolved = [name for name, value in (("start_command", start_command), ("binaries", binaries)) if not value]
     unresolved += [HARNESS_FIELD, RELAY_FIELD]
 
     return {
         "dockerfile": str(chosen.relative_to(project_root)),
         "dockerfiles": relative,
         "start_command": start_command,
-        "binaries": derive_binaries(text, env),
+        "binaries": binaries,
         "port": derive_port(text, env),
         "secrets": secrets,
         "egress": secrets_and_egress,

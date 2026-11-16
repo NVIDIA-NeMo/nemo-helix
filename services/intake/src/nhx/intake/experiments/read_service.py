@@ -5,11 +5,16 @@
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 
 from nhx.common.api.filter import FilterOperation
 from nhx.common.entities.client import EntityClient, EntityNotFoundError
 from nhx.intake.entities.experiments import Experiment as Evaluation
-from nhx.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository
+from nhx.intake.repository.evaluation_rollup import (
+    EvaluationRollup,
+    EvaluationRollupRepository,
+    MissingCreatedAfterError,
+)
 from nhx.intake.repository.evaluation_session import (
     EvaluationSessionPage,
     EvaluationSessionRepository,
@@ -117,6 +122,7 @@ class EvaluationReadService:
 
         rollups, available = await self._get_rollups(
             workspace=workspace,
+            created_after_by_name={evaluation.name: evaluation.created_at for evaluation in evaluations},
             evaluation_names=[evaluation.name for evaluation in evaluations],
         )
         return EvaluationReadBatch(
@@ -139,7 +145,7 @@ class EvaluationReadService:
         mode: IntakeResponseMode,
         sort_keys: list[tuple[str, bool]] | None,
     ) -> EvaluationSessionPage:
-        await self._get_live_evaluation(workspace=workspace, name=evaluation_name)
+        evaluation = await self._get_live_evaluation(workspace=workspace, name=evaluation_name)
         if self._sessions is None:
             raise EvaluationTelemetryUnavailableError(configured=False)
         status_filter = None
@@ -154,6 +160,7 @@ class EvaluationReadService:
                 evaluation_name=evaluation_name,
                 status=status_filter,
                 test_case_name=test_case_name,
+                created_after=evaluation.created_at,
                 page=page,
                 page_size=page_size,
                 mode=mode,
@@ -183,6 +190,7 @@ class EvaluationReadService:
         *,
         workspace: str,
         evaluation_names: list[str],
+        created_after_by_name: dict[str, datetime | None],
     ) -> tuple[dict[str, EvaluationRollup], bool]:
         if self._rollups is None:
             return {}, False
@@ -191,9 +199,13 @@ class EvaluationReadService:
                 await self._rollups.get_rollups(
                     workspace=workspace,
                     evaluation_names=evaluation_names,
+                    created_after_by_name=created_after_by_name,
                 ),
                 True,
             )
+        except MissingCreatedAfterError:
+            # A caller bug, not a ClickHouse outage.
+            raise
         except Exception:
             logger.exception("Skipping evaluation rollup hydration because ClickHouse is unavailable")
             return {}, False

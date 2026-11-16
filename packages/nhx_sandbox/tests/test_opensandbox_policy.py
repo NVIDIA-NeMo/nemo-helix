@@ -8,7 +8,44 @@ from dataclasses import dataclass, field
 
 import pytest
 from nhx_sandbox.egress import EgressPolicy, EgressRule
-from nhx_sandbox.opensandbox_policy import EgressVerificationError, EgressVerificationMode, verify_applied_egress
+from nhx_sandbox.opensandbox_policy import (
+    EgressVerificationError,
+    EgressVerificationMode,
+    egress_target_covers,
+    verify_applied_egress,
+)
+
+
+@pytest.mark.parametrize(
+    ("trusted", "target", "covered"),
+    [
+        # Same target, any spelling.
+        ("pypi.org", "PyPI.org.", True),
+        ("::ffff:0:0/96", "::ffff:0.0.0.0/96", True),
+        # A wildcard covers its subdomains at any depth, and narrower wildcards, but not the bare domain.
+        ("*.wikipedia.org", "en.wikipedia.org", True),
+        ("*.wikipedia.org", "upload.en.wikipedia.org", True),
+        ("*.wikipedia.org", "*.en.wikipedia.org", True),
+        ("*.wikipedia.org", "wikipedia.org", False),
+        ("*.wikipedia.org", "notwikipedia.org", False),
+        ("*.en.wikipedia.org", "*.wikipedia.org", False),
+        # A CIDR covers the addresses and ranges inside it, in its own family only.
+        ("10.0.0.0/8", "10.1.2.3", True),
+        ("10.0.0.0/8", "10.1.0.0/16", True),
+        ("10.0.0.0/8", "11.0.0.1", False),
+        ("10.1.0.0/16", "10.0.0.0/8", False),
+        ("2001:db8::/48", "2001:db8::1", True),
+        ("10.0.0.0/8", "::ffff:10.1.2.3", False),
+        # An exact host covers only itself; hostnames and addresses never cover each other.
+        ("en.wikipedia.org", "*.en.wikipedia.org", False),
+        ("10.1.2.3", "10.0.0.0/8", False),
+        ("10.0.0.0/8", "internal.example", False),
+        ("*.example", "10.1.2.3", False),
+    ],
+)
+def test_egress_target_covers(trusted: str, target: str, covered: bool) -> None:
+    assert egress_target_covers(trusted, target) is covered
+
 
 EXPECTED = EgressPolicy(
     rules=(

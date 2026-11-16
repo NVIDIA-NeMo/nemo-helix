@@ -49,7 +49,7 @@ class TestRailsServiceNamespaceSupport(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.config_cache_entry_patcher.stop()
 
-    @patch("nhx.guardrails.app.services.rails.service.LLMRails")
+    @patch("nhx.guardrails.app.services.rails.service.create_rails_engine")
     async def test_get_rails_with_namespaced_config(self, mock_llm_rails):
         """Test getting rails with namespaced configs"""
 

@@ -6,11 +6,7 @@ import {
   getModelsListModelsQueryKey,
   useModelsDeleteModel,
 } from '@nemo/sdk/generated/platform/models';
-import {
-  type Adapter,
-  type ModelDeployment,
-  type ModelEntity,
-} from '@nemo/sdk/generated/platform/schema';
+import type { Adapter, ModelDeployment, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import {
   Block,
   Button,
@@ -23,11 +19,12 @@ import { Empty } from '@studio/components/Empty';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ModelChatTab } from '@studio/components/ModelChatTab';
 import {
-  ModelArtifactData,
+  type ModelArtifactData,
   ModelDetailOverview,
-  ModelDetailOverviewProps,
+  type ModelDetailOverviewProps,
   ModelParametersAccordion,
 } from '@studio/components/sidePanels/ModelPanels/ModelPanel/components';
+import { DELETE_MODEL_DESCRIPTION } from '@studio/constants/models';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   type ComponentProps,
@@ -216,12 +213,9 @@ export const ModelPanel: FC<ModelPanelProps> = ({
             </Flex>
             <DeleteConfirmationModal
               open={deleteModalOpen}
-              title={`Delete model: ${model.name}`}
-              description="This permanently removes the model entity from the workspace. Related deployments and resources may be affected."
-              confirmationText={model.name}
-              simpleConfirm
-              successText={`Successfully deleted model ${model.name}`}
-              errorText="Failed to delete the model. Try again or check your permissions."
+              entity="model"
+              ids={[model.name]}
+              description={DELETE_MODEL_DESCRIPTION}
               onClose={() => setDeleteModalOpen(false)}
               onDelete={handleDeleteModel}
             />

@@ -10,7 +10,7 @@ import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getNewEvaluationMetricRoute } from '@studio/routes/utils';
-import { FC, useEffect, useMemo } from 'react';
+import { type FC, useEffect, useMemo } from 'react';
 import { matchPath, useLocation, useNavigate } from 'react-router';
 
 export const EvaluationLayout: FC = () => {

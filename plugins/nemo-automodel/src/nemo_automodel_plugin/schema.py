@@ -14,9 +14,14 @@ from nemo_helix_plugin.deployment import (
     reject_lora_without_lora_enabled,
 )
 from nemo_helix_plugin.integrations import IntegrationsSpec
-from nhx.customization_common.schema import NamespacedModel
+from nhx.customization_common.schema import (
+    LearningRateDefault,
+    NamespacedModel,
+    learning_rate_defaults_schema_extra,
+    match_learning_rate_default,
+)
 from nhx.customization_common.training.reporting import ProgressReportingConfig
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 __all__ = [
     "AutomodelJobInput",
@@ -146,6 +151,15 @@ class RetrievalSpec(AutomodelSchema):
         default="passage: ",
         description="Literal prefix prepended to each passage. Empty string disables prefixing.",
     )
+    temperature: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Softmax temperature of the training loss: contrastive for bi_encoder, listwise for cross_encoder. "
+            "Omit for 0.02 (bi_encoder) or 1.0 (cross_encoder). A Qwen3 causal reranker scores with raw yes/no "
+            "logits, so this is its only temperature setting."
+        ),
+    )
     export: ExportSpec | None = Field(
         default=None, description="Artifact layout and ONNX export settings. Defaults are applied when omitted."
     )
@@ -165,7 +179,7 @@ class MTPSpec(AutomodelSchema):
         default=None,
         description=(
             "Share one weight-tied layer across the prediction depths. Only some Automodel models accept it "
-            "(Nemotron-H in r0.6.0); omit it for others."
+            "(Nemotron-H in r0.7.0); omit it for others."
         ),
     )
     loss_scaling_factor: float | None = Field(
@@ -178,9 +192,9 @@ class MTPSpec(AutomodelSchema):
 class BackendSpec(AutomodelSchema):
     """Which implementation Automodel uses for each model component.
 
-    Every field defaults to ``None``, meaning "leave it to Automodel". Its own defaults
-    depend on what the training node has available (Transformer Engine, DeepEP, CUDA), so
-    only explicitly set values are forwarded.
+    Every field except ``rope_fusion`` defaults to ``None``, meaning "leave it to Automodel".
+    Its own defaults depend on what the training node has available (Transformer Engine,
+    DeepEP, CUDA), so only explicitly set values are forwarded.
     """
 
     attn: Literal["te", "sdpa", "flex", "eager", "tilelang"] | None = Field(
@@ -193,10 +207,15 @@ class BackendSpec(AutomodelSchema):
         default=None, description="RMSNorm kernel. 'torch_fp32' normalises in fp32 for numerical stability."
     )
     rope: Literal["torch", "quack"] | None = Field(default=None, description="Rotary position embedding kernel.")
-    rope_fusion: bool | None = Field(default=None, description="Fuse the rotary embedding into the attention kernel.")
+    rope_fusion: bool | None = Field(
+        default=False,
+        description="Fuse the rotary embedding into the attention kernel. Automodel v0.7.0 turns this off for "
+        "every model, so true has no effect.",
+    )
     experts: Literal["torch", "te", "gmm", "torch_mm", "torch_mm_mxfp8"] | None = Field(
         default=None,
-        description="MoE expert compute kernel. 'gmm' is the grouped-matmul path used by the large MoE recipes.",
+        description="MoE expert compute kernel. 'torch_mm' is the grouped-matmul path used by the large MoE "
+        "recipes; 'gmm' is a deprecated alias for it.",
     )
     dispatcher: Literal["torch", "deepep", "hybridep", "uccl_ep"] | None = Field(
         default=None,
@@ -289,6 +308,25 @@ class TrainingSpec(AutomodelSchema):
         description="Low-level kernel selection for the model's components. Omit to let Automodel "
         "choose based on the hardware it lands on.",
     )
+    tokenizer_backend: Literal["nemo_auto", "nemo_wrapped_auto", "transformers_auto", "tokenizers"] | None = Field(
+        default=None,
+        description=(
+            "How Automodel loads the tokenizer. Omit unless the default fails or does not match how the model is "
+            "served. Omitted, bi_encoder and cross_encoder use 'nemo_wrapped_auto' (the checkpoint's Hugging Face "
+            "tokenizer) and every other recipe uses Automodel's own default, 'nemo_auto', which prefers a "
+            "model-specific tokenizer such as Mistral's tekken.json when Automodel has one for the model type. "
+            "'transformers_auto' is Hugging Face AutoTokenizer without Automodel's wrapper; 'tokenizers' reads "
+            "tokenizer.json directly. Not supported for vision-language models, which load a processor."
+        ),
+    )
+    mask_generation_prompt: bool = Field(
+        default=False,
+        description=(
+            "Leave out of the loss the tokens the chat template writes before each assistant reply: the role "
+            "header and any empty reasoning block such as '<think></think>'. The model never generates them. "
+            "Chat-format (messages) datasets only."
+        ),
+    )
 
     @model_validator(mode="after")
     def _training_type_fields(self) -> Self:
@@ -330,6 +368,15 @@ RETRIEVAL_BATCH_DEFAULTS: dict[str, tuple[int, int]] = {
     "bi_encoder": (256, 8),
     "cross_encoder": (128, 8),
 }
+
+# Applied by ``with_resolved_recipe`` when the request leaves ``optimizer.learning_rate`` unset,
+# and published on ``AutomodelJobInput`` for Studio. A full-weight run updates every weight, so
+# it takes a smaller step than LoRA; the retrieval recipes use their own rate whatever the type.
+AUTOMODEL_LEARNING_RATE_DEFAULTS: list[LearningRateDefault] = [
+    {"when": {"training.recipe": "bi_encoder"}, "value": 1e-5},
+    {"when": {"training.recipe": "cross_encoder"}, "value": 3e-6},
+    {"when": {"training.finetuning_type": "all_weights"}, "value": 5e-6},
+]
 
 
 class BatchSpec(AutomodelSchema):
@@ -413,6 +460,8 @@ class OutputResponse(AutomodelSchema):
 class AutomodelJobInput(AutomodelSchema):
     """POST body / CLI JSON."""
 
+    model_config = ConfigDict(json_schema_extra=learning_rate_defaults_schema_extra(AUTOMODEL_LEARNING_RATE_DEFAULTS))
+
     name: str | None = None
     model: str
     dataset: DatasetSpec
@@ -461,17 +510,20 @@ class AutomodelJobInput(AutomodelSchema):
             raise ValueError("distillation only supports the sft recipe")
 
         training = self.training.model_copy(update={"recipe": recipe})
+        learning_rate = match_learning_rate_default(
+            AUTOMODEL_LEARNING_RATE_DEFAULTS,
+            {"training.recipe": recipe, "training.finetuning_type": training.finetuning_type},
+        )
         if recipe == "bi_encoder":
-            learning_rate, warmup_steps = 1e-5, 5
+            warmup_steps = 5
             global_batch_size, micro_batch_size = RETRIEVAL_BATCH_DEFAULTS["bi_encoder"]
         elif recipe == "cross_encoder":
-            learning_rate, warmup_steps = 3e-6, 100
+            warmup_steps = 100
             global_batch_size, micro_batch_size = RETRIEVAL_BATCH_DEFAULTS["cross_encoder"]
         else:
-            # A full-weight run updates every weight, so it takes a smaller step than LoRA.
             optimizer = self.optimizer
-            if training.finetuning_type == "all_weights" and "learning_rate" not in optimizer.model_fields_set:
-                optimizer = optimizer.model_copy(update={"learning_rate": 5e-6})
+            if learning_rate is not None and "learning_rate" not in optimizer.model_fields_set:
+                optimizer = optimizer.model_copy(update={"learning_rate": learning_rate})
             return self.model_copy(update={"training": training, "optimizer": optimizer})
 
         batch_updates: dict[str, int] = {}
@@ -481,7 +533,7 @@ class AutomodelJobInput(AutomodelSchema):
             batch_updates["micro_batch_size"] = micro_batch_size
 
         optimizer_updates: dict[str, float | int] = {}
-        if "learning_rate" not in self.optimizer.model_fields_set:
+        if learning_rate is not None and "learning_rate" not in self.optimizer.model_fields_set:
             optimizer_updates["learning_rate"] = learning_rate
         if "warmup_steps" not in self.optimizer.model_fields_set:
             optimizer_updates["warmup_steps"] = warmup_steps

@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  type ModelDeployment,
-  ModelDeploymentStatus,
-  type ModelEntity,
-  type ModelEntitysPage,
-  type ModelProvider,
+import type {
+  ModelDeployment,
+  ModelEntity,
+  ModelEntitysPage,
+  ModelProvider,
 } from '@nemo/sdk/generated/platform/schema';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 import type { Meta, StoryObj } from '@storybook/react';
 import { CustomModelsDataView } from '@studio/components/dataViews/CustomModelsDataView';
 import {

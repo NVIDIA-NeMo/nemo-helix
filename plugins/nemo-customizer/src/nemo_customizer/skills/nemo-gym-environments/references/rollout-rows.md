@@ -113,8 +113,30 @@ sets `answer` and omits `expected_answer` scores as if every response were wrong
 | Environment | Fields its `verify()` reads |
 |---|---|
 | `math_with_judge` | `question`, `expected_answer` |
+| `clevr_cogent` (`servers/vlm`) | `expected_answer`. The image and the question travel in `responses_create_params.input` |
 | `verifiers_agent` (any hub env) | `vf_env_id`, `task_idx` |
 | Anything else | Read its `*VerifyRequest` — assume nothing |
+
+An image row for `clevr_cogent` puts the image first, then the text. `image_url` is a string, and a `data:` URI travels with the row:
+
+```json
+{
+  "responses_create_params": {
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "input_image", "image_url": "data:image/png;base64,...", "detail": "auto"},
+          {"type": "input_text", "text": "Think step-by-step... How many cubes are there?"}
+        ]
+      }
+    ]
+  },
+  "agent_ref": {"type": "responses_api_agents", "name": "clevr_cogent_simple_agent"},
+  "expected_answer": "3",
+  "question": "How many cubes are there?"
+}
+```
 
 **Validate before uploading**, since nothing downstream will:
 

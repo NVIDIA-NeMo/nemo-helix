@@ -14,6 +14,7 @@ from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
 )
 from nemo_helix_plugin.inference_middleware_types import (
+    SystemOneResponse,
     TypedResponse,
     TypedResponseChunk,
 )
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 _RESPONSE_ADAPTERS: dict[BackendFormat, TypeAdapter] = {
     BackendFormat.OPENAI_CHAT: TypeAdapter(openai_chat_types.ChatCompletion),
     BackendFormat.ANTHROPIC_MESSAGES: TypeAdapter(anthropic_types.Message),
+    BackendFormat.SYSTEMONE: TypeAdapter(SystemOneResponse),
 }
 
 
@@ -92,7 +94,7 @@ class TypedResponseStream:
         result: AsyncIterator[dict[str, Any]],
     ) -> None:
         self._backend_format = backend_format
-        self._adapter = _STREAM_ADAPTERS[backend_format]
+        self._adapter = _STREAM_ADAPTERS.get(backend_format)
         self._source = result.__aiter__()
         self._raw_cache: list[dict[str, Any]] = []
         self._source_exhausted = False
@@ -134,6 +136,8 @@ class TypedResponseStream:
         as Anthropic ``ping`` events while still preventing raw dicts from
         ever being yielded as a typed chunk.
         """
+        if self._adapter is None:
+            return
         async for chunk in self.raw_chunks():
             try:
                 yield cast(TypedResponseChunk, self._adapter.validate_python(chunk))

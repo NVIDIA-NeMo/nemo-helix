@@ -3,7 +3,7 @@
 
 import { CheckCircle, Cancel } from '@nemo/icons/icons';
 import { Flex, Text } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface ScoreItemProps {
   success: boolean;

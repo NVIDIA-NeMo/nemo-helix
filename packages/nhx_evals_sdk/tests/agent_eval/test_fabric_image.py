@@ -50,7 +50,7 @@ def test_tag_is_content_addressed_and_harness_agnostic() -> None:
 
 def test_ensure_skips_build_when_image_present(monkeypatch: pytest.MonkeyPatch) -> None:
     recorder = _DockerRecorder(image_present=True)
-    monkeypatch.setattr(image_mod.subprocess, "run", recorder)
+    monkeypatch.setattr(image_mod, "run", recorder)
     tag = ensure_fabric_image()
     assert tag == fabric_image_tag()
     assert recorder.build_calls == []  # inspected, found, no build
@@ -58,7 +58,7 @@ def test_ensure_skips_build_when_image_present(monkeypatch: pytest.MonkeyPatch) 
 
 def test_ensure_builds_when_image_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     recorder = _DockerRecorder(image_present=False)
-    monkeypatch.setattr(image_mod.subprocess, "run", recorder)
+    monkeypatch.setattr(image_mod, "run", recorder)
     tag = ensure_fabric_image()
     (build,) = recorder.build_calls
     assert build[:4] == ["docker", "build", "-t", tag]
@@ -73,7 +73,7 @@ def test_image_pins_every_requirement_to_the_installed_fabric(monkeypatch: pytes
     with no trajectory rather than as an error.
     """
     recorder = _DockerRecorder(image_present=False)
-    monkeypatch.setattr(image_mod.subprocess, "run", recorder)
+    monkeypatch.setattr(image_mod, "run", recorder)
     ensure_fabric_image()
 
     version = image_mod.fabric_version()
@@ -98,7 +98,7 @@ def test_image_exists_raises_when_daemon_unreachable(monkeypatch: pytest.MonkeyP
     def _daemon_down(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess(argv, 1, b"", b"Cannot connect to the Docker daemon at unix:///...")
 
-    monkeypatch.setattr(image_mod.subprocess, "run", _daemon_down)
+    monkeypatch.setattr(image_mod, "run", _daemon_down)
     with pytest.raises(FabricImageError, match="cannot reach the Docker daemon"):
         image_mod.image_exists(fabric_image_tag())
 
@@ -107,7 +107,7 @@ def test_image_exists_false_when_image_absent(monkeypatch: pytest.MonkeyPatch) -
     def _absent(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess(argv, 1, b"", b"Error: No such image: foo")
 
-    monkeypatch.setattr(image_mod.subprocess, "run", _absent)
+    monkeypatch.setattr(image_mod, "run", _absent)
     assert image_mod.image_exists(fabric_image_tag()) is False
 
 
@@ -117,6 +117,6 @@ def test_image_exists_raises_on_daemon_timeout(monkeypatch: pytest.MonkeyPatch) 
         assert timeout is not None, "the docker call must be bounded"
         raise subprocess.TimeoutExpired(argv, timeout)
 
-    monkeypatch.setattr(image_mod.subprocess, "run", _hang)
+    monkeypatch.setattr(image_mod, "run", _hang)
     with pytest.raises(FabricImageError, match="timed out"):
         image_mod.image_exists(fabric_image_tag())

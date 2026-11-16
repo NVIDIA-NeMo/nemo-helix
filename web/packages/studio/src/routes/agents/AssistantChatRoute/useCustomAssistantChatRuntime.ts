@@ -13,9 +13,11 @@ import {
   COMPLETE_STATUS,
   RUNNING_STATUS,
 } from '@nemo/common/src/components/AssistantChat/constants';
+import type { DescribeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import {
   appendMessageToThreadMessage,
   createTextMessage,
+  getFailedReply,
   getMessageText,
 } from '@nemo/common/src/components/AssistantChat/messageUtils';
 import {
@@ -53,6 +55,7 @@ export interface CustomAssistantBeforeRunContext {
 }
 
 interface UseCustomAssistantChatRuntimeOptions {
+  describeError?: DescribeChatError;
   initialMessages?: readonly ThreadMessageLike[];
   onBeforeRun?: (
     context: CustomAssistantBeforeRunContext
@@ -147,6 +150,7 @@ const completeAssistantContent = (
 };
 
 export const useCustomAssistantChatRuntime = ({
+  describeError,
   initialMessages = [],
   onBeforeRun,
   onRun,
@@ -388,21 +392,14 @@ export const useCustomAssistantChatRuntime = ({
 
         const errorMessage = error instanceof Error ? error.message : 'Unknown Error';
         ensureAssistantMessage();
-        const currentResponseContent = getCurrentResponseContent();
-        const failureMessage = `NeMo Assistant stopped before completing: ${errorMessage}`;
-        const incompleteContent = mergeAssistantParts(currentResponseContent, [
-          {
-            type: 'text',
-            text: `${hasVisibleAssistantContent(currentResponseContent) ? '\n\n' : ''}${failureMessage}`,
-          },
-        ]);
+        const partialContent = getCurrentResponseContent();
+        const failedReply = getFailedReply(errorMessage, describeError);
         completeActiveAssistantMessage(
-          {
-            type: 'incomplete',
-            reason: 'error',
-            error: errorMessage,
-          },
-          incompleteContent,
+          failedReply.status,
+          [
+            ...(hasVisibleAssistantContent(partialContent) ? partialContent : []),
+            ...failedReply.parts,
+          ],
           { collapseAssistantContent: false }
         );
         onError?.(error instanceof Error ? error : new Error(errorMessage));
@@ -415,6 +412,7 @@ export const useCustomAssistantChatRuntime = ({
     },
     [
       completeAssistantMessageContent,
+      describeError,
       onBeforeRun,
       onError,
       onRun,

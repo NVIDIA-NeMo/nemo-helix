@@ -16,6 +16,8 @@ export type ServiceConfig = {
    * Order of priority for API Base URL requests. Vite environment variables are checked first, then Node.js process.env variables.
    */
   apiEnvKeys?: string[];
+  /** `x-*` schema extensions to emit as typed modules (see generate-schema-extensions.ts). */
+  schemaExtensions?: string[];
 };
 
 export const serviceConfigs: Record<string, ServiceConfig> = {
@@ -36,6 +38,7 @@ export const serviceConfigs: Record<string, ServiceConfig> = {
     url: `../../../../plugins/nemo-customizer/openapi/openapi.yaml`,
     apiEnvKeys: ['VITE_PLATFORM_BASE_URL'],
     zod: true,
+    schemaExtensions: ['x-learning-rate-defaults'],
   },
   'data-designer': {
     path: 'data-designer',

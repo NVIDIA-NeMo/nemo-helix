@@ -22,6 +22,9 @@ import { useCallback, useMemo, useRef } from 'react';
 export type EvaluationRow = EvaluationResponse & { id: string };
 export type ListEvaluationsSortParam = NonNullable<ListEvaluationsParams['sort']>;
 
+export const LAST_EXPERIMENT_REASON = 'This evaluation must belong to at least one experiment.';
+export const canRemoveFromGroup = (row: EvaluationRow) => (row.experiment_ids ?? []).length > 1;
+
 const toRows = (experiments: EvaluationResponse[] | undefined): EvaluationRow[] =>
   (experiments ?? []).map((experiment) => ({
     ...experiment,
@@ -51,8 +54,8 @@ export interface ExperimentEvaluations {
   rows: EvaluationRow[];
   /** Pins the row if unpinned, unpins it otherwise, then refetches both lists. */
   togglePin: (row: EvaluationRow) => void;
-  /** Removes the current group from the evaluation's `experiment_ids`, then refetches. Blocks (with a
-   * toast) when this is the evaluation's only group — every evaluation must belong to at least one. */
+  /** Removes the current group from the evaluation's `experiment_ids`, then refetches. No-ops when
+   * this is the evaluation's only group — every evaluation must belong to at least one. */
   removeFromGroup: (row: EvaluationRow) => void;
   /**
    * Row count that drives pagination: the unpinned total. Pinned rows ride atop every page and are
@@ -207,10 +210,9 @@ export function useExperimentEvaluations({
     (row: EvaluationRow) => {
       const { name } = row;
       if (pendingRef.current.has(name)) return;
-      // The API rejects an empty `experiment_ids`, so block removing an evaluation's only group and
-      // explain why rather than firing a request that would 400.
-      if (row.experiment_ids.length <= 1) {
-        toast.error('This evaluation must belong to at least one experiment.');
+      // The API rejects an empty `experiment_ids`, so block removing an evaluation's only group
+      // rather than firing a request that would 400.
+      if (!canRemoveFromGroup(row)) {
         return;
       }
       pendingRef.current.add(name);
@@ -220,7 +222,7 @@ export function useExperimentEvaluations({
         data: { experiment_ids: row.experiment_ids.filter((id) => id !== experimentId) },
       });
     },
-    [workspace, experimentId, patchEvaluation, toast]
+    [workspace, experimentId, patchEvaluation]
   );
 
   // Pinned first, then the current page of unpinned. Drop any unpinned row already shown as pinned —

@@ -331,7 +331,7 @@ class TestRemoveInstance:
         (d / "services.log").write_text("logs\n")
 
         with patch(
-            "nemo_helix_ext.local.process.shutil.rmtree",
+            "nemo_helix_ext.local.process.rmtree",
             side_effect=OSError("permission denied"),
         ):
             assert remove_instance("rmtree-fail", base_dir=base_dir) is False
@@ -587,7 +587,7 @@ class TestStopInstance:
         monkeypatch.setattr(process_module, "_snapshot_children", lambda _pid: [object()])
         monkeypatch.setattr(process_module, "_sweep_orphans", lambda _children: [222])
         monkeypatch.setattr(process_module, "_SIGKILL_WAIT_TIMEOUT", 0.0)
-        monkeypatch.setattr(process_module.os, "kill", fake_kill)
+        monkeypatch.setattr(process_module, "kill", fake_kill)
 
         result = stop_instance(scope, base_dir=base_dir, timeout=0.0)
 
@@ -616,7 +616,7 @@ class TestStartBackground:
             return mock_proc
 
         with patch(
-            "nemo_helix_ext.local.process.subprocess.Popen",
+            "nemo_helix_ext.local.process.Popen",
             side_effect=fake_popen,
         ):
             proc = start_background()
@@ -634,7 +634,7 @@ class TestStartBackground:
         mock_proc.pid = 99999
 
         with patch(
-            "nemo_helix_ext.local.process.subprocess.Popen",
+            "nemo_helix_ext.local.process.Popen",
             return_value=mock_proc,
         ) as mock_popen:
             proc = start_background(
@@ -668,7 +668,7 @@ class TestStartBackground:
             return mock_proc
 
         with patch(
-            "nemo_helix_ext.local.process.subprocess.Popen",
+            "nemo_helix_ext.local.process.Popen",
             side_effect=fake_popen,
         ):
             start_background(
@@ -693,7 +693,7 @@ class TestStartBackground:
             return mock_proc
 
         with patch(
-            "nemo_helix_ext.local.process.subprocess.Popen",
+            "nemo_helix_ext.local.process.Popen",
             side_effect=fake_popen,
         ):
             start_background(
@@ -716,7 +716,7 @@ class TestStartBackground:
         mock_proc.pid = 5555
 
         with patch(
-            "nemo_helix_ext.local.process.subprocess.Popen",
+            "nemo_helix_ext.local.process.Popen",
             return_value=mock_proc,
         ):
             start_background(
@@ -741,7 +741,7 @@ class TestStartBackground:
             return mock_proc
 
         with patch(
-            "nemo_helix_ext.local.process.subprocess.Popen",
+            "nemo_helix_ext.local.process.Popen",
             side_effect=fake_popen,
         ):
             start_background(
@@ -768,7 +768,7 @@ class TestStartBackground:
             return mock_proc
 
         with patch(
-            "nemo_helix_ext.local.process.subprocess.Popen",
+            "nemo_helix_ext.local.process.Popen",
             side_effect=fake_popen,
         ):
             start_background(
@@ -925,7 +925,7 @@ class TestSweepOrphans:
             # is the one whose non-empty result trips the warning.
             with (
                 patch.object(
-                    process_module.psutil,
+                    process_module,
                     "wait_procs",
                     side_effect=[([], [ps_child]), ([], [ps_child])],
                 ) as wait_procs,

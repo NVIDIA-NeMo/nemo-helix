@@ -34,7 +34,7 @@ import { PageLayout } from '@studio/routes/PageLayout';
 import { RootLayout } from '@studio/routes/RootLayout';
 import { RootRedirect } from '@studio/routes/RootRedirect';
 import { lazy } from 'react';
-import { type RouteObject } from 'react-router';
+import type { RouteObject } from 'react-router';
 
 const NoMatchRoute = lazy(() =>
   import('@studio/routes/NoMatchRoute').then((module) => ({ default: module.NoMatchRoute }))

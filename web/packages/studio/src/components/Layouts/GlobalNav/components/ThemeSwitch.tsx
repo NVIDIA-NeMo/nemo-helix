@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Moon, SunHigh } from '@nemo/icons/icons';
-import { Button, Theme, Tooltip, useTheme } from '@nvidia/foundations-react-core';
+import { Button, type Theme, Tooltip, useTheme } from '@nvidia/foundations-react-core';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { UI_THEME } from '@studio/util/localStorage';
 

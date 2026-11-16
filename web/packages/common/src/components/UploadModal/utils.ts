@@ -10,7 +10,7 @@
  * its affiliates is strictly prohibited.
  */
 import { isAcceptedFileType } from '@nemo/common/src/utils/file';
-import { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 
 /**
  * Type guard to check if a value is a FilesetFileOutput (remote file from v2 fileset API)
@@ -20,11 +20,6 @@ export const isFilesetFileOutput = (
 ): file is FilesetFileOutput => {
   return file !== undefined && 'file_ref' in file;
 };
-
-/**
- * @deprecated Use isFilesetFileOutput instead
- */
-export const isListFileEntry = isFilesetFileOutput;
 
 /**
  * Type guard to check if a value is a browser File object

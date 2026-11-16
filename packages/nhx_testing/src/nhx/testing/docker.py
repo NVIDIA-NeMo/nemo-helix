@@ -40,6 +40,7 @@ import sys
 import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from subprocess import run
 
 import pytest
 from docker.errors import APIError, BuildError, DockerException, ImageNotFound, NotFound
@@ -434,7 +435,7 @@ def remove_intake_clickhouse(
     # stop again (~30s per container), which pushed the e2e job past its timeout.
     removal_env = {key: value for key, value in os.environ.items() if key != "NHX_DATA_DIR"}
     try:
-        result = subprocess.run(command, env=removal_env, capture_output=True, text=True, timeout=timeout, check=False)
+        result = run(command, env=removal_env, capture_output=True, text=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as e:
         print(f"Warning: Could not remove Intake ClickHouse for {platform_data_dir}: {e}")
         return

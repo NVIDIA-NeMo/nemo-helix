@@ -1,10 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useCopyToClipboard } from '@nemo/common/src/hooks/useCopyToClipboard/index';
 import { suppressConsoleError } from '@nemo/testing/utils/suppress-console';
 import { renderHook, act } from '@testing-library/react';
-
-import { useCopyToClipboard } from './index';
 
 // Mock navigator.clipboard
 const mockWriteText = vi.fn();
@@ -72,11 +71,18 @@ describe('useCopyToClipboard', () => {
   });
 
   it('should call onError callback on error', async () => {
+    suppressConsoleError('Failed to copy text to clipboard');
+    const error = new Error('Clipboard access denied');
+    mockWriteText.mockRejectedValueOnce(error);
     const onError = vi.fn();
-    const { result } = renderHook(() => useCopyToClipboard({ onError }));
+    const onSuccess = vi.fn();
+    const { result } = renderHook(() => useCopyToClipboard({ onError, onSuccess }));
 
     await act(async () => {
       await result.current.copyToClipboard('test content');
     });
+
+    expect(onError).toHaveBeenCalledWith(error);
+    expect(onSuccess).not.toHaveBeenCalled();
   });
 });

@@ -51,8 +51,6 @@ import importlib.util
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -60,6 +58,8 @@ from collections.abc import Callable, Iterator, Mapping
 from datetime import datetime, timedelta, timezone
 from itertools import groupby
 from pathlib import Path
+from shutil import which
+from subprocess import run
 from types import ModuleType
 from typing import Any
 from urllib.parse import urlsplit
@@ -68,6 +68,7 @@ import httpx
 from evaluation import export
 from evaluation.ingest import ensure_workspace
 from evaluation.otlp_ingest import _add_attributes, export_trace_request
+from httpx import Client
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
 TEMP_ROOT = Path(__file__).resolve().parent / "tmp"
@@ -426,7 +427,7 @@ def _collection_count(
     url = f"{base_url.rstrip('/')}/apis/intake/v2/workspaces/{workspace}/{collection}"
     params = {"page": 1, "page_size": 1, f"filter[{time_field}][gte]": _EPOCH_ISO}
     owns_client = client is None
-    client = client or httpx.Client(timeout=30.0)
+    client = client or Client(timeout=30.0)
     try:
         resp = client.get(url, params=params)
     finally:
@@ -592,7 +593,7 @@ def _local_clickhouse_container() -> str:
     except ValueError as exc:
         raise RuntimeError(f"{_CLICKHOUSE_URL_ENV_VAR} has an invalid port: {clickhouse_url}") from exc
 
-    if not shutil.which("docker"):
+    if not which("docker"):
         raise RuntimeError("docker is unavailable")
 
     def running_names(*filters: str) -> list[str]:
@@ -601,7 +602,7 @@ def _local_clickhouse_container() -> str:
             command.extend(("--filter", filter_value))
         command.extend(("--format", "{{.Names}}"))
         try:
-            result = subprocess.run(command, capture_output=True, text=True)
+            result = run(command, capture_output=True, text=True)
         except OSError as exc:
             raise RuntimeError(f"docker lookup failed: {exc}") from exc
         if result.returncode != 0:
@@ -632,7 +633,7 @@ def _stop_local_ttl_merges() -> None:
     try:
         container = _local_clickhouse_container()
         command = ["docker", "exec", container, "clickhouse-client", "-q", "SYSTEM STOP TTL MERGES"]
-        proc = subprocess.run(command, capture_output=True, text=True)
+        proc = run(command, capture_output=True, text=True)
         failure = (proc.stderr.strip() or f"exit {proc.returncode}") if proc.returncode != 0 else None
     except Exception as exc:  # docker missing entirely, lookup/exec error — protection stays best-effort
         failure = str(exc)
@@ -660,7 +661,7 @@ def _first_span_id(base_url: str, workspace: str, *, client: httpx.Client | None
     url = f"{base_url.rstrip('/')}/apis/intake/v2/workspaces/{workspace}/spans"
     params = {"page": 1, "page_size": 1, "sort": "started_at", "filter[started_at][gte]": _EPOCH_ISO}
     owns_client = client is None
-    client = client or httpx.Client(timeout=30.0)
+    client = client or Client(timeout=30.0)
     try:
         resp = client.get(url, params=params)
         if resp.status_code != 200:
@@ -781,7 +782,7 @@ def ingest_bundle(
         _stop_local_ttl_merges()
     outcome: dict[str, dict] = {}
     counts = manifest.get("counts") or {}
-    with httpx.Client(timeout=60.0) as client:
+    with Client(timeout=60.0) as client:
         for source_ws in manifest["workspaces"]:
             try:
                 target = workspace_map[source_ws]
@@ -1006,7 +1007,7 @@ def cleanup_scratch(base_url: str, workspaces: list[str]) -> None:
         return
     for table in ("spans", "annotations", "evaluator_results", "trace_index"):
         try:
-            proc = subprocess.run(
+            proc = run(
                 [
                     "docker",
                     "exec",

@@ -502,7 +502,7 @@ def quiet_platform(monkeypatch):
     monkeypatch.setattr(reingest, "ensure_workspace", fake_ensure)
     monkeypatch.setattr(reingest, "export_trace_request", fake_export)
     monkeypatch.setattr(reingest, "_post_created", fake_post)
-    monkeypatch.setattr(reingest.httpx, "Client", client_factory)
+    monkeypatch.setattr(reingest, "Client", client_factory)
     return calls
 
 
@@ -515,7 +515,7 @@ def fake_docker(monkeypatch):
         runs.append(list(cmd))
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(reingest.subprocess, "run", fake_run)
+    monkeypatch.setattr(reingest, "run", fake_run)
     return runs
 
 
@@ -556,7 +556,7 @@ def test_require_empty_rejects_existing_target_data(tmp_path, quiet_platform, co
 
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
 def test_require_empty_transport_rejects_all_http_mutations(quiet_platform, method: str) -> None:
-    with reingest.httpx.Client() as client:
+    with reingest.Client() as client:
         with pytest.raises(AssertionError, match=f"unexpected {method} mutation"):
             client.request(method, "http://x/hidden-mutation")
 
@@ -597,7 +597,7 @@ def test_require_empty_direct_restore_uses_real_http_transport(
         kwargs["transport"] = transport
         return real_client(*args, **kwargs)
 
-    monkeypatch.setattr(reingest.httpx, "Client", client_factory)
+    monkeypatch.setattr(reingest, "Client", client_factory)
 
     outcome = reingest.ingest_bundle(
         "http://platform.example",
@@ -1285,8 +1285,8 @@ def test_local_clickhouse_container_resolves_managed_name_by_label(monkeypatch):
         return subprocess.CompletedProcess(command, 0, stdout="nhx-intake-clickhouse-a1b2c3d4e5f6\n", stderr="")
 
     monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "http://localhost:55123")
-    monkeypatch.setattr(reingest.shutil, "which", lambda name: "/usr/bin/docker")
-    monkeypatch.setattr(reingest.subprocess, "run", fake_run)
+    monkeypatch.setattr(reingest, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(reingest, "run", fake_run)
 
     assert reingest._local_clickhouse_container() == "nhx-intake-clickhouse-a1b2c3d4e5f6"
     assert "label=nhx.nvidia.com/managed-by=nemo-helix" in commands[0]
@@ -1296,9 +1296,9 @@ def test_local_clickhouse_container_resolves_managed_name_by_label(monkeypatch):
 
 def test_local_clickhouse_container_rejects_multiple_managed_instances(monkeypatch):
     monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "http://127.0.0.1:55123")
-    monkeypatch.setattr(reingest.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(reingest, "which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr(
-        reingest.subprocess,
+        reingest,
         "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 0, stdout="first\nsecond\n", stderr=""),
     )
@@ -1314,7 +1314,7 @@ def test_ttl_stop_failure_is_nonfatal_and_tells_user(tmp_path, quiet_platform, m
             raise FileNotFoundError("docker not installed")
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="no such container")
 
-    monkeypatch.setattr(reingest.subprocess, "run", failing_run)
+    monkeypatch.setattr(reingest, "run", failing_run)
     monkeypatch.setattr(reingest, "_local_clickhouse_container", lambda: "nhx-intake-clickhouse-a1b2c3d4e5f6")
     export_dir = _write_export(tmp_path, "ws-a", [AGENT_DOC, LLM_DOC])
     quiet_platform["span_counts"] = [0, 2]
@@ -1532,7 +1532,7 @@ def test_cleanup_scratch_remote_leaves_rows_and_record_and_reports(monkeypatch, 
         def __init__(self, *args, **kwargs):
             raise AssertionError("remote cleanup must not touch the entities API")
 
-    monkeypatch.setattr(reingest.httpx, "Client", _NoHTTP)
+    monkeypatch.setattr(reingest, "Client", _NoHTTP)
     reingest.cleanup_scratch("http://intake.example.com:8080", ["scratch-rt-abc12345-ws-a", "scratch-rt-abc12345-ws-b"])
     assert fake_docker == []
     err = capsys.readouterr().err
@@ -1545,7 +1545,7 @@ def test_cleanup_scratch_loopback_deletes_rows_and_keeps_reusable_record(monkeyp
         def __init__(self, *args, **kwargs):
             raise AssertionError("row cleanup must keep the active workspace record")
 
-    monkeypatch.setattr(reingest.httpx, "Client", _NoHTTP)
+    monkeypatch.setattr(reingest, "Client", _NoHTTP)
     monkeypatch.setattr(reingest, "_local_clickhouse_container", lambda: "nhx-intake-clickhouse-a1b2c3d4e5f6")
     reingest.cleanup_scratch("http://127.0.0.1:8080", ["scratch-rt-abc12345-ws-a"])
     tables = {cmd[-1].split("FROM intake.")[1].split(" ")[0] for cmd in fake_docker}
@@ -1557,7 +1557,7 @@ def test_cleanup_scratch_keeps_workspace_record_when_container_is_ambiguous(monk
         def __init__(self, *args, **kwargs):
             raise AssertionError("unsafe cleanup must not delete workspace records")
 
-    monkeypatch.setattr(reingest.httpx, "Client", _NoHTTP)
+    monkeypatch.setattr(reingest, "Client", _NoHTTP)
 
     def ambiguous_container() -> str:
         raise RuntimeError("multiple local ClickHouse containers found")
@@ -1584,9 +1584,9 @@ def test_cleanup_scratch_ignores_unlabeled_legacy_name_collision(monkeypatch, ca
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
     monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "http://localhost:8123")
-    monkeypatch.setattr(reingest.httpx, "Client", _NoHTTP)
-    monkeypatch.setattr(reingest.shutil, "which", lambda name: "/usr/bin/docker")
-    monkeypatch.setattr(reingest.subprocess, "run", fake_run)
+    monkeypatch.setattr(reingest, "Client", _NoHTTP)
+    monkeypatch.setattr(reingest, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(reingest, "run", fake_run)
 
     reingest.cleanup_scratch("http://127.0.0.1:8080", ["scratch-rt-abc12345-ws-a"])
 
@@ -1601,12 +1601,12 @@ def test_cleanup_scratch_loopback_with_external_clickhouse_preserves_all_state(m
             raise AssertionError("unverified cleanup must not delete workspace records")
 
     monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "https://clickhouse.example.internal:8443")
-    monkeypatch.setattr(reingest.httpx, "Client", _NoHTTP)
+    monkeypatch.setattr(reingest, "Client", _NoHTTP)
 
     def fail_docker_lookup(name: str) -> str:
         raise AssertionError("external ClickHouse must not inspect Docker")
 
-    monkeypatch.setattr(reingest.shutil, "which", fail_docker_lookup)
+    monkeypatch.setattr(reingest, "which", fail_docker_lookup)
 
     reingest.cleanup_scratch("http://127.0.0.1:8080", ["scratch-rt-abc12345-ws-a"])
 

@@ -15,7 +15,6 @@ import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { IntakeSessionDetailRoute } from '@studio/routes/IntakeSessionDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
-import { mockFeatureFlags } from '@studio/tests/util/mockFeatureFlags';
 import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -356,7 +355,6 @@ describe('IntakeSessionDetailRoute', () => {
   });
 
   it('switches a selected trace between graph modes', async () => {
-    mockFeatureFlags({ traceGraphEnabled: true });
     const user = userEvent.setup();
     renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
 
@@ -384,7 +382,6 @@ describe('IntakeSessionDetailRoute', () => {
   });
 
   it('loads graph spans by trace when the session page does not contain them', async () => {
-    mockFeatureFlags({ traceGraphEnabled: true });
     const traceId = 'trace-agent-run-003';
     const traceSpans = mockSpansPage.data.filter((span) => span.trace_id === traceId);
     server.use(
@@ -414,7 +411,6 @@ describe('IntakeSessionDetailRoute', () => {
   });
 
   it('warns when the trace span request fails and session spans are used', async () => {
-    mockFeatureFlags({ traceGraphEnabled: true });
     server.use(
       http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
         const traceId = new URL(request.url).searchParams.get('filter[trace_id]');
@@ -432,7 +428,6 @@ describe('IntakeSessionDetailRoute', () => {
   });
 
   it('restores graph mode separately for each trace', async () => {
-    mockFeatureFlags({ traceGraphEnabled: true });
     const user = userEvent.setup();
     sessionStorage.setItem('nemo-studio:trace-graph-mode:default:trace-agent-run-001', 'all');
     sessionStorage.setItem('nemo-studio:trace-graph-mode:default:trace-agent-run-003', 'grouped');
@@ -450,17 +445,6 @@ describe('IntakeSessionDetailRoute', () => {
 
     await user.click(await screen.findByText('Graph'));
     expect(screen.getByRole('radio', { name: 'Grouped' })).toBeChecked();
-  });
-
-  it('hides graph mode when its feature flag is disabled', async () => {
-    mockFeatureFlags({ traceGraphEnabled: false });
-
-    renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
-
-    expect(await screen.findByText('Trace Answer customer policy question')).toBeInTheDocument();
-    expect(screen.queryByText('Graph')).not.toBeInTheDocument();
-    expect(screen.getByText('Tree')).toBeInTheDocument();
-    expect(screen.getByText('List')).toBeInTheDocument();
   });
 
   it('keeps the detail shell useful for a session with one trace', async () => {
@@ -526,7 +510,6 @@ describe('IntakeSessionDetailRoute', () => {
   });
 
   it('preserves a directly linked span outside the loaded summary page', async () => {
-    mockFeatureFlags({ traceGraphEnabled: true });
     const user = userEvent.setup();
     let resolveOutsidePageSpan!: () => void;
     const outsidePageSpanGate = new Promise<void>((resolve) => {

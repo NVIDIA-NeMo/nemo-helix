@@ -112,7 +112,7 @@ export const CustomizationJobDetailsRoute: FC = () => {
                 <Flex align="center" gap="1">
                   {metadata.map((segment, index) => (
                     <Fragment key={segment}>
-                      {index > 0 && <ShapeCircle className="size-2" aria-hidden />}
+                      {index > 0 && <ShapeCircle variant="fill" className="size-2" aria-hidden />}
                       <Text kind="body/regular/sm" className="text-secondary">
                         {segment}
                       </Text>

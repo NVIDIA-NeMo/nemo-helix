@@ -1,0 +1,2 @@
+# The scorer needs only the standard library beyond NeMo Gym, which Gym installs from its own checkout.
+-e nemo-gym[dev] @ ../../

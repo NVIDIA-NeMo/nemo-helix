@@ -53,7 +53,6 @@ checkpoint:
   restore_from: LATEST
   save_consolidated: true
   dequantize_base_checkpoint: true
-  v4_compatible: false
 dataloader:
   _target_: torchdata.stateful_dataloader.StatefulDataLoader
   dataset:

@@ -1,0 +1,48 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Web Search with Tavily"
+description: "Give agents live web search and page extraction through the Tavily plugin."
+---
+
+The [Tavily plugin](https://github.com/tavily-ai/nemo-helix-tavily) gives agents `tavily_search` and `tavily_extract`
+tools. It is a third-party plugin maintained by Tavily. The platform proxies agent requests to Tavily's hosted MCP
+server with the workspace's Tavily API key, so agents never see the key.
+
+<Note>
+Once a workspace has a Tavily key, search queries and page URLs from agents with Tavily enabled and from
+`nemo tavily search` and `nemo tavily extract` go to `mcp.tavily.com` under Tavily's terms. See
+[Third-Party Services](/documentation/reference/telemetry-and-privacy#third-party-services).
+</Note>
+
+## Where it is included
+
+| Environment | Plugin installed | Proxy on by default |
+|---|---|---|
+| Helm chart and NeMo Helix images | Yes | Yes |
+| Source checkout (`make bootstrap`) | Yes | No. Run the `tavily` service with `NEMO_TAVILY_ENABLED=true`. |
+| `pip install nemo-helix` | No | No |
+
+The plugin is published on PyPI as [`nemo-helix-tavily-plugin`](https://pypi.org/project/nemo-helix-tavily-plugin/).
+To install it where it isn't included, including in a custom image, follow its
+[README](https://github.com/tavily-ai/nemo-helix-tavily#readme). It requires NeMo Helix 0.9 or later.
+
+## Turn the proxy on or off
+
+The platform reads this setting at startup, so restart it after a change. An environment variable takes precedence
+over the config file.
+
+| Where | Disable |
+|---|---|
+| Helm | `platformConfig.tavily.enabled: false` |
+| Environment | `NEMO_TAVILY_ENABLED=false` |
+| Platform config file | `tavily: {enabled: false}` |
+
+When the proxy is off, the plugin mounts no routes and never contacts Tavily.
+
+## Use Tavily
+
+Store a key with `nemo tavily setup`, then enable Tavily on an agent with `nemo tavily enable <agent>`. The
+[README](https://github.com/tavily-ai/nemo-helix-tavily#readme) covers these steps, the other `nemo tavily` commands,
+settings such as the allowed tools, and troubleshooting.

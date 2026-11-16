@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ChartPerformance, Numbers, Timer } from '@nemo/icons/icons';
+import { PerformanceMedium, Grid, Timer } from '@nemo/icons/icons';
 import type { FC } from 'react';
 
 export interface ChatMetrics {
@@ -38,11 +38,11 @@ export const StatsBadge: FC<StatsBadgeProps> = ({
         {seconds}s
       </span>
       <span className="inline-flex items-center gap-1" title="Tokens per second">
-        <ChartPerformance size={iconSize} />
+        <PerformanceMedium size={iconSize} />
         {tokensPerSec} t/s
       </span>
       <span className="inline-flex items-center gap-1" title="Completion tokens">
-        <Numbers size={iconSize} />
+        <Grid size={iconSize} />
         {Math.round(metrics.completionTokens)} tok
       </span>
     </div>

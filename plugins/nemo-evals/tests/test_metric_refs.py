@@ -59,7 +59,8 @@ async def _stored(
         outputs=bundle.outputs,
         payload_kind=bundle.payload.kind,
         payload_digest=bundle.payload.digest,
-        bundle_ref=ref,
+        bundle_ref=ref.ref,
+        bundle_fileset_id=ref.fileset_id,
     )
     return bundle
 

@@ -42,13 +42,6 @@ export function assertUnreachable(value: never, message?: string): never {
 }
 
 /**
- * Narrows an unknown value to a keyed object, excluding null and arrays. Use to
- * walk untyped payloads without asserting a shape the compiler cannot verify.
- */
-export const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/**
  * Narrows an unknown value to a primitive that renders as-is. Excludes null,
  * undefined, objects and arrays, which need their own presentation.
  */

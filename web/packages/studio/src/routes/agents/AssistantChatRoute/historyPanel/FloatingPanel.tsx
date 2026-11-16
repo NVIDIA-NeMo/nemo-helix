@@ -3,7 +3,7 @@
 
 import { ChevronDown } from '@nemo/icons/icons';
 import { Text } from '@nvidia/foundations-react-core';
-import { type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 interface FloatingPanelProps {
   children: ReactNode;

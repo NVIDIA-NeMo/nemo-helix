@@ -25,6 +25,7 @@ from nemo_deployments_plugin.backends.registry import (
     UnknownBackendTypeError,
 )
 from nemo_deployments_plugin.entities import Container, ContainerPort, DeploymentConfig
+from nemo_helix_plugin.capabilities import ProbeResult
 from nemo_helix_plugin.client.client import AsyncNemoClient
 
 
@@ -81,7 +82,8 @@ def _patched_docker_init(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=client),
     ):
         yield client
 

@@ -11,8 +11,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
 from nemo_helix_ext.cli.commands.jobs import (
     _generate_jobs_python_code,
+    app,
     create_or_update_tasks,
     create_results,
     download_results,
@@ -28,8 +30,10 @@ from nemo_helix_ext.cli.commands.jobs import (
     update_jobs,
     update_status_steps,
 )
+from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
+from typer.testing import CliRunner
 
 
 class _Response:
@@ -145,7 +149,7 @@ def test_list_jobs_uses_source_owned_client_and_keeps_first_page_semantics() -> 
     jobs_client.list_jobs.assert_called_once()
     call_kwargs = jobs_client.list_jobs.call_args.kwargs
     assert call_kwargs["workspace"] == "test-workspace"
-    assert json.loads(call_kwargs["query_params"]["filter"]) == {"name": "job-a", "status": ["active"]}
+    assert json.loads(call_kwargs["query_params"]["filter"]) == {"name": "job-a", "status": "active"}
     assert call_kwargs["query_params"]["page"] == 2
     assert call_kwargs["query_params"]["page_size"] == 10
     assert call_kwargs["query_params"]["sort"] == "-created_at"
@@ -182,10 +186,52 @@ def test_list_jobs_sends_serialized_filter_query_to_source_owned_client() -> Non
     assert len(captured_requests) == 1
     request = captured_requests[0]
     assert request.url.path == "/apis/jobs/v2/workspaces/test-workspace/jobs"
-    assert json.loads(request.url.params["filter"]) == {"name": "job-a", "status": ["active"]}
+    assert json.loads(request.url.params["filter"]) == {"name": "job-a", "status": "active"}
     assert request.url.params["page"] == "2"
     assert request.url.params["page_size"] == "10"
     assert request.url.params["sort"] == "-created_at"
+
+
+@pytest.mark.parametrize(
+    ("statuses", "expected"),
+    [
+        ([], "pending"),
+        (["active"], "active"),
+        (["queued"], "queued"),
+        (["completed", "error"], {"$in": ["completed", "error"]}),
+    ],
+)
+def test_list_jobs_status_options_send_scalar_or_membership_filter(statuses: list[str], expected: object) -> None:
+    captured_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_requests.append(request)
+        return _job_page_response(request)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = NemoClient(base_url="http://nemo.test", http_client=http_client)
+        args = [
+            "list",
+            "--workspace",
+            "test-workspace",
+            "--filter",
+            '{"status":"pending","source":"customizer"}',
+            "--filter.name",
+            "job-a",
+            "-f",
+            "json",
+        ]
+        for status in statuses:
+            args.extend(["--filter.status", status])
+        result = CliRunner().invoke(app, args, obj=CLIContext(_client=client))
+
+    assert result.exit_code == 0, result.output
+    assert len(captured_requests) == 1
+    request = captured_requests[0]
+    assert request.method == "GET"
+    assert request.url.path == "/apis/jobs/v2/workspaces/test-workspace/jobs"
+    assert json.loads(request.url.params["filter"]) == {"status": expected, "source": "customizer", "name": "job-a"}
+    assert "job-a" in result.output
 
 
 def test_list_steps_serializes_json_filter_for_source_owned_client() -> None:
@@ -234,17 +280,14 @@ def test_list_steps_serializes_json_filter_for_source_owned_client() -> None:
     warn_if_more_pages.assert_called_once()
 
 
-def test_download_results_streams_chunks_to_output_file(tmp_path: Path) -> None:
+def test_download_results_streams_chunks_to_output_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     platform_client = SimpleNamespace()
     jobs_client = MagicMock()
     binary_response = _BinaryResponse([b"metric-", b"bytes"])
     output_file = tmp_path / "metrics.bin"
     jobs_client.download_job_result.return_value = binary_response
 
-    with (
-        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
-        patch("nemo_helix_ext.cli.commands.jobs.typer.echo") as echo,
-    ):
+    with patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client):
         download_results(
             _ctx(platform_client),
             name="metrics",
@@ -260,8 +303,9 @@ def test_download_results_streams_chunks_to_output_file(tmp_path: Path) -> None:
     )
     assert output_file.read_bytes() == b"metric-bytes"
     assert binary_response.stream_calls == 1
-    echo.assert_called_once()
-    assert echo.call_args.args[0].endswith(f"Downloaded to {output_file!r}")
+    echoed = capsys.readouterr().out.splitlines()
+    assert len(echoed) == 1
+    assert echoed[0].endswith(f"Downloaded to {output_file!r}")
 
 
 def test_create_result_sends_required_attempt_association() -> None:

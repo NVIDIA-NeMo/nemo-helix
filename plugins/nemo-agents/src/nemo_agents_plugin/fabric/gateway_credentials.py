@@ -9,8 +9,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-PLATFORM_IGW_PATH_MARKER = "/apis/inference-gateway/"
-PLATFORM_IGW_API_KEY_ENV = "NEMO_AGENTS_IGW_API_KEY"
+from nemo_agents_plugin.fabric.gateway_models import PLATFORM_IGW_API_KEY_ENV, is_gateway_url, model_base_url
+
 PLATFORM_IGW_API_KEY_PLACEHOLDER = "not-used"
 
 
@@ -73,12 +73,4 @@ def _selected_model_config(config: Mapping[str, Any]) -> Mapping[str, Any] | Non
 
 
 def _is_platform_gateway_model(model: Mapping[str, Any]) -> bool:
-    base_url = model.get("base_url")
-    if isinstance(base_url, str):
-        return PLATFORM_IGW_PATH_MARKER in base_url
-
-    settings = model.get("settings")
-    if not isinstance(settings, Mapping):
-        return False
-    legacy_base_url = settings.get("base_url")
-    return isinstance(legacy_base_url, str) and PLATFORM_IGW_PATH_MARKER in legacy_base_url
+    return is_gateway_url(model_base_url(model))

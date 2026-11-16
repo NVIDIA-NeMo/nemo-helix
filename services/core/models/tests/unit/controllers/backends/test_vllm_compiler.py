@@ -128,10 +128,23 @@ def test_compile_vllm_args_user_served_name_not_overridden():
     assert args[args.index("--served-model-name") + 1] == "custom"
 
 
-def test_compile_vllm_args_enable_lora():
-    view = _view(gpu=1, model_name="qwen", lora_enabled=True)
-    args = vllm_compiler.compile_vllm_args(view, model_entity=None)
-    assert "--enable-lora" in args
+@pytest.mark.parametrize(
+    ("lora_enabled", "additional_args", "expected_rank"),
+    [
+        (True, [], "32"),
+        # The user's value wins, in either spelling.
+        (True, ["--max-lora-rank", "64"], "64"),
+        (True, ["--max_lora_rank=64"], None),
+        (False, [], None),
+    ],
+)
+def test_compile_vllm_args_lora(lora_enabled: bool, additional_args: list[str], expected_rank: str | None):
+    view = _view(gpu=1, model_name="qwen", lora_enabled=lora_enabled, additional_args=additional_args)
+    args = vllm_compiler.compile_vllm_args(view, model_entity=None, max_lora_rank=32)
+    assert ("--enable-lora" in args) is lora_enabled
+    assert args.count("--max-lora-rank") == (1 if expected_rank else 0)
+    if expected_rank:
+        assert args[args.index("--max-lora-rank") + 1] == expected_rank
 
 
 def test_compile_vllm_args_chat_template():
@@ -331,6 +344,43 @@ def test_compile_vllm_args_cpu_only_no_tp():
     assert "--tensor-parallel-size" not in args
 
 
+_TP4 = ["--tensor-parallel-size", "4"]
+_HERMES = ["--tool-call-parser", "hermes"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "kept"),
+    [
+        (["--served_model_name", "custom"], [*_TP4, *_HERMES]),
+        (["--served_model_name=custom"], [*_TP4, *_HERMES]),
+        (["--tensor_parallel_size=2", "--tool_call_parser", "custom"], ["--served-model-name", "qwen"]),
+        # vLLM sets a JSON flag one key at a time; a dotted key counts as the whole flag.
+        (["--tool-call-parser.extra", "x"], ["--served-model-name", "qwen", *_TP4]),
+        # Flags the compiler never emits pass through alongside its own.
+        (
+            ["--max_model_len=32768", "--speculative-config.method", "ngram"],
+            ["--served-model-name", "qwen", *_TP4, *_HERMES],
+        ),
+    ],
+)
+def test_compile_vllm_args_underscore_and_dotted_spelling_count_as_user_flag(raw: list[str], kept: list[str]):
+    # vLLM accepts underscores in flag names, so the compiler must not add a second one.
+    model = _model_entity(spec=_spec(tool_call_config=ToolCallConfig(tool_call_parser="hermes")))
+    args = vllm_compiler.compile_vllm_args(_view(gpu=4, model_name="qwen", additional_args=raw), model)
+    assert args == ["/model-store", *kept, *raw]
+
+
+@pytest.mark.parametrize("lora_enabled", [False, True])
+def test_compile_vllm_args_no_model_specific_flags(lora_enabled: bool):
+    # Nemotron 3.5 Super VL: vLLM copies its 2 KV heads across 4 ranks; model-specific flags
+    # (reasoning parser, MTP, LoRA rank, ...) come only from additional_args.
+    spec = _spec(num_kv_heads=2, architectures=["NemotronH_Omni_Reasoning_V3"], num_nextn_predict_layers=1)
+    model = _model_entity(spec=spec, trust_remote_code=True)
+    args = vllm_compiler.compile_vllm_args(_view(gpu=4, lora_enabled=lora_enabled), model)
+    lora = ["--enable-lora"] if lora_enabled else []
+    assert args == ["/model-store", *_TP4, *lora, "--trust-remote-code"]
+
+
 def test_compile_vllm_args_user_tp_not_overridden():
     model_entity = _model_entity(spec=_spec())
     view = _view(gpu=4, model_name="qwen", additional_args=["--tensor-parallel-size", "2"])
@@ -363,10 +413,19 @@ def test_compute_tp_picks_largest_valid_divisor():
     assert vllm_compiler.compute_tensor_parallel_size(4, model_entity) == 4
 
 
-def test_compute_tp_respects_kv_head_constraint():
-    # num_kv_heads=2 only divides by 1 and 2 (not 4) -> TP capped at 2.
-    model_entity = _model_entity(spec=_spec(hidden_size=4096, num_attention_heads=32, num_kv_heads=2))
-    assert vllm_compiler.compute_tensor_parallel_size(4, model_entity) == 2
+@pytest.mark.parametrize(
+    ("gpu", "hidden_size", "num_heads", "num_kv_heads", "expected"),
+    [
+        # vLLM copies 2 KV heads across 4 or 8 ranks; Nemotron 3.5 Super VL needs TP 4+ to fit.
+        (4, 4096, 32, 2, 4),
+        (8, 4096, 32, 2, 8),
+        # 3 KV heads neither split across 2 or 4 ranks nor copy evenly onto them.
+        (4, 3072, 24, 3, 1),
+    ],
+)
+def test_compute_tp_kv_head_rule(gpu: int, hidden_size: int, num_heads: int, num_kv_heads: int, expected: int):
+    spec = _spec(hidden_size=hidden_size, num_attention_heads=num_heads, num_kv_heads=num_kv_heads)
+    assert vllm_compiler.compute_tensor_parallel_size(gpu, _model_entity(spec=spec)) == expected
 
 
 def test_compute_tp_no_valid_divisor_defaults_to_one():

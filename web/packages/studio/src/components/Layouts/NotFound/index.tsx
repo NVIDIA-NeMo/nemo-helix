@@ -3,7 +3,7 @@
 
 import { IconError } from '@nemo/icons/icons';
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
 interface Props {

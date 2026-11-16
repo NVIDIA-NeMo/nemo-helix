@@ -38,7 +38,8 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "huggingface-hub>=1.0.1,<2.0.0",
     "hvac>=2.3.0",
-    "kubernetes>=30.1.0",
+    # Keep wheel installs compatible with the Jobs backend's ApiClient.deserialize API.
+    "kubernetes>=30.1.0,<37",
     "prometheus-fastapi-instrumentator>=8.0.2",
     "opentelemetry-exporter-prometheus>=0.64b0",
     "opentelemetry-processor-baggage>=0.64b0",

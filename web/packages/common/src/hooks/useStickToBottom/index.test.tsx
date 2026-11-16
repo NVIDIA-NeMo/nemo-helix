@@ -4,7 +4,7 @@
 import { useStickToBottom } from '@nemo/common/src/hooks/useStickToBottom';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 // jsdom has no layout: scrollHeight/clientHeight report 0 and scrollTop is a no-op.
 // Fake the geometry and back scrollTop with a real stored value so assignments stick.

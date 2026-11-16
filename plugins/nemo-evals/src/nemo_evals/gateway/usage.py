@@ -19,6 +19,7 @@ class CallApi(StrEnum):
     CHAT_COMPLETIONS = "chat.completions"
     RESPONSES = "responses"
     MESSAGES = "messages"
+    SYSTEMONE = "systemone"
     OTHER = "other"
 
     @classmethod
@@ -30,6 +31,8 @@ class CallApi(StrEnum):
             return cls.RESPONSES
         if path == "messages":
             return cls.MESSAGES
+        if path == "systemone":
+            return cls.SYSTEMONE
         return cls.OTHER
 
 
@@ -96,6 +99,13 @@ def usage_from_payload(api: CallApi, payload: Mapping[str, Any]) -> TokenUsage |
             output_tokens=_count(usage, "output_tokens"),
         )
     usage = payload.get("usage")
+    if api is CallApi.SYSTEMONE:
+        if not isinstance(usage, Mapping):
+            return None
+        return TokenUsage(
+            uncached_input_tokens=_count(usage, "input_tokens"),
+            output_tokens=_count(usage, "output_tokens"),
+        )
     if api is CallApi.RESPONSES:
         if isinstance(payload.get("response"), Mapping):
             usage = payload["response"].get("usage")

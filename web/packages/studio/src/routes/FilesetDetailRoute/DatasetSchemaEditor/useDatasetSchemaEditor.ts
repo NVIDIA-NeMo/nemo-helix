@@ -187,7 +187,6 @@ export function useDatasetSchemaEditor({
     setIsInferring(true);
     setInferError(null);
     try {
-      const decoder = new TextDecoder('utf-8');
       const perFile: PerFileInferred[] = [];
       for (const file of supportedExistingFiles.slice(0, INFER_FROM_EXISTING_MAX_FILES)) {
         const format = detectFormatFromPath(file.path);
@@ -199,8 +198,7 @@ export function useDatasetSchemaEditor({
           bytes: file.size,
         });
         if (!buffer) continue;
-        const textContent = decoder.decode(buffer);
-        const blob = new File([textContent], file.path);
+        const blob = new File([buffer], file.path);
         try {
           const row = await getFirstRow(blob, format);
           if (row && typeof row === 'object') {

@@ -10,6 +10,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from nemo_evals._fileset_receipt import FilesetReceipt
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.jobs.agent_files_snapshot import (
     discard_registered_agent_files,
@@ -22,9 +23,11 @@ from pytest_mock import MockerFixture
 
 def _files(mocker: MockerFixture) -> Any:
     files = mocker.Mock()
-    files.create_fileset = AsyncMock()
+    allocated = mocker.Mock()
+    allocated.data.return_value.id = "snapshot-id"
+    files.create_fileset = AsyncMock(return_value=allocated)
     files.upload_file = AsyncMock()
-    files.delete_fileset = AsyncMock()
+    files.delete_fileset_by_id = AsyncMock()
     mocker.patch("nemo_evals.jobs.agent_files_snapshot.AsyncFilesetFileSystem")
     return files
 
@@ -49,14 +52,14 @@ async def test_snapshot_copies_every_file_into_a_fresh_fileset(mocker: MockerFix
 
     ref = await snapshot_registered_agent_files(files, workspace="dev", agent_name="calc")
 
-    name = ref.root.removeprefix("dev/")
+    name = ref.ref.removeprefix("dev/")
     assert name.startswith("agent-files-") and len(name) == len("agent-files-") + 12
     assert sorted((c.kwargs["path"], c.kwargs["content"]) for c in files.upload_file.await_args_list) == [
         ("prompts/system.md", b"s"),
         ("skills/a/SKILL.md", b"a"),
     ]
     assert {c.kwargs["name"] for c in files.upload_file.await_args_list} == {name}
-    files.delete_fileset.assert_not_awaited()
+    files.delete_fileset_by_id.assert_not_awaited()
 
 
 async def test_a_failed_copy_deletes_the_half_made_snapshot(mocker: MockerFixture) -> None:
@@ -70,16 +73,18 @@ async def test_a_failed_copy_deletes_the_half_made_snapshot(mocker: MockerFixtur
     with pytest.raises(RuntimeError, match="storage unavailable"):
         await snapshot_registered_agent_files(files, workspace="dev", agent_name="calc")
 
-    deleted = files.delete_fileset.await_args.kwargs
-    assert deleted["workspace"] == "dev" and deleted["name"] == files.create_fileset.await_args.kwargs["body"].name
+    deleted = files.delete_fileset_by_id.await_args.kwargs
+    assert deleted["workspace"] == "dev" and deleted["fileset_id"] == "snapshot-id"
 
 
 async def test_discard_logs_rather_than_fails_the_job(mocker: MockerFixture, caplog: pytest.LogCaptureFixture) -> None:
     files = _files(mocker)
-    files.delete_fileset.side_effect = RuntimeError("gone already")
+    files.delete_fileset_by_id.side_effect = RuntimeError("gone already")
 
     with caplog.at_level("WARNING"):
-        await discard_registered_agent_files(files, FilesetRef(root="dev/agent-files-0123abcd4567"))
+        await discard_registered_agent_files(
+            files, FilesetReceipt(ref="dev/agent-files-0123abcd4567", fileset_id="snapshot-id")
+        )
 
     assert any("agent-files-0123abcd4567" in r.message for r in caplog.records)
 
@@ -88,6 +93,8 @@ def test_discard_from_the_evaluation_step_uses_the_sync_client_it_was_given(mock
     files_client = mocker.Mock()
     mocker.patch("nemo_evals.jobs.agent_files_snapshot.FilesClient.from_client", return_value=files_client)
 
-    discard_registered_agent_files_sync(mocker.Mock(spec=NemoClient), FilesetRef(root="dev/agent-files-0123abcd4567"))
+    discard_registered_agent_files_sync(
+        mocker.Mock(spec=NemoClient), FilesetReceipt(ref="dev/agent-files-0123abcd4567", fileset_id="snapshot-id")
+    )
 
-    files_client.delete_fileset.assert_called_once_with(workspace="dev", name="agent-files-0123abcd4567")
+    files_client.delete_fileset_by_id.assert_called_once_with(workspace="dev", fileset_id="snapshot-id")

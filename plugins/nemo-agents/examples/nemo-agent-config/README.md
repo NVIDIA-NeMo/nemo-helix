@@ -40,8 +40,14 @@ mcp:
   servers: {}
 
 tools:
+  enabled: null
   blocked: []
 ```
+
+Omit `tools.enabled` or set it to `null` to preserve default tool availability,
+subject to `blocked`. Set it to `[]` to deny all tools, or list tool names to allow
+only those tools. A tool name cannot appear in both lists. Tool policy support
+depends on the harness.
 
 `instructions.system` is the shared system prompt path for Claude, Codex,
 DeepAgents, and Hermes. Adapter-specific options stay under
@@ -176,7 +182,7 @@ commands above. The example calls the NVIDIA model endpoint directly.
 streaming and sessions. Mini-SWE-Agent supports replacement system instructions,
 but not appended instructions, skills, MCP, or tool policy.
 
-For Helix 0.9 / Fabric 0.5, follow the public
+For Helix 0.10 / Fabric 0.6, follow the public
 [Mini-SWE lifecycle guide](https://docs.nvidia.com/nemo-helix/documentation/agents/mini-swe-agent)
 for credential binding, session commands, normalized responses and timeout
 boundaries. The integration gate checks invocation, session history and Relay
