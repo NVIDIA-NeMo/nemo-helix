@@ -210,10 +210,13 @@ export const evaluatorHandlers = [
     const task = findTask(params.workspace, params.name);
     return task ? paginate(request, revisionsOf(task)) : notFound('Task');
   }),
-  // Resolves tags only: a revision handler keyed by digest would just echo the task back.
+  // Resolves a tag or a content digest; the content itself is the current task's.
   http.get(`${EVALS_URL}/tasks/:name/revisions/:revision`, ({ params }) => {
     const task = findTask(params.workspace, params.name);
-    const revision = task?.tags?.[String(params.revision)];
+    const key = String(params.revision);
+    const revision =
+      task?.tags?.[key] ??
+      (task && revisionsOf(task).find(({ content_hash }) => content_hash === key)?.revision);
     return task && revision ? HttpResponse.json({ ...task, revision }) : notFound('Revision');
   }),
 

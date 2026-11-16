@@ -29,6 +29,15 @@ describe('mock taskset handlers', () => {
     expect(await names(`default/tasksets?${query}`)).toEqual(expected);
   });
 
+  it('gets a task revision by tag or content digest', async () => {
+    const byDigest = await evals(`default/tasks/sort-strings/revisions/${'1'.padStart(64, 'c')}`);
+    expect((await byDigest.json()).revision).toBe(1);
+    expect(
+      (await (await evals('default/tasks/sort-strings/revisions/latest')).json()).revision
+    ).toBe(2);
+    expect((await evals('default/tasks/sort-strings/revisions/missing')).status).toBe(404);
+  });
+
   it('sorts tasksets by the sort param', async () => {
     expect(await names('default/tasksets?sort=name')).toEqual(['phishing-triage', 'sort-suite']);
     expect(await names('default/tasksets?sort=-name')).toEqual(['sort-suite', 'phishing-triage']);
