@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from typing import ClassVar, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -28,6 +29,7 @@ from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import MAX_REVISION, ContainerImage
 from nemo_builder_plugin.identity import ImageReference
 from nemo_builder_plugin.schema import BuildSet, SubmitBuildResponse
+from nemo_builder_plugin.settle import job_status_from, settle
 from nemo_builder_plugin.submit import (
     BuildConflict,
     InvalidBuildRequest,
@@ -40,7 +42,10 @@ from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.dependencies import get_nemo_client
+from nemo_helix_plugin.entities import EntityClient
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityNotFoundError,
@@ -59,6 +64,33 @@ async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str)
         return await entity_client.get(ContainerImage, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc
+
+
+#: ``image`` as it stands once settled: failed if its job abandoned it.
+Settle = Callable[[ContainerImage], Awaitable[ContainerImage]]
+
+
+async def _settle_as_builder(image: ContainerImage) -> ContainerImage:
+    # As the builder, not the reader: a reader who may not see the job must not have it taken for missing, and one
+    # who may not write the image must not be refused, nor have the failure written in their name.
+    try:
+        async with get_async_nemo_client(as_service="builder", internal=True) as client:
+            rows = EntityClient(AsyncEntitiesClient.from_client(client))
+            return (await settle(rows, [image], job_status_from(AsyncJobsClient.from_client(client))))[0]
+    except Exception:
+        # Settling is best effort, as `settle` is: the read still returns the row, and the next read or
+        # builder-settle pass settles it.
+        logger.exception(
+            "could not settle image %s/%s as the builder; returning it as stored",
+            sanitize_for_log(image.workspace),
+            sanitize_for_log(image.name),
+        )
+        return image
+
+
+def get_settle() -> Settle:
+    """How reading an image settles it, if its job abandoned it."""
+    return _settle_as_builder
 
 
 class BuilderService(NemoService):
@@ -92,8 +124,8 @@ def _build_router() -> APIRouter:
     ) -> SubmitBuildResponse:
         """Submit a set of images to build.
 
-        Creates one `pending` ``ContainerImage`` per spec, then the job that builds them. With
-        `max_concurrent_builds` set, the images are `queued` instead, and the job starts once a slot is free.
+        Creates one `pending` ``ContainerImage`` per spec, then the job that builds them. Jobs starts the job once
+        its build profiles have room (their `max_active_jobs`).
         """
         refusal = submit_refusal(caller)
         if refusal is not None:
@@ -136,7 +168,6 @@ def _build_router() -> APIRouter:
                 secret_readable=secret_readable,
                 resolve_upstream=resolve_upstream,
                 default_platform=config.default_platform,
-                queue=config.max_concurrent_builds is not None,
             )
         except InvalidBuildRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -146,7 +177,7 @@ def _build_router() -> APIRouter:
             raise HTTPException(status_code=502, detail=f"Couldn't resolve an image to copy: {exc}") from exc
         except PermissionDeniedError as exc:
             # From Jobs, which lists the profiles and creates the job as the caller. A refused listing writes nothing;
-            # a refused job leaves the rows written before it pending.
+            # a refused job leaves the rows written before it pending, until a read finds them with no job.
             raise HTTPException(status_code=403, detail=f"Not permitted: {exc.detail}") from exc
         except NemoHTTPError as exc:
             logger.exception("a platform service refused build set %r", sanitize_for_log(body.name))
@@ -177,12 +208,20 @@ def _build_router() -> APIRouter:
             default=None, ge=1, le=MAX_REVISION, description="Only the images of this `revision`."
         ),
         status: Literal["queued", "pending", "ready", "failed"] | None = Query(
-            default=None, description="Only images in this state."
+            default=None,
+            description=(
+                "Only images in this stored state. The `builder-settle` controller fails an abandoned `pending` "
+                "image within a minute or so, so until then `pending` includes it and `failed` doesn't. `queued` is "
+                "deprecated: only 0.10's builder wrote it."
+            ),
         ),
         page_params: PageParams = Depends(make_page_dep(max_size=100)),
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
     ) -> list[ContainerImage]:
-        """List the images in a workspace, in whatever state they are in, or only one job's or one build set's."""
+        """List the images in a workspace, in whatever state they are stored in, or only one job's or one build set's.
+
+        Listing doesn't settle: the `builder-settle` controller fails the abandoned ones.
+        """
         filters: dict[str, object] = {}
         if job is not None:
             filters["provenance.job"] = f"{workspace}/{job}"
@@ -210,13 +249,17 @@ def _build_router() -> APIRouter:
         name: str,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
         caller: Caller = Depends(current_caller),
+        settle_image: Settle = Depends(get_settle),
     ) -> ContainerImage:
-        """Read one image. This is what a caller polls until `status` leaves `pending`."""
+        """Read one image. This is what a caller polls until `status` leaves `pending`.
+
+        A `pending` image whose job has ended, or that is five minutes old and has no job, is failed as it is read.
+        """
         row = await _get_row(entity_client, workspace, name)
         refusal = read_refusal(row, caller)
         if refusal is not None:
             raise HTTPException(status_code=403, detail=refusal)
-        return row
+        return await settle_image(row)
 
     @router.post("/container-images/{name}/complete", response_model=ContainerImage, tags=["Builder"])
     @scope.write

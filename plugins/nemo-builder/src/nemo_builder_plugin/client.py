@@ -21,6 +21,7 @@ _IMAGES = "/apis/builder/v2/workspaces/{workspace}/container-images"
 
 class ListContainerImagesQueryParams(TypedDict, total=False):
     job: str
+    # `queued`: deprecated, only on rows 0.10's builder wrote.
     status: Literal["queued", "pending", "ready", "failed"]
     page: int
     page_size: int
