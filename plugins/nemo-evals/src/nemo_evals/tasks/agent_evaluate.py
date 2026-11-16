@@ -8,12 +8,13 @@ from __future__ import annotations
 import sys
 
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
+from nemo_evals.jobs.attempt_tasks import TASK_SERVICE_NAME
 from nemo_evals.tasks.runner import run_async_task_main
 
 
 def main() -> int:
     """Build the task SDK and dispatch to the agent-evaluation job."""
-    return run_async_task_main(AsyncAgentEvalJob, service_name="evals")
+    return run_async_task_main(AsyncAgentEvalJob, service_name=TASK_SERVICE_NAME)
 
 
 if __name__ == "__main__":

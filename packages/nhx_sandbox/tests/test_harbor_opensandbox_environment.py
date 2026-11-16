@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -31,6 +32,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
 from nhx_sandbox import egress
+from nhx_sandbox import harbor_opensandbox_driver as driver_module
 from nhx_sandbox import harbor_opensandbox_environment as environment_module
 from nhx_sandbox.core.errors import ExecInterrupted
 from nhx_sandbox.core.termination import TERMINATION_GLOB
@@ -68,7 +70,7 @@ def server(monkeypatch: pytest.MonkeyPatch) -> Server:
         )
         return real_client(transport=transport, **kwargs)
 
-    monkeypatch.setattr(environment_module.httpx, "AsyncClient", client)
+    monkeypatch.setattr(environment_module, "AsyncClient", client)
     monkeypatch.setattr(environment_module, "SERVER_RETRY_BASE_SEC", 0)
     return server
 
@@ -188,6 +190,63 @@ async def test_records_the_verified_policy_for_the_supervisor(tmp_path: Path, se
     assert record["network_mode"] == "public"
     assert record["policy"] == _policy_sent(server)
     assert record["policy_sha256"] == hashlib.sha256(canonical.encode()).hexdigest()
+
+
+async def test_a_slow_dns_lookup_does_not_block_the_event_loop(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Building the policy resolves hostnames; a slow lookup must not pause other trials on the same loop."""
+    lookups: list[str] = []
+    lookup_started = threading.Event()
+    loop_progressed = threading.Event()
+    loop_ran_during_lookup: list[bool] = []
+
+    def slow_resolve_host(target: str) -> tuple[Any, ...]:
+        lookups.append(target)
+        lookup_started.set()
+        # Only another coroutine on the loop can set this. If the lookup ran on the loop, nothing
+        # would, and the wait would run out.
+        loop_ran_during_lookup.append(loop_progressed.wait(timeout=5))
+        return ()
+
+    monkeypatch.setattr(egress, "_resolve_host", slow_resolve_host)
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
+    environment._trusted_allowed_hosts = ("slow.example.com",)
+
+    async def other_trial() -> None:
+        while not lookup_started.is_set():
+            await asyncio.sleep(0.001)
+        loop_progressed.set()
+
+    other = asyncio.create_task(other_trial())
+    try:
+        await environment._create_sandbox()
+    finally:
+        other.cancel()
+
+    assert lookups == ["slow.example.com"]
+    assert loop_ran_during_lookup == [True]
+
+
+async def test_the_policy_sent_verified_and_recorded_is_one_policy(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Building off the event loop still yields the single policy the create, the verification and the record share."""
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
+    built: list[Any] = []
+    build = environment.egress_policy
+
+    def spy() -> Any:
+        built.append(build())
+        return built[-1]
+
+    monkeypatch.setattr(environment, "egress_policy", spy)
+
+    sandbox = await environment._create_sandbox()
+
+    record = json.loads((tmp_path / TRIAL / applied_egress_filename(sandbox.id)).read_text())
+    assert len(built) == 1
+    assert record["policy"] == _policy_sent(server)
 
 
 @pytest.mark.parametrize("agent_session", [TRIAL, f"{TRIAL}__env"], ids=["harbor-0.13", "harbor-0.20"])
@@ -357,7 +416,7 @@ async def test_a_sandbox_created_later_still_ends_at_the_expiry(
     from the same settings ends when the first one does, not ``sandbox_timeout_sec`` after its own create."""
     settings: dict[str, Any] = {"sandbox_timeout_sec": 3600, "sandbox_expires_at": "2026-10-23T13:00:00+00:00"}
     now = [datetime(2026, 10, 23, 12, 30, tzinfo=UTC).timestamp()]
-    monkeypatch.setattr(time, "time", lambda: now[0])
+    monkeypatch.setattr(driver_module, "time", lambda: now[0])
 
     await _environment(tmp_path, server, NetworkMode.NO_NETWORK, **settings)._create_sandbox()
     now[0] += 20 * 60
@@ -847,12 +906,12 @@ async def test_a_failed_rewrite_leaves_the_previous_record_whole(
     sandbox_id = _sandbox(environment).id
     before = _record(tmp_path, sandbox_id)
 
-    def dies_mid_write(self: Path, data: str, *args: Any, **kwargs: Any) -> int:
-        with open(self, "w") as file:
-            file.write(data[:10])
+    def dies_mid_write(path: Path, text: str) -> None:
+        with open(path, "w") as file:
+            file.write(text[:10])
         raise OSError("No space left on device")
 
-    monkeypatch.setattr(Path, "write_text", dies_mid_write)
+    monkeypatch.setattr(environment_module, "_write_text", dies_mid_write)
     await environment.stop(delete=True)
     monkeypatch.undo()
 

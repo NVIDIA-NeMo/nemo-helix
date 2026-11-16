@@ -17,27 +17,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number (1-indexed).
-          default: 1
-          title: Page
-        description: Page number (1-indexed).
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          description: Items per page.
-          default: 20
-          title: Page Size
-        description: Items per page.
       - name: sort
         in: query
         required: false
@@ -55,6 +34,27 @@ paths:
           title: Enabled
           type: boolean
         description: Filter by enabled state.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Page size.
+          default: 20
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -225,27 +225,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number (1-indexed).
-          default: 1
-          title: Page
-        description: Page number (1-indexed).
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          description: Items per page.
-          default: 20
-          title: Page Size
-        description: Items per page.
       - name: sort
         in: query
         required: false
@@ -255,6 +234,27 @@ paths:
           default: -updated_at
           title: Sort
         description: Sort field.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Page size.
+          default: 20
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -388,27 +388,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number (1-indexed).
-          default: 1
-          title: Page
-        description: Page number (1-indexed).
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          description: Items per page.
-          default: 20
-          title: Page Size
-        description: Items per page.
       - name: sort
         in: query
         required: false
@@ -426,6 +405,27 @@ paths:
           title: Agent
           type: string
         description: Filter by the agent that was analyzed.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Page size.
+          default: 20
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -519,27 +519,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number (1-indexed).
-          default: 1
-          title: Page
-        description: Page number (1-indexed).
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          description: Items per page.
-          default: 20
-          title: Page Size
-        description: Items per page.
       - name: sort
         in: query
         required: false
@@ -566,6 +545,27 @@ paths:
           description: Filter by lifecycle status.
           title: Status
         description: Filter by lifecycle status.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Page size.
+          default: 20
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response

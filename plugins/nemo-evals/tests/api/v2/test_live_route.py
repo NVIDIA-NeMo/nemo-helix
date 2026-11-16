@@ -11,6 +11,8 @@ would block the worker for the whole of generation plus judging.
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 from typing import Any, NoReturn
@@ -29,6 +31,7 @@ from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entities import EntityClient, parse_qualified_name
@@ -44,6 +47,9 @@ from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
 from nhx_evals_sdk.values.common import SecretRef, SupportedJobTypes
 from nhx_evals_sdk.values.models import Model
 from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
+from pytest_httpserver import HTTPServer
+from werkzeug import Request as WerkzeugRequest
+from werkzeug import Response as WerkzeugResponse
 
 _BASE = "/v2/workspaces/default/evaluate/live"
 
@@ -749,3 +755,93 @@ def test_stored_cloudpickle_metric_is_rejected_by_default(
 
     assert resp.status_code == 422
     assert "cloudpickle metrics are disabled on this deployment" in resp.json()["detail"]
+
+
+_GATEWAY_ROUTE = "/apis/inference-gateway/v2/workspaces/default/model/{name}/-/v1"
+
+
+def test_gateway_calls_are_made_as_the_caller_when_auth_is_on(
+    monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer
+) -> None:
+    """A key-less gateway target and judge reach the platform as evals on behalf of the caller.
+
+    Sent as resolved, they carry the SDK's placeholder key, which an auth-on gateway refuses with 401
+    and the route reports as 502. The public host stands in for a URL the API may not reach itself.
+    The calls must land on the service client's platform URL.
+    """
+    seen: list[tuple[str, dict[str, str]]] = []
+
+    def gateway(request: WerkzeugRequest) -> WerkzeugResponse:
+        seen.append((request.path, dict(request.headers)))
+        text = "Paris" if "/model/target/" in request.path else '{"helpfulness": 4}'
+        return WerkzeugResponse(json.dumps(_chat_response(text)), content_type="application/json")
+
+    httpserver.expect_request(
+        re.compile(r"/apis/inference-gateway/.*/chat/completions"), method="POST"
+    ).respond_with_handler(gateway)
+    service_client = AsyncNemoClient(
+        base_url=httpserver.url_for("").rstrip("/"),
+        default_headers={"X-NHX-Principal-Id": "service:evals", "X-NHX-Principal-On-Behalf-Of": "sub-123"},
+    )
+    _delegated_service_client(monkeypatch, service_client)
+    monkeypatch.setattr(live_routes, "current_auth_context", lambda: _EDITOR)
+    monkeypatch.setattr(live_routes, "platform_auth_enabled", lambda: True)
+    public = "https://nhx.example.test"
+    judge = LLMJudgeMetric(
+        model=Model(url=public + _GATEWAY_ROUTE.format(name="judge"), name="judge"),
+        scores=[RangeScore(name="helpfulness", minimum=1, maximum=5, parser=JSONScoreParser(json_path="helpfulness"))],
+    )
+    judge_inline = MetricInline.model_validate_json(
+        bundle_metric(judge, HybridMetricBundlePackager()).model_dump_json()
+    ).model_dump(mode="json")
+
+    with TestClient(_build_app()) as client:
+        resp = client.post(
+            _BASE,
+            json={
+                "dataset": [{"expected": "Paris", "question": "Capital of France?"}],
+                "metrics": [_exact_match_metric(), judge_inline],
+                "target": {"url": public + _GATEWAY_ROUTE.format(name="target"), "name": "target"},
+                "prompt_template": {"messages": [{"role": "user", "content": "{{item.question}}"}]},
+            },
+        )
+
+    assert resp.status_code == 200, resp.text
+    by_metric = {m["metric"]: m for m in resp.json()["metrics"]}
+    assert by_metric["exact-match"]["scores"][0]["mean"] == pytest.approx(1.0)
+    assert by_metric["llm-judge"]["error"] is None
+    assert {path.split("/model/")[1].split("/")[0] for path, _ in seen} == {"judge", "target"}
+    for _, headers in seen:
+        assert headers.get("X-Nhx-Principal-On-Behalf-Of") == "sub-123"
+        assert headers.get("X-Nhx-Principal-Id") == "service:evals"
+        assert "Authorization" not in headers
+
+
+def test_gateway_target_is_called_as_resolved_when_auth_is_off(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With auth off there is no caller to call as, so the target keeps its URL and no proxy starts."""
+    called: list[str] = []
+
+    async def fake_inference(model, request, max_retries=3, **kwargs) -> dict[str, Any]:
+        del request, max_retries, kwargs
+        called.append(model.url)
+        return _chat_response("Paris")
+
+    monkeypatch.setattr(benchmark_execution, "make_inference_request", fake_inference)
+    monkeypatch.setattr(live_routes, "current_auth_context", lambda: _EDITOR)
+    monkeypatch.setattr(live_routes, "platform_auth_enabled", lambda: False)
+    target_url = "http://nemo-api:8080" + _GATEWAY_ROUTE.format(name="target")
+
+    resp = client.post(
+        _BASE,
+        json={
+            "dataset": [{"expected": "Paris", "question": "Capital of France?"}],
+            "metrics": [_exact_match_metric()],
+            "target": {"url": target_url, "name": "target"},
+            "prompt_template": {"messages": [{"role": "user", "content": "{{item.question}}"}]},
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert called == [target_url]

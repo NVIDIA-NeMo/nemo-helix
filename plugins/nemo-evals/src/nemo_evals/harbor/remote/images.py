@@ -52,3 +52,10 @@ class PreparedHarborEnvironment(BaseModel):
         default_factory=dict,
         description="Compose service name → pinned image (M3 story 8b); empty for single-container tasks.",
     )
+    agent_preinstalled: bool = Field(
+        default=False,
+        description=(
+            "Whether ``agent`` is the task's agent layer: its image with the run's agent already installed. The trial's "
+            "setup then only checks the install, so it runs without the agent setup egress window."
+        ),
+    )

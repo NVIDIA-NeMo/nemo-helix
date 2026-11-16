@@ -47,6 +47,26 @@ export const TOOL_ICONS: Record<string, FC<Omit<NvidiaGuiIconProps, 'iconName'>>
 export const CODE_BLOCK_SURFACE_CLASS = 'bg-gray-050 dark:bg-gray-900';
 export const FILE_CHANGE_ADDITION_CLASS = 'text-feedback-success';
 export const FILE_CHANGE_DELETION_CLASS = 'text-feedback-danger';
+
+export const TOOL_RUNNING_ACTIONS: Record<string, string> = {
+  AskUserQuestion: 'Asking',
+  Bash: 'Running',
+  Edit: 'Editing',
+  FindFiles: 'Searching files',
+  Glob: 'Finding files',
+  Grep: 'Searching text',
+  LS: 'Listing directory',
+  MultiEdit: 'Editing',
+  Read: 'Reading',
+  TaskCreate: 'Creating task',
+  TaskUpdate: 'Updating task',
+  TodoWrite: 'Updating todos',
+  ToolSearch: 'Searching tools',
+  WebFetch: 'Fetching URL',
+  WebSearch: 'Searching web',
+  Write: 'Writing',
+};
+
 export const SUBTLE_MESSAGE_MAX_LENGTH = 160;
 
 export const SUBTLE_TOOL_ICONS: Record<string, FC<Omit<NvidiaGuiIconProps, 'iconName'>>> = {

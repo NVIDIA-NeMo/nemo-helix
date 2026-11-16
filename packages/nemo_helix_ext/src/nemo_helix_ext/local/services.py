@@ -15,7 +15,9 @@ from asyncio import to_thread
 from collections.abc import Callable, MutableMapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from os import close
 from pathlib import Path
+from subprocess import Popen
 from time import monotonic, sleep
 from typing import Any, Literal, Protocol, Self, runtime_checkable
 
@@ -479,13 +481,13 @@ def _write_run_request(config: ServiceRunConfig) -> Path:
             file.write("\n")
     except BaseException:
         if fd >= 0:
-            os.close(fd)
+            close(fd)
             fd = -1
         path.unlink(missing_ok=True)
         raise
     finally:
         if fd >= 0:
-            os.close(fd)
+            close(fd)
     return path
 
 
@@ -500,8 +502,13 @@ def _terminate_startup_process(proc: subprocess.Popen) -> None:
         proc.wait(timeout=5)
 
 
-def serve_embedded_app(app: Any, cfg: ServiceRunConfig, socket_path: Path | None) -> None:
+def _run_uvicorn(app: Any, **kwargs: Any) -> None:
     import uvicorn
+
+    uvicorn.run(app, **kwargs)
+
+
+def serve_embedded_app(app: Any, cfg: ServiceRunConfig, socket_path: Path | None) -> None:
     from nhx.platform_runner.local_network import docker_listener_host
 
     docker_host = docker_listener_host(cfg.host)
@@ -517,7 +524,7 @@ def serve_embedded_app(app: Any, cfg: ServiceRunConfig, socket_path: Path | None
             keep_alive_timeout_seconds=cfg.keep_alive_timeout_seconds,
         )
     else:
-        uvicorn.run(
+        _run_uvicorn(
             app,
             host=cfg.host,
             port=cfg.port,
@@ -563,7 +570,7 @@ def run_services(
                 os.environ.pop("NHX_DATA_DIR", None)
             else:
                 os.environ["NHX_DATA_DIR"] = original_data_dir
-            os.close(lock_fd)
+            close(lock_fd)
 
 
 def daemonize_services(config: ServiceRunConfig | None = None) -> DaemonServiceHandle:
@@ -594,7 +601,7 @@ def daemonize_services(config: ServiceRunConfig | None = None) -> DaemonServiceH
     try:
         try:
             child_module = f"{__package__}._service_child"
-            proc = subprocess.Popen(
+            proc = Popen(
                 [sys.executable, "-m", child_module, str(request_path)],
                 stdout=log_file,
                 stderr=subprocess.STDOUT,

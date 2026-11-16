@@ -3,10 +3,13 @@
 
 """Evaluation rollup repository tests."""
 
+from datetime import datetime, timezone
+
 import pytest
 from nhx.intake.repository.clickhouse.evaluation_rollup import ClickHouseEvaluationRollupRepository
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
+from nhx.intake.repository.evaluation_rollup import MissingCreatedAfterError
 
 
 class _Executor(ClickHouseExecutor):
@@ -78,7 +81,11 @@ async def test_evaluation_rollups_anchor_on_root_session_membership():
     )
     repository = _repository(executor)
 
-    rollups = await repository.get_rollups(workspace="default", evaluation_names=["exp-a"])
+    rollups = await repository.get_rollups(
+        workspace="default",
+        evaluation_names=["exp-a"],
+        created_after_by_name={"exp-a": None},
+    )
 
     rollup = rollups["exp-a"]
     assert rollup.run_count == 3
@@ -168,9 +175,74 @@ async def test_evaluation_rollups_anchor_on_root_session_membership():
     assert "tokens_p99" in statements[2]
     assert "sessions.trace_id = spans.trace_id" not in statements[2]
     assert executor.queries[0].parameters["evaluation_name_0"] == "exp-a"
+    for query in executor.queries:
+        assert "event_ts >=" not in query.statement
+        assert not any(key.startswith("created_after_") for key in query.parameters)
     assert executor.queries[2].parameters["model_key"] == "gen_ai.request.model"
     assert "input_tokens_key" in executor.queries[2].parameters
     assert "output_tokens_key" in executor.queries[2].parameters
+
+
+def _empty_results() -> list[list[dict[str, object]]]:
+    return [[], [], []]
+
+
+_CREATED_AFTER = datetime(2026, 3, 1, 12, 0, 0, 123456, tzinfo=timezone.utc)
+_CREATED_AFTER_US = 1772366400123456
+
+
+@pytest.mark.asyncio
+async def test_evaluation_rollups_bound_sessions_to_created_after():
+    executor = _Executor(_empty_results())
+    repository = _repository(executor)
+
+    await repository.get_rollups(
+        workspace="default",
+        evaluation_names=["exp-a"],
+        created_after_by_name={"exp-a": _CREATED_AFTER},
+    )
+
+    # A single name gets a bare conjunct; the OR form would block partition pruning.
+    for query in executor.queries:
+        assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_0)s)" in query.statement
+        assert "evaluation_name !=" not in query.statement
+        assert query.parameters["created_after_0"] == _CREATED_AFTER_US
+    # Scores and span metrics join by session id, so they repeat the bound on the joined rows.
+    assert (
+        "ingested_at >= toDateTime64(fromUnixTimestamp64Micro(%(created_after_0)s), 3)" in executor.queries[1].statement
+    )
+    assert executor.queries[2].statement.count("event_ts >= fromUnixTimestamp64Micro(%(created_after_0)s)") == 2
+
+
+@pytest.mark.asyncio
+async def test_evaluation_rollups_bound_only_names_with_created_after():
+    executor = _Executor(_empty_results())
+    repository = _repository(executor)
+
+    await repository.get_rollups(
+        workspace="default",
+        evaluation_names=["exp-a", "exp-b"],
+        created_after_by_name={"exp-a": _CREATED_AFTER, "exp-b": None},
+    )
+
+    for query in executor.queries:
+        assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_0)s)" in query.statement
+        assert "%(created_after_1)s" not in query.statement
+        assert "created_after_1" not in query.parameters
+        assert query.parameters["created_after_0"] == _CREATED_AFTER_US
+        assert "evaluation_name_1" in query.parameters
+
+
+@pytest.mark.asyncio
+async def test_evaluation_rollups_missing_created_after_entry_raises():
+    repository = _repository(_Executor(_empty_results()))
+
+    with pytest.raises(MissingCreatedAfterError, match="exp-a"):
+        await repository.get_rollups(
+            workspace="default",
+            evaluation_names=["exp-a"],
+            created_after_by_name={"exp-b": None},
+        )
 
 
 def test_score_rollup_cte_builders_compose_the_pipeline():

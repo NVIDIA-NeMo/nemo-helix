@@ -14,6 +14,7 @@ from nemo_evals.api.schemas import HarborTaskDefinition, TaskRef
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
+from nemo_evals.jobs.attempt_tasks import TASKS_DIGEST_KEY, frozen_tasks_digest
 from nemo_evals.revisions import publish_revision
 from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
@@ -62,11 +63,9 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
     await entity_store.create(suite)
     await publish_revision(entity_store, entity_store, suite, TasksetRevisionEntity)
     if invalid == "missing-member":
-        await entity_store.delete(TaskEntity, task.name, workspace=task.workspace)
+        await entity_store.delete_by_id(TaskEntity, task.id, expected_db_version=task.db_version)
     elif invalid == "missing-revision":
-        await entity_store.delete(
-            TaskRevisionEntity, revision.name, workspace=revision.workspace, parent=revision.parent
-        )
+        await entity_store.delete_by_id(TaskRevisionEntity, revision.id, expected_db_version=revision.db_version)
     captured = []
 
     class Jobs:
@@ -139,6 +138,8 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
     ]
     assert body.spec["tasks"] == expected
     assert response.json()["spec"]["tasks"] == expected
-    assert body.platform_spec.steps[0].config["tasks"] == expected
+    # The step config pins the tasks the job stores; the worker reads them back from its attempt.
+    assert "tasks" not in body.platform_spec.steps[0].config
+    assert body.platform_spec.steps[0].config[TASKS_DIGEST_KEY] == frozen_tasks_digest(body.spec)
     assert body.platform_spec.steps[0].executor.provider == "subprocess"
     assert body.platform_spec.steps[0].executor.profile == "harbor-test"

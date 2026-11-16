@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { chartTooltipProps } from '@nemo/common/src/components/charts/ChartTooltip';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import type { CategoricalHistogramData } from '@studio/routes/DataDesignerJobDetailsRoute/datasetProfilerTypes';
 import { type FC, useMemo } from 'react';
@@ -80,14 +81,7 @@ export const CategoricalHistogramChart: FC<CategoricalHistogramChartProps> = ({ 
           <YAxis tick={TICK_STYLE} width={40} allowDecimals={false} tickLine={false} />
           <Tooltip
             cursor={{ fill: 'var(--background-color-accent-gray-subtle)' }}
-            contentStyle={{
-              fontSize: 12,
-              backgroundColor: 'var(--background-color-component-tooltip)',
-              borderColor: 'var(--border-color-base)',
-              color: 'var(--text-color-base)',
-            }}
-            labelStyle={{ color: 'var(--text-color-base)' }}
-            itemStyle={{ color: 'var(--text-color-base)' }}
+            {...chartTooltipProps}
             formatter={(value: number) => [value.toLocaleString(), 'Count']}
           />
           <Bar dataKey="count" name="Count" fill="var(--text-color-brand)" radius={[4, 4, 0, 0]}>

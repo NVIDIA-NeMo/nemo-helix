@@ -7,6 +7,7 @@ from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
 
 import httpx
 from fastapi import HTTPException
+from httpx import AsyncClient, Client
 from langchain_core.callbacks.manager import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
@@ -196,7 +197,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
         **kwargs: Any,
     ) -> Iterator[GenerationChunk]:
         stop = self.stop if stop is None else stop
-        with httpx.Client(timeout=self._get_timeout()) as client:
+        with Client(timeout=self._get_timeout()) as client:
             with client.stream(
                 "POST",
                 url=self._get_request_url(),
@@ -258,7 +259,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
 
             return completion
 
-        with httpx.Client(timeout=self._get_timeout()) as client:
+        with Client(timeout=self._get_timeout()) as client:
             response = client.post(
                 url=self._get_request_url(),
                 headers=self._get_request_headers(**kwargs),
@@ -303,7 +304,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
                         }
                     )
             else:
-                with httpx.Client(timeout=self._get_timeout()) as client:
+                with Client(timeout=self._get_timeout()) as client:
                     response = client.post(
                         url=self._get_request_url(),
                         headers=self._get_request_headers(**kwargs),
@@ -333,7 +334,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
         **kwargs: Any,
     ) -> AsyncIterator[GenerationChunk]:
         stop = self.stop if stop is None else stop
-        async with httpx.AsyncClient(timeout=self._get_timeout()) as client:
+        async with AsyncClient(timeout=self._get_timeout()) as client:
             async with client.stream(
                 "POST",
                 url=self._get_request_url(),
@@ -404,7 +405,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
 
             return generation.text
 
-        async with httpx.AsyncClient(timeout=self._get_timeout()) as client:
+        async with AsyncClient(timeout=self._get_timeout()) as client:
             response = await client.post(
                 url=self._get_request_url(),
                 headers=self._get_request_headers(**kwargs),
@@ -455,7 +456,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
                     }
                 )
             else:
-                async with httpx.AsyncClient(timeout=self._get_timeout()) as client:
+                async with AsyncClient(timeout=self._get_timeout()) as client:
                     response = await client.post(
                         url=self._get_request_url(),
                         headers=self._get_request_headers(**kwargs),

@@ -199,6 +199,29 @@ class TestInferModelHeadType:
 
         assert head_type == "cross_encoder"
 
+    @pytest.mark.parametrize(
+        ("sentence_transformers_config", "pipeline_tag"),
+        [({"model_type": "CrossEncoder"}, None), (None, "text-ranking")],
+        ids=["sentence-transformers-cross-encoder-metadata", "text-ranking-card"],
+    )
+    def test_reranker_saved_as_a_causal_lm_is_a_cross_encoder(
+        self, tmp_path: Path, sentence_transformers_config: dict | None, pipeline_tag: str | None
+    ) -> None:
+        """Automodel saves a yes/no reranker as a plain causal LM; only its metadata says it ranks."""
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        _write_json(model_dir / "config.json", {"architectures": ["Qwen3ForCausalLM"], "model_type": "qwen3"})
+        _write_json(model_dir / "generation_config.json", {})
+        if sentence_transformers_config is not None:
+            (model_dir / "modules.json").write_text("[]", encoding="utf-8")
+            _write_json(model_dir / "config_sentence_transformers.json", sentence_transformers_config)
+        if pipeline_tag is not None:
+            _write_readme_frontmatter(model_dir / "README.md", pipeline_tag=pipeline_tag)
+
+        head_type, _ = infer_model_head_type(str(model_dir))
+
+        assert head_type == "cross_encoder"
+
     def test_generic_sequence_classifier_is_not_assumed_to_be_a_reranker(self, tmp_path: Path) -> None:
         model_dir = tmp_path / "model"
         model_dir.mkdir()

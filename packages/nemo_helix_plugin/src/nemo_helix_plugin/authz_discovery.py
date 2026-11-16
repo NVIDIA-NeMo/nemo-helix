@@ -88,21 +88,6 @@ class _AuthzRouteSurface(Protocol):
     def extra_role_permissions(self) -> dict[str, list[Permission]]: ...
 
 
-def _method_from_dict(spec: dict[str, Any]) -> AuthzEndpointMethod:
-    """Parse a serialized endpoint-method dict back into :class:`AuthzEndpointMethod`.
-
-    This is the single chokepoint that decides which wire fields are preserved; unknown
-    keys are dropped. Kept as the canonical inverse of ``AuthzContribution.to_dict`` for
-    round-trip validation and bundle-side parsing.
-    """
-    return AuthzEndpointMethod(
-        permissions=list(spec.get("permissions") or []),
-        scopes=list(spec["scopes"]) if spec.get("scopes") is not None else None,
-        callers=list(spec["callers"]) if spec.get("callers") is not None else None,
-        deny=bool(spec.get("deny", False)),
-    )
-
-
 def _wire_callers(rules: list[PathRule]) -> list[str] | None:
     """Union the caller kinds across an endpoint's (OR'd) rules into the wire list.
 
@@ -131,7 +116,7 @@ def _collapse_rules(
     Returns ``(permissions, callers)`` for the representative rule.
     """
     # Only callers are OR'd across rules (unioned below); their permissions must match, since
-    # the wire format holds one permissions list per (path, method). Compare by Permission.id —
+    # derivation holds one permission list per (path, method). Compare by Permission.id —
     # the ``service.resource.action`` wire key joined from each Permission's structured parts —
     # not by object, so a description-only difference isn't read as a distinct set. Reject a
     # mismatch rather than silently picking one rule's.

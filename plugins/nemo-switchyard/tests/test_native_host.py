@@ -570,7 +570,7 @@ async def test_judge_transport_does_not_forward_caller_credentials() -> None:
     client.__aexit__.return_value = False
     client.post.return_value = response
 
-    with patch("nemo_switchyard._native_host.httpx.AsyncClient", return_value=client):
+    with patch("nemo_switchyard._native_host.AsyncClient", return_value=client):
         await IgwJudgeTransport(middleware).complete(
             "ws/judge",
             {"messages": [], "temperature": 0.8},
@@ -609,7 +609,7 @@ async def test_judge_transport_maps_timeout() -> None:
     client.post.side_effect = httpx.TimeoutException("slow")
 
     with (
-        patch("nemo_switchyard._native_host.httpx.AsyncClient", return_value=client),
+        patch("nemo_switchyard._native_host.AsyncClient", return_value=client),
         pytest.raises(InferenceMiddlewareError) as exc,
     ):
         await IgwJudgeTransport(middleware, timeout=0.01).complete("ws/judge", {}, {})

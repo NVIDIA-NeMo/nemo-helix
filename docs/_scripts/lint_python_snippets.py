@@ -19,11 +19,11 @@ import ast
 import inspect
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from subprocess import TimeoutExpired, run
 from typing import Iterable
 
 DOC_SUFFIXES = {".md", ".mdx"}
@@ -401,7 +401,7 @@ def run_type_check(
         command.extend(str(prepared.temp_path) for prepared in prepared_files)
 
         try:
-            completed = subprocess.run(
+            completed = run(
                 command,
                 cwd=project_root,
                 text=True,
@@ -411,7 +411,7 @@ def run_type_check(
             )
         except FileNotFoundError:
             return {path: ("Type checking failed: `uv` was not found on PATH",) for path in snippets_by_path}
-        except subprocess.TimeoutExpired:
+        except TimeoutExpired:
             return {path: (f"Type checking timed out after {timeout_seconds} seconds",) for path in snippets_by_path}
 
         output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)

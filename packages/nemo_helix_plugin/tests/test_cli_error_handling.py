@@ -27,6 +27,7 @@ from nemo_helix_plugin.client.errors import (
     PermissionDeniedError,
     RateLimitError,
 )
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 DOCUMENTED_REMOTE_ERROR_EXIT_CODE = 3
 
@@ -178,6 +179,28 @@ def test_handle_plugin_response_validation_error(capsys):
     captured = capsys.readouterr()
     assert "API response error:" in captured.err
     assert "Request: GET http://test/apis/auth/v2/access-keys" in captured.err
+
+
+def test_handle_plugin_response_validation_error_prints_failing_fields(capsys):
+    class Status(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        message: str
+
+    body = {"message": "running", "trials": 3}
+    request = httpx.Request("GET", "http://test/apis/evals/v2/runs/r1")
+    response = httpx.Response(200, request=request, json=body)
+    with pytest.raises(ValidationError) as validation_error:
+        Status.model_validate(body)
+    error = plugin_errors.NemoResponseValidationError(response, validation_error.value)
+
+    with pytest.raises(typer.Exit):
+        handle_exception(error)
+
+    err = " ".join(capsys.readouterr().err.split())  # Rich wraps long lines.
+    assert "did not match Status" in err
+    assert "trials: Extra inputs are not permitted (extra_forbidden)" in err
+    assert "API response error: running" not in err
 
 
 def test_handle_plugin_unprocessable_entity_error(capsys):

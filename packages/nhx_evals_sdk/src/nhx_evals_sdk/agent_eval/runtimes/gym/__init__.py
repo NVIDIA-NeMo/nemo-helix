@@ -71,7 +71,12 @@ and the task simply has no ``inputs['instruction']``. See :func:`discover_gym_ta
 """
 
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import DEFAULT_REWARD_KEY, GymRuntimeConfig
-from nhx_evals_sdk.agent_eval.runtimes.gym.dataset import discover_gym_tasks, validate_gym_task_row
+from nhx_evals_sdk.agent_eval.runtimes.gym.dataset import (
+    ID_PREFIX_PATTERN,
+    RESERVED_ID_PREFIX,
+    discover_gym_tasks,
+    validate_gym_task_row,
+)
 from nhx_evals_sdk.agent_eval.runtimes.gym.runtime import GymAgentTaskRunner
 from nhx_evals_sdk.metrics.runner_rewards import GymRewardMetric
 
@@ -80,6 +85,8 @@ __all__ = [
     "GymAgentTaskRunner",
     "GymRewardMetric",
     "GymRuntimeConfig",
+    "ID_PREFIX_PATTERN",
+    "RESERVED_ID_PREFIX",
     "discover_gym_tasks",
     "validate_gym_task_row",
 ]

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -39,11 +40,37 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     UV_CACHE_DIR=/root/.cache/uv UV_LINK_MODE=copy \
     uv pip install --python /opt/gym-host-venv/bin/python --no-deps "cryptography==50.0.0"
 
+# Apply the host lock's reviewed pins when Gym provisions component venvs,
+# including any created at runtime. Older Datasets releases cap fsspec below
+# the fixed version, so inherit its compatible locked version as well.
+RUN /opt/gym-host-venv/bin/python -c \
+    'from importlib.metadata import version; from pathlib import Path; Path("/opt/gym-host-overrides.txt").write_text("".join(f"{name}=={version(name)}\n" for name in ("urllib3", "fsspec", "datasets")))'
+
+# Gym 0.5.0's component --override flag takes precedence over UV_OVERRIDE.
+# Preserve the component file and pass the host pins explicitly as well. This
+# patches the host command builder used by both prefetch and runtime setup;
+# fail the build if an upstream change makes this backport no longer applicable.
+RUN /opt/gym-host-venv/bin/python - <<'PY'
+from importlib.metadata import distribution
+
+path = distribution("nemo-gym").locate_file("nemo_gym/cli/setup_command.py")
+source = path.read_text()
+old = 'override_flag = "--override overrides.txt " if has_overrides_txt else ""'
+new = (
+    'override_flag = ("--override overrides.txt " if has_overrides_txt else "") '
+    '+ "--override /opt/gym-host-overrides.txt "'
+)
+if source.count(old) != 1:
+    raise SystemExit("Unexpected Gym setup command; review the host-override backport")
+path.write_text(source.replace(old, new))
+PY
+
 # Build the per-server venvs now rather than on first run. Gym creates one venv per agent, model and
 # resources server the config selects, which is ~3 GB and several minutes -- paid once here instead
 # of on every container start.
 ENV PATH="/opt/gym-host-venv/bin:$PATH" \
     NEMO_GYM_VENV_DIR=/opt/gym_venvs \
+    UV_OVERRIDE=/opt/gym-host-overrides.txt \
     UV_CACHE_DIR=/home/ubuntu/.cache/uv
 RUN mkdir -p "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}"
 RUN if UV_LINK_MODE=copy gym env prefetch "+config_paths=[responses_api_agents/simple_agent/configs/simple_agent.yaml,responses_api_models/inference_provider/configs/inference_provider.yaml,resources_servers/mcqa/configs/mcqa.yaml]" \
@@ -97,6 +124,7 @@ RUN --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/u
 # Copy the locked host Python environment; this supplies Gym and sandboxed_gym.
 COPY --from=builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
 COPY --from=builder /opt/gym-host-venv /opt/gym-host-venv
+COPY --from=builder /opt/gym-host-overrides.txt /opt/gym-host-overrides.txt
 # Copy Gym's prebuilt per-component environments to avoid runtime installation.
 COPY --from=builder /opt/gym_venvs /opt/gym_venvs
 # Copy the matching uv cache used by those component environments.
@@ -106,6 +134,7 @@ ENV PATH="/opt/gym-host-venv/bin:$PATH" \
     VIRTUAL_ENV=/opt/gym-host-venv \
     PYTHONUNBUFFERED=1 \
     NEMO_GYM_VENV_DIR=/opt/gym_venvs \
+    UV_OVERRIDE=/opt/gym-host-overrides.txt \
     UV_CACHE_DIR=/home/ubuntu/.cache/uv \
     NHX_RUNTIME_HTTP_PORT=8080
 

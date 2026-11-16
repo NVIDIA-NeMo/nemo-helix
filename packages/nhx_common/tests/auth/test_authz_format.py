@@ -16,6 +16,7 @@ from nemo_helix_plugin.authz_format import (
     validate_static_authz_data,
 )
 from nhx.common.auth.exceptions import InvalidPermissionFormatError, InvalidScopeFormatError
+from pydantic import JsonValue
 
 
 class TestPermissionPatterns:
@@ -90,7 +91,8 @@ class TestValidateStaticAuthzData:
                 "endpoints": {
                     "/api/x": {
                         "get": {
-                            "permissions": ["secrets.read"],
+                            "direct": {"actor_perms": ["secrets.read"]},
+                            "delegated": {"actor_perms": [], "subject_perms": ["secrets.read"]},
                             "scopes": ["secrets:read", "platform:read"],
                         }
                     }
@@ -115,7 +117,11 @@ class TestValidateStaticAuthzData:
                 "roles": {},
                 "endpoints": {
                     "/apis/x/v2/thing": {
-                        "get": {"permissions": ["x.read"], "callers": ["principal", "service_principal"]},
+                        "get": {
+                            "direct": {"actor_perms": ["x.read"]},
+                            "delegated": {"actor_perms": [], "subject_perms": ["x.read"]},
+                            "callers": ["principal", "service_principal"],
+                        },
                     }
                 },
             }
@@ -130,7 +136,11 @@ class TestValidateStaticAuthzData:
                 "roles": {},
                 "endpoints": {
                     "/apis/x/v2/thing": {
-                        "get": {"permissions": ["x.read"], "callers": ["anon"]},
+                        "get": {
+                            "direct": {"actor_perms": ["x.read"]},
+                            "delegated": {"actor_perms": [], "subject_perms": ["x.read"]},
+                            "callers": ["anon"],
+                        },
                     }
                 },
             }
@@ -146,3 +156,106 @@ def test_shipped_static_authz_yaml_passes_validation() -> None:
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     validate_static_authz_data(data)
+    for methods in data["authz"]["endpoints"].values():
+        for declaration in methods.values():
+            assert "permissions" not in declaration
+            assert "direct" in declaration or "delegated" in declaration
+
+
+@pytest.mark.parametrize(
+    "branch",
+    [
+        None,
+        {},
+        {"subject_perms": []},
+        {"actor_perms": "entities.read"},
+        {"actor_perms": [], "subject_perms": [False]},
+        {"actor_perms": [], "fallback": True},
+    ],
+)
+def test_malformed_delegated_requirements_fail_validation(branch: JsonValue) -> None:
+    with pytest.raises(ValueError, match="delegated"):
+        validate_static_authz_data({"authz": {"endpoints": {"/api/x": {"get": {"delegated": branch}}}}})
+
+
+def test_explicit_requirement_permission_formats_and_empty_lists() -> None:
+    validate_static_authz_data(
+        {
+            "authz": {
+                "endpoints": {
+                    "/api/x": {
+                        "get": {
+                            "direct": {"actor_perms": ["entities.read"]},
+                            "delegated": {"actor_perms": ["entities.read"], "subject_perms": []},
+                        }
+                    }
+                }
+            }
+        }
+    )
+    with pytest.raises(InvalidPermissionFormatError):
+        validate_static_authz_data(
+            {
+                "authz": {
+                    "endpoints": {
+                        "/api/x": {
+                            "get": {
+                                "delegated": {"actor_perms": [], "subject_perms": ["iam:read"]},
+                            }
+                        }
+                    }
+                }
+            }
+        )
+    with pytest.raises(ValueError, match="direct"):
+        validate_static_authz_data(
+            {
+                "authz": {
+                    "endpoints": {
+                        "/api/x": {
+                            "get": {
+                                "direct": {"actor_perms": [], "subject_perms": []},
+                            }
+                        }
+                    }
+                }
+            }
+        )
+
+
+def test_explicit_branches_cannot_mix_with_inferred_declarations() -> None:
+    with pytest.raises(ValueError, match="shorthand"):
+        validate_static_authz_data(
+            {
+                "authz": {
+                    "endpoints": {
+                        "/api/x": {
+                            "get": {
+                                "permissions": ["iam.read"],
+                                "direct": {"actor_perms": []},
+                            }
+                        }
+                    }
+                }
+            }
+        )
+
+
+@pytest.mark.parametrize("declaration", [{"permissions": []}, {"permissions": ["iam.read"]}])
+def test_endpoint_permission_shorthand_is_rejected(declaration: dict[str, JsonValue]) -> None:
+    with pytest.raises(ValueError, match="shorthand"):
+        validate_static_authz_data({"authz": {"endpoints": {"/api/x": {"get": declaration}}}})
+
+
+@pytest.mark.parametrize("methods", [None, {"get": None}, {"get": {}}])
+def test_malformed_known_endpoint_is_rejected(methods: JsonValue) -> None:
+    with pytest.raises(ValueError, match="explicit"):
+        validate_static_authz_data({"authz": {"endpoints": {"/api/known": methods}}})
+
+
+def test_validation_does_not_fill_missing_branches() -> None:
+    direct = {"direct": {"actor_perms": ["entities.read"]}}
+    delegated = {"delegated": {"actor_perms": [], "subject_perms": ["iam.create"]}}
+    validate_static_authz_data({"authz": {"endpoints": {"/api/x": {"get": direct, "post": delegated}}}})
+    assert "delegated" not in direct
+    assert "direct" not in delegated

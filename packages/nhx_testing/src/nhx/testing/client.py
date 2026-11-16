@@ -13,6 +13,7 @@ import uuid
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from time import sleep
 from typing import Awaitable, Callable, Coroutine, Generator, Mapping, Protocol, TypeVar
 from unittest.mock import patch
 
@@ -396,7 +397,8 @@ def _create_svc(
 
 _DEFAULT_WORKSPACES = ["default"]
 _DEFAULT_PROJECTS = ["default/test-project"]
-_AUTH_WARMUP_DEADLINE_SECONDS = 5.0
+_AUTH_WARMUP_DEADLINE_SECONDS = 30.0
+_AUTH_WARMUP_MIN_ATTEMPTS = 5
 _AUTH_WARMUP_PAUSE_SECONDS = 0.05
 
 
@@ -423,15 +425,23 @@ def _post_after_auth_warmup(
 
     The embedded PDP can deny the first request after role-binding seed. A 403
     in that window is retried. A later non-success is raised instead of ignored.
+
+    A 403 is retried at least ``_AUTH_WARMUP_MIN_ATTEMPTS`` times even after the
+    deadline. On a loaded CI runner, a single request (which reloads policy data
+    when ``bundle_cache_seconds=0``) can take longer than the deadline. Without a
+    minimum, the first denial would be raised with no retry.
     """
     deadline = time.monotonic() + _AUTH_WARMUP_DEADLINE_SECONDS
+    attempts = 0
     while True:
         response = client.post(url, json=json, headers=headers)
+        attempts += 1
         if response.status_code in {200, 201, 409}:
             return
-        if response.status_code != 403 or time.monotonic() >= deadline:
+        out_of_retries = attempts >= _AUTH_WARMUP_MIN_ATTEMPTS and time.monotonic() >= deadline
+        if response.status_code != 403 or out_of_retries:
             raise RuntimeError(f"POST {url} failed: {response.status_code} {response.text}")
-        time.sleep(_AUTH_WARMUP_PAUSE_SECONDS)
+        sleep(_AUTH_WARMUP_PAUSE_SECONDS)
 
 
 @contextmanager
@@ -740,7 +750,7 @@ def create_test_client(
                 response = client.get("/health/ready")
                 if response.status_code == 200:
                     break
-                time.sleep(0.1)
+                sleep(0.1)
             else:
                 # Include /status in timeout error for debugging
                 status_text = ""

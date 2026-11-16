@@ -44,6 +44,7 @@ from nhx_evals_sdk.metrics.ragas import (
 )
 from nhx_evals_sdk.metrics.remote import NemoAgentToolkitRemoteMetric, RemoteMetric
 from nhx_evals_sdk.metrics.rouge import ROUGEMetric
+from nhx_evals_sdk.metrics.sequence_similarity import SequenceSimilarityMetric
 from nhx_evals_sdk.metrics.string_check import StringCheckMetric
 from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
 from nhx_evals_sdk.values import Model, SecretRef
@@ -75,12 +76,17 @@ def _embeddings_model() -> Model:
 
 
 def _builtin_metric_cases() -> Sequence[tuple[str, Metric]]:
+    """One configured instance of each built-in metric the inline packager must round-trip."""
     judge_model = _judge_model()
     return [
         ("exact_match", ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")),
         ("f1", F1Metric(reference="{{item.expected}}", candidate="{{item.output}}")),
         ("bleu", BLEUMetric(references=["{{item.expected}}"], candidate="{{item.output}}")),
         ("rouge", ROUGEMetric(reference="{{item.expected}}", candidate="{{item.output}}")),
+        (
+            "sequence_similarity",
+            SequenceSimilarityMetric(reference="{{item.expected}}", candidate="{{item.output | trim}}"),
+        ),
         (
             "string_check",
             StringCheckMetric(

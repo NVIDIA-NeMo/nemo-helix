@@ -2,16 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.common.entities.constants import MAX_LENGTH_255, REGEX_WORD_CHARACTER_DOT_DASH
 from nhx.core.models.api.dependencies import get_prompt_service
 from nhx.core.models.api.service.prompt_service import PromptService
-from nhx.core.models.api.v2.utils import NOT_FOUND_ERRORS
+from nhx.core.models.constants import RESOURCE_LOOKUP_NAME_PATTERN
 from nhx.core.models.schemas import (
     CreatePromptRequest,
     DeletePromptRequest,
@@ -47,8 +50,7 @@ router = APIRouter()
 )
 async def list_prompts(
     workspace: str,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: PromptSort = Query(
         default=PromptSort.CREATED_AT_ASC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -62,14 +64,12 @@ async def list_prompts(
     try:
         return await service.list_prompts(
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_operation=parsed_filter.operation,
         )
-    except NOT_FOUND_ERRORS:
-        raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception(f"Failed to list prompts for workspace {_sanitize_for_log(workspace)}")
@@ -105,7 +105,7 @@ async def create_prompt(
             )
         logger.warning(f"Prompt creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid prompt data")
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Failed to create prompt")
@@ -120,8 +120,8 @@ async def create_prompt(
     status_code=status.HTTP_200_OK,
 )
 async def get_prompt(
-    workspace: str,
-    name: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    name: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     service: PromptService = Depends(get_prompt_service),
 ) -> Prompt:
     """Get a prompt by workspace and name."""
@@ -137,7 +137,7 @@ async def get_prompt(
         return prompt
     except HTTPException:
         raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception(f"Failed to get prompt {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")
@@ -146,6 +146,7 @@ async def get_prompt(
 
 @router.put(
     "/v2/workspaces/{workspace}/prompts/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Prompt not found"}},
     summary="Update Prompt",
     response_description="Update an existing prompt",
     status_code=status.HTTP_200_OK,
@@ -171,7 +172,7 @@ async def update_prompt(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     except HTTPException:
         raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Failed to update prompt")
@@ -180,13 +181,14 @@ async def update_prompt(
 
 @router.delete(
     "/v2/workspaces/{workspace}/prompts/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Prompt not found"}},
     summary="Delete Prompt",
     response_description="Delete a prompt",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_prompt(
-    workspace: str,
-    name: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    name: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     service: PromptService = Depends(get_prompt_service),
 ):
     """Delete a prompt by workspace and name."""
@@ -206,7 +208,7 @@ async def delete_prompt(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception(f"Failed to delete prompt {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")

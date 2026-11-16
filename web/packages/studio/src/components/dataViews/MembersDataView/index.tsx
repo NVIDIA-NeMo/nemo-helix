@@ -11,11 +11,12 @@ import {
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { LockClosed } from '@nemo/icons/icons';
 import type { WorkspaceMember } from '@nemo/sdk/generated/platform/schema';
-import { type DropdownEntry, Text } from '@nvidia/foundations-react-core';
+import { Text } from '@nvidia/foundations-react-core';
 import { useWorkspaceMembers } from '@studio/api/entity-store/useWorkspaceMembers';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { type ComponentProps, type FC, useCallback, useMemo } from 'react';
@@ -117,17 +118,12 @@ export const MembersDataView: FC<MembersDataViewProps> = ({
         rowActionsColumn({
           size: ROW_ACTIONS_COLUMN_SIZE,
           enableResizing: false,
-          rowActions: (member: WorkspaceMemberWithId): DropdownEntry[] => [
-            {
-              children: 'Edit Role',
-              onSelect: () => onEditMember(member),
-            },
-            {
-              children: 'Remove',
-              danger: true,
-              onSelect: () => onRemoveMember(member),
-            },
-          ],
+          cell: ({ row: { original: member } }) => (
+            <QuickActionsMenuRoot
+              actions={[{ label: 'Edit Role', onSelect: () => onEditMember(member) }]}
+              deleteAction={{ label: 'Remove', onSelect: () => onRemoveMember(member) }}
+            />
+          ),
         }),
       ],
       [onEditMember, onRemoveMember]

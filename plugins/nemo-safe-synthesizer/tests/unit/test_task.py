@@ -142,7 +142,7 @@ def test_run_config_pii_only_disables_dataset_size_floor(tmp_path, monkeypatch, 
 def test_run_from_env_reports_missing_config_path(monkeypatch):
     task_main = import_task_main_without_heavy_runtime(monkeypatch)
     monkeypatch.setattr(task_main, "initialize_observability", lambda: None)
-    monkeypatch.setattr(task_main, "get_platform_config", lambda: SimpleNamespace(get_service_url=lambda _name: None))
+    monkeypatch.setattr(task_main, "init_models_sync", lambda: {})
     monkeypatch.setattr(task_main, "_setup_classify_endpoint", lambda: None)
     monkeypatch.setattr(task_main, "download_from_fileset", lambda fileset_url: pd.DataFrame({"value": [1]}))
     monkeypatch.setenv("DATA_SOURCE", "default/data#input.csv")

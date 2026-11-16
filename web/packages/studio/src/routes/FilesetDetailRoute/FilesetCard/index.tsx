@@ -3,12 +3,12 @@
 
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
-import {
-  FilesetPurpose,
-  type FilesetFileOutput,
-  type FilesetOutput,
-  type ModelEntityFilter,
+import type {
+  FilesetFileOutput,
+  FilesetOutput,
+  ModelEntityFilter,
 } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { Stack } from '@nvidia/foundations-react-core';
 import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { DatasetSamplePanel } from '@studio/routes/FilesetDetailRoute/FilesetCard/DatasetSamplePanel';

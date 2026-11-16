@@ -20,12 +20,30 @@ class WorkspaceDeletionStage(StrEnum):
     FAILED = "failed"
 
 
+class WorkspaceLimits(BaseModel):
+    """Optional per-workspace resource limits.
+
+    A field left unset means "use the platform default"; the consumer applies
+    that default, it is never written back to the workspace record.
+    """
+
+    max_concurrent_jobs: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Maximum number of jobs the workspace may have admitted concurrently. "
+        "When unset, the Jobs service default applies.",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class Workspace(BaseModel):
     """Workspace schema for API responses."""
 
     id: str = Field(..., description="System-generated UUID")
     name: str = Field(..., description="Workspace name (user-provided)")
     description: Optional[str] = Field(None, description="Optional description")
+    limits: Optional[WorkspaceLimits] = Field(None, description="Optional per-workspace resource limits")
 
     created_at: datetime = Field(..., description="Timestamp of workspace creation")
     created_by: str | None = Field(default=None, description="Principal id for workspace creator")

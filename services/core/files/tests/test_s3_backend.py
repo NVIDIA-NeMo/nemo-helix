@@ -21,7 +21,15 @@ from nhx.core.files.app.backends.s3 import (
     S3UnavailableError,
     _raise_for_s3_error,
 )
+from nhx.core.files.config import FilesConfig
 from nhx.core.files.exceptions import NotFoundError
+
+
+@pytest.fixture(autouse=True)
+def strict_s3_metadata(monkeypatch):
+    """Keep backend transport unit tests independent of process-local TTL state."""
+    config = FilesConfig(s3_metadata_cache_ttl_seconds=0)
+    monkeypatch.setattr("nhx.core.files.config.files_config", lambda: config)
 
 
 def _make_client_error(code: str, message: str = "Test error") -> ClientError:
@@ -174,22 +182,34 @@ class TestS3StorageImplInit:
         assert impl._full_key(path) == expected
 
     @pytest.mark.parametrize(
-        ("prefix", "path", "expected"),
+        ("prefix", "path"),
         [
-            (
-                "test-prefix",
-                "models/model.bin",
-                "cache/s3/test-bucket/test-prefix/models/model.bin",
-            ),
-            ("test-prefix", None, "cache/s3/test-bucket/test-prefix"),
-            ("", "file.txt", "cache/s3/test-bucket/file.txt"),
+            ("test-prefix", "models/model.bin"),
+            ("test-prefix", None),
+            ("", "file.txt"),
+            ("", None),
         ],
     )
-    async def test_get_cache_path_key(self, prefix, path, expected):
-        """Test cache path key generation."""
+    async def test_get_cache_path_key(self, prefix, path):
+        """S3 cache paths use a new namespace and resolve object metadata."""
         config = S3StorageConfig(bucket="test-bucket", prefix=prefix, use_sdk_auth=True)
         impl = S3StorageImpl(config, {})
-        assert await impl.get_cache_path_key(path) == expected
+        async with mock_s3_client(impl) as client:
+            client.head_object.return_value = {"ContentLength": 10, "ETag": '"opaque/../etag"'}
+            key = await impl.get_cache_path_key(path)
+            assert key is not None and key.startswith("cache/s3-v2/")
+            assert ".." not in key and "opaque" not in key
+            if path is None:
+                client.head_object.assert_not_awaited()
+            else:
+                client.head_object.assert_awaited_once_with(Bucket="test-bucket", Key=impl._full_key(path))
+
+    async def test_cache_root_isolates_s3_endpoints(self):
+        """Equal bucket names on different S3 servers must not share content."""
+        config = S3StorageConfig(bucket="bucket", use_sdk_auth=True)
+        first = S3StorageImpl(config, {})
+        second = S3StorageImpl(config.model_copy(update={"endpoint_url": "https://other-s3"}), {})
+        assert await first.get_cache_path_key() != await second.get_cache_path_key()
 
     def test_config_owns_storage_data(self):
         """Deleting an S3 fileset removes objects under our prefix, so we own the data."""
@@ -463,62 +483,11 @@ class TestS3StorageImplDownload:
 class TestS3StorageImplUpload:
     """Test upload method."""
 
-    async def test_upload_requires_content_length(self, s3_impl_no_prefix):
-        """Test upload raises ValueError when content_length is not provided."""
-
-        async def data_stream():
-            yield b"test data"
-
-        with pytest.raises(ValueError) as exc_info:
-            await s3_impl_no_prefix.upload("file.txt", data_stream())
-
-        assert "content_length is required" in str(exc_info.value)
-
-    async def test_upload_generates_presigned_url(self, s3_impl):
-        """Test that upload generates a presigned URL and streams content."""
-        captured_url = None
-        captured_headers = None
-
-        async def mock_upload_streaming(url, data, headers=None, **kwargs):
-            nonlocal captured_url, captured_headers
-            captured_url = url
-            captured_headers = headers
-            async for _ in data:
-                pass
-            return 0
-
-        async def data_stream():
-            yield b"test data"
-
-        async with mock_s3_client(s3_impl) as mock_client:
-            mock_client.generate_presigned_url.return_value = (
-                "https://test-bucket.s3.amazonaws.com/test-prefix/file.txt"
-                "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc123"
-            )
-            with patch(
-                "nhx.core.files.app.backends.s3.upload_url_streaming",
-                side_effect=mock_upload_streaming,
-            ):
-                result = await s3_impl.upload("file.txt", data_stream(), content_length=9)
-
-        assert result.path == "file.txt"
-        assert result.size == 9
-        assert "test-bucket" in captured_url
-        assert "X-Amz-Signature" in captured_url
-        assert captured_headers["Content-Length"] == "9"
-
-    async def test_upload_presigned_url_generation_fails(self, s3_impl_no_prefix):
-        """Test upload handles presigned URL generation failure."""
-
-        async def data_stream():
-            yield b"test data"
-
-        async with mock_s3_client(s3_impl_no_prefix) as mock_client:
-            mock_client.generate_presigned_url.side_effect = _make_client_error("NoSuchBucket")
-            with pytest.raises(S3ConfigError) as exc_info:
-                await s3_impl_no_prefix.upload("file.txt", data_stream(), content_length=9)
-
-        assert "Not found" in str(exc_info.value)
+    @pytest.mark.parametrize("content_length", [None, -1])
+    async def test_upload_requires_content_length(self, s3_impl_no_prefix, content_length):
+        """Reject missing or negative lengths before consuming the request stream."""
+        with pytest.raises(ValueError, match="content_length"):
+            await s3_impl_no_prefix.upload("file.txt", AsyncIteratorMock([b"test data"]), content_length)
 
 
 class TestS3StorageImplValidateStorage:

@@ -13,10 +13,10 @@ Clean help output with uv-inspired style:
 
 from __future__ import annotations
 
-import shutil
 import sys
 import time
 from io import StringIO
+from shutil import get_terminal_size
 from typing import Any, Callable, Mapping, Sequence
 
 import click
@@ -144,7 +144,7 @@ class NhxErrorHandlingMixin:
 
 def _get_terminal_width() -> int:
     """Get terminal width with reasonable bounds."""
-    width = shutil.get_terminal_size(fallback=(120, 24)).columns
+    width = get_terminal_size(fallback=(120, 24)).columns
     return min(width - 2, 120)
 
 

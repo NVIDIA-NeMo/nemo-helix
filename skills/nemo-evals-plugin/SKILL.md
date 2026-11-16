@@ -124,7 +124,7 @@ under a different skills root.
 | `assets/specs/llm_as_judge.json` | Online generation + judge; local-first (`NVIDIA_API_KEY`) |
 | `assets/specs/fabric_agent_eval.json` | Task-driven Fabric runner spec |
 | `assets/specs/gym_agent_eval.json` | Task-driven sandboxed Gym FileSet spec |
-| `assets/specs/harbor_taskset_run_openhands.json` | `nemo evals runs submit --spec-file` request: openhands on a closed-book model |
+| `assets/specs/harbor_taskset_run_openhands.json` | `nemo evals runs submit --spec-file` request: openhands on a gateway model |
 | `assets/examples/plugin_sdk_examples.py` | Copyable SDK snippets for each plugin surface |
 
 ## Available Scripts
@@ -194,7 +194,7 @@ resolved in the target workspace.
 
 To run a Harbor task suite on a Kubernetes deployment, use `nemo evals runs submit`,
 not an `agent-evaluate` job. Read [Harbor on Kubernetes](references/harbor-kubernetes.md)
-for the oracle smoke run, openhands with a closed-book model, Experiments, results and retries.
+for the oracle smoke run, openhands with a model (closed-book opt-in), Experiments, results and retries.
 
 Read [Agent Evaluation](references/agent-evaluation.md) for inline tasks,
 `TasksetRef`, concurrency, fail-fast behavior, sparse-output denominators,

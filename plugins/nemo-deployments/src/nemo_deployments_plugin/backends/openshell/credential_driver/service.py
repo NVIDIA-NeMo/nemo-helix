@@ -9,7 +9,7 @@ import asyncio
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 import grpc
 from google.protobuf.message import Message
@@ -27,7 +27,8 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import wire
-from .registry import BindingRegistry, ProviderOwner
+from .owned import OWNED_HANDLE_PREFIX, OwnedCredentials
+from .registry import Binding, BindingRegistry, ProviderOwner
 from .tickets import RegistrationDenied
 
 DRIVER_NAME = "nemo"
@@ -62,14 +63,31 @@ class ResolveRequest(BaseModel):
     credentials: list[LookupRequest] = Field(min_length=1, max_length=32)
 
 
-class CredentialDriver(driver_grpc.CredentialDriverServicer):
-    """Let OpenShell providers use Helix secrets through the credential-driver protocol.
+class ResolvedCredential(TypedDict):
+    request_id: str
+    value: str
+    expiration_time: NotRequired[str]
 
-    StoreCredential accepts a signed registration request and returns a handle to
-    its stored secret reference. ResolveCredentials checks the binding, workload
-    and creator access, then reads the value using the driver's Helix identity.
-    Auth-disabled installations omit the creator permission check.
-    DeleteCredential revokes the handle without deleting the underlying secret.
+
+def internal_owner(owner: ProviderOwner) -> bool:
+    """Recognize the internal owners sent by OpenShell 0.1.6."""
+    for prefix, key in (
+        ("sandbox-ssh-", "SSH_HOST_PRIVATE_KEY"),
+        ("sandbox-instance-", "SHARED_INSTANCE_LAUNCH_MATERIAL"),
+    ):
+        if owner.provider.startswith(prefix):
+            if owner.provider != f"{prefix}{owner.provider_id}" or owner.credential_key != key:
+                raise RegistrationDenied("Invalid internal credential owner.")
+            return True
+    return False
+
+
+class CredentialDriver(driver_grpc.CredentialDriverServicer):
+    """Resolve provider references and store OpenShell's own keys in Helix Secrets.
+
+    Provider registrations retain their workload and creator authorization checks;
+    deleting a reference leaves the user's secret intact. OpenShell's internal
+    owners store values in a private workspace until the gateway deletes them.
     """
 
     def __init__(
@@ -80,6 +98,7 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
         cache_lifetime: int = 300,
         auth_enabled: bool = True,
         clock: Callable[[], float] = time.time,
+        owned: OwnedCredentials | None = None,
     ) -> None:
         if not 1 <= cache_lifetime <= 3600:
             raise ValueError("Credential cache lifetime must be between 1 and 3600 seconds.")
@@ -88,6 +107,12 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
         self.cache_lifetime = cache_lifetime
         self.auth_enabled = auth_enabled
         self.clock = clock
+        self.owned = owned
+
+    def _owned_credentials(self) -> OwnedCredentials:
+        if self.owned is None:
+            raise RegistrationDenied("Internal credential storage is not configured.")
+        return self.owned
 
     def _require_auth_mode(self, principal_id: str | None) -> None:
         if self.auth_enabled != (principal_id is not None):
@@ -194,20 +219,32 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
             )
         if method == "StoreCredential":
             request = StoreRequest.model_validate(raw)
-            self._require_auth_mode(self.registry.tickets.verify(request.value).principal_id)
             owner = ProviderOwner.model_validate(request.model_dump(include=ProviderOwner.model_fields.keys()))
-            handle = await asyncio.to_thread(
-                self.registry.register,
-                owner,
-                request.value,
-                object_id=request.object_id,
-                existing_handle=request.existing_handle.identifier() if request.existing_handle else "",
-            )
+            existing_handle = request.existing_handle.identifier() if request.existing_handle else ""
+            if internal_owner(owner):
+                async with asyncio.timeout(15):
+                    handle = await self._owned_credentials().store(
+                        owner, request.value, object_id=request.object_id, existing_handle=existing_handle
+                    )
+            else:
+                self._require_auth_mode(self.registry.tickets.verify(request.value).principal_id)
+                handle = await asyncio.to_thread(
+                    self.registry.register,
+                    owner,
+                    request.value,
+                    object_id=request.object_id,
+                    existing_handle=existing_handle,
+                )
             return wire.message("StoreCredentialResponse", {"handle": {"driver": DRIVER_NAME, "handle": handle}})
         if method == "DeleteCredential":
             request = LookupRequest.model_validate(raw)
             owner = ProviderOwner.model_validate(request.model_dump(include=ProviderOwner.model_fields.keys()))
-            await asyncio.to_thread(self.registry.delete, owner, request.handle.identifier())
+            handle = request.handle.identifier()
+            if handle.startswith(OWNED_HANDLE_PREFIX):
+                async with asyncio.timeout(15):
+                    await self._owned_credentials().delete(owner, handle)
+            else:
+                await asyncio.to_thread(self.registry.delete, owner, handle)
             return wire.message("DeleteCredentialResponse")
         if method == "ResolveCredentials":
             requests = ResolveRequest.model_validate(raw).credentials
@@ -215,19 +252,27 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
             if not all(ids) or len(set(ids)) != len(ids):
                 raise RegistrationDenied("Invalid batch request identities.")
             # Validate every binding before making any Secrets API calls.
-            bindings = [
-                await asyncio.to_thread(
-                    self.registry.resolve,
-                    ProviderOwner.model_validate(item.model_dump(include=ProviderOwner.model_fields.keys())),
-                    item.handle.identifier(),
-                )
-                for item in requests
-            ]
-            results = []
-            deadlines = []
-            for binding in bindings:
-                self._require_auth_mode(binding.claims.principal_id)
+            bindings: list[Binding | None] = []
+            for item in requests:
+                owner = ProviderOwner.model_validate(item.model_dump(include=ProviderOwner.model_fields.keys()))
+                handle = item.handle.identifier()
+                if handle.startswith(OWNED_HANDLE_PREFIX):
+                    await asyncio.to_thread(self._owned_credentials().validate, owner, handle)
+                    bindings.append(None)
+                else:
+                    binding = await asyncio.to_thread(self.registry.resolve, owner, handle)
+                    self._require_auth_mode(binding.claims.principal_id)
+                    bindings.append(binding)
+            results: list[ResolvedCredential] = []
+            deadlines: list[int | None] = []
             for item, binding in zip(requests, bindings, strict=True):
+                if binding is None:
+                    owner = ProviderOwner.model_validate(item.model_dump(include=ProviderOwner.model_fields.keys()))
+                    async with asyncio.timeout(15):
+                        value = await self._owned_credentials().resolve(owner, item.handle.identifier())
+                    results.append({"request_id": item.request_id, "value": value})
+                    deadlines.append(None)
+                    continue
                 # A slow later read must not extend the lease of an earlier
                 # value in the batch. Start its lifetime before remote access.
                 deadline = int(self.clock()) + self.cache_lifetime
@@ -248,12 +293,17 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
                     raise RegistrationDenied("Secret response scope mismatch.")
                 results.append({"request_id": item.request_id, "value": secret.value})
             # A revoke/expiry while the remote read was pending must win.
-            for result, binding, deadline in zip(results, bindings, deadlines, strict=True):
+            for item, result, binding, deadline in zip(requests, results, bindings, deadlines, strict=True):
+                if binding is None:
+                    owner = ProviderOwner.model_validate(item.model_dump(include=ProviderOwner.model_fields.keys()))
+                    await asyncio.to_thread(self._owned_credentials().validate, owner, item.handle.identifier())
+                    continue
                 await asyncio.to_thread(self.registry.resolve, binding.owner, binding.handle)
                 async with asyncio.timeout(15):
                     await self._require_active_workload(binding.claims.workload)
+                assert deadline is not None
                 result["expiration_time"] = datetime.fromtimestamp(deadline, tz=timezone.utc).isoformat()
-            if any(deadline <= int(self.clock()) for deadline in deadlines):
+            if any(deadline <= int(self.clock()) for deadline in deadlines if deadline is not None):
                 raise RegistrationDenied("Credential resolution exceeded its cache lifetime.")
             return wire.message("ResolveCredentialsResponse", {"credentials": results})
         raise RegistrationDenied("Unsupported credential operation.")

@@ -703,7 +703,7 @@ def test_log_repository_uses_hardened_duckdb_config(local_storage, monkeypatch):
         captured_config = config
         raise RuntimeError("connect intercepted")
 
-    monkeypatch.setattr("nhx.core.files.app.log_db.duckdb.connect", _fake_connect)
+    monkeypatch.setattr("nhx.core.files.app.log_db.duckdb_connect", _fake_connect)
 
     with pytest.raises(RuntimeError, match="connect intercepted"):
         DuckDBLogRepository._query_offset_page(

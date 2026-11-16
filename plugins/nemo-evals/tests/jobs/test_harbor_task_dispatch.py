@@ -3,9 +3,11 @@
 
 """A task Job's input, its compiled Job, and what the dispatcher changes inside it."""
 
+import asyncio
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -17,7 +19,7 @@ from harbor.agents.factory import AgentFactory
 from harbor.environments.factory import EnvironmentFactory
 from harbor.models.task.config import EnvironmentConfig, TaskConfig
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
-from harbor.models.trial.config import AgentConfig, ResourceMode
+from harbor.models.trial.config import AgentConfig, ResourceMode, TrialConfig
 from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConfig
 from harbor.models.trial.paths import TrialPaths
 from nemo_builder_plugin.entities import ImageRuntimeConfig
@@ -25,6 +27,7 @@ from nemo_evals.filesets import FilesetRef
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
 from nemo_evals.harbor.compose.models import ComposeError
 from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
+from nemo_evals.jobs import harbor_task_dispatch
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalSpec,
@@ -57,6 +60,7 @@ from nemo_evals.jobs.harbor_task_spec import (
 )
 from nemo_evals.tasks import harbor_task_dispatch as entrypoint
 from nemo_evals.taskset_runs.specs import RunIntakePublication
+from nemo_evals.taskset_runs.trials import TRIALS_STATUS_KEY
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProvider
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
@@ -106,6 +110,55 @@ def test_a_publishing_run_gives_each_task_job_the_runs_evaluation_never_required
     assert (publication.intake.agent_name, publication.intake.agent_version) == ("codex", "unknown")
     # A failed publish must not fail the task Job and drop its scored result from the run's bundle.
     assert publication.intake.required is False
+
+
+async def test_a_task_job_reports_its_trials_in_its_own_status_details(task_spec, monkeypatch):
+    """The task Job's trial scope reports through its status details, with sessions named like published ones."""
+    reported: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        harbor_task_dispatch, "report_status_details", lambda details, **kwargs: reported.append(details)
+    )
+
+    job = HarborTaskAgentEvalJob()
+    job._task_spec = task_spec
+    harbor_job = MagicMock()
+    harbor_job._remaining_trial_configs = [TrialConfig.model_construct(trial_name="hello__a")]
+    scope = job._trial_progress_scope(HarborRuntimeConfig(reward_key="score"), MagicMock(), MagicMock())
+
+    assert scope is not None
+    async with scope(harbor_job):
+        pass
+
+    trials = reported[0][TRIALS_STATUS_KEY]
+    assert [(t["trial"], t["phase"], t["session_id"]) for t in trials] == [
+        ("hello__a", "pending", f"{task_spec.run_id}-task-1:hello__a")
+    ]
+
+    assert AsyncAgentEvalJob()._trial_progress_scope(HarborRuntimeConfig(), MagicMock(), None) is None
+
+
+async def test_a_status_write_that_outlives_its_timeout_still_lands_before_the_next(monkeypatch):
+    """An older trial list can't overwrite the newer one sent after it, and a write given up on still lands."""
+    first_may_finish = threading.Event()
+    landed: list[int] = []
+
+    def write(details: dict[str, Any], **kwargs: Any) -> None:
+        if details["n"] == 1:
+            first_may_finish.wait(timeout=5)
+        landed.append(details["n"])
+
+    monkeypatch.setattr(harbor_task_dispatch, "report_status_details", write)
+    publish = harbor_task_dispatch.status_details_writer(MagicMock(), None)
+
+    for n in (1, 2):
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.05):  # the reporter gives up waiting, as it does after 15s
+                await publish({"n": n})
+
+    first_may_finish.set()
+    await publish({"n": 3})
+
+    assert landed == [1, 2, 3]
 
 
 def test_a_task_job_publishes_under_its_own_name_and_leaves_the_evaluation_to_the_controller(task_spec):
@@ -348,6 +401,21 @@ def test_setup_hosts_reach_the_environment_and_wrap_a_builtin_agent(task_spec, t
         INNER_AGENT_KWARG: agent,
         SETUP_HOSTS_KWARG: ["registry.npmjs.org"],
     }
+
+
+@pytest.mark.parametrize("agent", ["claude-code", "codex"])
+def test_a_trial_on_its_agent_layer_reaches_no_setup_host(task_spec, tmp_path, agent):
+    """The layer already holds the install: setup only checks it, so the window stays shut and the agent unwrapped."""
+    spec = task_spec.model_copy(
+        update={"environment": task_spec.environment.model_copy(update={"agent_preinstalled": True})}
+    )
+    configured = _configured_with_setup_hosts(
+        spec, tmp_path, ("registry.npmjs.org",), agent_name=agent, agent_kwargs={"version": "2.1.0"}
+    )
+    assert configured.environment is not None
+    assert configured.environment.kwargs["agent_setup_hosts"] == []
+    assert configured.agent_import_path is None and configured.agent_name == agent
+    assert configured.agent_kwargs == {"version": "2.1.0"}
 
 
 def _harbor_setup_timeout_sec(configured: HarborRuntimeConfig) -> float:

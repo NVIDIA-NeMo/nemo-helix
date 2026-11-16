@@ -3,7 +3,8 @@
 
 import { jsonFilter } from '@nemo/common/src/api/filterOperators';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
-import { type HelixJobsListFilter, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobsListFilter } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { getHiddenJobSources } from '@studio/components/dataViews/JobsDataView/constants';
 
 /** Jobs in progress, or finished in the last 48 hours (`updated_at` stands in for finish time). */

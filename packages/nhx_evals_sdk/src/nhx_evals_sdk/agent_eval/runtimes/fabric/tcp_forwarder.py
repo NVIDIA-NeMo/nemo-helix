@@ -17,6 +17,7 @@ import socket
 import sys
 import threading
 from pathlib import Path
+from socket import create_connection
 
 LISTEN_HOST = "127.0.0.1"
 CONNECT_TIMEOUT_S = 30.0
@@ -41,7 +42,7 @@ def _pipe(source: socket.socket, sink: socket.socket) -> None:
 def _serve(client: socket.socket, upstream_host: str, upstream_port: int) -> None:
     with client:
         try:
-            upstream = socket.create_connection((upstream_host, upstream_port), timeout=CONNECT_TIMEOUT_S)
+            upstream = create_connection((upstream_host, upstream_port), timeout=CONNECT_TIMEOUT_S)
         except OSError:
             return
         with upstream:

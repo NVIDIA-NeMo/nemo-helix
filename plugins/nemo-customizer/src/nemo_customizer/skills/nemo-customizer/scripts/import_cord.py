@@ -12,10 +12,12 @@ each with its JSONL and ``images/``.
       plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_cord.py \
       --output /tmp/cord-v2
 
-Then upload that directory (a new fileset name, no ``--exist-ok``):
+Then upload the directory's contents (a new fileset name, no ``--exist-ok``).
+The trailing slash matters: without it the files land under ``cord-v2/`` in
+the fileset, and the fileset-relative image urls no longer resolve.
 
     nemo files filesets create cord-v2 --workspace default --purpose dataset
-    nemo files upload /tmp/cord-v2 cord-v2 --workspace default
+    nemo files upload /tmp/cord-v2/ cord-v2 --workspace default
 
 The fileset holds ``train/train.jsonl`` and ``validation/validation.jsonl``.
 Automodel selects training files from ``train/`` and validation files from

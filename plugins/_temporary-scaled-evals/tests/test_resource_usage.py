@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 try:
-    from scaled_evals.api.evaluation_store import EvaluationStore
+    from scaled_evals.api.evaluation_store import EvaluationWorkerRepository
     from scaled_evals.dispatch import sandbox_k8s
     from scaled_evals.dispatch import worker as worker_module
     from scaled_evals.dispatch.worker import Dispatcher
@@ -110,7 +110,7 @@ def test_resource_samples_fold_into_attempt_aware_aggregates() -> None:
     seed_task_revision("task_x")
     seed_evaluation({"id": "ev_1"})
     first, last = datetime(2026, 8, 7, tzinfo=UTC), datetime(2026, 8, 7, 0, 1, tzinfo=UTC)
-    store = EvaluationStore()
+    store = EvaluationWorkerRepository()
 
     store.record_resource_samples(
         "ev_1",
@@ -134,7 +134,7 @@ def test_resource_samples_fold_into_attempt_aware_aggregates() -> None:
 
 def test_dispatcher_persists_optional_backend_samples(monkeypatch: pytest.MonkeyPatch) -> None:
     store = MagicMock()
-    monkeypatch.setattr(worker_module, "EvaluationStore", lambda *_: store)
+    monkeypatch.setattr(worker_module, "EvaluationWorkerRepository", lambda *_: store)
     sample = ResourceUsageSample(source="test", cpu_usage_cores=0.5)
     backend = MagicMock()
     backend.sample_resources.return_value = [sample]

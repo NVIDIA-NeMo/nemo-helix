@@ -66,6 +66,8 @@ The chart merges `platformConfig` over its own defaults:
 | `sandbox_profiles` | chart: `harbor-standard` | Map of profile name → profile. At least one is required |
 | `default_sandbox_profile` | `harbor-standard` | The profile a run gets when it names none. Must be a `sandbox_profiles` key |
 | `dispatcher_image` | unset | The task Job image. If unset, defaults to `nhx-tasks:<platform.image_tag>`. If set, pin it by digest: `<image>@sha256:<digest>` |
+| `agent_layers` | `true` | Run each task on its agent layer (the task's image with the run's agent installed, built by Builder), so its trials skip the agent install and open no setup egress. `false`: trials install the agent during setup. See [agent layers on Kubernetes](/documentation/evaluate-models/agent-eval/harbor-runner#on-kubernetes) |
+| `agent_layer_wait_seconds` | `1800` | How long a task waits for its layer to build (30 min). Past it, or if the build fails, the task runs on its own image and installs the agent during setup |
 
 ## Profile properties
 

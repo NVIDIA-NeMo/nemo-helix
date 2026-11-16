@@ -3,7 +3,7 @@
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { IconText, ThumbDown, ThumbUp } from '@nemo/icons/icons';
-import { FeedbackAnnotationInputValue } from '@nemo/sdk/generated/platform/schema';
+import { FeedbackAnnotationInputValue } from '@nemo/sdk/generated/platform/schema/FeedbackAnnotationInputValue';
 import { Button, Divider, Flex, Tooltip } from '@nvidia/foundations-react-core';
 import { useSpanAnnotationActions } from '@studio/components/IntakeDetail/IntakeComponents/useSpanAnnotationActions';
 import { type FC, type MouseEvent, useEffect } from 'react';

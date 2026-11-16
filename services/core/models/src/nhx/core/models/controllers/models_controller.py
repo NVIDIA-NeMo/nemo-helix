@@ -4,6 +4,7 @@
 import asyncio
 import json
 import threading
+from asyncio import new_event_loop
 from logging import getLogger
 from typing import Optional
 
@@ -57,7 +58,7 @@ class ModelsController(HeartbeatMixin, Controller):
         self._backend_registry = backend_registry
         self._stop_signal = stop_signal
 
-        self._loop = asyncio.new_event_loop()
+        self._loop = new_event_loop()
         self._current_task: asyncio.Task | None = None
 
         # Use service principal for controller - runs in background thread without user context

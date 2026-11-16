@@ -11,6 +11,9 @@ from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
 from nemo_evals.jobs.agent_spec import AgentEvalSpec
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+#: Files required to aggregate every intermediate task bundle.
+TASK_BUNDLE_FILES = ("trials.jsonl", "scores.jsonl", "metadata.json")
+
 
 class RunIntakePublication(BaseModel):
     """Where the run publishes its trials: one Intake Evaluation, named after the run, in this Experiment.
@@ -30,6 +33,17 @@ class RunIntakePublication(BaseModel):
     )
     dataset_version: str = Field(
         min_length=1, description="The dataset's version: the request's, or the pinned taskset's content digest."
+    )
+
+
+class PlannedAgentLayers(BaseModel):
+    """The agent layers a run's tasks wait for: which install, and until when."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    key: str = Field(min_length=1, description="The run's agent install key (`AgentInstall.layer_key`).")
+    wait_until: datetime = Field(
+        description="When a task stops waiting for a layer that isn't ready and runs on its task_environments image."
     )
 
 
@@ -101,6 +115,14 @@ class TasksetRunPlan(BaseModel):
     gateway_url_override: str | None = Field(
         default=None,
         description="The agents plugin's deployments.gateway_url_override at submit, which task Jobs reach the gateway at.",
+    )
+    agent_layers: PlannedAgentLayers | None = Field(
+        default=None,
+        description=(
+            "The agent layers submit started for the run's agent: each task's image with the agent installed. Each "
+            "task waits in image_preparing for its layer, then runs on it, or on its task_environments image when the "
+            "layer fails or isn't ready by wait_until. None: the run's agent isn't layered."
+        ),
     )
 
     @model_validator(mode="after")

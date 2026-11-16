@@ -104,6 +104,38 @@ When `sandboxClusterCapable` is true, Kubernetes and Volcano job pods receive `O
 
 These values let sandboxed GRPO run. Kata adds kernel isolation. The NetworkPolicy values lock down the sandbox's cluster access when the cluster CNI enforces NetworkPolicy, and they are not required for the job to start. A CNI that only stores the policies leaves that access open. See [Secure Sandboxed GRPO](/documentation/kubernetes-deployment/setup/helm/sandboxed-grpo).
 
+## Isolate sandbox pods
+
+Every sandbox pod runs `execd`, the OpenSandbox command server. It listens on the pod IP and runs any command it is sent, as the image's user. OpenSandbox gives it no credential, creates no NetworkPolicy, and its egress sidecar filters only traffic leaving a sandbox.
+
+The platform protects sandboxes in two layers:
+
+- **A per-sandbox `execd` token.** Harbor evaluations give every sandbox they create its own random token. `execd` then refuses any request without it, whether the request comes straight to the pod IP or through the OpenSandbox server's proxy with the server API key. This works on every cluster and needs no configuration. The task in the sandbox can read its own token, which only reaches its own sandbox. The token needs `execd` v1.0.15 or later, the first release that reads `EXECD_ACCESS_TOKEN`. The example server values pin v1.0.21. An older `execd` ignores the token and accepts every request.
+- **An ingress NetworkPolicy.** When `sandboxClusterCapable` or `platformConfig.platform.sandbox_cluster_capable` is true, the chart creates a NetworkPolicy in the sandbox namespace that admits sandbox pod ingress only from `opensandbox.namespace`. It doesn't depend on `networkPolicies.enabled` and can't be turned off; add anything else that needs to reach sandboxes to `opensandbox.sandboxNetworkPolicy.extraIngress`. It also covers ports other than `execd`, such as Compose services. Platform clients reach sandboxes through the OpenSandbox server's proxy, so nothing else needs to connect to them.
+
+Sandboxes created by other clients get no token, and only the NetworkPolicy protects them.
+
+**Known issue: the token is visible to anyone who can read pods.** OpenSandbox only accepts env vars as plain values, so the token is stored as plain text in the sandbox's pod spec and BatchSandbox resource. Anyone who can read pods in the sandbox namespace, such as a user with the built-in `view` role, can read it. To use it, they still need a way to send requests to the sandbox, which the NetworkPolicy blocks on clusters that enforce it.
+
+The token travels in the `X-EXECD-ACCESS-TOKEN` header. If anything between the platform and the OpenSandbox server, such as an ingress controller or gateway, strips unknown headers, every command fails with `401`. Pass the header through.
+
+```yaml
+opensandbox:
+  sandboxNetworkPolicy:
+    # Optional: admit only the server pods instead of the whole server namespace.
+    serverPodSelector:
+      matchLabels:
+        app.kubernetes.io/name: opensandbox-server
+```
+
+- The policy lands in `opensandbox.composeServices.sandboxNamespace`, or the release namespace when that is empty. Both must match `[kubernetes] namespace` in the server values.
+- If `opensandbox.domain` is an in-cluster Service name, its namespace must match `opensandbox.namespace`. Otherwise the chart refuses to render, since the policy would shut the server out.
+- If the server runs in the sandbox namespace, set `serverPodSelector`. Otherwise the chart refuses to render, since admitting that namespace would admit every sandbox.
+- A client that sets `use_server_proxy: false` connects to the pod IP directly and is refused unless `extraIngress` admits it.
+- Every request to a sandbox goes through the OpenSandbox server, which forwards it over a pool of at most 100 connections per server process. A running command holds one connection until it finishes, so about 100 trials running at once fill the pool, and the next request waits up to 180 seconds for a free connection and then fails with `500`. The default evaluation caps (`max_cluster_concurrent_jobs: 50`) stay under this. Raise them past it only after giving the server more capacity.
+- In ingress gateway mode, add the gateway to `extraIngress` before upgrading, or it can't reach sandboxes.
+- The CNI must enforce NetworkPolicy. One that doesn't, such as flannel, stores the policy and ignores it.
+
 ## Verify
 
 ```sh

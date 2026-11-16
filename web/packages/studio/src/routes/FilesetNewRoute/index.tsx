@@ -7,7 +7,8 @@ import {
   type DatasetQualityReport,
 } from '@nemo/common/src/utils/datasetQuality';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
-import { type FilesetOutput, FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { Button, SidePanel, Stack } from '@nvidia/foundations-react-core';
 import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

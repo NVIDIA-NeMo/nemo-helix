@@ -113,19 +113,15 @@ export const DataDesignerJobActionsMenu: FC<DataDesignerJobActionsMenuProps> = (
           },
         ]
       : []),
-    {
-      label: 'Delete',
-      onSelect: () => setShowDeleteModal(true),
-      danger: true,
-    },
   ];
+  const deleteAction = { onSelect: () => setShowDeleteModal(true) };
 
   return (
     <>
       {variant === 'labeled' ? (
-        <ActionsMenu actions={actions} label="Actions" />
+        <ActionsMenu actions={actions} deleteAction={deleteAction} label="Actions" />
       ) : (
-        <QuickActionsMenuRoot actions={actions} />
+        <QuickActionsMenuRoot actions={actions} deleteAction={deleteAction} />
       )}
       {showDeleteModal && (
         <DeleteJobModal

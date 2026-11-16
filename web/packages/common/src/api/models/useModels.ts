@@ -1,16 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  getNextModelsPageParam,
+  getQueryKeyInfiniteModels,
+} from '@nemo/common/src/api/models/modelPages';
+import { DEFAULT_LARGE_PAGE_SIZE } from '@nemo/common/src/constants/api';
 import { modelsListModels } from '@nemo/sdk/generated/platform/models';
-import type {
-  ModelsListModelsParams,
-  ModelEntitysPage,
-  ModelEntity,
-} from '@nemo/sdk/generated/platform/schema';
+import type { ModelsListModelsParams, ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
 import { useInfiniteQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { useEffect } from 'react';
 
-import { DEFAULT_LARGE_PAGE_SIZE, QUERY_PREFIX_PLATFORM } from '../../constants/api';
+export {
+  buildWorkspaceGroup,
+  getQueryKeyInfiniteModels,
+  type ModelWorkspaceGroup,
+} from '@nemo/common/src/api/models/modelPages';
 
 /**
  * A basic filter for a models dropdown that fetches models sorted alphabetically.
@@ -27,15 +32,6 @@ export interface UseModelsOptions {
   workspace?: string;
 }
 
-export const getQueryKeyInfiniteModels = (workspace?: string, query?: ModelsListModelsParams) => [
-  QUERY_PREFIX_PLATFORM,
-  'models',
-  'v2',
-  'infinite',
-  workspace,
-  query,
-];
-
 /**
  * A wrapper for useInfiniteQuery that fetches models from the V2 platform API.
  *
@@ -47,11 +43,7 @@ export const useModelsInfinite = (options?: UseModelsOptions) => {
     queryKey: getQueryKeyInfiniteModels(workspace, options?.query),
     queryFn: ({ pageParam = 1 }) =>
       modelsListModels(workspace, { ...options?.query, page: pageParam }),
-    getNextPageParam: (lastPage: ModelEntitysPage) => {
-      if (!lastPage.pagination) return undefined;
-      const { page, total_pages } = lastPage.pagination;
-      return page < total_pages ? page + 1 : undefined;
-    },
+    getNextPageParam: getNextModelsPageParam,
     enabled: options?.queryOptions?.enabled !== false,
     initialPageParam: 1,
   });
@@ -74,16 +66,3 @@ export const useAllModels = (options?: UseModelsOptions) => {
   }, [isFetching, hasNextPage, fetchNextPage]);
   return result;
 };
-
-export type ModelWorkspaceGroup = {
-  workspace: string;
-  models: ModelEntity[];
-};
-
-export const buildWorkspaceGroup = (
-  workspaceName: string,
-  models: ModelEntity[]
-): ModelWorkspaceGroup => ({
-  workspace: workspaceName,
-  models: [...models].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
-});

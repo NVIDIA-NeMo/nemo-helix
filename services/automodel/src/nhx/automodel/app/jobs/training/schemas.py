@@ -123,6 +123,10 @@ class ModelConfig(BaseModel):
         default="sdpa",
         description="Attention backend: 'sdpa' (PyTorch native), 'flash_attention_2' (requires flash-attn), 'eager' (no optimization)",
     )
+    tokenizer_backend: Optional[str] = Field(
+        default=None,
+        description="Automodel tokenizer loading route; None keeps the recipe's default",
+    )
     trust_remote_code: bool = Field(
         default=False,
         description="Allow executing custom model code from the checkpoint. Required for some community models",
@@ -146,10 +150,6 @@ class ModelConfig(BaseModel):
         description="Some of the custom implementations in nemo automodel cause loading failures when used with other models in the same family, this forces the use_hf=True flag to use non custom implementations.",
     )
 
-    v4_compatible: bool = Field(
-        default=False,
-        description="Enable transformers-v4-compatible checkpoint output that preserves the original transformers-v4-style config.json output.",
-    )
     has_vision_tower: bool = Field(
         default=False,
         description="Copied from the model spec. Selects the vision-language recipe.",
@@ -258,6 +258,10 @@ class RetrievalConfig(BaseModel):
         default="query: ",
         description="Literal prefix prepended to each query. Empty string disables prefixing.",
     )
+    temperature: Optional[float] = Field(
+        default=None,
+        description="Loss softmax temperature; None uses 0.02 for bi_encoder and 1.0 for cross_encoder",
+    )
     passage_prefix: str = Field(
         default="passage: ",
         description="Literal prefix prepended to each passage. Empty string disables prefixing.",
@@ -279,6 +283,7 @@ class TrainingStepConfig(BaseModel):
         add_bos: Optional[bool] = None
         add_eos: Optional[bool] = None
         shuffle: bool = True
+        mask_generation_prompt: bool = False
 
     class TrainingConfig(BaseModel):
         training_type: TrainingType

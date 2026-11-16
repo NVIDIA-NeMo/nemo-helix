@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import socket
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -51,7 +53,10 @@ def _patch_local_probe(monkeypatch: pytest.MonkeyPatch, sock: FakeSock) -> None:
     from nemo_deployments_plugin.backends.docker import ports as ports_mod
 
     monkeypatch.setattr(ports_mod, "is_remote_docker_host", lambda: False)
-    monkeypatch.setattr(ports_mod.socket, "socket", lambda *args, **kwargs: sock)
+    fake_socket_module = SimpleNamespace(
+        socket=lambda *args, **kwargs: sock, AF_INET=socket.AF_INET, SOCK_STREAM=socket.SOCK_STREAM
+    )
+    monkeypatch.setattr(ports_mod, "socket", fake_socket_module)
 
 
 def test_is_port_free_returns_false_when_bind_fails(monkeypatch: pytest.MonkeyPatch) -> None:

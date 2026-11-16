@@ -1074,7 +1074,7 @@ class TestConfigFilePermissions:
                 raise PermissionError("Operation not permitted")
             real_chmod(path, mode)
 
-        with patch("nemo_helix_ext.config.config.os.chmod", side_effect=chmod_side_effect):
+        with patch("nemo_helix_ext.config.config.chmod", side_effect=chmod_side_effect):
             Config.write(
                 {"base_url": "http://test.example.com"},
                 context_name="default",
@@ -1097,7 +1097,7 @@ class TestConfigFilePermissions:
             real_chmod(path, mode)
 
         with (
-            patch("nemo_helix_ext.config.config.os.chmod", side_effect=chmod_side_effect),
+            patch("nemo_helix_ext.config.config.chmod", side_effect=chmod_side_effect),
             pytest.raises(PermissionError),
         ):
             Config.write(

@@ -61,13 +61,13 @@ def test_probes_bound_a_wedged_daemon_to_a_few_seconds() -> None:
 def test_a_timed_out_probe_fails_with_a_wedged_message(
     probe: Callable[[], tuple[bool, str]], binary: str, expected: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(checks.shutil, "which", lambda _name: f"/usr/bin/{binary}")
+    monkeypatch.setattr(checks, "which", lambda _name: f"/usr/bin/{binary}")
 
     def _timeout(*_args: object, **kwargs: object) -> object:
         assert kwargs["timeout"] == checks.PROBE_TIMEOUT_SECONDS
         raise subprocess.TimeoutExpired(cmd=binary, timeout=checks.PROBE_TIMEOUT_SECONDS)
 
-    monkeypatch.setattr(checks.subprocess, "run", _timeout)
+    monkeypatch.setattr(checks, "run", _timeout)
     ok, detail = probe()
     assert ok is False
     assert expected in detail and "timed out" in detail

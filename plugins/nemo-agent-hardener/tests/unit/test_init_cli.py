@@ -14,6 +14,7 @@ import pytest
 import yaml
 from nemo_agent_hardener_plugin import sdk as sdk_module
 from nemo_agent_hardener_plugin.cli import _shared, lifecycle
+from nemo_agent_hardener_plugin.filesets import UploadedFileset
 from nemo_agent_hardener_plugin.sdk import AgentHardenerPluginResource
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
@@ -59,7 +60,9 @@ def _patch_cli(
             )
         ),
     )
-    monkeypatch.setattr(lifecycle, "upload_project_dir", lambda *_a, **_k: "default/proj-bundle")
+    monkeypatch.setattr(
+        lifecycle, "upload_project_dir", lambda *_a, **_k: UploadedFileset("default/proj-bundle", "project-id")
+    )
 
     def fake_subprocess(cmd, _action, *, cwd=None, timeout=None, env=None):
         captured.append(cmd)
@@ -111,7 +114,9 @@ def test_project_init_uses_typed_client_without_sdk_namespace(tmp_path: Path, mo
         return httpx.Response(200, json={"dockerfile": "deploy/Dockerfile", "unresolved": []})
 
     monkeypatch.setattr(sdk_module, "client_from_platform", client_from_platform)
-    monkeypatch.setattr(lifecycle, "upload_project_dir", lambda *_args, **_kwargs: "default/proj-bundle")
+    monkeypatch.setattr(
+        lifecycle, "upload_project_dir", lambda *_args, **_kwargs: UploadedFileset("default/proj-bundle", "project-id")
+    )
     with NemoClient(
         base_url="http://platform.test",
         http_client=httpx.Client(transport=httpx.MockTransport(respond)),

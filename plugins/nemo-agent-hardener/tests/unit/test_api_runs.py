@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from nemo_agent_hardener_plugin.api.v2 import runs as runs_router_module
 from nemo_agent_hardener_plugin.entities import AgentHardenerRun
 from nemo_helix_plugin.entity_client import (
+    NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoPaginationInfo,
     get_entity_client,
@@ -118,18 +119,31 @@ class TestGetRun:
 
 class TestDeleteRun:
     def test_deletes_run(self, client, mock_entity_client) -> None:
-        mock_entity_client.delete = AsyncMock(return_value=None)
+        mock_entity_client.delete_by_id = AsyncMock(return_value=None)
 
         resp = client.delete("/apis/agent-hardener/v2/workspaces/default/runs/run-1")
 
         assert resp.status_code == 204, resp.text
-        call = mock_entity_client.delete.await_args
+        call = mock_entity_client.delete_by_id.await_args
         assert call is not None
-        assert call.kwargs["name"] == "run-1"
+        assert call.args[1] == mock_entity_client.get.return_value.id
+        assert call.kwargs["expected_db_version"] == mock_entity_client.get.return_value.db_version
 
     def test_missing_run_returns_404(self, client, mock_entity_client) -> None:
-        mock_entity_client.delete = AsyncMock(side_effect=NemoEntityNotFoundError("nope"))
+        mock_entity_client.delete_by_id = AsyncMock(side_effect=NemoEntityNotFoundError("nope"))
 
         resp = client.delete("/apis/agent-hardener/v2/workspaces/default/runs/ghost")
 
         assert resp.status_code == 404
+
+    def test_changed_run_returns_409(self, client, mock_entity_client) -> None:
+        selected = _make_run()
+        mock_entity_client.get = AsyncMock(return_value=selected)
+        mock_entity_client.delete_by_id = AsyncMock(side_effect=NemoEntityConflictError("changed"))
+
+        response = client.delete("/apis/agent-hardener/v2/workspaces/default/runs/run-1")
+
+        assert response.status_code == 409
+        mock_entity_client.delete_by_id.assert_awaited_once_with(
+            AgentHardenerRun, selected.id, expected_db_version=selected.db_version
+        )

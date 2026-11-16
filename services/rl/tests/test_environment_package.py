@@ -309,8 +309,10 @@ def test_convert_vendors_hub_dataset_and_configures_its_sandbox_path(tmp_path: P
         (isolated / "hub" / "datasets--primeintellect--ascii-tree").write_text("cached", encoding="utf-8")
         return FakeEnv()
 
+    monkeypatch.setattr(convert_mod, "_vendor_missing_agent_wheels", lambda *a, **k: None)
     monkeypatch.setattr(convert_mod, "_install_hub_package_from_wheels", lambda *a, **k: None)
     monkeypatch.setattr(convert_mod, "_load_verifiers_environment", _fake_load)
+    monkeypatch.setattr(convert_mod, "_loader_accepts_argument", lambda *_a, **_k: True)
 
     result = convert_prime_environment(
         ConvertEnvironmentSpec(
@@ -337,6 +339,99 @@ def test_convert_vendors_hub_dataset_and_configures_its_sandbox_path(tmp_path: P
     assert getattr(hub_constants, "HF_HOME") == str(developer_hf)
     assert getattr(hub_constants, "HF_HUB_CACHE") == str(developer_hf / "hub")
     assert getattr(datasets_config, "HF_DATASETS_CACHE") == developer_hf / "datasets"
+
+
+def test_convert_omits_dataset_path_when_the_loader_rejects_it(tmp_path: Path, monkeypatch) -> None:
+    """deepscaler-math takes dataset_name, so the sandbox config must not pass dataset_path."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
+
+    wheels = tmp_path / "prebuilt"
+    wheels.mkdir()
+    (wheels / "deepscaler_math-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    class FakeDataset:
+        column_names = ["prompt", "answer"]
+
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, key: str):
+            if key == "prompt":
+                return [[{"role": "user", "content": "2 + 2"}]]
+            return [""]
+
+        def to_parquet(self, path: str) -> None:
+            Path(path).write_bytes(b"PARQUET")
+
+    class FakeEnv:
+        dataset = FakeDataset()
+
+        def get_dataset(self, n: int = -1, seed: int | None = None):
+            return self.dataset
+
+    monkeypatch.setattr(convert_mod, "_vendor_missing_agent_wheels", lambda *a, **k: None)
+    monkeypatch.setattr(convert_mod, "_install_hub_package_from_wheels", lambda *a, **k: None)
+    monkeypatch.setattr(convert_mod, "_load_verifiers_environment", lambda *a, **k: FakeEnv())
+    monkeypatch.setattr(convert_mod, "_loader_accepts_argument", lambda *_a, **_k: False)
+
+    result = convert_prime_environment(
+        ConvertEnvironmentSpec(
+            hub_id="primeintellect/deepscaler-math",
+            out_dir=tmp_path / "env",
+            dataset_dir=tmp_path / "dataset",
+            wheels_dir=wheels,
+            dataset_size=1,
+        )
+    )
+    agent = yaml.safe_load((result.environment_root / "configs" / "verifiers_agent.yaml").read_text())
+    vf_env_args = agent["verifiers_agent"]["responses_api_agents"]["verifiers_agent"]["vf_env_args"]
+    assert vf_env_args == {}
+    assert (result.dataset_dir / "hub_environment.parquet").read_bytes() == b"PARQUET"
+
+
+def _load_by_name(dataset_name: str = "agentica-org/DeepScaleR-Preview-Dataset"):
+    return dataset_name
+
+
+def _load_starred(**kwargs):
+    return kwargs
+
+
+def _load_by_path(dataset_path=None):
+    return dataset_path
+
+
+def _load_keyword_only(*, dataset_path):
+    return dataset_path
+
+
+def _load_positional_only(dataset_path=None, /):
+    return dataset_path
+
+
+@pytest.mark.parametrize(
+    ("loader", "accepted"),
+    [
+        (_load_by_name, False),
+        (_load_starred, True),
+        (_load_by_path, True),
+        (_load_keyword_only, True),
+        # verifiers passes vf_env_args as keywords, which a positional-only parameter rejects.
+        (_load_positional_only, False),
+    ],
+)
+def test_loader_accepts_argument_follows_the_installed_signature(monkeypatch, loader, accepted: bool) -> None:
+    import sys
+    from types import ModuleType
+
+    from nhx.rl.tasks.environment.convert import DATASET_PATH_ARG, _loader_accepts_argument
+
+    module = ModuleType("hub_env")
+    setattr(module, "load_environment", loader)
+    monkeypatch.setitem(sys.modules, "hub_env", module)
+
+    assert _loader_accepts_argument("primeintellect/hub-env", DATASET_PATH_ARG) is accepted
 
 
 def test_split_train_validation_never_overlaps() -> None:
@@ -436,7 +531,7 @@ def test_download_hub_wheels_resolves_before_downloading(tmp_path: Path, monkeyp
             (dest / "xxhash-4.0.0-cp313-cp313-manylinux_2_17_x86_64.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     spec = convert_mod.ConvertEnvironmentSpec(
         hub_id="primeintellect/ascii-tree",
@@ -463,7 +558,7 @@ def test_download_hub_wheels_builds_sdists_and_requires_complete_closure(tmp_pat
     from nhx.rl.tasks.environment import convert as convert_mod
 
     commands: list[list[str]] = []
-    monkeypatch.setattr(convert_mod.sys, "executable", "/host/python3.12")
+    monkeypatch.setattr(convert_mod, "executable", "/host/python3.12")
 
     def _fake_run(cmd, **kwargs):
         commands.append(cmd)
@@ -482,7 +577,7 @@ def test_download_hub_wheels_builds_sdists_and_requires_complete_closure(tmp_pat
             (dest / "verifiers-0.1.14-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     wheels = convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(
@@ -537,7 +632,7 @@ def test_install_hub_package_does_not_build_sdist_deps(tmp_path: Path, monkeypat
     def _fake_run(cmd, **kwargs):
         captured.append(cmd)
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
     convert_mod._install_hub_package_from_wheels(wheels, "ascii_tree")
     assert captured and "--no-deps" in captured[0]
     assert "--find-links" not in " ".join(captured[0])
@@ -560,7 +655,7 @@ def test_download_hub_wheels_requirements_in_lists_env_and_verifiers(tmp_path: P
             (dest / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(
@@ -760,7 +855,7 @@ def test_gym_root_puts_fork_wheel_and_pins_in_the_closure(tmp_path: Path, monkey
             (dest / "nemo_gym-0.5.0rc0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
     _write_gym_checkout(tmp_path / "Gym")
 
     convert_mod.download_hub_wheels(
@@ -793,7 +888,7 @@ def test_gym_root_version_mismatch_is_rejected(tmp_path: Path, monkeypatch) -> N
         (out / "nemo_gym-0.4.0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
     _write_gym_checkout(tmp_path / "Gym", minor="4", pre="")
 
     with pytest.raises(RuntimeError, match="builds nemo-gym 0.4.0 but the image reports 0.5.0rc0"):
@@ -1049,7 +1144,7 @@ def test_download_hub_wheels_honours_hub_version(
             (dest / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(
@@ -1145,7 +1240,7 @@ def test_download_targets_the_training_image_not_the_host(tmp_path: Path, monkey
             (dest / "cffi-2.1.1-cp313-cp313-manylinux_2_17_x86_64.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env"),
@@ -1235,7 +1330,7 @@ def test_compile_ignores_this_repo_dependency_policy(tmp_path: Path, monkeypatch
             (dest / "openai-2.54.0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env"),
@@ -1278,7 +1373,7 @@ def test_compile_applies_nemo_rl_dependency_policy(tmp_path: Path, monkeypatch) 
             (dest / "fastapi-0.136.3-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(
@@ -1316,6 +1411,29 @@ def test_setuptools_override_keeps_the_pkg_resources_ceiling(tmp_path: Path) -> 
     overrides, _constraints = rl_dependency_policy(rl)
 
     assert overrides == ["setuptools<81,>=80.10.2", "fastapi[standard]>=0.133.0,<0.137.0"]
+
+
+def test_rl_dependency_policy_skips_package_scoped_overrides(tmp_path: Path) -> None:
+    from nhx.rl.tasks.environment.convert import rl_dependency_policy
+
+    rl = tmp_path / "RL"
+    rl.mkdir()
+    (rl / "pyproject.toml").write_text(
+        """
+[tool.uv]
+override-dependencies = [
+  "setuptools>=80.10.2",
+  { package = { name = "vllm", version = "0.29.0" }, dependencies = ["flashinfer-python==0.6.18.post1"] },
+]
+constraint-dependencies = ["urllib3>=2.7.0"]
+""",
+        encoding="utf-8",
+    )
+
+    overrides, constraints = rl_dependency_policy(rl)
+
+    assert overrides == ["setuptools<81,>=80.10.2"]
+    assert constraints == ["urllib3>=2.7.0"]
 
 
 def test_rl_dependency_policy_rejects_a_checkout_without_uv_limits(tmp_path: Path) -> None:

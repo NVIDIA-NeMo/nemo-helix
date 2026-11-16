@@ -78,6 +78,9 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
         description="Fileset ref holding the uploaded project bundle, for a 'project' manifest. The run "
         "expands this instead of ``agent_fileset``.",
     )
+    agent_fileset_id: str | None = Field(
+        default=None, description="Allocation ID of the owned scaffold; absent on legacy manifests."
+    )
     agent_fileset: str = Field(
         default="",
         description="Fileset ref holding the agent package resolved from the agent — its config plus the "
@@ -177,6 +180,7 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
         env: dict[str, str] | None = None,
         models: WarGameModels | None = None,
         agent_fileset: str = "",
+        agent_fileset_id: str | None = None,
         agent_updated_at: str = "",
         secret_refs: dict[str, str] | None = None,
         declared_secrets: list[str] | None = None,
@@ -194,6 +198,7 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
             agent=agent_ref,
             manifest_yaml=manifest_yaml,
             agent_fileset=agent_fileset,
+            agent_fileset_id=agent_fileset_id,
             agent_updated_at=agent_updated_at,
             port=port,
             secrets=secrets,

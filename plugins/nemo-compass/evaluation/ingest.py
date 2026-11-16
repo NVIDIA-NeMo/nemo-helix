@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Mint a per-run agent id and manage a platform's Intake workspaces."""
 
-import os
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
+from os import urandom
 from typing import Any, Protocol
 
 import httpx
+from httpx import Client
 
 
 class _HTTPResponse(Protocol):
@@ -37,7 +38,7 @@ class _PollingClient(Protocol):
 def mint_agent_id(base: str) -> str:
     """A fresh per-run Intake agent id: ``<base>-<YYYYMMDD-HHMMSS>-<4 hex>``."""
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    return f"{base}-{ts}-{os.urandom(2).hex()}"
+    return f"{base}-{ts}-{urandom(2).hex()}"
 
 
 def ensure_workspace(base_url: str, workspace: str, *, client: httpx.Client | _JSONClient | None = None) -> None:
@@ -51,7 +52,7 @@ def ensure_workspace(base_url: str, workspace: str, *, client: httpx.Client | _J
     """
     url = f"{base_url.rstrip('/')}/apis/entities/v2/workspaces"
     owns_client = client is None
-    active_client = client or httpx.Client(timeout=30.0)
+    active_client = client or Client(timeout=30.0)
     try:
         resp = active_client.post(url, json={"name": workspace})
     finally:
@@ -77,7 +78,7 @@ def ensure_experiment_group(
     """
     root = f"{base_url.rstrip('/')}/apis/intake/v2/workspaces/{workspace}/experiment-groups"
     owns_client = client is None
-    client = client or httpx.Client(timeout=30.0)
+    client = client or Client(timeout=30.0)
     try:
         resp = client.post(root, json={"name": name})
         if 200 <= resp.status_code < 300:
@@ -119,7 +120,7 @@ def create_experiment(
         "metadata": {key: str(value) for key, value in metadata.items()},
     }
     owns_client = client is None
-    client = client or httpx.Client(timeout=30.0)
+    client = client or Client(timeout=30.0)
     try:
         resp = client.post(url, json=body)
     finally:
@@ -147,7 +148,7 @@ def poll_visible(
     """
     url = f"{base_url.rstrip('/')}/apis/intake/v2/workspaces/{workspace}/spans"
     owns_client = client is None
-    active_client = client or httpx.Client(timeout=30.0)
+    active_client = client or Client(timeout=30.0)
     seen: set[str] = set()
     deadline = time.monotonic() + timeout_s
     try:

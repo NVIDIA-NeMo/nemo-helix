@@ -526,17 +526,15 @@ async def test_delete_deployment_config_success(deployment_config_service, mock_
 
     # First call: check dependent deployments, second call: list config versions
     mock_entity_client.list.side_effect = [mock_dep_result, mock_config_result]
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     # Act
     result = await deployment_config_service.delete_deployment_config("default", "test-config")
 
     # Assert
     assert result is True
-    mock_entity_client.delete.assert_called_once_with(
-        ModelDeploymentConfigEntity,
-        sample_config_entity.name,
-        workspace="default",
+    mock_entity_client.delete_by_id.assert_called_once_with(
+        ModelDeploymentConfigEntity, sample_config_entity.id, expected_db_version=sample_config_entity.db_version
     )
 
 
@@ -550,17 +548,17 @@ async def test_delete_deployment_config_specific_version(
     mock_dep_result.data = []
     mock_entity_client.list.return_value = mock_dep_result
     mock_entity_client.get.return_value = sample_config_entity
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     # Act
     result = await deployment_config_service.delete_deployment_config("default", "test-config", version=1)
 
     # Assert
     assert result is True
-    mock_entity_client.delete.assert_called_once_with(
+    mock_entity_client.delete_by_id.assert_called_once_with(
         ModelDeploymentConfigEntity,
-        sample_config_entity.name,
-        workspace="default",
+        mock_entity_client.get.return_value.id,
+        expected_db_version=mock_entity_client.get.return_value.db_version,
     )
 
 
@@ -666,7 +664,7 @@ async def test_delete_deployment_config_version_no_dependent_on_that_version(
     mock_dep_result.data = [mock_deployment]
     mock_entity_client.list.return_value = mock_dep_result
     mock_entity_client.get.return_value = sample_config_entity
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     # Act - delete version 1 (should succeed since deployment references version 2)
     result = await deployment_config_service.delete_deployment_config("default", "test-config", version=1)
@@ -701,7 +699,7 @@ async def test_delete_deployment_config_with_deleted_dependent_deployments(
     mock_config_result.data = [sample_config_entity]
 
     mock_entity_client.list.side_effect = [mock_dep_result, mock_config_result]
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     # Act - delete the config (should succeed since deployment is DELETED)
     result = await deployment_config_service.delete_deployment_config("default", "test-config")

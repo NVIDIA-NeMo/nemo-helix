@@ -631,6 +631,41 @@ def test_wait_for_gateway_timeout() -> None:
     assert client.wait_for_gateway("p", timeout=0, poll_interval=0.0) is False
 
 
+def test_wait_for_model_retries_until_the_route_is_routable() -> None:
+    model = "default/base&adapters/default/adapter"
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = [
+        httpx.Response(404, request=httpx.Request("GET", BASE), json={"detail": "Model entity not found"}),
+        httpx.Response(200, request=httpx.Request("GET", BASE), json={"id": model, "object": "model"}),
+    ]
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    assert client.wait_for_model(model, poll_interval=0.0) is True
+    assert http.request.call_count == 2
+    assert "/openai/-/v1/models/" in http.request.call_args.args[1]
+
+
+def test_wait_for_model_stops_on_non_transient_error() -> None:
+    http = MagicMock(spec=httpx.Client)
+    http.request.return_value = httpx.Response(403, request=httpx.Request("GET", BASE), json={"detail": "denied"})
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    assert client.wait_for_model("default/base&adapters/default/adapter", poll_interval=0.0) is False
+    assert http.request.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_async_wait_for_model_retries_until_the_route_is_routable() -> None:
+    http = AsyncMock(spec=httpx.AsyncClient)
+    http.request.side_effect = [
+        httpx.Response(404, request=httpx.Request("GET", BASE), json={"detail": "Model entity not found"}),
+        httpx.Response(200, request=httpx.Request("GET", BASE), json={"id": "m", "object": "model"}),
+    ]
+    client = AsyncModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    assert await client.wait_for_model("default/base&adapters/default/adapter", poll_interval=0.0) is True
+
+
 @pytest.mark.asyncio
 async def test_async_wait_for_gateway_returns_true_when_ready() -> None:
     http = AsyncMock(spec=httpx.AsyncClient)

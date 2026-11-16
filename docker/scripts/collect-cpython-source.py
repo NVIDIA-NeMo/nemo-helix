@@ -15,11 +15,11 @@ import subprocess
 import sys
 import urllib.error
 import urllib.parse
-import urllib.request
 import zlib
 from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 from time import sleep
+from urllib.request import urlopen
 
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
@@ -94,7 +94,7 @@ def response_body(response) -> bytes:
 
 def release_page_sha256(version: str, filename: str) -> str:
     metadata_url = release_page_url(version)
-    with urllib.request.urlopen(metadata_url, timeout=30) as response:
+    with urlopen(metadata_url, timeout=30) as response:
         parser = ReleaseFilesParser()
         parser.feed(response_body(response).decode("utf-8", errors="replace"))
 
@@ -145,7 +145,7 @@ def download(url: str, destination: Path) -> None:
     last_error: Exception | None = None
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(url, timeout=60) as response:
+            with urlopen(url, timeout=60) as response:
                 data = response.read()
             verify_sha256(data, expected_sha256)
             destination.write_bytes(data)

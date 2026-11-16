@@ -224,6 +224,7 @@ async def publish_to_intake(
             f"workspace {resolved_workspace!r}, or has been deleted."
         ) from error
 
+    tasks_by_id = {task.id: task for task in result.tasks}
     output_names_by_metric: dict[tuple[str, str], list[str]] = {
         (task.id, metric_type_name(metric)): [spec.name for spec in metric.output_spec()]
         for task in result.tasks
@@ -248,6 +249,7 @@ async def publish_to_intake(
             agent_name=agent_name,
             agent_version=agent_version,
             model_name=model_name,
+            task=tasks_by_id.get(trial.task_id),
         )
         if otlp is None:
             return None

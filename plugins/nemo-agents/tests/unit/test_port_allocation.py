@@ -152,7 +152,7 @@ def test_reservation_closes_on_caller_error() -> None:
 
 
 def test_reservation_propagates_permission_error_and_closes_socket() -> None:
-    with patch("nemo_agents_plugin.runner.in_memory.socket.socket") as socket_cls:
+    with patch("nemo_agents_plugin.runner.in_memory.socket") as socket_cls:
         sock = socket_cls.return_value.__enter__.return_value
         sock.bind.side_effect = PermissionError(errno.EACCES, "Permission denied")
         with pytest.raises(PermissionError):

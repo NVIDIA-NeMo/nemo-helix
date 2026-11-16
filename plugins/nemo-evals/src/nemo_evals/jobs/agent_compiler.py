@@ -13,6 +13,7 @@ secrets are surfaced as ``from_secret`` environment variables, as are the
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -28,6 +29,7 @@ from nemo_evals.jobs.agent_spec import (
     registered_agent_config,
     registered_agent_files,
 )
+from nemo_evals.jobs.attempt_tasks import step_config_without_tasks
 from nemo_evals.jobs.environment_stage import EnvironmentStageSpec
 from nemo_evals.jobs.fabric_harness_packages import fabric_harness_requirements
 from nemo_evals.jobs.gateway_models import add_gateway_key_placeholder
@@ -42,6 +44,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     HelixJobStep,
     SubprocessExecutionProviderSpec,
 )
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.image import get_qualified_image
 
 AGENT_EVAL_STEP_NAME = "agent-evaluate"
@@ -56,6 +59,11 @@ GYM_AGENT_EVAL_ENTRYPOINT = ["/app/.venv/bin/python", "-m"]
 AGENT_EVAL_COMMAND = ["nemo_evals.tasks.agent_evaluate"]
 ENVIRONMENT_STAGE_STEP_NAME = "stage-environment"
 ENVIRONMENT_STAGE_COMMAND = ["nemo_evals.tasks.stage_environment"]
+
+#: The largest step config this compiler emits, as the Kubernetes backends serialize it into a ConfigMap.
+#: Kubernetes caps a ConfigMap at 1 MiB including its metadata; this leaves room for that metadata, so an
+#: oversized job is refused at submit instead of failing when its step is scheduled.
+MAX_STEP_CONFIG_BYTES = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -96,6 +104,7 @@ def compile_agent_eval_job(
         )
     )
 
+    _require_step_configs_fit(steps)
     return HelixJobSpec(steps=steps)
 
 
@@ -113,11 +122,30 @@ def _compile_agent_eval_cpu_job(
 
     eval_step = _agent_eval_cpu_step(spec, profile, sandbox_plan=sandbox_plan)
     steps.append(eval_step.step)
+    _require_step_configs_fit(steps)
     return _AgentEvalCPUCompilation(
         platform_spec=HelixJobSpec(steps=steps),
         eval_step=eval_step.step,
         executor=eval_step.executor,
     )
+
+
+def _require_step_configs_fit(steps: list[HelixJobStep]) -> None:
+    """Refuse a job whose step config Kubernetes can't hold in a ConfigMap.
+
+    Tasks and trials are read from the job attempt instead (see :mod:`nemo_evals.jobs.attempt_tasks`), so
+    what can still grow is the target (a registered agent's resolved config) and the staging step's spec.
+
+    Raises:
+        HelixJobCompilationError: A step config is larger than :data:`MAX_STEP_CONFIG_BYTES`.
+    """
+    for step in steps:
+        size = len(json.dumps(step.config).encode("utf-8"))
+        if size > MAX_STEP_CONFIG_BYTES:
+            raise HelixJobCompilationError(
+                f"the {step.name!r} step's config is {size} bytes, over the {MAX_STEP_CONFIG_BYTES}-byte limit a "
+                "Kubernetes ConfigMap can hold; shrink the agent's config or the files it inlines"
+            )
 
 
 def _secret_refs(spec: AgentEvalSpec) -> Iterator[tuple[str, str]]:
@@ -173,7 +201,7 @@ def _agent_eval_step(
     return HelixJobStep(
         name=AGENT_EVAL_STEP_NAME,
         executor=executor,
-        config=spec.model_dump(mode="json"),
+        config=step_config_without_tasks(spec.model_dump(mode="json")),
         environment=_environment(spec, sandbox_plan=sandbox_plan),
     )
 
@@ -200,7 +228,7 @@ def _agent_eval_cpu_step(
     step = HelixJobStep(
         name=AGENT_EVAL_STEP_NAME,
         executor=executor,
-        config=spec.model_dump(mode="json"),
+        config=step_config_without_tasks(spec.model_dump(mode="json")),
         environment=_environment(spec, sandbox_plan=sandbox_plan),
     )
     return _AgentEvalCPUStep(step=step, executor=executor)

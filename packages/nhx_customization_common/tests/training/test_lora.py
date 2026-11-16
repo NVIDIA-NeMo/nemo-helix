@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import sys
 import types
 from pathlib import Path
@@ -23,7 +24,7 @@ class _Model:
 
     def save_pretrained(self, path: Path, safe_serialization: bool = False) -> None:
         Path(path).mkdir(parents=True, exist_ok=True)
-        (Path(path) / "config.json").write_text("{}")
+        (Path(path) / "config.json").write_text(json.dumps({"auto_map": {"AutoConfig": "configuration.Config"}}))
 
     def merge_and_unload(self) -> Self:
         return self
@@ -128,3 +129,29 @@ def test_merge_loads_the_model_class_for_the_checkpoint(
     assert (output / "preprocessor_config.json").is_file() is has_vision_tower
     assert (output / "chat_template.jinja").read_text() == ("processor" if has_vision_tower else "tokenizer")
     assert not list(tmp_path.glob("merged_lora-*"))
+
+
+@pytest.mark.parametrize(
+    ("builtin_model_class", "has_builtin_class", "model_trust_remote_code"),
+    [(True, True, False), (True, False, True), (False, True, True)],
+    ids=["adapter-uses-builtin-names", "no-builtin-class-for-the-type", "adapter-uses-remote-code-names"],
+)
+def test_merge_loads_the_class_whose_module_names_the_adapter_uses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    builtin_model_class: bool,
+    has_builtin_class: bool,
+    model_trust_remote_code: bool,
+) -> None:
+    """Automodel's Nemotron-H saves adapters as ``model.*``; its remote code names those modules ``backbone.*``."""
+    _install_ml_stubs(monkeypatch)
+    monkeypatch.setattr(lora, "_merge_parent", lambda: tmp_path)
+    monkeypatch.setattr(lora, "_has_builtin_model_class", lambda path: has_builtin_class)
+    output = tmp_path / "output"
+
+    lora.merge_lora_adapter(tmp_path / "adapter", "/models/base", output, True, builtin_model_class=builtin_model_class)
+
+    assert _Peft.loaded is not None
+    assert _Peft.loaded.kwargs["trust_remote_code"] is model_trust_remote_code
+    # Saved from transformers' own class, the checkpoint ships no remote code for auto_map to name.
+    assert ("auto_map" in json.loads((output / "config.json").read_text())) is model_trust_remote_code

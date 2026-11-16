@@ -28,6 +28,8 @@ export interface AgentConfig {
   /** `nemo-agents-spec-v1` named models, e.g. `{ default: { model: 'nvidia-…' } }`. */
   models?: Record<string, AgentSpecModel>;
   harnesses?: Record<string, { kind?: string; model?: AgentSpecModel }>;
+  /** `nemo-agents-spec-v1` MCP servers; stdio servers carry their command in `url`. */
+  mcp?: { servers?: Record<string, { transport?: string; url?: string }> };
   workflow?: {
     _type: string;
     tool_names?: string[];

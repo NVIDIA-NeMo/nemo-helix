@@ -558,7 +558,7 @@ class _ScriptedPostClient:
 def test_post_after_auth_warmup_retries_the_first_forbidden(monkeypatch: pytest.MonkeyPatch) -> None:
     from nhx.testing.client import _post_after_auth_warmup
 
-    monkeypatch.setattr("nhx.testing.client.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("nhx.testing.client.sleep", lambda _seconds: None)
     client = _ScriptedPostClient([403, 201])
 
     _post_after_auth_warmup(
@@ -574,7 +574,7 @@ def test_post_after_auth_warmup_retries_the_first_forbidden(monkeypatch: pytest.
 def test_post_after_auth_warmup_raises_when_the_denial_is_not_warmup(monkeypatch: pytest.MonkeyPatch) -> None:
     from nhx.testing.client import _post_after_auth_warmup
 
-    monkeypatch.setattr("nhx.testing.client.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("nhx.testing.client.sleep", lambda _seconds: None)
     client = _ScriptedPostClient([422])
 
     with pytest.raises(RuntimeError, match="422"):
@@ -584,3 +584,39 @@ def test_post_after_auth_warmup_raises_when_the_denial_is_not_warmup(monkeypatch
             json={"name": "destination"},
             headers={"X-NHX-Principal-Id": "user@example.com"},
         )
+
+
+def test_post_after_auth_warmup_retries_forbidden_after_a_slow_first_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nhx.testing.client import _post_after_auth_warmup
+
+    monkeypatch.setattr("nhx.testing.client.sleep", lambda _seconds: None)
+    # A deadline already in the past stands in for a first request slower than the deadline.
+    monkeypatch.setattr("nhx.testing.client._AUTH_WARMUP_DEADLINE_SECONDS", -1.0)
+    client = _ScriptedPostClient([403, 403, 201])
+
+    _post_after_auth_warmup(
+        client,
+        "/apis/entities/v2/workspaces",
+        json={"name": "destination"},
+        headers={"X-NHX-Principal-Id": "user@example.com"},
+    )
+
+    assert client.calls == 3
+
+
+def test_post_after_auth_warmup_raises_persistent_forbidden_after_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nhx.testing.client import _AUTH_WARMUP_MIN_ATTEMPTS, _post_after_auth_warmup
+
+    monkeypatch.setattr("nhx.testing.client.sleep", lambda _seconds: None)
+    monkeypatch.setattr("nhx.testing.client._AUTH_WARMUP_DEADLINE_SECONDS", -1.0)
+    client = _ScriptedPostClient([403] * _AUTH_WARMUP_MIN_ATTEMPTS)
+
+    with pytest.raises(RuntimeError, match="403"):
+        _post_after_auth_warmup(
+            client,
+            "/apis/entities/v2/workspaces",
+            json={"name": "destination"},
+            headers={"X-NHX-Principal-Id": "user@example.com"},
+        )
+
+    assert client.calls == _AUTH_WARMUP_MIN_ATTEMPTS

@@ -49,7 +49,7 @@ class TestClusterInfo:
             "services": {"ready": [], "not_ready": []},
             "controllers": {"healthy": True, "status": {}},
         }
-        with patch("httpx.get", return_value=mock_resp) as mock_get:
+        with patch("nemo_helix_ext.cli.commands.quickstart.cli.http_get", return_value=mock_resp) as mock_get:
             result = runner.invoke(app, ["cluster-info"])
         assert result.exit_code == 0
         called_url = mock_get.call_args[0][0]
@@ -99,7 +99,7 @@ class TestClusterInfo:
         mock_resp.json.return_value = status_data
         with (
             patch("nemo_helix_ext.cli.core.context.CLIContext.get_base_url", return_value=_BASE_URL),
-            patch("httpx.get", return_value=mock_resp),
+            patch("nemo_helix_ext.cli.commands.quickstart.cli.http_get", return_value=mock_resp),
         ):
             result = runner.invoke(app, ["cluster-info"])
         assert result.exit_code == 0
@@ -117,7 +117,7 @@ class TestClusterInfo:
         }
         with (
             patch("nemo_helix_ext.cli.core.context.CLIContext.get_base_url", return_value=_BASE_URL),
-            patch("httpx.get", return_value=mock_resp),
+            patch("nemo_helix_ext.cli.commands.quickstart.cli.http_get", return_value=mock_resp),
         ):
             result = runner.invoke(app, ["cluster-info"])
         assert _BASE_URL in result.stderr
@@ -135,7 +135,7 @@ class TestClusterInfo:
         }
         with (
             patch("nemo_helix_ext.cli.core.context.CLIContext.get_base_url", return_value=base_url),
-            patch("httpx.get", return_value=mock_resp) as mock_get,
+            patch("nemo_helix_ext.cli.commands.quickstart.cli.http_get", return_value=mock_resp) as mock_get,
         ):
             runner.invoke(app, ["cluster-info"])
         called_url = mock_get.call_args[0][0]
@@ -147,7 +147,7 @@ class TestClusterInfo:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
         with (
             patch("nemo_helix_ext.cli.core.context.CLIContext.get_base_url", return_value=_BASE_URL),
-            patch("httpx.get", side_effect=Exception("Connection refused")),
+            patch("nemo_helix_ext.cli.commands.quickstart.cli.http_get", side_effect=Exception("Connection refused")),
         ):
             result = runner.invoke(app, ["cluster-info"])
         assert result.exit_code == 1
@@ -164,7 +164,7 @@ class TestClusterInfo:
         mock_resp = MagicMock(status_code=status_code)
         with (
             patch("nemo_helix_ext.cli.core.context.CLIContext.get_base_url", return_value=_BASE_URL),
-            patch("httpx.get", return_value=mock_resp),
+            patch("nemo_helix_ext.cli.commands.quickstart.cli.http_get", return_value=mock_resp),
         ):
             result = runner.invoke(app, ["cluster-info"])
         assert result.exit_code == 1

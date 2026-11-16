@@ -219,7 +219,7 @@ class BuildQueueController(NemoController):
     async def _forget(self, build: QueuedBuild) -> None:
         assert self._entities is not None
         try:
-            await self._entities.delete(QueuedBuild, build.name, workspace=build.workspace)
+            await self._entities.delete_by_id(QueuedBuild, build.id, expected_db_version=build.db_version)
         except EntityNotFoundError:
             pass
 

@@ -48,6 +48,7 @@
 {"name": "cuda-pathfinder", "license": "APACHE-2.0", "compatible": true}
 {"name": "cuda-toolkit", "license": "NVIDIA PROPRIETARY SOFTWARE", "compatible": true}
 {"name": "cut-cross-entropy", "license": "APSL-2.0", "compatible": true}
+{"name": "cwevals", "license": "APACHE-2.0", "compatible": true}
 {"name": "cycler", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "cyclopts", "license": "APACHE-2.0", "compatible": true}
 {"name": "data-designer", "license": "APACHE-2.0", "compatible": true}

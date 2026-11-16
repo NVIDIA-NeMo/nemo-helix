@@ -141,7 +141,7 @@ class TestOIDCTokenProvider:
 
         assert await provider.get_access_token_async() == token
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_refresh_token_grant_uses_nemo_scoped_ca_bundle(self, mock_post, monkeypatch):
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -158,7 +158,7 @@ class TestOIDCTokenProvider:
         assert result == {"access_token": "new_access"}
         assert mock_post.call_args.kwargs["verify"] == "/tmp/nemo-ca.pem"
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_refresh_token_grant_uses_context_certificate_authority(self, mock_post, tmp_path, monkeypatch):
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -177,7 +177,7 @@ class TestOIDCTokenProvider:
         assert result == {"access_token": "new_access"}
         assert mock_post.call_args.kwargs["verify"] == context_ca
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_broker_refresh_uses_json_without_provider_client_fields(self, mock_post):
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -199,7 +199,7 @@ class TestOIDCTokenProvider:
         }
         assert "data" not in mock_post.call_args.kwargs
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_get_access_token_refreshes_when_expired(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
         new_token = _make_jwt({"exp": int(time.time()) + 3600})
@@ -230,7 +230,7 @@ class TestOIDCTokenProvider:
         assert call_kwargs[1]["data"]["client_id"] == "client"
         assert call_kwargs[1]["data"]["refresh_token"] == "old_refresh"
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_refresh_selects_access_token_when_id_token_is_present(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
         new_id_token = _make_jwt({"exp": int(time.time()) + 3600})
@@ -253,7 +253,7 @@ class TestOIDCTokenProvider:
         assert provider.get_access_token() == "opaque-access-token"
         assert provider.tokens.refresh_token == "rotated-refresh"
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_refresh_does_not_fall_back_to_id_token(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
         mock_response = MagicMock()
@@ -271,7 +271,7 @@ class TestOIDCTokenProvider:
         with pytest.raises(RuntimeError, match="configured access_token"):
             provider.get_access_token()
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_get_access_token_refreshes_opaque_token_with_expires_in(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
 
@@ -298,7 +298,7 @@ class TestOIDCTokenProvider:
         assert provider.tokens.expires_at is not None
         assert before + 120 <= provider.tokens.expires_at <= time.time() + 120
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_refresh_reloads_tokens_before_request(self, mock_post):
         stale_token = _make_jwt({"exp": int(time.time()) - 200})
         shared_token = _make_jwt({"exp": int(time.time()) - 100})
@@ -321,7 +321,7 @@ class TestOIDCTokenProvider:
 
         assert mock_post.call_args[1]["data"]["refresh_token"] == "shared_refresh"
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_refresh_invalid_grant_recovers_with_reloaded_tokens(self, mock_post):
         stale_token = _make_jwt({"exp": int(time.time()) - 200})
         shared_token = _make_jwt({"exp": int(time.time()) + 3600})
@@ -362,7 +362,7 @@ class TestOIDCTokenProvider:
         assert result == shared_token
         assert mock_post.call_count == 1
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_refresh_invalid_grant_retries_with_reloaded_refresh_token(self, mock_post):
         stale_token = _make_jwt({"exp": int(time.time()) - 200})
         rotated_access_token = _make_jwt({"exp": int(time.time()) - 100})
@@ -412,7 +412,7 @@ class TestOIDCTokenProvider:
         assert mock_post.call_args_list[1][1]["data"]["refresh_token"] == "rotated_refresh"
 
     @pytest.mark.asyncio
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     async def test_get_access_token_async_refreshes_when_expired(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
         new_token = _make_jwt({"exp": int(time.time()) + 3600})
@@ -453,7 +453,7 @@ class TestOIDCTokenProvider:
         with pytest.raises(RuntimeError, match="no refresh token"):
             provider.get_access_token()
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_refresh_raises_on_http_error(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
 
@@ -474,7 +474,7 @@ class TestOIDCTokenProvider:
         with pytest.raises(RuntimeError, match="Token refresh failed"):
             provider.get_access_token()
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_on_tokens_refreshed_callback_called(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
         new_token = _make_jwt({"exp": int(time.time()) + 3600})
@@ -500,7 +500,7 @@ class TestOIDCTokenProvider:
         persisted_tokens = callback.call_args[0][0]
         assert persisted_tokens.access_token == new_token
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_on_tokens_refreshed_callback_error_does_not_propagate(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
         new_token = _make_jwt({"exp": int(time.time()) + 3600})
@@ -524,7 +524,7 @@ class TestOIDCTokenProvider:
         result = provider.get_access_token()
         assert result == new_token
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_rotated_refresh_token_persistence_error_propagates(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
         new_token = _make_jwt({"exp": int(time.time()) + 3600})
@@ -548,7 +548,7 @@ class TestOIDCTokenProvider:
 
         assert isinstance(exc_info.value.__cause__, OSError)
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_refresh_keeps_old_refresh_token_if_not_rotated(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
         new_token = _make_jwt({"exp": int(time.time()) + 3600})
@@ -572,7 +572,7 @@ class TestOIDCTokenProvider:
         provider.get_access_token()
         assert provider.tokens.refresh_token == "original_refresh"
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_force_refresh(self, mock_post):
         valid_token = _make_jwt({"exp": int(time.time()) + 3600})
         new_token = _make_jwt({"exp": int(time.time()) + 7200})
@@ -593,7 +593,7 @@ class TestOIDCTokenProvider:
         assert result == new_token
         mock_post.assert_called_once()
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_refresh_uses_refresh_lock(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
         new_token = _make_jwt({"exp": int(time.time()) + 7200})
@@ -625,7 +625,7 @@ class TestOIDCTokenProvider:
 
         assert lock_events == ["enter", "exit"]
 
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_refresh_includes_scope_when_configured(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
         new_token = _make_jwt({"exp": int(time.time()) + 3600})

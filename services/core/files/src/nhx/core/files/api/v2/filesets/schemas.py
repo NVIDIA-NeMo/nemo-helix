@@ -8,9 +8,10 @@ request types (CreateFilesetRequest, UpdateFilesetRequest) are imported from
 ``nemo_helix_plugin.files.types`` — the shared single source of truth.
 
 This module adds server-specific concerns: converter functions that map domain
-entities to response DTOs, the FilesetFilter schema, and the FilesetPage alias.
+entities to response DTOs, the FilesetFilter and FilesetSortField schemas, and the FilesetPage alias.
 """
 
+from enum import StrEnum
 from typing import Annotated, Optional
 
 from nemo_helix_plugin.files.types import CacheStatus
@@ -121,3 +122,30 @@ class FilesetFilter(Filter):
         default=None,
         description="Filter by update date. Supports '$gte' (on or after) and '$lte' (on or before) datetime filters.",
     )
+
+
+class FilesetSortField(StrEnum):
+    """Sort options for listing filesets.
+
+    Extends the generic entity sorts with ``storage_type``, which orders by the
+    storage backend recorded on the fileset. Prefix a field with ``-`` for
+    descending order.
+    """
+
+    CREATED_AT_ASC = "created_at"
+    CREATED_AT_DESC = "-created_at"
+    UPDATED_AT_ASC = "updated_at"
+    UPDATED_AT_DESC = "-updated_at"
+    NAME_ASC = "name"
+    NAME_DESC = "-name"
+    STORAGE_TYPE_ASC = "storage_type"
+    STORAGE_TYPE_DESC = "-storage_type"
+
+    @property
+    def entity_sort(self) -> str:
+        """The ``EntityClient.list`` sort string, mapping API fields onto entity field paths.
+
+        ``EntityClient`` adds the ``data.`` prefix to non-base fields itself, so the
+        path here is relative to the entity, not the stored JSON column.
+        """
+        return self.value.replace("storage_type", "storage.type")

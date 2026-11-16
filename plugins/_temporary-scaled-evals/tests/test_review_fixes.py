@@ -23,7 +23,7 @@ try:
     from scaled_evals.api.build import buildkit
     from scaled_evals.api.build.errors import BuildError
     from scaled_evals.api.build.image_builder_service import _post_resolve
-    from scaled_evals.api.evaluation_store import EvaluationStore
+    from scaled_evals.api.evaluation_store import EvaluationWorkerRepository
     from scaled_evals.api.routers import evaluations as evaluations_router
     from scaled_evals.api.task_store import TaskStore
     from scaled_evals.cli.client import download_artifact, make_client, request, upload_file
@@ -196,7 +196,7 @@ def test_repair_and_cleanup_preserve_recoverability() -> None:
             ],
         }
     )
-    evaluations = EvaluationStore()
+    evaluations = EvaluationWorkerRepository()
     result = evaluations.record_dispatch_job_infrastructure_failure(
         "ev",
         execution_number=2,

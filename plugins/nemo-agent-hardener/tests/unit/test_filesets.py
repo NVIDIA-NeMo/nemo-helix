@@ -5,14 +5,17 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import zipfile
 from pathlib import Path
 
+import httpx
 import pytest
 from _doubles import make_sdk
 from nemo_agent_hardener_plugin import filesets
-from nemo_agent_hardener_plugin.filesets import extract_zip_safely, upload_project_dir
+from nemo_agent_hardener_plugin.filesets import UploadedFileset, extract_zip_safely, upload_project_dir
+from nemo_helix_plugin.client.client import NemoClient
 
 
 def _write_zip(path: Path, members: dict[str, str]) -> Path:
@@ -100,16 +103,16 @@ def _bundle_names(tmp_path: Path, project: Path) -> list[str]:
     """Run upload_project_dir against a stub uploader and return the zip's member names."""
     captured: dict[str, Path] = {}
 
-    def _fake_upload(_sdk: object, local_path: Path, *, workspace: str, prefix: str = "hitlog") -> str:
+    def _fake_upload(_sdk: object, local_path: Path, *, workspace: str, prefix: str = "hitlog") -> UploadedFileset:
         # The archive lives in a TemporaryDirectory that closes on return; copy it out first.
         kept = tmp_path / "bundle.zip"
         kept.write_bytes(local_path.read_bytes())
         captured["archive"] = kept
-        return f"{workspace}/fs-1"
+        return UploadedFileset(f"{workspace}/fs-1", "allocation-id")
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(filesets, "upload_file_to_fileset", _fake_upload)
-        assert upload_project_dir(make_sdk(), project, workspace="default") == "default/fs-1"
+        mp.setattr(filesets, "_upload_file_to_fileset", _fake_upload)
+        assert upload_project_dir(make_sdk(), project, workspace="default").ref == "default/fs-1"
     with zipfile.ZipFile(captured["archive"]) as archive:
         return sorted(archive.namelist())
 
@@ -161,14 +164,45 @@ def test_upload_project_dir_names_the_fileset_for_a_project(tmp_path: Path) -> N
     """A project bundle must not land in a ``hitlog-`` fileset — the ref is all a later reader sees."""
     captured: dict[str, str] = {}
 
-    def _fake_upload(_sdk: object, _local_path: Path, *, workspace: str, prefix: str = "hitlog") -> str:
+    def _fake_upload(_sdk: object, _local_path: Path, *, workspace: str, prefix: str = "hitlog") -> UploadedFileset:
         captured["prefix"] = prefix
-        return f"{workspace}/{prefix}-abc123"
+        return UploadedFileset(f"{workspace}/{prefix}-abc123", "allocation-id")
 
     project = _make_project(tmp_path / "project")
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(filesets, "upload_file_to_fileset", _fake_upload)
+        mp.setattr(filesets, "_upload_file_to_fileset", _fake_upload)
         ref = upload_project_dir(make_sdk(), project, workspace="default")
 
     assert captured["prefix"] == "project"
-    assert ref == "default/project-abc123"
+    assert ref.ref == "default/project-abc123"
+
+
+def test_cleanup_uses_only_the_captured_allocation_id() -> None:
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        # The original allocation is gone; cleanup must not select a replacement by name.
+        return httpx.Response(404, json={"detail": "Original allocation not found"})
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        client = NemoClient(base_url="http://testserver", http_client=http)
+        filesets.delete_fileset_by_id(client, workspace="default", fileset_id="original-allocation-id")
+
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("DELETE", "/apis/files/v2/workspaces/default/filesets/by-id/original-allocation-id")
+    ]
+
+
+def test_cleanup_failure_logs_the_allocation_at_error_level(caplog: pytest.LogCaptureFixture) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"detail": "Storage unavailable"})
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        client = NemoClient(base_url="http://testserver", http_client=http)
+        filesets.delete_fileset_by_id(client, workspace="default", fileset_id="stale-scaffold-id")
+
+    failures = [record for record in caplog.records if "Failed to delete fileset ID" in record.getMessage()]
+    assert len(failures) == 1
+    assert failures[0].levelno == logging.ERROR
+    assert "stale-scaffold-id" in failures[0].getMessage()

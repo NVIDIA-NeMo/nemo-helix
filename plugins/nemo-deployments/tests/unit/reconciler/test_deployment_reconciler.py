@@ -460,7 +460,7 @@ async def test_desired_stopped_deletes(
     await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
 
     assert mock_backend.deployment_delete_calls == [("default", "dep1")]
-    mock_entities.delete.assert_awaited_once()
+    mock_entities.delete_by_id.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -473,17 +473,12 @@ async def test_desired_stopped_delete_conflict_is_handled_for_retry(
     dep.desired_state = "STOPPED"
     cfg = make_deployment_config()
     deployment_reconciler.set_config_cache({("default", "cfg1"): cfg})
-    mock_entities.delete.side_effect = NemoEntityConflictError("conflict")
+    mock_entities.delete_by_id.side_effect = NemoEntityConflictError("conflict")
 
     await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
 
     assert mock_backend.deployment_delete_calls == [("default", "dep1")]
-    mock_entities.delete.assert_awaited_once_with(
-        Deployment,
-        name="dep1",
-        workspace="default",
-        expected_db_version=dep.db_version,
-    )
+    mock_entities.delete_by_id.assert_awaited_once_with(Deployment, dep.id, expected_db_version=dep.db_version)
 
 
 @pytest.mark.asyncio
@@ -499,7 +494,7 @@ async def test_delete_proceeds_when_config_missing(
     await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
 
     assert mock_backend.deployment_delete_calls == [("default", "dep1")]
-    mock_entities.delete.assert_awaited_once()
+    mock_entities.delete_by_id.assert_awaited_once()
 
 
 def _deployment_stuck_deleting(*, elapsed_seconds: int) -> Deployment:
@@ -536,7 +531,7 @@ async def test_delete_retains_deleting_when_backend_returns_failed(
     await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
 
     assert dep.status == "DELETING"
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -565,7 +560,7 @@ async def test_delete_retry_surfaces_backend_reason_without_resetting_timeout(
     assert dep.status_message == "Waiting for backend to delete deployment: docker paused"
     assert dep.status_history == history
     mock_entities.update.assert_awaited_once()
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -596,12 +591,7 @@ async def test_delete_uses_db_version_from_deleting_save(
 
     await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
 
-    mock_entities.delete.assert_awaited_once_with(
-        Deployment,
-        name="dep1",
-        workspace="default",
-        expected_db_version=saved.db_version,
-    )
+    mock_entities.delete_by_id.assert_awaited_once_with(Deployment, saved.id, expected_db_version=saved.db_version)
 
 
 @pytest.mark.asyncio
@@ -618,7 +608,7 @@ async def test_delete_timeout_fails_at_boundary(
     assert dep.status == "FAILED"
     assert dep.error_details is not None
     assert dep.error_details["reason"] == "deleting_timeout"
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -642,7 +632,7 @@ async def test_delete_timeout_keeps_deleting_reason(
     assert dep.error_details["last_status_message"] == (
         "Waiting for backend to delete deployment: container still stopping"
     )
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -664,7 +654,7 @@ async def test_delete_timeout_failure_is_not_re_evaluated(
     await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
 
     mock_entities.update.assert_not_awaited()
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -685,7 +675,7 @@ async def test_delete_reopened_after_timeout_retries_backend(
     assert dep.status_history[-1].status == "DELETING"
     assert dep.status_history[-1].timestamp == NOW.isoformat()
     assert dep.error_details is None
-    mock_entities.delete.assert_awaited_once()
+    mock_entities.delete_by_id.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -702,7 +692,7 @@ async def test_delete_timeout_before_boundary_stays_deleting(
     await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
 
     assert dep.status == "DELETING"
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
     assert dep.error_details is None
     assert dep.status_history == original_history
     assert dep.status_message == "Waiting for backend to delete deployment: still terminating"
@@ -725,7 +715,7 @@ async def test_delete_timeout_disabled_when_zero(
     await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
 
     assert dep.status == "DELETING"
-    mock_entities.delete.assert_awaited_once()
+    mock_entities.delete_by_id.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -741,7 +731,7 @@ async def test_delete_retains_deleting_when_backend_delete_fails(
     await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
 
     assert dep.status == "DELETING"
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1095,13 +1085,13 @@ async def test_provider_cleanup_survives_restart_and_deletion_timeout(
         mock_backend.create_deployment = AsyncMock(return_value=mock_backend.delete_status)
     await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
     mock_entities.update.assert_awaited()
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
     dep = Deployment.model_validate(dep.model_dump())
     patch_reconciler_now.now.return_value = NOW + timedelta(seconds=DELETING_TIMEOUT_SECONDS * 2)
     restarted = _starting_timeout_reconciler(mock_entities, mock_backend)
     await _reconcile_stuck_deleting(restarted, mock_backend, dep)
     assert dep.status == "DELETING"
-    mock_entities.delete.assert_not_awaited()
+    mock_entities.delete_by_id.assert_not_awaited()
     mock_backend.delete_status = BackendStatusUpdate(status="SUCCEEDED")
     await _reconcile_stuck_deleting(restarted, mock_backend, dep)
-    mock_entities.delete.assert_awaited_once()
+    mock_entities.delete_by_id.assert_awaited_once()

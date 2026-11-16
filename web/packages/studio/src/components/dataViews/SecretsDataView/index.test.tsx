@@ -6,8 +6,9 @@ import { SecretsDataView } from '@studio/components/dataViews/SecretsDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
 import { XL_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
+import { menuFor } from '@studio/tests/util/menuFor';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter } from 'react-router';
@@ -25,6 +26,23 @@ const renderComponent = (props?: { onCreate?: () => void }) => {
 };
 
 describe('SecretsDataView', () => {
+  it('shows Edit and Delete, with Delete styled as danger, and opens the delete modal', async () => {
+    const user = userEvent.setup();
+    renderComponent();
+
+    await screen.findByText('openai-api-key', undefined, { timeout: XL_SELECTOR_TIMEOUT });
+    const trigger = screen.getAllByRole('button', { name: 'Open quick actions menu' })[0];
+    await user.click(trigger);
+
+    const menu = menuFor(trigger);
+    const items = within(menu).getAllByTestId('quick-actions-menu-item');
+    expect(items.map((item) => item.textContent)).toEqual(['Edit', 'Delete']);
+    expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
+
+    await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/Delete: /);
+  });
+
   describe('Data display', () => {
     it('displays secrets from the API', async () => {
       renderComponent();

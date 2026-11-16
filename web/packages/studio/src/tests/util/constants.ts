@@ -4,4 +4,3 @@
 export const LOCATION_DISPLAY_TEST_ID = 'location-display';
 export const LG_SELECTOR_TIMEOUT = 5000;
 export const XL_SELECTOR_TIMEOUT = 8000;
-export const XXL_SELECTOR_TIMEOUT = 12000;

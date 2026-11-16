@@ -37,11 +37,11 @@ export interface EmptyStateDescriptor {
 }
 
 /**
- * Keys of entities that have a standardized empty state — the subset of
- * {@link EntityKey} that has migrated onto {@link EntityEmptyState}. Narrowing
- * from `EntityKey` is what guarantees every empty state resolves an icon.
+ * Keys of entities that have a standardized empty state. Every {@link EntityKey}
+ * now has one, so this is `EntityKey` itself; keying off it is what guarantees
+ * every empty state resolves an icon.
  */
-export type EmptyStateEntityKey = Exclude<EntityKey, 'datasets'>;
+export type EmptyStateEntityKey = EntityKey;
 
 export type { EntityKey };
 
@@ -66,11 +66,20 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
       'nemo guardrail check --config <config-name> --messages \'[{"role":"user","content":"<message>"}]\'',
     skillPrompt: 'Help me verify my guardrail config with the nemo-guardrails skill',
   },
+  datasets: {
+    heading: 'No datasets yet',
+    subheading:
+      'Datasets hold the training and evaluation data your models and agents learn from and are measured against.',
+    createAction: { label: 'Create Dataset' },
+    cliCommand:
+      'nemo files filesets create <dataset-name> --purpose dataset --workspace <workspace>',
+    skillPrompt: 'Help me create my first dataset with the nemo-files skill',
+  },
   filesets: {
     heading: 'No filesets yet',
     subheading:
       'Filesets group the files your agents and jobs read from — training data, models, or other artifacts.',
-    createAction: { label: 'Create Fileset' },
+    createAction: { label: 'Create Model Fileset' },
     cliCommand: 'nemo files filesets create <fileset-name> --workspace <workspace>',
     skillPrompt: 'Help me create my first fileset with the nemo-files skill',
   },
@@ -183,6 +192,13 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     createAction: { label: 'Create Evaluation' },
     cliCommand: 'nemo evals evaluate --spec-file <spec>.json --workspace <workspace>',
     skillPrompt: 'Help me create my first evaluation with the nemo-nemo-evals-plugin skill',
+  },
+  tasksets: {
+    heading: 'No tasksets yet',
+    subheading:
+      'A taskset groups stored tasks into a versioned suite you can run an agent evaluation against.',
+    cliCommand: 'nemo evals tasksets create --harbor-dir <path> --workspace <workspace>',
+    skillPrompt: 'Help me create my first taskset with the nemo-nemo-evals-plugin skill',
   },
   evaluationSessions: {
     heading: 'No test cases',

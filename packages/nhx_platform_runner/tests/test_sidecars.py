@@ -381,7 +381,7 @@ def test_real_adapters_sidecar_entrypoint_starts_and_stops_with_required_env(
     monkeypatch.setattr(
         adapters_main, "get_nemo_client", lambda **_kwargs: NemoClient(base_url="http://platform.local")
     )
-    monkeypatch.setattr(adapters_main.asyncio, "new_event_loop", lambda: MagicMock())
+    monkeypatch.setattr(adapters_main, "new_event_loop", lambda: MagicMock())
     monkeypatch.setattr(adapters_main, "Loop", FakeLoop)
     monkeypatch.setattr(adapters_main, "TimedLoopWaiter", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(adapters_main.ControllerManager, "get_instance", classmethod(lambda _cls: manager))

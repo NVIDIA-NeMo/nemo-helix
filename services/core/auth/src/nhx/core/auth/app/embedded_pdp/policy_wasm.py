@@ -5,9 +5,9 @@
 
 import logging
 import os
-import subprocess
 from collections.abc import Mapping
 from pathlib import Path
+from subprocess import run
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ def _build_policy_wasm(
     logger.info(
         "Building embedded auth PDP policy.wasm", extra={"repo_root": str(repo_root), "wasm_path": str(wasm_path)}
     )
-    result = subprocess.run(
+    result = run(
         [str(build_script)],
         cwd=repo_root,
         env=build_env,

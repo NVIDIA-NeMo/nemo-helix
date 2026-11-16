@@ -121,7 +121,8 @@ describe('SafeSynthesizerNewRoute', () => {
     beforeEach(async () => {});
 
     it('should render the form with all sections', async () => {
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -139,7 +140,8 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should render Cancel and Continue buttons', async () => {
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -153,7 +155,8 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should render the descriptive text content', async () => {
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -171,7 +174,8 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should set up breadcrumbs correctly', async () => {
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -196,7 +200,8 @@ describe('SafeSynthesizerNewRoute', () => {
 
   describe('Cancel functionality', () => {
     it('should navigate to list page when cancel button is clicked', async () => {
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       const user = userEvent.setup();
@@ -222,7 +227,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -246,8 +252,9 @@ describe('SafeSynthesizerNewRoute', () => {
       vi.resetModules();
 
       // Import the schema to get default values
-      const schema = await import('./schema');
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const schema = await import('@studio/routes/SafeSynthesizerNewRoute/schema');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -309,7 +316,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       const user = userEvent.setup();
@@ -330,7 +338,7 @@ describe('SafeSynthesizerNewRoute', () => {
 
       // However, we can verify that if the mutation were to be called, the payload wrapper would be correct
       // by checking the schema structure
-      const schema = await import('./schema');
+      const schema = await import('@studio/routes/SafeSynthesizerNewRoute/schema');
       const formDefaults = schema.getSafeSynthesizerFormDefaults();
 
       // Simulate what would be sent to the mutation if validation passed
@@ -349,7 +357,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       const user = userEvent.setup();
@@ -382,7 +391,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -412,7 +422,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -448,7 +459,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -490,7 +502,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -542,7 +555,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -581,7 +595,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -625,7 +640,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -658,7 +674,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -684,7 +701,8 @@ describe('SafeSynthesizerNewRoute', () => {
 
     it('should not display error banner initially', async () => {
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       render(
@@ -706,7 +724,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       // Spy on console.error to suppress vitest-fail-on-console and assert the call.
@@ -766,7 +785,8 @@ describe('SafeSynthesizerNewRoute', () => {
       }));
 
       vi.resetModules();
-      const { SafeSynthesizerNewRoute } = await import('./index');
+      const { SafeSynthesizerNewRoute } =
+        await import('@studio/routes/SafeSynthesizerNewRoute/index');
       if (!SafeSynthesizerNewRoute) return;
 
       const user = userEvent.setup();

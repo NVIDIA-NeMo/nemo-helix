@@ -8,6 +8,7 @@ import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { mockGuardrailConfigs } from '@studio/mocks/handlers/guardrails';
 import { server } from '@studio/mocks/node';
 import { XL_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
+import { menuFor } from '@studio/tests/util/menuFor';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -164,9 +165,14 @@ describe('GuardrailsDataView', () => {
     renderComponent({ onRequestDelete });
     await findPiiFilterRow();
 
-    const menuButtons = screen.getAllByRole('button', { name: /actions/i });
-    await user.click(menuButtons[0]);
-    await user.click((await screen.findAllByRole('menuitem', { name: 'Delete' }))[0]);
+    const trigger = screen.getAllByRole('button', { name: /actions/i })[0];
+    await user.click(trigger);
+
+    const menu = menuFor(trigger);
+    const items = within(menu).getAllByTestId('quick-actions-menu-item');
+    expect(items.map((item) => item.textContent)).toEqual(['Duplicate', 'Delete']);
+    expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
     await waitFor(() => {
       expect(onRequestDelete).toHaveBeenCalledWith(expect.objectContaining({ name: 'pii-filter' }));
     });

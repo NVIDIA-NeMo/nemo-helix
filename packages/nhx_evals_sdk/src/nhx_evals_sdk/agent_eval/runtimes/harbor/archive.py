@@ -9,7 +9,7 @@ import shutil
 import stat
 import tomllib
 import unicodedata
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -156,16 +156,27 @@ def validate_native_task_inputs(root: Path) -> NativeTask:
             instruction = value.decode("utf-8")
     if total > MAX_METADATA_BYTES:
         raise ValueError("Task metadata exceeds aggregate byte limit")
-    from harbor.models.task.task import Task
-
     try:
-        task = Task(root)
-        if not (root / "environment").is_dir() or not Task.is_valid_dir(root):
-            raise ValueError("Invalid native Harbor task")
+        name = _native_task_name(root)
     except OSError as exc:
         raise ValueError("Missing or unreadable native Harbor artifact") from exc
-    normalize_harbor_instruction(instruction, task_id=task.name)
-    return NativeTask(task.name, instruction, config)
+    normalize_harbor_instruction(instruction, task_id=name)
+    return NativeTask(name, instruction, config)
+
+
+def _native_task_name(root: Path) -> str:
+    """Load ``root`` with Harbor's own task model and return the task's name.
+
+    Raises:
+        ValueError: Harbor does not accept ``root`` as a task directory.
+        OSError: A native Harbor artifact is missing or unreadable.
+    """
+    from harbor.models.task.task import Task
+
+    task = Task(root)
+    if not (root / "environment").is_dir() or not Task.is_valid_dir(root):
+        raise ValueError("Invalid native Harbor task")
+    return task.name
 
 
 def remove_owned_tree(root: Path) -> None:
@@ -195,6 +206,11 @@ def private_directory(parent: Path | None = None) -> Generator[Path, None, None]
 
 def _raise_walk_error(error: OSError) -> None:
     raise error
+
+
+def _walk_task_tree(root: Path) -> Iterator[tuple[str, list[str], list[str]]]:
+    """Walk ``root`` top-down without following links, raising the first directory that can't be listed."""
+    return os.walk(root, followlinks=False, onerror=_raise_walk_error)
 
 
 def check_internal_symlink(path: Path, root: Path) -> str:
@@ -235,7 +251,7 @@ def inventory_task_entries(root: Path) -> list[tuple[Path, os.stat_result]]:
     seen = {root.name.casefold()}
     total = 0
     # Walk without following links; only task-internal links are kept, never descended into.
-    for directory, dirs, files in os.walk(root, followlinks=False, onerror=_raise_walk_error):
+    for directory, dirs, files in _walk_task_tree(root):
         for name in sorted(dirs + files):
             path = Path(directory) / name
             relative = path.relative_to(root.parent).as_posix()

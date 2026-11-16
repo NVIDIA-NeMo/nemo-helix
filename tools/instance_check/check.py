@@ -21,11 +21,11 @@ Examples:
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
-import subprocess
 import sys
+from importlib.util import find_spec
 from pathlib import Path
+from subprocess import run
 
 from nemo_helix_plugin.client.config.config import ConfigParams, get_context
 
@@ -74,7 +74,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def run_check(args: argparse.Namespace) -> int:
     """Resolve the platform context and run the acceptance pytest file."""
-    if importlib.util.find_spec("pytest") is None:
+    if find_spec("pytest") is None:
         print(
             "This check needs pytest. Run it from the NeMo Helix dev environment: "
             "uv run python tools/instance_check/check.py",
@@ -105,7 +105,7 @@ def run_check(args: argparse.Namespace) -> int:
         env["NHX_CHECK_MODELS"] = "1"
     if args.require_token_exchange:
         env["NHX_CHECK_REQUIRE_TOKEN_EXCHANGE"] = "1"
-    completed = subprocess.run(
+    completed = run(
         [
             sys.executable,
             "-m",

@@ -4,9 +4,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 import yaml
@@ -15,8 +16,10 @@ from mcp.types import ListToolsResult, PaginatedRequestParams, Tool
 from nemo_agents_plugin.agent_config import AgentConfig, McpServerConfig
 from nemo_agents_plugin.fabric import mcp_status, server
 from nemo_agents_plugin.fabric.mcp_status import (
+    McpServerState,
     McpServerStatus,
     McpStatusCache,
+    McpStatusResponse,
     _list_all_tools,
     probe_mcp_server,
 )
@@ -284,3 +287,14 @@ def test_mcp_server_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert single.status_code == 200
     assert single.json() == body["servers"][0]
     assert missing.status_code == 404
+
+
+# Studio's hand-written types are checked against the same fixture in web/packages/studio/src/api/agents/mcpStatusContract.test.ts.
+_STUDIO_FIXTURE = Path(__file__).resolve().parents[4] / "web/packages/studio/src/mocks/mcpStatusResponse.json"
+
+
+def test_studio_fixture_matches_response_model() -> None:
+    fixture = json.loads(_STUDIO_FIXTURE.read_text(encoding="utf-8"))
+
+    assert McpStatusResponse.model_validate(fixture).model_dump(mode="json") == fixture
+    assert {s["state"] for s in fixture["servers"]} == set(get_args(McpServerState))

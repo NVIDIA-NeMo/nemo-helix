@@ -608,6 +608,7 @@ class TestPublishedPackagingContract:
         }
         assert fabric == {
             "nemo-fabric[relay,streaming]",
+            "nemo-fabric-adapter-catalog",
             "nemo-fabric-adapters-claude",
             "nemo-fabric-adapters-codex",
             "nemo-fabric-adapters-deepagents",

@@ -161,7 +161,10 @@ class ResultService:
     async def _delete(self, entity_cls: type[_ResultEntityT], workspace: str, name: str) -> bool:
         """Delete by workspace/name; ``False`` if absent. Type-agnostic (delete takes no body)."""
         try:
-            await self.entity_client.delete(entity_cls, name, workspace=workspace)
+            _delete_target = await self.entity_client.get(entity_cls, name=name, workspace=workspace)
+            await self.entity_client.delete_by_id(
+                entity_cls, _delete_target.id, expected_db_version=_delete_target.db_version
+            )
         except NemoEntityNotFoundError:
             return False
         return True

@@ -2,9 +2,11 @@
   "private": true,
   "scripts": {
     "prepare:helm": "node scripts/sync-helm-docs.mjs",
+    "prepare:libraries": "node scripts/sync-library-versions.mjs",
+    "check:libraries": "node scripts/sync-library-versions.mjs --check",
     "sync:colab-links": "node scripts/sync-colab-links.mjs",
     "check:colab-links": "node scripts/sync-colab-links.mjs --check",
-    "prepare": "npm run prepare:helm && npm run sync:colab-links",
+    "prepare": "npm run prepare:helm && npm run prepare:libraries && npm run sync:colab-links",
     "test": "node --test scripts/*.test.mjs",
     "check": "npm test && npm run prepare && npm run check:colab-links && npm run validate-lfs-assets && npx -y fern-api@latest check && npm run validate-mdx && npm run validate-notebook-viewer && npm run check:gated-links",
     "check:fern": "npm run prepare && npx -y fern-api@latest check",
@@ -22,6 +24,7 @@
   },
   "devDependencies": {
     "@mdx-js/mdx": "^3.1.0",
+    "smol-toml": "^1.9.1",
     "yaml": "^2.9.0"
   }
 }

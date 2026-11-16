@@ -36,6 +36,12 @@ _DEPLOYMENTS_PLUGIN_IMPORT_ERROR = (
 )
 
 
+def _import_deployments_plugin_backend() -> type[ServiceBackend]:
+    from nhx.core.models.controllers.backends.deployments_plugin.backend import DeploymentsPluginServiceBackend
+
+    return DeploymentsPluginServiceBackend
+
+
 def _resolve_backend_class(
     name: BackendName, available_backends: Dict[BackendName, type[ServiceBackend]]
 ) -> type[ServiceBackend]:
@@ -44,12 +50,9 @@ def _resolve_backend_class(
         return available_backends[name]
     if name == "deployments_plugin":
         try:
-            from nhx.core.models.controllers.backends.deployments_plugin.backend import (
-                DeploymentsPluginServiceBackend,
-            )
+            return _import_deployments_plugin_backend()
         except ImportError as exc:
             raise ImportError(_DEPLOYMENTS_PLUGIN_IMPORT_ERROR) from exc
-        return DeploymentsPluginServiceBackend
     available = ", ".join(sorted({*available_backends, *_LAZY_BACKEND_NAMES}))
     raise KeyError(f"Unknown backend '{name}'. Available backends: {available}")
 

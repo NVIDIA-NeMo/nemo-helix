@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.api import response_policy
-from nemo_helix_plugin.client.errors import BadRequestError, NotFoundError, UnprocessableEntityError
+from nemo_helix_plugin.client.errors import BadRequestError, NotFoundError
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.entities.client import EntityNotFoundError
 from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
@@ -61,14 +61,6 @@ FORWARDED_CASES = [
     pytest.param(endpoint, params, error_type, status, detail, id=f"{endpoint[3]}-{label}")
     for endpoint in ENDPOINTS
     for label, params, error_type, status, detail in [
-        ("page", {"page": "0"}, UnprocessableEntityError, 422, "Input should be greater than or equal to 1"),
-        (
-            "page-size",
-            {"page_size": str(2**63)},
-            UnprocessableEntityError,
-            422,
-            "Input should be less than or equal to 1000",
-        ),
         (
             "timestamp",
             {"filter[created_at][$gt]": "notadate"},
@@ -78,8 +70,7 @@ FORWARDED_CASES = [
         ),
         ("sort", {"sort": "--name"}, BadRequestError, 400, "Invalid sort field -name"),
     ]
-    if not (label == "page-size" and endpoint[0] is adapters)
-    and not (label == "sort" and endpoint[0] in (models, providers))
+    if not (label == "sort" and endpoint[0] in (models, providers))
 ]
 
 
@@ -93,11 +84,7 @@ def test_upstream_list_query_errors(endpoint, params, error_type, status, detail
         response = client.get(f"/v2/workspaces/default/{endpoint[3]}", params=params)
     service_method.assert_awaited_once()
     kwargs = service_method.await_args.kwargs
-    if "page" in params:
-        assert kwargs["page"] == int(params["page"])
-    elif "page_size" in params:
-        assert kwargs["page_size"] == int(params["page_size"])
-    elif "sort" in params:
+    if "sort" in params:
         assert kwargs["sort"] == params["sort"]
     else:
         operation = kwargs["parsed_filter"].operation if "parsed_filter" in kwargs else kwargs["filter_operation"]
@@ -120,7 +107,11 @@ def test_internal_value_error_is_not_a_client_error(endpoint, monkeypatch):
 @pytest.mark.parametrize(
     "endpoint,params,field",
     [
-        (ENDPOINTS[1], {"page_size": str(2**63)}, "page_size"),
+        *(
+            pytest.param(endpoint, params, field, id=f"{endpoint[3]}-{field}")
+            for endpoint in ENDPOINTS
+            for params, field in [({"page": "0"}, "page"), ({"page_size": str(2**63)}, "page_size")]
+        ),
         (ENDPOINTS[0], {"sort": "--name"}, "sort"),
         (ENDPOINTS[2], {"sort": "--name"}, "sort"),
     ],

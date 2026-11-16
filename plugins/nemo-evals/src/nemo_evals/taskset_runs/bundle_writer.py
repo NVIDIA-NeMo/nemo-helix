@@ -19,7 +19,7 @@ from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.jobs.agent_spec import HarborRunnerTarget
 from nemo_evals.jobs.harbor_scoring import harbor_scoring_task
 from nemo_evals.taskset_runs.plan_storage import load_plan
-from nemo_evals.taskset_runs.specs import AcceptedTaskOutput, TasksetBundleSpec, TasksetRunPlan
+from nemo_evals.taskset_runs.specs import TASK_BUNDLE_FILES, AcceptedTaskOutput, TasksetBundleSpec, TasksetRunPlan
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.file_manager import AsyncFilesetFileManager
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary, RunMetadata
@@ -27,9 +27,6 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.scoring import harbor_scoring_metr
 from nhx_evals_sdk.agent_eval.scores import AgentEvalTaskScore
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial
-
-#: Files read from each task bundle. Evidence stays where it is and is linked, not copied.
-TASK_BUNDLE_FILES = ("trials.jsonl", "scores.jsonl", "metadata.json")
 
 
 @dataclass(frozen=True)

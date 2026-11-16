@@ -22,7 +22,6 @@ from nemo_evals.api.schemas import (
     TaskInput,
     TaskRef,
     TasksetInput,
-    TasksetRef,
 )
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalTaskInput, FabricRunnerTarget
 from nemo_evals.jobs.evaluate import EvaluateInputSpec
@@ -173,7 +172,7 @@ def test_skill_python_examples_import_and_build_agent_spec() -> None:
 
     spec = AgentEvalInputSpec.model_validate(examples.build_agent_eval_spec(metric_bundle))
 
-    assert not isinstance(spec.tasks, TasksetRef)
+    assert isinstance(spec.tasks, list)
     assert len(spec.tasks) == 1
     assert isinstance(spec.target, FabricRunnerTarget)
     assert spec.target.config is not None

@@ -332,6 +332,27 @@ describe('SliderWithTextInput', () => {
       expect(mockOnChange).toHaveBeenCalledWith(10);
     });
 
+    it('should call the TextInput onBlur after clamping', () => {
+      const calls: string[] = [];
+      const field = createMockField(
+        50,
+        vi.fn(() => calls.push('onChange'))
+      );
+      render(
+        <SliderWithTextInput
+          field={field}
+          min={10}
+          max={90}
+          attributes={{ TextInput: { onBlur: () => calls.push('onBlur') } }}
+        />
+      );
+
+      const textInput = screen.getByRole('spinbutton');
+      fireEvent.change(textInput, { target: { value: '150' } });
+      fireEvent.blur(textInput);
+      expect(calls).toEqual(['onChange', 'onBlur']);
+    });
+
     it('should allow typing a value whose prefix is below min', () => {
       const mockOnChange = vi.fn();
       const field = createMockField(1, mockOnChange);
@@ -520,8 +541,65 @@ describe('SliderWithTextInput', () => {
       const slider = screen.getByRole('slider');
       const textInput = screen.getByRole('spinbutton');
 
-      expect(slider).toHaveAttribute('aria-label', 'Controlled slider');
-      expect(textInput).toHaveAttribute('aria-label', 'slider_text_input');
+      expect(slider).toHaveAttribute('aria-label', 'Volume');
+      expect(textInput).toHaveAttribute('aria-label', 'Volume value');
+      expect(
+        screen.getByRole('button', { name: 'Reset Volume to default value' })
+      ).toBeInTheDocument();
+    });
+
+    it('prefers the text label over displayName', () => {
+      render(
+        <SliderWithTextInput
+          field={createMockField(50)}
+          defaultValue={25}
+          min={0}
+          max={100}
+          step={1}
+          displayName="volume_level"
+          formFieldProps={{ slotLabel: 'Volume' }}
+        />
+      );
+
+      expect(screen.getByRole('slider')).toHaveAttribute('aria-label', 'Volume');
+      expect(
+        screen.getByRole('button', { name: 'Reset Volume to default value' })
+      ).toBeInTheDocument();
+    });
+
+    it('names the controls after displayName when the label is not text', () => {
+      render(
+        <SliderWithTextInput
+          field={createMockField(50)}
+          defaultValue={25}
+          min={0}
+          max={100}
+          step={1}
+          displayName="Volume"
+          formFieldProps={{ slotLabel: <span>Volume</span> }}
+        />
+      );
+
+      expect(screen.getByRole('slider')).toHaveAttribute('aria-label', 'Volume');
+      expect(screen.getByRole('spinbutton')).toHaveAttribute('aria-label', 'Volume value');
+      expect(
+        screen.getByRole('button', { name: 'Reset Volume to default value' })
+      ).toBeInTheDocument();
+    });
+
+    it('falls back to generic names when there is no text label', () => {
+      render(
+        <SliderWithTextInput
+          field={createMockField(50)}
+          defaultValue={25}
+          min={0}
+          max={100}
+          step={1}
+        />
+      );
+
+      expect(screen.getByRole('slider')).toHaveAttribute('aria-label', 'Controlled slider');
+      expect(screen.getByRole('spinbutton')).toHaveAttribute('aria-label', 'slider_text_input');
     });
 
     it('should have data-testid for testing', () => {

@@ -53,6 +53,25 @@ def test_valid_ethos_parses_to_metadata_and_sections() -> None:
     assert ethos.warnings == ()
 
 
+@pytest.mark.parametrize(
+    "front",
+    [
+        "name: [unfinished",
+        "name:\n\tinvalid: indentation",
+        "name: *undefined",
+        "name: !!python/object:builtins.object {}",
+        "created_timestamp: 2026-13-02T03:04:05Z",
+        "created_timestamp: 2026-02-30",
+        "created_timestamp: '2026-13-02T03:04:05Z'",
+    ],
+    ids=["sequence", "indentation", "undefined-alias", "unsafe-tag", "timestamp", "date", "quoted-timestamp"],
+)
+def test_invalid_front_matter_raises_ethos_parse_error(front: str) -> None:
+    markdown = _ethos_md(extra_front=front)
+    with pytest.raises(EthosParseError):
+        parse_ethos(markdown)
+
+
 def test_missing_required_section_rejected() -> None:
     md = _ethos_md().replace("## Purpose & Outcomes\n\nPurpose & Outcomes content\n\n", "")
 
@@ -113,6 +132,19 @@ def test_change_scope_levers_recognize_with_approval() -> None:
         "Fine-tuning": "no",
         "Model swap (within mode)": "with-approval",
     }
+
+
+@pytest.mark.parametrize(
+    ("empty_value", "newline"),
+    [("", "\n"), (" \t", "\n"), (" \t", "\r\n")],
+    ids=["empty", "horizontal-whitespace", "crlf"],
+)
+def test_empty_change_scope_lever_does_not_consume_following_line(empty_value: str, newline: str) -> None:
+    scope = newline.join([f"- Retrain:{empty_value}", "-\tPrompt edits:\tyes", "- Tools: no"])
+
+    ethos = parse_ethos(_ethos_md(sections={"Change Scope": scope}))
+
+    assert ethos.change_scope_levers == {"Prompt edits": "yes", "Tools": "no"}
 
 
 def test_schema_drops_optimizer_run_configuration() -> None:

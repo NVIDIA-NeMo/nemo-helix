@@ -12,6 +12,7 @@ from typing import cast
 import httpx
 import pytest
 import typer
+from nemo_evals import runs_cli
 from nemo_evals.api.fields import TaskRef
 from nemo_evals.image_builds.models import BuildImage, ImageBuild
 from nemo_evals.runs_cli import (
@@ -327,6 +328,92 @@ def test_create_prints_the_dataset_flag_and_the_ref_last(cli, monkeypatch):
 def test_create_needs_exactly_one_source(cli, tmp_path: Path):
     assert cli(FakeBuilds(), "create").exit_code == 2
     assert cli(FakeBuilds(), "create", "--harbor-dir", str(tmp_path), "--harbor-hub", "x/y@1").exit_code == 2
+
+
+@pytest.fixture
+def creating(monkeypatch, tmp_path):
+    for name in ("sum-three", "debug-agent-runtime-error", "greet-universe"):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "task.toml").write_text(f'[task]\nname = "hello/{name}"\n')
+    seen = SimpleNamespace(directory=tmp_path, uploaded=[], published=[])
+
+    def publish(evaluator, task_dirs, *, prefix, workspace, echo):
+        seen.uploaded.extend(task_dirs)
+        return [f"{workspace}/{directory.name}#{DIGEST}" for directory in task_dirs]
+
+    def replace_taskset(name, taskset, workspace):
+        seen.published.append([member.root for member in taskset.tasks])
+        seen.ref = f"{workspace}/{name}#" + "3" * 64
+
+    tasksets = SimpleNamespace(
+        replace=replace_taskset,
+        list_revisions=lambda *a, **k: SimpleNamespace(data=[SimpleNamespace(content_hash="3" * 64)]),
+    )
+    monkeypatch.setattr(runs_cli, "publish_tasks", publish)
+    monkeypatch.setattr(
+        "nemo_evals.tasksets_cli.Evaluator", SimpleNamespace(from_client=lambda _: SimpleNamespace(tasksets=tasksets))
+    )
+    client = SimpleNamespace(resolve_workspace=lambda workspace=None: workspace or "default")
+
+    def invoke(*args):
+        app = typer.Typer()
+        add_tasksets_commands(app, lambda: client)  # ty: ignore[invalid-argument-type]
+        return CliRunner().invoke(app, ["tasksets", "create", "--harbor-dir", str(tmp_path), *args])
+
+    seen.invoke = invoke
+    return seen
+
+
+@pytest.mark.parametrize("as_json", [False, True], ids=["text", "json"])
+def test_create_local_range_selection(creating, as_json):
+    result = creating.invoke("--tasks", "sum-three,0-0", *(["--json"] if as_json else []))
+    assert result.exit_code == 0, result.output
+    refs = [f"default/{name}#{DIGEST}" for name in ("sum-three", "debug-agent-runtime-error")]
+    assert creating.uploaded == [creating.directory / "sum-three", creating.directory / "debug-agent-runtime-error"]
+    assert creating.published == [refs]
+    if as_json:
+        assert json.loads(result.output) == {
+            "taskset_ref": creating.ref,
+            "tasks": refs,
+            "total": 3,
+            "intake_dataset": None,
+        }
+    else:
+        assert result.output.splitlines()[-1] == creating.ref
+        assert "2 of 3 tasks" in result.output
+
+
+@pytest.mark.parametrize("tokens", ["0,2-1", "0-3", "0-1,1"])
+def test_create_invalid_range_writes_nothing(creating, tokens):
+    result = creating.invoke("--tasks", tokens)
+    assert result.exit_code == 1 and "Error:" in result.output
+    assert creating.uploaded == creating.published == []
+
+
+def test_create_listing_ignores_an_invalid_range(creating):
+    result = creating.invoke("--tasks", "2-1", "--list-tasks")
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [
+        "  #  task",
+        "  0  hello/debug-agent-runtime-error",
+        "  1  hello/greet-universe",
+        "  2  hello/sum-three",
+    ]
+    assert creating.uploaded == creating.published == []
+
+
+def test_create_help_explains_ranges_without_a_client():
+    def no_client():
+        raise AssertionError("help must not construct a client")
+
+    app = typer.Typer()
+    add_tasksets_commands(app, no_client)
+    result = CliRunner().invoke(app, ["tasksets", "create", "--help"], terminal_width=160)
+    assert result.exit_code == 0, result.output
+    help_text = " ".join(result.output.replace("│", " ").split())
+    assert "Zero-based" in help_text and "inclusive ranges" in help_text
+    assert "0-4,7,anko-example" in help_text
 
 
 @pytest.mark.parametrize(

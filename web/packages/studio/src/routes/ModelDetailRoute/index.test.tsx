@@ -5,6 +5,7 @@ import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { ROUTES } from '@studio/constants/routes';
 import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
 import { type ModelLineage, useModelLineage } from '@studio/hooks/useModelLineage';
+import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { ModelDetailRoute } from '@studio/routes/ModelDetailRoute';
 import { renderRoute } from '@studio/tests/util/render';
 import { screen } from '@testing-library/react';
@@ -14,6 +15,15 @@ vi.mock('@studio/hooks/useModelLineage', async (importOriginal) => ({
   useModelLineage: vi.fn(),
 }));
 vi.mock('@studio/hooks/useCustomizationJob');
+vi.mock('@studio/providers/breadcrumbs/useBreadcrumbs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@studio/providers/breadcrumbs/useBreadcrumbs')>()),
+  useBreadcrumbs: vi.fn(),
+}));
+vi.mock('@studio/routes/ModelDetailRoute/DetailsTab/DetailsActions', () => ({
+  DetailsActions: ({ canDelete }: { canDelete: boolean }) => (
+    <button type="button">details actions{canDelete ? ' with delete' : ''}</button>
+  ),
+}));
 vi.mock('@studio/routes/ModelDetailRoute/DetailsTab', () => ({
   DetailsTab: () => <div>details content</div>,
 }));
@@ -66,6 +76,7 @@ const renderPage = (path: string) =>
     routes: [
       { path: ROUTES.workspace.modelDetail, element: <ModelDetailRoute /> },
       { path: ROUTES.workspace.modelAdapterDetail, element: <ModelDetailRoute /> },
+      { path: ROUTES.workspace.baseModelsModel, element: <ModelDetailRoute parent="catalog" /> },
     ],
   });
 
@@ -210,5 +221,71 @@ describe('ModelDetailRoute', () => {
     renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/missing');
 
     expect(await screen.findByText('Adapter not found')).toBeInTheDocument();
+  });
+
+  describe('under the Model Catalog', () => {
+    const baseModel = { name: 'my-model', workspace: 'ws' } as ModelEntity;
+
+    it('sits under the Model Catalog breadcrumb', async () => {
+      mockLineage({
+        model: baseModel,
+        job: { jobName: undefined, workspace: 'ws', isLoading: false },
+      });
+      renderPage('/workspaces/ws/base-models/my-model');
+
+      await screen.findByTestId('nv-page-header-heading');
+      expect(useBreadcrumbs).toHaveBeenLastCalledWith({
+        items: [
+          { href: '/workspaces/ws/base-models', slotLabel: 'Model Catalog' },
+          { slotLabel: 'my-model' },
+        ],
+      });
+    });
+
+    it('offers delete on Details while no provider serves the model', async () => {
+      mockLineage({
+        model: baseModel,
+        job: { jobName: undefined, workspace: 'ws', isLoading: false },
+      });
+      renderPage('/workspaces/ws/base-models/my-model');
+
+      expect(
+        await screen.findByRole('button', { name: 'details actions with delete' })
+      ).toBeInTheDocument();
+    });
+
+    it('withholds delete while a provider serves the model', async () => {
+      mockLineage({
+        model: { ...baseModel, model_providers: ['ws/provider'] } as ModelEntity,
+        job: { jobName: undefined, workspace: 'ws', isLoading: false },
+      });
+      renderPage('/workspaces/ws/base-models/my-model');
+
+      expect(await screen.findByRole('button', { name: 'details actions' })).toBeInTheDocument();
+    });
+
+    it('looks the model up in the default workspace too', async () => {
+      mockLineage({ model: baseModel });
+      renderPage('/workspaces/ws/base-models/my-model');
+
+      await screen.findByTestId('nv-page-header-heading');
+      expect(useModelLineage).toHaveBeenLastCalledWith('ws', 'my-model', undefined, {
+        fallbackWorkspace: 'default',
+      });
+    });
+  });
+
+  it('sits under the Fine-tuning breadcrumb, without the catalog actions', async () => {
+    mockLineage();
+    renderPage('/workspaces/ws/fine-tune/models/my-model');
+
+    await screen.findByTestId('nv-page-header-heading');
+    expect(useBreadcrumbs).toHaveBeenLastCalledWith({
+      items: [
+        { href: '/workspaces/ws/fine-tune', slotLabel: 'Fine-tuning' },
+        { slotLabel: 'my-model' },
+      ],
+    });
+    expect(screen.queryByRole('button', { name: /details actions/ })).not.toBeInTheDocument();
   });
 });

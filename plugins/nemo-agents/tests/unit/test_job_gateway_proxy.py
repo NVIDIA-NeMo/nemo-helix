@@ -8,12 +8,14 @@ import copy
 import json
 import logging
 import socket
+import time
 from pathlib import Path
 from unittest.mock import Mock
 from urllib.parse import urlsplit
 
 import httpx
 import pytest
+import uvicorn
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.invocation import AgentConfigInvocationRequest
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
@@ -393,16 +395,16 @@ def test_anonymous_job_respects_platform_auth_configuration(
 def test_startup_failure_closes_listener(monkeypatch: pytest.MonkeyPatch, workload: Mock, startup: str) -> None:
     address = []
 
-    def run(server, *, sockets):
-        address.append(sockets[0].getsockname())
-        if startup == "error":
-            raise RuntimeError("cannot start")
-        while not server.should_exit:
-            import time
+    class _Server(uvicorn.Server):
+        def run(self, sockets: list[socket.socket] | None = None) -> None:
+            assert sockets is not None
+            address.append(sockets[0].getsockname())
+            if startup == "error":
+                raise RuntimeError("cannot start")
+            while not self.should_exit:
+                time.sleep(0.01)
 
-            time.sleep(0.01)
-
-    monkeypatch.setattr(gateway_proxy.uvicorn.Server, "run", run)
+    monkeypatch.setattr(gateway_proxy, "Server", _Server)
     monkeypatch.setattr(gateway_proxy, "_STARTUP_TIMEOUT_SECONDS", 0.05)
     with pytest.raises((RuntimeError, TimeoutError), match="proxy"):
         with gateway_proxy.platform_auth_proxy():

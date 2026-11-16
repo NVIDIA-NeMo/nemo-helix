@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nhx.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
+from nhx.intake.repository.evaluation_rollup import EvaluationRollup
 
 EXPERIMENTS = "/apis/intake/v2/workspaces/default/experiments"
 # The deprecated pre-rename path; kept as a hidden alias for backwards compatibility.
@@ -381,7 +383,9 @@ def test_filter_experiments_by_baseline_evaluation_name(client: TestClient) -> N
 
 def test_evaluation_read_degrades_when_rollup_hydration_fails(client: TestClient) -> None:
     class FailingRollupRepository:
-        async def get_rollups(self, *, workspace: str, evaluation_names: list[str]) -> dict:
+        async def get_rollups(
+            self, *, workspace: str, evaluation_names: list[str], created_after_by_name: dict
+        ) -> dict:
             raise RuntimeError("clickhouse unavailable")
 
     group = _create_group(client)
@@ -561,6 +565,49 @@ def test_soft_delete_frees_name_for_reuse(client: TestClient) -> None:
     second = client.post(EVALUATIONS, json=_evaluation_body(name="reusable", experiment_group_id=group["id"]))
     assert second.status_code == 201, second.text
     assert second.json()["id"] != first.json()["id"]
+
+
+def test_recreated_evaluation_reads_are_bound_to_its_own_created_at(client: TestClient) -> None:
+    """A recreated Evaluation must not inherit the deleted namesake's results.
+
+    Delete frees the name, so the new entity can claim it; its rollup reads must then be
+    bounded to the new entity's created_at, not the deleted one's lifetime.
+    """
+
+    class CapturingRollupRepository:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def get_rollups(
+            self, *, workspace: str, evaluation_names: list[str], created_after_by_name: dict
+        ) -> dict:
+            self.calls.append(dict(created_after_by_name))
+            return {name: EvaluationRollup(evaluation_name=name) for name in evaluation_names}
+
+    group = _create_group(client)
+    first = client.post(EVALUATIONS, json=_evaluation_body(name="recreated", experiment_group_id=group["id"]))
+    assert first.status_code == 201, first.text
+    assert client.delete(f"{EVALUATIONS}/recreated").status_code == 204
+
+    second = client.post(EVALUATIONS, json=_evaluation_body(name="recreated", experiment_group_id=group["id"]))
+    assert second.status_code == 201, second.text
+    assert second.json()["id"] != first.json()["id"]
+
+    capturing = CapturingRollupRepository()
+    app = cast(FastAPI, client.app)
+    app.dependency_overrides[get_evaluation_rollup_repository] = lambda: capturing
+    try:
+        fetched = client.get(f"{EVALUATIONS}/recreated")
+        assert fetched.status_code == 200, fetched.text
+    finally:
+        app.dependency_overrides.pop(get_evaluation_rollup_repository, None)
+
+    # The rollup request is bounded to the recreated entity's created_at — the one the
+    # store stamped on the new row, not the deleted evaluation's.
+    assert len(capturing.calls) == 1
+    created_after = capturing.calls[0].get("recreated")
+    assert created_after is not None
+    assert created_after == datetime.fromisoformat(second.json()["created_at"])
 
 
 def test_list_hides_soft_deleted_by_default(client: TestClient) -> None:

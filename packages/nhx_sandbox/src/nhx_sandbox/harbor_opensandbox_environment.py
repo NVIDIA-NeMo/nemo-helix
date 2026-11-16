@@ -63,6 +63,7 @@ from harbor.environments.capabilities import EnvironmentCapabilities, Environmen
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
+from httpx import AsyncClient
 from nhx_sandbox.backends.opensandbox.termination import OpenSandboxTerminationDiagnostics
 from nhx_sandbox.compose_env import expand_env
 from nhx_sandbox.core.termination import check_termination, write_termination
@@ -212,7 +213,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         domain: OpenSandbox server address; defaults to ``OPENSANDBOX_DOMAIN``.
         api_key: OpenSandbox API key; defaults to ``OPENSANDBOX_API_KEY``. An explicit ``""`` means no auth.
         protocol: ``http`` or ``https``.
-        use_server_proxy: Route execd traffic through the server instead of to the pod directly.
+        use_server_proxy: Route execd traffic through the server instead of to the pod directly. On by default:
+            a deployment that isolates sandbox pods admits only the server, so a direct connection can't reach them.
         ready_timeout_sec: How long a new sandbox may take to become healthy.
         sandbox_timeout_sec: The sandbox's server-side lifetime.
         sandbox_expires_at: ISO-8601 time, with its UTC offset, no sandbox may outlive. Each create gets ``sandbox_timeout_sec``
@@ -264,7 +266,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         domain: str | None = None,
         api_key: str | None = None,
         protocol: str = "https",
-        use_server_proxy: bool = False,
+        use_server_proxy: bool = True,
         ready_timeout_sec: float = DEFAULT_READY_TIMEOUT_SEC,
         sandbox_timeout_sec: float = DEFAULT_SANDBOX_TIMEOUT_SEC,
         sandbox_expires_at: str | None = None,
@@ -441,6 +443,16 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         )
         return build_egress_policy(self._egress_allowlist(targets))
 
+    async def _build_egress_policy(self) -> EgressPolicy:
+        """:meth:`egress_policy`, run in a worker thread.
+
+        Building a policy does blocking DNS lookups and reads ``/etc/resolv.conf``. Harbor runs every
+        trial on one event loop, so doing that inline would pause all of them for as long as a slow or
+        unresolvable host takes to time out. The policy is rebuilt for every sandbox rather than cached,
+        so a long run always sees current DNS answers.
+        """
+        return await asyncio.to_thread(self.egress_policy)
+
     def _operator_hosts(self) -> tuple[str, ...]:
         """Egress targets from the operator rather than the task; their addresses may be carved out."""
         return self._trusted_allowed_hosts
@@ -513,7 +525,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         if uses_extension:
             await self._require_extension()
 
-        egress_policy = self.egress_policy()
+        # Built once and shared by the create, the verification and the applied-egress record, so all
+        # three describe the same policy. Off the event loop: it resolves hostnames and reads resolv.conf.
+        egress_policy = await self._build_egress_policy()
         entrypoint = self._sandbox_entrypoint()
         sandbox = await self._driver.create(
             CreateRequest(
@@ -666,7 +680,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         """Replace *path* with *record* in one rename, so a failed write leaves the previous record whole."""
         temporary = path.with_name(f"{path.name}.tmp")
         try:
-            temporary.write_text(json.dumps(record, indent=2))
+            _write_text(temporary, json.dumps(record, indent=2))
             temporary.replace(path)
         except OSError:
             temporary.unlink(missing_ok=True)
@@ -1152,6 +1166,11 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 )
 
 
+def _write_text(path: Path, text: str) -> None:
+    """Write *text* to *path*; a seam so a test can fail the write without patching ``Path``."""
+    path.write_text(text)
+
+
 def _error_text(response: httpx.Response) -> str:
     """A short error message from a server response: ``code: message`` when it has the server's error shape."""
     try:
@@ -1206,7 +1225,7 @@ class _ServerClient:
             response: httpx.Response | None = None
 
             try:
-                async with httpx.AsyncClient(timeout=attempt_timeout) as client:
+                async with AsyncClient(timeout=attempt_timeout) as client:
                     response = await client.request(method, f"{self.base_url}{path}", json=body, headers=self.headers)
             except retry_errors as exc:
                 error = exc

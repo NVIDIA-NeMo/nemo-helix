@@ -40,6 +40,7 @@ class FakeEntities:
     async def get(self, entity_type, *, name, workspace):
         if name not in self.entities:
             raise EntityNotFoundError(name)
+        self.entities[name]._id = f"entity-{name}"
         return self.entities[name].model_copy(deep=True)
 
     async def update(self, entity):
@@ -49,8 +50,11 @@ class FakeEntities:
         self.entities[entity.name] = entity
         return entity
 
-    async def delete(self, entity_type, name, *, workspace):
-        del self.entities[name]
+    async def delete_by_id(self, entity_type, entity_id, *, expected_db_version):
+        key = next(
+            key for key, entity in self.entities.items() if isinstance(entity, entity_type) and entity.id == entity_id
+        )
+        del self.entities[key]
 
 
 class FakeJobs:

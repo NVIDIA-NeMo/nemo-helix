@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChatMissingModelError, CHAT_CORS_HEADERS } from '@nemo/common/src/constants/chat';
+import { PLATFORM_BASE_URL } from '@nemo/common/src/constants/environment';
+import type { ChatCompletionRequestReturn } from '@nemo/common/src/types/chat';
 import { getGatewayProxyGetQueryKey } from '@nemo/sdk/generated/platform/inference-gateway';
 import { selectOidcBearerToken } from '@nemo/sdk/src/utils/oidcBearerToken';
 import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
@@ -8,10 +11,6 @@ import { useMutation, type UseMutationOptions } from '@tanstack/react-query';
 import OpenAI from 'openai';
 import type { ChatCompletion, ChatCompletionCreateParams } from 'openai/resources/index.mjs';
 import { useAuth } from 'react-oidc-context';
-
-import { ChatMissingModelError, CHAT_CORS_HEADERS } from '../../constants/chat';
-import { PLATFORM_BASE_URL } from '../../constants/environment';
-import type { ChatCompletionRequestReturn } from '../../types/chat';
 
 export type UseChatCompletionParams = ChatCompletionCreateParams & {
   workspace?: string;

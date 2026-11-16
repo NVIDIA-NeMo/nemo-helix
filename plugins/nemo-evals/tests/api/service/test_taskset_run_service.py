@@ -284,8 +284,9 @@ async def test_snapshot_cleanup_requires_proven_precreate_failure(
     pinned, spec = await service._resolve(request, "default")
     snapshot = FilesetRef("agents/request-snapshot")
     files_service.filesets[("agents", "request-snapshot")] = {"skill.txt": b"skill"}
+    files_service.allocations[("agents", "request-snapshot")] = "snapshot-id"
     spec.target = HarborRunnerTarget(
-        source=RegisteredAgentSource(agent=AgentRef("agents/coder"), files=snapshot),
+        source=RegisteredAgentSource(agent=AgentRef("agents/coder"), files=snapshot, fileset_id="snapshot-id"),
         agent_kwargs={"fabric_config": {"name": "coder"}},
     )
     monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=(pinned, spec)))
@@ -533,6 +534,7 @@ async def test_get_counts_progress_from_every_member_page_without_jobs(
         "members": {"image_ready": 2, "registered": 3, "succeeded": 1, "failed": 1},
         "queued": 1,
         "task_jobs": {"active": 2, "pending": 1},
+        "trial_counts": None,
     }
 
 
@@ -630,11 +632,13 @@ async def test_list_tasks_preserves_stored_task_details_and_page_metadata(
         {
             "task": "task-10",
             "task_index": 10,
+            "task_name": None,
             "phase": "failed",
             "job": "recorded-job-10",
             "job_status": "error",
             "error": "saved diagnostic",
             "publication": None,
+            "trial_counts": None,
         }
     ]
     assert result.pagination.model_dump() == {
@@ -675,14 +679,43 @@ async def _no_network_spec(service, request, target):
     return pinned, spec
 
 
-async def test_no_network_tasks_without_a_closed_book_route_are_refused_before_acceptance(
-    service, published, request_body, monkeypatch, entity_store
+async def test_no_network_tasks_run_open_book_with_one_warning(
+    service, published, request_body, monkeypatch, run_store
 ):
+    """No-network tasks don't make a run closed-book; the run is accepted unlabelled, with one run-level warning."""
     request = TasksetRunInput.model_validate(request_body)
     target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5")))
     monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=await _no_network_spec(service, request, target)))
 
-    with pytest.raises(TasksetRunResolutionError, match=r"closed_book_required: no-network tasks \['task-1'\]"):
+    outcome = await service.submit(request, workspace="default", caller="user:alice")
+
+    assert outcome.created
+    plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
+    assert isinstance(plan.spec.target, HarborRunnerTarget)
+    assert plan.spec.target.closed_book is False
+    open_book = [warning for warning in outcome.status.warnings if "open-book" in warning]
+    assert open_book == [
+        "This run has 1 no-network task and runs open-book. Its sandbox has no network, but the model provider may "
+        'still use hosted tools such as web search. To enforce closed-book, set "closed_book": true on the target '
+        "and use a virtual model that includes closed-book middleware (must be last middleware entry)."
+    ]
+
+    replay = await service.submit(request, workspace="default", caller="user:alice")
+
+    assert replay.created is False
+    assert replay.status.warnings == []  # shown on first acceptance only
+
+
+async def test_a_closed_book_run_without_a_closed_book_route_is_refused_before_acceptance(
+    service, published, request_body, monkeypatch, entity_store
+):
+    request = TasksetRunInput.model_validate(request_body)
+    target = HarborRunnerTarget(
+        source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5")), closed_book=True
+    )
+    monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=await _no_network_spec(service, request, target)))
+
+    with pytest.raises(TasksetRunResolutionError, match=r"closed_book_required: closed_book runs"):
         await service.submit(request, workspace="default", caller="user:alice")
     assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
 
@@ -693,9 +726,11 @@ async def test_a_refused_registered_agent_does_not_leave_its_files_snapshot(
     request = TasksetRunInput.model_validate(request_body)
     snapshot = FilesetRef("agents/request-snapshot")
     files_service.filesets[("agents", "request-snapshot")] = {"skill.txt": b"skill"}
+    files_service.allocations[("agents", "request-snapshot")] = "snapshot-id"
     target = HarborRunnerTarget(
-        source=RegisteredAgentSource(agent=AgentRef("agents/coder"), files=snapshot),
+        source=RegisteredAgentSource(agent=AgentRef("agents/coder"), files=snapshot, fileset_id="snapshot-id"),
         agent_kwargs={"fabric_config": {"name": "coder"}},
+        closed_book=True,
     )
     monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=await _no_network_spec(service, request, target)))
 

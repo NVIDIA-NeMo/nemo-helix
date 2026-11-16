@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest import mock
 from unittest.mock import AsyncMock, MagicMock
@@ -540,12 +541,15 @@ class TestValidateFabricPackageArtifacts:
             context_dir=tmp_path,
         )
 
-    def test_accepts_skill_relative_to_nested_agent_config(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(("kind", "skill_path"), [("codex", "../skills/review"), ("deepagents", "../skills")])
+    def test_accepts_skill_relative_to_nested_agent_config(self, tmp_path: Path, kind: str, skill_path: str) -> None:
         agent_config_path = _agent_config_path(tmp_path, "configs/agent.yaml")
         _skill(tmp_path / "skills" / "review")
+        config = _agent_config(skill_path)
+        config.harnesses["codex"].kind = kind
 
         validate_fabric_package_artifacts(
-            _agent_config("../skills/review"),
+            config,
             agent_config_path=agent_config_path,
             context_dir=tmp_path,
         )
@@ -591,7 +595,8 @@ class TestValidateFabricPackageArtifacts:
                 context_dir=context_dir,
             )
 
-    def test_rejects_symlink_that_escapes_context(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(("kind", "skill_path"), [("codex", "skills/external"), ("deepagents", "skills")])
+    def test_rejects_symlink_that_escapes_context(self, tmp_path: Path, kind: str, skill_path: str) -> None:
         context_dir = tmp_path / "project"
         context_dir.mkdir()
         agent_config_path = _agent_config_path(context_dir)
@@ -599,13 +604,42 @@ class TestValidateFabricPackageArtifacts:
         skills_dir = context_dir / "skills"
         skills_dir.mkdir()
         (skills_dir / "external").symlink_to(external_skill, target_is_directory=True)
+        config = _agent_config(skill_path)
+        config.harnesses["codex"].kind = kind
 
         with pytest.raises(FabricPackageArtifactError, match="resolves outside Docker build context"):
             validate_fabric_package_artifacts(
-                _agent_config("skills/external"),
+                config,
                 agent_config_path=agent_config_path,
                 context_dir=context_dir,
             )
+
+    @pytest.mark.parametrize("link_kind", ["external", "absolute", "relative"])
+    @pytest.mark.parametrize("linked_directory", [False, True], ids=["nested-asset", "linked-directory"])
+    def test_validates_skill_asset_links(self, tmp_path: Path, link_kind: str, linked_directory: bool) -> None:
+        context_dir = tmp_path / "project"
+        bundle = _skill(context_dir / "skills" / "review")
+        agent_config_path = _agent_config_path(context_dir)
+        references = context_dir / "references" if linked_directory else bundle / "references"
+        references.mkdir()
+        if linked_directory:
+            (bundle / "references").symlink_to("../../references", target_is_directory=True)
+        asset = (tmp_path if link_kind == "external" else context_dir) / "asset.txt"
+        asset.write_text("Skill reference")
+        target = str(asset) if link_kind == "absolute" else os.path.relpath(asset, references)
+        (references / "asset.txt").symlink_to(target)
+
+        if link_kind == "relative":
+            validate_fabric_package_artifacts(
+                _agent_config("skills/review"), agent_config_path=agent_config_path, context_dir=context_dir
+            )
+            assert (references / "asset.txt").readlink() == Path(target)
+        else:
+            message = "outside Docker build context" if link_kind == "external" else "must use a relative target"
+            with pytest.raises(FabricPackageArtifactError, match=message):
+                validate_fabric_package_artifacts(
+                    _agent_config("skills/review"), agent_config_path=agent_config_path, context_dir=context_dir
+                )
 
     def test_rejects_agent_config_outside_context(self, tmp_path: Path) -> None:
         context_dir = tmp_path / "project"

@@ -18,6 +18,7 @@ import {
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
@@ -26,7 +27,7 @@ import {
   useSecretsDeleteSecret,
   useSecretsListSecrets,
 } from '@nemo/sdk/generated/platform/secrets';
-import { type DropdownEntry, Stack, Text } from '@nvidia/foundations-react-core';
+import { Stack, Text } from '@nvidia/foundations-react-core';
 import { EditSecretModal } from '@studio/routes/SecretsListRoute/EditSecretModal';
 import { keepPreviousData } from '@tanstack/react-query';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
@@ -74,7 +75,9 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
   // Filter secrets by search text (API does not support server-side search)
   const searchBar = dataViewState.searchBar.state;
   const filteredSecrets = useMemo(() => {
-    if (!searchBar) return secrets;
+    if (!searchBar) {
+      return secrets;
+    }
     return secrets.filter((secret: HelixSecretResponse) =>
       secret.name?.toLowerCase().includes(searchBar.toLowerCase())
     );
@@ -91,7 +94,9 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
   );
 
   const handleDeleteSecret = async () => {
-    if (!modalSecret) return false;
+    if (!modalSecret) {
+      return false;
+    }
 
     try {
       await deleteSecretMutation.mutateAsync({
@@ -146,23 +151,25 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
         rowActionsColumn({
           size: ROW_ACTIONS_COLUMN_SIZE,
           enableResizing: false,
-          rowActions: (secret: SecretWithId): DropdownEntry[] => [
-            {
-              children: 'Edit',
-              onSelect: () => {
-                setModalSecret(secret);
-                setModalOpen('edit');
-              },
-            },
-            {
-              children: 'Delete',
-              danger: true,
-              onSelect: () => {
-                setModalSecret(secret);
-                setModalOpen('delete');
-              },
-            },
-          ],
+          cell: ({ row: { original: secret } }) => (
+            <QuickActionsMenuRoot
+              actions={[
+                {
+                  label: 'Edit',
+                  onSelect: () => {
+                    setModalSecret(secret);
+                    setModalOpen('edit');
+                  },
+                },
+              ]}
+              deleteAction={{
+                onSelect: () => {
+                  setModalSecret(secret);
+                  setModalOpen('delete');
+                },
+              }}
+            />
+          ),
         }),
       ],
       []

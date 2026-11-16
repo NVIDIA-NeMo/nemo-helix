@@ -47,26 +47,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
       - name: sort
         in: query
         required: false
@@ -78,6 +58,27 @@ paths:
           default: -created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
       - in: query
         name: filter
         style: deepObject
@@ -436,22 +437,6 @@ paths:
         schema:
           type: string
           title: Name
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          default: 1
-          title: Page
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          default: 25
-          title: Page Size
       - name: sort
         in: query
         required: false
@@ -468,6 +453,27 @@ paths:
         schema:
           title: Filter
           type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
       responses:
         '200':
           description: Successful Response
@@ -693,6 +699,51 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    AutocorrelationSimilarityParameters:
+      properties:
+        value_columns:
+          title: Value Columns
+          description: Numeric value columns to evaluate. Defaults to all shared columns
+            inferred as numeric. Changing this selection changes the meaning of the
+            aggregate score.
+          items:
+            type: string
+          type: array
+        max_lag:
+          type: integer
+          minimum: 1.0
+          title: Max Lag
+          description: Maximum requested lag; short sequences use a smaller stable
+            lag cap. Scores computed with different lag horizons are not directly
+            comparable.
+          default: 20
+        min_points:
+          type: integer
+          minimum: 4.0
+          title: Min Points
+          description: Minimum finite observations required in each sequence.
+          default: 4
+        max_groups:
+          type: integer
+          minimum: 1.0
+          title: Max Groups
+          description: Maximum shared groups to evaluate using a reproducible sample
+            to bound runtime.
+          default: 128
+      type: object
+      title: AutocorrelationSimilarityParameters
+      description: 'Control autocorrelation similarity evaluation.
+
+
+        Timestamp ordering and sequence grouping use the top-level time-series and
+
+        data settings. The requested lag is capped automatically for short
+
+        sequences, and undersized or constant training profiles are skipped. A
+
+        constant synthetic profile paired with varying training data receives zero
+
+        similarity.'
     ClassifyConfig:
       properties:
         enable_classify:
@@ -951,6 +1002,10 @@ components:
           items:
             type: string
           type: array
+        time_series:
+          allOf:
+          - $ref: '#/components/schemas/TimeSeriesEvaluationParameters'
+          description: Time-series-specific evaluation settings.
       type: object
       title: EvaluationParameters
       description: 'Configuration for evaluating synthetic data quality and privacy.
@@ -1978,6 +2033,11 @@ components:
             and characters-per-word distributions between real and synthetic free-text
             columns.
           type: number
+        autocorrelation_similarity_score:
+          title: Autocorrelation Similarity Score
+          description: How closely lagged self-correlation in synthetic time-series
+            sequences matches the training sequences.
+          type: number
         data_privacy_score:
           title: Data Privacy Score
           description: Composite of MIA and AIA protection scores.
@@ -2192,6 +2252,24 @@ components:
         output, which backend enforces the constraint, and how the constraint schema
 
         is built.'
+    TimeSeriesEvaluationParameters:
+      properties:
+        enabled:
+          title: Enabled
+          description: Enable time-series evaluation metrics. Defaults to None, which
+            follows time_series.is_timeseries. True requires top-level time-series
+            mode.
+          type: boolean
+        autocorrelation:
+          allOf:
+          - $ref: '#/components/schemas/AutocorrelationSimilarityParameters'
+          description: Autocorrelation similarity metric parameters.
+      type: object
+      title: TimeSeriesEvaluationParameters
+      description: 'Metric-specific time-series evaluation configuration.
+
+
+        Each metric''s parameters are one ``TimeSeriesMetricParameters`` field.'
     TimeSeriesParameters:
       properties:
         is_timeseries:

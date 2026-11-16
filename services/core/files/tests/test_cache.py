@@ -49,6 +49,7 @@ def create_mock_source_storage(
 ):
     """Create a mock source storage backend."""
     mock = AsyncMock()
+    mock.for_download.return_value = mock
     mock.get_cache_path_key = AsyncMock(return_value=cache_path_key)
 
     if download_data is None:
@@ -143,6 +144,7 @@ async def test_warm_fileset_cache_caches_all_files():
     files = [MockFileInfo(path="file1.txt"), MockFileInfo(path="file2.txt")]
 
     source_storage = AsyncMock()
+    source_storage.for_download.return_value = source_storage
     source_storage.get_cache_path_key = AsyncMock(side_effect=lambda p=None: f"cache/{p}" if p else "cache/")
     source_storage.list_files.return_value = files
 
@@ -188,6 +190,7 @@ async def test_warm_fileset_cache_continues_on_error():
     source_storage = AsyncMock()
     source_storage.get_cache_path_key = AsyncMock(side_effect=lambda p=None: f"cache/{p}" if p else "cache/")
     source_storage.list_files.return_value = files
+    source_storage.for_download.return_value = source_storage
 
     download_attempts = []
 
@@ -235,6 +238,7 @@ async def test_warm_fileset_cache_respects_concurrency_limit():
     source_storage = AsyncMock()
     source_storage.get_cache_path_key = AsyncMock(side_effect=lambda p=None: f"cache/{p}" if p else "cache/")
     source_storage.list_files.return_value = files
+    source_storage.for_download.return_value = source_storage
 
     concurrent_count = 0
     max_concurrent_seen = 0

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { DeleteAction } from '@nemo/common/src/components/ActionsMenu';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import {
   type QuickActionItem,
@@ -16,6 +17,7 @@ import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileS
 import { RenameFileModal } from '@studio/components/FilesTable/RenameFileModal';
 import { TransformFileModal } from '@studio/components/FilesTable/TransformFileModal';
 import type { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
+import { getDeleteFilesDescription } from '@studio/constants/filesets';
 import { useSelectedDatasetId } from '@studio/hooks/useSelectedDatasetId';
 import { resolveDatasetFilePath } from '@studio/util/files';
 import { type FC, useState } from 'react';
@@ -47,7 +49,7 @@ export const FileQuickActions: FC<Props> = ({
   const datasetFullName = useSelectedDatasetId({ datasetId });
   const { workspace, name } = getPartsFromReference(datasetFullName);
 
-  const { mutateAsync, error: deleteError } = useDatasetFileDelete();
+  const { mutateAsync } = useDatasetFileDelete();
 
   // Use currentFolder only for basename-only paths; tree/API paths are already full paths
   const path = resolveDatasetFilePath(file.path, currentFolder ?? undefined);
@@ -110,35 +112,39 @@ export const FileQuickActions: FC<Props> = ({
     }
   };
 
-  const actions: QuickActionItem[] = isReadWriteDataset
-    ? [
-        ...(onViewFile ? [{ label: 'View File', onSelect: handleViewFile }] : []),
-        { label: 'Download', onSelect: downloadFile, disabled: isDownloading },
-        { label: 'Copy Path', onSelect: handleCopyPath, divider: { width: 'large' } },
-        { label: 'Move', onSelect: openModalWithFile('addToFolder') },
-        { label: 'Duplicate', onSelect: handleDuplicate, disabled: isDuplicating },
-        { label: 'Create Split', onSelect: openModalWithFile('createSplit') },
-        { label: 'Transform', onSelect: openModalWithFile('transform') },
-        { label: 'Rename', onSelect: openModalWithFile('rename'), divider: { width: 'large' } },
-        { label: 'Delete', onSelect: openModalWithFile('delete'), danger: true },
-      ]
-    : [
-        ...(onViewFile ? [{ label: 'View File', onSelect: handleViewFile }] : []),
-        { label: 'Download', onSelect: downloadFile, disabled: isDownloading },
-        { label: 'Copy Path', onSelect: handleCopyPath },
-      ];
+  const { actions, deleteAction }: { actions: QuickActionItem[]; deleteAction?: DeleteAction } =
+    isReadWriteDataset
+      ? {
+          actions: [
+            ...(onViewFile ? [{ label: 'View File', onSelect: handleViewFile }] : []),
+            { label: 'Download', onSelect: downloadFile, disabled: isDownloading },
+            { label: 'Copy Path', onSelect: handleCopyPath, divider: {} },
+            { label: 'Move', onSelect: openModalWithFile('addToFolder') },
+            { label: 'Duplicate', onSelect: handleDuplicate, disabled: isDuplicating },
+            { label: 'Create Split', onSelect: openModalWithFile('createSplit') },
+            { label: 'Transform', onSelect: openModalWithFile('transform') },
+            { label: 'Rename', onSelect: openModalWithFile('rename') },
+          ],
+          deleteAction: { onSelect: openModalWithFile('delete') },
+        }
+      : {
+          actions: [
+            ...(onViewFile ? [{ label: 'View File', onSelect: handleViewFile }] : []),
+            { label: 'Download', onSelect: downloadFile, disabled: isDownloading },
+            { label: 'Copy Path', onSelect: handleCopyPath },
+          ],
+        };
 
   return (
     <>
-      <QuickActionsMenuRoot actions={actions} />
+      <QuickActionsMenuRoot actions={actions} deleteAction={deleteAction} />
       {openModal === 'delete' && modalFile && (
         <DeleteConfirmationModal
           open
+          entity="file"
+          ids={[path]}
+          description={getDeleteFilesDescription(1)}
           onDelete={handleDeleteFile}
-          simpleConfirm
-          title="Delete File"
-          confirmationText={path}
-          errorText={deleteError?.message}
           onClose={() => setOpenModal(undefined)}
         />
       )}

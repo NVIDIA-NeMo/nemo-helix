@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
-import { FileStorageType, type HelixJobResultResponse } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobResultResponse } from '@nemo/sdk/generated/platform/schema';
+import { FileStorageType } from '@nemo/sdk/generated/platform/schema/FileStorageType';
 
 export interface ArtifactItem {
   resultName: string;

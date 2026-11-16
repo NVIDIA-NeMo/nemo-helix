@@ -13,8 +13,9 @@ pytest.importorskip("scaled_evals")
 
 from api_test_fixture import client, v1
 from scaled_evals.api.auth import current_principal
+from scaled_evals.api.benchmark_run_store import BenchmarkRunWorkerRepository
 from scaled_evals.api.benchmark_store import BenchmarkStore, TaskRef
-from scaled_evals.api.evaluation_store import EvaluationStore
+from scaled_evals.api.evaluation_store import EvaluationRequestRepository
 from scaled_evals.dispatch.sandbox_k8s import apply_agent_timeout_floor
 from scaled_evals.dispatch.worker import (
     Dispatcher,
@@ -199,13 +200,20 @@ def test_benchmark_variant_snapshot_freezes_lineage_and_policy() -> None:
     run = {"framework": "harbor", "runtime": "sandbox_k8s", "parallelism": 1}
     seed_benchmark_run({**run, "id": "bmr_variant", "name": "v", "benchmark_id": "bm_variant", "benchmark_revision": 1})
     seed_benchmark_run({**run, "id": "bmr_base", "name": "b", "benchmark_id": "bm_base", "benchmark_revision": 2})
-    assert EvaluationStore._benchmark_variant_snapshot("bmr_variant") == {
+    assert EvaluationRequestRepository._benchmark_variant_snapshot(
+        BenchmarkRunWorkerRepository().get("bmr_variant")
+    ) == {
         "derived_from": {"benchmark_id": "bm_base", "revision": 2},
         "operational_policy": {"agent_timeout_floor_sec": 7200},
     }
-    assert EvaluationStore._benchmark_variant_snapshot("bmr_base") is None
-    assert EvaluationStore._benchmark_variant_snapshot("bmr_missing") is None
-    assert EvaluationStore._benchmark_variant_snapshot(None) is None
+    assert (
+        EvaluationRequestRepository._benchmark_variant_snapshot(BenchmarkRunWorkerRepository().get("bmr_base")) is None
+    )
+    assert (
+        EvaluationRequestRepository._benchmark_variant_snapshot(BenchmarkRunWorkerRepository().get("bmr_missing"))
+        is None
+    )
+    assert EvaluationRequestRepository._benchmark_variant_snapshot(None) is None
 
 
 def test_create_variant_404_when_base_missing() -> None:

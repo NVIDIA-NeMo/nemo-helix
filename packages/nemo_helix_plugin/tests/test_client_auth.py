@@ -477,7 +477,7 @@ class TestOIDCTokenProvider:
     def test_discover_nhx_config_uses_nemo_scoped_ca_bundle(self, monkeypatch):
         monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/nemo-ca.pem")
 
-        with patch("nemo_helix_plugin.client.oidc.httpx.get") as mock_get:
+        with patch("nemo_helix_plugin.client.oidc.get") as mock_get:
             mock_get.return_value = httpx.Response(
                 200,
                 json={"auth_enabled": False},
@@ -494,7 +494,7 @@ class TestOIDCTokenProvider:
         )
 
     def test_discover_nhx_config_rejects_unknown_bearer_token_source(self):
-        with patch("nemo_helix_plugin.client.oidc.httpx.get") as mock_get:
+        with patch("nemo_helix_plugin.client.oidc.get") as mock_get:
             mock_get.return_value = httpx.Response(
                 200,
                 json={
@@ -721,7 +721,7 @@ class TestOIDCTokenProvider:
     def test_refresh_token_grant_uses_nemo_scoped_ca_bundle(self, monkeypatch):
         monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/nemo-ca.pem")
 
-        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+        with patch("nemo_helix_plugin.client.oidc.post") as mock_post:
             mock_post.return_value = httpx.Response(200, json={"access_token": "new-access"})
 
             result = refresh_token_grant(
@@ -736,7 +736,7 @@ class TestOIDCTokenProvider:
     def test_refresh_token_grant_uses_context_certificate_authority(self, monkeypatch):
         monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
 
-        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+        with patch("nemo_helix_plugin.client.oidc.post") as mock_post:
             mock_post.return_value = httpx.Response(200, json={"access_token": "new-access"})
 
             result = refresh_token_grant(
@@ -752,7 +752,7 @@ class TestOIDCTokenProvider:
     def test_broker_refresh_uses_json_without_provider_client_fields(self, monkeypatch):
         monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
 
-        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+        with patch("nemo_helix_plugin.client.oidc.post") as mock_post:
             mock_post.return_value = httpx.Response(200, json={"access_token": "new-access"})
 
             result = refresh_token_grant(
@@ -775,7 +775,7 @@ class TestWorkloadTokenExchangeProvider:
     def test_token_exchange_grant_sends_rfc8693_request(self, monkeypatch):
         monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
 
-        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+        with patch("nemo_helix_plugin.client.oidc.post") as mock_post:
             mock_post.return_value = httpx.Response(200, json={"access_token": "exchanged-token", "expires_in": 300})
 
             token_data = token_exchange_grant(
@@ -805,7 +805,7 @@ class TestWorkloadTokenExchangeProvider:
     def test_token_exchange_grant_uses_docker_opaque_subject_token_type(self, monkeypatch):
         monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
 
-        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+        with patch("nemo_helix_plugin.client.oidc.post") as mock_post:
             mock_post.return_value = httpx.Response(200, json={"access_token": "exchanged-token", "expires_in": 300})
 
             token_exchange_grant(
@@ -819,7 +819,7 @@ class TestWorkloadTokenExchangeProvider:
     def test_token_exchange_grant_uses_nemo_scoped_ca_bundle(self, monkeypatch):
         monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/nemo-ca.pem")
 
-        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+        with patch("nemo_helix_plugin.client.oidc.post") as mock_post:
             mock_post.return_value = httpx.Response(200, json={"access_token": "exchanged-token", "expires_in": 300})
 
             token_data = token_exchange_grant(
@@ -832,7 +832,7 @@ class TestWorkloadTokenExchangeProvider:
         assert mock_post.call_args.kwargs["verify"] == "/tmp/nemo-ca.pem"
 
     def test_token_exchange_grant_allows_http_loopback_endpoint(self):
-        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+        with patch("nemo_helix_plugin.client.oidc.post") as mock_post:
             mock_post.return_value = httpx.Response(200, json={"access_token": "exchanged-token", "expires_in": 300})
 
             token_data = token_exchange_grant(
@@ -844,7 +844,7 @@ class TestWorkloadTokenExchangeProvider:
         assert token_data["access_token"] == "exchanged-token"
 
     def test_token_exchange_grant_rejects_http_non_loopback_endpoint_when_allow_http_is_set(self):
-        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+        with patch("nemo_helix_plugin.client.oidc.post") as mock_post:
             with pytest.raises(ValueError, match="HTTPS"):
                 token_exchange_grant(
                     token_endpoint="http://nemo-gateway:8080/apis/auth/token",
@@ -856,7 +856,7 @@ class TestWorkloadTokenExchangeProvider:
         mock_post.assert_not_called()
 
     def test_token_exchange_grant_rejects_non_object_error_payload(self):
-        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+        with patch("nemo_helix_plugin.client.oidc.post") as mock_post:
             mock_post.return_value = httpx.Response(
                 400,
                 json=[],
@@ -872,7 +872,7 @@ class TestWorkloadTokenExchangeProvider:
 
     @pytest.mark.parametrize("payload", [[], {}, {"access_token": ""}, {"access_token": None}])
     def test_token_exchange_grant_rejects_success_response_without_non_empty_access_token(self, payload):
-        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+        with patch("nemo_helix_plugin.client.oidc.post") as mock_post:
             mock_post.return_value = httpx.Response(200, json=payload)
 
             with pytest.raises(WorkloadTokenExchangeError, match="invalid_response"):
@@ -883,7 +883,7 @@ class TestWorkloadTokenExchangeProvider:
                 )
 
     def test_token_exchange_grant_rejects_non_json_success_response(self):
-        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+        with patch("nemo_helix_plugin.client.oidc.post") as mock_post:
             mock_post.return_value = httpx.Response(200, content=b"not-json")
 
             with pytest.raises(WorkloadTokenExchangeError, match="Token endpoint response was not a JSON object"):
@@ -1340,7 +1340,7 @@ class TestFromConfig:
 
         with (
             patch("nemo_helix_plugin.client.oidc_factory._discover_oidc_client_settings") as mock_discover,
-            patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post,
+            patch("nemo_helix_plugin.client.oidc.post") as mock_post,
         ):
             mock_discover.return_value = NHXOIDCConfig(
                 auth_enabled=True,

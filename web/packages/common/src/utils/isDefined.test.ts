@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isDefined } from './isDefined';
+import { isDefined } from '@nemo/common/src/utils/isDefined';
 
 describe('isDefined', () => {
   it('should return false for null values', () => {

@@ -1,10 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  asString,
-  parseRawAttributes,
-} from '@studio/components/IntakeDetail/SpanTemplates/rawAttributes';
+import { asNonEmptyString } from '@nemo/common/src/utils/asString';
+import { parseRawAttributes } from '@studio/components/IntakeDetail/SpanTemplates/rawAttributes';
 import {
   TemplateKeyValues,
   type TemplateField,
@@ -19,7 +17,7 @@ import type { FC } from 'react';
  */
 export const ToolSpanContent: FC<SpanTemplateContentProps> = ({ span }) => {
   const attributes = parseRawAttributes(span.raw_attributes);
-  const description = asString(attributes['tool.description']);
+  const description = asNonEmptyString(attributes['tool.description']);
   const durationMs = getSpanDurationMs(span);
 
   const fields: TemplateField[] = [

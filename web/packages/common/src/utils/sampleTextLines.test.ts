@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { sampleIndices, sampleTextLines } from './sampleTextLines';
+import { sampleIndices, sampleTextLines } from '@nemo/common/src/utils/sampleTextLines';
 
 describe('sampleTextLines', () => {
   const jsonl = ['{"a":1}', '{"b":2}', '{"c":3}', '{"d":4}'].join('\n');

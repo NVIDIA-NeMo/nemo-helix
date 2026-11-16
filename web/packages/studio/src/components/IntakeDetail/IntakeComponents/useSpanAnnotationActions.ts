@@ -8,12 +8,10 @@ import {
   useCreateAnnotation,
   useDeleteAnnotation,
 } from '@nemo/sdk/generated/platform/annotations';
-import {
-  AnnotationKind,
-  FeedbackAnnotationInputKind,
-  type FeedbackAnnotationInputValue,
-  NoteAnnotationInputKind,
-} from '@nemo/sdk/generated/platform/schema';
+import type { FeedbackAnnotationInputValue } from '@nemo/sdk/generated/platform/schema';
+import { AnnotationKind } from '@nemo/sdk/generated/platform/schema/AnnotationKind';
+import { FeedbackAnnotationInputKind } from '@nemo/sdk/generated/platform/schema/FeedbackAnnotationInputKind';
+import { NoteAnnotationInputKind } from '@nemo/sdk/generated/platform/schema/NoteAnnotationInputKind';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 

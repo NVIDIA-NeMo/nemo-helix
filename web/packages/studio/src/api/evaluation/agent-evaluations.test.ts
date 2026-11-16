@@ -16,6 +16,8 @@ import {
   parseBundleRef,
 } from '@studio/api/evaluation/agent-evaluations';
 
+const OTHER_WORKSPACE = 'other-ws';
+
 const customFetchMock = vi.fn();
 vi.mock('@nemo/sdk/generated/fetchers/evals', () => ({
   customFetch: (...args: unknown[]) => customFetchMock(...args),
@@ -82,6 +84,29 @@ describe('fetchAgentEvalJob', () => {
 });
 
 describe('agentNameForJob', () => {
+  it.each(['fabric', 'harbor', 'gym'])('reads the registered %s source AgentRef', (kind) => {
+    const job = baseJob({
+      spec: {
+        target: { kind, source: { agent: 'ws-a/support-bot-mini' } },
+        tasks: [],
+      } as unknown as AgentEvaluateJob['spec'],
+    });
+    expect(agentNameForJob(job)).toBe('support-bot-mini');
+  });
+
+  it.each(['agent', 'fabric', 'harbor', 'gym'])(
+    'does not turn a foreign %s AgentRef into a local breadcrumb',
+    (kind) => {
+      const name = `${OTHER_WORKSPACE}/support-bot-mini`;
+      const target =
+        kind === 'agent' ? { kind, agent: { name } } : { kind, source: { agent: name } };
+      const job = baseJob({
+        spec: { target, tasks: [] } as unknown as AgentEvaluateJob['spec'],
+      });
+      expect(agentNameForJob(job)).toBeNull();
+    }
+  );
+
   it('reads the agent name from the target', () => {
     expect(agentNameForJob(baseJob())).toBe('support-bot-mini');
   });

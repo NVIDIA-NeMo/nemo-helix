@@ -97,6 +97,8 @@ def restricted_platform_policy[Policy: Message](
                 ("GET", f"{attempt_step_path}/tasks/*"),
                 ("GET", f"{step_path}/tasks/*"),
                 ("POST", f"{prefix}/results/*"),
+                # A save that collides with an existing result reads it back to stay idempotent.
+                ("GET", f"{prefix}/results/*"),
             )
         )
     if fileset:

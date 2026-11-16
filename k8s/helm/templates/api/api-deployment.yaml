@@ -45,7 +45,7 @@ spec:
 {{- end }}
       serviceAccountName: {{ include "nhx-api.apiServiceAccountName" . }}
       securityContext:
-        {{- include "nemo-common.podSecurityContext" (dict "global" .Values.podSecurityContext "local" .Values.api.podSecurityContext) | nindent 8 }}
+        {{- include "nemo-common.podSecurityContext" (dict "global" .Values.podSecurityContext "local" .Values.api.podSecurityContext "globalIds" true) | nindent 8 }}
       containers:
         - name: nhx-api
           securityContext:
@@ -66,6 +66,15 @@ spec:
                 name: {{ include "nemo-helix.apiEnvSecretName" . }}
           {{- end }}
           env:
+            # garak creates its config, data and cache dirs on import. Keep them on an
+            # emptyDir, which fsGroup makes writable for any runAsUser, instead of the
+            # image's home directory.
+            - name: XDG_CONFIG_HOME
+              value: /var/lib/nemo-xdg/config
+            - name: XDG_DATA_HOME
+              value: /var/lib/nemo-xdg/data
+            - name: XDG_CACHE_HOME
+              value: /var/lib/nemo-xdg/cache
             {{- if include "nemo-helix.defaultEncryptionKeyExistingSecretName" . }}
             - name: {{ include "nemo-helix.defaultEncryptionKeyEnvName" . }}
               valueFrom:
@@ -166,6 +175,8 @@ spec:
               subPath: config.yaml
             - name: data-designer-tmp
               mountPath: /app/data/data-designer
+            - name: xdg-dirs
+              mountPath: /var/lib/nemo-xdg
             {{- if eq ( include "nhx-core.localStorageEnabled" . ) "true" }}
             - name: files-storage
               mountPath: {{ include "nhx-core.localStoragePath" . }}
@@ -175,6 +186,8 @@ spec:
             {{- end }}
       volumes:
         - name: data-designer-tmp
+          emptyDir: {}
+        - name: xdg-dirs
           emptyDir: {}
         - name: config
           configMap:

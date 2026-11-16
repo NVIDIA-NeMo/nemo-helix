@@ -41,6 +41,7 @@ from typing import Any, Generic, Self, TypeVar, cast, get_args, get_origin, over
 from urllib.parse import quote, urlsplit
 
 import httpx
+from httpx import AsyncClient, Client
 from nemo_helix_plugin.auth import is_service_principal_id
 from nemo_helix_plugin.client.auth import (
     AsyncClientTokenProvider,
@@ -812,7 +813,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
             client_runtime=resolved_runtime,
         )
         self._owns_http = http_client is None if owns_http_client is None else owns_http_client
-        self._http = http_client or httpx.Client(
+        self._http = http_client or Client(
             timeout=timeout if timeout is not None else DEFAULT_TIMEOUT,
             verify=client_verify_from_env(),
         )
@@ -1151,7 +1152,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         )
         self._auth = auth
         self._owns_http = http_client is None if owns_http_client is None else owns_http_client
-        self._http = http_client or httpx.AsyncClient(
+        self._http = http_client or AsyncClient(
             timeout=timeout if timeout is not None else DEFAULT_TIMEOUT,
             verify=client_verify_from_env(),
         )

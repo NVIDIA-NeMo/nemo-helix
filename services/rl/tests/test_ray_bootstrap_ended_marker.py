@@ -92,14 +92,11 @@ def test_the_head_does_not_start_ray_while_the_old_marker_remains(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Workers would read the marker once connected, so a head that cannot clear it fails instead."""
-    (tmp_path / f"ENDED.{ATTEMPT}").touch()
+    # A directory in the marker's place: unlink refuses it with an OSError on every platform, even as root.
+    (tmp_path / f"ENDED.{ATTEMPT}").mkdir()
     head = _node(tmp_path, 0)
     started: list[bool] = []
 
-    def refuse_unlink(self: Path, missing_ok: bool = False) -> None:
-        raise PermissionError("read-only")
-
-    monkeypatch.setattr(ray_bootstrap.Path, "unlink", refuse_unlink)
     monkeypatch.setattr(head, "_start_head_process", lambda: started.append(True))
     monkeypatch.setattr(head, "_stop_ray", lambda *args, **kwargs: None)
 

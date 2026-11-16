@@ -7,7 +7,9 @@ import json
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 
+import click
 import typer
+from nemo_helix_plugin.cli_list_jobs import JobsSort, job_status_filter, resolve_job_types, run_list_jobs
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.jobs.client import JobsClient
@@ -868,6 +870,17 @@ def get_status_jobs(
 def list_jobs(
     ctx: typer.Context,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    job_type: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--type",
+            "-t",
+            metavar="TYPE",
+            help="Only list jobs of this type: a plugin (e.g. 'evals', all its job types) or one job type "
+            "(e.g. 'evals.evaluate'). Repeat for several. Lists through each job type's own route, so it "
+            "can't be combined with a source filter or sort.",
+        ),
+    ] = None,
     filter: Annotated[
         str | None,
         typer.Option(
@@ -917,13 +930,37 @@ def list_jobs(
     if columns is None or str(columns).strip() == "default":
         output_columns = default_columns
 
+    status_filter = job_status_filter(filter_status)
+
+    if job_type:
+        _list_jobs_by_type(
+            ctx,
+            job_type,
+            workspace=workspace,
+            filter_json=filter,
+            filter_name=filter_name,
+            filter_project=filter_project,
+            filter_source=filter_source,
+            status_filter=status_filter,
+            filter_workspace=filter_workspace,
+            sort=sort,
+            page=page,
+            page_size=page_size,
+            all_pages=all_pages,
+            output_format=output_format,
+            no_truncate=no_truncate,
+            columns=columns,
+            stream=stream,
+        )
+        return
+
     filter_value = _source_filter_query(
         merge_filter_dict(
             filter,
             name=filter_name,
             project=filter_project,
             source=filter_source,
-            status=filter_status,
+            status=status_filter,
             workspace=filter_workspace,
         )
     )
@@ -952,6 +989,56 @@ def list_jobs(
     )
     if not all_pages:
         warn_if_more_pages(items, pagination_type)
+
+
+def _list_jobs_by_type(
+    ctx: typer.Context,
+    job_types: list[str],
+    *,
+    workspace: str | None,
+    filter_json: str | None,
+    filter_name: str | None,
+    filter_project: str | None,
+    filter_source: str | None,
+    status_filter: str | dict[str, list[str]] | None,
+    filter_workspace: str | None,
+    sort: str | None,
+    page: int | None,
+    page_size: int | None,
+    all_pages: bool,
+    output_format: ListOutputFormatOption,
+    no_truncate: bool | None,
+    columns: str | None,
+    stream: bool,
+) -> None:
+    """``nemo jobs list --type``: list through each job type's own route instead of the core Jobs list.
+
+    A job type's route already restricts the list to its own jobs, so a ``source`` filter or sort is
+    rejected rather than silently combined with it.
+    """
+    if filter_source is not None:
+        raise click.BadParameter("can't be combined with --type.", param_hint="'--filter.source'")
+    if sort in ("source", "-source"):
+        raise click.BadParameter("--type lists can't be sorted by source.", param_hint="'--sort'")
+    merged = merge_filter_dict(
+        filter_json, name=filter_name, project=filter_project, status=status_filter, workspace=filter_workspace
+    )
+    if isinstance(merged, dict) and "source" in merged:
+        raise click.BadParameter("a 'source' filter can't be combined with --type.", param_hint="'--filter'")
+    run_list_jobs(
+        ctx,
+        resolve_job_types(job_types),
+        workspace=workspace,
+        query_filter=_source_filter_query(merged),
+        sort=cast(JobsSort | None, sort),
+        page=page,
+        page_size=page_size,
+        all_pages=all_pages,
+        output_format=output_format,
+        no_truncate=no_truncate,
+        columns=columns,
+        stream=stream,
+    )
 
 
 @app.command("list-execution-profiles")

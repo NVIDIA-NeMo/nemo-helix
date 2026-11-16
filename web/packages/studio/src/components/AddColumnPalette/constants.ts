@@ -24,7 +24,7 @@ import {
   Data,
   Profile,
 } from '@nemo/icons/icons';
-import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
+import { SamplerType } from '@nemo/sdk/generated/data-designer/schema/SamplerType';
 import type { ColumnTypeColor, ColumnTypeGroup } from '@studio/components/AddColumnPalette/types';
 
 /** Accent color → Tailwind text color utility for an option's icon. */

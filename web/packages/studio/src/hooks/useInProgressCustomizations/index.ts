@@ -3,16 +3,18 @@
 
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { getQueryKeyInfiniteModels } from '@nemo/common/src/api/models/useModels';
+import { asNonEmptyString } from '@nemo/common/src/utils/asString';
 import { useJobsListJobs } from '@nemo/sdk/generated/platform/jobs';
 import { getModelsListModelsQueryKey } from '@nemo/sdk/generated/platform/models';
-import {
-  FinetuningType,
-  HelixJobStatus,
-  type HelixJobListSortField,
-  type HelixJobResponse,
-  type HelixJobsListFilter,
+import type {
+  HelixJobListSortField,
+  HelixJobResponse,
+  HelixJobsListFilter,
 } from '@nemo/sdk/generated/platform/schema';
+import { FinetuningType } from '@nemo/sdk/generated/platform/schema/FinetuningType';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { JOB_SOURCE } from '@studio/components/dataViews/JobsDataView/constants';
+import { asRecord } from '@studio/util/guards';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
 
@@ -56,18 +58,12 @@ export interface InProgressCustomization {
   createdAt?: string;
 }
 
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
-
-const asString = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.length > 0 ? value : undefined;
-
 /**
  * The base model a run started from. Backends spell it differently: automodel and RL hold
  * a URN string in `spec.model`, unsloth an object with a `name`.
  */
 const readBaseModel = (spec: Record<string, unknown> | undefined): string | undefined =>
-  spec ? (asString(spec.model) ?? asString(asRecord(spec.model)?.name)) : undefined;
+  spec ? (asNonEmptyString(spec.model) ?? asNonEmptyString(asRecord(spec.model)?.name)) : undefined;
 
 /** The spec is untyped here, so only a value the UI can format is accepted. */
 const asFinetuningType = (value: unknown): FinetuningType | undefined =>
@@ -75,7 +71,7 @@ const asFinetuningType = (value: unknown): FinetuningType | undefined =>
 
 const toInProgressCustomization = (job: HelixJobResponse): InProgressCustomization | null => {
   const spec = asRecord(job.spec);
-  const outputName = asString(asRecord(spec?.output)?.name);
+  const outputName = asNonEmptyString(asRecord(spec?.output)?.name);
   // A run that declares no output has nothing for the user to wait for.
   if (!outputName) return null;
   return {

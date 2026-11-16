@@ -21,7 +21,7 @@ import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataView
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
-import { ChartBar, FolderClosed, LayoutColumns, Pin, Loop } from '@nemo/icons/icons';
+import { ChartBar, FolderClosed, LayoutColumns, Pin } from '@nemo/icons/icons';
 import type { EvaluationFilter, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Button, Modal, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { EVAL_DURATION_METADATA_KEY, evalDurationMs } from '@studio/api/evaluation/utils';
@@ -42,7 +42,9 @@ import {
   useColumnLayout,
 } from '@studio/components/dataViews/ExperimentDataView/useColumnLayout';
 import {
+  canRemoveFromGroup,
   type EvaluationRow,
+  LAST_EXPERIMENT_REASON,
   type ListEvaluationsSortParam,
   useExperimentEvaluations,
 } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
@@ -580,25 +582,22 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
                 ? [
                     {
                       label: 'New evaluation from this configuration',
-                      icon: <Loop className="fill-none" size="16" />,
                       onSelect: () => rerun(row.original),
                     },
                   ]
                 : []),
               {
-                // `fill-none` overrides the menu's cloned `fill: 'solid'`, which would otherwise paint
-                // the folder body over the "+"/"-" (they're drawn before the folder shape).
                 label: 'Add to experiment',
-                icon: <FolderClosed className="fill-none" size="16" />,
                 onSelect: () =>
                   setAddToGroupState({ evaluations: [row.original], clearSelection: () => {} }),
               },
-              {
-                label: 'Remove from experiment',
-                icon: <FolderClosed className="fill-none" size="16" />,
-                onSelect: () => removeFromGroup(row.original),
-              },
             ]}
+            deleteAction={{
+              label: 'Remove',
+              onSelect: () => removeFromGroup(row.original),
+              disabled: !canRemoveFromGroup(row.original),
+              disabledReason: LAST_EXPERIMENT_REASON,
+            }}
           />
         ),
       }),

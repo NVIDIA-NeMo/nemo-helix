@@ -4,9 +4,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
+import nemo_deployments_plugin.backends.k8s.backend as k8s_backend
+import nemo_deployments_plugin.backends.k8s.client as k8s_client
 import pytest
+from kubernetes import config
 from nemo_deployments_plugin.backends.k8s.backend import K8sDeploymentBackend
 from nemo_deployments_plugin.backends.k8s.client import KubernetesClients, build_api_client
 from nemo_deployments_plugin.backends.registry import BACKEND_CLASSES, ExecutorRegistry, ExecutorSpec
@@ -15,8 +19,6 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 
 @pytest.fixture(autouse=True)
 def _reset_kubernetes_modules_cache() -> Iterator[None]:
-    import nemo_deployments_plugin.backends.k8s.client as k8s_client
-
     k8s_client._kubernetes_modules_cache = None
     k8s_client._k8s_client_module = None
     yield
@@ -42,63 +44,47 @@ def test_executor_registry_accepts_k8s_backend() -> None:
 
 
 def test_k8s_backend_missing_kubernetes_package(monkeypatch: pytest.MonkeyPatch) -> None:
-    import builtins
+    def missing_kubernetes() -> ModuleType:
+        raise ImportError("no kubernetes")
 
-    real_import = builtins.__import__
-
-    def guarded_import(
-        name: str,
-        globals: dict[str, object] | None = None,
-        locals: dict[str, object] | None = None,
-        fromlist: tuple[str, ...] = (),
-        level: int = 0,
-    ) -> object:
-        if name == "kubernetes":
-            raise ImportError("no kubernetes")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    monkeypatch.setattr(k8s_backend, "_import_kubernetes", missing_kubernetes)
     with pytest.raises(RuntimeError, match="kubernetes package is required"):
         K8sDeploymentBackend(MagicMock(), {})
 
 
-def test_build_api_client_prefers_in_cluster() -> None:
-    with (
-        patch("kubernetes.config.load_incluster_config") as mock_incluster,
-        patch("kubernetes.config.load_kube_config") as mock_kube,
-        patch("kubernetes.client.ApiClient") as mock_api_client,
-        patch("kubernetes.client.Configuration"),
-    ):
-        build_api_client()
-        mock_incluster.assert_called_once()
-        mock_kube.assert_not_called()
-        mock_api_client.assert_called_once()
+def _fake_kubernetes_modules(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMock]:
+    """Install fake ``kubernetes.client``/``kubernetes.config`` where ``build_api_client`` looks them up."""
+    fake_client = MagicMock()
+    fake_config = MagicMock()
+    fake_config.ConfigException = config.ConfigException
+    monkeypatch.setattr(k8s_client, "_kubernetes_modules_cache", (fake_client, fake_config))
+    return fake_client, fake_config
 
 
-def test_build_api_client_falls_back_to_kubeconfig() -> None:
-    from kubernetes import config
+def test_build_api_client_prefers_in_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_client, fake_config = _fake_kubernetes_modules(monkeypatch)
 
-    with (
-        patch("kubernetes.config.load_incluster_config", side_effect=config.ConfigException("not in cluster")),
-        patch("kubernetes.config.load_kube_config") as mock_kube,
-        patch("kubernetes.client.ApiClient"),
-        patch("kubernetes.client.Configuration") as mock_configuration,
-    ):
-        build_api_client()
-        mock_kube.assert_called_once_with(client_configuration=mock_configuration.return_value)
+    build_api_client()
+    fake_config.load_incluster_config.assert_called_once()
+    fake_config.load_kube_config.assert_not_called()
+    fake_client.ApiClient.assert_called_once()
 
 
-def test_build_api_client_honors_explicit_kubeconfig_path() -> None:
-    with (
-        patch("kubernetes.config.load_kube_config") as mock_kube,
-        patch("kubernetes.config.load_incluster_config") as mock_incluster,
-        patch("kubernetes.client.ApiClient"),
-        patch("kubernetes.client.Configuration"),
-    ):
-        build_api_client(kubeconfig_path="/tmp/kubeconfig")
-        mock_kube.assert_called_once()
-        assert mock_kube.call_args.kwargs["config_file"] == "/tmp/kubeconfig"
-        mock_incluster.assert_not_called()
+def test_build_api_client_falls_back_to_kubeconfig(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_client, fake_config = _fake_kubernetes_modules(monkeypatch)
+    fake_config.load_incluster_config.side_effect = config.ConfigException("not in cluster")
+
+    build_api_client()
+    fake_config.load_kube_config.assert_called_once_with(client_configuration=fake_client.Configuration.return_value)
+
+
+def test_build_api_client_honors_explicit_kubeconfig_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, fake_config = _fake_kubernetes_modules(monkeypatch)
+
+    build_api_client(kubeconfig_path="/tmp/kubeconfig")
+    fake_config.load_kube_config.assert_called_once()
+    assert fake_config.load_kube_config.call_args.kwargs["config_file"] == "/tmp/kubeconfig"
+    fake_config.load_incluster_config.assert_not_called()
 
 
 def test_kubernetes_clients_close_releases_api_client() -> None:

@@ -386,6 +386,10 @@ To create a job and tail a log, there are some scripts to help test:
 uv run python script/test_e2e.py start_and_watch
 ```
 
+### Log access
+
+Reading job logs requires `jobs.read` and `filesets.read` in the job's workspace. Factory routes also require their plugin's job-read permission. If the token is [scope-restricted](../../../docs/auth/authorization/api-scopes.mdx), it must permit each route's read scope or `platform:read`.
+
 ### Subprocess backend
 
 The `subprocess/default` profile is registered by default for non-Kubernetes runtimes, including local Docker development. It runs the job command as a host subprocess and emits stdout/stderr through the normal Files/OTEL-backed Jobs logs API.

@@ -7,13 +7,22 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import logging
-from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from collections import OrderedDict
+from concurrent.futures import CancelledError
+from contextlib import asynccontextmanager, closing
+from copy import copy
+from dataclasses import dataclass, field, replace
+from io import BufferedReader, RawIOBase
+from time import monotonic
 from typing import Any, AsyncIterator, NoReturn
 
 import aioboto3
 import aiohttp
+import boto3
+from anyio import create_task_group, from_thread, to_thread
+from boto3.s3.transfer import TransferConfig
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 from nhx.common.files.storage_config import S3StorageConfig
@@ -23,14 +32,16 @@ from nhx.core.files.app.backends.base import (
     StorageImpl,
 )
 from nhx.core.files.app.http_session import get_http_session
-from nhx.core.files.app.streaming import download_url_streaming, upload_url_streaming
+from nhx.core.files.app.streaming import download_url_streaming
 from nhx.core.files.exceptions import (
     NotFoundError,
     StorageAccessError,
     StorageBackendError,
     StorageConfigError,
+    StorageObjectChangedError,
     StorageUnavailableError,
 )
+from s3transfer.utils import ChunksizeAdjuster
 from types_aiobotocore_s3 import S3Client
 
 logger = logging.getLogger(__name__)
@@ -64,6 +75,9 @@ def _raise_for_s3_error(error: ClientError, context: str = "") -> NoReturn:
         "AccessDenied",
         "InvalidAccessKeyId",
         "SignatureDoesNotMatch",
+        "ExpiredToken",
+        "InvalidToken",
+        "InvalidSecurity",
         "403",
     ):
         raise S3AccessError(f"Access denied{ctx}: {error_message}")
@@ -78,6 +92,41 @@ def _raise_for_s3_error(error: ClientError, context: str = "") -> NoReturn:
 
     # Default to generic backend error
     raise S3BackendError(f"S3 error{ctx}: {error_message}")
+
+
+class _UploadStream(RawIOBase):
+    """Expose the async request stream to boto3's non-threaded transfer manager."""
+
+    def __init__(self, stream: AsyncIterator[bytes], content_length: int):
+        """Track the declared length and current fragment without buffering the request."""
+        self.stream = stream
+        self.remaining = content_length
+        self.pending = memoryview(b"")
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int:
+        """Read on an AnyIO worker, preserving partial chunks and checking the declared length."""
+        from_thread.check_cancelled()
+        while not self.pending:
+            try:
+                chunk = from_thread.run(anext, self.stream, None)
+            except CancelledError:
+                from_thread.check_cancelled()
+                raise
+            if chunk is None:
+                if self.remaining:
+                    raise ValueError("Upload body does not match Content-Length")
+                return 0
+            self.remaining -= len(chunk)
+            if self.remaining < 0:
+                raise ValueError("Upload body exceeds Content-Length")
+            self.pending = memoryview(chunk)
+        size = min(len(buffer), len(self.pending))
+        buffer[:size] = self.pending[:size]
+        self.pending = self.pending[size:]
+        return size
 
 
 def _add_content_md5_header(params: dict[str, Any], **kwargs: Any) -> None:
@@ -101,11 +150,38 @@ def _add_content_md5_header(params: dict[str, Any], **kwargs: Any) -> None:
         params["headers"]["Content-MD5"] = content_md5
 
 
+@dataclass(frozen=True)
+class _ObjectSnapshot:
+    """Object identity and size shared by one request and its cache writer."""
+
+    path: str
+    size: int
+    etag: str | None
+    version_id: str | None
+    kms_encrypted: bool = False
+
+
+@dataclass(frozen=True)
+class _MetadataEntry:
+    """A successful HEAD result, aged from the start of its freshness check."""
+
+    checked_at: float
+    snapshot: _ObjectSnapshot
+
+
+# Process-local, bounded LRU. Credential fingerprints isolate upstream access
+# scopes; mutation invalidation covers all scopes and overlapping fileset prefixes.
+_METADATA_CACHE_MAX_SIZE = 4096
+_metadata_cache: OrderedDict[tuple[str, str, str], _MetadataEntry] = OrderedDict()
+_metadata_generation = 0
+
+
 @dataclass
 class S3StorageImpl(StorageImpl):
     config: S3StorageConfig
     secrets: dict[str, str]
     _session: aioboto3.Session = field(init=False)
+    _snapshot: _ObjectSnapshot | None = field(default=None, init=False)
 
     def __post_init__(self):
         self._session = aioboto3.Session()
@@ -166,6 +242,40 @@ class S3StorageImpl(StorageImpl):
         """
         return key == self.config.prefix or key.startswith(self._storage_boundary())
 
+    def _metadata_source(self) -> str:
+        """Identify a bucket independently of fileset prefixes and credentials."""
+        # Region is a routing/signing hint, not bucket identity. Invalidating
+        # across aliases is safe even when they use different region settings.
+        return json.dumps([self.config.endpoint_url, self.config.bucket])
+
+    async def _metadata_cache_key(self, path: str) -> tuple[str, str, str] | None:
+        """Scope metadata to resolved credentials, without retaining secret text."""
+        if self.config.use_sdk_auth:
+            credentials = await self._session._session.get_credentials()
+            if credentials is None:
+                return None
+            frozen = await credentials.get_frozen_credentials()
+            auth = [frozen.access_key, frozen.secret_key, frozen.token]
+        else:
+            # Validate required secrets before allowing a metadata cache hit.
+            self._get_client_kwargs()
+            auth = [self.secrets.get("access_key_id"), self.secrets.get("secret_access_key")]
+        # Keep lookups isolated by routing hints (which may select different
+        # AWS partitions), while invalidation deliberately spans region aliases.
+        fingerprint = hashlib.sha256(json.dumps([auth, self.config.region]).encode()).hexdigest()
+        return self._metadata_source(), self._full_key(path), fingerprint
+
+    def _invalidate_metadata(self, path: str | None = None) -> None:
+        """Invalidate this object (or prefix), including pending freshness checks."""
+        global _metadata_generation
+        _metadata_generation += 1
+        source = self._metadata_source()
+        for key in list(_metadata_cache):
+            if key[0] == source and (
+                key[1] == self._full_key(path) if path is not None else key[1].startswith(self.config.prefix or "")
+            ):
+                del _metadata_cache[key]
+
     @asynccontextmanager
     async def _client(self) -> AsyncIterator[S3Client]:
         """Create an S3 client context manager."""
@@ -212,35 +322,68 @@ class S3StorageImpl(StorageImpl):
     async def download(self, path: str, byte_range: ByteRange | None) -> AsyncIterator[bytes]:
         """Download a file from S3 using a presigned URL."""
         full_key = self._full_key(path)
+        params: dict[str, Any] = {"Bucket": self.config.bucket, "Key": full_key}
+        headers: dict[str, str] = {}
+        snapshot = self._snapshot
+        if snapshot is not None and snapshot.path == path:
+            if snapshot.version_id and not (snapshot.kms_encrypted and snapshot.etag):
+                # KMS content is never cached. A conditional current-object GET
+                # avoids an unnecessary version-permission probe on every read.
+                params["VersionId"] = snapshot.version_id
+            if snapshot.etag:
+                params["IfMatch"] = snapshot.etag
+                headers["If-Match"] = snapshot.etag
 
-        async with self._client() as client:
-            try:
-                url = await client.generate_presigned_url(
-                    "get_object",
-                    Params={"Bucket": self.config.bucket, "Key": full_key},
-                    ExpiresIn=3600,
-                )
-            except ClientError as e:
-                error_code = e.response.get("Error", {}).get("Code", "")
-                if error_code in ("NoSuchKey", "NotFound", "404"):
-                    raise NotFoundError(f"File {path} does not exist in S3 bucket {self.config.bucket}") from e
-                _raise_for_s3_error(e, f"generating presigned URL for {path}")
+        async def presign(request_params: dict[str, Any]) -> str:
+            """Sign a GET without fetching content or requiring version permissions."""
+            async with self._client() as client:
+                try:
+                    return await client.generate_presigned_url("get_object", Params=request_params, ExpiresIn=3600)
+                except ClientError as e:
+                    error_code = e.response.get("Error", {}).get("Code", "")
+                    if error_code in ("NoSuchKey", "NotFound", "404"):
+                        raise NotFoundError(f"File {path} does not exist in S3 bucket {self.config.bucket}") from e
+                    _raise_for_s3_error(e, f"generating presigned URL for {path}")
 
+        url = await presign(params)
         session = get_http_session()
 
         async def _download() -> AsyncIterator[bytes]:
-            try:
-                async for chunk in download_url_streaming(
-                    url,
-                    session=session,
-                    byte_range=byte_range,
-                    chunk_size=self.config.read_chunk_size,
-                ):
-                    yield chunk
-            except aiohttp.ClientResponseError as e:
-                if e.status == 404:
-                    raise NotFoundError(f"File {path} does not exist in S3 bucket {self.config.bucket}") from e
-                raise S3BackendError(f"HTTP error downloading {path}: {e.status}") from e
+            current_url = url
+            started = False
+            for attempt in range(2):
+                try:
+                    async for chunk in download_url_streaming(
+                        current_url,
+                        session=session,
+                        headers=headers,
+                        byte_range=byte_range,
+                        chunk_size=self.config.read_chunk_size,
+                    ):
+                        started = True
+                        yield chunk
+                    return
+                except aiohttp.ClientResponseError as e:
+                    if (
+                        e.status == 403
+                        and attempt == 0
+                        and not started
+                        and "VersionId" in params
+                        and "IfMatch" in params
+                    ):
+                        # GetObject does not imply GetObjectVersion. Fall back
+                        # only with the same ETag guard, never to an unpinned GET.
+                        current_url = await presign({k: v for k, v in params.items() if k != "VersionId"})
+                        continue
+                    if e.status in (404, 412):
+                        self._invalidate_metadata(path)
+                    if e.status == 412:
+                        raise StorageObjectChangedError(
+                            "Upstream object changed during download; retry the request"
+                        ) from e
+                    if e.status == 404:
+                        raise NotFoundError(f"File {path} does not exist in S3 bucket {self.config.bucket}") from e
+                    raise S3BackendError(f"HTTP error downloading {path}: {e.status}") from e
 
         return _download()
 
@@ -250,32 +393,34 @@ class S3StorageImpl(StorageImpl):
         fstream: AsyncIterator[bytes],
         content_length: int | None = None,
     ) -> FileInfo:
-        """Upload a file to S3 using a presigned URL with aiohttp streaming.
-
-        Args:
-            path: The path within the storage to upload to
-            fstream: Async iterator of bytes to upload
-            content_length: Required - the total size of the upload. S3 presigned
-                URLs require Content-Length header for PUT requests.
-        """
+        """Stream a file using boto3's managed PUT/multipart transfer."""
         if content_length is None:
             raise ValueError("content_length is required for S3 uploads")
+        if content_length < 0:
+            raise ValueError("content_length must be non-negative")
 
-        full_key = self._full_key(path)
+        def upload() -> None:
+            """Keep SDK calls and synchronous stream reads on the same AnyIO worker."""
+            # Serial classic transfers keep reads on this AnyIO worker and memory bounded.
+            transfer = TransferConfig(use_threads=False, preferred_transfer_client="classic")
+            transfer.multipart_chunksize = ChunksizeAdjuster().adjust_chunksize(
+                transfer.multipart_chunksize, content_length
+            )
+            with (
+                closing(boto3.Session().client("s3", **self._get_client_kwargs())) as client,
+                BufferedReader(_UploadStream(fstream, content_length)) as source,
+            ):
+                client.upload_fileobj(source, self.config.bucket, self._full_key(path), Config=transfer)
 
-        async with self._client() as client:
-            try:
-                url = await client.generate_presigned_url(
-                    "put_object",
-                    Params={"Bucket": self.config.bucket, "Key": full_key},
-                    ExpiresIn=3600,
-                )
-            except ClientError as e:
-                _raise_for_s3_error(e, f"generating presigned URL for {path}")
-
-        headers = {"Content-Length": str(content_length)}
-        await upload_url_streaming(url, fstream, headers=headers)
-
+        try:
+            async with create_task_group() as group:
+                group.start_soon(to_thread.run_sync, upload)
+        except ExceptionGroup as errors:
+            error = errors.exceptions[0]  # Only the upload worker can fail in this group.
+            if isinstance(error, ClientError):
+                _raise_for_s3_error(error, f"uploading {path}")
+            raise error from None
+        self._invalidate_metadata(path)
         return FileInfo(path=path, size=content_length)
 
     async def validate_storage(self):
@@ -293,17 +438,59 @@ class S3StorageImpl(StorageImpl):
         Overrides base class implementation which uses list_files (inefficient
         for S3 and doesn't work correctly due to prefix handling).
         """
-        full_key = self._full_key(path)
+        storage = await self.for_download(path)
+        if storage._snapshot is None:
+            raise S3BackendError("Failed to resolve S3 object metadata")
+        return FileInfo(path=path, size=storage._snapshot.size)
 
+    async def for_download(self, path: str) -> S3StorageImpl:
+        """Resolve metadata within its TTL and return a pinned download view."""
+        if self._snapshot is not None and self._snapshot.path == path:
+            return self
+        from nhx.core.files.config import files_config
+
+        ttl = files_config().s3_metadata_cache_ttl_seconds
+        key = await self._metadata_cache_key(path) if ttl > 0 else None
+        checked_at = monotonic()
+        if key is not None:
+            entry = _metadata_cache.get(key)
+            if entry is not None:
+                if checked_at - entry.checked_at < ttl:
+                    _metadata_cache.move_to_end(key)
+                    storage = copy(self)
+                    storage._snapshot = replace(entry.snapshot, path=path)
+                    return storage
+                del _metadata_cache[key]
+        generation = _metadata_generation
         async with self._client() as client:
             try:
-                head = await client.head_object(Bucket=self.config.bucket, Key=full_key)
-                return FileInfo(path=path, size=head["ContentLength"])
+                head = await client.head_object(Bucket=self.config.bucket, Key=self._full_key(path))
             except ClientError as e:
                 error_code = e.response.get("Error", {}).get("Code", "")
                 if error_code in ("NoSuchKey", "NotFound", "404"):
                     raise NotFoundError(f"File {path} does not exist in S3 bucket {self.config.bucket}") from e
                 _raise_for_s3_error(e, f"getting file info for {path}")
+        storage = copy(self)
+        version_id = head.get("VersionId")
+        storage._snapshot = _ObjectSnapshot(
+            path=path,
+            size=head["ContentLength"],
+            etag=head.get("ETag"),
+            # A null version can be overwritten when versioning is suspended.
+            version_id=version_id if version_id and version_id != "null" else None,
+            kms_encrypted=head.get("ServerSideEncryption") in ("aws:kms", "aws:kms:dsse"),
+        )
+        if (
+            key is not None
+            and generation == _metadata_generation
+            and (storage._snapshot.etag or storage._snapshot.version_id)
+            and not storage._snapshot.kms_encrypted
+        ):
+            _metadata_cache[key] = _MetadataEntry(checked_at, storage._snapshot)
+            _metadata_cache.move_to_end(key)
+            while len(_metadata_cache) > _METADATA_CACHE_MAX_SIZE:
+                _metadata_cache.popitem(last=False)
+        return storage
 
     async def delete(self, path: str) -> FileInfo:
         """Delete a file from S3."""
@@ -317,6 +504,7 @@ class S3StorageImpl(StorageImpl):
 
                 # Delete the object
                 await client.delete_object(Bucket=self.config.bucket, Key=full_key)
+                self._invalidate_metadata(path)
 
                 logger.info(f"Deleted file {path} from S3 bucket {self.config.bucket}")
                 return file_info
@@ -336,6 +524,9 @@ class S3StorageImpl(StorageImpl):
         touched. A failure after one page and before the next may leave some
         owned keys deleted; a later retry lists again and deletes the rest.
         """
+        # Invalidate before and after: partial bulk deletes can change objects
+        # even when a later page fails, and concurrent HEADs must not refill them.
+        self._invalidate_metadata()
         prefix = self.config.prefix or ""
 
         async with self._client() as client:
@@ -357,17 +548,37 @@ class S3StorageImpl(StorageImpl):
                 logger.info(f"Deleted all files with prefix '{prefix}' from S3 bucket {self.config.bucket}")
             except ClientError as e:
                 _raise_for_s3_error(e, f"deleting all files from bucket {self.config.bucket}")
+            finally:
+                self._invalidate_metadata()
 
-    async def get_cache_path_key(self, path: str | None = None) -> str:
-        """Return cache path that includes bucket and prefix for uniqueness.
+    async def get_cache_path_key(self, path: str | None = None) -> str | None:
+        """Key cached content by source, object key, and freshly resolved identity.
 
-        Format: cache/s3/{bucket}/{prefix}/{path}
+        The new namespace ignores legacy path-only entries. Hashes keep opaque
+        ETags, version IDs and object keys safe as local filesystem components.
         """
-        prefix_part = f"/{self.config.prefix}" if self.config.prefix else ""
-        base = f"cache/s3/{self.config.bucket}{prefix_part}"
+        source = json.dumps(
+            [self.config.endpoint_url, self.config.region, self.config.bucket, self.config.prefix],
+            separators=(",", ":"),
+        )
+        base = f"cache/s3-v2/{hashlib.sha256(source.encode()).hexdigest()}"
         if path is None:
             return base
-        return f"{base}/{path}"
+        storage = await self.for_download(path)
+        snapshot = storage._snapshot
+        if snapshot is None:
+            raise S3BackendError("Failed to resolve S3 object metadata")
+        if snapshot.kms_encrypted:
+            # HEAD does not prove kms:Decrypt permission. Always GET encrypted
+            # content instead of allowing a local plaintext cache to bypass it.
+            return None
+        if not snapshot.etag and not snapshot.version_id:
+            # Nonconforming S3 backends without validators cannot be cached safely.
+            return None
+        identity = json.dumps([snapshot.version_id, snapshot.etag], separators=(",", ":"))
+        object_key = hashlib.sha256(self._full_key(path).encode()).hexdigest()
+        version = hashlib.sha256(identity.encode()).hexdigest()
+        return f"{base}/{object_key}/{version}"
 
     def get_duckdb_path(self, path: str) -> str:
         """Return S3 URI for DuckDB access.

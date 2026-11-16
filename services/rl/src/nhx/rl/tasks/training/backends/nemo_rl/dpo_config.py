@@ -244,7 +244,6 @@ def compile_dpo_config(
             "checkpoint": {
                 "model_save_format": "safetensors",
                 "save_consolidated": "every",
-                "v4_compatible": customizer_config.model.v4_compatible,
             },
         },
         "dynamic_batching": {"enabled": False},

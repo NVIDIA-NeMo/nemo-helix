@@ -54,7 +54,8 @@ fi
 
 case "${CLEANUP_SCOPE:-ci}" in
   ci)
-    tag_filter="select(((.metadata.container.tags // []) | any(test(\"${release_tag_pattern}\"))) | not)"
+    cache_branch_tag_pattern='^cache-.+-linux-(amd64|arm64)$'
+    tag_filter="select(((.metadata.container.tags // []) | any(test(\"${release_tag_pattern}\") or test(\"${cache_branch_tag_pattern}\"))) | not)"
     ;;
   release)
     tag_filter="select((.metadata.container.tags // []) | any(test(\"${release_tag_pattern}\")))"

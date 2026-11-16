@@ -33,12 +33,12 @@ import {
   modelsDeleteModel,
   modelsGetModel,
 } from '@nemo/sdk/generated/platform/models';
-import {
-  type ModelDeployment,
-  type ModelDeploymentConfig,
-  ModelDeploymentStatus,
-  type ModelEntity,
+import type {
+  ModelDeployment,
+  ModelDeploymentConfig,
+  ModelEntity,
 } from '@nemo/sdk/generated/platform/schema';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 import {
   HUGGING_FACE_DEPLOYMENT_SOURCE_FIELD,
   HUGGING_FACE_DEPLOYMENT_SOURCE_VALUE,

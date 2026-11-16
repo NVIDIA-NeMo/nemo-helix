@@ -3,7 +3,8 @@
 
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
-import { HelixJobStatus, type HelixJobResultResponse } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobResultResponse } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { Flex, Spinner, Stack } from '@nvidia/foundations-react-core';
 import { FilesetFilePreviewPanel } from '@studio/components/FilesetFilePreviewPanel';
 import {

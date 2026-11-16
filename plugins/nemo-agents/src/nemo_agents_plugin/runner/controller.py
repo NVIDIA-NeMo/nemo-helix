@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from typing import ClassVar, cast
 
 import httpx
+from httpx import AsyncClient
 from nemo_agents_plugin.config import ControllerConfig
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
@@ -487,7 +488,7 @@ class AgentDeploymentController(NemoController):
     def _runtime_health_client(self, transport: EndpointTransport) -> httpx.AsyncClient:
         client = self._runtime_health_clients.get(transport)
         if client is None:
-            client = httpx.AsyncClient(
+            client = AsyncClient(
                 timeout=_RUNTIME_HEALTH_TIMEOUT_SECONDS,
                 follow_redirects=False,
                 **transport.client_kwargs(),
@@ -786,13 +787,11 @@ class AgentDeploymentController(NemoController):
         self._runtime_instance_ids.pop((dep.workspace, dep.name), None)
         if dep.id is not None:
             self._pending_restart_reconciliations.pop(dep.id, None)
+        if not dep.id:
+            logger.warning("Cannot delete deployment entity '%s': no persisted ID", dep.name)
+            return
         try:
-            await self.entities.delete(
-                AgentDeployment,
-                name=dep.name,
-                workspace=dep.workspace,
-                expected_db_version=dep.db_version,
-            )
+            await self.entities.delete_by_id(AgentDeployment, dep.id, expected_db_version=dep.db_version)
         except Exception:
             logger.exception("Failed to delete deployment entity '%s'", dep.name)
         else:

@@ -254,12 +254,11 @@ class PreflightChecker:
         try:
             from docker.errors import DockerException, ImageNotFound
 
-            import docker
-
             from .container import ContainerManager
 
-            client = docker.from_env()
-            has_floating_tag = ContainerManager(self.config)._has_floating_tag()
+            container_manager = ContainerManager(self.config)
+            client = container_manager.client
+            has_floating_tag = container_manager._has_floating_tag()
             # First check if image exists locally
             try:
                 client.images.get(self.config.image)

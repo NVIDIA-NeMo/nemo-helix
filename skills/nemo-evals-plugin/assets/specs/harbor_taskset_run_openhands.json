@@ -5,7 +5,7 @@
       "source": {
         "name": "openhands",
         "model": {
-          "ref": "default/nemotron-super-closed-book"
+          "ref": "default/nvidia-nemotron-3-5-super-vl-120b-a12b"
         }
       },
       "agent_kwargs": {

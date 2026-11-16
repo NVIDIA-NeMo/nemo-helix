@@ -260,7 +260,7 @@ class DependencyProvider:
             - Expose the effective principal, entity client, and platform configuration.
             - Register the service configuration only when this service owns one.
         """
-        from nemo_helix_plugin.dependencies import get_request_authorizer
+        from nemo_helix_plugin.dependencies import get_request_authorizer, get_submission_authorizer
         from nhx.common.auth.dependencies import get_request_authorizer as request_authorizer
         from nhx.common.service.dependencies import (
             get_effective_principal_id,
@@ -272,6 +272,7 @@ class DependencyProvider:
         )
 
         app.dependency_overrides[get_request_authorizer] = request_authorizer
+        app.dependency_overrides[get_submission_authorizer] = request_authorizer
         app.dependency_overrides[get_nemo_client] = self.get_request_scoped_nemo_client
         app.dependency_overrides[get_sync_nemo_client] = self.get_request_scoped_sync_nemo_client
         app.dependency_overrides[get_entity_client] = self.get_entity_client

@@ -205,7 +205,7 @@ async def test_a_slot_directory_another_user_owns_isnt_used(tmp_path: Path, monk
     directory = tmp_path / "slots"
     directory.mkdir(mode=0o700)
     owner = directory.stat().st_uid
-    monkeypatch.setattr(os, "getuid", lambda: owner + 1)
+    monkeypatch.setattr(setup_slots, "_uid", lambda: owner + 1)
     assert await _uncapped(directory)
 
 

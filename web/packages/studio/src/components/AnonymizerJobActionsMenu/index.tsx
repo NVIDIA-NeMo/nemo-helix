@@ -17,7 +17,7 @@ import { DeleteJobModal } from '@studio/components/dataViews/AnonymizerJobsDataV
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAnonymizerJobRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
-import { type FC, useCallback, useMemo, useState } from 'react';
+import { type FC, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 interface AnonymizerJobActionsMenuProps {
@@ -58,40 +58,35 @@ export const AnonymizerJobActionsMenu: FC<AnonymizerJobActionsMenuProps> = ({
 
   const isCancellable = job.status != null && CJobCancellableStatuses.includes(job.status);
 
-  const actions = useMemo<QuickActionItem[]>(
-    () => [
-      ...(includeViewDetails
-        ? [
-            {
-              label: 'View details',
-              onSelect: () => {
-                if (job.name) {
-                  navigate(getAnonymizerJobRoute(workspace, job.name));
-                }
-              },
+  const actions: QuickActionItem[] = [
+    ...(includeViewDetails
+      ? [
+          {
+            label: 'View details',
+            onSelect: () => {
+              if (job.name) {
+                navigate(getAnonymizerJobRoute(workspace, job.name));
+              }
             },
-          ]
-        : []),
-      ...(isCancellable
-        ? [
-            {
-              label: 'Cancel',
-              onSelect: () => setShowCancelModal(true),
-            },
-          ]
-        : []),
-      {
-        label: 'Delete',
-        onSelect: () => setShowDeleteModal(true),
-        danger: true,
-      },
-    ],
-    [includeViewDetails, isCancellable, navigate, workspace, job.name]
-  );
+          },
+        ]
+      : []),
+    ...(isCancellable
+      ? [
+          {
+            label: 'Cancel',
+            onSelect: () => setShowCancelModal(true),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <>
-      <QuickActionsMenuRoot actions={actions} />
+      <QuickActionsMenuRoot
+        actions={actions}
+        deleteAction={{ onSelect: () => setShowDeleteModal(true) }}
+      />
       {showCancelModal && (
         <CancelJobModal
           open

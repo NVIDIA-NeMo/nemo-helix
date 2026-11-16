@@ -19,6 +19,8 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/agent-hardener/python \
 COPY docker/locks/nhx-agent-hardener-tasks /opt/agent-hardener-lock
 # The agent-hardener venv installs from its committed lock. The garak venv comes from agent-hardener's own
 # provisioner, as on a host after `nemo agent-hardener setup`, so its garak pin stays the single source of truth.
+# Apply fixed dependency versions during Garak provisioning, not afterward;
+# Datasets 5.1 admits the fixed fsspec version (same reviewed override as the workspace).
 # Use uv's compatibility tar backend for the managed Python download under QEMU.
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_LEGACY_TAR_BACKEND=1 uv venv --python 3.12 /opt/agent-hardener/venv && \
@@ -27,8 +29,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --locked \
         --no-dev \
         --no-install-project && \
-    /opt/agent-hardener/venv/bin/python -c \
-        "from agent_hardener.garak_venv import provision_garak_venv; provision_garak_venv()"
+    printf 'urllib3==2.8.0\nfsspec==2026.7.0\ndatasets==5.1.0\n' > /tmp/garak-overrides.txt && \
+    UV_OVERRIDE=/tmp/garak-overrides.txt /opt/agent-hardener/venv/bin/python -c \
+        "from agent_hardener.garak_venv import provision_garak_venv; provision_garak_venv()" && \
+    rm /tmp/garak-overrides.txt
+
 RUN set -eux; \
     case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
         amd64) target="x86_64-unknown-linux-musl"; sha256="${OPENSHELL_SHA256_AMD64}" ;; \

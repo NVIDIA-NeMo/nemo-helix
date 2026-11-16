@@ -249,9 +249,9 @@ async def test_run_timeout_redacts_secrets_in_argv(monkeypatch: pytest.MonkeyPat
     async def _fake_exec(*argv: str, **kwargs: object) -> _HangingProc:
         return _HangingProc()
 
-    monkeypatch.setattr(docker_mod.asyncio, "create_subprocess_exec", _fake_exec)
-    monkeypatch.setattr(docker_mod.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(docker_mod.os, "killpg", lambda pgid, sig: None)
+    monkeypatch.setattr(docker_mod, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(docker_mod, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(docker_mod, "killpg", lambda pgid, sig: None)
 
     provider = DockerSandboxProvider()
     argv = ["docker", "run", "-e", "NVIDIA_API_KEY=supersecret-xyz", "img:latest"]

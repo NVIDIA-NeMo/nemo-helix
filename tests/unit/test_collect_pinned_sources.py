@@ -66,7 +66,7 @@ def run(module, monkeypatch: pytest.MonkeyPatch, manifest: Path, output: Path) -
 def test_downloads_verified_archive_and_records_what_it_covers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     module = load_module()
     monkeypatch.setenv("NHX_COLLECT_SOURCES", "1")
-    monkeypatch.setattr(module.urllib.request, "urlopen", lambda url, timeout: Response(ARCHIVE))
+    monkeypatch.setattr(module, "urlopen", lambda url, timeout: Response(ARCHIVE))
     output = tmp_path / "out"
 
     assert run(module, monkeypatch, write_manifest(tmp_path / "m.json"), output) == 0
@@ -81,7 +81,7 @@ def test_downloads_verified_archive_and_records_what_it_covers(monkeypatch: pyte
 def test_checksum_mismatch_fails_without_writing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     module = load_module()
     monkeypatch.setenv("NHX_COLLECT_SOURCES", "1")
-    monkeypatch.setattr(module.urllib.request, "urlopen", lambda url, timeout: Response(b"tampered"))
+    monkeypatch.setattr(module, "urlopen", lambda url, timeout: Response(b"tampered"))
     output = tmp_path / "out"
 
     with pytest.raises(RuntimeError, match="sha256 mismatch"):
@@ -98,7 +98,7 @@ def test_download_failure_fails_the_build(monkeypatch: pytest.MonkeyPatch, tmp_p
     def unreachable(url: str, timeout: int) -> Response:
         raise module.urllib.error.URLError("TLS connect error")
 
-    monkeypatch.setattr(module.urllib.request, "urlopen", unreachable)
+    monkeypatch.setattr(module, "urlopen", unreachable)
 
     with pytest.raises(RuntimeError, match="could not download busybox 1.38.0"):
         run(module, monkeypatch, write_manifest(tmp_path / "m.json"), tmp_path / "out")
@@ -107,7 +107,7 @@ def test_download_failure_fails_the_build(monkeypatch: pytest.MonkeyPatch, tmp_p
 def test_disabled_collection_downloads_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     module = load_module()
     monkeypatch.delenv("NHX_COLLECT_SOURCES", raising=False)
-    monkeypatch.setattr(module.urllib.request, "urlopen", lambda url, timeout: pytest.fail("downloaded"))
+    monkeypatch.setattr(module, "urlopen", lambda url, timeout: pytest.fail("downloaded"))
     output = tmp_path / "out"
 
     assert run(module, monkeypatch, write_manifest(tmp_path / "m.json"), output) == 0

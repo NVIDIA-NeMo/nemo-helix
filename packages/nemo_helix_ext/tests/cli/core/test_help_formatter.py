@@ -22,7 +22,7 @@ from typer.testing import CliRunner
 @contextmanager
 def mock_terminal_size(columns: int, lines: int = 24):
     """Mock terminal size for testing."""
-    with patch("nemo_helix_ext.cli.core.help_formatter.shutil.get_terminal_size") as mock_size:
+    with patch("nemo_helix_ext.cli.core.help_formatter.get_terminal_size") as mock_size:
         mock_size.return_value = os.terminal_size((columns, lines))
         yield mock_size
 

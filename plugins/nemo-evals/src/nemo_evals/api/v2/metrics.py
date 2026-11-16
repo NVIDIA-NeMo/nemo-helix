@@ -9,7 +9,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
-from nemo_evals.api.dependencies import get_metric_service
+from nemo_evals.api.dependencies import get_metric_files_metadata_client, get_metric_service
 from nemo_evals.api.schemas import (
     Metric,
     MetricFilter,
@@ -20,10 +20,13 @@ from nemo_evals.api.service.metric_service import MetricService
 from nemo_evals.authz import scope
 from nemo_evals.entities import MAX_NAME_LENGTH, NAME_PATTERN
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricsDisabledError
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.client.errors import AuthenticationError, PermissionDeniedError
 from nemo_helix_plugin.entities import EntityValidationError
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import Page
@@ -59,8 +62,7 @@ router = APIRouter()
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[MetricPerms.LIST])
 async def list_metrics(
     workspace: str,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: MetricSort = Query(
         default=MetricSort.CREATED_AT_ASC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -78,8 +80,8 @@ async def list_metrics(
     try:
         return await service.list_metrics(
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_operation=parsed_filter.operation,
             include_derived=include_derived,
@@ -176,11 +178,12 @@ async def delete_metric(
     workspace: str,
     name: str,
     service: MetricService = Depends(get_metric_service),
+    files_metadata_client: AsyncFilesClient = Depends(get_metric_files_metadata_client),
 ):
     """Delete a stored metric by workspace and name."""
     logger.info(f"Deleting metric: {sanitize_for_log(workspace)}/{sanitize_for_log(name)}")
     try:
-        deleted = await service.delete_metric(workspace, name)
+        deleted = await service.delete_metric(workspace, name, files_metadata_client=files_metadata_client)
         if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -189,6 +192,8 @@ async def delete_metric(
         return None
     except HTTPException:
         raise
+    except (AuthenticationError, PermissionDeniedError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail="Fileset lookup access denied") from exc
     except NemoEntityConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."

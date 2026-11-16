@@ -12,9 +12,7 @@ describe('getStudioUiNavigationSuggestion', () => {
       customizerEnabled: true,
       evalsEnabled: true,
       guardrailsEnabled: true,
-      inferenceProviderEnabled: true,
       intakeEnabled: true,
-      modelCompareEnabled: true,
       monitorEnabled: true,
     });
   });

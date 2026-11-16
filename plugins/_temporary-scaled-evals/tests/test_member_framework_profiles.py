@@ -165,9 +165,10 @@ def test_create_routes_overrides_into_member_dispatch(monkeypatch: pytest.Monkey
         runner_metadata={"portable": True},
     )
     monkeypatch.setattr(benchmark_runs_router, "preflight_benchmark_run", lambda *_args, **_kwargs: preflight)
-    monkeypatch.setattr(benchmark_runs_router, "_response", lambda _db, row: row)
+    response = MagicMock()
+    monkeypatch.setattr(benchmark_runs_router, "_response", response)
     db = MagicMock()
-    db.benchmark_runs.create_run.side_effect = lambda _run_id, **kwargs: captured.update(kwargs) or kwargs
+    db.benchmark_runs.create_run.side_effect = lambda run_id, **kwargs: captured.update(kwargs) or {"id": run_id}
 
     result = benchmark_runs_router.create_benchmark_run(
         CreateBenchmarkRunRequest(
@@ -182,7 +183,9 @@ def test_create_routes_overrides_into_member_dispatch(monkeypatch: pytest.Monkey
         False,
     )
 
-    assert result["runner_metadata"] == {
+    assert result is response.return_value
+    response.assert_called_once_with(db, db.benchmark_runs.create_run.call_args.args[0])
+    assert captured["runner_metadata"] == {
         "portable": True,
         "member_framework_profile_ids": {"task_0": "cfg_member"},
     }

@@ -701,7 +701,7 @@ def test_a_pause_signals_this_process(
     """Automodel shares the signal with every rank at the next step, so rank 0's own pid is enough."""
     monkeypatch.setenv("RANK", "0")
     sent: list[tuple[int, int]] = []
-    monkeypatch.setattr(finetune.os, "kill", lambda pid, sig: sent.append((pid, sig)))
+    monkeypatch.setattr(finetune, "kill", lambda pid, sig: sent.append((pid, sig)))
     wrapper, _ = _wrapper(finetune, monkeypatch, _FakeRecipe())
     wrapper.run_train_validation_loop()
 

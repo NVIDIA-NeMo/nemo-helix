@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from docker.errors import APIError, DockerException, NotFound
+from nhx.intake import local_clickhouse
 from nhx.intake.config import (
     DEFAULT_CLICKHOUSE_DIGEST,
     DEFAULT_CLICKHOUSE_IMAGE,
@@ -186,7 +187,7 @@ def settings() -> ClickHouseSettings:
 def _patch_reconciliation(monkeypatch: pytest.MonkeyPatch, client: FakeDockerClient, tmp_path: Path) -> None:
     monkeypatch.setenv("NHX_DATA_DIR", str(tmp_path))
     monkeypatch.setattr("nhx.intake.local_clickhouse._wait_until_ready", lambda _settings: None)
-    monkeypatch.setattr("nhx.intake.local_clickhouse.docker.from_env", lambda **_kwargs: client)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.docker_from_env", lambda **_kwargs: client)
 
 
 def test_default_unconfigured_url_is_locally_managed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -240,7 +241,7 @@ def test_local_clickhouse_readiness_checks_managed_data_directory(
         data_dir=data_dir,
     )
     client = FakeDockerClient({name: container})
-    monkeypatch.setattr("nhx.intake.local_clickhouse.docker.from_env", lambda **_kwargs: client)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.docker_from_env", lambda **_kwargs: client)
 
     asyncio.run(check_local_clickhouse_data_directory(data_dir=data_dir))
 
@@ -422,7 +423,7 @@ def test_reconcile_reports_docker_daemon_unavailable(
     settings: ClickHouseSettings,
 ) -> None:
     docker_factory = MagicMock(side_effect=DockerException("daemon not running"))
-    monkeypatch.setattr("nhx.intake.local_clickhouse.docker.from_env", docker_factory)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.docker_from_env", docker_factory)
 
     with pytest.raises(DockerUnavailableError, match="Docker daemon is unavailable") as error:
         _reconcile_local_clickhouse(settings)
@@ -439,7 +440,7 @@ def test_reconcile_closes_client_when_docker_ping_fails(
 ) -> None:
     client = FakeDockerClient()
     client.ping = MagicMock(side_effect=DockerException("connection disappeared"))
-    monkeypatch.setattr("nhx.intake.local_clickhouse.docker.from_env", lambda **_kwargs: client)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.docker_from_env", lambda **_kwargs: client)
 
     with pytest.raises(DockerUnavailableError, match="Docker daemon is unavailable"):
         _reconcile_local_clickhouse(settings)
@@ -482,7 +483,7 @@ def test_prepare_operator_data_dir_does_not_change_permissions(
     tmp_path: Path,
 ) -> None:
     chmod = MagicMock()
-    monkeypatch.setattr(Path, "chmod", chmod)
+    monkeypatch.setattr("nhx.intake.local_clickhouse._set_mode", chmod)
 
     data_dir = tmp_path / "operator-clickhouse"
     data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=False)
@@ -506,14 +507,14 @@ def test_ensure_data_directory_identity_tolerates_rootless_bind_mount_permission
 ) -> None:
     data_dir = tmp_path / "intake-clickhouse"
     data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=True)
-    original_chmod = Path.chmod
+    original_set_mode = local_clickhouse._set_mode
 
-    def reject_container_owned_paths(path: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+    def reject_container_owned_paths(path: Path, mode: int) -> None:
         if path in {data_dir, data_dir / "tmp"}:
             raise PermissionError("Operation not permitted")
-        original_chmod(path, mode, follow_symlinks=follow_symlinks)
+        original_set_mode(path, mode)
 
-    monkeypatch.setattr(Path, "chmod", reject_container_owned_paths)
+    monkeypatch.setattr(local_clickhouse, "_set_mode", reject_container_owned_paths)
 
     assert _ensure_data_directory_identity(data_dir, manage_permissions=True) == data_instance_id
 
@@ -610,18 +611,14 @@ def test_recreated_data_directory_replaces_stale_container(
     new_data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=True)
     assert new_data_instance_id != original_data_instance_id
 
-    real_stat = Path.stat
+    real_stat = local_clickhouse._stat
 
-    def stat_with_reused_identity_metadata(
-        path: Path,
-        *,
-        follow_symlinks: bool = True,
-    ) -> os.stat_result:
+    def stat_with_reused_identity_metadata(path: Path) -> os.stat_result:
         if path.name.startswith(".nhx-clickhouse-identity"):
             return original_identity_stat
-        return real_stat(path, follow_symlinks=follow_symlinks)
+        return real_stat(path)
 
-    monkeypatch.setattr(Path, "stat", stat_with_reused_identity_metadata)
+    monkeypatch.setattr(local_clickhouse, "_stat", stat_with_reused_identity_metadata)
     assert _ensure_data_directory_identity(data_dir, manage_permissions=True) == new_data_instance_id
 
     client = FakeDockerClient({name: container})
@@ -648,7 +645,7 @@ def test_remove_local_clickhouse_validates_and_removes_owned_container(
         data_dir=data_dir,
     )
     client = FakeDockerClient({name: container})
-    monkeypatch.setattr("nhx.intake.local_clickhouse.docker.from_env", lambda **_kwargs: client)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.docker_from_env", lambda **_kwargs: client)
 
     assert remove_local_clickhouse(data_dir=data_dir) is True
     assert container.stopped is True
@@ -670,7 +667,7 @@ def test_stop_local_clickhouse_preserves_container_and_data(
         data_dir=data_dir,
     )
     client = FakeDockerClient({name: container})
-    monkeypatch.setattr("nhx.intake.local_clickhouse.docker.from_env", lambda **_kwargs: client)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.docker_from_env", lambda **_kwargs: client)
 
     assert asyncio.run(stop_local_clickhouse(data_dir=data_dir)) is True
     assert container.stopped is True
@@ -693,9 +690,9 @@ def test_remove_local_clickhouse_restores_host_ownership_before_removal(
         data_dir=data_dir,
     )
     client = FakeDockerClient({name: container})
-    monkeypatch.setattr("nhx.intake.local_clickhouse.docker.from_env", lambda **_kwargs: client)
-    monkeypatch.setattr("nhx.intake.local_clickhouse.os.getuid", lambda: 1234)
-    monkeypatch.setattr("nhx.intake.local_clickhouse.os.getgid", lambda: 5678)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.docker_from_env", lambda **_kwargs: client)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.getuid", lambda: 1234)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.getgid", lambda: 5678)
 
     assert remove_local_clickhouse(data_dir=data_dir, restore_data_ownership=True) is True
     assert container.exec_calls == [
@@ -781,7 +778,7 @@ def test_remove_local_clickhouse_refuses_unowned_container(
         data_dir=data_dir,
     )
     client = FakeDockerClient({name: container})
-    monkeypatch.setattr("nhx.intake.local_clickhouse.docker.from_env", lambda **_kwargs: client)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.docker_from_env", lambda **_kwargs: client)
 
     with pytest.raises(LocalClickHouseProvisioningError, match="Refusing to remove"):
         remove_local_clickhouse(data_dir=data_dir)
@@ -802,7 +799,7 @@ def test_remove_local_clickhouse_removes_owned_legacy_container(
         data_dir=data_dir,
     )
     client = FakeDockerClient({LEGACY_CONTAINER_NAME: container})
-    monkeypatch.setattr("nhx.intake.local_clickhouse.docker.from_env", lambda **_kwargs: client)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.docker_from_env", lambda **_kwargs: client)
 
     assert remove_local_clickhouse(data_dir=data_dir) is True
     assert container.stopped is True
@@ -820,7 +817,7 @@ def test_remove_local_clickhouse_ignores_legacy_container_for_another_data_direc
         data_dir=tmp_path / "unrelated-clickhouse",
     )
     client = FakeDockerClient({LEGACY_CONTAINER_NAME: legacy})
-    monkeypatch.setattr("nhx.intake.local_clickhouse.docker.from_env", lambda **_kwargs: client)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.docker_from_env", lambda **_kwargs: client)
 
     assert remove_local_clickhouse(data_dir=data_dir) is False
     assert legacy.removed is False

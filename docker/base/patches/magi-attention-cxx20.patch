@@ -1,0 +1,60 @@
+MagiAttention upstream commit 1f84a484e2 ("fix(build): use C++20 for PyTorch extensions", #372),
+applied to the commit Automodel pins (d7ea8afd). NGC PyTorch 26.09 headers reject C++17.
+Covers the magi_attn_ext CMake build, the magi_attn_comm extension, and the runtime JIT flags.
+Drop this patch once MAGI_ATTENTION_COMMIT includes 1f84a484e2.
+
+diff --git a/magi_attention/common/jit/core.py b/magi_attention/common/jit/core.py
+index b708e37..5b8ae7a 100644
+--- a/magi_attention/common/jit/core.py
++++ b/magi_attention/common/jit/core.py
+@@ -252,10 +252,10 @@ def gen_jit_spec(
+         needs_device_linking,
+     )
+ 
+-    cflags = ["-O3", "-std=c++17", "-Wno-switch-bool"]
++    cflags = ["-O3", "-std=c++20", "-Wno-switch-bool"]
+     cuda_cflags = [
+         "-O3",
+-        "-std=c++17",
++        "-std=c++20",
+         "-use_fast_math",
+         "-DCUTLASS_ENABLE_GDC_FOR_SM90",  # For PDL
+         "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED",  # Necessary for the WGMMA shapes that we use
+diff --git a/magi_attention/csrc/extensions/CMakeLists.txt b/magi_attention/csrc/extensions/CMakeLists.txt
+index 9df6ddd..75d9180 100644
+--- a/magi_attention/csrc/extensions/CMakeLists.txt
++++ b/magi_attention/csrc/extensions/CMakeLists.txt
+@@ -56,9 +56,9 @@ python3_add_library(magi_attn_ext MODULE ${SOURCES} WITH_SOABI)
+ 
+ # Set Language Standards
+ set_target_properties(magi_attn_ext PROPERTIES
+-    CXX_STANDARD 17
++    CXX_STANDARD 20
+     CXX_STANDARD_REQUIRED ON
+-    CUDA_STANDARD 17
++    CUDA_STANDARD 20
+     CUDA_STANDARD_REQUIRED ON
+ )
+ 
+diff --git a/setup.py b/setup.py
+index 5ab10b1..2ef98bb 100644
+--- a/setup.py
++++ b/setup.py
+@@ -502,6 +502,7 @@ def build_magi_attn_comm_module(
+     # Flags for the standard C++ compiler (gcc/g++)
+     cxx_flags = [
+         "-O3",  # Maximize optimization
++        "-std=c++20",  # Match the standard required by recent PyTorch headers
+         "-Wno-deprecated-declarations",  # Suppress warnings about deprecated code
+         "-Wno-unused-variable",  # Suppress warnings about unused variables
+         "-Wno-sign-compare",  # Suppress signed/unsigned comparison warnings
+@@ -515,8 +516,7 @@ def build_magi_attn_comm_module(
+         "-O3",
+         "-Xptxas",  # Pass arguments to ptxas (PTX assembler)
+         "-v",  # Verbose output
+-        "-Xcompiler",  # Pass arguments to the host compiler
+-        "-std=c++17",  # Use C++17 standard
++        "-std=c++20",  # Set the standard for both CUDA and host compilation
+         "-lineinfo",  # Generate line-number information for profiling
+         # "-Xcompiler",  # Uncomment for profiling compilation time
+         # "-ftime-report",  # Uncomment for profiling compilation time

@@ -19,9 +19,11 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.file_manager import TmpDirPath
 from nemo_helix_plugin.jobs.schemas import FileStorageType, HelixJobResultCreateRequest
 from nemo_helix_plugin.jobs.types import HelixJobStatusUpdateRequest, HelixJobTaskUpdate, UpdateHelixJobRequest
+from nhx.common.auth.models import Principal
 from nhx.common.entities import ALL_WORKSPACES, DEFAULT_WORKSPACE
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
 from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.api.v2.jobs import endpoints
 from nhx.core.jobs.api.v2.jobs.endpoints import (
     _format_create_job_conflict,
     _format_entity_validation_error,
@@ -37,6 +39,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
 from nhx.core.jobs.app.dispatcher import (
     JobAlreadyExistsError,
     JobDispatcher,
+    JobEnvironmentValidationError,
     JobHasNoAttemptError,
     JobOutputLocationError,
     JobSecretValidationError,
@@ -623,33 +626,72 @@ def test_create_job_secret_validation_error_returns_safe_guidance():
 
 
 @pytest.mark.asyncio
-async def test_create_job_conflict_sanitizes_log_fields(
+async def test_create_job_environment_validation_error_returns_422_naming_rejected_key(
     test_client: AsyncClient,
     mock_dispatcher: JobDispatcher,
-    caplog,
 ):
-    with patch.object(mock_dispatcher, "create_job", new=AsyncMock(side_effect=ValueError("conflict"))):
-        with caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"):
-            response = await test_client.post(
-                "/apis/jobs/v2/workspaces/default%0Aforged/jobs",
-                json={
-                    "name": "dup-job",
-                    "source": "test-source",
-                    "spec": {},
-                    "platform_spec": {
-                        "steps": [
-                            {
-                                "name": "valid-step",
-                                "executor": TestConstants.TEST_EXECUTOR.model_dump(mode="json"),
-                                "config": {},
-                            }
-                        ]
-                    },
+    """Same status as update; ordered before ``except ValueError``, which would turn it into a 409."""
+    raw_error = "Job step environment keys must not use platform-reserved managed environment keys: ['NHX_PRINCIPAL']"
+    with patch.object(
+        mock_dispatcher, "create_job", new=AsyncMock(side_effect=JobEnvironmentValidationError(raw_error))
+    ):
+        response = await test_client.post(
+            "/apis/jobs/v2/workspaces/default/jobs",
+            json={
+                "name": "env-job",
+                "source": "test-source",
+                "spec": {},
+                "platform_spec": {
+                    "steps": [
+                        {
+                            "name": "valid-step",
+                            "executor": TestConstants.TEST_EXECUTOR.model_dump(mode="json"),
+                            "config": {},
+                        }
+                    ]
                 },
-            )
+            },
+        )
 
-    assert response.status_code == 409
+    assert response.status_code == 422
+    assert response.json()["detail"] == raw_error
+
+
+@pytest.mark.asyncio
+async def test_create_job_conflict_sanitizes_log_fields(monkeypatch, caplog):
+    """Keep defense-in-depth logging safe even when a direct caller bypasses HTTP validation."""
+    dispatcher = AsyncMock()
+    dispatcher.create_job.side_effect = ValueError("conflict")
+    auth_client = MagicMock()
+    auth_client.principal = Principal(id="user:example")
+    request = CreateHelixJobRequest(
+        name="dup-job",
+        source="test-source",
+        spec={},
+        platform_spec=HelixJobSpec(
+            steps=[
+                HelixJobStepSpec(
+                    name="valid-step",
+                    executor=SubprocessExecutionProvider(provider="subprocess", profile="default", command=["true"]),
+                )
+            ]
+        ),
+    )
+    # Logging safety must not depend on the host's configured execution profiles.
+    monkeypatch.setattr(endpoints, "validate_job_spec", lambda *args: None)
+    with (
+        caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"),
+        pytest.raises(HTTPException) as error,
+    ):
+        await endpoints.create_job(
+            workspace="default\nforged", request=request, auth_client=auth_client, dispatcher=dispatcher
+        )
+
+    assert error.value.status_code == 409
+    dispatcher.create_job.assert_awaited_once()
     message = next(record.getMessage() for record in caplog.records if "Failed to create job" in record.msg)
+    assert "defaultforged" in message
+    assert "default\nforged" not in message
     assert "\r" not in message
     assert "\n" not in message
 

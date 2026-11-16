@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { asString } from '@nemo/common/src/utils/asString';
+import { asRecord } from '@studio/util/guards';
+
 /**
  * Lightweight reader for the Data Designer `builder_config.json` artifact.
  *
@@ -42,14 +45,6 @@ export interface BuilderConfigSummary {
   readonly processorNames: string[];
   readonly libraryVersion?: string;
 }
-
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-
-const asString = (value: unknown): string | undefined =>
-  typeof value === 'string' ? value : undefined;
 
 const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 

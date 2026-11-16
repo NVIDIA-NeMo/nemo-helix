@@ -18,6 +18,7 @@ import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+from types import ModuleType
 
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_nb import (
@@ -272,6 +273,12 @@ def convert_md_to_notebook(md_path: Path, language_filter: str = "all") -> Path:
     return temp_nb_path
 
 
+def _papermill() -> ModuleType:
+    import papermill  # noqa: PLC0415 — lazy import to allow importing this module without papermill installed
+
+    return papermill
+
+
 def execute_notebook(
     notebook_path: Path,
     language_filter: str = "all",
@@ -299,7 +306,7 @@ def execute_notebook(
     Raises:
         papermill.PapermillExecutionError: If any cell raises an error.
     """
-    import papermill  # noqa: PLC0415 — lazy import to allow importing this module without papermill installed
+    papermill = _papermill()
 
     output_path = output_path or notebook_path.with_suffix(".executed.ipynb")
 

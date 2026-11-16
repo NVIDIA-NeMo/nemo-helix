@@ -351,7 +351,7 @@ async def test_load_deployment_config_wraps_an_entities_client_that_accepts_quer
         workspace="default",
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
-    with patch("grpc.insecure_channel", return_value=MagicMock()):
+    with patch("nemo_deployments_plugin.backends.openshell.backend.insecure_channel", return_value=MagicMock()):
         backend = OpenShellDeploymentBackend(client, {"gateway_endpoint": "http://127.0.0.1:17670"})
 
     with pytest.raises(NemoEntityNotFoundError):
@@ -1752,7 +1752,9 @@ async def test_provider_channel_closes_when_operation_fails(openshell_backend, t
     )
     channel = MagicMock()
     channel.__aenter__.return_value = channel
-    with patch("grpc.aio.insecure_channel", return_value=channel) as connect:
+    with patch(
+        "nemo_deployments_plugin.backends.openshell.backend.aio_insecure_channel", return_value=channel
+    ) as connect:
         with pytest.raises(RuntimeError, match="operation failed"):
             async with openshell_backend._provider_provisioner():
                 raise RuntimeError("operation failed")

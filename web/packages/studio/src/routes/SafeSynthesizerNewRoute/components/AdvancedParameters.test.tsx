@@ -229,33 +229,6 @@ describe('AdvancedParameters', () => {
         expect(Number(numberInput.value)).toBeLessThanOrEqual(2);
       });
     });
-
-    it('resets temperature to default when reset button is clicked', async () => {
-      const user = userEvent.setup();
-      render(
-        <TestWrapper>
-          <AdvancedParameters />
-        </TestWrapper>
-      );
-
-      const temperatureInputs = screen.getAllByDisplayValue('0.9');
-      const numberInput = temperatureInputs.find(
-        (input) => input.getAttribute('type') === 'number'
-      ) as HTMLInputElement;
-
-      // Change the value
-      fireEvent.change(numberInput, { target: { value: '1.5' } });
-
-      // Click reset button (first reset button is for temperature)
-      const resetButton = screen.getByRole('button', {
-        name: 'Reset temperature to default value',
-      });
-      await user.click(resetButton);
-
-      await waitFor(() => {
-        expect(numberInput).toHaveValue(0.9);
-      });
-    });
   });
 
   describe('Top_p Controls', () => {
@@ -266,7 +239,8 @@ describe('AdvancedParameters', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => expect(screen.getAllByDisplayValue('1').length).toBeGreaterThan(0));
+      const inputs = await screen.findAllByRole('spinbutton');
+      expect(inputs.find((input) => input.getAttribute('max') === '1')).toHaveValue(1);
     });
 
     it('updates top_p value when typing in input', async () => {
@@ -372,7 +346,12 @@ describe('AdvancedParameters', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => expect(screen.getAllByDisplayValue('1').length).toBeGreaterThan(0));
+      const inputs = await screen.findAllByRole('spinbutton');
+      expect(
+        inputs.find(
+          (input) => input.getAttribute('min') === '1' && input.getAttribute('max') === '2'
+        )
+      ).toHaveValue(1);
     });
 
     it('renders repetition_penalty slider with correct constraints', async () => {

@@ -11,13 +11,13 @@ from __future__ import annotations
 import hashlib
 import logging
 import shlex
-import time
 from pathlib import Path, PurePosixPath
+from time import monotonic, sleep
 
 from kubernetes import client as k8s
 from kubernetes import config as k8s_config
-from kubernetes import watch as k8s_watch
 from kubernetes.client.exceptions import ApiException
+from kubernetes.watch import Watch
 from nemo_builder_plugin.run.utils import job_identity, read_step_config
 from nemo_builder_plugin.steps import SandboxGroup, SandboxSpec, SuperviseStepConfig, WorkLayout
 from nemo_helix_plugin.jobs.constants import job_storage_subpath
@@ -52,6 +52,13 @@ _CREATE_TIMEOUT_SECONDS = 60.0
 #: This step's namespace, which Kubernetes mounts beside the ServiceAccount token.
 _NAMESPACE_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
 
+#: Files kind's createContainer hook copies to the root of every container, to bind-mount them over /sys's DMI files.
+#: They aren't mount points at the root, so kaniko's ignore list misses them: `--cleanup` fails deleting them
+#: (`unlinkat //product_uuid: device or resource busy`), and a snapshot would put the node's in the image.
+#: The script ignores only those the sandbox starts with: an ignored path is also kept out of every layer, so on any
+#: other runtime it would drop a file a `RUN` writes there. On kind, such a file is still dropped.
+_RUNTIME_ROOT_FILES = ("/product_uuid", "/product_name")
+
 
 def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
     """The shell the sandbox runs: one kaniko invocation per image, in turn, with ``--cleanup`` between them.
@@ -59,7 +66,15 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
     No ``set -e``, so one failure doesn't stop the rest; each marker line's ``$?`` must be kaniko's status.
     """
     view = WorkLayout(SANDBOX_ROOT)
-    lines = ["set -u"]
+    # Before the first build: kaniko builds in this container's own root, so after it a file there may be one of its
+    # `RUN`s'. Unquoted where it's used, to split into one flag a path; the paths hold no space or glob.
+    lines = [
+        "set -u",
+        "runtime_ignores=",
+        f"for path in {' '.join(shlex.quote(path) for path in _RUNTIME_ROOT_FILES)}; do",
+        '  if [ -e "$path" ]; then runtime_ignores="$runtime_ignores --ignore-path=$path"; fi',
+        "done",
+    ]
     for image in group.images:
         layout = view.output(image.image)
         # Empty the output first, or a failed build would leave an earlier attempt's layout for
@@ -81,14 +96,16 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
             "--cleanup",
             "--verbosity=info",
         ]
-        lines.append(" ".join(shlex.quote(a) for a in args))
+        lines.append(" ".join(shlex.quote(a) for a in args) + " $runtime_ignores")
         # On a line of its own: kaniko passes a `RUN`'s output through as is, so it may not end in a newline.
         lines.append(f"printf '\\n%s %s %s\\n' {RESULT_MARKER} {shlex.quote(image.image)} \"$?\"")
     return "\n".join(lines)
 
 
 def _volume_mounts(group: SandboxGroup, job_sub_path: str) -> list[k8s.V1VolumeMount]:
-    """The group's own context, read-only, and an output directory for each of its images.
+    """The group's own context and mounts, read-only, and an output directory for each of its images.
+
+    kaniko leaves every mount point out of its snapshots, so a mount's files reach a ``RUN`` but never the image.
 
     Never the whole output directory, where a later group's ``RUN`` could rewrite an earlier group's layout.
     """
@@ -99,6 +116,12 @@ def _volume_mounts(group: SandboxGroup, job_sub_path: str) -> list[k8s.V1VolumeM
             sub_path=str(volume.context(group.source)),
             mount_path=str(view.context(group.source)),
             read_only=True,
+        ),
+        *(
+            k8s.V1VolumeMount(
+                name="work", sub_path=str(volume.context(mount.source)), mount_path=mount.target, read_only=True
+            )
+            for mount in group.mounts
         ),
         *(
             k8s.V1VolumeMount(
@@ -180,8 +203,8 @@ def _pod_manifest(
 
 
 def _await_pod(api: k8s.CoreV1Api, *, name: str, namespace: str) -> str:
-    watcher = k8s_watch.Watch()
-    deadline = time.monotonic() + _POD_TIMEOUT_SECONDS
+    watcher = Watch()
+    deadline = monotonic() + _POD_TIMEOUT_SECONDS
     try:
         for event in watcher.stream(
             api.list_namespaced_pod,
@@ -194,7 +217,7 @@ def _await_pod(api: k8s.CoreV1Api, *, name: str, namespace: str) -> str:
             if phase in ("Succeeded", "Failed"):
                 watcher.stop()
                 return phase + _terminations(event["object"])
-            if time.monotonic() > deadline:
+            if monotonic() > deadline:
                 break
     finally:
         watcher.stop()
@@ -233,15 +256,15 @@ def _create_pod(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace
 
     ponytail: a waiting step keeps its pod's share of the quota; capping concurrent builds removes that.
     """
-    deadline = time.monotonic() + _RETRY_DEADLINE_SECONDS
+    deadline = monotonic() + _RETRY_DEADLINE_SECONDS
     for attempt in range(1, _RETRY_ATTEMPTS + 1):
-        timeout = min(_CREATE_TIMEOUT_SECONDS, max(deadline - time.monotonic(), 1.0))
+        timeout = min(_CREATE_TIMEOUT_SECONDS, max(deadline - monotonic(), 1.0))
         try:
             # A (connect, read) tuple: kubernetes 29.x ignores a float timeout.
             api.create_namespaced_pod(namespace=namespace, body=manifest, _request_timeout=(timeout, timeout))
             return
         except ApiException as exc:
-            remaining = deadline - time.monotonic()
+            remaining = deadline - monotonic()
             retryable = any(exc.status == status and text in str(exc.body) for status, text in _RETRYABLE_ERRORS)
             if not retryable or attempt == _RETRY_ATTEMPTS or remaining <= 0:
                 raise
@@ -249,7 +272,7 @@ def _create_pod(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace
             logger.warning(
                 "sandbox %s: %s; retrying in %.0fs", sanitize_for_log(name), sanitize_for_log(exc.reason), delay
             )
-        time.sleep(delay)
+        sleep(delay)
 
 
 def _run_sandbox(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace: str) -> tuple[str, str]:

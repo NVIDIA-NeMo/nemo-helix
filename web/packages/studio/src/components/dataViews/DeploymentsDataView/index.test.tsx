@@ -5,7 +5,8 @@ import { DeploymentsDataView } from '@studio/components/dataViews/DeploymentsDat
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
 import { renderRoute } from '@studio/tests/util/render';
-import { waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 vi.mock('use-debounce', () => ({
@@ -64,6 +65,39 @@ describe('DeploymentsDataView', () => {
   afterEach(() => {
     server.resetHandlers();
   });
+
+  it.each([
+    { status: 'READY', disabled: false },
+    { status: 'DELETING', disabled: true },
+    { status: 'DELETED', disabled: true },
+  ])(
+    'shows only Delete, styled as danger, for a $status deployment',
+    async ({ status, disabled }) => {
+      const user = userEvent.setup();
+      server.use(
+        http.get(DEPLOYMENTS_URL, () =>
+          HttpResponse.json({
+            ...emptyDeploymentsPage,
+            data: [{ name: 'my-deployment', workspace: 'default', status }],
+            pagination: {
+              ...emptyDeploymentsPage.pagination,
+              current_page_size: 1,
+              total_results: 1,
+            },
+          })
+        )
+      );
+      renderDataView('/workspaces/default/deployments');
+
+      await screen.findByText('my-deployment');
+      await user.click(screen.getByRole('button', { name: 'Open quick actions menu' }));
+
+      const items = await screen.findAllByTestId('quick-actions-menu-item');
+      expect(items.map((item) => item.textContent)).toEqual(['Delete']);
+      expect(items[0]).toHaveClass('nv-menu-item--danger');
+      expect(items[0]).toHaveProperty('disabled', disabled);
+    }
+  );
 
   it('sends no filter[ or search params on initial render', async () => {
     const requestUrls = captureRequests();

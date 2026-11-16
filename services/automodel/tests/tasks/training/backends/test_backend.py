@@ -5,27 +5,19 @@
 
 import signal
 import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from nhx.automodel.tasks.training.backends.backend import AutomodelBackend
+from nhx.automodel.tasks.training.backends.checkpoints import ModelType
+from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter
+from nhx.automodel.tasks.training.protocol import LibraryConfig
+from nhx.automodel.tasks.training.schemas import TrainingRecipe
+from nhx.customization_common.training.progress import TrainingWallClock
 from pytest_mock import MockerFixture
-
-# Mock nemo_automodel before importing backend/config modules
-# (nemo_automodel is only available in the training container)
-sys.modules["nemo_automodel"] = MagicMock()
-sys.modules["nemo_automodel._transformers"] = MagicMock()
-sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
-
-from nhx.automodel.tasks.training.backends.backend import AutomodelBackend  # noqa: E402
-from nhx.automodel.tasks.training.backends.checkpoints import ModelType  # noqa: E402
-from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter  # noqa: E402
-from nhx.automodel.tasks.training.protocol import LibraryConfig  # noqa: E402
-from nhx.automodel.tasks.training.schemas import TrainingRecipe  # noqa: E402
-from nhx.customization_common.training.progress import TrainingWallClock  # noqa: E402
 
 
 class TestAutomodelBackend:
@@ -209,8 +201,8 @@ class RecordingProgress(JobsServiceProgressReporter):
 
 
 def run_execute(monkeypatch: pytest.MonkeyPatch, progress: JobsServiceProgressReporter, proc: Proc):
-    monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.subprocess.Popen", lambda *a, **k: proc)
-    monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.threading.Thread", Thread)
+    monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.Popen", lambda *a, **k: proc)
+    monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.Thread", Thread)
     previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
     config = MagicMock()
     config.parallelism.num_nodes = 1
@@ -264,8 +256,8 @@ class TestExecuteTrainingWallClock:
 
 
 class TestExecuteTrainingTrackerRun:
-    def test_torchrun_continues_the_jobs_mlflow_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """MLflow starts its run inside the workers, so the run ID reaches them through the environment."""
+    def test_torchrun_gets_the_tracker_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Trackers start inside the workers, so the MLflow run ID and the W&B server reach them as env vars."""
         mlflow_config = {"tracking_uri": "http://mlflow", "experiment_name": "exp", "tags": {"job_uid": "uid"}}
         launched: dict[str, dict[str, str]] = {}
         proc = Proc()
@@ -274,8 +266,8 @@ class TestExecuteTrainingTrackerRun:
             launched["env"] = env
             return proc
 
-        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.subprocess.Popen", popen)
-        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.threading.Thread", Thread)
+        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.Popen", popen)
+        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.Thread", Thread)
         monkeypatch.setattr(
             "nhx.automodel.tasks.training.backends.backend.find_mlflow_run_id",
             lambda config: "run-1" if config == mlflow_config else None,
@@ -284,7 +276,10 @@ class TestExecuteTrainingTrackerRun:
         config = MagicMock()
         config.parallelism.num_nodes = 1
         config.training_timeout = None
-        library = LibraryConfig(config_dict={"mlflow": mlflow_config}, config_path=Path("/tmp/automodel_config.yaml"))
+        library = LibraryConfig(
+            config_dict={"mlflow": mlflow_config, "_wandb_base_url": "https://wandb.internal"},
+            config_path=Path("/tmp/automodel_config.yaml"),
+        )
         try:
             AutomodelBackend(job_ctx=MagicMock()).execute_training(config, library, RecordingProgress(1.0, 2.0))
         finally:
@@ -292,3 +287,4 @@ class TestExecuteTrainingTrackerRun:
                 signal.signal(sig, handler)
 
         assert launched["env"]["MLFLOW_RUN_ID"] == "run-1"
+        assert launched["env"]["WANDB_BASE_URL"] == "https://wandb.internal"

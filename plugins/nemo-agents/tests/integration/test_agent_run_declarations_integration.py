@@ -46,12 +46,16 @@ class _TestAgentsService(NemoServiceAdapter):
         super().__init__(AgentsService())
 
 
-def _agent_config(name: str) -> dict[str, Any]:
+# An installed plugin adapter that reads the request context; no stock adapter does.
+_CONTEXT_READING_KIND = "nvidia.helix.compass.analyst"
+
+
+def _agent_config(name: str, harness_kind: str) -> dict[str, Any]:
     return {
         "config_format": "nemo-agents-spec-v1",
         "name": name,
         "default_harness": "hermes",
-        "harnesses": {"hermes": {"kind": "hermes"}},
+        "harnesses": {"hermes": {"kind": harness_kind}},
         "models": {"default": {"provider": "openai", "model": "openai/gpt-5.4"}},
     }
 
@@ -64,8 +68,10 @@ def ctx() -> Iterator[ClientContext]:
         yield ctx
 
 
-def _register(ctx: ClientContext, name: str, **declarations: Any) -> dict[str, Any]:
-    body = RegisterAgentRequest(name=name, config=_agent_config(name), **declarations)
+def _register(ctx: ClientContext, name: str, *, harness_kind: str = "hermes", **declarations: Any) -> dict[str, Any]:
+    if declarations.get("context_schema") is not None:
+        harness_kind = _CONTEXT_READING_KIND
+    body = RegisterAgentRequest(name=name, config=_agent_config(name, harness_kind), **declarations)
     return (
         AgentsClient.from_client(ctx.client)
         .register_agent(workspace="default", body=body)
@@ -162,6 +168,28 @@ def test_a_context_that_does_not_match_the_schema_fails_job_create(
 
     assert 400 <= error.status_code < 500
     assert message in str(error)
+
+
+def test_register_rejects_a_context_schema_a_stock_adapter_would_ignore(ctx: ClientContext) -> None:
+    body = RegisterAgentRequest(
+        name="analyst", config=_agent_config("analyst", "hermes"), context_schema=_CONTEXT_SCHEMA
+    )
+
+    with pytest.raises(NemoHTTPError) as excinfo:
+        AgentsClient.from_client(ctx.client).register_agent(workspace="default", body=body)
+
+    assert excinfo.value.status_code == 400
+    assert "(nvidia.fabric.hermes) does not read the request context" in str(excinfo.value)
+
+
+def test_a_context_for_a_stock_adapter_fails_job_create(ctx: ClientContext) -> None:
+    """The run would complete on a model that never saw the context, so it is refused before it spends tokens."""
+    _register(ctx, "calc")
+
+    error = _execute_error(ctx, "run-calc", {"agent": "calc", "input": "hello", "context": {"run": "r1"}})
+
+    assert 400 <= error.status_code < 500
+    assert "(nvidia.fabric.hermes), which does not read the request context" in str(error)
 
 
 def test_omitting_input_fails_job_create_without_a_default(ctx: ClientContext) -> None:

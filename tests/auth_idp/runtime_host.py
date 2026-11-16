@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-import subprocess
 from dataclasses import replace
+from os import kill
 from pathlib import Path
+from subprocess import run as run_process
 
 import httpx
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig
@@ -116,11 +117,11 @@ class HostAuthIdpRuntime:
             raise AssertionError(f"invalid Kubernetes port-forward PID file: {forward.pid_file}")
         pid = int(pid_text)
         try:
-            os.kill(pid, 0)
+            kill(pid, 0)
         except ProcessLookupError as exc:
             log_tail = _log_tail(forward.log_file)
             raise AssertionError(f"Kubernetes gateway port-forward {pid} exited\n{log_tail}") from exc
-        command = subprocess.run(
+        command = run_process(
             ["ps", "-p", str(pid), "-o", "args="],
             check=False,
             capture_output=True,

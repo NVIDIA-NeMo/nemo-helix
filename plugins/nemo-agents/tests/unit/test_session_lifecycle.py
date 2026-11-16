@@ -68,7 +68,7 @@ async def test_cleanup_dials_a_gateway_routed_deployment_through_its_gateway() -
     with (
         patch("nemo_agents_plugin.session_lifecycle.get_deployment_transport", return_value=transport),
         patch.object(EndpointTransport, "client_kwargs", return_value={"verify": tls_context}),
-        patch("nemo_agents_plugin.session_lifecycle.httpx.AsyncClient", return_value=client_cm) as client_cls,
+        patch("nemo_agents_plugin.session_lifecycle.AsyncClient", return_value=client_cm) as client_cls,
     ):
         await cleanup_fabric_runtime(entity_client, session)
 

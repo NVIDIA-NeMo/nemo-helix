@@ -77,6 +77,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     KubernetesVolume,
     KubernetesVolumeMount,
     PodStatus,
+    _storage_cleanup_job_name,
     build_affinity,
     build_image_pull_secrets,
     build_metadata,
@@ -190,11 +191,11 @@ def kubernetes_client_mock():
     core_v1_mock = MagicMock()
     with (
         patch(
-            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.client.BatchV1Api",
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.BatchV1Api",
             return_value=batch_v1_mock,
         ),
         patch(
-            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.client.CoreV1Api",
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.CoreV1Api",
             return_value=core_v1_mock,
         ),
     ):
@@ -256,7 +257,7 @@ def kubernetes_job(
 ):
     """Create a KubernetesJob instance with mocked clients."""
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -633,6 +634,7 @@ def test_cleanup_job_persistent_storage_applies_pod_security_context():
     assert sc.run_as_user == 2000
     assert sc.fs_group == 3000
     assert sc.run_as_non_root is True
+    assert body.metadata.name == _storage_cleanup_job_name("pvc", "ws", "jid")
 
 
 def test_cleanup_job_persistent_storage_omits_security_context_when_unconfigured():
@@ -694,6 +696,111 @@ def _cleanup_jobs(batch_v1: MagicMock, *jobs: client.V1Job) -> None:
     batch_v1.list_namespaced_job.return_value = SimpleNamespace(items=list(jobs))
 
 
+def test_cleanup_does_not_treat_another_pvcs_job_as_this_directory():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("other-pvc-cleanup", pvc_name="other-pvc"))
+
+    cleanup_job_persistent_storage(
+        namespace="ns",
+        batch_v1=batch_v1,
+        pvc_name="pvc",
+        workspace="ws",
+        job_id="jid",
+        step_name="step",
+        permissions_image="perm:img",
+        execution_backend="kubernetes_job",
+        execution_profile="default",
+        job_metadata=KubernetesObjectMetadata(),
+        pod_metadata=KubernetesObjectMetadata(),
+    )
+
+    batch_v1.create_namespaced_job.assert_called_once()
+
+
+def test_cleanup_keeps_the_job_another_caller_already_created():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1)
+    batch_v1.create_namespaced_job.side_effect = ApiException(status=409)
+
+    cleanup_job_persistent_storage(
+        namespace="ns",
+        batch_v1=batch_v1,
+        pvc_name="pvc",
+        workspace="ws",
+        job_id="jid",
+        step_name="other-step",
+        permissions_image="perm:img",
+        execution_backend="kubernetes_job",
+        execution_profile="default",
+        job_metadata=KubernetesObjectMetadata(),
+        pod_metadata=KubernetesObjectMetadata(),
+    )
+
+    assert batch_v1.create_namespaced_job.call_args.kwargs["body"].metadata.name == _storage_cleanup_job_name(
+        "pvc", "ws", "jid"
+    )
+
+
+def test_cleanup_job_name_is_a_short_hash_of_the_claim_and_folder():
+    """A second PVC, or a workspace that would truncate to the same prefix, is a different Job."""
+    shared = _storage_cleanup_job_name("pvc", "ws", "jid")
+    assert shared == _storage_cleanup_job_name("pvc", "ws", "jid")
+    assert shared != _storage_cleanup_job_name("other-pvc", "ws", "jid")
+    long_workspace = "workspace-" + ("a" * 80)
+    other_long_workspace = "workspace-" + ("b" * 80)
+    assert _storage_cleanup_job_name("pvc", long_workspace, "job") != _storage_cleanup_job_name(
+        "pvc", other_long_workspace, "job"
+    )
+    assert shared.startswith("cleanup-")
+    assert len(shared) <= 63
+
+
+def test_reclaim_finds_the_cleanup_job_another_profile_on_the_same_pvc_created():
+    """The stable name ignores the profile, so a profile removed after creating the Job can't strand it."""
+    batch_v1 = MagicMock()
+    workloads: dict[str, client.V1Job] = {}
+
+    def listed(*, namespace, label_selector):
+        wanted = dict(item.split("=", 1) for item in label_selector.split(","))
+        return SimpleNamespace(
+            items=[
+                job
+                for job in workloads.values()
+                if all(job.metadata.labels.get(key) == value for key, value in wanted.items())
+            ]
+        )
+
+    def created(*, namespace, body):
+        if body.metadata.name in workloads:
+            raise ApiException(status=409)
+        workloads[body.metadata.name] = body
+
+    batch_v1.list_namespaced_job.side_effect = listed
+    batch_v1.create_namespaced_job.side_effect = created
+    batch_v1.delete_namespaced_job.side_effect = lambda *, name, **kwargs: workloads.pop(name)
+
+    def reclaim(profile: str) -> bool:
+        return reclaim_job_persistent_storage(
+            namespace="ns",
+            batch_v1=batch_v1,
+            pvc_name="pvc",
+            workspace="ws",
+            job_id="jid",
+            permissions_image="perm:img",
+            execution_backend="kubernetes_job",
+            execution_profile=profile,
+            job_metadata=KubernetesObjectMetadata(),
+            pod_metadata=KubernetesObjectMetadata(),
+        )
+
+    assert reclaim("a") is False
+    (job,) = workloads.values()
+    job.status = client.V1JobStatus(conditions=[client.V1JobCondition(type="Complete", status="True")])
+
+    assert reclaim("b") is True
+    assert not workloads
+
+
 def test_reclaim_starts_a_cleanup_job_and_reports_it_pending():
     batch_v1 = MagicMock()
     _cleanup_jobs(batch_v1)
@@ -705,13 +812,14 @@ def test_reclaim_starts_a_cleanup_job_and_reports_it_pending():
         f"{JOB_TYPE_LABEL}={JOB_TYPE_STORAGE_CLEANUP}",
         f"{JOB_WORKSPACE_ID_LABEL}=ws",
         f"{JOB_ID_LABEL}=jid",
-        f"{JOB_STEP_NAME_LABEL}=retention",
-        f"{JOB_EXECUTION_BACKEND_LABEL}=kubernetes_job",
-        f"{JOB_EXECUTION_PROFILE_LABEL}=default",
     ):
         assert label in selector
+    for key in (JOB_STEP_NAME_LABEL, JOB_EXECUTION_BACKEND_LABEL, JOB_EXECUTION_PROFILE_LABEL):
+        assert f"{key}=" not in batch_v1.list_namespaced_job.call_args.kwargs["label_selector"]
     body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
     assert all(body.metadata.labels[key] == value for key, value in (item.split("=") for item in selector))
+    assert body.metadata.labels[JOB_EXECUTION_BACKEND_LABEL] == "kubernetes_job"
+    assert body.metadata.labels[JOB_EXECUTION_PROFILE_LABEL] == "default"
     # Reclaim deletes the Job once it has seen it finish. A TTL could delete it before that.
     assert body.spec.ttl_seconds_after_finished is None
     assert body.spec.template.spec.containers[0].resources.limits == {"cpu": "500m", "memory": "256Mi"}
@@ -1062,7 +1170,7 @@ def test_kubernetes_job_profile_environment_applied(
         **{**kubernetes_execution_profile_config.model_dump(), "env": {"HOME": "/tmp"}}
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -1101,7 +1209,7 @@ def test_kubernetes_job_uses_service_discovery_urls_for_job_runtime(
         loopback_address="nemo-gateway",
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=platform_config,
@@ -1150,6 +1258,26 @@ def test_kubernetes_job_rejects_reserved_step_auth_env_vars(kubernetes_job, cpu_
     )
 
     with pytest.raises(ValueError, match="NEMO_WORKFLOW_TOKEN"):
+        kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
+
+
+@pytest.mark.parametrize(
+    ("name", "from_secret", "match"),
+    [
+        ("NHX_PRINCIPAL", None, "NHX_PRINCIPAL"),
+        ("NEMO_JOB_SECRETS", None, "NEMO_JOB_SECRETS"),
+        ('NHX_PRINCIPAL={"id":"service:jobs","x":"', None, "must not contain"),
+        ("X=default/a,NHX_PRINCIPAL", HelixJobSecretEnvironmentVariableRef(name="b"), "must match"),
+    ],
+)
+def test_kubernetes_job_rejects_platform_injected_and_malformed_step_env_names(
+    kubernetes_job, cpu_execution_provider, test_step_pending, name, from_secret, match
+):
+    test_step_pending.step_spec.environment.append(
+        HelixJobEnvironmentVariable(name=name, value=None if from_secret else "attacker", from_secret=from_secret)
+    )
+
+    with pytest.raises(ValueError, match=match):
         kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
 
 
@@ -2333,7 +2461,7 @@ def test_schedule_kubernetes_gpu(mock_nemo_client, kubernetes_execution_profile_
     )
 
     # patch the check for kubernetes
-    with patch("kubernetes.config.load_incluster_config"):
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"):
         assert step is not None
         executor = GPUKubernetesJobBackend(
             nemo_client=mock_nemo_client,
@@ -3469,7 +3597,7 @@ def test_scheduler_name_applied_to_pod_spec(
         ),
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -3501,7 +3629,7 @@ def test_scheduler_name_not_set_by_default(
         storage=DEFAULT_STORAGE,
     )
     with (
-        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.load_incluster_config"),
         patch(
             "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
@@ -4184,7 +4312,7 @@ def test_cancelled_cleanup_budget_resumes_next_workload(kubernetes_job, test_ste
     first = test_step_pending.model_copy(update={"id": "a", "name": "first", "status": HelixJobStatus.CANCELLED})
     second = first.model_copy(update={"id": "b", "name": "second"})
     workloads = {step.id: common_labels_for_step(step) for step in [first, second]}
-    with patch("nhx.core.jobs.controllers.backends.base.time.monotonic", return_value=100.0) as clock:
+    with patch("nhx.core.jobs.controllers.backends.base.monotonic", return_value=100.0) as clock:
 
         def lookup(**kwargs):
             clock.return_value += 3

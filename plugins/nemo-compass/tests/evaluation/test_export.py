@@ -448,7 +448,7 @@ def test_fetch_platform_info_reads_cluster_info(monkeypatch):
         seen["url"] = url
         return FakeResp()
 
-    monkeypatch.setattr(artifact.httpx, "get", fake_get)
+    monkeypatch.setattr(artifact, "get", fake_get)
     info = artifact.fetch_platform_info("http://localhost:8080/")
     assert seen["url"] == "http://localhost:8080/cluster-info"
     assert info == {"platform_version": "26.07", "revision": "deadbeef"}
@@ -458,7 +458,7 @@ def test_fetch_platform_info_none_when_unreachable(monkeypatch):
     def boom(url, timeout):
         raise OSError("connection refused")
 
-    monkeypatch.setattr(artifact.httpx, "get", boom)
+    monkeypatch.setattr(artifact, "get", boom)
     assert artifact.fetch_platform_info("http://localhost:8080") is None
 
 

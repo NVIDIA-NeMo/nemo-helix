@@ -46,7 +46,10 @@ import sys
 import tempfile
 import tomllib
 from collections.abc import Mapping
+from os import replace
 from pathlib import Path
+from shutil import which
+from subprocess import run
 
 import yaml
 from evaluation import artifact, publish, reingest, release
@@ -100,7 +103,7 @@ def _load_dotenv(path: Path = ENV_PATH) -> None:
 
 def _aws_cli_version(executable: str) -> tuple[int, int, int] | None:
     try:
-        result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=5)
+        result = run([executable, "--version"], capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if result.returncode:
@@ -115,7 +118,7 @@ def _aws_cli_version(executable: str) -> tuple[int, int, int] | None:
 def _doctor(subjects: dict[str, Subject], name: str | None) -> None:
     """Print a readiness checklist for one subject (or all): what's set up, what's not."""
     names = [name] if name else sorted(subjects)
-    aws = shutil.which("aws")
+    aws = which("aws")
     aws_version = _aws_cli_version(aws) if aws else None
     for subject_name in names:
         subject = subjects.get(subject_name)
@@ -150,7 +153,7 @@ def _atomic_write_text(path: Path, contents: str) -> None:
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write(contents)
-        os.replace(temporary, path)
+        replace(temporary, path)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
@@ -272,13 +275,13 @@ def _swap_insights_directory(staged: Path) -> None:
             )
         )
         backup.rmdir()
-        os.replace(INSIGHTS_DIR, backup)
+        replace(INSIGHTS_DIR, backup)
     try:
-        os.replace(staged, INSIGHTS_DIR)
+        replace(staged, INSIGHTS_DIR)
     except BaseException:
         if backup is not None:
             try:
-                os.replace(backup, INSIGHTS_DIR)
+                replace(backup, INSIGHTS_DIR)
             except BaseException as rollback_error:
                 raise RuntimeError(
                     f"failed to promote {staged} and could not restore backup {backup}"
@@ -346,7 +349,7 @@ def _analyze_all(args: argparse.Namespace, subjects: dict[str, Subject]) -> None
         if args.verbose:
             command.append("--verbose")
         try:
-            subprocess.run(command, check=True)
+            run(command, check=True)
         except subprocess.CalledProcessError as exc:
             sys.exit(f"analyze all: {name} failed with exit code {exc.returncode}; no checked-in Insights were updated")
 
@@ -463,12 +466,12 @@ def _read_bundle_manifest(bundle: Path) -> object:
         reason = (proc.stderr.strip().splitlines() or ["tar failed"])[0]
         return f"could not read bundle {bundle.name}: {reason} (corrupt or truncated? re-download or re-mint)"
 
-    listing = subprocess.run(["tar", "--zstd", "-tf", str(bundle)], capture_output=True, text=True)
+    listing = run(["tar", "--zstd", "-tf", str(bundle)], capture_output=True, text=True)
     if listing.returncode != 0:
         sys.exit(_tar_error(listing))
     if "state/manifest.json" not in listing.stdout.splitlines():
         sys.exit(f"{bundle.name} is not an evaluation bundle (no state/manifest.json inside)")
-    proc = subprocess.run(
+    proc = run(
         ["tar", "--zstd", "-xOf", str(bundle), "state/manifest.json"],
         capture_output=True,
         text=True,
@@ -510,7 +513,7 @@ def _restore_export_bundle(
     catalog = reingest.load_catalog(reingest.resolve_platform_root(platform_root))
     TMP.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=TMP) as tmp:
-        subprocess.run(["tar", "--zstd", "-xf", str(bundle), "-C", tmp], check=True)
+        run(["tar", "--zstd", "-xf", str(bundle), "-C", tmp], check=True)
         state = Path(tmp) / "state"
         manifest = json.loads((state / "manifest.json").read_text(encoding="utf-8"))
         workspace_map = (
@@ -682,7 +685,7 @@ def _run_roundtrip(bundle: Path, base: str, platform_root: str | None) -> None:
     catalog = reingest.load_catalog(reingest.resolve_platform_root(platform_root))
     TMP.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=TMP) as tmp:
-        subprocess.run(["tar", "--zstd", "-xf", str(bundle), "-C", tmp], check=True)
+        run(["tar", "--zstd", "-xf", str(bundle), "-C", tmp], check=True)
         state = Path(tmp) / "state"
         manifest = json.loads((state / "manifest.json").read_text(encoding="utf-8"))
         mismatches = reingest.roundtrip_diff(

@@ -5,23 +5,32 @@
 
 A benchmark run is identity + config in `benchmark_runs`; its members are
 ordinary `evaluations` rows carrying benchmark_run_id. Status/reward/per-task are
-derived on read from the members (derive_run_view) — nothing is materialized and
-the worker is not involved. Cluster-free: TestClient over the fake Entity Store.
+derived on read from the members (derive_run_view). Initialization is stored on
+the parent and gates cancellation and worker admission. Cluster-free: TestClient
+over the fake Entity Store.
 """
 
 import json
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 pytest.importorskip("scaled_evals")
 
 from api_test_fixture import client
-from scaled_evals.api.benchmark_run_store import BenchmarkRunStore, derive_run_view
+from fake_entity_store import FakeEntityStore
+from nemo_helix_plugin.entities.base import EntityConflictError, EntityT
+from nemo_scaled_evals_plugin.entities import ScaledEvalsBenchmarkRun, ScaledEvalsEvaluation
+from scaled_evals.api import entity_store as entity_storage
+from scaled_evals.api.benchmark_run_store import (
+    BenchmarkRunRequestRepository,
+    BenchmarkRunWorkerRepository,
+    derive_run_view,
+)
 from scaled_evals.api.config_profile_store import ConfigProfileStore
-from scaled_evals.api.evaluation_store import EvaluationStore
+from scaled_evals.api.evaluation_store import EvaluationRequestRepository, EvaluationWorkerRepository
 from scaled_evals.api.repositories.base_repository import Conflict
 from scaled_evals.api.settings import settings
 from task_fixtures import seed_benchmark, seed_benchmark_run, seed_evaluation, seed_task_revision
@@ -38,7 +47,7 @@ def _seed_suite(*, members: list[dict], **benchmark_fields: Any) -> None:
 @pytest.fixture(autouse=True)
 def _stub_execution_snapshot(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
-        EvaluationStore,
+        EvaluationRequestRepository,
         "_capture_execution_snapshot",
         MagicMock(
             return_value={
@@ -141,10 +150,10 @@ def _seed_run(*members: dict, **overrides) -> None:
 def _created(response) -> tuple[dict, list[dict]]:  # noqa: ANN001
     """Stored run and member evaluations (by task) of a create response."""
     run_id = response.json()["id"]
-    run = BenchmarkRunStore().get(run_id)
+    run = BenchmarkRunWorkerRepository().get(run_id)
     assert run is not None
-    members = BenchmarkRunStore().members_for_runs([run_id])
-    stored = [EvaluationStore().load_for_dispatch(member["id"]) for member in members]
+    members = BenchmarkRunWorkerRepository().read_for_runs([run_id])[run_id].members
+    stored = [EvaluationWorkerRepository().load_for_dispatch(member["id"]) for member in members]
     assert None not in stored
     return run, [row for row in stored if row is not None]
 
@@ -413,7 +422,7 @@ def test_failed_create_withdraws_its_members_even_if_the_run_delete_fails(monkey
     from scaled_evals.api import entity_store
 
     _seed_suite(members=[_member(0), _member(1)])
-    create = EvaluationStore.create
+    create = EvaluationRequestRepository.create
     calls = iter([True, False])
 
     def flaky_create(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
@@ -424,8 +433,8 @@ def test_failed_create_withdraws_its_members_even_if_the_run_delete_fails(monkey
     def failing_run_delete(self, run_id: str) -> bool:  # noqa: ANN001
         raise RuntimeError("run delete failed")
 
-    monkeypatch.setattr(EvaluationStore, "create", flaky_create)
-    monkeypatch.setattr(BenchmarkRunStore, "soft_delete", failing_run_delete)
+    monkeypatch.setattr(EvaluationRequestRepository, "create", flaky_create)
+    monkeypatch.setattr(BenchmarkRunRequestRepository, "soft_delete", failing_run_delete)
 
     with pytest.raises(RuntimeError, match="member create failed"):
         client.post("/v1/benchmark-runs", json={"name": "suite run", "benchmark_id": "bm_suite"})
@@ -806,30 +815,35 @@ def test_cancel_run_derives_cancelled() -> None:
     resp = client.post("/v1/benchmark-runs/bmr_1/cancel")
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "cancelled"
-    assert (EvaluationStore().load_for_dispatch("ev_m0") or {}).get("status") == "cancelled"
+    assert (EvaluationWorkerRepository().load_for_dispatch("ev_m0") or {}).get("status") == "cancelled"
 
 
 def test_cancelling_again_finishes_members_a_conflict_left_queued(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_run(_member_eval(0, status="queued", reward=None), _member_eval(1, status="queued", reward=None))
-    real_cancel = EvaluationStore.cancel
+    real_cancel = EvaluationRequestRepository.cancel
 
-    def conflict_once(self: EvaluationStore, evaluation_id: str, **kwargs: Any) -> Any:
-        monkeypatch.setattr(EvaluationStore, "cancel", real_cancel)
+    def conflict_once(self: EvaluationRequestRepository, evaluation_id: str, **kwargs: Any) -> Any:
+        monkeypatch.setattr(EvaluationRequestRepository, "cancel", real_cancel)
         raise Conflict("evaluation_changed", "evaluation changed concurrently; retry")
 
-    monkeypatch.setattr(EvaluationStore, "cancel", conflict_once)
+    monkeypatch.setattr(EvaluationRequestRepository, "cancel", conflict_once)
     with pytest.raises(Conflict):
-        BenchmarkRunStore().cancel("bmr_1")
+        BenchmarkRunWorkerRepository().cancel("bmr_1")
 
-    _row, cancelled_now, members = BenchmarkRunStore().cancel("bmr_1")
+    cancellation = BenchmarkRunWorkerRepository().cancel("bmr_1")
 
-    assert cancelled_now is False
-    assert sorted(member["id"] for member in members) == ["ev_m0", "ev_m1"]
-    assert {(EvaluationStore().load_for_dispatch(f"ev_m{i}") or {}).get("status") for i in (0, 1)} == {"cancelled"}
+    assert cancellation is not None and cancellation.cancelled_now is False
+    assert sorted(cancellation.cancelled_members) == ["ev_m0", "ev_m1"]
+    assert {(EvaluationWorkerRepository().load_for_dispatch(f"ev_m{i}") or {}).get("status") for i in (0, 1)} == {
+        "cancelled"
+    }
 
 
-def test_cancel_run_tears_down_launched_members(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_cancel_run_tears_down_launched_members(monkeypatch: pytest.MonkeyPatch, cleanup_fails: bool) -> None:
     backend = MagicMock()
+    if cleanup_fails:
+        backend.teardown.side_effect = RuntimeError("cleanup unavailable")
     monkeypatch.setattr(
         "scaled_evals.api.routers.evaluations._resolve_backend",
         lambda runtime: backend,
@@ -848,3 +862,156 @@ def test_cancel_run_tears_down_launched_members(monkeypatch: pytest.MonkeyPatch)
 
     assert response.status_code == 200, response.text
     assert backend.teardown.call_args.args[0].external_id == "job-123"
+    body = response.json()
+    assert body["n_teardown_pending"] == 0
+    assert body["n_teardown_failed"] == int(cleanup_fails)
+    member = body["result"]["per_task"][0]
+    assert member["cancel_teardown_status"] == ("failed" if cleanup_fails else "succeeded")
+    if cleanup_fails:
+        assert "cleanup unavailable" in member["cancel_teardown_error"]
+    else:
+        assert member["cancel_teardown_error"] is None
+
+
+def test_create_run_closes_membership_after_all_writes(
+    entity_store: FakeEntityStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Concurrent cancellation is rejected until both member records have been written."""
+    _seed_suite(members=[_member(0), _member(1)])
+    original = entity_store.create
+    observed: list[int] = []
+
+    def create_and_try_cancel(entity: EntityT) -> EntityT:
+        """Probe cancellation after parent creation and after each member insertion."""
+        saved = original(entity)
+        if isinstance(entity, ScaledEvalsBenchmarkRun | ScaledEvalsEvaluation):
+            run_id = entity.name if isinstance(entity, ScaledEvalsBenchmarkRun) else entity.benchmark_run_id
+            assert run_id is not None
+            members = EvaluationWorkerRepository().list_for_runs([run_id])
+            observed.append(len(members))
+            before = {key: value.model_dump_json() for key, value in entity_store.stored.items()}
+            response = client.post(f"/v1/benchmark-runs/{run_id}/cancel")
+            assert response.status_code == 409, response.text
+            assert response.json()["detail"]["error"]["code"] == "benchmark_run_initializing"
+            if isinstance(entity, ScaledEvalsEvaluation):
+                assert (
+                    EvaluationWorkerRepository().claim_next(
+                        claim_timeout=60, worker_id="initialization-test", evaluation_id=entity.name
+                    )
+                    is None
+                )
+            assert {key: value.model_dump_json() for key, value in entity_store.stored.items()} == before
+        return saved
+
+    monkeypatch.setattr(entity_store, "create", create_and_try_cancel)
+    response = client.post("/v1/benchmark-runs", json={"name": "suite", "benchmark_id": "bm_suite"})
+    assert response.status_code == 202, response.text
+    assert observed == [0, 1, 2]
+    run_id = response.json()["id"]
+    assert response.json()["initialization_status"] == "complete"
+    claimed = EvaluationWorkerRepository().claim_next(claim_timeout=60, worker_id="initialization-test")
+    assert claimed is not None
+    assert (
+        entity_store.get(
+            ScaledEvalsEvaluation, claimed["id"], workspace=entity_storage.private_workspace()
+        ).benchmark_run_id
+        == run_id
+    )
+    cancelled = client.post(f"/v1/benchmark-runs/{run_id}/cancel")
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert all(member["status"] == "cancelled" for member in EvaluationWorkerRepository().list_for_runs([run_id]))
+
+
+def test_failed_member_creation_never_completes_initialization(
+    entity_store: FakeEntityStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Failure creating a later member leaves the parent incomplete and cleans up the partial run."""
+    _seed_suite(members=[_member(0), _member(1)])
+    original = entity_store.create
+    writes = 0
+
+    def fail_second_member(entity: EntityT) -> EntityT:
+        """Fail before persisting the second evaluation."""
+        nonlocal writes
+        if isinstance(entity, ScaledEvalsEvaluation):
+            writes += 1
+            if writes == 2:
+                raise RuntimeError("member creation failed")
+        return original(entity)
+
+    monkeypatch.setattr(entity_store, "create", fail_second_member)
+    with pytest.raises(RuntimeError, match="member creation failed"):
+        client.post("/v1/benchmark-runs", json={"name": "suite", "benchmark_id": "bm_suite"})
+    [parent] = entity_storage.list_all(entity_storage.entity_client(), ScaledEvalsBenchmarkRun)
+    assert parent.initialization_status == "created" and parent.deleted_at is not None
+    [member] = entity_storage.list_all(entity_storage.entity_client(), ScaledEvalsEvaluation)
+    assert member.deleted
+    assert EvaluationWorkerRepository().claim_next(claim_timeout=60, worker_id="initialization-test") is None
+
+
+def test_completion_retries_without_overwriting_parent_edits(
+    entity_store: FakeEntityStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A version conflict during completion reloads the parent and preserves concurrent metadata edits."""
+    _seed_suite(members=[_member(0), _member(1)])
+    original = entity_store.update
+    raced = False
+
+    def edit_before_completion(entity: EntityT) -> EntityT:
+        """Change the parent between the completion read and its first write."""
+        nonlocal raced
+        if isinstance(entity, ScaledEvalsBenchmarkRun) and entity.initialization_status == "complete" and not raced:
+            raced = True
+            current = entity_store.get(ScaledEvalsBenchmarkRun, entity.name, workspace=entity.workspace)
+            current.display_name = "concurrent name"
+            original(current)
+        return original(entity)
+
+    monkeypatch.setattr(entity_store, "update", edit_before_completion)
+    response = client.post("/v1/benchmark-runs", json={"name": "suite", "benchmark_id": "bm_suite"})
+    assert response.status_code == 202, response.text
+    assert raced
+    assert response.json()["name"] == "concurrent name"
+    assert response.json()["initialization_status"] == "complete"
+    assert len(EvaluationWorkerRepository().list_for_runs([response.json()["id"]])) == 2
+
+
+def test_failed_completion_rolls_back_without_marking_ready(
+    entity_store: FakeEntityStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exhausted completion retries do not publish an initialized run or leave its members dispatchable."""
+    _seed_suite(members=[_member(0)])
+    original = entity_store.update
+
+    def reject_completion(entity: EntityT) -> EntityT:
+        """Reject completion writes while allowing the existing cleanup path to run."""
+        if isinstance(entity, ScaledEvalsBenchmarkRun) and entity.initialization_status == "complete":
+            raise EntityConflictError("completion conflict")
+        return original(entity)
+
+    monkeypatch.setattr(entity_store, "update", reject_completion)
+    with pytest.raises(Conflict) as error:
+        client.post("/v1/benchmark-runs", json={"name": "suite", "benchmark_id": "bm_suite"})
+    assert error.value.code == "benchmark_run_changed"
+    [parent] = entity_storage.list_all(entity_storage.entity_client(), ScaledEvalsBenchmarkRun)
+    assert parent.initialization_status == "created" and parent.deleted_at is not None
+    assert all(
+        member.deleted for member in entity_storage.list_all(entity_storage.entity_client(), ScaledEvalsEvaluation)
+    )
+
+
+def test_complete_run_rejects_additional_members(entity_store: FakeEntityStore) -> None:
+    """The normal member-creation path rejects additions after the creator closes membership."""
+    _seed_suite(members=[_member(0)])
+    with patch.object(
+        EvaluationRequestRepository, "create", autospec=True, side_effect=EvaluationRequestRepository.create
+    ) as create:
+        response = client.post("/v1/benchmark-runs", json={"name": "suite", "benchmark_id": "bm_suite"})
+    assert response.status_code == 202, response.text
+    [member_call] = create.call_args_list
+    before = {key: value.model_dump_json() for key, value in entity_store.stored.items()}
+    with pytest.raises(Conflict) as error:
+        EvaluationWorkerRepository().create("ev_late", **member_call.kwargs)
+    assert error.value.code == "benchmark_run_members_closed"
+    assert {key: value.model_dump_json() for key, value in entity_store.stored.items()} == before

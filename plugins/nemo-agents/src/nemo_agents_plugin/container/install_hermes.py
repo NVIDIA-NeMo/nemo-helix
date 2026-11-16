@@ -4,23 +4,24 @@
 """Install the pinned Hermes source with its upstream dependency overrides."""
 
 import argparse
-import runpy
 import subprocess
 import tempfile
 from importlib.metadata import version
 from pathlib import Path
+from runpy import run_path
+from subprocess import run
 
 
 def install_hermes(checkout: Path, python: Path) -> None:
     # Hermes deliberately overrides conflicting transitive requirements (for
     # example browser-harness's Pillow pin). Use the pinned source's own lock
     # and checker rather than maintaining a second set of exceptions in Helix.
-    checker = runpy.run_path(str(checkout / "pm" / "pip_check.py"))
+    checker = run_path(str(checkout / "pm" / "pip_check.py"))
     lock = checkout / "uv.lock"
     with tempfile.TemporaryDirectory(prefix="nemo-hermes-install-") as directory:
         overrides = Path(directory) / "overrides.txt"
         overrides.write_text("\n".join(checker["override_requirements"](lock)) + "\n")
-        subprocess.run(
+        run(
             [
                 "uv",
                 "--no-config",
@@ -41,7 +42,7 @@ def install_hermes(checkout: Path, python: Path) -> None:
             ],
             check=True,
         )
-    result = subprocess.run(
+    result = run(
         ["uv", "--no-config", "pip", "check", "--python", str(python)],
         capture_output=True,
         text=True,

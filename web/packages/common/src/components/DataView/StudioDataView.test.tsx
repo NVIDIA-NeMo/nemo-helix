@@ -416,6 +416,55 @@ describe('StudioDataView', () => {
     });
   });
 
+  describe('row actions while loading', () => {
+    const makeColumnsWithRowActions = (
+      {
+        accessor,
+      }: { accessor: (field: string, opts?: Record<string, unknown>) => Record<string, unknown> },
+      {
+        rowActionsColumn,
+      }: { rowActionsColumn: (opts?: Record<string, unknown>) => Record<string, unknown> }
+    ) => [
+      accessor('name', { header: 'Name' }),
+      rowActionsColumn({
+        cell: ({ row }: { row: { original: TestData } }) => (
+          <button type="button">Actions for {row.original.name}</button>
+        ),
+      }),
+    ];
+
+    it('does not render row actions while loading', () => {
+      render(
+        <StudioDataView
+          {...defaultProps}
+          makeColumns={makeColumnsWithRowActions as never}
+          attributes={{ DataViewRoot: { data: testData, requestStatus: 'loading' } }}
+        />
+      );
+
+      expect(screen.queryByRole('button', { name: /^Actions for/ })).not.toBeInTheDocument();
+    });
+
+    it('renders row actions once loading completes', () => {
+      const { rerender } = render(
+        <StudioDataView
+          {...defaultProps}
+          makeColumns={makeColumnsWithRowActions as never}
+          attributes={{ DataViewRoot: { data: testData, requestStatus: 'loading' } }}
+        />
+      );
+      rerender(
+        <StudioDataView
+          {...defaultProps}
+          makeColumns={makeColumnsWithRowActions as never}
+          attributes={{ DataViewRoot: { data: testData, requestStatus: 'success' } }}
+        />
+      );
+
+      expect(screen.getByRole('button', { name: 'Actions for Alice' })).toBeInTheDocument();
+    });
+  });
+
   describe('maxTwoLines', () => {
     it('should wrap data cell content with line-clamp class by default', () => {
       render(<StudioDataView {...defaultProps} />);

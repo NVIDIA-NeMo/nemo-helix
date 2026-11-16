@@ -3,15 +3,16 @@
 
 import copy
 import datetime
+import hashlib
 import json
 import logging
 import os
-import uuid
 from typing import Any
 
-from kubernetes import client, config
+from kubernetes import client
 from kubernetes.client.models import V1Pod
 from kubernetes.client.rest import ApiException
+from kubernetes.config import ConfigException, load_incluster_config, load_kube_config
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
@@ -58,6 +59,7 @@ from nhx.common.jobs.constants import (
     DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,
     DEFAULT_TASK_STORAGE_PATH,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -103,7 +105,7 @@ from nhx.core.jobs.controllers.backends.base import (
     resolve_gpu_job_shm_size,
     resolve_task_image,
     step_ttl_seconds_active,
-    validate_no_reserved_managed_job_environment_variable_names,
+    validate_step_environment,
 )
 from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError, JobStorageError
 from pydantic import BaseModel, ConfigDict, Field
@@ -143,10 +145,10 @@ def load_kubernetes_config():
 
     try:
         # Try to load in-cluster config first (for when running in K8s)
-        config.load_incluster_config()
-    except config.ConfigException:
+        load_incluster_config()
+    except ConfigException:
         # Fall back to kubeconfig file
-        config.load_kube_config()
+        load_kube_config()
 
     _load_kubernetes_config_once = True
 
@@ -1199,6 +1201,24 @@ def cleanup_job_persistent_storage(
         pod_security_context: Same pod security context as workload jobs (runAsUser/fsGroup, etc.) so cleanup
             can remove files on NFS and similar storage where the workload user owns the data.
     """
+    # Workload cleanup and retention share this directory. A second rm races the first.
+    labels = _storage_cleanup_labels(workspace, job_id, step_name, execution_backend, execution_profile)
+    # The Job name depends only on the PVC and directory, so any step or profile may have created it.
+    for label in (JOB_STEP_NAME_LABEL, JOB_EXECUTION_BACKEND_LABEL, JOB_EXECUTION_PROFILE_LABEL):
+        labels.pop(label, None)
+    selector = ",".join(f"{key}={value}" for key, value in labels.items())
+    inflight = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector).items or []
+    if any(
+        _finished_condition(item) != "Failed"
+        and any(
+            volume.name == JOB_STORAGE_VOLUME_NAME
+            and volume.persistent_volume_claim is not None
+            and volume.persistent_volume_claim.claim_name == pvc_name
+            for volume in item.spec.template.spec.volumes or []
+        )
+        for item in inflight
+    ):
+        return
     cleanup_job_name, cleanup_job = _storage_cleanup_job(
         namespace=namespace,
         pvc_name=pvc_name,
@@ -1219,6 +1239,9 @@ def cleanup_job_persistent_storage(
             extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{job_id}"),
         )
     except ApiException as e:
+        # The name is the directory. The other creator won the race.
+        if e.status == 409:
+            return
         logger.error(
             "Failed to create persistent storage cleanup job",
             extra=dict(job=f"{workspace}/{job_id}", error=e),
@@ -1253,6 +1276,16 @@ STORAGE_CLEANUP_RESOURCES = client.V1ResourceRequirements(
 )
 
 
+def _storage_cleanup_job_name(pvc_name: str, workspace: str, job_id: str) -> str:
+    """DNS-1123 name for ``jobs/{workspace}/{job_id}`` on one PVC.
+
+    Hash the claim and the full folder. Truncating ``cleanup-{workspace}-{job_id}``
+    collides across claims and long names, and a 409 then leaves the second directory.
+    """
+    folder = f"{pvc_name}/{build_job_storage_subpath(workspace, job_id)}"
+    return f"cleanup-{hashlib.sha256(folder.encode()).hexdigest()[:16]}"
+
+
 def _storage_cleanup_job(
     namespace: str,
     pvc_name: str,
@@ -1268,7 +1301,8 @@ def _storage_cleanup_job(
 ) -> tuple[str, client.V1Job]:
     """Build the Job that removes a job's storage directory, and return its name and body."""
     job_storage_subpath = build_job_storage_subpath(workspace, job_id)
-    cleanup_job_name = f"cleanup-{workspace}-{job_id}-{uuid.uuid4().hex[:8]}"[:63].rstrip("-")
+    # Stable name: a second creator for this directory gets 409 instead of a second rm.
+    cleanup_job_name = _storage_cleanup_job_name(pvc_name, workspace, job_id)
     cleanup_common_labels = _storage_cleanup_labels(workspace, job_id, step_name, execution_backend, execution_profile)
 
     job_meta = build_metadata(cleanup_common_labels, job_metadata)
@@ -1355,6 +1389,9 @@ def reclaim_job_persistent_storage(
     call starts a new one.
     """
     labels = _storage_cleanup_labels(workspace, job_id, STORAGE_RECLAIM_STEP_NAME, execution_backend, execution_profile)
+    # The Job name depends only on the PVC and directory, so any step or profile may have created it.
+    for label in (JOB_STEP_NAME_LABEL, JOB_EXECUTION_BACKEND_LABEL, JOB_EXECUTION_PROFILE_LABEL):
+        labels.pop(label, None)
     selector = ",".join(f"{key}={value}" for key, value in labels.items())
     cleanup_jobs = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector).items
     # Providers may use the same profile name with different PVCs. A cleanup of one
@@ -1387,11 +1424,16 @@ def reclaim_job_persistent_storage(
         # Finished reclaim Jobs are deleted here. A TTL could delete one before it is seen to
         # succeed, and the next call would start another.
         cleanup_job.spec.ttl_seconds_after_finished = None
-        batch_v1.create_namespaced_job(namespace=namespace, body=cleanup_job)
-        logger.info(
-            "Created storage reclaim job",
-            extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{job_id}"),
-        )
+        try:
+            batch_v1.create_namespaced_job(namespace=namespace, body=cleanup_job)
+        except ApiException as e:
+            if e.status != 409:
+                raise
+        else:
+            logger.info(
+                "Created storage reclaim job",
+                extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{job_id}"),
+            )
         return False
 
     outcomes = [_finished_condition(cleanup_job) for cleanup_job in cleanup_jobs]
@@ -1503,10 +1545,7 @@ def create_pod_template_spec(
             ),
         )
     env.extend(_opensandbox_job_env(platform_config))
-    validate_no_reserved_managed_job_environment_variable_names(
-        (envvar.name for envvar in step.step_spec.environment or []),
-        source="Job step environment keys",
-    )
+    validate_step_environment(step.step_spec.environment or [], source="Job step environment keys")
     env.extend(
         [
             client.V1EnvVar(name=NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR, value=DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH),
@@ -1515,6 +1554,7 @@ def create_pod_template_spec(
             client.V1EnvVar(name=NEMO_JOB_STEP_ENVVAR, value=step.name),
             client.V1EnvVar(name=NEMO_JOB_WORKSPACE_ENVVAR, value=step.workspace),
             client.V1EnvVar(name=NEMO_JOB_FILESET_ENVVAR, value=step.fileset),
+            client.V1EnvVar(name=NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR, value=step.artifact_base_path or ""),
             client.V1EnvVar(
                 name=NEMO_JOB_TASK_ENVVAR,
                 value_from=client.V1EnvVarSource(field_ref=client.V1ObjectFieldSelector(field_path="metadata.uid")),

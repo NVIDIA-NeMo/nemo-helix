@@ -15,8 +15,8 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-from collections.abc import Generator, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Generator, Sequence
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import unquote, urlsplit
@@ -420,6 +420,21 @@ def gateway_models_as_job[TargetT: Model | AgentBase](
     its own, or when the job has no identity to forward (an auth-disabled platform), which is how they
     were called before.
     """
+    with gateway_models_via_proxy(metrics, target, platform_auth_proxy) as called:
+        yield called
+
+
+@contextmanager
+def gateway_models_via_proxy[TargetT: Model | AgentBase](
+    metrics: Sequence[Metric],
+    target: TargetT | None,
+    proxy: Callable[[], AbstractContextManager[str | None]],
+) -> Generator[TargetT | None]:
+    """:func:`gateway_models_as_job` with the identity supplied by ``proxy`` rather than this job's.
+
+    ``proxy`` is entered only when a model or the target needs it, and yields the loopback origin of an
+    auth proxy, or ``None`` when there is no identity to forward.
+    """
     bound = [
         (metric, models)
         for metric in metrics
@@ -429,7 +444,7 @@ def gateway_models_as_job[TargetT: Model | AgentBase](
     if not bound and platform_target is None:
         yield target
         return
-    with platform_auth_proxy() as origin:
+    with proxy() as origin:
         if origin is None:
             yield target
             return

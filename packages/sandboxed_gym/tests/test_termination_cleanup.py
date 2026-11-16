@@ -9,11 +9,11 @@ is to re-raise with the default action installed, which would take the test sess
 
 from __future__ import annotations
 
-import atexit
 import signal
 from collections.abc import Callable
 
 import pytest
+import sandboxed_gym.orchestrator as orchestrator_module
 from sandboxed_gym.orchestrator import (
     _TERMINATION_SHUTDOWNS,
     TERMINATION_SIGNALS,
@@ -22,27 +22,23 @@ from sandboxed_gym.orchestrator import (
 
 
 @pytest.fixture(autouse=True)
-def restore_process_state():
+def restore_process_state(monkeypatch: pytest.MonkeyPatch):
     """Undo the process-global handlers and atexit hooks each test installs."""
     original = {signum: signal.getsignal(signum) for signum in TERMINATION_SIGNALS}
+    # Tests replace signal.signal through the same monkeypatch, which is undone only after this
+    # teardown, so restore the handlers with the real function.
+    set_handler = signal.signal
     registered: list[Callable[[], object]] = []
-    real_register = atexit.register
     prior_shutdowns = list(_TERMINATION_SHUTDOWNS)
     _TERMINATION_SHUTDOWNS.clear()
 
-    def _tracking_register(func, *args, **kwargs):
-        registered.append(func)
-        return real_register(func, *args, **kwargs)
-
-    atexit.register = _tracking_register  # ty: ignore[invalid-assignment]
+    # Record the hooks instead of registering them, so the test process never runs them at exit.
+    monkeypatch.setattr(orchestrator_module, "register_atexit", registered.append)
     try:
         yield registered
     finally:
-        atexit.register = real_register
-        for func in registered:
-            atexit.unregister(func)
         for signum, handler in original.items():
-            signal.signal(signum, handler)
+            set_handler(signum, handler)
         _TERMINATION_SHUTDOWNS.clear()
         _TERMINATION_SHUTDOWNS.extend(prior_shutdowns)
 
@@ -51,7 +47,7 @@ def restore_process_state():
 def test_a_termination_signal_destroys_the_host(signum, monkeypatch: pytest.MonkeyPatch) -> None:
     """SIGTERM is what Kubernetes sends before SIGKILL, and the last chance to free the sandbox."""
     calls: list[str] = []
-    monkeypatch.setattr("os.kill", lambda pid, sig: calls.append(f"kill:{sig}"))
+    monkeypatch.setattr(orchestrator_module, "kill", lambda pid, sig: calls.append(f"kill:{sig}"))
 
     install_termination_cleanup(lambda: calls.append("shutdown"))
     handler = signal.getsignal(signum)
@@ -64,7 +60,7 @@ def test_a_termination_signal_destroys_the_host(signum, monkeypatch: pytest.Monk
 @pytest.mark.parametrize("signum", TERMINATION_SIGNALS)
 def test_the_signal_is_re_raised_with_the_default_action(signum, monkeypatch: pytest.MonkeyPatch) -> None:
     """The exit status must still report the signal, or a cancelled job reads as a clean stop."""
-    monkeypatch.setattr("os.kill", lambda pid, sig: None)
+    monkeypatch.setattr(orchestrator_module, "kill", lambda pid, sig: None)
 
     install_termination_cleanup(lambda: None)
     handler = signal.getsignal(signum)
@@ -82,7 +78,7 @@ def test_the_default_action_is_restored_before_cleanup_runs(signum, monkeypatch:
     slowest part, since it waits on the sandbox being destroyed -- so an impatient second SIGTERM
     would stack another destroy on top of the in-flight one.
     """
-    monkeypatch.setattr("os.kill", lambda pid, sig: None)
+    monkeypatch.setattr(orchestrator_module, "kill", lambda pid, sig: None)
     observed: list[object] = []
 
     install_termination_cleanup(lambda: observed.append(signal.getsignal(signum)))
@@ -101,7 +97,7 @@ def test_the_signal_is_re_raised_even_when_cleanup_fails(signum, monkeypatch: py
     process keeps running with its exit status never reporting the signal.
     """
     killed: list[int] = []
-    monkeypatch.setattr("os.kill", lambda pid, sig: killed.append(sig))
+    monkeypatch.setattr(orchestrator_module, "kill", lambda pid, sig: killed.append(sig))
 
     def _explode() -> None:
         raise RuntimeError("destroy_host failed")
@@ -140,6 +136,6 @@ def test_handlers_are_optional_off_the_main_thread(monkeypatch: pytest.MonkeyPat
     def _refuse(signum: int, handler: object) -> None:
         raise ValueError("signal only works in main thread")
 
-    monkeypatch.setattr(signal, "signal", _refuse)
+    monkeypatch.setattr(orchestrator_module, "set_signal_handler", _refuse)
 
     install_termination_cleanup(lambda: None)

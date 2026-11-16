@@ -8,6 +8,10 @@ class StorageBackendError(Exception):
     """Raised when a storage backend has an error."""
 
 
+class StorageObjectChangedError(StorageBackendError):
+    """Raised when an object no longer matches the resolved download snapshot."""
+
+
 class StorageAccessError(StorageBackendError):
     """Raised when access to a storage backend is denied.
 

@@ -26,7 +26,7 @@ The `kaizen-ui` skill is not committed — it is synced from the `@nvidia/founda
 
 ## Import Path Rules
 
-- **Never use relative imports.** This applies to sibling files in the same directory too. Always use the absolute alias path — even `./useSomething` or `./types` should be written as `@studio/components/Foo/useSomething` or `@nemo/common/src/utils/types`. ESLint (`no-relative-import-paths/no-relative-import-paths`) enforces this and will warn if you slip.
+- **Never use relative imports.** This applies to sibling files in the same directory too. Always use the absolute alias path — even `./useSomething` or `./types` should be written as `@studio/components/Foo/useSomething` or `@nemo/common/src/utils/types`. ESLint (`no-restricted-imports` in `eslint.config.js`) enforces this as an error in `common` and `studio`.
 - Import path mappings:
   - `@studio/` → `packages/studio/src/` (inside the studio package)
   - `@nemo/common/` → `packages/common/src/`

@@ -60,10 +60,11 @@ class EvaluationSessionRepository(ABC):
         evaluation_name: str,
         status: SpanStatus | None = None,
         test_case_name: str | None = None,
+        created_after: datetime | None,
         page: int,
         page_size: int,
         mode: IntakeResponseMode,
         sort_keys: list[tuple[str, bool]] | None = None,
     ) -> EvaluationSessionPage:
-        """Return one page of sessions for an Evaluation."""
+        """Return one page of sessions for an Evaluation, limited to runs ingested since ``created_after``."""
         pass

@@ -398,7 +398,7 @@ async def test_ensure_model_provider_creates_when_not_exists(reconciler, make_de
 
 
 @pytest.mark.asyncio
-@patch("nhx.core.models.controllers.deployment_reconciler.uuid.uuid4")
+@patch("nhx.core.models.controllers.deployment_reconciler.uuid4")
 async def test_ensure_model_provider_handles_name_collision(mock_uuid, reconciler, make_deployment):
     """Test that ensure_model_provider creates provider with UUID suffix when name collision occurs."""
     # Mock UUID to return predictable value

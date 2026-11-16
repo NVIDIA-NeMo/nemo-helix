@@ -37,7 +37,7 @@ def openshell_backend(
     with (
         patch("nemo_deployments_plugin.backends.openshell.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.openshell.backend.NemoEntitiesClient", return_value=mock_entities),
-        patch("grpc.insecure_channel", return_value=MagicMock()),
+        patch("nemo_deployments_plugin.backends.openshell.backend.insecure_channel", return_value=MagicMock()),
     ):
         backend = OpenShellDeploymentBackend(mock_client, {"gateway_endpoint": "http://127.0.0.1:17670"})
         backend._stub = mock_stub

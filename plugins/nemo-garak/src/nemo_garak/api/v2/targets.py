@@ -16,6 +16,7 @@ from nemo_garak.api.v2._perms import AuditTargetPerms
 from nemo_garak.api.v2.schemas import CreateAuditTargetRequest, TargetFilter, UpdateAuditTargetRequest
 from nemo_garak.authz import scope
 from nemo_garak.entities import AuditTarget
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -77,8 +78,7 @@ async def create_target(
 )
 async def list_targets(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     parsed_filter: TargetFilter = Depends(_target_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -89,8 +89,8 @@ async def list_targets(
         result = await entity_client.list(
             AuditTarget,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_obj=filter_dict or None,
         )
@@ -194,7 +194,8 @@ async def delete_target(
 ) -> None:
     """Delete an audit target by name."""
     try:
-        await entity_client.delete(AuditTarget, name=name, workspace=workspace)
+        _delete_target = await entity_client.get(AuditTarget, name=name, workspace=workspace)
+        await entity_client.delete_by_id(AuditTarget, _delete_target.id, expected_db_version=_delete_target.db_version)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,

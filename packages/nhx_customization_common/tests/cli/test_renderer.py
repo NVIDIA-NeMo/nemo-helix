@@ -71,13 +71,13 @@ def test_studio_available_when_in_ready(monkeypatch: pytest.MonkeyPatch) -> None
         captured["url"] = url
         return _status_response(["entities", "studio", "jobs"])
 
-    monkeypatch.setattr(renderer_mod.httpx, "get", fake_get)
+    monkeypatch.setattr(renderer_mod, "http_get", fake_get)
     assert studio_is_available("https://nhx.test") is True
     assert captured["url"] == "https://nhx.test/status"
 
 
 def test_studio_not_available_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(renderer_mod.httpx, "get", lambda url, **kw: _status_response(["entities", "jobs"]))
+    monkeypatch.setattr(renderer_mod, "http_get", lambda url, **kw: _status_response(["entities", "jobs"]))
     assert studio_is_available("https://nhx.test") is False
 
 
@@ -85,21 +85,21 @@ def test_studio_not_available_on_transport_error(monkeypatch: pytest.MonkeyPatch
     def boom(url: str, **kwargs: object) -> httpx.Response:
         raise httpx.ConnectError("refused")
 
-    monkeypatch.setattr(renderer_mod.httpx, "get", boom)
+    monkeypatch.setattr(renderer_mod, "http_get", boom)
     assert studio_is_available("https://nhx.test") is False
 
 
 def test_studio_not_available_on_error_status(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        renderer_mod.httpx, "get", lambda url, **kw: httpx.Response(503, json={}, request=_PROBE_REQUEST)
+        renderer_mod, "http_get", lambda url, **kw: httpx.Response(503, json={}, request=_PROBE_REQUEST)
     )
     assert studio_is_available("https://nhx.test") is False
 
 
 def test_studio_not_available_on_malformed_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        renderer_mod.httpx,
-        "get",
+        renderer_mod,
+        "http_get",
         lambda url, **kw: httpx.Response(200, json={"unexpected": 1}, request=_PROBE_REQUEST),
     )
     assert studio_is_available("https://nhx.test") is False

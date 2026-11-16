@@ -9,11 +9,12 @@ function escapeSlack(value) {
 }
 
 async function reportPostMergeResults({ core, context, env, fetchImpl }) {
+  const checksName = env.CHECKS_NAME || "image/e2e";
   const results = Object.entries(JSON.parse(env.NEEDS_JSON)).map(
     ([job, value]) => ({ job, result: value.result || "missing" }),
   );
   await core.summary
-    .addHeading("Post-merge image and e2e checks")
+    .addHeading(`Post-merge ${checksName} checks`)
     .addTable([
       ["Job", "Result"],
       ...results.map(({ job, result }) => [job, result]),
@@ -30,7 +31,7 @@ async function reportPostMergeResults({ core, context, env, fetchImpl }) {
   const description = failures
     .map(({ job, result }) => `${job}: ${result}`)
     .join(", ");
-  core.setFailed(`Post-merge image/e2e checks: ${description}`);
+  core.setFailed(`Post-merge ${checksName} checks: ${description}`);
   if (!env.SLACK_ALERTS_WEBHOOK)
     throw new Error(
       "SLACK_ALERTS_WEBHOOK is required for post-merge failure alerts",
@@ -39,7 +40,7 @@ async function reportPostMergeResults({ core, context, env, fetchImpl }) {
   const repo = `${context.repo.owner}/${context.repo.repo}`;
   const baseUrl = `${context.serverUrl}/${repo}`;
   const text = [
-    ":rotating_light: *Post-merge image/e2e checks failed*",
+    `:rotating_light: *Post-merge ${escapeSlack(checksName)} checks failed*`,
     `Repository: ${escapeSlack(repo)}`,
     `Commit: <${baseUrl}/commit/${context.sha}|${context.sha.slice(0, 7)}>`,
     ...failures.map(

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlparse
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.inference_middleware import (
     ImmediateResponse,
@@ -18,7 +18,7 @@ from nemo_helix_plugin.inference_middleware import (
     InferenceResponse,
     NemoInferenceMiddleware,
 )
-from nemo_helix_plugin.inference_middleware_models import VirtualModel
+from nemo_helix_plugin.inference_middleware_models import MiddlewareCall, VirtualModel, VirtualModelInferenceConfig
 from nemo_helix_plugin.models.types import ModelProvider, ModelProviderStatus, ServedModelMapping
 from nhx.core.inference_gateway.api.dependencies import (
     global_middleware_registry,
@@ -243,6 +243,27 @@ def test_get_model_entity_exists_without_providers(app: FastAPI, client: TestCli
     assert data["owned_by"] == "ns1"
 
 
+def _model_cache_serving(model_entity_id: str) -> ModelCache:
+    """A ModelCache whose routing table holds one provider serving ``model_entity_id``."""
+    cache = ModelCache()
+    cache.update_model_info(
+        ModelProviderInfo(
+            model_provider=ModelProvider(
+                workspace="ws",
+                name="nim-provider",
+                host_url="http://nim.example.com",
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                served_models=[
+                    ServedModelMapping(model_entity_id=model_entity_id, served_model_name="adder-backend-id"),
+                ],
+            )
+        )
+    )
+    cache.rebuild_model_entity_map()
+    return cache
+
+
 def test_get_model_lora_compound_name_in_path(app: FastAPI, client: TestClient):
     """LoRA-style composite names (base&adapters/ws/adapter) resolve via GET /v1/models/{name:path}.
 
@@ -256,11 +277,230 @@ def test_get_model_lora_compound_name_in_path(app: FastAPI, client: TestClient):
     vm_cache.rebuild([_custom_vm("ws", "base", default_model_entity="ws/base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws/base&adapters/ws/adder")
+
     response = client.get("/v2/workspaces/ws/openai/-/v1/models/ws/base&adapters/ws/adder")
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == "ws/base&adapters/ws/adder"
     assert data["owned_by"] == "ws"
+
+
+def test_get_model_lora_composite_404_until_adapter_is_routable(app: FastAPI, client: TestClient):
+    """A composite is not ready while the base VM exists but the adapter's routing entry does not.
+
+    This is the state the report observed: GET returned 200 while chat completions 404'd with
+    ``Model entity not found``. The GET must return the same 404 chat would, so it can gate
+    inference.
+    """
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_custom_vm("ws", "base", default_model_entity="ws/base")])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: ModelCache()
+
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 404
+    assert response.json()["detail"] == (
+        "Routing table lookup failed: Model entity not found for base model ws/base with adapter ws/adder"
+    )
+
+
+def _routing_middleware(models: dict[str, str | list[str]] | None = None) -> MiddlewareCall:
+    config: dict[str, object] = {} if models is None else {"models": models}
+    return MiddlewareCall(name="router", config_type="route_config", config=config)
+
+
+def _model_cache_serving_ids(*model_entity_ids: str) -> ModelCache:
+    cache = ModelCache()
+    cache.update_model_info(
+        ModelProviderInfo(
+            model_provider=ModelProvider(
+                workspace="ws",
+                name="nim-provider",
+                host_url="http://nim.example.com",
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                served_models=[
+                    ServedModelMapping(model_entity_id=model_entity_id, served_model_name=model_entity_id)
+                    for model_entity_id in model_entity_ids
+                ],
+            )
+        )
+    )
+    cache.rebuild_model_entity_map()
+    return cache
+
+
+def test_get_model_lora_plain_declared_model_does_not_satisfy_adapter(app: FastAPI, client: TestClient):
+    """A routable plain model on the VirtualModel does not make the adapter ready.
+
+    Middleware may leave the public composite in place. The plain base being
+    served must not turn this GET into 200 before that composite exists.
+    """
+    vm = VirtualModel(
+        workspace="ws",
+        name="base",
+        default_model_entity=None,
+        autoprovisioned=False,
+        request_middleware=[_routing_middleware()],
+        models=[VirtualModelInferenceConfig(model="ws/routed-target")],
+    )
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([vm])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws/routed-target")
+
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 404
+    assert response.json()["detail"] == (
+        "Routing table lookup failed: Model entity not found for base model ws/base with adapter ws/adder"
+    )
+
+
+def test_get_model_lora_named_replacement_models_do_not_require_public_name(app: FastAPI, client: TestClient):
+    """Middleware that names the ids it writes does not wait on the public composite.
+
+    Chat resolves one of those ids and drops the adapter suffix. Every named id
+    has to be routable, because the request decides which one is selected.
+    """
+    vm = VirtualModel(
+        workspace="ws",
+        name="base",
+        default_model_entity=None,
+        autoprovisioned=False,
+        request_middleware=[_routing_middleware({"capable": "ws/strong", "efficient": ["ws/weak"]})],
+    )
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([vm])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws/strong")
+
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Routing table lookup failed: Model entity not found for ws/weak"
+
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving_ids("ws/strong", "ws/weak")
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 200
+    assert response.json()["id"] == "ws/base&adapters/ws/adder"
+
+
+def test_get_model_lora_replacements_override_default_entity(app: FastAPI, client: TestClient):
+    """Named replacements decide readiness even when a default composite is set."""
+    vm = VirtualModel(
+        workspace="ws",
+        name="base",
+        default_model_entity="ws/base",
+        autoprovisioned=False,
+        request_middleware=[_routing_middleware({"capable": "ws/strong", "efficient": "ws/weak"})],
+    )
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([vm])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving_ids("ws/strong", "ws/weak")
+    assert client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder").status_code == 200
+
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving_ids(
+        "ws/base&adapters/ws/adder", "ws/strong"
+    )
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Routing table lookup failed: Model entity not found for ws/weak"
+
+
+def test_get_model_lora_judge_does_not_gate_readiness(app: FastAPI, client: TestClient):
+    """Judge ids are not written into ``body["model"]``. A judge-only map falls back."""
+    vm = VirtualModel(
+        workspace="ws",
+        name="base",
+        default_model_entity=None,
+        autoprovisioned=False,
+        request_middleware=[
+            _routing_middleware({"judge": ["ws/judge-a", "ws/judge-b"], "capable": "ws/strong", "efficient": "ws/weak"})
+        ],
+    )
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([vm])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving_ids("ws/strong", "ws/weak")
+    assert client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder").status_code == 200
+
+    vm_cache.rebuild(
+        [
+            VirtualModel(
+                workspace="ws",
+                name="base",
+                default_model_entity=None,
+                autoprovisioned=False,
+                request_middleware=[_routing_middleware({"judge": "ws/judge"})],
+            )
+        ]
+    )
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws/judge")
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 404
+
+
+def test_get_model_lora_denied_reference_is_403_before_lookup(
+    app: FastAPI, client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    """A workspace the caller cannot use is denied before the routing table is read."""
+    from nhx.core.inference_gateway.api.v2 import openai as openai_module
+
+    async def deny_secret(request_workspace, ref):
+        if "secret-ws" in ref.name:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to run inference on models in workspace 'secret-ws'."
+            )
+
+    monkeypatch.setattr(openai_module, "enforce_model_ref_access", deny_secret)
+    model_cache = MagicMock(spec=ModelCache)
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_custom_vm("ws", "base", default_model_entity="ws/base")])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: model_cache
+
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/secret-ws/private")
+    assert response.status_code == 403
+    model_cache.get_from_model_entity.assert_not_called()
+
+
+def test_get_model_lora_middleware_without_named_models_requires_public_name(app: FastAPI, client: TestClient):
+    """Middleware that does not name a replacement leaves the public composite in place."""
+    vm = VirtualModel(
+        workspace="ws",
+        name="base",
+        default_model_entity=None,
+        autoprovisioned=False,
+        request_middleware=[_routing_middleware()],
+    )
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([vm])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: ModelCache()
+
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 404
+
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws/base&adapters/ws/adder")
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 200
+
+
+def test_get_model_lora_without_default_or_middleware_requires_public_name(app: FastAPI, client: TestClient):
+    """With nothing to select another entity, the public composite is the route."""
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_custom_vm("ws", "base")])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_model_cache] = lambda: ModelCache()
+
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 404
+
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws/base&adapters/ws/adder")
+    response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
+    assert response.status_code == 200
 
 
 def test_get_model_lora_compound_bare_name_in_path(app: FastAPI, client: TestClient):
@@ -271,6 +511,8 @@ def test_get_model_lora_compound_bare_name_in_path(app: FastAPI, client: TestCli
     vm_cache = VirtualModelCache()
     vm_cache.rebuild([_custom_vm("ws", "base", default_model_entity="ws/base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws/base&adapters/ws/adder")
 
     response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
     assert response.status_code == 200
@@ -813,6 +1055,8 @@ def test_get_model_cross_workspace_lora(app: FastAPI, client: TestClient):
     vm_cache = VirtualModelCache()
     vm_cache.rebuild([_custom_vm("ws-a", "base", default_model_entity="ws-a/base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    app.dependency_overrides[global_model_cache] = lambda: _model_cache_serving("ws-a/base&adapters/ws-b/adapter")
 
     response = client.get("/v2/workspaces/ws-a/openai/-/v1/models/ws-a/base&adapters/ws-b/adapter")
     assert response.status_code == 200

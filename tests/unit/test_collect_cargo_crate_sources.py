@@ -103,7 +103,7 @@ def run(
     def fake_urlopen(url: str, timeout: int) -> Response:
         return Response(bodies[url.rsplit("/", 2)[1]])
 
-    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(module, "urlopen", fake_urlopen)
     monkeypatch.setattr(
         sys,
         "argv",

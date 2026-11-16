@@ -16,9 +16,8 @@ paths to ZITADEL, and sends protected NeMo API calls through NeMo's auth
 service ext_authz endpoint.
 
 NeMo validates ZITADEL opaque access tokens with RFC 7662 introspection. The
-chart sets `auth.oidc.introspect_opaque_tokens=true` and intentionally leaves
-UserInfo fallback disabled for bearer-token validation so audience and scope
-semantics stay with the introspection response.
+chart enables `auth.oidc.introspect_opaque_tokens` and sets
+`auth.oidc.audience` to the ZITADEL project ID, which ZITADEL puts in `aud`.
 
 For group-based RBAC, the demo configures ZITADEL to emit a standard `groups`
 custom claim from project roles. That keeps NeMo Helix configuration

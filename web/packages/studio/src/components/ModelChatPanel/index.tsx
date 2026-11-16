@@ -9,9 +9,14 @@ import {
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { hasModelProvider, toInferenceModelName } from '@nemo/common/src/utils/models';
 import { Collapse, Trash } from '@nemo/icons/icons';
+import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
-import { ParamsPopover } from '@studio/components/chat/ParamsPopover';
+import {
+  CHAT_INFERENCE_PARAM_FIELDS,
+  CHAT_INFERENCE_PARAM_METADATA,
+  DEFAULT_CHAT_INFERENCE_PARAMS,
+  mergeChatParams,
+} from '@studio/components/chat/params';
 import { ModelChat } from '@studio/components/ModelChat';
 import { useModelChatAvailability } from '@studio/hooks/useModelChatAvailability';
 import {
@@ -55,11 +60,10 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
   const [inferenceParams, setInferenceParams] = useState<InferenceParams>(() => {
     // The chat runtime only reads max_tokens, so fold a saved completion-token limit into it.
     const { max_completion_tokens, ...saved } = panel.promptData?.inference_params ?? {};
-    return {
-      ...DEFAULT_INFERENCE_PARAMS,
+    return mergeChatParams(DEFAULT_CHAT_INFERENCE_PARAMS, {
       ...saved,
-      max_tokens: max_completion_tokens ?? saved.max_tokens ?? DEFAULT_INFERENCE_PARAMS.max_tokens,
-    };
+      max_tokens: max_completion_tokens ?? saved.max_tokens,
+    });
   });
 
   const handleModelChange = useCallback(
@@ -149,17 +153,24 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
       )}
       {/* Model picker + inference params — shared across single and compare modes. */}
       <Flex className="shrink-0 items-center gap-2 border-b border-base px-3 py-2">
-        <div className="flex-1">
-          <WorkspaceModelSelect
-            workspace={modelWorkspace}
-            include={hasModelProvider}
-            value={selectedModel}
-            onValueChange={handleModelChange}
-            fullWidth
-            disabled={panel.locked}
-          />
-        </div>
-        <ParamsPopover value={inferenceParams} onChange={setInferenceParams} />
+        <WorkspaceModelSelect
+          workspace={modelWorkspace}
+          include={hasModelProvider}
+          value={selectedModel}
+          onValueChange={handleModelChange}
+          fullWidth
+          disabled={panel.locked}
+          showParams
+          paramsIconOnly
+          // A locked panel pins the model, not its sampling settings.
+          paramsDisabled={false}
+          paramsFields={CHAT_INFERENCE_PARAM_FIELDS}
+          paramsFieldMetadata={CHAT_INFERENCE_PARAM_METADATA}
+          inferenceParams={inferenceParams}
+          onInferenceParamsChange={(next) =>
+            setInferenceParams((prev) => mergeChatParams(prev, next))
+          }
+        />
       </Flex>
 
       {/* Chat surface */}

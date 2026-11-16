@@ -63,7 +63,7 @@ class TestRunNemoLocal:
             calls.append({"cmd": cmd, **kwargs})
             return subprocess.CompletedProcess(cmd, 0, "ok", "")
 
-        monkeypatch.setattr(utils.subprocess, "run", fake_run)
+        monkeypatch.setattr(utils, "run", fake_run)
 
         result = utils.run_nemo_local("config", "current-context")
 
@@ -83,7 +83,7 @@ class TestRunNemoLocal:
             calls.append({"cmd": cmd, **kwargs})
             return subprocess.CompletedProcess(cmd, 0, "ok", "")
 
-        monkeypatch.setattr(utils.subprocess, "run", fake_run)
+        monkeypatch.setattr(utils, "run", fake_run)
 
         utils.run_nemo_local("config", "view")
 
@@ -101,7 +101,7 @@ class TestRunNemoLocal:
             calls.append({"cmd": cmd, **kwargs})
             return subprocess.CompletedProcess(cmd, 0, "ok", "")
 
-        monkeypatch.setattr(utils.subprocess, "run", fake_run)
+        monkeypatch.setattr(utils, "run", fake_run)
 
         utils.run_nemo_local("config", "view", env_extra={"NEMO_TELEMETRY_ENABLED": "true"})
 

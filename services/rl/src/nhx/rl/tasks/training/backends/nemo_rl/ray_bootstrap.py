@@ -28,6 +28,7 @@ from collections import deque
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
+from subprocess import Popen, run
 from types import FrameType
 
 from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
@@ -512,7 +513,7 @@ class RayClusterBootstrap:
         logger.info(f"Starting head: {' '.join(cmd)}")
         print(f"[ray_bootstrap] Starting head: {' '.join(cmd)}", flush=True)
         try:
-            result = subprocess.run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS, env=self._ray_start_env())
+            result = run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS, env=self._ray_start_env())
         except subprocess.TimeoutExpired:
             logger.warning(f"Ray head start timed out after {RAY_START_TIMEOUT_SECONDS}s")
             print(f"[ray_bootstrap] Ray head start timed out after {RAY_START_TIMEOUT_SECONDS}s", flush=True)
@@ -552,7 +553,7 @@ class RayClusterBootstrap:
         logger.info(f"Starting worker: {' '.join(cmd)}")
         print(f"[ray_bootstrap] Starting worker: {' '.join(cmd)}", flush=True)
         try:
-            result = subprocess.run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS, env=self._ray_start_env())
+            result = run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS, env=self._ray_start_env())
         except subprocess.TimeoutExpired:
             logger.warning(f"Ray worker start timed out after {RAY_START_TIMEOUT_SECONDS}s")
             print(f"[ray_bootstrap] Ray worker start timed out after {RAY_START_TIMEOUT_SECONDS}s", flush=True)
@@ -601,7 +602,7 @@ class RayClusterBootstrap:
             Total number of worker_units available in the cluster
         """
         try:
-            result = subprocess.run(
+            result = run(
                 [self.ray_executable, "status"],
                 capture_output=True,
                 text=True,
@@ -698,7 +699,7 @@ class RayClusterBootstrap:
         # After workers have connected.
         clock = self.progress.training_wall_clock() if self.progress is not None else nullcontext()
         with clock:
-            process = subprocess.Popen(
+            process = Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -772,7 +773,7 @@ class RayClusterBootstrap:
         # Bound the call so a wedged `ray stop` can't keep the (non-daemon)
         # cleanup thread — and therefore the whole process — alive indefinitely.
         try:
-            subprocess.run(
+            run(
                 [self.ray_executable, "stop", "--force", f"--grace-period={grace_period}"],
                 check=False,
                 capture_output=True,
@@ -835,7 +836,7 @@ class RayClusterBootstrap:
     def _log_ray_status(self) -> None:
         """Log current Ray cluster status."""
         try:
-            status_result = subprocess.run(
+            status_result = run(
                 [self.ray_executable, "status"],
                 capture_output=True,
                 text=True,
@@ -844,7 +845,7 @@ class RayClusterBootstrap:
             )
             logger.info(f"Ray status:\n{status_result.stdout}")
 
-            memory_result = subprocess.run(
+            memory_result = run(
                 [self.ray_executable, "memory"],
                 capture_output=True,
                 text=True,

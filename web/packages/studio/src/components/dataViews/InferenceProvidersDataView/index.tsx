@@ -20,11 +20,11 @@ import {
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useDeferredUnmount } from '@nemo/common/src/hooks/useDeferredUnmount';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   getModelsListProvidersQueryKey,
   useModelsDeleteProvider,
@@ -36,7 +36,7 @@ import type {
   ModelProviderFilter,
   ModelProviderSort,
 } from '@nemo/sdk/generated/platform/schema';
-import { type DropdownEntry, Stack, Text } from '@nvidia/foundations-react-core';
+import { Stack, Text } from '@nvidia/foundations-react-core';
 import { EditInferenceProviderModal } from '@studio/routes/InferenceProvidersListRoute/EditInferenceProviderModal';
 import { InferenceProviderDetailsSidePanel } from '@studio/routes/InferenceProvidersListRoute/InferenceProviderDetailsSidePanel';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
@@ -60,7 +60,6 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
   onCreate,
   attributes,
 }) => {
-  const toast = useToast();
   const queryClient = useQueryClient();
 
   const {
@@ -112,7 +111,6 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
   const deleteProviderMutation = useModelsDeleteProvider({
     mutation: {
       onSuccess: () => {
-        toast.success('Inference provider deleted successfully.');
         queryClient.invalidateQueries({
           queryKey: getModelsListProvidersQueryKey(workspace),
         });
@@ -139,17 +137,14 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
   );
 
   const handleDeleteProvider = async () => {
-    if (!modalProvider) return false;
-    try {
-      await deleteProviderMutation.mutateAsync({
-        workspace,
-        name: modalProvider.name,
-      });
-      return true;
-    } catch {
-      toast.error('Failed to delete inference provider');
+    if (!modalProvider) {
       return false;
     }
+    await deleteProviderMutation.mutateAsync({
+      workspace,
+      name: modalProvider.name,
+    });
+    return true;
   };
 
   const handleModalClose = () => {
@@ -201,28 +196,25 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
         rowActionsColumn({
           size: ROW_ACTIONS_COLUMN_SIZE,
           enableResizing: false,
-          cellProps: {
-            attributes: {
-              DropdownContent: { className: 'min-w-[156px]' },
-            },
-          },
-          rowActions: (provider: ProviderWithId): DropdownEntry[] => [
-            {
-              children: 'Edit',
-              onSelect: () => {
-                setModalProvider(provider);
-                setModalOpen('edit');
-              },
-            },
-            {
-              children: 'Delete',
-              danger: true,
-              onSelect: () => {
-                setModalProvider(provider);
-                setModalOpen('delete');
-              },
-            },
-          ],
+          cell: ({ row: { original: provider } }) => (
+            <QuickActionsMenuRoot
+              actions={[
+                {
+                  label: 'Edit',
+                  onSelect: () => {
+                    setModalProvider(provider);
+                    setModalOpen('edit');
+                  },
+                },
+              ]}
+              deleteAction={{
+                onSelect: () => {
+                  setModalProvider(provider);
+                  setModalOpen('delete');
+                },
+              }}
+            />
+          ),
         }),
       ],
       []
@@ -273,12 +265,11 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
       {modalOpen === 'delete' && modalProvider && (
         <DeleteConfirmationModal
           open
-          simpleConfirm
+          entity="inference provider"
+          ids={[modalProvider.name]}
+          description="Its model entities are also deleted, unless another provider serves them or a model deployment uses this provider."
           onDelete={handleDeleteProvider}
-          title={`Delete inference provider: ${modalProvider.name}`}
-          confirmationText={modalProvider.name}
           onClose={handleModalClose}
-          description="Deleting this inference provider will also delete its model entities unless another provider serves them or it is a model deployment's provider. Are you sure you want to proceed?"
         />
       )}
 
