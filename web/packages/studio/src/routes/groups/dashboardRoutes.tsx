@@ -3,11 +3,7 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { Apps } from '@nemo/icons/icons';
-import {
-  ASSISTANT_STUDIO_ENABLED,
-  DASHBOARD_ROUTE_ENABLED,
-  DASHBOARD_SANDBOX_ENABLED,
-} from '@studio/constants/environment';
+import { DASHBOARD_ROUTE_ENABLED, DASHBOARD_SANDBOX_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
 import {
@@ -21,11 +17,6 @@ import type { RouteObject } from 'react-router';
 const DashboardLandingRoute = lazy(() =>
   import('@studio/routes/DashboardLandingRoute').then((module) => ({
     default: module.DashboardLandingRoute,
-  }))
-);
-const WorkspaceDashboardRoute = lazy(() =>
-  import('@studio/routes/WorkspaceDashboardRoute').then((module) => ({
-    default: module.WorkspaceDashboardRoute,
   }))
 );
 const WorkspaceDashboardHomeRoute = lazy(() =>
@@ -45,8 +36,7 @@ const AssistantChatRoute = lazy(() =>
  */
 const getDashboardElement = (): ReactNode => {
   if (DASHBOARD_SANDBOX_ENABLED) return <WorkspaceDashboardHomeRoute />;
-  if (ASSISTANT_STUDIO_ENABLED) return <DashboardLandingRoute />;
-  return <WorkspaceDashboardRoute />;
+  return <DashboardLandingRoute />;
 };
 
 export const dashboardRoutes: RouteObject[] = gateDashboardRoutes([
