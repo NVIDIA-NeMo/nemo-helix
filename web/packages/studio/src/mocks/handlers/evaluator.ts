@@ -129,6 +129,18 @@ const recordMatcher = (request: Request) => {
     (!to || Date.parse(r.updated_at) <= Date.parse(to));
 };
 
+/** Applies the list's `sort` param (`name`, `created_at`, or `updated_at`; `-` for descending). */
+const sortRecords = <T extends Pick<Task, 'name' | 'created_at' | 'updated_at'>>(
+  request: Request,
+  rows: T[]
+): T[] => {
+  const sort = new URL(request.url).searchParams.get('sort');
+  if (!sort) return rows;
+  const key = sort.replace(/^-/, '') as 'name' | 'created_at' | 'updated_at';
+  const dir = sort.startsWith('-') ? -1 : 1;
+  return rows.toSorted((a, b) => dir * String(a[key]).localeCompare(String(b[key])));
+};
+
 /** Newest first, as the server orders them; `tags` holds the tags pointing at each. */
 const revisionsOf = (record: Task | Taskset): Revision[] =>
   Array.from({ length: record.revision }, (_, i) => {
@@ -184,7 +196,10 @@ export const evaluatorHandlers = [
     const matches = recordMatcher(request);
     return paginate(
       request,
-      mockTasks.filter((t) => t.workspace === params.workspace && matches(t))
+      sortRecords(
+        request,
+        mockTasks.filter((t) => t.workspace === params.workspace && matches(t))
+      )
     );
   }),
   http.get(`${EVALS_URL}/tasks/:name`, ({ params }) => {
@@ -206,7 +221,10 @@ export const evaluatorHandlers = [
     const matches = recordMatcher(request);
     return paginate(
       request,
-      mockTasksets.filter((t) => t.workspace === params.workspace && matches(t))
+      sortRecords(
+        request,
+        mockTasksets.filter((t) => t.workspace === params.workspace && matches(t))
+      )
     );
   }),
   http.get(TASKSET_URL, ({ params }) => {

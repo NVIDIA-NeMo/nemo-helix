@@ -29,6 +29,11 @@ describe('mock taskset handlers', () => {
     expect(await names(`default/tasksets?${query}`)).toEqual(expected);
   });
 
+  it('sorts tasksets by the sort param', async () => {
+    expect(await names('default/tasksets?sort=name')).toEqual(['phishing-triage', 'sort-suite']);
+    expect(await names('default/tasksets?sort=-name')).toEqual(['sort-suite', 'phishing-triage']);
+  });
+
   it('filters tasks by a name list', async () => {
     expect(
       await names('default/tasks?filter[name][$in]=sort-ints&filter[name][$in]=missing')
