@@ -85,3 +85,22 @@ class TestTheDefaultArchitecture:
     def test_it_must_be_os_and_architecture(self, bad: str) -> None:
         with pytest.raises(ValidationError):
             BuilderConfig(default_platform=bad)
+
+
+class TestMaxConcurrentBuilds:
+    """Deprecated since 0.11: Jobs' build profile limits cap builds instead."""
+
+    def test_a_0_10_config_that_sets_it_still_loads_and_warns(self, caplog: pytest.LogCaptureFixture) -> None:
+        BuilderConfig(max_concurrent_builds=3)
+        assert "max_concurrent_builds is deprecated and ignored" in caplog.text
+
+    def test_its_environment_variable_still_loads_and_warns(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv("NEMO_BUILDER_MAX_CONCURRENT_BUILDS", "3")
+        BuilderConfig()
+        assert "max_concurrent_builds is deprecated and ignored" in caplog.text
+
+    def test_a_config_without_it_doesnt_warn(self, caplog: pytest.LogCaptureFixture) -> None:
+        BuilderConfig()
+        assert "max_concurrent_builds" not in caplog.text

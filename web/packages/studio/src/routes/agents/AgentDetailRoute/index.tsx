@@ -79,6 +79,7 @@ export const AgentDetailRoute: FC = () => {
   const [deleteDeploymentTarget, setDeleteDeploymentTarget] = useState<AgentDeployment | null>(
     null
   );
+  const deleteDeploymentName = deleteDeploymentTarget?.name;
   const { success, error } = useToast();
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const deployButtonRef = useRef<HTMLDivElement>(null);
@@ -509,14 +510,16 @@ export const AgentDetailRoute: FC = () => {
       {deleteDeploymentTarget && (
         <DeleteConfirmationModal
           open
-          title="Delete Deployment"
-          successText="Successfully queued deployment for deletion."
+          entity="deployment"
+          ids={[deleteDeploymentName ?? 'unnamed']}
+          description="The agent stops serving requests from this deployment."
+          successText={`Started deleting deployment '${deleteDeploymentName}'.`}
           onDelete={async () => {
             try {
-              if (!deleteDeploymentTarget.name) return false;
+              if (!deleteDeploymentName) return false;
               await deleteDeploymentMutation.mutateAsync({
                 workspace,
-                name: deleteDeploymentTarget.name,
+                name: deleteDeploymentName,
               });
               return true;
             } catch {
@@ -524,7 +527,6 @@ export const AgentDetailRoute: FC = () => {
             }
           }}
           onClose={() => setDeleteDeploymentTarget(null)}
-          simpleConfirm
         />
       )}
     </AccessibleTitle>
