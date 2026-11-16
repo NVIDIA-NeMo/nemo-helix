@@ -342,6 +342,26 @@ agents, the subprocess log holds the agent server's startup, validation, and req
 harness's own output is saved per invocation under the deployment's `artifacts/.fabric/` directory on
 the platform host.
 
+### Startup failure diagnostics
+
+When a deployment fails during startup or exceeds its health-check timeout, the controller
+attempts to save the latest **500 lines**, capped at **64 KiB of UTF-8 text**, before removing
+the runtime. A backend-reported startup failure takes precedence over the generic timeout.
+Capture is best effort and limited to 10 seconds; an unavailable log channel does not block
+cleanup, so some failures (for example, image-pull failures before a process starts) have no output.
+Byte truncation can leave a partial first line.
+
+The snapshot is stored with the workspace-scoped deployment entity and survives runtime cleanup
+and platform restarts. View it in Studio's **Logs** tab or through
+`GET /apis/agents/v2/workspaces/{workspace}/deployments/{name}/logs?tail=500`.
+The endpoint returns up to the requested number of retained lines (`tail=0` returns no lines);
+the SSE logs endpoint also serves retained diagnostics. This is a fixed failure snapshot, not a
+complete log archive. The host-local CLI log reader does not read this snapshot.
+
+Snapshots have no time-based expiry: deleting the agent deployment deletes its retained diagnostics.
+Application logs may contain sensitive output; avoid printing credentials. Snapshots have the same
+read authorization as the deployment and are also included in its `startup_log_tail` field.
+
 ## Update a Deployed Agent
 
 Agent configs are immutable, so `redeploy` replaces the agent in one step: it validates the new config,
