@@ -142,7 +142,7 @@ variable "RL_BASE_CONTEXT" {
 
 # The tag for base images if needed
 variable "WHEELS_TAG" {
-  default = "254fde5799bd4b9eee56ee5c6a298c0ec648e76b"
+  default = "43f85ee63c23b2cc8bc45da20bde6b9306facf3f"
 }
 
 variable "BAKE_CACHE_SOURCE_BRANCH" {
