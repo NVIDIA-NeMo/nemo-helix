@@ -70,6 +70,13 @@ class FilesConfig(create_service_config_class("files")):  # type: ignore
         "direct bucket changes and writes through other processes may remain stale until expiry.",
     )
 
+    s3_cache_max_versions_per_object: int = Field(
+        default=2,
+        ge=1,
+        description="Maximum completed versions retained per S3 object in the local content cache. "
+        "Superseded versions are pruned after a successful cache write.",
+    )
+
     hf_retry_attempts: int = Field(
         default=4,
         ge=1,
