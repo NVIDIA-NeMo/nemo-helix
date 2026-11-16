@@ -299,16 +299,18 @@ async def access_secret(
 ) -> schemas.HelixSecretAccessResponse | JSONResponse:
     """Access the value of a secret."""
     with scoped_app_ctx(SecretsContext(name=name, namespace=workspace)):
-        # Additional authorization check.
-        # we need to check if we are validating a delegated user here, or the caller is the actual accessor.
-        # Create auth client with the on-behalf-of principal for authorization check
-        if auth_client.principal.on_behalf_of is not None and not await auth_client.on_behalf_of_has_permissions(
-            workspace, ["secrets.read"]
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Forbidden",
-            )
+        # Additional authorization check. The OPA policy only establishes that the caller is a service, with no
+        # per-workspace scoping, so the workspace-scoped `secrets.read` check must run against the principal the
+        # service acts for. Fail closed when that principal is absent, otherwise a bare service principal would be
+        # able to read every workspace's secret values.
+        if auth_client.auth_enabled:
+            if auth_client.principal.on_behalf_of is None or not await auth_client.on_behalf_of_has_permissions(
+                workspace, ["secrets.read"]
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Forbidden",
+                )
 
         # If the secret is the default NGC API key secret, return its value directly
         if is_default_ngc_api_key(platform_config, workspace, name):
