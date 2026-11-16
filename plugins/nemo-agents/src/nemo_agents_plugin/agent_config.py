@@ -165,6 +165,8 @@ class McpConfig(BaseModel):
 class ToolsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    # None preserves harness defaults; [] disables all tools.
+    enabled: list[str] | None = None
     blocked: list[str] = Field(default_factory=list)
 
 
