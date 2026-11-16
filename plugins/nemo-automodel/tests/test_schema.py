@@ -480,10 +480,10 @@ def test_backend_rope_fusion_defaults_off_and_accepts_a_stored_null() -> None:
         ),
         ({"training_type": "partial_sft"}, "needs freeze_modules or unfreeze_modules"),
         ({"training_type": "partial_distillation", "freeze_modules": [{"path": "lm_head"}]}, "teacher_model"),
-        ({"freeze_modules": [{"glob": "*.layers.0.*"}]}, "need training_type partial_sft"),
+        ({"freeze_modules": [{"glob": "*.layers.0.*"}]}, "need training_type partial_sft or partial_distillation"),
         (
             {"training_type": "distillation", "teacher_model": "default/teacher", "unfreeze_modules": [{"path": "x"}]},
-            "need training_type partial_distillation",
+            "need training_type partial_sft or partial_distillation",
         ),
         (
             {"training_type": "partial_sft", "freeze_modules": [{"path": "lm_head", "glob": "*.lm_head"}]},

@@ -4,7 +4,7 @@
 """Value types for the Customizer service.
 
 ``FinetuningType`` and ``OutputNameType`` are shared with unsloth via
-:mod:`nhx.customization_common.schemas.values`. ``TrainingType`` (4 algorithms),
+:mod:`nhx.customization_common.schemas.values`. ``TrainingType``,
 ``CheckpointFormat`` and ``Precision`` are automodel-specific.
 """
 
@@ -97,22 +97,24 @@ class Precision(str, Enum):
 
 
 class TrainingType(str, Enum):
-    """Training algorithm type."""
+    """Training algorithm type.
+
+    The partial types train only the modules that ``freeze_modules`` and ``unfreeze_modules``
+    leave trainable.
+    """
 
     SFT = "sft"
+    PARTIAL_SFT = "partial_sft"
     DISTILLATION = "distillation"
+    PARTIAL_DISTILLATION = "partial_distillation"
     DPO = "dpo"
     GRPO = "grpo"
 
+    @property
+    def is_partial(self) -> bool:
+        return self in (TrainingType.PARTIAL_SFT, TrainingType.PARTIAL_DISTILLATION)
 
-# Partial training types run the same algorithm with only some modules trainable, chosen by
-# training.freeze_modules and unfreeze_modules. Training compiles them as the base algorithm.
-PARTIAL_TRAINING_TYPES: dict[str, TrainingType] = {
-    "partial_sft": TrainingType.SFT,
-    "partial_distillation": TrainingType.DISTILLATION,
-}
-
-
-def base_training_type(training_type: str) -> TrainingType:
-    """The algorithm a job's training type runs: ``partial_sft`` trains as ``sft``, and so on."""
-    return PARTIAL_TRAINING_TYPES.get(training_type) or TrainingType(training_type)
+    @property
+    def is_distillation(self) -> bool:
+        """Distillation needs a teacher model and trains with the KD loss, partial or not."""
+        return self in (TrainingType.DISTILLATION, TrainingType.PARTIAL_DISTILLATION)

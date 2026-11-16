@@ -9,13 +9,11 @@ from nemo_helix_plugin.deployment import DeploymentParams
 from nemo_helix_plugin.integrations import IntegrationsSpec
 from nhx.automodel.entities.validators import validate_fileset_uri
 from nhx.automodel.entities.values import (
-    PARTIAL_TRAINING_TYPES,
     CheckpointSelection,
     FinetuningType,
     OutputNameType,
     Precision,
     TrainingType,
-    base_training_type,
 )
 from nhx.common.entities.constants import (
     MAX_LENGTH_255,
@@ -510,8 +508,7 @@ class _TrainingBase(BaseModel):
         default=None,
         description=(
             "Modules to make trainable, each with everything under it. Wins over freeze_modules and over the "
-            "frozen vision tower of vision-language jobs. Partial training types only. With peft, Automodel "
-            "0.7.0 trains these modules but does not save them in the adapter."
+            "frozen vision tower of vision-language jobs. Partial training types only."
         ),
     )
 
@@ -567,7 +564,7 @@ class _TrainingBase(BaseModel):
             batch, micro_batch = RETRIEVAL_BATCH_DEFAULTS["cross_encoder"]
         else:
             return self.model_copy(update={"recipe": recipe})
-        if base_training_type(getattr(self, "type", "sft")) == TrainingType.DISTILLATION:
+        if TrainingType(getattr(self, "type", TrainingType.SFT)).is_distillation:
             raise ValueError("Knowledge distillation only supports the sft recipe.")
         updates: dict[str, object] = {"recipe": recipe}
         if "batch_size" not in self.model_fields_set:
@@ -590,15 +587,14 @@ class _TrainingBase(BaseModel):
 
     @model_validator(mode="after")
     def _selectors_need_partial_type(self) -> Self:
-        # Selectors make training partial, so they belong to the partial types and nowhere else.
-        training_type = getattr(self, "type", "sft")
-        partial = training_type in PARTIAL_TRAINING_TYPES
-        if partial and not (self.freeze_modules or self.unfreeze_modules):
-            raise ValueError(f"training type {training_type} needs freeze_modules or unfreeze_modules")
-        if not partial and (self.freeze_modules or self.unfreeze_modules):
+        training_type = TrainingType(getattr(self, "type", TrainingType.SFT))
+        has_selectors = bool(self.freeze_modules or self.unfreeze_modules)
+        if training_type.is_partial and not has_selectors:
+            raise ValueError(f"training type {training_type.value} needs freeze_modules or unfreeze_modules")
+        if has_selectors and not training_type.is_partial:
             raise ValueError(
-                f"freeze_modules and unfreeze_modules need a partial training type "
-                f"({', '.join(PARTIAL_TRAINING_TYPES)}), not {training_type}"
+                "freeze_modules and unfreeze_modules need training type partial_sft or partial_distillation, "
+                f"not {training_type.value}"
             )
         return self
 

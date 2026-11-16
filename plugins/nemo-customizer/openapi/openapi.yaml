@@ -3514,8 +3514,7 @@ components:
           title: Unfreeze Modules
           description: Modules to make trainable, each with everything under it. Wins
             over freeze_modules and over the frozen vision tower of vision-language
-            jobs. Partial training types only. With LoRA, Automodel 0.7.0 trains these
-            modules but does not save them in the adapter.
+            jobs. Partial training types only.
           items:
             $ref: '#/components/schemas/AutomodelModuleSelector'
           type: array
@@ -6468,11 +6467,9 @@ components:
           type: array
         unfreeze_modules:
           title: Unfreeze Modules
-          description: 'Modules to train in full, each with everything under it. Wins
-            over freeze_modules. partial_sft only. With LoRA they become the adapter''s
-            modules_to_save: for Llama, Mistral, Gemma, and Qwen2/3 models Unsloth
-            allows only embed_tokens and lm_head, and vLLM serves the result only
-            after a merge.'
+          description: Modules to train in full, each with everything under it. Wins
+            over freeze_modules. partial_sft only. With LoRA they become the adapter's
+            modules_to_save.
           items:
             $ref: '#/components/schemas/UnslothModuleSelector'
           type: array

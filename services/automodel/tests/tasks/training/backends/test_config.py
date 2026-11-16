@@ -710,6 +710,24 @@ def test_peft_forwards_use_memory_efficient_lora_only_when_set(requested: bool |
 
 
 @pytest.mark.parametrize(
+    ("training_type", "has_peft"),
+    [
+        (TrainingType.SFT, True),
+        (TrainingType.PARTIAL_SFT, True),
+        (TrainingType.DISTILLATION, True),
+        (TrainingType.PARTIAL_DISTILLATION, True),
+        (TrainingType.DPO, False),
+    ],
+)
+def test_peft_is_built_for_the_sft_and_distillation_types(training_type: TrainingType, has_peft: bool) -> None:
+    cfg: dict[str, Any] = {}
+
+    _build_peft(cfg, _lora_step_config(training_type=training_type.value))
+
+    assert ("peft" in cfg) is has_peft
+
+
+@pytest.mark.parametrize(
     ("wandb_block", "base_url"),
     [
         ({"project": "p", "settings": {"base_url": "https://wandb.internal"}}, "https://wandb.internal"),
@@ -832,12 +850,13 @@ def test_causal_lm_freeze_config_carries_only_requested_selectors(
     ("training_type", "peft", "precision", "optimizer", "expected"),
     [
         (TrainingType.DISTILLATION, False, None, "torch.optim.Adam", "float32"),
+        (TrainingType.PARTIAL_DISTILLATION, False, None, "torch.optim.Adam", "float32"),
         (TrainingType.DISTILLATION, True, None, "torch.optim.Adam", "auto"),
         (TrainingType.DISTILLATION, False, Precision.BF16, "torch.optim.Adam", "bfloat16"),
         (TrainingType.DISTILLATION, False, None, "transformer_engine.pytorch.optimizers.fused_adam.FusedAdam", "auto"),
         (TrainingType.SFT, False, None, "torch.optim.Adam", "auto"),
     ],
-    ids=["full-weight-kd", "lora-kd", "explicit-precision", "fused-adam", "sft"],
+    ids=["full-weight-kd", "full-weight-partial-kd", "lora-kd", "explicit-precision", "fused-adam", "sft"],
 )
 def test_full_weight_kd_student_keeps_fp32_weights(
     training_type: TrainingType, peft: bool, precision: Precision | None, optimizer: str, expected: str

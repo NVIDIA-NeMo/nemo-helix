@@ -40,7 +40,7 @@ from nhx.automodel.app.jobs.training.schemas import (
     TrainingStepConfig,
 )
 from nhx.automodel.config import config
-from nhx.automodel.entities.values import Precision, TrainingType, base_training_type
+from nhx.automodel.entities.values import Precision, TrainingType
 from nhx.automodel.images import AUTOMODEL_PYTHON_ENTRYPOINT, get_training_image
 from nhx.automodel.tasks.training.backends.registry import uses_custom_automodel_impl
 from nhx.common.jobs.exceptions import HelixJobCompilationError
@@ -156,7 +156,7 @@ def compile_training_step(
 
     """
     job_spec.validate_for_training()
-    if base_training_type(job_spec.training.type) == TrainingType.DPO:
+    if TrainingType(job_spec.training.type) == TrainingType.DPO:
         raise ValueError("DPO training is not supported by nhx-automodel")
     trust_remote_code = me.trust_remote_code or False
     chat_template = me.spec.chat_template if me.spec else None
@@ -173,7 +173,7 @@ def compile_training_step(
     try:
         reject_incompatible_checkpoint(
             traits,
-            training_type=base_training_type(training.type).value,
+            training_type=TrainingType(training.type).value,
             recipe=training_recipe.value,
             sequence_packing=bool(getattr(training, "sequence_packing", False)),
             expert_parallel_size=p.expert_parallel_size,
@@ -341,7 +341,7 @@ def _translate_training_config(
         me: The primary model entity.
         teacher_me: Teacher model entity, populated for distillation jobs.
     """
-    training_type = base_training_type(training.type)
+    training_type = TrainingType(training.type)
     lora = _translate_lora_config(training.peft, me) if isinstance(training.peft, LoRAParams) else None
 
     kd = None

@@ -153,8 +153,7 @@ def test_compile_training_step_carries_pass2_fields() -> None:
     cfg = step.config if hasattr(step, "config") else step["config"]
 
     assert cfg["dataset"]["mask_generation_prompt"] is True
-    # partial_sft trains as sft; the selectors make it partial.
-    assert cfg["training"]["training_type"] == "sft"
+    assert cfg["training"]["training_type"] == "partial_sft"
     assert cfg["training"]["freeze_modules"] == [{"path": None, "glob": "*.layers.0.*"}]
     assert cfg["training"]["unfreeze_modules"] is None
     assert cfg["model"]["tokenizer_backend"] is None
@@ -302,6 +301,40 @@ def test_distillation_with_resolved_recipe_rejects_encoder_recipes(selectors: di
         training.with_resolved_recipe("bi_encoder")
     resolved = training.with_resolved_recipe("sft")
     assert resolved.recipe == "sft"
+
+
+@pytest.mark.parametrize(
+    ("model", "fields", "error"),
+    [
+        (SFTTraining, {"type": "partial_sft"}, "needs freeze_modules or unfreeze_modules"),
+        (
+            DistillationTraining,
+            {"type": "partial_distillation", "teacher_model": "default/teacher"},
+            "needs freeze_modules or unfreeze_modules",
+        ),
+        (
+            SFTTraining,
+            {"freeze_modules": [{"path": "lm_head"}]},
+            "need training type partial_sft or partial_distillation",
+        ),
+        (
+            DistillationTraining,
+            {"teacher_model": "default/teacher", "unfreeze_modules": [{"path": "lm_head"}]},
+            "need training type partial_sft or partial_distillation",
+        ),
+    ],
+    ids=[
+        "partial-sft-without-selectors",
+        "partial-distillation-without-selectors",
+        "selectors-on-sft",
+        "selectors-on-distillation",
+    ],
+)
+def test_module_selectors_belong_to_the_partial_training_types(
+    model: type[SFTTraining | DistillationTraining], fields: dict[str, object], error: str
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        model.model_validate(fields)
 
 
 def test_resolve_training_recipe_auto_uses_cross_encoder_head() -> None:

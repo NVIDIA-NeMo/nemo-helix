@@ -198,8 +198,7 @@ class TrainingSpec(UnslothSchema):
         default=None,
         description=(
             "Modules to train in full, each with everything under it. Wins over freeze_modules. partial_sft only. "
-            "With LoRA they become the adapter's modules_to_save: for Llama, Mistral, Gemma, and Qwen2/3 models "
-            "Unsloth allows only embed_tokens and lm_head, and vLLM serves the result only after a merge."
+            "With LoRA they become the adapter's modules_to_save."
         ),
     )
 

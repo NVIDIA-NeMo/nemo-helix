@@ -14,7 +14,7 @@ from nemo_helix_plugin.deployment import (
     reject_lora_without_lora_enabled,
 )
 from nemo_helix_plugin.integrations import IntegrationsSpec
-from nhx.automodel.entities.values import TrainingType, base_training_type
+from nhx.automodel.entities.values import TrainingType
 from nhx.customization_common.schema import (
     LearningRateDefault,
     NamespacedModel,
@@ -365,27 +365,26 @@ class TrainingSpec(AutomodelSchema):
         default=None,
         description=(
             "Modules to make trainable, each with everything under it. Wins over freeze_modules and over the "
-            "frozen vision tower of vision-language jobs. Partial training types only. With LoRA, Automodel "
-            "0.7.0 trains these modules but does not save them in the adapter."
+            "frozen vision tower of vision-language jobs. Partial training types only."
         ),
     )
 
     @model_validator(mode="after")
     def _training_type_fields(self) -> Self:
-        algorithm = base_training_type(self.training_type)
-        if algorithm == TrainingType.DISTILLATION and not self.teacher_model:
+        training_type = TrainingType(self.training_type)
+        if training_type.is_distillation and not self.teacher_model:
             raise ValueError(f"teacher_model is required when training_type is {self.training_type}")
-        if algorithm == TrainingType.DISTILLATION and self.recipe not in ("auto", "sft"):
+        if training_type.is_distillation and self.recipe not in ("auto", "sft"):
             raise ValueError("distillation only supports the sft recipe")
         if self.finetuning_type.startswith("lora") and self.lora is None:
             self.lora = LoRAParams()
-        # Selectors make training partial, so they belong to the partial types and nowhere else.
-        partial = self.training_type != algorithm.value
-        if partial and not (self.freeze_modules or self.unfreeze_modules):
+        has_selectors = bool(self.freeze_modules or self.unfreeze_modules)
+        if training_type.is_partial and not has_selectors:
             raise ValueError(f"training_type {self.training_type} needs freeze_modules or unfreeze_modules")
-        if not partial and (self.freeze_modules or self.unfreeze_modules):
+        if has_selectors and not training_type.is_partial:
             raise ValueError(
-                f"freeze_modules and unfreeze_modules need training_type partial_{algorithm.value}, not {self.training_type}"
+                "freeze_modules and unfreeze_modules need training_type partial_sft or partial_distillation, "
+                f"not {self.training_type}"
             )
         return self
 
@@ -557,10 +556,7 @@ class AutomodelJobInput(AutomodelSchema):
         recipe = self.training.recipe
         if recipe == "auto" and checkpoint_head_type in ("embedding", "cross_encoder"):
             recipe = "bi_encoder" if checkpoint_head_type == "embedding" else "cross_encoder"
-        if base_training_type(self.training.training_type) == TrainingType.DISTILLATION and recipe not in (
-            "auto",
-            "sft",
-        ):
+        if TrainingType(self.training.training_type).is_distillation and recipe not in ("auto", "sft"):
             raise ValueError("distillation only supports the sft recipe")
 
         training = self.training.model_copy(update={"recipe": recipe})
