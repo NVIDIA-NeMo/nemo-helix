@@ -44,6 +44,11 @@ FAILING = "Nightly taskset runs e2e is failing"
 SLOWING = "Nightly taskset runs e2e is slowing down"
 EVIDENCE_NAME = re.compile(r"taskset-runs-e2e-[0-9a-f]{32}\.json$")
 STAGE_IN_FAILURE = re.compile(r'<failure[^>]*message="[^"]*?\[([a-z][a-z-]*)\]')
+#: A JUnit suite with skips: the workflow fails a row on any, since a skipped step is a check that didn't run.
+SKIPPED = re.compile(r'\bskipped="[1-9][0-9]*"')
+#: The e2e matrix job's name (``kind-taskset-runs-e2e`` in the workflow); its row matches the artifact name.
+E2E_JOB = re.compile(r"^Kind taskset runs e2e \((?P<auth>[^,]+), (?P<exchange>[^,]+), (?P<copy>[^)]+)\)$")
+FAILED_CONCLUSIONS = frozenset({"failure", "cancelled", "timed_out"})
 ROW_ARTIFACT = re.compile(r"^kind-taskset-runs-e2e-(?P<row>.+)-kubernetes-artifacts$")
 
 
@@ -104,7 +109,8 @@ def failure_stage(needs: Mapping[str, Mapping[str, Any]], junit: str) -> str:
 
 
 def failed_rows(rows: Mapping[str, str | None]) -> list[str]:
-    """``<row>: [<stage>]`` for each row whose JUnit failed, or that has none (it failed before pytest)."""
+    """``<row>: [<stage>]`` for each row whose JUnit failed or skipped a test, or that has none (it failed before
+    pytest, or uploaded nothing)."""
     failed = []
     for row, junit in sorted(rows.items()):
         if junit is None:
@@ -113,7 +119,20 @@ def failed_rows(rows: Mapping[str, str | None]) -> list[str]:
             failed.append(f"{row}: [{match.group(1)}]")
         elif "<failure" in junit or "<error" in junit:
             failed.append(f"{row}: [test]")
+        elif SKIPPED.search(junit):
+            failed.append(f"{row}: [skipped]")
     return failed
+
+
+def failed_job_rows(github: GitHub, run: Run) -> list[str]:
+    """The rows whose e2e matrix job failed, from the run's jobs: a row that failed early may upload no artifact."""
+    body = github("GET", f"repos/{run.repo}/actions/runs/{run.run_id}/jobs?per_page=100")
+    jobs = body.get("jobs", []) if isinstance(body, Mapping) else []
+    return sorted(
+        f"auth-{m['auth'].removeprefix('auth-')}-exchange-{m['exchange'].removeprefix('exchange-')}-{m['copy']}"
+        for job in jobs
+        if job.get("conclusion") in FAILED_CONCLUSIONS and (m := E2E_JOB.match(job.get("name", "")))
+    )
 
 
 def run_ids(evidence: Sequence[Mapping[str, Any]]) -> list[str]:
@@ -145,7 +164,11 @@ def report(
     """
     green = all(job.get("result") == "success" for job in run.needs.values())
     stage = None if green else failure_stage(run.needs, junit)
-    failed = [] if green else failed_rows(rows or {})
+    if green:
+        failed = []
+    else:  # every failed matrix job counts, with or without an artifact
+        rows = {**{row: None for row in failed_job_rows(github, run)}, **(rows or {})}
+        failed = failed_rows(rows)
     ids = run_ids(evidence)
     facts = "\n".join(
         [f"Run: {run.url(run.run_id)}", f"Commit: {run.source_sha}"]
