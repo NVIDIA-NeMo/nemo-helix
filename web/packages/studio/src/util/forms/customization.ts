@@ -6,6 +6,7 @@ import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import type {
   AutomodelJobInput,
   AutomodelJobsJobRequest,
+  AutomodelTrainingSpecTrainingType,
   RlDPOTraining,
   RlGRPOTraining,
   RlJobInput,
@@ -143,6 +144,17 @@ export const MODEL_FIELD_BY_BACKEND: Record<CustomizationBackend, ModelFieldName
   rl: 'rl.model',
 };
 
+/**
+ * The data each Automodel training type trains on. A partial type runs the same algorithm on the
+ * same data as its base type, with only some modules trainable.
+ */
+const AUTOMODEL_DATA_TRAINING_TYPE: Record<AutomodelTrainingSpecTrainingType, TrainingType> = {
+  sft: 'sft',
+  distillation: 'distillation',
+  partial_sft: 'sft',
+  partial_distillation: 'distillation',
+};
+
 /** Unsloth is SFT-only; automodel and RL each carry their own method selector. */
 export const resolveTrainingType = (
   backend: CustomizationBackend,
@@ -153,7 +165,7 @@ export const resolveTrainingType = (
     case 'rl':
       return rlTrainingType ?? 'dpo';
     case 'automodel':
-      return automodelTrainingType ?? 'sft';
+      return AUTOMODEL_DATA_TRAINING_TYPE[automodelTrainingType ?? 'sft'];
     default:
       return 'sft';
   }
