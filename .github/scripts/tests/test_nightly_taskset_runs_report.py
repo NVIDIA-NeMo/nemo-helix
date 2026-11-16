@@ -232,7 +232,9 @@ def test_a_green_run_with_a_known_failure_lists_it_when_closing(tmp_path: Path) 
 
     assert junit == "" and known == [KNOWN]
     assert report_module.report(github, make_run(GREEN), evidence, junit, known) == {"action": "closed"}
-    assert "Known failure, reported only: auth-workload" in github.calls[1][2]["body"]
+    _, _, closing = github.calls[1]
+    assert closing is not None
+    assert "Known failure, reported only: auth-workload" in closing["body"]
 
 
 def test_main_without_artifacts_reports_the_setup_stage() -> None:
