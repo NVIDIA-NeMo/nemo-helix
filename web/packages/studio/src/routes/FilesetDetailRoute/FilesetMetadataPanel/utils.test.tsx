@@ -4,6 +4,7 @@
 import type { FilesetOutput, HuggingfaceStorageConfig } from '@nemo/sdk/generated/platform/schema';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { getMetadataSections } from '@studio/routes/FilesetDetailRoute/FilesetMetadataPanel/utils';
+import { render, screen } from '@studio/tests/util/render';
 import { isValidElement } from 'react';
 
 const huggingfaceFileset: FilesetOutput = {
@@ -122,6 +123,30 @@ describe('getMetadataSections', () => {
     it('omits model entity sections when entities array is empty', () => {
       const sections = getMetadataSections(huggingfaceFileset, undefined, []);
       expect(sections.filter((s) => s.value.startsWith('model-entity-'))).toHaveLength(0);
+    });
+  });
+
+  describe('HuggingFace Source link', () => {
+    const sourceHref = (storage: Partial<HuggingfaceStorageConfig>) => {
+      const fileset = {
+        ...huggingfaceFileset,
+        storage: { type: 'huggingface', ...storage } as HuggingfaceStorageConfig,
+      };
+      const row = findRow(getMetadataSections(fileset, undefined, []), 'source', 'Source');
+      render(<>{row?.value}</>);
+      return screen.getByRole('link', { name: storage.repo_id }).getAttribute('href');
+    };
+
+    it('links a dataset repo to its /datasets/ page', () => {
+      expect(
+        sourceHref({ repo_id: 'nvidia/Nemotron-Cascade-2-SFT-Data', repo_type: 'dataset' })
+      ).toBe('https://huggingface.co/datasets/nvidia/Nemotron-Cascade-2-SFT-Data');
+    });
+
+    it('keeps a model repo at the huggingface.co root', () => {
+      expect(sourceHref({ repo_id: 'meta-llama/Llama-2-7b', repo_type: 'model' })).toBe(
+        'https://huggingface.co/meta-llama/Llama-2-7b'
+      );
     });
   });
 });
