@@ -9,7 +9,7 @@ from nemo_helix_ext.quickstart.progress import describe_training_progress, statu
 
 
 def _status(state: str, steps: list | None = None) -> SimpleNamespace:
-    return SimpleNamespace(status=state, steps=steps or [])
+    return SimpleNamespace(id="platform-job-original", status=state, steps=steps or [])
 
 
 def _step(name: str, state: str, details: dict) -> SimpleNamespace:
@@ -57,7 +57,7 @@ def test_wait_for_training_stops_when_the_job_completes(monkeypatch: pytest.Monk
 
     class _Jobs:
         def get_job_status(self, name: str, workspace: str) -> SimpleNamespace:
-            assert name == "job-a"
+            assert name == ("job-a" if len(statuses) == 2 else "platform-job-original")
             assert workspace == "default"
             return SimpleNamespace(data=lambda: statuses.pop(0))
 

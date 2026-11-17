@@ -348,7 +348,7 @@ def test_legacy_definition_description_update_and_attempt_access(mixed_jobs, col
     assert response.status_code == 200, response.text
     assert response.json()["description"] == "updated"
     assert jobs.get_job.await_count == 1
-    assert jobs.update_job.await_args.kwargs["name"] == name
+    assert jobs.update_job.await_args.kwargs["name"] == records[name].id
     attempt = SimpleNamespace(
         id="old-attempt",
         name="old-attempt",
