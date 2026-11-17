@@ -99,9 +99,24 @@ class Run:
         return f"{self.server_url}/{self.repo}/actions/runs/{run_id}"
 
 
+def images_ready(needs: Mapping[str, Mapping[str, Any]]) -> bool:
+    """This run built the images, or skipped the build because ``find-images`` found them in GHCR."""
+    build = (needs.get("build-images") or {}).get("result")
+    found = ((needs.get("find-images") or {}).get("outputs") or {}).get("found") == "true"
+    return build == "success" or (build == "skipped" and found)
+
+
+def is_green(needs: Mapping[str, Mapping[str, Any]]) -> bool:
+    """Every job succeeded, but for a build skipped for images already in GHCR."""
+    jobs_green = all(job.get("result") == "success" for name, job in needs.items() if name != "build-images")
+    return jobs_green and images_ready(needs)
+
+
 def failure_stage(needs: Mapping[str, Mapping[str, Any]], junit: str) -> str:
     """The job that failed before the test, or the ``[stage]`` the test's own failure message names."""
-    if (needs.get("build-images") or {}).get("result") != "success":
+    if "find-images" in needs and needs["find-images"].get("result") != "success":
+        return "find-images"
+    if not images_ready(needs):
         return "build-images"
     if match := STAGE_IN_FAILURE.search(junit):
         return match.group(1)
@@ -164,7 +179,7 @@ def report(
 
     ``rows`` maps each matrix row to its own JUnit (None without one), for the failed-rows line.
     """
-    green = all(job.get("result") == "success" for job in run.needs.values())
+    green = is_green(run.needs)
     stage = None if green else failure_stage(run.needs, junit)
     if green:
         failed = []
