@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import {
   getDataDesignerListCreateJobsQueryKey,
   useDataDesignerDeleteCreateJob,
 } from '@nemo/sdk/generated/data-designer/data-designer';
 import type { CreateJob as DataDesignerJob } from '@nemo/sdk/generated/data-designer/schema';
-import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
+import { getDeleteJobsDescription } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useQueryClient } from '@tanstack/react-query';
 import type { FC } from 'react';
@@ -30,9 +31,9 @@ export const DeleteJobModal: FC<DeleteJobModalProps> = ({ jobs, onClose, onDelet
     },
   });
 
-  const handleDelete = async (jobsToDelete: DataDesignerJob[]) => {
+  const handleDelete = async () => {
     await Promise.all(
-      jobsToDelete
+      jobs
         .filter((job) => job.workspace && job.name)
         .map(async (job) => {
           try {
@@ -45,14 +46,16 @@ export const DeleteJobModal: FC<DeleteJobModalProps> = ({ jobs, onClose, onDelet
         })
     );
     onDeleted?.();
+    return true;
   };
 
   return (
-    <BulkDeleteModal
-      items={jobs}
+    <DeleteConfirmationModal
       open={jobs.length > 0}
+      entity="Data Designer job"
+      ids={jobs.map((job) => job.name)}
+      description={getDeleteJobsDescription(jobs.length)}
       onDelete={handleDelete}
-      title={(count) => `Delete ${count} Data Designer Job${count !== 1 ? 's' : ''}`}
       onClose={onClose}
     />
   );

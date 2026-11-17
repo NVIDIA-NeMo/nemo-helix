@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { asNonEmptyString } from '@nemo/common/src/utils/asString';
 import {
   asBoolean,
   asNumber,
-  asString,
   parseRawAttributes,
 } from '@studio/components/IntakeDetail/SpanTemplates/rawAttributes';
 import {
@@ -30,7 +30,7 @@ const formatParamValue = (value: unknown): string | undefined => {
 
 /** Parse the OpenInference `llm.invocation_parameters` JSON blob into a record. */
 const parseInvocationParameters = (value: unknown): Record<string, unknown> => {
-  const raw = asString(value);
+  const raw = asNonEmptyString(value);
   if (!raw) return {};
   try {
     const parsed: unknown = JSON.parse(raw);

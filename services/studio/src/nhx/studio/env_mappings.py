@@ -122,11 +122,6 @@ ENV_MAPPINGS: list[EnvMapping] = [
         default="false",
     ),
     EnvMapping(
-        marker="STUDIO_UI_VITE_FF_INFERENCE_PROVIDER_ENABLED",
-        config_path="studio.feature_flags.inference_provider_enabled",
-        default="true",
-    ),
-    EnvMapping(
         marker="STUDIO_UI_VITE_FF_INTAKE_ENABLED", config_path="studio.feature_flags.intake_enabled", default="true"
     ),
     EnvMapping(

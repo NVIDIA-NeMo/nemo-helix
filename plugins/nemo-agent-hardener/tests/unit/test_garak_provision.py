@@ -121,7 +121,7 @@ def test_default_install_is_a_plain_pypi_install(tmp_path: Path, monkeypatch: py
         "allow",
         "--python",
         str(cfg.venv_path / "bin" / "python"),
-        "nvidia-agent-hardener>=0.0.17",
+        "nvidia-agent-hardener>=0.0.18",
     ]
 
 
@@ -131,7 +131,7 @@ def test_existing_venv_rechecks_configured_requirement(
 ) -> None:
     cfg = AgentHardenerConfig(
         venv_path=tmp_path / "venv",
-        spec="nvidia-agent-hardener>=0.0.17",
+        spec="nvidia-agent-hardener>=0.0.18",
         index_url="private=https://registry.example/simple",
         index_strategy="unsafe-best-match",
     )

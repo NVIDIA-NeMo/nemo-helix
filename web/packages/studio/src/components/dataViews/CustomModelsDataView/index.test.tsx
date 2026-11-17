@@ -128,8 +128,10 @@ describe('CustomModelsDataView', () => {
     await user.click(within(menu).getByRole('menuitem', { name: 'Delete Adapter' }));
 
     // Confirm deletion in the modal
-    expect(await screen.findByRole('dialog')).toHaveTextContent('Delete Adapter');
-    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(
+      await screen.findByRole('heading', { name: `Delete adapter '${adapterName}'?` })
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Delete Adapter' }));
 
     await waitFor(() => {
       expect(adapterDeleteHandler).toHaveBeenCalledWith(

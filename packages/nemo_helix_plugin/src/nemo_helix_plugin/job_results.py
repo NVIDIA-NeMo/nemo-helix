@@ -17,7 +17,7 @@ Concrete impls living in this codebase:
   results as platform artefacts.
 
 The API is deliberately narrow: a single ``save(name, local_path, *,
-ignore_patterns=None) -> ResultRef``. Read paths (``get`` / ``list``)
+ignore_patterns=None, stage=False) -> ResultRef``. Read paths (``get`` / ``list``)
 are not on the Protocol — task code that needs to enumerate results
 goes through the typed Jobs client.
 """
@@ -61,6 +61,8 @@ class _ResultManager(Protocol):
         result_name: str,
         artifact_local_path: str | Path,
         ignore_patterns: list[str] | str | None = None,
+        *,
+        stage: bool = False,
     ) -> HelixJobResultResponse: ...
 
 
@@ -110,7 +112,13 @@ class JobResults(ABC):
         local_path: str | Path,
         *,
         ignore_patterns: list[str] | str | None = None,
-    ) -> ResultRef: ...
+        stage: bool = False,
+    ) -> ResultRef:
+        """Publish ``local_path`` as result ``name``.
+
+        Set ``stage`` when other processes may still change a directory's files: the platform copies the
+        selected files to a temporary directory beside it first and uploads that copy.
+        """
 
 
 class LocalJobResults(JobResults):
@@ -130,6 +138,7 @@ class LocalJobResults(JobResults):
     Directories are copied recursively; ``ignore_patterns`` uses the same
     matching rules as hosted uploads so callers can skip cache files (matches
     the evaluator's ``ignore_patterns=["cache.db", "cache/"]`` usage).
+    ``stage`` is accepted for API parity and ignored: the local copy is the published result.
     """
 
     def __init__(self, root: Path) -> None:
@@ -141,6 +150,7 @@ class LocalJobResults(JobResults):
         local_path: str | Path,
         *,
         ignore_patterns: list[str] | str | None = None,
+        stage: bool = False,
     ) -> ResultRef:
         src = Path(local_path)
         if not src.exists():
@@ -268,11 +278,13 @@ class HelixJobResults(JobResults):
         local_path: str | Path,
         *,
         ignore_patterns: list[str] | str | None = None,
+        stage: bool = False,
     ) -> ResultRef:
         record = self._manager.create_result(
             result_name=name,
             artifact_local_path=local_path,
             ignore_patterns=ignore_patterns,
+            stage=stage,
         )
         logger.info(
             "Saved result %r to %s for job %r in workspace %r",

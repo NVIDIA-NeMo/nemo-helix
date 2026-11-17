@@ -3,6 +3,7 @@
 
 import type { StatTileDiagnosticProps, StatTileStatus } from '@nemo/common/src/components/StatTile';
 import { formatFileSize } from '@nemo/common/src/components/UploadModal/utils';
+import { asNonEmptyString } from '@nemo/common/src/utils/asString';
 import { formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
 import { ShapeCircle, GpuCard } from '@nemo/icons/icons';
@@ -184,9 +185,6 @@ export const getCustomizationTrainingProgress = (customization: CustomizationJob
 
 const asFiniteNumber = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-
-const asNonEmptyString = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.length > 0 ? value : undefined;
 
 export const getTrainingTelemetry = (
   job: CustomizationJob | null | undefined

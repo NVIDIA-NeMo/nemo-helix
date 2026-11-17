@@ -46,7 +46,10 @@ describe('DeploymentActions', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
     const dialog = await screen.findByRole('dialog');
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    expect(
+      within(dialog).getByRole('heading', { name: "Delete deployment 'my-deployment'?" })
+    ).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete Deployment' }));
 
     expect(deleteDeploymentAndConfig).toHaveBeenCalledWith(deployment);
   });

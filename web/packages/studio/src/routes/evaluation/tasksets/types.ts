@@ -2,14 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Task } from '@nemo/sdk/generated/evals/schema';
-
-/** A task reference split into its parts: `[workspace/]name[#revision]`. */
-export interface TaskRefParts {
-  workspace: string;
-  name: string;
-  /** Pinned revision digest or tag; absent when the ref follows the latest revision. */
-  version?: string;
-}
+import type { TaskRefParts } from '@studio/routes/evaluation/tasks/types';
 
 /** One taskset member: its stored ref, and the task record when it resolved. */
 export interface TasksetTaskRow extends TaskRefParts {

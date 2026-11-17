@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { asNonEmptyString } from '@nemo/common/src/utils/asString';
 import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { agentNameForTarget } from '@studio/api/evaluation/agentTarget';
 import { type EvalRunOutcome, evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
@@ -26,9 +27,6 @@ export interface EvalJobRow {
   /** The evaluator's run rollup from the job's status details; null for jobs that predate it. */
   outcome: EvalRunOutcome | null;
 }
-
-const asNonEmptyString = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.length > 0 ? value : undefined;
 
 const specOf = (job: HelixJobResponse): Record<string, unknown> => job.spec ?? {};
 

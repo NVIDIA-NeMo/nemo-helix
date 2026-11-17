@@ -59,7 +59,6 @@ describe('DashboardLandingRoute', () => {
     vi.clearAllMocks();
     mockFeatureFlags({
       guardrailsEnabled: true,
-      inferenceProviderEnabled: true,
     });
   });
 

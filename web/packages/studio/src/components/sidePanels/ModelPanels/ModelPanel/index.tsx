@@ -24,6 +24,7 @@ import {
   type ModelDetailOverviewProps,
   ModelParametersAccordion,
 } from '@studio/components/sidePanels/ModelPanels/ModelPanel/components';
+import { DELETE_MODEL_DESCRIPTION } from '@studio/constants/models';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   type ComponentProps,
@@ -212,12 +213,9 @@ export const ModelPanel: FC<ModelPanelProps> = ({
             </Flex>
             <DeleteConfirmationModal
               open={deleteModalOpen}
-              title={`Delete model: ${model.name}`}
-              description="This permanently removes the model entity from the workspace. Related deployments and resources may be affected."
-              confirmationText={model.name}
-              simpleConfirm
-              successText={`Successfully deleted model ${model.name}`}
-              errorText="Failed to delete the model. Try again or check your permissions."
+              entity="model"
+              ids={[model.name]}
+              description={DELETE_MODEL_DESCRIPTION}
               onClose={() => setDeleteModalOpen(false)}
               onDelete={handleDeleteModel}
             />

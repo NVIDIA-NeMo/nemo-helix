@@ -169,7 +169,7 @@ export function resolveConfigModel(config: RailsConfig | undefined, configLabel:
 }
 
 /** What the run targeted, for stamping onto the record. */
-export interface RunRecordContext {
+interface RunRecordContext {
   /** Parent config db_version. Omitted for a draft run — a draft has no version. */
   configVersion?: number;
   /** True when the run targeted an unsaved draft. */

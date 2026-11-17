@@ -12,7 +12,6 @@ describe('getStudioUiNavigationSuggestion', () => {
       customizerEnabled: true,
       evalsEnabled: true,
       guardrailsEnabled: true,
-      inferenceProviderEnabled: true,
       intakeEnabled: true,
       monitorEnabled: true,
     });

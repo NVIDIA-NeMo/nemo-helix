@@ -8,6 +8,7 @@ import time
 
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nhx.common.client_factory import get_nemo_client
 from nhx.common.config import get_platform_config
 from nhx.common.controller import ControllerManager, Loop, TimedLoopWaiter, TrackLastExecutionTime
@@ -71,6 +72,7 @@ def run(parent_stop_signal: threading.Event | None = None):
     # Job scheduling loop
     admission = ConcurrencyAdmission(
         JobsClient.from_client(nemo_client),
+        WorkspacesClient.from_client(nemo_client),
         executor_limits={
             (p.provider, p.profile): limit
             for p in profiles

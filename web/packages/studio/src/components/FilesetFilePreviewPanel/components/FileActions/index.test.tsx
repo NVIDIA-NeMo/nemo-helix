@@ -19,15 +19,6 @@ vi.mock('@studio/components/FilesTable/CreateFileSplitsModal', () => ({
   CreateFileSplitsModal: () => <div data-testid="create-file-splits-modal" />,
 }));
 
-vi.mock('@nemo/common/src/components/DeleteConfirmationModal', () => ({
-  DeleteConfirmationModal: vi.fn(({ open, title }) => {
-    if (!open) {
-      return null;
-    }
-    return <div data-testid="delete-confirmation-modal">{title}</div>;
-  }),
-}));
-
 describe('FileActions', () => {
   const file: FileSystemFile = { type: 'file', path: 'folder/data.json', size: 100, oid: 'oid-1' };
 
@@ -59,6 +50,8 @@ describe('FileActions', () => {
     await openMenu(user);
     await user.click(screen.getByText('Delete'));
 
-    expect(screen.getByTestId('delete-confirmation-modal')).toHaveTextContent('Delete File');
+    expect(
+      await screen.findByRole('heading', { name: "Delete file 'folder/data.json'?" })
+    ).toBeInTheDocument();
   });
 });

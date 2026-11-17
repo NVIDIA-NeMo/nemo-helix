@@ -46,20 +46,6 @@ vi.mock('@studio/routes/FilesetListRoute/ActionMenu', () => ({
   )),
 }));
 
-vi.mock('@studio/components/BulkDeleteModal', () => ({
-  BulkDeleteModal: vi.fn(({ items, open, onClose }) =>
-    open ? (
-      <div data-testid="bulk-delete-modal">
-        <span>Bulk Delete Modal</span>
-        <span data-testid="selected-datasets-count">{items.length}</span>
-        <button onClick={() => onClose?.()} data-testid="confirm-bulk-delete">
-          Confirm Delete
-        </button>
-      </div>
-    ) : null
-  ),
-}));
-
 // Mock the route utils
 vi.mock('@studio/routes/utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@studio/routes/utils')>();

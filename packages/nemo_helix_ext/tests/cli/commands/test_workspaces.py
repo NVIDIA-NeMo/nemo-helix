@@ -874,7 +874,7 @@ def test_unknown_input_field_is_a_usage_error() -> None:
 
     assert result.exit_code == 2, result.output
     assert "Unknown input fields: descripton" in result.stderr
-    assert "Accepted fields: description, name" in result.stderr
+    assert "Accepted fields: description, limits, name" in result.stderr
     assert recorder.requests == []
 
 

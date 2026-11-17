@@ -3,6 +3,11 @@
 
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 
+export const getDeleteJobsDescription = (count: number) =>
+  count === 1
+    ? "The job is removed from this workspace and can't be restored."
+    : "The jobs are removed from this workspace and can't be restored.";
+
 export const STATUS_FILTER_OPTIONS = [
   { value: HelixJobStatus.created, label: 'Created' },
   { value: HelixJobStatus.queued, label: 'Queued' },

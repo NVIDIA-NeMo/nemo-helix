@@ -21,7 +21,7 @@ from nemo_gym.base_resources_server import (  # ty: ignore[unresolved-import]
 
 # Gym starts the server from this directory; the explicit path also covers an import from elsewhere.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import scoring  # noqa: E402
+import scoring  # noqa: E402  # ty: ignore[unresolved-import]
 
 
 class FinanceQAConfig(BaseResourcesServerConfig):
