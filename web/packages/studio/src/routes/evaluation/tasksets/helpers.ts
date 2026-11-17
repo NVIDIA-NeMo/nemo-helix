@@ -7,6 +7,7 @@ import type {
   TaskFilters,
   TasksetTaskRow,
 } from '@studio/routes/evaluation/tasksets/types';
+import type { QueryClient } from '@tanstack/react-query';
 
 export const parseFilesRef = (ref: string): FilesRefParts => {
   const [path, file] = ref.split('#');
@@ -48,4 +49,12 @@ export const matchesTaskFilters = (
     if (!pairs.some((pair) => includesText(pair, metadata))) return false;
   }
   return true;
+};
+
+/** Refetches every taskset query in the workspace: lists, records, and revisions. */
+export const invalidateTasksets = (queryClient: QueryClient, workspace: string) => {
+  const prefix = `/apis/evals/v2/workspaces/${workspace}/tasksets`;
+  return queryClient.invalidateQueries({
+    predicate: ({ queryKey: [url] }) => typeof url === 'string' && url.startsWith(prefix),
+  });
 };
