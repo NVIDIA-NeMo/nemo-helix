@@ -7,7 +7,7 @@ import {
   getEvalsListTasksQueryOptions,
 } from '@nemo/sdk/generated/evals/evals-plugin-tasks-routes';
 import type { Task, TaskFilter } from '@nemo/sdk/generated/evals/schema';
-import { taskRef } from '@studio/routes/evaluation/tasksets/helpers';
+import { taskRef } from '@studio/routes/evaluation/taskHelpers';
 import type { TasksetTaskRow } from '@studio/routes/evaluation/tasksets/types';
 import { type UseQueryResult, useQueries } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';

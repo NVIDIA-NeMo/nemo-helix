@@ -13,6 +13,7 @@ import {
   gateTasksetRoutes,
   getEvaluationResultsRoute,
   getTasksetsRoute,
+  getTasksRoute,
 } from '@studio/routes/utils';
 import { lazy } from 'react';
 import { Navigate, type RouteObject } from 'react-router';
@@ -43,6 +44,16 @@ const EvaluationNewRoute = lazy(() =>
   }))
 );
 
+const TaskListRoute = lazy(() =>
+  import('@studio/routes/evaluation/tasks/TaskListRoute').then((module) => ({
+    default: module.TaskListRoute,
+  }))
+);
+const TaskDetailRoute = lazy(() =>
+  import('@studio/routes/evaluation/tasks/TaskDetailRoute').then((module) => ({
+    default: module.TaskDetailRoute,
+  }))
+);
 const TasksetListRoute = lazy(() =>
   import('@studio/routes/evaluation/tasksets/TasksetListRoute').then((module) => ({
     default: module.TasksetListRoute,
@@ -94,16 +105,27 @@ export const evaluationRoutes: RouteObject[] = gateEvaluationRoutes([
       element: <TasksetListRoute />,
       errorElement: <RouteErrorPanel title="Tasksets" />,
     },
-    {
-      path: ROUTES.workspace.tasksetDetail,
+    ...[ROUTES.workspace.tasksetDetail, ROUTES.workspace.tasksetDetailTab].map((path) => ({
+      path,
       element: <TasksetDetailRoute />,
       errorElement: <RouteErrorPanel title="Taskset" />,
+    })),
+    {
+      path: ROUTES.workspace.tasks,
+      element: <TaskListRoute />,
+      errorElement: <RouteErrorPanel title="Tasks" />,
     },
+    ...[ROUTES.workspace.taskDetail, ROUTES.workspace.taskDetailTab].map((path) => ({
+      path,
+      element: <TaskDetailRoute />,
+      errorElement: <RouteErrorPanel title="Task" />,
+    })),
   ]),
 ]);
 
 const NavIcon = ENTITY_ICONS.evaluationResults;
 const TasksetsIcon = ENTITY_ICONS.tasksets;
+const TasksIcon = ENTITY_ICONS.tasks;
 
 export const getEvaluationSideNavItems = (workspace: string) =>
   EVALS_ENABLED
@@ -117,7 +139,7 @@ export const getEvaluationSideNavItems = (workspace: string) =>
       ]
     : [];
 
-/** Tasksets sit in the Evaluations nav group, beside the Experiments they feed. */
+/** Tasksets and the tasks they group sit in the Evaluations nav group, beside the Experiments they feed. */
 export const getTasksetSideNavItems = (workspace: string) =>
   EVALS_ENABLED && TASKSETS_ENABLED
     ? [
@@ -126,6 +148,12 @@ export const getTasksetSideNavItems = (workspace: string) =>
           slotIcon: <TasksetsIcon className={iconColorClass} />,
           slotLabel: 'Tasksets',
           href: getTasksetsRoute(workspace),
+        },
+        {
+          id: 'tasks',
+          slotIcon: <TasksIcon className={iconColorClass} />,
+          slotLabel: 'Tasks',
+          href: getTasksRoute(workspace),
         },
       ]
     : [];
