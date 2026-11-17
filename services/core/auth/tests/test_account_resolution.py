@@ -30,6 +30,53 @@ class _FakeStore:
         )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize(
+    ("kind", "claim", "delegated", "expected"),
+    [
+        ("workload_access_token", "act.sub", True, "service_principal"),
+        ("oidc_access_token", "act.sub", True, "principal"),
+        ("workload_subject_token", "act.sub", True, "principal"),
+        ("workload_access_token", "sub", True, "principal"),
+        ("workload_access_token", "act.sub", False, "principal"),
+    ],
+)
+async def test_workload_caller_kind_survives_account_resolution(
+    fake_store: "_FakeStore", cached: bool, kind: str, claim: str, delegated: bool, expected: str
+):
+    actor = "system:serviceaccount:qa:jobs"
+    auth_input = {
+        "principal_id": actor,
+        "identity_resolution": {
+            "principal": {
+                "kind": kind,
+                "issuer": "https://helix.example.com",
+                "subject": actor,
+                "subject_claim": claim,
+                "account_type": "user",
+                "authz_aliases": [actor],
+            },
+            "on_behalf_of": {
+                "kind": kind,
+                "issuer": "https://helix.example.com",
+                "subject": "creator",
+                "subject_claim": "sub",
+                "account_type": "user",
+            },
+        },
+    }
+    if delegated:
+        auth_input["on_behalf_of_principal_id"] = "creator"
+    if cached:
+        auth_input.update(actor_account_id="actor-account", actor_aliases=[actor])
+    context = await AccountResolver(AuthServiceConfig()).resolve_authz_input(auth_input)
+    assert context.caller_kind == expected
+    assert actor in context.actor_aliases
+    assert context.subject_account_id == "account-for-creator"
+    assert all(call["account_type"] == "user" for call in fake_store.calls)
+
+
 @pytest.fixture
 def fake_store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
     store = _FakeStore()

@@ -139,7 +139,8 @@ role_applies_to_principal(role_name, principal) if {
 role_applies_to_identity(role_name, principal, actor_side) if {
 	not object.get(data.authz.roles[role_name], "service_only", false)
 } else if {
-	valid_service_principal(principal)
+	# caller_kind is supplied by authentication after verifying the bearer.
+	# Delegated Kubernetes/Docker actors retain their real ids, not service: aliases.
 	principal == extract_principal_id
 	request_caller_kind == "service_principal"
 	service_role_context_allowed(actor_side)

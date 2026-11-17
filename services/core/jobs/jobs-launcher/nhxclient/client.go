@@ -11,9 +11,11 @@ to support the jobs-launcher service.
 */
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -53,11 +55,11 @@ func PrincipalFromEnv() *Principal {
 }
 
 func getSecretURL(baseURL, workspace, secretName string) string {
-	return fmt.Sprintf("%s/apis/secrets/v2/workspaces/%s/secrets/%s/access", baseURL, workspace, secretName)
+	return fmt.Sprintf("%s/apis/secrets/v2/workspaces/%s/secrets/%s/access", baseURL, url.PathEscape(workspace), url.PathEscape(secretName))
 }
 
 type SecretClient interface {
-	GetSecret(workspaceID, secretName string) (*HelixSecretAccessResponse, error)
+	GetSecret(ctx context.Context, workspaceID, secretName string) (*HelixSecretAccessResponse, error)
 }
 
 type secretClient struct {
@@ -85,10 +87,10 @@ func NewSecretClientForEndpoint(endpoint Endpoint, principal *Principal) SecretC
 	return NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, endpoint.HTTPClient())
 }
 
-func (c *secretClient) GetSecret(workspaceID, secretName string) (*HelixSecretAccessResponse, error) {
+func (c *secretClient) GetSecret(ctx context.Context, workspaceID, secretName string) (*HelixSecretAccessResponse, error) {
 	secretURL := getSecretURL(c.apiBaseURL, workspaceID, secretName)
 
-	req, err := http.NewRequest("GET", secretURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", secretURL, nil)
 	if err != nil {
 		return nil, err
 	}

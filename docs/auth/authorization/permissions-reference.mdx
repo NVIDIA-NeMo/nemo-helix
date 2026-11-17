@@ -107,7 +107,8 @@ HelixAdmin is omitted — it bypasses permission checks entirely at the policy l
 | ------------ | ------------- | :------: | :------: | :------: | :------: |
 | <code>secrets.(read &#124; list)</code> | Read, list secrets | ✓ | ✓ | ✓ |  |
 | <code>secrets.(create &#124; update &#124; delete)</code> | Create, update, delete secrets |  | ✓ | ✓ |  |
-| <code>secrets.(access &#124; rotate)</code> | Access, rotate secrets |  |  |  |  |
+| `secrets.access` | Access secret values (service principals only) |  |  |  | ✓ |
+| `secrets.rotate` | Rotate encryption keys |  |  |  |  |
 
 ## Workspaces API
 

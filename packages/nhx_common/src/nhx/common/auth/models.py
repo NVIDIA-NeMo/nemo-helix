@@ -174,9 +174,25 @@ class Principal(BaseModel):
         description="Alternate trusted identifiers for the on-behalf-of principal",
     )
 
+    credential_scopes: list[str] | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+        description="Authentication-owned scope ceiling retained across Job delegation",
+    )
+
+    verified_workload_delegation: bool = Field(
+        default=False,
+        exclude=True,
+        repr=False,
+        description="Authentication-owned fact from a verified Helix workload access token",
+    )
+
     @property
     def caller_kind(self) -> CallerKind:
         """Whether the caller is a service principal, derived from the trusted principal id."""
+        if self.verified_workload_delegation and self.is_delegated:
+            return "service_principal"
         if not self.id:
             return "principal"
         return parse_principal_identifier(self.id, validate=False).caller_kind
@@ -223,6 +239,7 @@ class Principal(BaseModel):
             email=self.effective_email,
             account_id=self.effective_account_id,
             authz_aliases=self.effective_authz_aliases,
+            credential_scopes=self.credential_scopes,
         )
 
     @property
@@ -473,6 +490,9 @@ class AuthContext(BaseModel):
     can later act on their behalf (e.g., accessing secrets).
     """
 
+    credential_scopes: list[str] | None = Field(
+        default=None, description="Original credential scope ceiling retained for delegated execution"
+    )
     principal_id: str = Field(..., description="The principal's unique identifier")
     principal_account_id: Optional[str] = Field(
         default=None,
@@ -506,6 +526,7 @@ class AuthContext(BaseModel):
     def from_principal(cls, principal: Principal) -> Self:
         """Create from a runtime Principal."""
         return cls(
+            credential_scopes=principal.credential_scopes,
             principal_id=principal.id,
             principal_account_id=principal.account_id,
             principal_email=principal.email,
@@ -521,6 +542,7 @@ class AuthContext(BaseModel):
     def to_principal(self) -> Principal:
         """Convert back to a Principal for SDK calls."""
         return Principal(
+            credential_scopes=self.credential_scopes,
             id=self.principal_id,
             account_id=self.principal_account_id,
             email=self.principal_email,

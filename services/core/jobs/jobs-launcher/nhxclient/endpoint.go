@@ -84,5 +84,8 @@ func (e Endpoint) HTTPClient() *http.Client {
 			return (&net.Dialer{}).DialContext(ctx, "unix", e.SocketPath)
 		},
 	}
-	return &http.Client{Transport: transport}
+	return &http.Client{Transport: &unixSocketTransport{transport}}
 }
+
+// Distinguishes the configured Unix socket from an ordinary TCP transport.
+type unixSocketTransport struct{ *http.Transport }

@@ -1833,3 +1833,42 @@ def test_kubernetes_subject_token_decoder_rejects_ambiguous_pod_uid_reference(
         asyncio.run(
             exchange._decode_kubernetes_subject_token(exchange_config, "kubernetes-subject-token", "nemo-helix")
         )
+
+
+@pytest.mark.parametrize("kind", ["job", "deployment", None])
+def test_runtime_job_binding_is_only_issued_for_a_recorded_job(kind: str | None) -> None:
+    delegation = _delegation_entity(workload_kind=kind)
+    verified = exchange.VerifiedSubjectToken(subject="system:serviceaccount:qa:jobs", groups=[])
+    claims = exchange._build_delegated_claims(delegation, verified)
+    if kind == "job":
+        assert claims["nhx_workload"] == {
+            "workspace": "default",
+            "job": "job-123",
+            "attempt": "attempt-1",
+            "step": "step-a",
+        }
+    else:
+        assert "nhx_workload" not in claims
+    assert claims["act"]["sub"] == verified.subject
+
+
+def test_delegation_retains_creator_credential_scope_ceiling() -> None:
+    creator = Principal(id="creator@example.com", credential_scopes=["evals:write", "inference:write"])
+    context = PluginAuthContext.from_principal(creator)
+    assert context.to_principal().effective_principal.credential_scopes == creator.credential_scopes
+    delegation = _delegation_entity(workload_kind="job", auth_context=context)
+    verified = exchange.VerifiedSubjectToken(subject="system:serviceaccount:qa:jobs", groups=[])
+    claims = exchange._build_delegated_claims(delegation, verified)
+    assert claims["nhx_credential_scopes"] == creator.credential_scopes
+
+
+def test_delegation_retains_creator_stable_account_identity() -> None:
+    creator = Principal(
+        id="creator@example.com", account_id="account-original", authz_aliases=["creator@example.com", "oidc-subject"]
+    )
+    context = PluginAuthContext.from_principal(creator)
+    delegation = _delegation_entity(workload_kind="job", auth_context=context)
+    verified = exchange.VerifiedSubjectToken(subject="system:serviceaccount:qa:jobs", groups=[])
+    claims = exchange._build_delegated_claims(delegation, verified)
+    assert claims["nhx_subject_account_id"] == creator.account_id
+    assert claims["nhx_subject_aliases"] == creator.authz_aliases

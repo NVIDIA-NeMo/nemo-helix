@@ -74,3 +74,22 @@ async def test_exec_reports_command_failure(tmp_path: Path) -> None:
         await sandbox.start()
         result = await sandbox.exec("exit 7")
         assert not result.ok and result.return_code == 7 and result.error_type is None
+
+
+@pytest.mark.parametrize("mode", [0o600, 0o700])
+async def test_private_upload_is_owned_by_nonroot_agent(tmp_path: Path, mode: int) -> None:
+    source = tmp_path / "private.sh"
+    source.write_text("#!/bin/sh\nprintf private-upload-ok\n", encoding="utf-8")
+    source.chmod(mode)
+    provider = DockerSandboxProvider(extra_run_args=["--user", "1000:1000"])
+    async with AsyncSandbox(provider, SandboxSpec(image="busybox:1.37.0-musl", workdir="/tmp")) as sandbox:
+        await sandbox.start()
+        await sandbox.upload_file(source, "/tmp/private-upload.sh")
+        observed = await sandbox.exec("stat -c '%u:%g %a' /tmp/private-upload.sh")
+        assert observed.ok and observed.stdout is not None
+        assert observed.stdout.strip() == f"1000:1000 {mode:o}"
+        read = await sandbox.exec("cat /tmp/private-upload.sh")
+        assert read.ok and read.stdout == source.read_text(encoding="utf-8")
+        if mode & 0o100:
+            executed = await sandbox.exec("/tmp/private-upload.sh")
+            assert executed.ok and executed.stdout == "private-upload-ok"

@@ -102,6 +102,9 @@ class AuthContext(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    credential_scopes: list[str] | None = Field(
+        default=None, description="Original credential scope ceiling retained for delegated execution"
+    )
     principal_id: str = Field(..., description="The principal's unique identifier")
     principal_account_id: str | None = Field(
         default=None, description="Stable NeMo account identifier for the principal"
@@ -172,6 +175,7 @@ class AuthContext(BaseModel):
     def from_principal(cls, principal: RuntimePrincipal) -> Self:
         """Create from a runtime Principal-like value."""
         return cls(
+            credential_scopes=getattr(principal, "credential_scopes", None),
             principal_id=principal.id,
             principal_account_id=principal.account_id,
             principal_email=principal.email,
@@ -201,6 +205,7 @@ class AuthContext(BaseModel):
         from nhx.common.auth.models import Principal
 
         return Principal(
+            credential_scopes=self.credential_scopes,
             id=self.principal_id,
             account_id=self.principal_account_id,
             email=self.principal_email,
@@ -322,3 +327,18 @@ __all__ = [
     "platform_auth_enabled",
     "verified_access_key_claims",
 ]
+
+
+def current_workload_token_claims() -> dict[str, Any] | None:
+    """Verified workload claims for the active request, never caller-supplied headers."""
+    try:
+        from nhx.common.auth.dependencies import auth_client_context
+    except ImportError:
+        return None
+    auth_client = auth_client_context.get()
+    if auth_client is None or not auth_client.auth_enabled:
+        return None
+    resolved = auth_client.resolved_bearer_token
+    if resolved is None or resolved.token_kind != "workload_access_token":
+        return None
+    return dict(resolved.claims.raw_claims)

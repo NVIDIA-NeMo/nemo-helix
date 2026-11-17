@@ -50,14 +50,28 @@ def _workload_access_principal_from_claims(claims: TokenClaims) -> Principal:
                 authz_aliases=[alias for alias in aliases if isinstance(alias, str)],
             )
         return _direct_principal_from_claims(claims)
+    account_id = claims.raw_claims.get("nhx_subject_account_id")
+    aliases = claims.raw_claims.get("nhx_subject_aliases")
+    subject_account_id: str | None = None
+    subject_aliases = _identity_aliases(claims.subject, claims.email)
+    if (
+        isinstance(account_id, str)
+        and account_id
+        and isinstance(aliases, list)
+        and all(isinstance(a, str) for a in aliases)
+    ):
+        subject_account_id = account_id
+        subject_aliases = [alias for alias in aliases if isinstance(alias, str)]
     return Principal(
         id=claims.actor.subject,
+        verified_workload_delegation=True,
         groups=claims.actor.groups,
         authz_aliases=[claims.actor.subject],
         on_behalf_of=claims.subject,
+        on_behalf_of_account_id=subject_account_id,
         on_behalf_of_email=claims.email,
         on_behalf_of_groups=claims.groups,
-        on_behalf_of_authz_aliases=_identity_aliases(claims.subject, claims.email),
+        on_behalf_of_authz_aliases=subject_aliases,
     )
 
 
@@ -69,8 +83,18 @@ class ResolvedBearerToken:
     @property
     def principal(self) -> Principal:
         if self.token_kind == "workload_access_token":
-            return _workload_access_principal_from_claims(self.claims)
-        return _direct_principal_from_claims(self.claims)
+            principal = _workload_access_principal_from_claims(self.claims)
+            scopes = self.claims.raw_claims.get("nhx_credential_scopes")
+        else:
+            principal = _direct_principal_from_claims(self.claims)
+            # An empty scope on a legacy/access key means unrestricted. An
+            # explicitly empty signed delegation ceiling below is invalid.
+            scopes = (self.scopes or None) if self.token_kind == "access_key" else None
+        if scopes is not None:
+            if not isinstance(scopes, list) or not scopes or not all(isinstance(s, str) for s in scopes):
+                raise ValueError("Invalid delegated credential scopes")
+            principal.credential_scopes = list(scopes)
+        return principal
 
     @property
     def scopes(self) -> list[str]:

@@ -32,8 +32,7 @@ from nemo_evals.jobs.agent_spec import (
 from nemo_evals.jobs.run_outcome import row_eval_outcome
 from nemo_evals.jobs.utils import run_with_isolated_async_client
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.entities import EntityBase, EntityClient
-from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entities import EntityBase
 from nemo_helix_plugin.job_context import JobContext
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary
 from nhx_evals_sdk.values import Agent, AgentBase, Model
@@ -43,14 +42,22 @@ from nhx_evals_sdk.values.results import EvaluationResult
 logger = logging.getLogger(__name__)
 
 
-def _entity_client(async_client: AsyncNemoClient | None) -> EntityClient | None:
-    """The standard async ``EntityClient`` for the job's async task SDK, or ``None`` if absent.
+class _ResultWriter:
+    def __init__(self, client: AsyncNemoClient) -> None:
+        self.client = client
 
-    ``None`` means no async task client was injected, so persistence is skipped.
-    """
-    if async_client is None:
-        return None
-    return EntityClient(AsyncEntitiesClient.from_client(async_client))
+    async def save(self, entity: AgentEvalResultEntity | EvaluateResultEntity) -> EntityBase:
+        from nemo_evals.jobs.runtime_client import EvalsRuntimeClient
+
+        await EvalsRuntimeClient.from_client(self.client).save_result(
+            workspace=entity.workspace, job=entity.name, body=entity
+        )
+        return entity
+
+
+def _entity_client(async_client: AsyncNemoClient | None) -> _ResultWriter | None:
+    """The Job-bound result writer, or None for an offline run."""
+    return _ResultWriter(async_client) if async_client is not None else None
 
 
 #: Query-parameter keys whose values are redacted before a target URL is persisted/returned.
@@ -109,7 +116,7 @@ def _row_target_fields(target: Model | Agent | None) -> tuple[str | None, str | 
     return None, None, None
 
 
-def _persist(entity: EntityBase, *, async_client: AsyncNemoClient | None) -> None:
+def _persist(entity: AgentEvalResultEntity | EvaluateResultEntity, *, async_client: AsyncNemoClient | None) -> None:
     if async_client is None:
         logger.info("No async task client injected; skipping result-entity persistence.")
         return
@@ -119,9 +126,9 @@ def _persist(entity: EntityBase, *, async_client: AsyncNemoClient | None) -> Non
     try:
 
         async def _save(client: AsyncNemoClient) -> EntityBase:
-            entity_client = _entity_client(client)
-            assert entity_client is not None
-            return await entity_client.save(entity)
+            writer = _entity_client(client)
+            assert writer is not None
+            return await writer.save(entity)
 
         run_with_isolated_async_client(async_client, _save)
     except Exception:

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from nhx.common.auth.models import Principal
 from nhx.common.auth.workload_tokens import (
+    JobWorkloadBinding,
+    ServiceWorkloadAccessTokenProvider,
     issue_service_workload_access_token_async,
     resolve_workload_access_token,
     resolve_workload_subject_token,
@@ -83,6 +86,8 @@ async def test_delegated_service_workload_access_token_preserves_obo_principal(t
     config = _token_exchange_config(tmp_path)
     creator = Principal(
         id="user:alice",
+        account_id="account-original",
+        authz_aliases=["user:alice", "alice@example.test"],
         email="alice@example.test",
         groups=["workspace-editors"],
     )
@@ -95,6 +100,48 @@ async def test_delegated_service_workload_access_token_preserves_obo_principal(t
     assert resolved.principal.on_behalf_of == "user:alice"
     assert resolved.principal.on_behalf_of_email == "alice@example.test"
     assert resolved.principal.on_behalf_of_groups == ["workspace-editors"]
+    assert resolved.principal.effective_principal.account_id == "account-original"
+    assert resolved.principal.effective_principal.authz_aliases == creator.authz_aliases
+    assert "nhx_workload" not in resolved.claims.raw_claims
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_job_bound_service_token_preserves_creator_scope_and_native_identity(
+    tmp_path: Path, asynchronous: bool
+) -> None:
+    config = _token_exchange_config(tmp_path)
+    creator = Principal(id="user:alice", credential_scopes=["evaluator:write", "inference:write"])
+    binding = JobWorkloadBinding("team", "job-one", "attempt-one", "evaluate")
+    provider = ServiceWorkloadAccessTokenProvider(config, "jobs", creator, job_binding=binding)
+    token = (
+        await provider.get_access_token_async() if asynchronous else await asyncio.to_thread(provider.get_access_token)
+    )
+    resolved = await resolve_workload_access_token(config, token)
+    assert resolved is not None
+    assert resolved.claims.raw_claims["nhx_workload"] == {
+        "workspace": "team",
+        "job": "job-one",
+        "attempt": "attempt-one",
+        "step": "evaluate",
+    }
+    assert resolved.principal.on_behalf_of == creator.id
+    assert resolved.principal.credential_scopes == creator.credential_scopes
+    assert resolved.claims.scopes == creator.credential_scopes
+
+
+@pytest.mark.parametrize(("service", "creator"), [("models", "user:alice"), ("jobs", None)])
+def test_job_binding_cannot_be_added_to_an_unrelated_or_undelegated_service_token(
+    tmp_path: Path, service: str, creator: str | None
+) -> None:
+    provider = ServiceWorkloadAccessTokenProvider(
+        _token_exchange_config(tmp_path),
+        service,
+        creator,
+        job_binding=JobWorkloadBinding("team", "job-one", "attempt-one", "evaluate"),
+    )
+    with pytest.raises(ValueError, match="jobs service and a delegated creator"):
+        provider.get_access_token()
 
 
 @pytest.mark.asyncio

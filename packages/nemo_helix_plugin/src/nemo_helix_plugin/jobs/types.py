@@ -125,6 +125,10 @@ class AuthContext(BaseModel):
     fields.
     """
 
+    credential_scopes: list[str] | None = Field(
+        default=None,
+        description="Original credential scope ceiling retained for delegated execution",
+    )
     principal_id: str = Field(..., description="The principal's unique identifier")
     principal_account_id: Optional[str] = Field(
         default=None, description="Stable NeMo account identifier for the principal"

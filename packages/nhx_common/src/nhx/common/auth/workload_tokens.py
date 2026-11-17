@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import httpx
@@ -39,10 +39,25 @@ class _SigningKeyLoadRequest:
 
 
 @dataclass(frozen=True)
+class JobWorkloadBinding:
+    """Native Job identity supplied by a trusted Jobs executor, never by child environment variables."""
+
+    workspace: str
+    job: str
+    attempt: str
+    step: str
+
+    def __post_init__(self) -> None:
+        if any(not value.strip() for value in asdict(self).values()):
+            raise ValueError("A Job workload binding requires workspace, job, attempt, and step")
+
+
+@dataclass(frozen=True)
 class ServiceWorkloadAccessTokenProvider(ServicePrincipalTokenProvider):
     config: AuthConfig
     service_name: str
     on_behalf_of: str | Principal | None = None
+    job_binding: JobWorkloadBinding | None = None
 
     @property
     def service_principal_id(self) -> str:
@@ -57,6 +72,7 @@ class ServiceWorkloadAccessTokenProvider(ServicePrincipalTokenProvider):
             self.config,
             service_name=self.service_name,
             on_behalf_of=self.on_behalf_of,
+            job_binding=self.job_binding,
         )
 
     async def get_access_token_async(self) -> str:
@@ -64,6 +80,7 @@ class ServiceWorkloadAccessTokenProvider(ServicePrincipalTokenProvider):
             self.config,
             service_name=self.service_name,
             on_behalf_of=self.on_behalf_of,
+            job_binding=self.job_binding,
         )
 
 
@@ -204,6 +221,9 @@ def granted_workload_scope(config: AuthConfig, requested_scope: Any) -> str | No
 
 def _principal_claims(principal: Principal) -> dict[str, Any]:
     claims: dict[str, Any] = {"sub": principal.id}
+    if principal.account_id:
+        claims["nhx_subject_account_id"] = principal.account_id
+        claims["nhx_subject_aliases"] = list(principal.authz_aliases)
     if principal.email:
         claims["email"] = principal.email
     if principal.groups:
@@ -211,7 +231,11 @@ def _principal_claims(principal: Principal) -> dict[str, Any]:
     return claims
 
 
-def _service_token_claims(service_name: str, on_behalf_of: str | Principal | None) -> dict[str, Any]:
+def _service_token_claims(
+    service_name: str, on_behalf_of: str | Principal | None, job_binding: JobWorkloadBinding | None = None
+) -> dict[str, Any]:
+    if job_binding is not None and (service_name != "jobs" or on_behalf_of is None):
+        raise ValueError("A Job workload binding requires the jobs service and a delegated creator")
     service_subject = f"service:{service_name}"
     if on_behalf_of is None:
         return {"sub": service_subject}
@@ -221,6 +245,10 @@ def _service_token_claims(service_name: str, on_behalf_of: str | Principal | Non
     else:
         subject_claims = {"sub": on_behalf_of}
     subject_claims["act"] = {"sub": service_subject}
+    if isinstance(on_behalf_of, Principal) and on_behalf_of.credential_scopes is not None:
+        subject_claims["nhx_credential_scopes"] = on_behalf_of.credential_scopes
+    if job_binding is not None:
+        subject_claims["nhx_workload"] = asdict(job_binding)
     return subject_claims
 
 
@@ -243,6 +271,8 @@ def _encode_access_token(
         "nbf": now,
         "exp": now + workload.token_ttl_seconds,
     }
+    if "nhx_credential_scopes" in subject_claims:
+        scope = " ".join(subject_claims["nhx_credential_scopes"])
     if scope:
         claims["scope"] = scope
     return jwt.encode(
@@ -258,12 +288,13 @@ def issue_service_workload_access_token(
     *,
     service_name: str,
     on_behalf_of: str | Principal | None = None,
+    job_binding: JobWorkloadBinding | None = None,
 ) -> str:
     signing_key = workload_signing_key(config)
     return _encode_access_token(
         config,
         signing_key,
-        subject_claims=_service_token_claims(service_name, on_behalf_of),
+        subject_claims=_service_token_claims(service_name, on_behalf_of, job_binding),
         scope=granted_workload_scope(config, None),
     )
 
@@ -273,12 +304,13 @@ async def issue_service_workload_access_token_async(
     *,
     service_name: str,
     on_behalf_of: str | Principal | None = None,
+    job_binding: JobWorkloadBinding | None = None,
 ) -> str:
     signing_key = await workload_signing_key_async(config)
     return _encode_access_token(
         config,
         signing_key,
-        subject_claims=_service_token_claims(service_name, on_behalf_of),
+        subject_claims=_service_token_claims(service_name, on_behalf_of, job_binding),
         scope=granted_workload_scope(config, None),
     )
 

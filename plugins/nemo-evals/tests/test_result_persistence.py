@@ -36,8 +36,7 @@ from nemo_evals.jobs.result_persistence import (
     persist_evaluate_result,
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.entities import EntityBase, EntityClient
-from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entities import EntityBase
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
 from nhx_evals_sdk.agent_eval.results import AgentEvalMetricOutputCoverage, AgentEvalResult, AgentEvalSummary
@@ -53,15 +52,11 @@ _ASYNC_SDK = AsyncNemoClient(
 )
 
 
-def test_entity_client_adapts_async_sdk(mocker: MockerFixture) -> None:
-    wrapped_client = mocker.Mock(spec=EntityClient)
-    constructor = mocker.patch.object(result_persistence, "EntityClient", return_value=wrapped_client)
-
-    assert result_persistence._entity_client(_ASYNC_SDK) is wrapped_client
-    constructor.assert_called_once()
-    typed_client = constructor.call_args.args[0]
-    assert isinstance(typed_client, AsyncEntitiesClient)
-    assert typed_client._http is _ASYNC_SDK._http
+def test_result_writer_preserves_the_injected_client() -> None:
+    writer = result_persistence._entity_client(_ASYNC_SDK)
+    assert writer is not None
+    assert writer.client is _ASYNC_SDK
+    assert result_persistence._entity_client(None) is None
 
 
 def _model() -> Model:

@@ -326,7 +326,13 @@ class FabricInstalledAgent(BaseInstalledAgent):
         user = shlex.quote(str(environment.default_user or "root"))
         await self.exec_as_root(
             environment,
-            command=f"mkdir -p {quoted} && chown -R {user}:{user} {quoted}",
+            # Re-chowning an already-owned cached venv copies every lower-layer
+            # file into Docker's writable layer. Change only mismatched owners
+            # and never follow a symlink out of the installation directories.
+            command=(
+                f"mkdir -p {quoted} && find {quoted} "
+                f"\\( ! -user {user} -o ! -group {user} \\) -exec chown -h {user}:{user} {{}} +"
+            ),
         )
 
     def _install_fabric_command(self) -> str:

@@ -427,6 +427,7 @@ authz:
       description: "Runtime permissions for job workload containers"
       permissions:
       - jobs.logs.create
+      - secrets.access
     ServiceSystem:
       description: >-
         Internal Helix service principal (principal IDs matching service:*). Used when no

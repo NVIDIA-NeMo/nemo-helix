@@ -539,6 +539,12 @@ components:
       title: Affinity
     AuthContext:
       properties:
+        credential_scopes:
+          title: Credential Scopes
+          description: Original credential scope ceiling retained for delegated execution
+          items:
+            type: string
+          type: array
         principal_id:
           type: string
           title: Principal Id

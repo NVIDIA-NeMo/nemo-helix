@@ -26,7 +26,7 @@ from nemo_helix_plugin.client.constants import (
 )
 from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
 from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR, Principal
-from nhx.common.auth.workload_tokens import ServiceWorkloadAccessTokenProvider
+from nhx.common.auth.workload_tokens import JobWorkloadBinding, ServiceWorkloadAccessTokenProvider
 from nhx.common.config import get_auth_config
 from nhx.common.jobs.constants import NEMO_JOB_SECRETS_ENVVAR
 from opentelemetry._logs import Logger
@@ -186,13 +186,17 @@ def parse_secret_references(secrets_env: str) -> list[SecretReference]:
     return references
 
 
-def _mint_task_access_token(principal: Principal | None) -> str | None:
+def _mint_task_access_token(
+    principal: Principal | None, *, job_binding: JobWorkloadBinding | None = None
+) -> str | None:
     """A ``jobs`` service token delegated to *principal*, or ``None`` without workload token exchange."""
     auth_config = get_auth_config()
     if not (auth_config.enabled and auth_config.oidc.workload is not None):
         return None
     on_behalf_of = principal.effective_principal if principal is not None and principal.id else None
-    return ServiceWorkloadAccessTokenProvider(auth_config, "jobs", on_behalf_of).get_access_token()
+    return ServiceWorkloadAccessTokenProvider(
+        auth_config, "jobs", on_behalf_of, job_binding=job_binding
+    ).get_access_token()
 
 
 def _delegable_principal(env: dict[str, str]) -> Principal | None:
@@ -212,7 +216,9 @@ def write_task_access_token(token_file: Path, token: str) -> None:
     os.replace(tmp, token_file)
 
 
-def inject_subprocess_task_auth(env: dict[str, str], token_file: Path) -> dict[str, str]:
+def inject_subprocess_task_auth(
+    env: dict[str, str], token_file: Path, *, job_binding: JobWorkloadBinding | None = None
+) -> dict[str, str]:
     """Give the child a short-lived bearer token delegated from its job principal, via a rotatable file.
 
     Without workload token exchange, or without a principal to delegate from, the child gets no
@@ -221,7 +227,7 @@ def inject_subprocess_task_auth(env: dict[str, str], token_file: Path) -> dict[s
     env.pop(ACCESS_TOKEN_ENVVAR, None)
     env.pop(ACCESS_TOKEN_FILE_ENVVAR, None)
     principal = _delegable_principal(env)
-    if principal is None or not (token := _mint_task_access_token(principal)):
+    if principal is None or not (token := _mint_task_access_token(principal, job_binding=job_binding)):
         return env
     write_task_access_token(token_file, token)
     env[ACCESS_TOKEN_FILE_ENVVAR] = str(token_file)
@@ -234,13 +240,15 @@ def task_access_token_refresh_interval() -> float:
     return (workload.token_ttl_seconds if workload is not None else 300) / 2
 
 
-def refresh_subprocess_task_auth(env: dict[str, str], token_file: Path) -> bool:
+def refresh_subprocess_task_auth(
+    env: dict[str, str], token_file: Path, *, job_binding: JobWorkloadBinding | None = None
+) -> bool:
     """Re-mint the child's delegated token into *token_file*; the child re-reads it on each request.
 
     ``False`` when there was nothing to mint, so the caller keeps retrying instead of treating it as rotated.
     """
     principal = _delegable_principal(env)
-    if principal is None or not (token := _mint_task_access_token(principal)):
+    if principal is None or not (token := _mint_task_access_token(principal, job_binding=job_binding)):
         return False
     write_task_access_token(token_file, token)
     return True
