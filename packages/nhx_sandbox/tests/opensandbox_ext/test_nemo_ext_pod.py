@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 
 pytest.importorskip("kubernetes")
-pytest.importorskip("scaled_evals", reason="scaled-evals plugin not installed")
 
 from kubernetes.client import (
     V1ContainerState,
