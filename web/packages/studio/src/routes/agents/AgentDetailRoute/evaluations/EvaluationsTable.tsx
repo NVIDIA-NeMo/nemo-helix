@@ -5,6 +5,7 @@ import {
   ROW_SELECTION_COLUMN_SIZE,
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { ElapsedTime } from '@nemo/common/src/components/ElapsedTime';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
@@ -21,7 +22,6 @@ import {
 } from '@nemo/sdk/generated/platform/evaluations';
 import { Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
-import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
 import {
@@ -411,16 +411,26 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
         }}
       />
 
-      <BulkDeleteModal
-        items={deleteRows}
-        open={deleteRows.length > 0}
-        onDelete={handleDelete}
-        title={(count) => `Delete ${count} Evaluation${count !== 1 ? 's' : ''}`}
-        onClose={() => {
-          setDeleteRows([]);
-          dataViewState.rowSelection.set({});
-        }}
-      />
+      {deleteRows.length > 0 && (
+        <DeleteConfirmationModal
+          open
+          entity="evaluation"
+          ids={deleteRows.map((row) => row.name)}
+          description={
+            deleteRows.length === 1
+              ? "The evaluation and its results are deleted and can't be restored."
+              : "The evaluations and their results are deleted and can't be restored."
+          }
+          onDelete={async () => {
+            await handleDelete(deleteRows);
+            return true;
+          }}
+          onClose={() => {
+            setDeleteRows([]);
+            dataViewState.rowSelection.set({});
+          }}
+        />
+      )}
     </>
   );
 };
