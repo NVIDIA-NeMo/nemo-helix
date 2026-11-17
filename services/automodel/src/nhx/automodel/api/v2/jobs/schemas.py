@@ -479,6 +479,15 @@ class _TrainingBase(BaseModel):
         gt=0,
         description="Maximum token sequence length for training. Higher = more memory, longer training.",
     )
+    max_pixels: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Per-image pixel ceiling for vision-language checkpoints. Larger images are downscaled before the "
+            "vision tower, which bounds image tokens (about one per 32x32 pixels on Qwen3-VL). Unset keeps the "
+            "processor default, which can be large enough to exceed max_seq_length. Rejected for text checkpoints."
+        ),
+    )
     precision: Optional[Precision] = Field(
         default=None,
         description="Model precision for training. Auto-detected if unset.",

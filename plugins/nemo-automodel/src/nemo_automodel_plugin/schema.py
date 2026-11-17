@@ -275,6 +275,14 @@ class TrainingSpec(AutomodelSchema):
     finetuning_type: Literal["lora", "all_weights", "lora_merged"] = "lora"
     lora: LoRAParams | None = None
     max_seq_length: int = Field(default=2048, gt=0)
+    max_pixels: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Per-image pixel ceiling for vision-language checkpoints. Larger images are downscaled before the "
+            "vision tower, which bounds image tokens. Unset keeps the processor default. Rejected for text checkpoints."
+        ),
+    )
     precision: Literal["bf16", "fp16", "fp32", "fp8"] | None = Field(
         default=None,
         description="Model precision for training. Auto-detected from the checkpoint when unset.",
