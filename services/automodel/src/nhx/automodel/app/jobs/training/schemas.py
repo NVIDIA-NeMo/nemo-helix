@@ -113,6 +113,10 @@ class ModelConfig(BaseModel):
         default=2048,
         description="Maximum token sequence length for training; longer sequences are truncated",
     )
+    max_pixels: int | None = Field(
+        default=None,
+        description="Per-image pixel ceiling passed to the vision-language processor; None keeps its default",
+    )
 
     # Model loading options
     precision: Optional[Precision] = Field(

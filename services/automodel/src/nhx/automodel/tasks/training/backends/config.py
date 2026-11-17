@@ -400,6 +400,8 @@ def _compile_vlm_config(
         "pretrained_model_name_or_path": customizer_config.model.path,
         "trust_remote_code": trust_remote_code,
     }
+    if customizer_config.model.max_pixels is not None:
+        cfg["processor"]["max_pixels"] = customizer_config.model.max_pixels
     freeze_config: dict[str, bool] = {
         "freeze_vision_tower": True,
         "freeze_language_model": False,

@@ -3384,6 +3384,13 @@ components:
           exclusiveMinimum: 0.0
           title: Max Seq Length
           default: 2048
+        max_pixels:
+          title: Max Pixels
+          description: Per-image pixel ceiling for vision-language checkpoints. Larger
+            images are downscaled before the vision tower, which bounds image tokens.
+            Unset keeps the processor default. Rejected for text checkpoints.
+          type: integer
+          exclusiveMinimum: 0.0
         precision:
           title: Precision
           description: Model precision for training. Auto-detected from the checkpoint
@@ -4569,6 +4576,14 @@ components:
             Falls back to the service default when omitted.
           type: string
           minLength: 1
+        max_pixels:
+          title: Max Pixels
+          description: Per-image pixel ceiling for vision-language checkpoints. Larger
+            images are downscaled before the policy processor and the vLLM rollout
+            engine see them, so training and generation use the same resolution. Unset
+            keeps the processor default. Rejected for text checkpoints.
+          type: integer
+          exclusiveMinimum: 0.0
         type:
           type: string
           const: grpo

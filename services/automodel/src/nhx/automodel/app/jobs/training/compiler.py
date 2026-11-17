@@ -306,10 +306,13 @@ def _translate_model_config(
     """Translate job spec to internal ModelConfig."""
     training = job_spec.training
     recorded = traits or CheckpointTraits()
+    if training.max_pixels is not None and not recorded.has_vision_tower:
+        raise ValueError("max_pixels applies only to vision-language checkpoints.")
     return ModelConfig(
         path=path,
         name=_extract_model_name(job_spec),
         max_seq_length=training.max_seq_length,
+        max_pixels=training.max_pixels,
         precision=training.precision,
         attn_implementation=training.attn_implementation,
         tokenizer_backend=training.tokenizer_backend,

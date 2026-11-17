@@ -1380,6 +1380,25 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
     assert loaded[1]["conversation"][0]["content"][0]["type"] == "image"
 
 
+def test_max_pixels_reaches_the_vision_processor(tmp_path: Path) -> None:
+    rows = [{"prompt": "say hi", "completion": "hi"}]
+    config = _vision_training_config(tmp_path, rows)
+    config.model.max_pixels = 2_621_440
+
+    compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["processor"]["max_pixels"] == 2_621_440
+
+
+def test_max_pixels_is_absent_from_the_processor_when_unset(tmp_path: Path) -> None:
+    rows = [{"prompt": "say hi", "completion": "hi"}]
+    config = _vision_training_config(tmp_path, rows)
+
+    compiled = _compile_vision(config, tmp_path)
+
+    assert "max_pixels" not in compiled["processor"]
+
+
 def test_a_caller_exclude_keeps_the_vision_patterns(tmp_path: Path) -> None:
     """`*.out_proj` must not replace the compiler's vision-tower freeze."""
     rows = [{"prompt": "say hi", "completion": "hi"}]

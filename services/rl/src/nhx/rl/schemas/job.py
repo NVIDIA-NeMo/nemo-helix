@@ -334,6 +334,14 @@ class GRPOTraining(_TrainingBase):
 
     model_config = ConfigDict(json_schema_extra=learning_rate_defaults_schema_extra(GRPO_LEARNING_RATE_DEFAULTS))
 
+    max_pixels: int | None = Field(
+        default=None,
+        gt=0,
+        description="Per-image pixel ceiling for vision-language checkpoints. Larger images are downscaled before "
+        "the policy processor and the vLLM rollout engine see them, so training and generation use the same "
+        "resolution. Unset keeps the processor default. Rejected for text checkpoints.",
+    )
+
     # No default: ``TrainingMethod`` is a discriminated union, so the tag has to be
     # present in the submitted JSON (same as DPOTraining.type).
     type: Literal["grpo"]
