@@ -1,12 +1,12 @@
 ---
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-title: "Fine-Tune Nemotron 3.5 Super VL on CORD-v2"
+title: "Vision LoRA on CORD-v2"
 description: ""
 ---
 
 <div className="notebook-actions">
-  <a href="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/super-vl-cord-lora.ipynb" target="_blank" rel="noopener noreferrer" className="notebook-actions__button notebook-actions__button--primary">
+  <a href="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/cord-v2-vision-lora.ipynb" target="_blank" rel="noopener noreferrer" className="notebook-actions__button notebook-actions__button--primary">
     <span aria-hidden="true">&#9654;</span><span>Run in Google Colab</span>
   </a>
 </div>
@@ -76,7 +76,7 @@ PROFILES = {
         "validation_limit": 30,
         "lora_rank": 16,
         "lora_alpha": 32,
-        "max_seq_length": 2048,
+        "max_seq_length": 1024,
         "epochs": 1,
         "max_steps": None,
         "global_batch_size": 8,

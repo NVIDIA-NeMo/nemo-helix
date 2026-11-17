@@ -308,9 +308,9 @@ navigation:
               - page: LoRA Customization Job
                 path: ../../customizer/tutorials/lora-customization-job.mdx
                 slug: lora-customization-job
-              - page: Super VL CORD LoRA
-                path: ../../customizer/tutorials/super-vl-cord-lora.mdx
-                slug: super-vl-cord-lora
+              - page: Vision LoRA on CORD-v2
+                path: ../../customizer/tutorials/cord-v2-vision-lora.mdx
+                slug: cord-v2-vision-lora
               - page: Distillation Customization Job
                 path: ../../customizer/tutorials/distillation-customization-job.mdx
                 slug: distillation-customization-job

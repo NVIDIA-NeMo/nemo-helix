@@ -88,7 +88,7 @@ LoRA fits one 48GB GPU. Full-weight SFT does not. This is not a Super VL result;
 
 ### Training Options
 
-- **CORD-v2 LoRA.** Rank 16, alpha 32, first 300 training rows and 30 validation rows. Walkthrough: [Fine-Tune Nemotron 3.5 Super VL on CORD-v2](/documentation/customizer-reference/tutorials/super-vl-cord-lora) with `PROFILE = "qwen3-vl-8b"`.
+- **CORD-v2 LoRA.** Rank 16, alpha 32, first 300 training rows and 30 validation rows. Walkthrough: [Vision LoRA on CORD-v2](/documentation/customizer-reference/tutorials/cord-v2-vision-lora) with `PROFILE = "qwen3-vl-8b"`.
 - **Finance OCR LoRA.** Same shape as CORD, with global batch 4, `attn_implementation` `sdpa`, and dataset `default/finance-ocr-small`. Not deployed or scored.
 - **CLEVR-CoGenT GRPO.** 32 training rows and 16 validation rows, `--prompt qwen`, `inline_tool_output_images` true, `max_rollout_turns` 2.
 
