@@ -68,13 +68,14 @@ SYSTEM_PROMPT = (
 MODEL_TIMEOUT_SECONDS = 90
 MODEL_MAX_RETRIES = 1
 #: The model errors that are answered instead of raised: the ones that pass on their own (a timeout, a
-#: dropped connection, a 429, a 5xx such as a model that is temporarily down). Anything else — a wrong
-#: key (401), an unknown model (404), a bad request (400) — still fails the request, so a misconfigured
-#: agent stops the run with a clear error instead of answering every attack with an error message.
+#: dropped connection, a 5xx such as a model that is temporarily down). A 429 is not one of them: the
+#: server answers it with its own 429, which garak backs off on and resends instead of scoring a fake
+#: reply. Anything else — a wrong key (401), an unknown model (404), a bad request (400) — still fails
+#: the request, so a misconfigured agent stops the run with a clear error instead of answering every
+#: attack with an error message.
 _TRANSIENT_MODEL_ERRORS = (
     openai.APITimeoutError,
     openai.APIConnectionError,
-    openai.RateLimitError,
     openai.InternalServerError,
 )
 
@@ -84,6 +85,8 @@ _TRANSIENT_MODEL_ERRORS = (
 #: its request open until the caller gives up: garak's attack turn times out after 600s and fails the
 #: whole attacker, and the benign validator scores the request as an error after 240s.
 TOOL_TIMEOUT_SECONDS = 30
+#: Longest a stopped call's output is read for after the kill.
+_DRAIN_TIMEOUT_SECONDS = 2
 
 
 def _run_tool_process(args: str | list[str], *, shell: bool) -> str:
@@ -106,8 +109,14 @@ def _run_tool_process(args: str | list[str], *, shell: bool) -> str:
             stdout, stderr = process.communicate(timeout=TOOL_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
-            stdout, stderr = process.communicate()
-            return f"{stdout}{stderr}error: timed out after {TOOL_TIMEOUT_SECONDS}s and was stopped"
+            stopped = f"error: timed out after {TOOL_TIMEOUT_SECONDS}s and was stopped"
+            try:
+                stdout, stderr = process.communicate(timeout=_DRAIN_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                # A child that started its own session (`setsid cmd &`) escapes the group kill and
+                # still holds the pipes open; give up on the output rather than wait for it.
+                return stopped
+            return f"{stdout}{stderr}{stopped}"
     output = stdout + stderr
     return output if output else f"(exit {process.returncode}, no output)"
 
