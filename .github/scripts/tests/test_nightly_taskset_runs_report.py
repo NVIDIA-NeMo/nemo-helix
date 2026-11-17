@@ -99,6 +99,37 @@ def test_failure_stage_names_the_failed_job_before_the_test_else_the_tests_own_s
     assert report_module.failure_stage(RED_TEST, '<failure message="boom"/>') == "test"
 
 
+FOUND = {"result": "success", "outputs": {"found": "true"}}
+NOT_FOUND = {"result": "success", "outputs": {"found": "false"}}
+REUSED_GREEN = {
+    "find-images": FOUND,
+    "build-images": {"result": "skipped"},
+    "kind-taskset-runs-e2e": {"result": "success"},
+}
+
+
+def test_a_build_skipped_for_images_in_ghcr_is_green_not_a_build_failure() -> None:
+    github = FakeGitHub(open_issue=3)
+
+    assert report_module.report(github, make_run(REUSED_GREEN), [], "") == {"action": "closed"}
+    reused_red = {**REUSED_GREEN, "kind-taskset-runs-e2e": {"result": "failure"}}
+    assert report_module.failure_stage(reused_red, JUNIT_DISPATCH) == "dispatch"
+
+
+def test_a_skipped_build_without_images_in_ghcr_is_a_build_failure() -> None:
+    needs = {**REUSED_GREEN, "find-images": NOT_FOUND, "kind-taskset-runs-e2e": {"result": "skipped"}}
+
+    assert not report_module.is_green(needs)
+    assert report_module.failure_stage(needs, "") == "build-images"
+
+
+def test_a_failed_image_lookup_is_its_own_stage() -> None:
+    needs = {"find-images": {"result": "failure"}, "build-images": {"result": "skipped"}}
+
+    assert not report_module.is_green(needs)
+    assert report_module.failure_stage(needs, "") == "find-images"
+
+
 def test_slow_steps_flags_steps_over_half_their_cap() -> None:
     evidence = [{"test_1": {"durations_s": {"submit": 100, "run": 600}, "caps_s": {"submit": 900, "run": 900}}}]
 

@@ -77,9 +77,49 @@ jobs:
           echo "source_sha=${SOURCE_SHA}" >> "${GITHUB_OUTPUT}"
           echo "copies=$(python3 -c "import json, sys; print(json.dumps(list(range(1, int(sys.argv[1]) + 1))))" "${REPEAT}")" >> "${GITHUB_OUTPUT}"
 
+  # CI publishes the images for main and same-repo PRs, tagged with the commit, but only when its path filter matches:
+  # reuse them when all four are there, else build them below. A PR's builds tag their merge commit's images with
+  # the PR's head SHA, so on a PR head this tests the merge with main.
+  find-images:
+    name: Find images
+    needs: [plan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      found: ${{ steps.find.outputs.found }}
+      image_registry: ${{ steps.find.outputs.image_registry }}
+      image_tag: ${{ steps.find.outputs.image_tag }}
+    steps:
+      - id: find
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          registry="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          found=true
+          for image in nhx-api nhx-tasks nhx-builder-tasks nhx-kaniko; do
+            if ! docker manifest inspect "${registry}/${image}:${SOURCE_SHA}" >/dev/null; then
+              echo "No ${registry}/${image}:${SOURCE_SHA}: building the images"
+              found=false
+              break
+            fi
+          done
+          {
+            echo "found=${found}"
+            echo "image_registry=${registry}"
+            echo "image_tag=${SOURCE_SHA}"
+          } >> "${GITHUB_OUTPUT}"
+
   build-images:
     name: Build images
-    needs: [plan]
+    needs: [plan, find-images]
+    if: needs.find-images.outputs.found != 'true'
     permissions:
       contents: read
       packages: write
@@ -91,7 +131,11 @@ jobs:
 
   kind-taskset-runs-e2e:
     name: Kind taskset runs e2e (auth-${{ matrix.auth }}, exchange-${{ matrix.workload_token_exchange }}, ${{ matrix.copy }})
-    needs: [plan, build-images]
+    needs: [plan, find-images, build-images]
+    # Runs on images this run built, or on CI's when the build was skipped for them.
+    if: >-
+      ${{ !cancelled() && (needs.build-images.result == 'success'
+      || (needs.build-images.result == 'skipped' && needs.find-images.outputs.found == 'true')) }}
     runs-on: ubuntu-latest
     # kind, OpenSandbox and the pre-pulls, then pytest's 49-minute timeout.
     timeout-minutes: 120
@@ -111,8 +155,8 @@ jobs:
       KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-taskset-runs-${{ matrix.auth }}-${{ matrix.workload_token_exchange }}-${{ matrix.copy }}
       # The Authentik demo installs into its own namespace.
       KUBE_NAMESPACE: ${{ matrix.workload_token_exchange && 'nemo-authentik' || 'nemo-helix' }}
-      NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-images.outputs.image_registry }}
-      NHX_E2E_IMAGE_TAG: ${{ needs.build-images.outputs.image_tag }}
+      NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-images.outputs.image_registry || needs.find-images.outputs.image_registry }}
+      NHX_E2E_IMAGE_TAG: ${{ needs.build-images.outputs.image_tag || needs.find-images.outputs.image_tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -304,7 +348,7 @@ jobs:
 
   report:
     name: Report
-    needs: [plan, build-images, kind-taskset-runs-e2e]
+    needs: [plan, find-images, build-images, kind-taskset-runs-e2e]
     # Its own job: a job whose dependency failed is skipped, so an alert inside the e2e job would miss a failed build.
     # TEMPORARY, drop `push` before merge.
     if: always() && (github.event_name == 'schedule' || github.event_name == 'push' || inputs.classify_for != '')
