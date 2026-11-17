@@ -124,7 +124,7 @@ const SubtleToolGroup = ({ args, running }: SubtleToolGroupProps) => {
         return (
           <RepeatedToolCallsStep
             key={first.toolCallId}
-            defaultOpen={runningAction !== undefined && group.actions.includes(runningAction)}
+            running={runningAction !== undefined && group.actions.includes(runningAction)}
             title={group.repeatedTitle}
             toolName={first.toolName}
           >

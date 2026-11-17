@@ -131,7 +131,56 @@ describe('AssistantToolCallPart', () => {
 
     const group = screen.getByTestId('assistant-work-repeated-tool-calls');
     expect(group).toHaveAttribute('open');
+    expect(within(group).getAllByTestId('nv-collapsible-trigger')[0]).toHaveTextContent('Running…');
     expect(getStepTitles(group)).toEqual(['Ran pwd', 'Running ls']);
+  });
+
+  it('opens a closed repeated group when a running call joins it', async () => {
+    const pwd = { args: { command: 'pwd' }, toolCallId: 'toolu_bash_1', toolName: 'Bash' };
+    const ls = { args: { command: 'ls' }, toolCallId: 'toolu_bash_2', toolName: 'Bash' };
+    const read = { args: { file_path: 'a.md' }, toolCallId: 'toolu_read', toolName: 'Read' };
+    const props = {
+      addResult: vi.fn(),
+      argsText: '',
+      resume: vi.fn(),
+      toolCallId: 'toolu_group',
+      toolName: ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
+      type: 'tool-call',
+    } as const;
+    const { rerender } = render(
+      <MockToastProvider>
+        <AssistantToolCallPart
+          {...props}
+          args={{ actions: [pwd, ls, read] }}
+          status={{ type: 'running' }}
+        />
+      </MockToastProvider>
+    );
+    const group = screen.getByTestId('assistant-work-repeated-tool-calls');
+    expect(group).not.toHaveAttribute('open');
+    expect(group).toHaveTextContent('Ran 2 commands');
+
+    rerender(
+      <MockToastProvider>
+        <AssistantToolCallPart
+          {...props}
+          args={{
+            actions: [
+              pwd,
+              ls,
+              read,
+              { args: { command: 'git status' }, toolCallId: 'toolu_bash_3', toolName: 'Bash' },
+            ],
+          }}
+          status={{ type: 'running' }}
+        />
+      </MockToastProvider>
+    );
+
+    expect(screen.getByTestId('assistant-work-repeated-tool-calls')).toHaveAttribute('open');
+    expect(getStepTitles(screen.getByTestId('assistant-work-repeated-tool-calls'))).toContain(
+      'Running git status'
+    );
   });
 
   it('folds repeated calls of one tool into a step per tool, keeping each command', async () => {
