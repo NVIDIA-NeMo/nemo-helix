@@ -13,7 +13,7 @@ from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
 from typing import NoReturn, cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 
 import pytest
 from filesets import AsyncFilesetFileSystem, FilesetFileSystem
@@ -523,13 +523,10 @@ async def test_failed_upload_is_not_registered_as_complete(
 
     monkeypatch.setattr(fs, "put_file", fail_upload)
     file_sink = _manager(asynchronous, fs)
-    response = Mock()
-    response.data.return_value = SimpleNamespace(fileset="results", output_location=None)
     if asynchronous:
         jobs_client = Mock(spec=AsyncJobsClient)
-        jobs_client.get_job = AsyncMock(return_value=response)
         manager = AsyncResultManager(
-            job_name="job",
+            job_id="job",
             workspace="default",
             attempt_id="attempt",
             fileset_name="results",
@@ -538,16 +535,15 @@ async def test_failed_upload_is_not_registered_as_complete(
         )
     else:
         jobs_client = Mock(spec=JobsClient)
-        jobs_client.get_job.return_value = response
         manager = ResultManager(
-            job_name="job",
+            job_id="job",
             workspace="default",
             attempt_id="attempt",
             fileset_name="results",
             files_client=Mock(spec=FilesClient),
             jobs_client=jobs_client,
         )
-    monkeypatch.setattr(manager, "_create_file_manager", lambda _name: file_sink)
+    monkeypatch.setattr(type(manager), "_create_file_manager", lambda _self, _name: file_sink)
     with pytest.raises(OSError) as raised:
         if isinstance(manager, AsyncResultManager):
             await manager.create_result("bundle", source, stage=True)

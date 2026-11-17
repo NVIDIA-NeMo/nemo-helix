@@ -21,6 +21,7 @@ PLATFORM_SPEC_JSON = '{"steps":[{"name":"step-one","executor":{"provider":"cpu",
 
 class _CreatedJob:
     def __init__(self, *, name: str = "created-job", workspace: str = "result-workspace") -> None:
+        self.id = "job-original"
         self.name = name
         self.workspace = workspace
 
@@ -157,7 +158,7 @@ def test_jobs_create_watch_uses_sdk_watcher_and_outputs_created_job() -> None:
         timestamp_format=None,
     )
     jobs_client.watch_job.assert_called_once_with(
-        "created-job",
+        "job-original",
         workspace="result-workspace",
         timeout=42,
         poll_interval=7,
@@ -312,7 +313,7 @@ def test_jobs_create_wait_uses_quiet_waiter_and_outputs_created_job() -> None:
     _assert_created_job_request(jobs_client)
     wait_for_job.assert_called_once_with(
         jobs_client,
-        "created-job",
+        "job-original",
         workspace="result-workspace",
         resource_label="job",
         timeout=42,

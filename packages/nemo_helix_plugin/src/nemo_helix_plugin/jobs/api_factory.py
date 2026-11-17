@@ -189,7 +189,7 @@ class BaseJobRequest(BaseModel, Generic[JobConfigT]):
 
 class BaseJob(BaseModel, Generic[JobConfigT]):
     id: str | None = None
-    attempt_id: str | None = None
+    attempt_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     name: str
     description: str | None = None
     project: str | None = None
@@ -1279,24 +1279,27 @@ def job_route_factory(
 
     job_output_adapter = TypeAdapter(job_output)
 
-    async def require_own_job(jobs_client: AsyncJobsClient, name: str, workspace: str) -> None:
+    def validate_own_job(job: HelixJob, name: str, workspace: str) -> HelixJob:
         """Refuse a job these routes do not serve, before acting on it.
 
         Services can share a job source, as the customization trainers do, so the stored spec
         must also fit this route's schema. Otherwise the action would land on another service's
         job, and its response could not be rendered.
         """
-        job = (await jobs_client.get_job(name=name, workspace=workspace)).data()
         if job.source == service_name:
             try:
-                job_output_adapter.validate_python(job.spec)
-                return
+                job_output_adapter.validate_python(_public_job_spec(job.spec))
+                return job
             except ValidationError:
                 pass
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job '{name}' was not found among {job_type} jobs in workspace '{workspace}'.",
         )
+
+    async def require_own_job(jobs_client: AsyncJobsClient, name: str, workspace: str) -> HelixJob:
+        job = (await jobs_client.get_job(name=name, workspace=workspace)).data()
+        return validate_own_job(job, name, workspace)
 
     def attempt_from_response(attempt: HelixJobAttemptResponse) -> TypedJobAttempt:
         return TypedJobAttempt(
@@ -1561,7 +1564,7 @@ def job_route_factory(
                 method="PATCH",
             )
             update_fields: dict[str, Any] = {}
-            update_identifier = name
+            update_identifier = existing_job.id if existing_job is not None else name
             if "description" in request.model_fields_set:
                 update_fields["description"] = request.description
             if "spec" in request.model_fields_set:
@@ -1613,7 +1616,7 @@ def job_route_factory(
         ) -> Page[TypedJobAttempt]:
             f"""List attempts for a {service_name} job."""
             jobs = AsyncJobsClient.from_client(async_client)
-            await _require_job_in_collection(jobs, name=name, workspace=workspace)
+            checked_job = await _require_job_in_collection(jobs, name=name, workspace=workspace)
             query: ListAttemptsQueryParams = {
                 "page": page_params.page,
                 "page_size": page_params.page_size,
@@ -1624,7 +1627,7 @@ def job_route_factory(
             attempt_page = (
                 await jobs.list_job_attempts(
                     workspace=workspace,
-                    job=name,
+                    job=checked_job.id if checked_job is not None else name,
                     query_params=query,
                 )
             ).page()
@@ -1654,11 +1657,11 @@ def job_route_factory(
         ) -> TypedJobAttempt:
             f"""Get one attempt for a {service_name} job."""
             jobs = AsyncJobsClient.from_client(async_client)
-            await _require_job_in_collection(jobs, name=name, workspace=workspace)
+            checked_job = await _require_job_in_collection(jobs, name=name, workspace=workspace)
             response = (
                 await jobs.get_job_attempt(
                     workspace=workspace,
-                    job=name,
+                    job=checked_job.id if checked_job is not None else name,
                     attempt=attempt,
                 )
             ).data()
@@ -1675,8 +1678,12 @@ def job_route_factory(
         ) -> HelixJobStatusResponse:
             f"""Get the status of a job by name for the {service_name} microservice."""
             jobs_client = AsyncJobsClient.from_client(async_client)
-            await _require_job_in_collection(jobs_client, name=name, workspace=workspace)
-            job_resp = (await jobs_client.get_job_status(name=name, workspace=workspace)).data()
+            checked_job = await _require_job_in_collection(jobs_client, name=name, workspace=workspace)
+            job_resp = (
+                await jobs_client.get_job_status(
+                    name=checked_job.id if checked_job is not None else name, workspace=workspace
+                )
+            ).data()
             return HelixJobStatusResponse(**job_resp.model_dump())
 
         @router.delete(
@@ -1696,13 +1703,15 @@ def job_route_factory(
             f"""Delete a job by name for the {service_name} microservice."""
             try:
                 jobs_client = AsyncJobsClient.from_client(async_client).with_retry(RetryPolicy(max_retries=0))
-                await _require_mutation_target_in_collection(
+                checked_job = await _require_mutation_target_in_collection(
                     name=name,
                     workspace=workspace,
                     authorize=authorize,
                     method="DELETE",
                 )
-                await jobs_client.delete_job(name=name, workspace=workspace)
+                await jobs_client.delete_job(
+                    name=checked_job.id if checked_job is not None else name, workspace=workspace
+                )
             except NemoHTTPError as exc:
                 raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
             return None
@@ -1719,14 +1728,18 @@ def job_route_factory(
             f"""Cancel a job by name for the {service_name} microservice."""
 
             jobs_client = AsyncJobsClient.from_client(async_client)
-            await _require_mutation_target_in_collection(
+            checked_job = await _require_mutation_target_in_collection(
                 name=name,
                 workspace=workspace,
                 authorize=authorize,
                 method="POST",
                 suffix="/cancel",
             )
-            job_resp = (await jobs_client.cancel_job(name=name, workspace=workspace)).data()
+            job_resp = (
+                await jobs_client.cancel_job(
+                    name=checked_job.id if checked_job is not None else name, workspace=workspace
+                )
+            ).data()
             return from_response(job_resp)
 
         # Logs
@@ -1760,9 +1773,13 @@ def job_route_factory(
             if task_id is not None:
                 logs_query["task_id"] = task_id
             jobs_client = AsyncJobsClient.from_client(async_client)
-            await _require_job_in_collection(jobs_client, name=name, workspace=workspace)
+            checked_job = await _require_job_in_collection(jobs_client, name=name, workspace=workspace)
             logs_page = (
-                await jobs_client.list_job_logs(workspace=workspace, name=name, query_params=logs_query)
+                await jobs_client.list_job_logs(
+                    workspace=workspace,
+                    name=checked_job.id if checked_job is not None else name,
+                    query_params=logs_query,
+                )
             ).page()
             return HelixJobLogPage(data=logs_page.items, **logs_page.metadata)
 
@@ -1781,21 +1798,30 @@ def job_route_factory(
             f"""Get the results of a job by name for the {service_name} microservice."""
 
             jobs = AsyncJobsClient.from_client(async_client)
-            await _require_job_in_collection(jobs, name=name, workspace=workspace)
+            checked_job = await _require_job_in_collection(jobs, name=name, workspace=workspace)
             if attempt_id is not None:
                 query_params: ListJobResultsQueryParams = {"attempt_id": attempt_id}
                 results = (
-                    await jobs.list_job_results(name=name, workspace=workspace, query_params=query_params)
+                    await jobs.list_job_results(
+                        name=checked_job.id if checked_job is not None else name,
+                        workspace=workspace,
+                        query_params=query_params,
+                    )
                 ).data()
             else:
-                results = (await jobs.list_job_results(name=name, workspace=workspace)).data()
+                results = (
+                    await jobs.list_job_results(
+                        name=checked_job.id if checked_job is not None else name, workspace=workspace
+                    )
+                ).data()
             result_dicts = [result.model_dump() for result in results.data]
             list_results = []
+            jobs_path = request.url.path.rsplit("/", 2)[0]
             for result_dict in result_dicts:
                 result_name = result_dict["name"]
-                result_dict["download_url"] = str(
-                    request.url.replace(path=f"{request.url.path}/{result_name}/download")
-                )
+                job_id = result_dict["job"]
+                download_path = f"{jobs_path}/{job_id}/results/{result_name}/download"
+                result_dict["download_url"] = str(request.url.replace(path=download_path))
                 list_results.append(HelixJobResultResponse(**result_dict))
 
             return HelixJobListResultResponse(data=list_results)
@@ -1814,12 +1840,18 @@ def job_route_factory(
             f"""Get a result by its job-wide unique name for the {service_name} microservice."""
 
             jobs = AsyncJobsClient.from_client(async_client)
-            await _require_job_in_collection(jobs, name=job, workspace=workspace)
-            result_obj = (await jobs.get_job_result(name=name, job=job, workspace=workspace)).data()
+            checked_job = await _require_job_in_collection(jobs, name=job, workspace=workspace)
+            result_obj = (
+                await jobs.get_job_result(
+                    name=name, job=checked_job.id if checked_job is not None else job, workspace=workspace
+                )
+            ).data()
 
             # Construct the URL for downloading this result
             result_dict = result_obj.model_dump()
-            result_dict["download_url"] = str(request.url.replace(path=f"{request.url.path}/download"))
+            jobs_path = request.url.path.rsplit("/", 3)[0]
+            download_path = f"{jobs_path}/{result_obj.job}/results/{name}/download"
+            result_dict["download_url"] = str(request.url.replace(path=download_path))
             return HelixJobResultResponse(**result_dict)
 
         # Stamp authorization rules on the generated routes. Reads use one shared
@@ -1863,8 +1895,12 @@ def job_route_factory(
             """
 
             jobs = AsyncJobsClient.from_client(async_client)
-            await _require_job_in_collection(jobs, name=job, workspace=workspace)
-            result_info = (await jobs.get_job_result(name=name, job=job, workspace=workspace)).data()
+            checked_job = await _require_job_in_collection(jobs, name=job, workspace=workspace)
+            result_info = (
+                await jobs.get_job_result(
+                    name=name, job=checked_job.id if checked_job is not None else job, workspace=workspace
+                )
+            ).data()
             _, tmp_dir_path = await download_from_result_info(
                 result_name=name,
                 job_name=job,
@@ -1978,16 +2014,22 @@ def job_route_factory(
             f"""Pause a job by name for the {service_name} microservice."""
 
             jobs_client = AsyncJobsClient.from_client(async_client)
-            if job_discriminator is None:
-                await require_own_job(jobs_client, name, workspace)
-            await _require_mutation_target_in_collection(
+            checked_job = await _require_mutation_target_in_collection(
                 name=name,
                 workspace=workspace,
                 authorize=authorize,
                 method="POST",
                 suffix="/pause",
             )
-            job_resp = (await jobs_client.pause_job(name=name, workspace=workspace)).data()
+            if checked_job is None:
+                checked_job = await require_own_job(jobs_client, name, workspace)
+            else:
+                checked_job = validate_own_job(checked_job, name, workspace)
+            job_resp = (
+                await jobs_client.pause_job(
+                    name=checked_job.id if checked_job is not None else name, workspace=workspace
+                )
+            ).data()
             return from_response(job_resp)
 
         @router.post(
@@ -2002,16 +2044,22 @@ def job_route_factory(
             f"""Resume a job by name for the {service_name} microservice."""
 
             jobs_client = AsyncJobsClient.from_client(async_client)
-            if job_discriminator is None:
-                await require_own_job(jobs_client, name, workspace)
-            await _require_mutation_target_in_collection(
+            checked_job = await _require_mutation_target_in_collection(
                 name=name,
                 workspace=workspace,
                 authorize=authorize,
                 method="POST",
                 suffix="/resume",
             )
-            job_resp = (await jobs_client.resume_job(name=name, workspace=workspace)).data()
+            if checked_job is None:
+                checked_job = await require_own_job(jobs_client, name, workspace)
+            else:
+                checked_job = validate_own_job(checked_job, name, workspace)
+            job_resp = (
+                await jobs_client.resume_job(
+                    name=checked_job.id if checked_job is not None else name, workspace=workspace
+                )
+            ).data()
             return from_response(job_resp)
 
         @router.patch("/jobs/{name}/control")
@@ -2025,16 +2073,22 @@ def job_route_factory(
             f"""Change mutable job behavior for the {service_name} microservice."""
 
             jobs_client = AsyncJobsClient.from_client(async_client)
-            if job_discriminator is None:
-                await require_own_job(jobs_client, name, workspace)
-            await _require_mutation_target_in_collection(
+            checked_job = await _require_mutation_target_in_collection(
                 name=name,
                 workspace=workspace,
                 authorize=authorize,
                 method="PATCH",
                 suffix="/control",
             )
-            job_resp = (await jobs_client.update_job_control(name=name, workspace=workspace, body=body)).data()
+            if checked_job is None:
+                checked_job = await require_own_job(jobs_client, name, workspace)
+            else:
+                checked_job = validate_own_job(checked_job, name, workspace)
+            job_resp = (
+                await jobs_client.update_job_control(
+                    name=checked_job.id if checked_job is not None else name, workspace=workspace, body=body
+                )
+            ).data()
             return from_response(job_resp)
 
         _stamp(pause_job, perm="pause", write=True)
@@ -2054,9 +2108,7 @@ def job_route_factory(
             f"""Rerun a failed job by name for the {service_name} microservice."""
 
             jobs_client = AsyncJobsClient.from_client(async_client)
-            if job_discriminator is None:
-                await require_own_job(jobs_client, name, workspace)
-            await _require_mutation_target_in_collection(
+            checked_job = await _require_mutation_target_in_collection(
                 name=name,
                 workspace=workspace,
                 authorize=authorize,
@@ -2065,7 +2117,15 @@ def job_route_factory(
             )
             # Sent once: a retry after a lost response would find the new attempt and fail with 409.
             rerun_client = jobs_client.with_retry(RetryPolicy(max_retries=0))
-            job_resp = (await rerun_client.rerun_job(job=name, workspace=workspace)).data()
+            if checked_job is None:
+                checked_job = await require_own_job(jobs_client, name, workspace)
+            else:
+                checked_job = validate_own_job(checked_job, name, workspace)
+            job_resp = (
+                await rerun_client.rerun_job(
+                    job=checked_job.id if checked_job is not None else name, workspace=workspace
+                )
+            ).data()
             return from_response(job_resp)
 
         _stamp(rerun_job, perm="rerun", write=True)

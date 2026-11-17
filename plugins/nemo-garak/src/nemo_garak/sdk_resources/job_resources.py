@@ -149,11 +149,19 @@ def _try_parse_log_message(raw_message: str) -> dict[str, str] | None:
 class GarakJobResource:
     """Sync SDK handle for a submitted audit job."""
 
-    def __init__(self, *, job_name: str, platform: NemoClient, workspace: str) -> None:
+    def __init__(self, *, job_name: str, platform: NemoClient, workspace: str, job_id: str | None = None) -> None:
         self._job_name = job_name
+        self._job_id = job_id
         self._platform = platform
         self._workspace = workspace
         self._consecutive_poll_errors = 0
+
+    def _reference(self) -> str:
+        if self._job_id is None:
+            self.get_job()
+        if self._job_id is None:
+            raise ValueError("Job response is missing its immutable ID")
+        return self._job_id
 
     @property
     def name(self) -> str:
@@ -162,17 +170,29 @@ class GarakJobResource:
 
     def get_job(self) -> dict[str, object]:
         """Fetch the current job dict."""
-        url = _job_url(self._platform, self._workspace, self._job_name)
+        url = _job_url(self._platform, self._workspace, self._job_id or self._job_name)
         resp = _platform_get(self._platform, url)
         resp.raise_for_status()
-        return resp.json()
+        job = resp.json()
+        job_id = job.get("id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError("Job response is missing its immutable ID")
+        if self._job_id is None:
+            self._job_id = job_id
+        return job
 
     def get_job_status(self) -> HelixJobStatus | None:
         """Fetch the current platform status of the job."""
-        url = _job_url(self._platform, self._workspace, self._job_name, "/status")
+        url = _job_url(self._platform, self._workspace, self._job_id or self._job_name, "/status")
         resp = _platform_get(self._platform, url)
         resp.raise_for_status()
-        return resp.json().get("status")
+        payload = resp.json()
+        if self._job_id is None:
+            job_id = payload.get("id")
+            if not isinstance(job_id, str) or not job_id:
+                raise ValueError("Job status is missing its immutable ID")
+            self._job_id = job_id
+        return payload.get("status")
 
     def check_if_complete(self, *, raise_if_not_complete: bool = False) -> bool:
         """Return whether the job has reached the ``completed`` status.
@@ -204,7 +224,7 @@ class GarakJobResource:
         page_cursor = None
         while True:
             params = {"page_cursor": page_cursor} if page_cursor else None
-            url = _job_url(self._platform, self._workspace, self._job_name, "/logs")
+            url = _job_url(self._platform, self._workspace, self._reference(), "/logs")
             resp = _platform_get(self._platform, url, params=params)
             resp.raise_for_status()
             response = resp.json()
@@ -237,7 +257,7 @@ class GarakJobResource:
                 "Wait until the job completes before downloading artifacts."
             )
         output_path = Path(path or self._job_name)
-        url = _job_url(self._platform, self._workspace, self._job_name, f"/results/{ARTIFACTS_RESULT_NAME}/download")
+        url = _job_url(self._platform, self._workspace, self._reference(), f"/results/{ARTIFACTS_RESULT_NAME}/download")
         resp = _platform_get(self._platform, url)
         resp.raise_for_status()
         with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:*") as tar:
@@ -260,11 +280,19 @@ class GarakJobResource:
 class AsyncGarakJobResource:
     """Async SDK handle for a submitted audit job."""
 
-    def __init__(self, *, job_name: str, platform: AsyncNemoClient, workspace: str) -> None:
+    def __init__(self, *, job_name: str, platform: AsyncNemoClient, workspace: str, job_id: str | None = None) -> None:
         self._job_name = job_name
+        self._job_id = job_id
         self._platform = platform
         self._workspace = workspace
         self._consecutive_poll_errors = 0
+
+    async def _reference(self) -> str:
+        if self._job_id is None:
+            await self.get_job()
+        if self._job_id is None:
+            raise ValueError("Job response is missing its immutable ID")
+        return self._job_id
 
     @property
     def name(self) -> str:
@@ -273,17 +301,29 @@ class AsyncGarakJobResource:
 
     async def get_job(self) -> dict[str, object]:
         """Fetch the current job dict."""
-        url = _job_url(self._platform, self._workspace, self._job_name)
+        url = _job_url(self._platform, self._workspace, self._job_id or self._job_name)
         resp = await _async_platform_get(self._platform, url)
         resp.raise_for_status()
-        return resp.json()
+        job = resp.json()
+        job_id = job.get("id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError("Job response is missing its immutable ID")
+        if self._job_id is None:
+            self._job_id = job_id
+        return job
 
     async def get_job_status(self) -> HelixJobStatus | None:
         """Fetch the current platform status of the job."""
-        url = _job_url(self._platform, self._workspace, self._job_name, "/status")
+        url = _job_url(self._platform, self._workspace, self._job_id or self._job_name, "/status")
         resp = await _async_platform_get(self._platform, url)
         resp.raise_for_status()
-        return resp.json().get("status")
+        payload = resp.json()
+        if self._job_id is None:
+            job_id = payload.get("id")
+            if not isinstance(job_id, str) or not job_id:
+                raise ValueError("Job status is missing its immutable ID")
+            self._job_id = job_id
+        return payload.get("status")
 
     async def check_if_complete(self, *, raise_if_not_complete: bool = False) -> bool:
         """Return whether the job has reached the ``completed`` status.
@@ -315,7 +355,7 @@ class AsyncGarakJobResource:
         page_cursor = None
         while True:
             params = {"page_cursor": page_cursor} if page_cursor else None
-            url = _job_url(self._platform, self._workspace, self._job_name, "/logs")
+            url = _job_url(self._platform, self._workspace, await self._reference(), "/logs")
             resp = await _async_platform_get(self._platform, url, params=params)
             resp.raise_for_status()
             response = resp.json()
@@ -348,7 +388,9 @@ class AsyncGarakJobResource:
                 "Wait until the job completes before downloading artifacts."
             )
         output_path = Path(path or self._job_name)
-        url = _job_url(self._platform, self._workspace, self._job_name, f"/results/{ARTIFACTS_RESULT_NAME}/download")
+        url = _job_url(
+            self._platform, self._workspace, await self._reference(), f"/results/{ARTIFACTS_RESULT_NAME}/download"
+        )
         resp = await _async_platform_get(self._platform, url)
         resp.raise_for_status()
         await asyncio.to_thread(
