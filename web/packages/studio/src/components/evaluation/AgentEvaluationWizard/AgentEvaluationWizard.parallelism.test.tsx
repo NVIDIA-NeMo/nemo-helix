@@ -125,7 +125,14 @@ const mockLists = () => {
       return HttpResponse.json({ data: name ? [] : [SOURCE] });
     }),
     http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
-      HttpResponse.json({ data: [] })
+      HttpResponse.json({
+        data: ['rows.jsonl', 'dataset.jsonl'].map((path) => ({
+          path,
+          size: 1,
+          file_ref: path,
+          file_url: '',
+        })),
+      })
     )
   );
 };
