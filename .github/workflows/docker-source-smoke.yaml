@@ -48,7 +48,8 @@ jobs:
         with:
           name: nhx-builder
           driver: docker-container
-          cleanup: true
+          # Hosted runners are discarded after the job; removing the builder took 3-6 minutes.
+          cleanup: false
 
       - name: Configure bake variables
         shell: bash
@@ -113,7 +114,8 @@ jobs:
         with:
           name: nhx-builder
           driver: docker-container
-          cleanup: true
+          # Hosted runners are discarded after the job; removing the builder took 3-6 minutes.
+          cleanup: false
 
       - name: Configure bake variables
         shell: bash
