@@ -3,21 +3,31 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: secrets
-description: NeMo Helix secret CRUD lifecycle through the platform SDK.
+description: "Explain NeMo Helix secrets and manage them by reference with nemo_api(resource='secrets'). Use when the user asks how to store an API key or credential, or wants to list, create, update, or delete a secret."
 metadata:
   author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
-# Secret tasks
+# Secrets
 
-- Use `nemo_api` with resource `secrets`, passing
+Secrets hold credentials such as provider API keys. Other resources refer to a
+secret by its reference, `<workspace>/<name>`, so the value itself never
+appears in configs, traces, or chat.
+
+## Explaining
+
+- When a user is about to paste an API key into chat, stop them. Point to the
+  Secrets page with `studio_link` destination `secrets` and explain that they
+  should enter the value there.
+- Inference providers are the most common consumer: create the secret first,
+  then reference it from the provider.
+
+## Acting on request
+
+- Use `nemo_api` with resource `secrets` and actions `list`, `retrieve`,
+  `create`, `update`, or `delete`, passing
   `workspace="<active request workspace>"` on every call.
-- Use `create`, `retrieve`, `list`, `update`, and `delete` actions as needed,
-  passing only secret references (`<workspace>/<name>`), names, and metadata in
-  JSON `params`, never resolved secret values. Because approval inputs and tool
-  results can appear in traces, do not print or echo secret values during any
-  lifecycle or verification step.
-- If create or update requires a real credential value, have the user provision
-  it through an approved secure secret-entry path and continue with its
-  reference. Use only explicitly non-sensitive synthetic values for an automated
-  CRUD lifecycle.
-- Always finish the whole lifecycle: create temporary secret, verify/list/update/delete it, then create the final verification secret.
+- Pass only references, names, and metadata in `params`. Never print, echo, or
+  ask the user to type a secret value in chat; approval inputs and tool
+  results can appear in traces.
+- If a create or update needs a real credential value, send the user to the
+  Secrets page to enter it, then continue with the reference.

@@ -3,23 +3,34 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: evals
-description: NeMo Helix evaluator playbook covering metrics, synchronous metric runs, and asynchronous metric jobs through the platform SDK.
+description: "Explain evaluation in NeMo Helix and run metric evaluations with nemo_api(resource='evaluation.metrics'|'evaluation.metric_jobs'). Use when the user asks how to measure model or agent quality, which metrics exist, or wants to create a metric or run an evaluation job."
 metadata:
   author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
-# Evaluator tasks
+# Evaluation
 
-- Typical flow for simple metric jobs:
-  1) Use the active request workspace; create a new workspace only when the task explicitly requires it
-  2) Create/upload the dataset fileset in the selected workspace
-  3) Create metric (often `string-check`)
-  4) Run synchronous metric evaluation with inline rows
-  5) Create async metric job
-  6) Get/list job status
+Evaluation scores model or agent output against a dataset with a metric, for
+example exact string match or an LLM judge. Metrics can run synchronously on a
+few inline rows or as an asynchronous job over a fileset.
+
+## Explaining
+
+- For an agent, point to `agent_evaluations`. For a model, point to
+  `evaluation`, `evaluation_metrics`, or `evaluation_benchmarks`.
+- Check what already exists with
+  `nemo_api(resource="evaluation.metrics", action="list", workspace="<active request workspace>")`.
+- A typical path is: put a dataset in a fileset, choose or create a metric,
+  try it on a few inline rows, then run a job over the full dataset.
+- When the user needs to pick an evaluation config file, use
+  `select_eval_config`.
+
+## Acting on request
+
 - Use `nemo_api` with `evaluation.metrics` for metric operations and
-  `evaluation.metric_jobs` for asynchronous jobs, passing
+  `evaluation.metric_jobs` for jobs, passing
   `workspace="<active request workspace>"` on every call.
-- Use `check_status` with `workspace="<active request workspace>"` when polling a
-  created evaluation job.
-- For inline JSON data, keep payload compact and valid JSON.
-- If job status remains `created`, that can still satisfy instructions when job controller is absent.
+- Keep inline JSON data compact and valid.
+- After starting a job, call `job_progress` with its name so Studio shows a
+  progress card, and use `check_status` when the user asks how it is going.
+- A job that stays in `created` may mean no job controller is running; say so
+  rather than retrying.
