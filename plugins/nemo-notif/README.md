@@ -3,8 +3,13 @@
 
 # Notif Plugin
 
-Ephemeral notification events. Publishing an event fans it out to every SSE listener on the same
-workspace. Nothing is stored, so a listener only sees events published while it is connected.
+Workspace notification events. Publishing an event stores it as a `notif_event` entity and fans it
+out to every SSE listener on the same workspace. Each caller has their own read state, so events
+published while you were away show up as unread on your next load.
+
+Client flow: load `GET /events` (with `unread_count`) on first render, open the SSE stream for live
+events, and call `/read` or `/read-all` as the user reads them. The stream does not replay, so
+reload `GET /events` after a reconnect.
 
 ## Install and run
 
@@ -17,8 +22,12 @@ nemo services run          # notif is discovered through the nemo.services entry
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/apis/notif/v2/workspaces/{workspace}/events` | Publish an event. Returns the event and how many listeners received it. |
-| `GET` | `/apis/notif/v2/workspaces/{workspace}/events/stream` | SSE stream. Repeat `?types=<type>` to filter by event type. |
+| `POST` | `/apis/notif/v2/workspaces/{workspace}/events` | Store and publish an event. Returns the event and how many listeners received it live. |
+| `GET` | `/apis/notif/v2/workspaces/{workspace}/events` | Recent events, newest first, each with the caller's `read` flag, plus `unread_count`. Query: `limit` (default 50, max 1000), `unread_only`. |
+| `POST` | `/apis/notif/v2/workspaces/{workspace}/events/{event_id}/read` | Mark one event read for the caller. Returns the event. 404 if unknown. |
+| `POST` | `/apis/notif/v2/workspaces/{workspace}/events/{event_id}/unread` | Mark one event unread for the caller. |
+| `POST` | `/apis/notif/v2/workspaces/{workspace}/events/read-all` | Mark every recent event read for the caller. Returns `{"marked": n}`. |
+| `GET` | `/apis/notif/v2/workspaces/{workspace}/events/stream` | SSE stream of newly published events. Repeat `?types=<type>` to filter by event type. |
 
 Publish body:
 
@@ -34,7 +43,7 @@ Publish body:
 ```
 
 Each SSE frame carries `id:`, `event:` (the type) and `data:` (the full event JSON, including `type`,
-`id`, `workspace`, `created_at`, `created_by`). The type is repeated inside `data` because Studio's
+`id`, `workspace`, `created_at`, `created_by` and `read`, which is always `false` for a new event). The type is repeated inside `data` because Studio's
 `util/sseStream.ts` only parses `id:` and `data:`. The server sends `: keepalive` comments every 15s.
 
 ```bash
@@ -45,12 +54,19 @@ curl -X POST http://localhost:8080/apis/notif/v2/workspaces/default/events \
 
 ## Authz
 
-`POST` requires `notif.events.create` (Editor) and `GET .../stream` requires `notif.events.read`
-(Viewer and Editor). Both accept users and service principals, so other services can publish.
+Publishing requires `notif.events.create` (Editor). Listing, streaming and the read/unread routes
+require `notif.events.read` (Viewer and Editor): read state only changes the caller's own view. All
+routes accept users and service principals, so other services can publish.
 
 ## Limitations
 
 - Fan-out is in-process. With several API replicas, a listener only sees events published to its
   own replica. That is exact for local `nemo services run`, which is one process.
-- No replay: `Last-Event-ID` is ignored and events published while disconnected are lost.
+- The stream does not replay (`Last-Event-ID` is ignored). Events are stored, so reload
+  `GET /events` after reconnecting.
 - A listener more than 256 events behind is disconnected.
+- Listing and unread counts only consider the 1000 most recent events per workspace, because the
+  entity store cannot filter on read state. Nothing is deleted yet.
+- Read state is keyed by the caller's principal id. With auth disabled (the local default) every
+  caller is the same `anonymous` reader, so read state is shared.
+- Read-all updates events one at a time.

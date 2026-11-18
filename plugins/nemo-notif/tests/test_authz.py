@@ -15,7 +15,12 @@ def test_notif_authz_derivation_has_no_problems() -> None:
 
     events = "/apis/notif/v2/workspaces/{workspace}/events"
     assert contrib.endpoints[events]["post"].permissions == ["notif.events.create"]
+    assert contrib.endpoints[events]["get"].permissions == ["notif.events.read"]
     assert contrib.endpoints[f"{events}/stream"]["get"].permissions == ["notif.events.read"]
+    # Read state is the caller's own, so Viewers (who hold .read) can change it.
+    assert contrib.endpoints[f"{events}/read-all"]["post"].permissions == ["notif.events.read"]
+    assert contrib.endpoints[f"{events}/{{event_id}}/read"]["post"].permissions == ["notif.events.read"]
+    assert contrib.endpoints[f"{events}/{{event_id}}/unread"]["post"].permissions == ["notif.events.read"]
     for methods in contrib.endpoints.values():
         for binding in methods.values():
             assert binding.callers is not None and {"principal", "service_principal"} <= set(binding.callers)

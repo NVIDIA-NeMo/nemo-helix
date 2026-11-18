@@ -30,14 +30,24 @@ class CreateNotifEventRequest(BaseModel):
 
 
 class NotifEvent(CreateNotifEventRequest):
-    """An event as fanned out to listeners."""
+    """An event as returned by the API and fanned out to listeners."""
 
     id: str
     workspace: str
-    created_at: datetime
+    created_at: datetime | None = None
     created_by: str | None = None
+    read: bool = Field(default=False, description="Whether the calling principal has read this event.")
 
 
 class PublishNotifEventResponse(BaseModel):
     event: NotifEvent
     delivered: int = Field(description="Number of SSE listeners the event was handed to.")
+
+
+class NotifEventList(BaseModel):
+    data: list[NotifEvent] = Field(description="Most recent events first.")
+    unread_count: int = Field(description="Unread events for the caller among the most recent events scanned.")
+
+
+class MarkAllReadResponse(BaseModel):
+    marked: int = Field(description="Number of events newly marked as read.")

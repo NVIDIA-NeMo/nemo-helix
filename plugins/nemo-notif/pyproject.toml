@@ -27,4 +27,4 @@ packages = ["src/nemo_notif_plugin"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
