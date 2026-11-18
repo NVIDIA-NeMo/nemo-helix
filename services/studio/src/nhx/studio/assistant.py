@@ -389,7 +389,7 @@ def _build_studio_system_prompt(
         "For any finite set of choices without a dedicated select_* picker — including yes/no, multiple-choice, 'pick one of these' (for example deployments, jobs, or next actions), or whenever you would offer the user options to choose from — you MUST call ask_user_question to render a selectable options picker instead of listing the choices in plain text. Only ask a concise plain-text question for genuinely open-ended, free-form input that has no discrete options.",
         "Conditional message-summary behavior:",
         "Use a Studio summary block only after substantive work that benefits from collapsing details.",
-        "A summary block is required when you called one or more tools, ran commands, changed files or platform state, performed a multi-step investigation, or produced a long detailed response.",
+        "A summary block is required when you called one or more tools, changed platform state, performed a multi-step investigation, or produced a long detailed response.",
         "For a short informational answer, definition, confirmation, greeting, or simple clarification completed without tool calls, omit the summary block entirely and return the normal answer so Studio shows it in full.",
         "Do not emit the summary markers with a shortened duplicate of an already concise answer.",
         f"Start the summary block on its own line with {STUDIO_MESSAGE_SUMMARY_START} and end it on its own line with {STUDIO_MESSAGE_SUMMARY_END}.",
@@ -409,9 +409,9 @@ def _build_studio_system_prompt(
         "When you are interrupted by a permission request or input request after substantive work, include the summary block describing what happened so far and what you need next.",
         "When you only need to ask one simple clarification and have not performed substantive work or called a tool, ask it normally without a summary block.",
         "When user input is still required, the summary's final sentence MUST state the exact unresolved selection or action, for example 'Select an agent to continue.' Never show only the investigation result while hiding the request for input in the collapsed details.",
-        "Prefer NeMo Studio MCP tools and Studio views over CLI commands for user-facing follow-up actions, navigation, inspection, and status/result review.",
-        "Do not tell the user to run nemo CLI commands, shell commands, curl commands, or status commands to inspect agents, jobs, evaluations, filesets, models, traces, logs, or results when a Studio view, Studio link, or Studio progress card is available for the same purpose.",
-        "Use CLI commands only to perform work that has no Studio UI equivalent, when the user explicitly asks for CLI/debugging, or when you must gather data that Studio tools cannot provide.",
+        "Prefer Studio tools and Studio views over CLI commands for follow-up actions, navigation, inspection, and status or result review.",
+        "Do not tell the user to run nemo CLI, shell, curl, or status commands to inspect agents, jobs, evaluations, filesets, models, traces, logs, or results when a Studio view, Studio link, or Studio progress card serves the same purpose.",
+        "Mention a CLI command only when the user asks for one or no Studio page covers the task.",
         "Required Studio-link behavior:",
         "Default to trying to include a Studio link in Studio-related responses.",
         "When your answer mentions or depends on a Studio resource, page, workflow, or result, first choose the nearest studio_link destination and include that link unless no relevant Studio page exists.",
@@ -485,10 +485,7 @@ def _build_assistant_system_prompt(
                 f"pass studio_session_id='{session_id}'."
             ),
             "Do not reveal the Studio session id to the user.",
-            (
-                "The approval context for nemo_api is injected by Studio and is not a tool argument. "
-                "Read-only calls run immediately; mutating calls will automatically pause for the user's approval."
-            ),
+            ("Read-only nemo_api calls run immediately; mutating calls pause until the user approves them in Studio."),
         ]
     )
 
@@ -1093,6 +1090,9 @@ async def _stream_assistant(
         )
         return
 
+    # Claim the session before any await so a concurrent send sees it as active.
+    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+    _session_streams[session_id] = queue
     try:
         off_topic = await assistant_topic_gate.is_off_topic(
             message,
@@ -1101,23 +1101,45 @@ async def _stream_assistant(
             headers=headers,
         )
         if off_topic:
-            model = _studio_assistant_name()
-            await _persist_conversation_turn(
-                entity_store, conversation, message, assistant_topic_gate.REFUSAL_TEXT, model
+            frames = _stream_refusal(message, conversation, entity_store)
+        else:
+            frames = _stream_agent_turn(
+                session_id, queue, message, agent_url, headers, studio_system_prompt, conversation, entity_store
             )
-            yield _assistant_text_event(assistant_topic_gate.REFUSAL_TEXT, model)
-            yield _sse("", event="done")
-            return
+        async for frame in frames:
+            yield frame
     except EntityStoreError:
         logger.exception("Failed to persist NeMo Assistant session %s", session_id)
         yield _sse(
             json.dumps({"message": "NeMo Assistant could not save this conversation."}),
             event="error",
         )
-        return
+    finally:
+        if _session_streams.get(session_id) is queue:
+            del _session_streams[session_id]
 
-    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
-    _session_streams[session_id] = queue
+
+async def _stream_refusal(
+    message: str,
+    conversation: AssistantConversation,
+    entity_store: _ConversationStore,
+) -> AsyncIterator[str]:
+    model = _studio_assistant_name()
+    await _persist_conversation_turn(entity_store, conversation, message, assistant_topic_gate.REFUSAL_TEXT, model)
+    yield _assistant_text_event(assistant_topic_gate.REFUSAL_TEXT, model)
+    yield _sse("", event="done")
+
+
+async def _stream_agent_turn(
+    session_id: str,
+    queue: asyncio.Queue[tuple[str, Any]],
+    message: str,
+    agent_url: str,
+    headers: Mapping[str, str],
+    studio_system_prompt: str,
+    conversation: AssistantConversation,
+    entity_store: _ConversationStore,
+) -> AsyncIterator[str]:
     deployment_run_id = str(uuid.uuid4())
     contextual_message = "\n\n".join(
         [
@@ -1193,14 +1215,7 @@ async def _stream_assistant(
             json.dumps({"message": _assistant_error_detail(exc)}),
             event="error",
         )
-    except EntityStoreError:
-        logger.exception("Failed to persist NeMo Assistant session %s", session_id)
-        yield _sse(
-            json.dumps({"message": "NeMo Assistant could not save this conversation."}),
-            event="error",
-        )
     finally:
-        _session_streams.pop(session_id, None)
         if not invocation.done():
             invocation.cancel()
         if not queued_event.done():

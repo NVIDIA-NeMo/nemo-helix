@@ -1720,12 +1720,15 @@ def test_platform_route_stream_uses_deployed_assistant(monkeypatch: pytest.Monke
     assert "Current Studio route path: /workspaces/default/dashboard/assistant" in captured["studio_system_prompt"]
     assert "you MUST call select_agent" in captured["studio_system_prompt"]
     assert "you MUST call select_model" in captured["studio_system_prompt"]
-    # The options-picker directive is present and rewritten to the deployed agent's tool name.
     assert "you MUST call ask_user_question to render a selectable options picker" in captured["studio_system_prompt"]
     assert "AskUserQuestion" not in captured["studio_system_prompt"]
-    assert "Prefer NeMo Studio MCP tools and Studio views over CLI commands" in captured["studio_system_prompt"]
-    assert "Do not tell the user to run nemo CLI commands" in captured["studio_system_prompt"]
-    assert "when a Studio view, Studio link, or Studio progress card is available" in captured["studio_system_prompt"]
+    assert "Prefer Studio tools and Studio views over CLI commands" in captured["studio_system_prompt"]
+    assert "Do not tell the user to run nemo CLI, shell, curl, or status commands" in captured["studio_system_prompt"]
+    assert "nemo setup" not in captured["studio_system_prompt"]
+    assert (
+        "when a Studio view, Studio link, or Studio progress card serves the same purpose"
+        in captured["studio_system_prompt"]
+    )
     assert "Default to trying to include a Studio link in Studio-related responses" in captured["studio_system_prompt"]
     assert "link to the closest list page for the current workspace" in captured["studio_system_prompt"]
     assert "Base Models or available base models use destination='base_models'" in captured["studio_system_prompt"]
@@ -1749,8 +1752,7 @@ def test_platform_route_stream_uses_deployed_assistant(monkeypatch: pytest.Monke
     assert "Required job-progress behavior:" in captured["studio_system_prompt"]
     assert "you MUST call job_progress" in captured["studio_system_prompt"]
     assert f"studio_session_id='{session_id}'" in captured["studio_system_prompt"]
-    assert "The approval context for nemo_api is injected by Studio" in captured["studio_system_prompt"]
-    assert "mutating calls will automatically pause for the user's approval" in captured["studio_system_prompt"]
+    assert "mutating calls pause until the user approves them in Studio" in captured["studio_system_prompt"]
     assert (
         "For a newly created agent, use studio_link with destination='agent_chat'" in captured["studio_system_prompt"]
     )
@@ -2143,6 +2145,50 @@ async def test_stream_assistant_refuses_off_topic_message_without_invoking_agent
         assistant_topic_gate.REFUSAL_TEXT,
     ]
     assert session_id not in assistant._session_streams
+
+
+@pytest.mark.asyncio
+async def test_stream_assistant_rejects_concurrent_send_while_topic_check_runs(monkeypatch: pytest.MonkeyPatch):
+    session_id = str(uuid.uuid4())
+    entity_store = FakeEntityStore()
+    conversation = AssistantConversation(
+        name=f"assistant-{session_id}",
+        workspace="default",
+        session_id=session_id,
+        owner_id="local-user",
+    )
+    await entity_store.create(conversation)
+    check_started = asyncio.Event()
+    release_check = asyncio.Event()
+
+    async def slow_check(message: str, *, base_url: str, workspace: str, headers: dict[str, str]) -> bool:
+        check_started.set()
+        await release_check.wait()
+        return False
+
+    async def fake_invoke(agent_url, headers, messages, studio_session_id):
+        return "final answer", "model-x"
+
+    monkeypatch.setattr(assistant_topic_gate, "is_off_topic", slow_check)
+    monkeypatch.setattr(assistant, "_invoke_assistant", fake_invoke)
+
+    def stream(message: str) -> AsyncIterator[str]:
+        return assistant._stream_assistant(
+            session_id, message, "https://agent.test/x", {}, "sys prompt", conversation, entity_store
+        )
+
+    async def collect(message: str) -> str:
+        return "".join([frame async for frame in stream(message)])
+
+    first = asyncio.create_task(collect("first"))
+    await check_started.wait()
+    second = await asyncio.wait_for(collect("second"), timeout=5)
+    release_check.set()
+
+    assert "session already has an active stream" in second
+    assert "final answer" in await first
+    assert session_id not in assistant._session_streams
+    assert [message.content for message in conversation.messages] == ["first", "final answer"]
 
 
 @pytest.mark.asyncio
