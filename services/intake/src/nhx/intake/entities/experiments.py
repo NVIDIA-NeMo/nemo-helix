@@ -233,10 +233,15 @@ class Experiment(EntityBase):
     is_deleted: bool = Field(
         default=False,
         description=(
-            "Soft-delete flag. DELETE flips this to true and reserves the original name "
-            "so telemetry can still resolve its evaluation's deletion state. Deleted experiments "
+            "Soft-delete flag. DELETE flips this to true, updates telemetry references, and renames "
+            "the entity so the original name is free for reuse. Deleted experiments "
             "are hidden from list/get and rejected by ATIF ingest unless `filter[is_deleted]=true`."
         ),
+    )
+
+    deletion_name: str | None = Field(
+        default=None,
+        description="System-managed destination name, persisted before telemetry cleanup so deletion can be retried.",
     )
 
     pinned_at: datetime | None = Field(

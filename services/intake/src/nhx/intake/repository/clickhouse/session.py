@@ -22,6 +22,82 @@ class ClickHouseSessionRepository(SessionRepository):
     def __init__(self, executor: ClickHouseExecutor) -> None:
         self._executor = executor
 
+    async def rename_evaluation_references(self, *, workspace: str, original_name: str, deleted_name: str) -> None:
+        if original_name == deleted_name:
+            return
+        keys = bag_keys(spec_for_field(SpanAttributeField.EVALUATION_NAME))
+        key_parameters = {f"evaluation_key_{index}": key for index, key in enumerate(keys)}
+        key_list = ", ".join(f"%({key})s" for key in key_parameters)
+        values = ", ".join(f"attributes_string[%({key})s]" for key in key_parameters)
+        # Mutate every retained version, including tombstones. Inserting live
+        # replacements could revive a deleted span or replace a colliding root.
+        # Mutations do not propagate through the insert-time materialized view,
+        # so update its trace index explicitly and wait for both mutations.
+        await self._executor.execute(
+            ClickHouseQuery(
+                name="sessions.rename_evaluation_spans",
+                statement=f"""
+                    ALTER TABLE {self._executor.table(ClickHouseTable.SPANS)}
+                    UPDATE attributes_string = mapApply(
+                        (key, value) -> (key, if(
+                            has([{key_list}], key) AND value = %(original_name)s,
+                            %(deleted_name)s, value
+                        )), attributes_string
+                    )
+                    WHERE workspace = %(workspace)s AND has([{values}], %(original_name)s)
+                    SETTINGS mutations_sync = 2
+                """,
+                parameters={
+                    "workspace": workspace,
+                    "original_name": original_name,
+                    "deleted_name": deleted_name,
+                    **key_parameters,
+                },
+            )
+        )
+        await self._executor.execute(
+            ClickHouseQuery(
+                name="sessions.rename_evaluation_traces",
+                statement=f"""
+                    ALTER TABLE {self._executor.table(ClickHouseTable.TRACE_INDEX)}
+                    UPDATE evaluation_name = %(deleted_name)s
+                    WHERE workspace = %(workspace)s AND evaluation_name = %(original_name)s
+                    SETTINGS mutations_sync = 2
+                """,
+                parameters={"workspace": workspace, "original_name": original_name, "deleted_name": deleted_name},
+            )
+        )
+
+    async def list_evaluation_session_ids(
+        self, *, workspace: str, evaluation_name: str, after: str | None, limit: int
+    ) -> list[str]:
+        keys = bag_keys(spec_for_field(SpanAttributeField.EVALUATION_NAME))
+        values = ", ".join(f"attributes_string[%(evaluation_key_{index})s]" for index in range(len(keys)))
+        rows = await self._executor.fetch_all(
+            ClickHouseQuery(
+                name="sessions.for_evaluation",
+                statement=f"""
+                    SELECT DISTINCT session_id
+                    FROM {self._executor.table(ClickHouseTable.SPANS)} FINAL
+                    PREWHERE workspace = %(workspace)s
+                    WHERE is_deleted = 0
+                        AND (%(first_page)s OR session_id > %(after)s)
+                        AND has([{values}], %(evaluation_name)s)
+                    ORDER BY session_id
+                    LIMIT %(limit)s
+                """,
+                parameters={
+                    "workspace": workspace,
+                    "evaluation_name": evaluation_name,
+                    "first_page": after is None,
+                    "after": after or "",
+                    "limit": limit,
+                    **{f"evaluation_key_{index}": key for index, key in enumerate(keys)},
+                },
+            )
+        )
+        return [str(row["session_id"]) for row in rows]
+
     async def get_session(self, *, workspace: str, session_id: str) -> IntakeSession | None:
         query = _session_detail_query(self._executor.table(ClickHouseTable.SPANS)).bind(
             workspace=workspace,

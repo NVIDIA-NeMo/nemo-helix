@@ -218,6 +218,30 @@ class IntakeSpansService:
                 raise SessionInEvaluationError(workspace, session_id)
         await self._sessions.delete_session(workspace=workspace, session_id=session_id)
 
+    async def rename_evaluation_references(self, *, workspace: str, original_name: str, deleted_name: str) -> None:
+        await self._sessions.rename_evaluation_references(
+            workspace=workspace, original_name=original_name, deleted_name=deleted_name
+        )
+
+    async def delete_evaluation_sessions(self, *, workspace: str, evaluation_name: str) -> None:
+        """Delete eligible sessions after an evaluation is soft-deleted.
+
+        Keyset pagination advances past protected shared sessions as well as deleted
+        ones. Retrying after a storage failure discovers only remaining current spans.
+        """
+        after = None
+        while session_ids := await self._sessions.list_evaluation_session_ids(
+            workspace=workspace, evaluation_name=evaluation_name, after=after, limit=100
+        ):
+            for session_id in session_ids:
+                try:
+                    await self.delete_session(workspace=workspace, session_id=session_id)
+                except (SessionInEvaluationError, SessionNotFoundError):
+                    # Shared/unresolved ownership stays protected. A concurrent
+                    # deletion can also remove a session between listing and deletion.
+                    continue
+            after = session_ids[-1]
+
     async def create_evaluator_result(self, result: EvaluatorResult) -> EvaluatorResult:
         """Persist one evaluator_result. Loose target — no span existence check."""
 

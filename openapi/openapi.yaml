@@ -5571,6 +5571,18 @@ paths:
       tags:
       - Evaluations
       summary: Delete Evaluation
+      description: 'Soft-delete an evaluation and its eligible sessions'' spans and
+        traces.
+
+
+        Shared sessions remain until all associated evaluations are deleted. Retained
+
+        telemetry follows the renamed evaluation, allowing its original name to be
+        reused.
+
+        Failed cleanup keeps the original name reserved so DELETE can be retried.
+
+        Evaluator results and annotations are retained.'
       operationId: delete_evaluation_apis_intake_v2_workspaces__workspace__evaluations__name__delete
       parameters:
       - name: workspace
@@ -5591,7 +5603,10 @@ paths:
         '404':
           description: Evaluation not found
         '409':
-          description: Evaluation is selected as an Experiment's baseline
+          description: Evaluation is a baseline or telemetry has conflicting trace-index
+            ownership
+        '503':
+          description: Telemetry storage unavailable; retry deletion to resume cleanup
         '422':
           description: Validation Error
           content:
@@ -6147,6 +6162,8 @@ paths:
       tags:
       - Experiments
       summary: Delete Experiment
+      description: Delete the group and clean telemetry for evaluations whose last
+        membership it owns.
       operationId: delete_experiment_apis_intake_v2_workspaces__workspace__experiments__name__delete
       parameters:
       - name: workspace
@@ -6166,6 +6183,10 @@ paths:
           description: Successful Response
         '404':
           description: Experiment not found
+        '409':
+          description: Conflicting trace-index ownership prevents telemetry cleanup
+        '503':
+          description: Telemetry storage unavailable; retry deletion to resume cleanup
         '422':
           description: Validation Error
           content:

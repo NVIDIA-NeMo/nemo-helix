@@ -37,6 +37,46 @@ def _repository(executor: _Executor) -> ClickHouseSessionRepository:
     return ClickHouseSessionRepository(executor)
 
 
+@pytest.mark.asyncio
+async def test_rename_evaluation_references_updates_both_tables_synchronously_and_binds_names() -> None:
+    executor = _Executor()
+    await _repository(executor).rename_evaluation_references(
+        workspace="team'", original_name="eval'", deleted_name="eval-deleted-target"
+    )
+    spans, traces = executor.queries
+    assert spans.name == "sessions.rename_evaluation_spans"
+    assert "ALTER TABLE spans" in spans.statement
+    assert "mapApply" in spans.statement
+    assert "WHERE workspace = %(workspace)s" in spans.statement
+    assert "nemo.evaluation.name" in spans.parameters.values()
+    assert "nemo.experiment.id" in spans.parameters.values()
+    assert "ALTER TABLE trace_index" in traces.statement
+    assert "UPDATE evaluation_name = %(deleted_name)s" in traces.statement
+    for query in (spans, traces):
+        assert "SETTINGS mutations_sync = 2" in query.statement
+        assert "is_deleted = 0" not in query.statement
+        assert "team'" not in query.statement
+        assert "eval'" not in query.statement
+        assert query.parameters["workspace"] == "team'"
+        assert query.parameters["original_name"] == "eval'"
+        assert query.parameters["deleted_name"] == "eval-deleted-target"
+
+
+@pytest.mark.asyncio
+async def test_rename_evaluation_does_not_release_partial_failure_or_run_second_statement() -> None:
+    class FailingExecutor(_Executor):
+        async def execute(self, query: ClickHouseQuery) -> None:
+            self.queries.append(query)
+            raise RuntimeError("mutation failed")
+
+    executor = FailingExecutor()
+    with pytest.raises(RuntimeError, match="mutation failed"):
+        await _repository(executor).rename_evaluation_references(
+            workspace="team", original_name="evaluation", deleted_name="evaluation-deleted-target"
+        )
+    assert len(executor.queries) == 1
+
+
 def test_session_query_is_primary_key_pruned_and_payload_free() -> None:
     query = _session_detail_query("spans")
 
