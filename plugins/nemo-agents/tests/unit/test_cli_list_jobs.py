@@ -114,11 +114,17 @@ def test_lists_every_agents_job_type(app: typer.Typer) -> None:
     result = _invoke(app, api)
 
     assert result.exit_code == 0, result.output
-    assert [r.url.path for r in api.requests] == [f"{JOBS}/evaluate", f"{JOBS}/execute", f"{JOBS}/package"]
+    assert [r.url.path for r in api.requests] == [
+        f"{JOBS}/evaluate",
+        f"{JOBS}/execute",
+        f"{JOBS}/package",
+        f"{JOBS}/pipeline",
+    ]
     assert {job["type"] for job in json.loads(result.stdout)["data"]} == {
         "agents.evaluate",
         "agents.execute",
         "agents.package-agent",
+        "agents.pipeline",
     }
 
 

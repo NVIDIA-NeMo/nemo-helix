@@ -795,6 +795,7 @@ nemo-evals-trial-recording = "nemo_evals.gateway.middleware.trial_recording:Tria
 "evals.retrieve-eval" = "nemo_evals.jobs.retrieve_eval:RetrieveEvalJob"
 "agent-optimization.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
 "agent-optimization.switchyard" = "nemo_switchyard.jobs.optimize:SwitchyardOptimizeJob"
+"agents.pipeline" = "nemo_agents_plugin.jobs.pipeline:PipelineJob"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.logging_provider"]

@@ -8,6 +8,7 @@ from __future__ import annotations
 from fastapi.routing import APIRoute
 from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
 from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
+from nemo_agents_plugin.jobs.pipeline import PipelineJob
 from nemo_agents_plugin.service import AgentsService
 from nemo_helix_plugin.scheduler import submit_path_for
 
@@ -40,6 +41,10 @@ def test_evaluate_job_route_matches_generated_submit_path() -> None:
 
 def test_execute_job_route_matches_generated_submit_path() -> None:
     assert submit_path_for(ExecuteAgentJob, workspace="{workspace}") in _mounted_post_paths()
+
+
+def test_pipeline_job_route_matches_generated_submit_path() -> None:
+    assert submit_path_for(PipelineJob, workspace="{workspace}") in _mounted_post_paths()
 
 
 def test_session_routes_are_mounted() -> None:

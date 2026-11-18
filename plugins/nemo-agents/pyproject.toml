@@ -71,6 +71,7 @@ agents = "nemo_agents_plugin.skills:skills_dir"
 "agents.evaluate" = "nemo_agents_plugin.jobs.evaluate_agent:EvaluateAgentJob"
 "agents.execute" = "nemo_agents_plugin.jobs.execute:ExecuteAgentJob"
 "agents.package-agent" = "nemo_agents_plugin.jobs.package_agent:PackageAgentJob"
+"agents.pipeline" = "nemo_agents_plugin.jobs.pipeline:PipelineJob"
 
 [project.entry-points."nemo.agents.post_run_actions"]
 "agents.noop" = "nemo_agents_plugin.jobs.post_run_actions:NoopPostRunAction"
