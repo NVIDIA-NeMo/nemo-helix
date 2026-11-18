@@ -169,7 +169,6 @@ MCP_TOOLS: list[dict[str, Any]] = [
 
 STUDIO_ASSISTANT_CONTEXT = "\n".join(
     [
-        "You are NeMo Assistant, running inside NeMo Studio.",
         (
             "NeMo Studio and the NeMo Helix API are already set up and running for this workspace. "
             "Treat the platform as healthy and go straight to the user's question."
