@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // stepSpecNameConfigKey is the key the jobs controller adds to a step entity's
@@ -26,6 +27,7 @@ type jobStepClient struct {
 	httpClient *http.Client
 	principal  *Principal
 	apiBaseURL string
+	session    *Session
 }
 
 func NewJobStepClientWithHTTPClient(apiBaseURL string, principal *Principal, httpClient *http.Client) JobStepClient {
@@ -33,7 +35,8 @@ func NewJobStepClientWithHTTPClient(apiBaseURL string, principal *Principal, htt
 		httpClient = http.DefaultClient
 	}
 	return &jobStepClient{
-		httpClient: httpClient,
+		httpClient: safeHTTPClient(httpClient),
+		session:    &Session{},
 		principal:  principal,
 		apiBaseURL: apiBaseURL,
 	}
@@ -52,14 +55,7 @@ func (c *jobStepClient) GetJobStepConfig(ctx context.Context, workspace, job, st
 		return nil, err
 	}
 
-	// Same principal scheme as the secrets fetch: the jobs service acting on
-	// behalf of the job creator.
-	if c.principal != nil && c.principal.ID != "" {
-		req.Header.Set("X-NHX-Principal-Id", "service:jobs")
-		req.Header.Set("X-NHX-Principal-On-Behalf-Of", c.principal.ID)
-	}
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.session.do(req, c.httpClient, c.principal)
 	if err != nil {
 		return nil, err
 	}
@@ -82,4 +78,14 @@ func (c *jobStepClient) GetJobStepConfig(ctx context.Context, workspace, job, st
 	}
 	delete(config, stepSpecNameConfigKey)
 	return json.Marshal(config)
+}
+
+func (s *Session) JobStepClient(endpoint Endpoint, principal *Principal) JobStepClient {
+	client := s.clientForEndpoint(endpoint)
+	if client.Timeout == 0 {
+		client.Timeout = 30 * time.Second
+	}
+	c := NewJobStepClientWithHTTPClient(endpoint.ConnectBaseURL, principal, client).(*jobStepClient)
+	c.session = s
+	return c
 }
