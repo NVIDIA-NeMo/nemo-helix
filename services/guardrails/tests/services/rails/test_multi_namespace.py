@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import unittest
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from nhx.guardrails.app.services.configs.registry import ConfigRegistry
@@ -10,6 +9,7 @@ from nhx.guardrails.app.services.rails.registry import RailsRegistry
 from nhx.guardrails.app.services.rails.service import RailsService
 from nhx.guardrails.app.services.utils import normalize_config_ids
 from nhx.guardrails.app.utils.hash_utils import compute_token_headers_hash
+from nhx.guardrails.entities import GuardrailConfig
 from nhx.guardrails.entities.values._private import Model, RailsConfig
 
 
@@ -35,19 +35,17 @@ class TestRailsServiceNamespaceSupport(unittest.IsolatedAsyncioTestCase):
         self.rails_service = RailsService(
             config_registry=self.mock_config_registry, rails_registry=self.mock_rails_registry
         )
+        self.mock_config_registry.fetch_entities.side_effect = self._fetch_entities
 
-        # Mock the config cache entry to return a mock with old datetime so rails cache is always newer
-        mock_config_cache_entry = MagicMock()
-        mock_config_cache_entry.created_at = datetime(2000, 1, 1, tzinfo=timezone.utc)  # Very old date
-        self.config_cache_entry_patcher = patch.object(
-            self.rails_service._config_registry,
-            "get_cache_entry",
-            return_value=mock_config_cache_entry,
-        )
-        self.mock_config_cache_entry = self.config_cache_entry_patcher.start()
-
-    def tearDown(self):
-        self.config_cache_entry_patcher.stop()
+    @staticmethod
+    async def _fetch_entities(config_ids):
+        entities = {}
+        for config_id in config_ids:
+            workspace, name = config_id.split("/")
+            entity = GuardrailConfig(name=name, workspace=workspace)
+            entity._id = f"id-{config_id}"
+            entities[config_id] = entity
+        return entities
 
     @patch("nhx.guardrails.app.services.rails.service.create_rails_engine")
     async def test_get_rails_with_namespaced_config(self, mock_llm_rails):
@@ -63,7 +61,7 @@ class TestRailsServiceNamespaceSupport(unittest.IsolatedAsyncioTestCase):
         mock_config = RailsConfig(models=[Model(type="main", model=model_name, engine=engine)])
         mock_rails = MagicMock()
 
-        self.mock_config_registry.get.return_value = mock_config
+        self.mock_config_registry.build_config.return_value = mock_config
         mock_llm_rails.return_value = mock_rails
         self.mock_rails_registry.get_cache_entry.return_value = None
 
@@ -71,7 +69,8 @@ class TestRailsServiceNamespaceSupport(unittest.IsolatedAsyncioTestCase):
             config_ids=config_ids, model=model, req_headers_cache_key=token_hash
         )
 
-        self.mock_config_registry.get.assert_called_once()
+        self.mock_config_registry.fetch_entities.assert_awaited_once_with(config_ids)
+        self.mock_config_registry.build_config.assert_called_once()
         mock_llm_rails.assert_called_once()
         self.mock_rails_registry.add.assert_called_once()
 
@@ -88,13 +87,17 @@ class TestRailsServiceNamespaceSupport(unittest.IsolatedAsyncioTestCase):
         mock_rails = MagicMock()
         mock_cache_entry = MagicMock()
         mock_cache_entry.llm_rails = mock_rails
-        mock_cache_entry.created_at = datetime.now(timezone.utc)
+        mock_cache_entry.config_versions = (
+            ("id-nvidia/test-config", 1),
+            ("id-default/test-config2", 1),
+        )
 
         self.mock_rails_registry.get_cache_entry.return_value = mock_cache_entry
 
         result = await self.rails_service.get_rails(config_ids=config_ids, model=model)
 
         self.mock_rails_registry.get_cache_entry.assert_called_once()
-        self.mock_config_registry.get.assert_not_called()
+        self.mock_config_registry.fetch_entities.assert_awaited_once_with(config_ids)
+        self.mock_config_registry.build_config.assert_not_called()
 
         assert result == mock_rails
