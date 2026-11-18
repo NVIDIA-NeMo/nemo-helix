@@ -29,4 +29,4 @@ if [ ${#filtered_files[@]} -eq 0 ]; then
 	exit 0
 fi
 
-"${uv_bin}" run --frozen --group compass --group typecheck --group scaled-evals ty check --exit-zero-on-warning "${filtered_files[@]}"
+"${uv_bin}" run --frozen --group compass --group typecheck --group scaled-evals --group opensandbox-ext ty check --exit-zero-on-warning "${filtered_files[@]}"

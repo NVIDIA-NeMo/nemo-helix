@@ -140,8 +140,8 @@ class IntakeSpansService:
             sort=sort,
         )
 
-    async def get_span(self, *, workspace: str, span_id: str) -> IntakeSpan:
-        span = await self._spans.get_span(workspace=workspace, span_id=span_id)
+    async def get_span(self, *, workspace: str, span_id: str, session_id: str | None = None) -> IntakeSpan:
+        span = await self._spans.get_span(workspace=workspace, span_id=span_id, session_id=session_id)
         if span is None:
             raise SpanNotFoundError(workspace, span_id)
         return span
@@ -157,8 +157,10 @@ class IntakeSpansService:
     ) -> PaginatedResult[IntakeTrace]:
         return await self._traces.list_traces(filters=filters, page=page, page_size=page_size, sort=sort, mode=mode)
 
-    async def get_trace(self, *, workspace: str, trace_id: str, mode: TraceMode) -> IntakeTrace:
-        trace = await self._traces.get_trace(workspace=workspace, trace_id=trace_id, mode=mode)
+    async def get_trace(
+        self, *, workspace: str, trace_id: str, mode: TraceMode, session_id: str | None = None
+    ) -> IntakeTrace:
+        trace = await self._traces.get_trace(workspace=workspace, trace_id=trace_id, mode=mode, session_id=session_id)
         if trace is None:
             raise TraceNotFoundError(workspace, trace_id)
         return trace

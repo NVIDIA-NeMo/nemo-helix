@@ -17,7 +17,6 @@ from typing import Any
 import pytest
 
 pytest.importorskip("opensandbox_server")
-pytest.importorskip("scaled_evals", reason="scaled-evals plugin not installed")
 
 import nemo_ext_server as ext
 import opensandbox_server

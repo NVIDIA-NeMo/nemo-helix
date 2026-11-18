@@ -16,7 +16,7 @@ from typing import Any
 from nhx.common.api.common import PaginatedResult
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseExternalData, ClickHouseQuery
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
-from nhx.intake.repository.trace import TraceRepository
+from nhx.intake.repository.trace import TraceAmbiguousError, TraceRepository
 from nhx.intake.spans.domain import (
     CostRollup,
     IntakeTrace,
@@ -69,13 +69,13 @@ TRACE_COLUMNS = [
 
 _CURRENT_SPAN_IDENTITY_COLUMNS = (
     "workspace",
+    "session_id",
     "source_format",
     "trace_id",
     "external_span_id",
     "id",
 )
 _CURRENT_SPAN_VALUE_COLUMNS = (
-    "session_id",
     "external_parent_span_id",
     "kind",
     "name",
@@ -109,8 +109,8 @@ class _TracePageRef:
         )
 
     @property
-    def trace_key(self) -> tuple[str, str]:
-        return self.source_format, self.trace_id
+    def trace_key(self) -> tuple[str, str, str]:
+        return self.source_format, self.trace_id, self.session_id
 
 
 class ClickHouseTraceRepository(TraceRepository):
@@ -202,9 +202,29 @@ class ClickHouseTraceRepository(TraceRepository):
             ),
         )
 
-    async def get_trace(self, *, workspace: str, trace_id: str, mode: TraceMode) -> IntakeTrace | None:
+    async def get_trace(
+        self, *, workspace: str, trace_id: str, mode: TraceMode, session_id: str | None = None
+    ) -> IntakeTrace | None:
+        if session_id is None:
+            sessions = await self._executor.fetch_all(
+                ClickHouseQuery(
+                    name="traces.get.sessions",
+                    statement=f"""
+                        SELECT DISTINCT session_id
+                        FROM {self._executor.table(ClickHouseTable.TRACE_INDEX)} FINAL
+                        WHERE workspace = %(workspace)s AND trace_id = %(trace_id)s AND is_deleted = 0
+                        LIMIT 2
+                    """,
+                    parameters={"workspace": workspace, "trace_id": trace_id},
+                )
+            )
+            if len(sessions) > 1:
+                raise TraceAmbiguousError(f"Trace {workspace}/{trace_id} belongs to multiple sessions")
+            if not sessions:
+                return None
+            session_id = str(sessions[0]["session_id"])
         result = await self.list_traces(
-            filters=TraceListFilter(workspace=workspace, trace_ids=[trace_id]),
+            filters=TraceListFilter(workspace=workspace, trace_ids=[trace_id], session_id=session_id),
             page=1,
             page_size=1,
             sort="-started_at",
@@ -236,8 +256,8 @@ class ClickHouseTraceRepository(TraceRepository):
                 # from pulling in unrelated spans.
                 "span_versions.session_id IN (SELECT session_id FROM roots)\n"
                 "                AND span_versions.trace_id IN (SELECT trace_id FROM roots)\n"
-                "                AND (span_versions.source_format, span_versions.trace_id) "
-                "IN (SELECT source_format, trace_id FROM roots)"
+                "                AND (span_versions.source_format, span_versions.trace_id, span_versions.session_id) "
+                "IN (SELECT source_format, trace_id, session_id FROM roots)"
             ),
         )
         parameters.update(rollup_parameters)
@@ -258,6 +278,7 @@ class ClickHouseTraceRepository(TraceRepository):
                     ON roots.workspace = rollups.workspace
                     AND roots.source_format = rollups.source_format
                     AND roots.trace_id = rollups.trace_id
+                    AND roots.session_id = rollups.session_id
             )
             SELECT
                 {_metric_select_columns()}
@@ -303,7 +324,7 @@ class ClickHouseTraceRepository(TraceRepository):
                         AND trace_roots.is_deleted = 0
                         AND trace_roots.trace_id IN (SELECT trace_id FROM refs)
                     ORDER BY trace_roots.root_started_at ASC, trace_roots.root_span_id ASC
-                    LIMIT 1 BY trace_roots.workspace, trace_roots.source_format, trace_roots.trace_id
+                    LIMIT 1 BY trace_roots.workspace, trace_roots.session_id, trace_roots.source_format, trace_roots.trace_id
                 )
                 SELECT refs.group_id, max(traces.started_at) AS started_at
                 FROM refs
@@ -358,6 +379,7 @@ def _trace_hydration_sql(*, trace_index_table: str, spans_table: str, mode: Trac
             ON traces.workspace = rollups.workspace
             AND traces.source_format = rollups.source_format
             AND traces.id = rollups.trace_id
+            AND traces.session_id = rollups.session_id
     """
     return query, {**trace_parameters, **aggregate_parameters}
 
@@ -377,10 +399,11 @@ def _page_trace_roots_sql(*, trace_index_table: str, mode: TraceMode) -> tuple[s
             AND trace_roots.trace_id IN %(page_trace_ids)s
             AND (
                 trace_roots.source_format,
-                trace_roots.trace_id
+                trace_roots.trace_id,
+                trace_roots.session_id
             ) IN %(page_trace_keys)s
         ORDER BY trace_roots.root_started_at ASC, trace_roots.root_span_id ASC
-        LIMIT 1 BY trace_roots.workspace, trace_roots.source_format, trace_roots.trace_id
+        LIMIT 1 BY trace_roots.workspace, trace_roots.session_id, trace_roots.source_format, trace_roots.trace_id
     """
     return query, parameters
 
@@ -434,7 +457,7 @@ def _trace_index_sql(
         FROM {table} AS trace_roots FINAL
         WHERE {where_sql}
         ORDER BY trace_roots.root_started_at ASC, trace_roots.root_span_id ASC
-        LIMIT 1 BY trace_roots.workspace, trace_roots.source_format, trace_roots.trace_id
+        LIMIT 1 BY trace_roots.workspace, trace_roots.session_id, trace_roots.source_format, trace_roots.trace_id
     """
     return query, parameters
 
@@ -470,7 +493,7 @@ def _trace_index_select_columns(*, mode: TraceMode) -> tuple[str, dict[str, Any]
 _PAGE_TRACE_REFS_WHERE_SQL = (
     "span_versions.session_id IN %(page_session_ids)s\n"
     "                AND span_versions.trace_id IN %(page_trace_ids)s\n"
-    "                AND (span_versions.source_format, span_versions.trace_id) "
+    "                AND (span_versions.source_format, span_versions.trace_id, span_versions.session_id) "
     "IN %(page_trace_keys)s"
 )
 
@@ -497,6 +520,7 @@ def _trace_aggregates_sql(
             "workspace",
             "source_format",
             "trace_id",
+            "session_id",
             usage.trace_columns,
             _unique_string_attribute_aggregate(parameter="model_key", alias="models"),
             _unique_string_attribute_aggregate(parameter="provider_key", alias="providers"),
@@ -515,13 +539,14 @@ def _trace_aggregates_sql(
                 trace_spans.workspace AS workspace,
                 trace_spans.source_format AS source_format,
                 trace_spans.trace_id AS trace_id,
+                trace_spans.session_id AS session_id,
                 trace_spans.status AS status,
                 trace_spans.attributes_string AS attributes_string,
                 {usage.span_columns}
             FROM {current_spans} AS trace_spans
             WHERE trace_spans.is_deleted = 0
         ) AS span_rows
-        GROUP BY workspace, source_format, trace_id
+        GROUP BY workspace, session_id, source_format, trace_id
     """
     return query, parameters
 
@@ -550,7 +575,7 @@ def _reconcile_hydrated_page(
     page_refs: Sequence[_TracePageRef],
     hydrated_rows: Sequence[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[_TracePageRef]]:
-    rows_by_key = {(str(row["source_format"]), str(row["id"])): row for row in hydrated_rows}
+    rows_by_key = {(str(row["source_format"]), str(row["id"]), str(row["session_id"])): row for row in hydrated_rows}
     rows = [rows_by_key[ref.trace_key] for ref in page_refs if ref.trace_key in rows_by_key]
     dropped_refs = [ref for ref in page_refs if ref.trace_key not in rows_by_key]
     return rows, dropped_refs
@@ -640,9 +665,13 @@ def _order_by(sort: str, *, table_alias: str | None = None) -> str:
     if table_alias is not None:
         column = f"{table_alias}.{column}"
         id_column = f"{table_alias}.id"
+        session_column = f"{table_alias}.session_id"
+        source_column = f"{table_alias}.source_format"
     else:
         id_column = "id"
-    return f"{column} {direction}, {id_column} ASC"
+        session_column = "session_id"
+        source_column = "source_format"
+    return f"{column} {direction}, {id_column} ASC, {session_column} ASC, {source_column} ASC"
 
 
 def _row_to_trace(row: dict[str, Any]) -> IntakeTrace:
@@ -714,7 +743,7 @@ def _metric_roots_sql(
         FROM {trace_index_table} AS trace_roots FINAL
         WHERE {where_sql}
         ORDER BY trace_roots.root_started_at ASC, trace_roots.root_span_id ASC
-        LIMIT 1 BY trace_roots.workspace, trace_roots.source_format, trace_roots.trace_id
+        LIMIT 1 BY trace_roots.workspace, trace_roots.session_id, trace_roots.source_format, trace_roots.trace_id
     """
     return query, parameters
 

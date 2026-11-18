@@ -37,6 +37,7 @@ from nemo_data_designer_plugin.sdk import http as sdk_http
 from nemo_data_designer_plugin.sdk.errors import (
     DataDesignerClientError,
     DataDesignerConfigValidationError,
+    DataDesignerJobError,
     DataDesignerPreviewError,
 )
 from nemo_data_designer_plugin.sdk.job_resources import AsyncDataDesignerJobResource, DataDesignerJobResource
@@ -306,3 +307,71 @@ async def test_async_create_posts_to_named_create_job(
     assert kwargs["body"].spec["num_records"] == 10
     assert job._job_name == "dd-job-2"
     assert job._job_collection == "create"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_retrieved_handle_keeps_original_id_after_name_reuse(asynchronous: bool) -> None:
+    references: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        reference = request.url.path.rsplit("/", 1)[-1]
+        references.append(reference)
+        if len(references) == 1:
+            return httpx.Response(200, json={"id": "platform-job-original", "name": "training"})
+        assert reference == "platform-job-original"
+        return httpx.Response(404, json={"detail": "original Job disappeared"})
+
+    if asynchronous:
+        async with AsyncNemoClient(
+            base_url="http://test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        ) as client:
+            handle = await AsyncDataDesignerResource(client).get_job_resource("training", workspace="default")
+            with pytest.raises(DataDesignerJobError):
+                await handle.get_job()
+    else:
+        with NemoClient(
+            base_url="http://test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+        ) as client:
+            handle = DataDesignerResource(client).get_job_resource("training", workspace="default")
+            with pytest.raises(DataDesignerJobError):
+                handle.get_job()
+    assert references == ["training", "platform-job-original"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lookup", ["job", "status"])
+async def test_async_name_only_handle_retains_discovered_id_for_logs(lookup):
+    references = []
+
+    def handler(request):
+        references.append(request.url.path)
+        if request.url.path.endswith("/logs"):
+            return httpx.Response(200, json={"data": [], "total": 0, "next_page": None, "prev_page": None})
+        if request.url.path.endswith("/status"):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "original",
+                    "name": "same",
+                    "status": "completed",
+                    "status_details": {},
+                    "error_details": None,
+                    "steps": [],
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                },
+            )
+        return httpx.Response(200, json={"id": "original", "name": "same"})
+
+    async with AsyncNemoClient(
+        base_url="http://test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    ) as client:
+        handle = AsyncDataDesignerJobResource(job_name="same", platform=client, workspace="default")
+        if lookup == "job":
+            await handle.get_job()
+        else:
+            await handle.get_job_status()
+        assert await handle._reference() == "original"
+        await handle.get_logs()
+    assert references[-1].endswith("/original/logs")

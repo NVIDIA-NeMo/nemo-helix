@@ -10,6 +10,7 @@ import {
 import type {
   FileChangeSummary,
   SubtleToolAction,
+  SubtleToolActionGroup,
 } from '@nemo/common/src/components/AssistantChat/toolCall/types';
 import {
   isAssistantSubtleToolCallName,
@@ -37,7 +38,7 @@ const getRawStringArg = (args: Record<string, unknown>, keys: string[]): string 
   return undefined;
 };
 
-export const getToolSummary = (toolName: string, args: AssistantToolArgs): string | undefined => {
+const getToolSummary = (toolName: string, args: AssistantToolArgs): string | undefined => {
   switch (toolName) {
     case 'Bash':
       return getStringArg(args, ['command']);
@@ -68,14 +69,14 @@ export const getToolSummary = (toolName: string, args: AssistantToolArgs): strin
   }
 };
 
-export const compactSubtleDetail = (detail: string | undefined): string | undefined => {
+const compactSubtleDetail = (detail: string | undefined): string | undefined => {
   const compacted = detail?.replace(/\s+/g, ' ').trim();
   if (!compacted) return undefined;
   if (compacted.length <= SUBTLE_MESSAGE_MAX_LENGTH) return compacted;
   return `${compacted.slice(0, SUBTLE_MESSAGE_MAX_LENGTH - 3).trimEnd()}...`;
 };
 
-export const formatSubtleToolMessage = (
+const formatSubtleToolMessage = (
   action: string,
   detail: string | undefined,
   fallback: string
@@ -363,68 +364,52 @@ export const getBashCommand = (args: AssistantToolArgs): string | undefined => {
   return undefined;
 };
 
-export const getToolInvocation = (toolName: string, args: AssistantToolArgs): string => {
-  if (toolName === 'Bash') {
-    const command = args.command;
-    if (typeof command === 'string' && command) return command;
-  }
-
-  return JSON.stringify(args, null, 2);
-};
-
 export const getSubtleToolGroupActions = (args: AssistantToolArgs): readonly SubtleToolAction[] => {
   const actions = args.actions;
-  if (!Array.isArray(actions)) return [];
-
-  return actions
-    .filter(isPlainObject)
-    .map((action, index): SubtleToolAction | undefined => {
-      const toolName = getRawStringArg(action, ['toolName'])?.trim();
-      if (!toolName) return undefined;
-
-      const actionArgs = isPlainObject(action.args) ? toAssistantToolArgs(action.args) : {};
-      const message = getSubtleToolMessage(toolName, actionArgs);
-      if (!message) return undefined;
-
-      return {
-        detail: getSubtleToolDetail(toolName, actionArgs, message),
-        Icon: getSubtleToolIcon(toolName),
-        invocation: getToolInvocation(toolName, actionArgs),
-        message,
-        toolCallId: getRawStringArg(action, ['toolCallId'])?.trim() ?? `${toolName}-${index}`,
-        toolName,
-      };
-    })
-    .filter((action): action is SubtleToolAction => action !== undefined);
-};
-
-export const summarizeRepeatedSubtleToolActions = (
-  actions: readonly SubtleToolAction[]
-): readonly SubtleToolAction[] => {
-  const groupedActions = new Map<string, SubtleToolAction[]>();
-
-  for (const action of actions) {
-    const existingActions = groupedActions.get(action.toolName);
-    if (existingActions) {
-      existingActions.push(action);
-    } else {
-      groupedActions.set(action.toolName, [action]);
-    }
+  if (!Array.isArray(actions)) {
+    return [];
   }
 
-  return Array.from(groupedActions.values()).map((group) => {
-    if (group.length === 1) return group[0]!;
-
-    const firstAction = group[0]!;
-    return {
-      ...firstAction,
-      details: group.map((action) => action.detail),
-      invocations: group.map((action) => action.invocation),
-      message: getRepeatedSubtleToolMessage(firstAction.toolName, group.length),
-      title: group.map((action) => action.message).join(' | '),
-      toolCallId: `${firstAction.toolCallId}-${group.length}`,
-    };
+  return actions.filter(isPlainObject).flatMap((action, index): SubtleToolAction[] => {
+    const toolName = getRawStringArg(action, ['toolName'])?.trim();
+    if (!toolName) {
+      return [];
+    }
+    const actionArgs = isPlainObject(action.args) ? toAssistantToolArgs(action.args) : {};
+    if (!getSubtleToolMessage(toolName, actionArgs)) {
+      return [];
+    }
+    return [
+      {
+        args: actionArgs,
+        toolCallId: getRawStringArg(action, ['toolCallId'])?.trim() ?? `${toolName}-${index}`,
+        toolName,
+      },
+    ];
   });
 };
 
-export { getStringArg };
+/** Folds calls of the same tool into one group, in the order each tool first appears. */
+export const groupRepeatedSubtleToolActions = (
+  actions: readonly SubtleToolAction[]
+): readonly SubtleToolActionGroup[] => {
+  const actionsByTool = new Map<string, [SubtleToolAction, ...SubtleToolAction[]]>();
+  for (const action of actions) {
+    const existing = actionsByTool.get(action.toolName);
+    if (existing) {
+      existing.push(action);
+    } else {
+      actionsByTool.set(action.toolName, [action]);
+    }
+  }
+
+  return Array.from(actionsByTool.values(), (group) => {
+    if (group.length === 1) {
+      return { actions: group };
+    }
+    return {
+      actions: group,
+      repeatedTitle: getRepeatedSubtleToolMessage(group[0].toolName, group.length),
+    };
+  });
+};

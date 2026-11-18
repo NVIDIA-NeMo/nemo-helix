@@ -351,19 +351,19 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
       {deleteState && (
         <DeleteConfirmationModal
           open
-          title={
+          entity="agent"
+          ids={
             deleteState.kind === 'bulk'
-              ? `Delete ${deleteState.items.length} Agent${deleteState.items.length === 1 ? '' : 's'}`
-              : 'Delete Agent'
+              ? deleteState.items.map((agent) => agent.name)
+              : [deleteState.item.name]
           }
           description={
-            deleteState.kind === 'bulk'
-              ? `Are you sure you want to delete ${deleteState.items.length} agent${deleteState.items.length === 1 ? '' : 's'} and all their deployments?`
-              : 'Are you sure you want to delete this agent and all its deployments?'
+            deleteState.kind === 'bulk' && deleteState.items.length > 1
+              ? "The agents and all of their deployments are deleted and can't be restored."
+              : "The agent and all of its deployments are deleted and can't be restored."
           }
           onDelete={handleDelete}
           onClose={() => setDeleteState(null)}
-          simpleConfirm
           suppressResultToasts
         />
       )}

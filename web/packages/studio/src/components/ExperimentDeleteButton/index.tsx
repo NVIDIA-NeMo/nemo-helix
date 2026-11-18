@@ -50,9 +50,9 @@ export const ExperimentDeleteButton = ({
       <DeleteConfirmationModal
         open={open}
         onClose={() => setOpen(false)}
-        title={`Delete experiment “${name}”?`}
+        entity="experiment"
+        ids={[name]}
         description={EXPERIMENT_DELETE_DESCRIPTION}
-        successText="Experiment deleted."
         onDelete={async () => {
           await deleteExperiment(workspace, name);
           onDeleted?.();

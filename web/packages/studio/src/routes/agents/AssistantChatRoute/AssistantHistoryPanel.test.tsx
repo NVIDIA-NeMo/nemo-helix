@@ -218,11 +218,13 @@ describe('AssistantHistoryPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Expand All Chats' }));
     await user.click(await screen.findByRole('button', { name: 'Delete chat Private agent work' }));
 
-    expect(screen.getByRole('dialog', { name: 'Delete chat?' })).toBeInTheDocument();
     expect(
-      screen.getByText('Delete “Private agent work”? This chat cannot be recovered.')
+      screen.getByRole('dialog', { name: "Delete chat 'Private agent work'?" })
     ).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(
+      screen.getByText("The chat and its messages are deleted and can't be restored.")
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Delete Chat' }));
 
     await waitFor(() =>
       expect(mocks.deleteAssistantSessionHistory).toHaveBeenCalledWith('session-1', 'team-a')
