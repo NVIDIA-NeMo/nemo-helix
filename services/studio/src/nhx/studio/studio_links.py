@@ -15,7 +15,7 @@ from nhx.studio.env_mappings import ENV_MAPPINGS
 
 @dataclass(frozen=True)
 class StudioLinkDestination:
-    """Known Studio destination that Claude Code can link to."""
+    """Known Studio destination that the assistant can link to."""
 
     label: str
     path_template: str
