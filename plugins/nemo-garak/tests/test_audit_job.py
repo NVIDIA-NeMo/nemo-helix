@@ -37,10 +37,10 @@ from nemo_garak.jobs.audit import (
     _collect_report_artifacts,
     _divide_and_write_confs,
     _garak_config_dict,
+    _gateway_key_var,
     _gateway_token,
     _resolve_garak_python,
     _rewrite_options_uris,
-    _uses_inference_gateway,
 )
 from nemo_garak.jobs.publication import (
     IntakePublicationSpec,
@@ -1447,11 +1447,16 @@ def _succeeding_garak(envs: list[dict[str, str]]):
 
 
 class TestGatewayToken:
-    def test_detects_the_gateway_sentinel_at_any_depth(self) -> None:
-        assert _uses_inference_gateway({"nim": _GATEWAY})
-        assert _uses_inference_gateway({"openai": {"OpenAICompatible": _GATEWAY}})
-        assert not _uses_inference_gateway({"nim": {"uri": "https://integrate.api.nvidia.com/v1"}})
-        assert not _uses_inference_gateway({})
+    def test_key_var_only_when_every_uri_points_at_the_platform(self) -> None:
+        sdk = _token_sdk()
+        gateway = {"uri": "https://helix.example/gateway/v1"}
+        assert _gateway_key_var("nim", {"nim": gateway}, sdk, None) == "NIM_API_KEY"
+        assert _gateway_key_var("openai.OpenAICompatible", {"openai": {"OpenAICompatible": gateway}}, sdk, None)
+        assert _gateway_key_var("nim", {"nim": {"uri": "https://integrate.api.nvidia.com/v1"}}, sdk, None) is None
+        # A host that only starts with the platform's name is not the platform.
+        assert _gateway_key_var("nim", {"nim": {"uri": "https://helix.example.evil.test/v1"}}, sdk, None) is None
+        assert _gateway_key_var("nim", {}, sdk, None) is None
+        assert _gateway_key_var("nim", {"nim": gateway}, None, None) is None
 
     def test_token_comes_from_either_client(self) -> None:
         async_sdk = AsyncNemoClient(base_url="https://helix.example", workspace="default", auth=StaticToken(_TOKEN))
@@ -1529,6 +1534,8 @@ class TestAuditJobGatewayCredentials:
         [
             # A target that does not go through the gateway must never be handed a platform token.
             ({"options": {"nim": {"uri": "https://integrate.api.nvidia.com/v1"}}}, None),
+            # A plain URI to another host next to a gateway block: the token could reach that host.
+            ({"options": {"nim": {"uri": "https://other.example/v1"}, "judge": _GATEWAY}}, None),
             # A generator whose key variable is not known.
             ({"type": "test.Blank", "options": {"test": _GATEWAY}}, None),
             # A client with no bearer token.

@@ -269,10 +269,33 @@ def _build_env(persistent_dir: Path) -> dict[str, str]:
     return env
 
 
-def _uses_inference_gateway(node: object) -> bool:
-    """Whether target options carry an ``nhx_uri_spec`` sentinel at any depth."""
-    return isinstance(node, dict) and (
-        "nhx_uri_spec" in node or any(_uses_inference_gateway(value) for value in node.values())
+def _uris(node: object) -> list[str]:
+    """Every ``uri`` in resolved target options, at any depth."""
+    if not isinstance(node, dict):
+        return []
+    own = [value for key, value in node.items() if key == "uri" and isinstance(value, str)]
+    return own + [uri for value in node.values() for uri in _uris(value)]
+
+
+def _gateway_key_var(
+    target_type: str, resolved_options: dict, sdk: NemoClient | None, async_sdk: AsyncNemoClient | None
+) -> str | None:
+    """Variable to hand the platform token to garak in, or ``None`` when it must not get one.
+
+    The token only goes out when every URI garak is given points at the platform itself. That is
+    decided from the resolved options, the ones garak reads, so a plain ``uri`` to another host
+    next to an ``nhx_uri_spec`` block never receives it. Only the target's own generator gets the
+    token, so a detector or judge model that calls a third party never sends that party one.
+    """
+    client = sdk if sdk is not None else async_sdk
+    uris = _uris(resolved_options)
+    if client is None or not uris:
+        return None
+    platform = str(client.base_url).rstrip("/") + "/"
+    if not all(uri.startswith(platform) for uri in uris):
+        return None
+    return _API_KEY_VAR_BY_TARGET_TYPE.get(target_type) or _API_KEY_VAR_BY_TARGET_TYPE.get(
+        target_type.partition(".")[0]
     )
 
 
@@ -600,14 +623,8 @@ class AuditJob(NemoJob):
                         shutil.rmtree(probe_dir)
 
             env = _build_env(persistent)
-            # Only the target's own generator gets the platform token, so a detector or judge
-            # model that calls a third party never sends that party one.
-            gateway_key_var = (
-                _API_KEY_VAR_BY_TARGET_TYPE.get(spec.target.type)
-                or _API_KEY_VAR_BY_TARGET_TYPE.get(spec.target.type.partition(".")[0])
-                if _uses_inference_gateway(spec.target.options)
-                else None
-            )
+            resolved_options = json.loads(target_opts_path.read_text()) if target_opts_path.exists() else {}
+            gateway_key_var = _gateway_key_var(spec.target.type, resolved_options, sdk, async_sdk)
             base_cmd = [
                 garak_python,
                 "-m",

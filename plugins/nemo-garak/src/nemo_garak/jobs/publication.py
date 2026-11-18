@@ -15,13 +15,14 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeVar
 
 from httpx import AsyncClient
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.tls import client_verify_from_env
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.intake.types import AtifCreateParams, AtifCreateRequest, AtifStepParam
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
@@ -107,9 +108,10 @@ def report_sessions(
     unscored = 0
     for entry in entries:
         if entry["entry_type"] == "init":
-            # garak writes naive local time, and publication runs where garak ran.
+            # garak writes naive local time. It is read as UTC so the timestamp is the same
+            # whichever host publishes the report; Intake keys a session's rows on it.
             started = datetime.fromisoformat(entry.get("orig_start_time") or entry["start_time"])
-            timestamp = started.astimezone().isoformat()
+            timestamp = (started if started.tzinfo else started.replace(tzinfo=UTC)).isoformat()
         # garak also logs each attempt before detection runs (status 1); those carry no scores.
         if entry["entry_type"] != "attempt" or entry["status"] != 2:
             continue
@@ -180,14 +182,16 @@ async def _with_intake(
     """Call ``use`` with an Intake client that carries the platform client's identity, on this loop.
 
     The sync client is converted. The async client is bound to its caller's loop, so it is cloned
-    onto a throwaway transport that keeps its request hooks.
+    onto a throwaway transport that keeps its request hooks and CA bundle.
     """
     if client is not None:
         async with client.to_async() as converted:
             return await use(AsyncIntakeClient.from_client(converted))
     assert async_client is not None
     hooks = {event: list(handlers) for event, handlers in async_client._client.event_hooks.items()}
-    async with AsyncClient(timeout=async_client._client.timeout, event_hooks=hooks) as http_client:
+    async with AsyncClient(
+        timeout=async_client._client.timeout, event_hooks=hooks, verify=client_verify_from_env()
+    ) as http_client:
         return await use(AsyncIntakeClient.from_client(async_client.with_http_client(http_client)))
 
 

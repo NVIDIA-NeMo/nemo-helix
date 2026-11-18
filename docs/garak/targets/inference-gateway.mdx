@@ -83,7 +83,7 @@ The resolved `uri` reflects whatever the provider is configured to point at — 
 
 garak calls the gateway with an API key it reads from the environment, such as `NIM_API_KEY` for a `nim` target. When the target uses `nhx_uri_spec`, the plugin sets that key to the access token of the client that runs the audit, so an Inference Gateway that requires authentication accepts garak's requests. You do not export a key yourself.
 
-- Only the target's own generator gets the token (`nim`, `openai` and `rest` targets). A target that sets `uri` directly never receives one.
+- Only the target's own generator gets the token (`nim`, `openai` and `rest` targets), and only when every `uri` in the resolved options points at the platform. A target with a `uri` to another host never receives one.
 - The token is refreshed before every probe and every retry, and it is not logged or written to the reports.
 - If the client does not authenticate with a bearer token, garak calls the gateway with a placeholder key, as before.
 

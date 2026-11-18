@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -166,6 +167,18 @@ class TestReportSessions:
         assert [s["session_id"] for s in first] == [s["session_id"] for s in second]
         assert [s["steps"][0]["timestamp"] for s in first] == [s["steps"][0]["timestamp"] for s in second]
         assert first[0]["steps"][0]["timestamp"].startswith(_ORIG_START)
+
+    def test_timestamp_does_not_depend_on_the_publishing_hosts_timezone(self, tmp_path: Path, monkeypatch) -> None:
+        stamps = []
+        try:
+            for zone in ("America/Los_Angeles", "Asia/Tokyo"):
+                monkeypatch.setenv("TZ", zone)
+                time.tzset()
+                stamps.append(_sessions(tmp_path)[0][0]["steps"][0]["timestamp"])
+        finally:
+            monkeypatch.undo()
+            time.tzset()
+        assert stamps[0] == stamps[1] == f"{_ORIG_START}+00:00"
 
     def test_unaggregated_report_uses_its_own_start_time(self, tmp_path: Path) -> None:
         init = {"entry_type": "init", "start_time": _ORIG_START, "run": "solo"}
@@ -343,7 +356,13 @@ class TestPublishesThroughRealClients:
             )
             patched = "nemo_garak.jobs.publication.AsyncClient"
 
-        with patch(patched, side_effect=lambda **kwargs: real_async_client(transport=transport, **kwargs)):
+        transports: list[dict[str, Any]] = []
+
+        def _client(**kwargs: Any) -> httpx.AsyncClient:
+            transports.append(kwargs)
+            return real_async_client(transport=transport, **kwargs)
+
+        with patch(patched, side_effect=_client):
             outcome = publish_audit_report(
                 _write_report(tmp_path / "r.jsonl"),
                 spec=IntakePublicationSpec(evaluation_id="qwen-garak"),
@@ -355,6 +374,8 @@ class TestPublishesThroughRealClients:
             )
 
         assert outcome.status == HelixJobStatus.COMPLETED
+        # The transport publication builds must use the configured CA bundle, like the client's own.
+        assert all("verify" in kwargs for kwargs in transports)
         gets = [r for r in requests if r.method == "GET"]
         posts = [r for r in requests if r.method == "POST"]
         assert [r.url.path for r in gets] == ["/apis/intake/v2/workspaces/ykagal/evaluations/qwen-garak"]
