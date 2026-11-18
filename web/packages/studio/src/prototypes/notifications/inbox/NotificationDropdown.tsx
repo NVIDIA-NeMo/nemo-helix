@@ -9,7 +9,6 @@ import {
   PopoverTrigger,
   StatusIndicator,
 } from '@nvidia/foundations-react-core';
-import { MAX_INBOX_ITEMS } from '@studio/prototypes/notifications/inbox/fixtures';
 import { NotificationInbox } from '@studio/prototypes/notifications/inbox/NotificationInbox';
 import type { InboxItem, InboxState } from '@studio/prototypes/notifications/inbox/types';
 import { SEVERITY_COLOR, hasNotification } from '@studio/prototypes/notifications/utils';
@@ -28,7 +27,7 @@ export const NotificationDropdown: FC<NotificationDropdownProps> = ({
   defaultOpen = false,
   onOpenChange,
 }) => {
-  const { items, unread, markRead, markAllRead, dismiss } = inbox;
+  const { items, summary, dismiss } = inbox;
   const [open, setOpen] = useState(defaultOpen);
   const [shownIds, setShownIds] = useState<ReadonlySet<string> | null>(() =>
     defaultOpen ? idsOf(items) : null
@@ -44,9 +43,7 @@ export const NotificationDropdown: FC<NotificationDropdownProps> = ({
   const shown = shownIds === null ? items : items.filter(({ id }) => shownIds.has(id));
   const pendingCount = items.length - shown.length;
 
-  const label = hasNotification(unread)
-    ? `Notifications (${unread.count} unread)`
-    : 'Notifications';
+  const label = hasNotification(summary) ? `Notifications (${summary.count})` : 'Notifications';
 
   return (
     <PopoverRoot open={open} onOpenChange={handleOpenChange}>
@@ -60,11 +57,11 @@ export const NotificationDropdown: FC<NotificationDropdownProps> = ({
           data-testid="proto-notification-bell"
         >
           <Bell />
-          {hasNotification(unread) && (
+          {hasNotification(summary) && (
             <StatusIndicator
               aria-hidden
               size="small"
-              color={SEVERITY_COLOR[unread.severity]}
+              color={SEVERITY_COLOR[summary.severity]}
               className="absolute right-1.5 top-1.5"
               data-testid="proto-notification-bell-dot"
             />
@@ -79,17 +76,11 @@ export const NotificationDropdown: FC<NotificationDropdownProps> = ({
       >
         <NotificationInbox
           headingId={headingId}
-          items={shown.slice(0, MAX_INBOX_ITEMS)}
+          items={shown}
           pendingCount={pendingCount}
-          hasUnread={hasNotification(unread)}
           onShowPending={() => setShownIds(idsOf(items))}
-          onOpenItem={(item) => {
-            markRead(item.id);
-            handleOpenChange(false);
-          }}
+          onOpenItem={() => handleOpenChange(false)}
           onDismissItem={(item) => dismiss(item.id)}
-          onMarkAllRead={markAllRead}
-          onViewAll={() => handleOpenChange(false)}
         />
       </PopoverContent>
     </PopoverRoot>

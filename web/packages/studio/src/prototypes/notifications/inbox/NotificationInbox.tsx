@@ -2,24 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { BellOff } from '@nemo/icons/icons';
-import { Anchor, Button, Divider, Stack, Text } from '@nvidia/foundations-react-core';
-import { INBOX_HREF } from '@studio/prototypes/notifications/inbox/fixtures';
+import { Button, Divider, Stack, Text } from '@nvidia/foundations-react-core';
 import { InboxEntry } from '@studio/prototypes/notifications/inbox/InboxEntry';
 import type { InboxItem } from '@studio/prototypes/notifications/inbox/types';
 import { groupInboxItems } from '@studio/prototypes/notifications/inbox/utils';
 import { useMemo, type FC } from 'react';
-import { Link } from 'react-router';
 
 interface NotificationInboxProps {
   headingId: string;
   items: InboxItem[];
   pendingCount: number;
-  hasUnread: boolean;
   onShowPending: () => void;
   onOpenItem: (item: InboxItem) => void;
   onDismissItem: (item: InboxItem) => void;
-  onMarkAllRead: () => void;
-  onViewAll: () => void;
 }
 
 const EmptyInbox: FC = () => (
@@ -36,12 +31,9 @@ export const NotificationInbox: FC<NotificationInboxProps> = ({
   headingId,
   items,
   pendingCount,
-  hasUnread,
   onShowPending,
   onOpenItem,
   onDismissItem,
-  onMarkAllRead,
-  onViewAll,
 }) => {
   const groups = useMemo(() => groupInboxItems(items), [items]);
 
@@ -50,13 +42,10 @@ export const NotificationInbox: FC<NotificationInboxProps> = ({
       className="flex max-h-[min(560px,calc(100vh-var(--nv-app-bar-height,0px)-48px))] w-[400px] max-w-[calc(100vw-32px)] flex-col"
       data-testid="proto-notification-inbox"
     >
-      <div className="flex items-center justify-between gap-2 px-4 py-3">
+      <div className="px-4 py-3">
         <Text id={headingId} kind="label/bold/md">
           Notifications
         </Text>
-        <Button kind="tertiary" size="small" disabled={!hasUnread} onClick={onMarkAllRead}>
-          Mark all as read
-        </Button>
       </div>
       <Divider />
       {pendingCount > 0 && (
@@ -91,14 +80,6 @@ export const NotificationInbox: FC<NotificationInboxProps> = ({
             ))}
           </div>
         )}
-      </div>
-      <Divider />
-      <div className="flex justify-center px-4 py-3">
-        <Anchor asChild textKind="body/regular/sm">
-          <Link to={INBOX_HREF} onClick={onViewAll}>
-            View all notifications
-          </Link>
-        </Anchor>
       </div>
     </div>
   );

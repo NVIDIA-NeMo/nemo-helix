@@ -10,6 +10,7 @@ import { UserPopover } from '@studio/components/UserPopover';
 import { FLAG_OVERRIDES_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
+import { NotificationCenter } from '@studio/prototypes/notifications/notif/NotificationCenter';
 import { AssistantTopBarChat } from '@studio/routes/agents/AssistantChatRoute/AssistantTopBarChat';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { useSidebarState } from '@studio/util/hooks/useSidebarState';
@@ -97,6 +98,7 @@ const GlobalNavContent: FC<GlobalNavContentProps> = ({
                 <FeatureFlagPanel />
               </Suspense>
             )}
+            <NotificationCenter />
             <ThemeSwitch />
             <DocumentationLink />
             <UserPopover />

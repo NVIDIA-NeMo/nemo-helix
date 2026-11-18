@@ -11,10 +11,6 @@ import {
   JOB_COMPLETED,
 } from '@studio/prototypes/notifications/toasts/fixtures';
 
-export const INBOX_HREF = `${NAV_HREFS.dashboard}/notifications`;
-
-export const MAX_INBOX_ITEMS = 8;
-
 const HOUR = 60;
 const DAY = 24 * HOUR;
 
@@ -31,8 +27,8 @@ export const SAMPLE_INBOX: InboxItem[] = [
     { minutesAgo: 38 }
   ),
   toInboxItem(JOB_COMPLETED, 'custom-models', { minutesAgo: 2 * HOUR + 10 }),
-  toInboxItem(GUARDRAIL_DEGRADED, 'guardrails', { minutesAgo: 5 * HOUR, read: true }),
-  toInboxItem(DATASET_UPLOADED, 'dataset-list', { minutesAgo: DAY + 2 * HOUR, read: true }),
+  toInboxItem(GUARDRAIL_DEGRADED, 'guardrails', { minutesAgo: 5 * HOUR }),
+  toInboxItem(DATASET_UPLOADED, 'dataset-list', { minutesAgo: DAY + 2 * HOUR }),
   toInboxItem(
     {
       status: 'success',
@@ -41,7 +37,7 @@ export const SAMPLE_INBOX: InboxItem[] = [
       link: { label: 'View job', href: `${NAV_HREFS['data-designer']}/support-intents` },
     },
     'data-designer',
-    { minutesAgo: DAY + 5 * HOUR, read: true }
+    { minutesAgo: DAY + 5 * HOUR }
   ),
   toInboxItem(
     {
@@ -51,8 +47,6 @@ export const SAMPLE_INBOX: InboxItem[] = [
       link: { label: 'View deployment', href: `${NAV_HREFS.deployments}/nemotron-nano-9b` },
     },
     'deployments',
-    { minutesAgo: 3 * DAY, read: true }
+    { minutesAgo: 3 * DAY }
   ),
 ];
-
-export const ALL_READ_INBOX: InboxItem[] = SAMPLE_INBOX.map((item) => ({ ...item, read: true }));

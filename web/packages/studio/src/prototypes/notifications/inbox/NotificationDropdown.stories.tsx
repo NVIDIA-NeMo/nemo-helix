@@ -5,7 +5,7 @@ import { AppBar, Avatar, Button, Text } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
 import { DocumentationLink } from '@studio/components/Layouts/GlobalNav/components/DocumentationLink';
 import { NAV_HREFS } from '@studio/prototypes/notifications/fixtures';
-import { ALL_READ_INBOX, SAMPLE_INBOX } from '@studio/prototypes/notifications/inbox/fixtures';
+import { SAMPLE_INBOX } from '@studio/prototypes/notifications/inbox/fixtures';
 import { NotificationDropdown } from '@studio/prototypes/notifications/inbox/NotificationDropdown';
 import type { InboxItem, InboxState } from '@studio/prototypes/notifications/inbox/types';
 import { useInbox } from '@studio/prototypes/notifications/inbox/useInbox';
@@ -95,10 +95,6 @@ export const Open: Story = {};
 
 export const Closed: Story = {
   args: { defaultOpen: false },
-};
-
-export const AllRead: Story = {
-  args: { initialItems: ALL_READ_INBOX },
 };
 
 export const Empty: Story = {

@@ -5,7 +5,6 @@ import { useRelativeTimeSince } from '@nemo/common/src/components/RelativeTime';
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
 import { Close } from '@nemo/icons/icons';
 import { Anchor, Button, StatusIndicator, Text } from '@nvidia/foundations-react-core';
-import { NAV_LABELS } from '@studio/prototypes/notifications/fixtures';
 import type { InboxItem } from '@studio/prototypes/notifications/inbox/types';
 import { SEVERITY_LABEL } from '@studio/prototypes/notifications/inbox/utils';
 import { SEVERITY_COLOR } from '@studio/prototypes/notifications/utils';
@@ -38,11 +37,7 @@ export const InboxEntry: FC<InboxEntryProps> = ({ item, isLast, onOpen, onDismis
       </div>
       <div className={cn('flex min-w-0 flex-1 flex-col gap-1', !isLast && 'pb-4')}>
         <div className="flex items-start gap-2">
-          <Text
-            kind={item.read ? 'body/regular/md' : 'body/bold/md'}
-            className={cn('min-w-0 flex-1', item.read && 'text-secondary')}
-          >
-            {!item.read && <span className="sr-only">Unread: </span>}
+          <Text kind="body/bold/md" className="min-w-0 flex-1">
             {item.title}
           </Text>
           <Button
@@ -61,13 +56,10 @@ export const InboxEntry: FC<InboxEntryProps> = ({ item, isLast, onOpen, onDismis
           <time dateTime={item.createdAt} title={formatAbsoluteTimestamp(item.createdAt)}>
             {timeSince}
           </time>
-          {` · ${NAV_LABELS[item.sourceId]}`}
+          {` · ${item.source}`}
         </Text>
         {item.description && (
-          <Text
-            kind="body/regular/sm"
-            className={cn('line-clamp-2', item.read && 'text-secondary')}
-          >
+          <Text kind="body/regular/sm" className="line-clamp-2">
             {item.description}
           </Text>
         )}

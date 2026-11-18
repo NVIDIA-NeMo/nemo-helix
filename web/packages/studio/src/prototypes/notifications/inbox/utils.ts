@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { NavId } from '@studio/prototypes/notifications/fixtures';
+import { NAV_LABELS, type NavId } from '@studio/prototypes/notifications/fixtures';
 import type {
   InboxGroup,
   InboxGroupLabel,
@@ -47,27 +47,23 @@ export const groupInboxItems = (items: InboxItem[], now: Date = new Date()): Inb
   }, []);
 };
 
-export const summarizeUnread = (items: InboxItem[]): NavNotification | undefined =>
-  rollupNotifications(
-    items.filter((item) => !item.read).map((item) => ({ count: 1, severity: item.severity }))
-  );
+export const summarizeInbox = (items: InboxItem[]): NavNotification | undefined =>
+  rollupNotifications(items.map((item) => ({ count: 1, severity: item.severity })));
 
 interface ToInboxItemOptions {
   minutesAgo?: number;
-  read?: boolean;
 }
 
 export const toInboxItem = (
   options: NotifyOptions,
   sourceId: NavId,
-  { minutesAgo = 0, read = false }: ToInboxItemOptions = {}
+  { minutesAgo = 0 }: ToInboxItemOptions = {}
 ): InboxItem => ({
   id: `inbox-${crypto.randomUUID()}`,
   severity: options.status,
   title: options.heading,
   description: options.description,
   link: options.link,
-  sourceId,
+  source: NAV_LABELS[sourceId],
   createdAt: new Date(Date.now() - minutesAgo * MINUTE_MS).toISOString(),
-  read,
 });
