@@ -71,6 +71,41 @@ def test_search_docs_reports_results_and_empty_states(docs_root: Path) -> None:
     assert empty["status"] == "error"
 
 
+@pytest.mark.parametrize(
+    ("query", "path"),
+    [
+        ("fine tuning", "customizer.md"),
+        ("finetuning", "customizer.md"),
+        ("virtual model", "guardrails/index.mdx"),
+        ("lora_adapter", "customizer.md"),
+    ],
+)
+def test_search_matches_hyphen_underscore_and_camel_case_variants(docs_root: Path, query: str, path: str) -> None:
+    (docs_root / "customizer.md").write_text("# Customizer\n\nFine-tuning trains a LoRA adapter.\n", encoding="utf-8")
+    docs_search._load_index.cache_clear()
+
+    assert docs_search.search(query)[0]["path"] == path
+
+
+def test_search_does_not_treat_code_comments_as_headings(docs_root: Path) -> None:
+    (docs_root / "cli.md").write_text(
+        "# CLI\n\nInstall the CLI.\n\n```bash\n# install the cli\nuv tool install nemo-helix\n```\n",
+        encoding="utf-8",
+    )
+    docs_search._load_index.cache_clear()
+
+    [result] = [result for result in docs_search.search("install cli") if result["path"] == "cli.md"]
+    assert result["section"] == "CLI"
+    assert "uv tool install" in str(result["excerpt"])
+
+
+def test_docs_dir_ignores_a_missing_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv(docs_search.DOCS_DIR_ENV, str(tmp_path / "missing"))
+
+    assert docs_search.docs_dir() is None
+    assert json.loads(docs_search.search_docs("guardrails"))["status"] == "unavailable"
+
+
 def test_search_docs_reports_missing_docs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(docs_search, "docs_dir", lambda: None)
 

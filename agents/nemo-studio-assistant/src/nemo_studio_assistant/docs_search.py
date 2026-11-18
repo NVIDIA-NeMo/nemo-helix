@@ -23,7 +23,9 @@ _STOPWORDS = frozenset(
     "a an and are as at be by can do does for from how i in is it my of on or so that the this to use "
     "using what when where which why with you your".split()
 )
-_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]*")
+_WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+_WORD_PART_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
+_FENCE_RE = re.compile(r"^(```|~~~).*?^\1[ \t]*$", re.MULTILINE | re.DOTALL)
 _FRONTMATTER_RE = re.compile(r"\A---\n(?P<body>.*?)\n---\n", re.DOTALL)
 _TITLE_RE = re.compile(r"^title:\s*(?P<title>.+)$", re.MULTILINE)
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(?P<heading>.+?)\s*#*\s*$", re.MULTILINE)
@@ -38,8 +40,26 @@ class DocSection:
     text: str
 
 
+def _word_variants(word: str) -> list[str]:
+    """Return ``word`` plus its hyphen, underscore, and CamelCase parts and their concatenation.
+
+    This lets "fine tuning" match "fine-tuning" and "virtual model" match "VirtualModel".
+    """
+    parts = _WORD_PART_RE.findall(word)
+    lowered = word.lower()
+    if len(parts) < 2:
+        return [lowered]
+    joined = "".join(parts).lower()
+    return [lowered, *([joined] if joined != lowered else []), *(part.lower() for part in parts)]
+
+
 def _tokens(text: str) -> list[str]:
-    return [token for token in _TOKEN_RE.findall(text.lower()) if token not in _STOPWORDS and len(token) > 1]
+    return [
+        token
+        for word in _WORD_RE.findall(text)
+        for token in _word_variants(word)
+        if token not in _STOPWORDS and len(token) > 1
+    ]
 
 
 def _repo_docs_dir() -> Path | None:
@@ -54,7 +74,7 @@ def docs_dir() -> Path | None:
     """Return the documentation root: an explicit override, the bundled snapshot, or a repo checkout."""
     configured = os.environ.get(DOCS_DIR_ENV)
     if configured:
-        return Path(configured)
+        return Path(configured) if Path(configured).is_dir() else None
     for candidate in (Path.cwd() / SNAPSHOT_DIR_NAME, Path("/workspace") / SNAPSHOT_DIR_NAME):
         if candidate.is_dir():
             return candidate
@@ -72,9 +92,12 @@ def _split_sections(relative_path: str, content: str) -> list[DocSection]:
     content = _MARKUP_LINE_RE.sub("", content)
 
     sections: list[DocSection] = []
+    fences = [match.span() for match in _FENCE_RE.finditer(content)]
     heading = title
     start = 0
     for match in _HEADING_RE.finditer(content):
+        if any(fence_start <= match.start() < fence_end for fence_start, fence_end in fences):
+            continue
         text = content[start : match.start()].strip()
         if text:
             sections.append(DocSection(relative_path, title, heading, text))
@@ -157,7 +180,12 @@ def search_docs(query: str, limit: int = DEFAULT_LIMIT) -> str:
     if not query.strip():
         return json.dumps({"status": "error", "message": "query is required"})
     if docs_dir() is None:
-        return json.dumps({"status": "unavailable", "message": "No documentation is bundled with this assistant."})
+        return json.dumps(
+            {
+                "status": "unavailable",
+                "message": "No documentation is bundled with this assistant; run scripts/snapshot-docs.sh before packaging.",
+            }
+        )
     results = search(query, limit)
     if not results:
         return json.dumps({"status": "no_results", "message": f"No documentation matched {query!r}."})
