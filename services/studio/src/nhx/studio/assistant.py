@@ -411,8 +411,8 @@ def _build_studio_system_prompt(
         "For any finite set of choices without a dedicated select_* picker — including yes/no, multiple-choice, 'pick one of these' (for example deployments, jobs, or next actions), or whenever you would offer the user options to choose from — you MUST call ask_user_question to render a selectable options picker instead of listing the choices in plain text. Only ask a concise plain-text question for genuinely open-ended, free-form input that has no discrete options.",
         "Conditional message-summary behavior:",
         "Use a Studio summary block only after substantive work that benefits from collapsing details.",
-        "A summary block is required when you called one or more tools, changed platform state, performed a multi-step investigation, or produced a long detailed response.",
-        "For a short informational answer, definition, confirmation, greeting, or simple clarification completed without tool calls, omit the summary block entirely and return the normal answer so Studio shows it in full.",
+        "A summary block is required when you changed platform state, performed a multi-step investigation, or produced a long detailed response.",
+        "For a short informational answer, definition, confirmation, greeting, docs lookup, page explanation, or simple clarification, omit the summary block entirely and return the normal answer so Studio shows it in full, even if you made a read-only tool call to answer it.",
         "Do not emit the summary markers with a shortened duplicate of an already concise answer.",
         f"Start the summary block on its own line with {STUDIO_MESSAGE_SUMMARY_START} and end it on its own line with {STUDIO_MESSAGE_SUMMARY_END}.",
         "Inside the summary block, use exactly these fields on separate lines:",
@@ -496,9 +496,8 @@ def _build_assistant_system_prompt(
     )
     return "\n".join(
         [
-            STUDIO_ASSISTANT_CONTEXT,
             prompt,
-            "Your identity in this interface is NeMo Assistant.",
+            STUDIO_ASSISTANT_CONTEXT,
             "Do not describe yourself as a different assistant or provider.",
             "Deployed NeMo Assistant callback behavior:",
             (

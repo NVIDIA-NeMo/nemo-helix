@@ -804,7 +804,8 @@ def test_build_studio_system_prompt_includes_message_summary_contract():
     assert "use a numbered or bulleted list" in prompt
     assert "repeat those links at the bottom of the summary" in prompt
     assert "Put repeated links on separate lines without a heading" in prompt
-    assert "A summary block is required when you called one or more tools" in prompt
+    assert "A summary block is required when you changed platform state" in prompt
+    assert "even if you made a read-only tool call to answer it" in prompt
     assert "For a short informational answer" in prompt
     assert "omit the summary block entirely" in prompt
     assert "Do not emit the summary markers with a shortened duplicate" in prompt
@@ -821,7 +822,7 @@ def test_build_assistant_system_prompt_uses_assistant_identity():
         {},
     )
 
-    assert "Your identity in this interface is NeMo Assistant." in prompt
+    assert prompt.count("You are NeMo Assistant") == 1
     assert "Claude" not in prompt
 
 
