@@ -79,4 +79,18 @@ describe('TasksetFormModal', () => {
     expect(await screen.findByText(/already exists/)).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('offers a retry when the tasks fail to load', async () => {
+    server.use(
+      http.get(
+        `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace/tasks`,
+        () => HttpResponse.json({ detail: 'boom' }, { status: 500 }),
+        { once: true }
+      )
+    );
+    renderModal();
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    await selectTask('sort-ints');
+    expect(screen.queryByText(/Couldn.t load tasks/)).not.toBeInTheDocument();
+  });
 });
