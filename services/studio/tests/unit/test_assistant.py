@@ -1672,6 +1672,7 @@ def test_platform_route_stream_uses_deployed_assistant(monkeypatch: pytest.Monke
     assert "you MUST call job_progress" in captured["studio_system_prompt"]
     assert f"studio_session_id='{session_id}'" in captured["studio_system_prompt"]
     assert "mutating calls pause until the user approves them in Studio" in captured["studio_system_prompt"]
+    assert "do not ask again for the same action" in captured["studio_system_prompt"]
     assert (
         "For a newly created agent, use studio_link with destination='agent_chat'" in captured["studio_system_prompt"]
     )
