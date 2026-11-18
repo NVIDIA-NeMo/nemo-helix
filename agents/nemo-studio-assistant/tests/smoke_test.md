@@ -23,10 +23,27 @@ The tests validate Fabric translation, the Deep Agents adapter, all packaged
 skills, the MCP tool surface, SDK serialization, session validation, and
 approval gating for mutations.
 
+## One-command local deploy
+
+With the platform running (`nemo services run`, see `SETUP.md`), Docker up, and
+`NEMO_DEFAULT_MODEL` set to a model entity id from `nemo models list`:
+
+```bash
+agents/nemo-studio-assistant/scripts/deploy-local.sh
+```
+
+The script snapshots `docs/` for `search_docs`, replaces any previous
+registration and deployment, runs the steps below, and finishes with a one-line
+invocation. Run the steps by hand when one fails and you need its output.
+
 ## Register, package, and deploy
 
 These commands change platform state and should be run independently so each
 result can be verified:
+
+```bash
+agents/nemo-studio-assistant/scripts/snapshot-docs.sh
+```
 
 ```bash
 export NHX_BASE_URL=http://127.0.0.1:8080
@@ -64,6 +81,21 @@ Open `http://127.0.0.1:8080/studio`, select the assistant deployment, and send
 `List all workspaces`. Verify incremental, nonduplicated text and a terminal
 success or error. Then exercise a selector and an approved mutation to verify
 the callback MCP tools.
+
+## Guide behavior
+
+In Studio, verify:
+
+- On a Virtual Models page, "how do I add a guardrail here?" names the current
+  page and links to the right destination.
+- "How does skill optimization work?" shows a "Searched docs for ..." step and
+  cites a doc title.
+- "List my workspaces" shows a "Called list workspaces" step before the answer.
+- "How do I bake a cheesecake?" returns the fixed off-topic refusal without an
+  agent run. The topic gate reads `STUDIO_ASSISTANT_TOPIC_GATE_MODEL`, falling
+  back to `NEMO_DEFAULT_MODEL`, from the environment of `nemo services run`;
+  set it to `off` to disable the gate. It needs the guardrails service and fails
+  open when the check is unavailable.
 
 ## Cleanup
 
