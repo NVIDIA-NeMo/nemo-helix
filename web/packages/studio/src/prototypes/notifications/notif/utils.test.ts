@@ -35,6 +35,12 @@ describe('parseNotifEvent', () => {
   it('defaults a missing data payload to an empty object', () => {
     expect(parseNotifEvent(frame({ data: null }))?.data).toEqual({});
   });
+
+  it('accepts a missing created_at and defaults read to false', () => {
+    const event = parseNotifEvent(frame({ created_at: null, read: undefined }));
+    expect(event?.created_at).toBeNull();
+    expect(event?.read).toBe(false);
+  });
 });
 
 describe('notifEventToInboxItem', () => {
@@ -55,7 +61,12 @@ describe('notifEventToInboxItem', () => {
       source: 'Jobs',
       createdAt: '2026-11-18T20:33:23.123456Z',
       link: { label: 'View details', href: '/workspaces/default/jobs/abc' },
+      read: false,
     });
+  });
+
+  it('carries the read flag from the server', () => {
+    expect(parse({ read: true }).read).toBe(true);
   });
 
   it('uses data.link_label when present and drops an absent link', () => {

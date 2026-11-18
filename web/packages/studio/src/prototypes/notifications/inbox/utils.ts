@@ -47,18 +47,30 @@ export const groupInboxItems = (items: InboxItem[], now: Date = new Date()): Inb
   }, []);
 };
 
-export const summarizeInbox = (items: InboxItem[]): NavNotification | undefined =>
-  rollupNotifications(items.map((item) => ({ count: 1, severity: item.severity })));
+export const summarizeUnread = (
+  unread: InboxItem[],
+  unreadCount: number
+): NavNotification | undefined => {
+  const rollup = rollupNotifications(
+    unread.filter((item) => !item.read).map((item) => ({ count: 1, severity: item.severity }))
+  );
+  if (unreadCount <= 0) {
+    return undefined;
+  }
+  return { count: unreadCount, severity: rollup?.severity ?? 'info' };
+};
 
 interface ToInboxItemOptions {
   minutesAgo?: number;
+  read?: boolean;
 }
 
 export const toInboxItem = (
   options: NotifyOptions,
   sourceId: NavId,
-  { minutesAgo = 0 }: ToInboxItemOptions = {}
+  { minutesAgo = 0, read = false }: ToInboxItemOptions = {}
 ): InboxItem => ({
+  read,
   id: `inbox-${crypto.randomUUID()}`,
   severity: options.status,
   title: options.heading,

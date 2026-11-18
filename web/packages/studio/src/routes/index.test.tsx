@@ -118,6 +118,7 @@ describe('Routes', () => {
       // once its feature ships unconditionally — a new feature should arrive flag-gated.
       const alwaysOnWorkspaceRoutes = new Set<string>([
         ROUTES.workspace.virtualModels,
+        ROUTES.workspace.notifications,
         ROUTES.workspace.index,
         ROUTES.workspace.agentDetail,
         ROUTES.workspace.agentEvaluationDetail,

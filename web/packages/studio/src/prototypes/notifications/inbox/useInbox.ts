@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { InboxItem, InboxState } from '@studio/prototypes/notifications/inbox/types';
-import { summarizeInbox } from '@studio/prototypes/notifications/inbox/utils';
+import { summarizeUnread } from '@studio/prototypes/notifications/inbox/utils';
 import { useCallback, useMemo, useState } from 'react';
 
 export const useInbox = (initialItems: InboxItem[]): InboxState => {
@@ -12,11 +12,16 @@ export const useInbox = (initialItems: InboxItem[]): InboxState => {
     setItems((prev) => (prev.some(({ id }) => id === item.id) ? prev : [item, ...prev]));
   }, []);
 
-  const dismiss = useCallback((id: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
+  const markRead = useCallback((id: string) => {
+    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, read: true } : item)));
   }, []);
 
-  const summary = useMemo(() => summarizeInbox(items), [items]);
+  const markAllRead = useCallback(() => {
+    setItems((prev) => prev.map((item) => (item.read ? item : { ...item, read: true })));
+  }, []);
 
-  return { items, summary, add, dismiss };
+  const unread = useMemo(() => items.filter((item) => !item.read), [items]);
+  const summary = useMemo(() => summarizeUnread(unread, unread.length), [unread]);
+
+  return { items, unread, summary, add, markRead, markAllRead };
 };

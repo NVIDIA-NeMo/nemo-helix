@@ -12,6 +12,17 @@ export interface NotifEvent {
   readonly severity: NotificationSeverity;
   readonly link?: string | null;
   readonly data: Record<string, unknown>;
-  readonly created_at: string;
+  readonly created_at: string | null;
   readonly created_by?: string | null;
+  readonly read: boolean;
+}
+
+export interface NotifEventList {
+  readonly data: NotifEvent[];
+  readonly unread_count: number;
+}
+
+export interface NotifListParams {
+  readonly limit: number;
+  readonly unreadOnly: boolean;
 }

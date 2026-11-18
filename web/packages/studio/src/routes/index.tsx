@@ -7,6 +7,7 @@ import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
 import { ROUTES } from '@studio/constants/routes';
 import { PluginProvider } from '@studio/plugins/PluginProvider';
 import { PluginRenderer } from '@studio/plugins/PluginRenderer';
+import { notificationRoutes } from '@studio/prototypes/notifications/notif/routes';
 import {
   agentRoutes,
   anonymizerRoutes,
@@ -113,6 +114,7 @@ export const routes: RouteObject[] = [
               ...experimentRoutes,
               ...customizationRoutes,
               ...jobRoutes,
+              ...notificationRoutes,
               ...intakeRoutes,
               ...optimizerRoutes,
               ...safeSynthesizerRoutes,

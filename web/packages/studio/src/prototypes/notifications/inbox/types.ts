@@ -13,6 +13,7 @@ export interface InboxItem {
   readonly source: string;
   readonly createdAt: string;
   readonly link?: NotificationLink;
+  readonly read: boolean;
 }
 
 export type InboxGroupLabel = 'Today' | 'Yesterday' | 'Earlier';
@@ -24,7 +25,9 @@ export interface InboxGroup {
 
 export interface InboxState {
   items: InboxItem[];
+  unread: InboxItem[];
   summary: NavNotification | undefined;
   add: (item: InboxItem) => void;
-  dismiss: (id: string) => void;
+  markRead: (id: string) => void;
+  markAllRead: () => void;
 }

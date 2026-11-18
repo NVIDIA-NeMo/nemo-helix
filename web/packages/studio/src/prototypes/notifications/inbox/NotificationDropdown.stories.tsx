@@ -30,7 +30,11 @@ const ProtoAppBar: FC<ProtoAppBarProps> = ({ inbox, defaultOpen, onInboxOpenChan
     slotEnd={
       <>
         <NotificationDropdown
-          inbox={inbox}
+          unread={inbox.unread}
+          summary={inbox.summary}
+          onMarkRead={(item) => inbox.markRead(item.id)}
+          onMarkAllRead={inbox.markAllRead}
+          viewAllHref={`${NAV_HREFS.dashboard}/notifications`}
           defaultOpen={defaultOpen}
           onOpenChange={onInboxOpenChange}
         />
@@ -97,8 +101,8 @@ export const Closed: Story = {
   args: { defaultOpen: false },
 };
 
-export const Empty: Story = {
-  args: { initialItems: [] },
+export const AllCaughtUp: Story = {
+  args: { initialItems: SAMPLE_INBOX.map((item) => ({ ...item, read: true })) },
 };
 
 const LivePreview: FC = () => {
@@ -154,10 +158,10 @@ const LivePreview: FC = () => {
           {streaming ? 'Stop event stream' : `Stream an event every ${STREAM_INTERVAL_MS / 1000}s`}
         </Button>
         <Text kind="body/regular/sm">
-          Each event raises a floating notification and lands in the bell&apos;s inbox. Start the
+          Each event raises a floating notification and lands in the bell&apos;s unread list.
+          Marking an item read (×, or following its link) removes it from the dropdown. Start the
           stream, then open the bell: while it is open, floating notifications are suppressed and
-          new events collect behind a &quot;new notifications&quot; button instead of pushing the
-          list down.
+          new events collect behind a &quot;new notifications&quot; button.
         </Text>
         <CurrentPath />
       </div>

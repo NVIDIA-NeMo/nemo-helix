@@ -8,8 +8,11 @@ import type { NotificationSeverity } from '@studio/prototypes/notifications/type
 
 export const NOTIF_PLUGIN_NAME = 'notif';
 
+export const notifEventsPath = (workspace: string): string =>
+  `/apis/notif/v2/workspaces/${encodeURIComponent(workspace)}/events`;
+
 export const notifStreamPath = (workspace: string): string =>
-  `/apis/notif/v2/workspaces/${encodeURIComponent(workspace)}/events/stream`;
+  `${notifEventsPath(workspace)}/stream`;
 
 const SEVERITIES: ReadonlySet<string> = new Set<NotificationSeverity>([
   'info',
@@ -38,28 +41,31 @@ const DEFAULT_LINK_LABEL = 'View details';
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-export const parseNotifEvent = (raw: string): NotifEvent | undefined => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
+export const toNotifEvent = (value: unknown): NotifEvent | undefined => {
   if (
-    !isRecord(parsed) ||
-    typeof parsed.id !== 'string' ||
-    typeof parsed.type !== 'string' ||
-    typeof parsed.title !== 'string' ||
-    typeof parsed.created_at !== 'string' ||
-    typeof parsed.severity !== 'string' ||
-    !SEVERITIES.has(parsed.severity)
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.type !== 'string' ||
+    typeof value.title !== 'string' ||
+    typeof value.severity !== 'string' ||
+    !SEVERITIES.has(value.severity)
   ) {
     return undefined;
   }
   return {
-    ...parsed,
-    data: isRecord(parsed.data) ? parsed.data : {},
+    ...value,
+    created_at: typeof value.created_at === 'string' ? value.created_at : null,
+    read: value.read === true,
+    data: isRecord(value.data) ? value.data : {},
   } as NotifEvent;
+};
+
+export const parseNotifEvent = (raw: string): NotifEvent | undefined => {
+  try {
+    return toNotifEvent(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
 };
 
 const sourceLabelFor = (type: string): string => {
@@ -83,8 +89,9 @@ export const notifEventToInboxItem = (event: NotifEvent): InboxItem => ({
   title: event.title,
   description: event.message ?? undefined,
   source: sourceLabelFor(event.type),
-  createdAt: event.created_at,
+  createdAt: event.created_at ?? new Date().toISOString(),
   link: event.link ? { label: linkLabelFor(event.data), href: event.link } : undefined,
+  read: event.read,
 });
 
 export const inboxItemToNotifyOptions = (item: InboxItem): NotifyOptions => ({

@@ -27,8 +27,8 @@ export const SAMPLE_INBOX: InboxItem[] = [
     { minutesAgo: 38 }
   ),
   toInboxItem(JOB_COMPLETED, 'custom-models', { minutesAgo: 2 * HOUR + 10 }),
-  toInboxItem(GUARDRAIL_DEGRADED, 'guardrails', { minutesAgo: 5 * HOUR }),
-  toInboxItem(DATASET_UPLOADED, 'dataset-list', { minutesAgo: DAY + 2 * HOUR }),
+  toInboxItem(GUARDRAIL_DEGRADED, 'guardrails', { minutesAgo: 5 * HOUR, read: true }),
+  toInboxItem(DATASET_UPLOADED, 'dataset-list', { minutesAgo: DAY + 2 * HOUR, read: true }),
   toInboxItem(
     {
       status: 'success',
@@ -37,7 +37,7 @@ export const SAMPLE_INBOX: InboxItem[] = [
       link: { label: 'View job', href: `${NAV_HREFS['data-designer']}/support-intents` },
     },
     'data-designer',
-    { minutesAgo: DAY + 5 * HOUR }
+    { minutesAgo: DAY + 5 * HOUR, read: true }
   ),
   toInboxItem(
     {
@@ -47,6 +47,6 @@ export const SAMPLE_INBOX: InboxItem[] = [
       link: { label: 'View deployment', href: `${NAV_HREFS.deployments}/nemotron-nano-9b` },
     },
     'deployments',
-    { minutesAgo: 3 * DAY }
+    { minutesAgo: 3 * DAY, read: true }
   ),
 ];

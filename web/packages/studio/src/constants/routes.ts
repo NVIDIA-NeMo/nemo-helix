@@ -67,6 +67,7 @@ export const ROUTES = {
     dashboard: `/workspaces/:${P.workspace}/dashboard`,
     jobs: `/workspaces/:${P.workspace}/jobs`,
     jobDetail: `/workspaces/:${P.workspace}/jobs/:${P.jobName}`,
+    notifications: `/workspaces/:${P.workspace}/notifications`,
     newCustomizationJob: `/workspaces/:${P.workspace}/fine-tune/new`,
     /**
      * The full fine-tuning form. A sibling route rather than a step inside

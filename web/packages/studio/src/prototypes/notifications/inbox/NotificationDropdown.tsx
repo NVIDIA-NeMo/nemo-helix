@@ -10,12 +10,17 @@ import {
   StatusIndicator,
 } from '@nvidia/foundations-react-core';
 import { NotificationInbox } from '@studio/prototypes/notifications/inbox/NotificationInbox';
-import type { InboxItem, InboxState } from '@studio/prototypes/notifications/inbox/types';
+import type { InboxItem } from '@studio/prototypes/notifications/inbox/types';
+import type { NavNotification } from '@studio/prototypes/notifications/types';
 import { SEVERITY_COLOR, hasNotification } from '@studio/prototypes/notifications/utils';
 import { useId, useState, type FC } from 'react';
 
 interface NotificationDropdownProps {
-  inbox: InboxState;
+  unread: InboxItem[];
+  summary: NavNotification | undefined;
+  onMarkRead: (item: InboxItem) => void;
+  onMarkAllRead: () => void;
+  viewAllHref?: string;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
@@ -23,27 +28,32 @@ interface NotificationDropdownProps {
 const idsOf = (items: InboxItem[]): ReadonlySet<string> => new Set(items.map(({ id }) => id));
 
 export const NotificationDropdown: FC<NotificationDropdownProps> = ({
-  inbox,
+  unread,
+  summary,
+  onMarkRead,
+  onMarkAllRead,
+  viewAllHref,
   defaultOpen = false,
   onOpenChange,
 }) => {
-  const { items, summary, dismiss } = inbox;
   const [open, setOpen] = useState(defaultOpen);
   const [shownIds, setShownIds] = useState<ReadonlySet<string> | null>(() =>
-    defaultOpen ? idsOf(items) : null
+    defaultOpen ? idsOf(unread) : null
   );
   const headingId = useId();
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
-    setShownIds(next ? idsOf(items) : null);
+    setShownIds(next ? idsOf(unread) : null);
     onOpenChange?.(next);
   };
 
-  const shown = shownIds === null ? items : items.filter(({ id }) => shownIds.has(id));
-  const pendingCount = items.length - shown.length;
+  const shown = shownIds === null ? unread : unread.filter(({ id }) => shownIds.has(id));
+  const pendingCount = unread.length - shown.length;
 
-  const label = hasNotification(summary) ? `Notifications (${summary.count})` : 'Notifications';
+  const label = hasNotification(summary)
+    ? `Notifications (${summary.count} unread)`
+    : 'Notifications';
 
   return (
     <PopoverRoot open={open} onOpenChange={handleOpenChange}>
@@ -78,9 +88,16 @@ export const NotificationDropdown: FC<NotificationDropdownProps> = ({
           headingId={headingId}
           items={shown}
           pendingCount={pendingCount}
-          onShowPending={() => setShownIds(idsOf(items))}
-          onOpenItem={() => handleOpenChange(false)}
-          onDismissItem={(item) => dismiss(item.id)}
+          hasUnread={hasNotification(summary)}
+          viewAllHref={viewAllHref}
+          onShowPending={() => setShownIds(idsOf(unread))}
+          onOpenItem={(item) => {
+            onMarkRead(item);
+            handleOpenChange(false);
+          }}
+          onMarkRead={onMarkRead}
+          onMarkAllRead={onMarkAllRead}
+          onViewAll={() => handleOpenChange(false)}
         />
       </PopoverContent>
     </PopoverRoot>

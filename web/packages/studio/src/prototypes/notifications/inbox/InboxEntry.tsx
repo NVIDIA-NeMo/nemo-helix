@@ -3,23 +3,22 @@
 
 import { useRelativeTimeSince } from '@nemo/common/src/components/RelativeTime';
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
-import { Close } from '@nemo/icons/icons';
-import { Anchor, Button, StatusIndicator, Text } from '@nvidia/foundations-react-core';
+import { Anchor, StatusIndicator, Text } from '@nvidia/foundations-react-core';
 import type { InboxItem } from '@studio/prototypes/notifications/inbox/types';
 import { SEVERITY_LABEL } from '@studio/prototypes/notifications/inbox/utils';
 import { SEVERITY_COLOR } from '@studio/prototypes/notifications/utils';
 import cn from 'classnames';
-import type { FC } from 'react';
+import type { FC, ReactNode } from 'react';
 import { Link } from 'react-router';
 
 interface InboxEntryProps {
   item: InboxItem;
   isLast: boolean;
-  onOpen: (item: InboxItem) => void;
-  onDismiss: (item: InboxItem) => void;
+  onOpen?: (item: InboxItem) => void;
+  slotAction?: ReactNode;
 }
 
-export const InboxEntry: FC<InboxEntryProps> = ({ item, isLast, onOpen, onDismiss }) => {
+export const InboxEntry: FC<InboxEntryProps> = ({ item, isLast, onOpen, slotAction }) => {
   const timeSince = useRelativeTimeSince(item.createdAt);
 
   return (
@@ -37,20 +36,14 @@ export const InboxEntry: FC<InboxEntryProps> = ({ item, isLast, onOpen, onDismis
       </div>
       <div className={cn('flex min-w-0 flex-1 flex-col gap-1', !isLast && 'pb-4')}>
         <div className="flex items-start gap-2">
-          <Text kind="body/bold/md" className="min-w-0 flex-1">
+          <Text
+            kind={item.read ? 'body/regular/md' : 'body/bold/md'}
+            className={cn('min-w-0 flex-1', item.read && 'text-secondary')}
+          >
+            {!item.read && <span className="sr-only">Unread: </span>}
             {item.title}
           </Text>
-          <Button
-            aria-label={`Dismiss ${item.title}`}
-            color="neutral"
-            kind="tertiary"
-            size="small"
-            className="-my-1 shrink-0"
-            onClick={() => onDismiss(item)}
-            data-testid="proto-inbox-entry-dismiss"
-          >
-            <Close size="16" />
-          </Button>
+          {slotAction && <div className="-my-1 shrink-0">{slotAction}</div>}
         </div>
         <Text kind="body/regular/sm" className="text-secondary">
           <time dateTime={item.createdAt} title={formatAbsoluteTimestamp(item.createdAt)}>
@@ -59,13 +52,16 @@ export const InboxEntry: FC<InboxEntryProps> = ({ item, isLast, onOpen, onDismis
           {` · ${item.source}`}
         </Text>
         {item.description && (
-          <Text kind="body/regular/sm" className="line-clamp-2">
+          <Text
+            kind="body/regular/sm"
+            className={cn('line-clamp-2', item.read && 'text-secondary')}
+          >
             {item.description}
           </Text>
         )}
         {item.link && (
           <Anchor asChild textKind="body/regular/sm" className="w-fit">
-            <Link to={item.link.href} onClick={() => onOpen(item)}>
+            <Link to={item.link.href} onClick={() => onOpen?.(item)}>
               {item.link.label}
             </Link>
           </Anchor>
