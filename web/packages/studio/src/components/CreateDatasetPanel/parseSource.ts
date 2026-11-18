@@ -87,8 +87,13 @@ function parseHuggingFace(url: URL): ParseResult {
 
   const [owner, repo] = segs;
   if (!owner || !repo) return INCOMPLETE;
-  // Single segment only; branch names containing slashes are out of scope (spec 13).
-  const revision = segs[2] === 'tree' && segs[3] ? segs[3] : 'main';
+  // Only `/tree/{revision}` with exactly one revision segment can follow owner/repo. Anything else
+  // (`blob`, `resolve`, a bare `tree`, a subdirectory, a revision containing slashes) names
+  // something the fields cannot keep, and dropping it would silently point the dataset at a
+  // different source than the URL entered (spec 13), so it is incomplete.
+  const rest = segs.slice(2);
+  if (rest.length > 0 && (rest[0] !== 'tree' || rest.length !== 2)) return INCOMPLETE;
+  const revision = rest[1] ?? 'main';
   return {
     status: 'ok',
     fields: { repo_id: `${owner}/${repo}`, repo_type, revision },
@@ -129,10 +134,16 @@ function parseGithub(url: URL): ParseResult {
   const repo = segs[1]?.replace(/\.git$/, '');
   if (!owner || !repo) return INCOMPLETE;
 
+  // Only `/tree/{revision}[/path...]` can follow owner/repo: any other suffix (`blob/...`, a bare
+  // `tree`) names something the fields cannot keep, and dropping it would silently point the
+  // dataset at a different source than the URL entered. Report it as incomplete instead.
+  const rest = segs.slice(2);
+  if (rest.length > 0 && (rest[0] !== 'tree' || !rest[1])) return INCOMPLETE;
+
   const fields: GithubFields = { owner, repo, revision: 'HEAD' };
-  if (segs[2] === 'tree' && segs[3]) {
-    fields.revision = segs[3];
-    const path = segs.slice(4).join('/');
+  if (rest[0] === 'tree') {
+    fields.revision = rest[1];
+    const path = rest.slice(2).join('/');
     if (path) fields.path = path;
   }
   return { status: 'ok', fields, nameSeed: repo };

@@ -76,24 +76,14 @@ export function UploadTabForm({ draft, errors, dispatch }: UploadTabFormProps) {
           >
             <Flex direction="col" align="center" gap="density-md">
               <Text kind="body/regular/md">Drag and drop files here</Text>
-              {!folderName && (
-                <Flex gap="density-md">
-                  <Button
-                    type="button"
-                    kind="secondary"
-                    onClick={() => filesInput.current?.click()}
-                  >
-                    Choose files
-                  </Button>
-                  <Button
-                    type="button"
-                    kind="secondary"
-                    onClick={() => folderInput.current?.click()}
-                  >
-                    Choose folder
-                  </Button>
-                </Flex>
-              )}
+              <Flex gap="density-md">
+                <Button type="button" kind="secondary" onClick={() => filesInput.current?.click()}>
+                  Choose files
+                </Button>
+                <Button type="button" kind="secondary" onClick={() => folderInput.current?.click()}>
+                  Choose folder
+                </Button>
+              </Flex>
             </Flex>
           </Block>
 
