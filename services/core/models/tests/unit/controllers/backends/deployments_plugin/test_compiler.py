@@ -3,6 +3,7 @@
 
 import shlex
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,8 +12,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 from nemo_deployments_plugin.entities import Container, SecretRef
-from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.models.types import K8sNIMOperatorConfig, ToolCallConfig
+from nemo_deployments_plugin.schema import CreateDeploymentConfigRequest
+from nemo_helix_plugin.models.types import AuthContext, K8sNIMOperatorConfig, ToolCallConfig
 from nhx.common.config import Runtime
 from nhx.core.models.app import ModelWeightsType
 from nhx.core.models.controllers.backends.common import DeploymentConfigView
@@ -30,6 +31,7 @@ from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import
 from nhx.core.models.controllers.backends.deployments_plugin.request_converters import deployment_config_create_request
 from nhx.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
 from nhx.core.models.controllers.backends.vllm_compiler import MODEL_STORE_PATH
+from pytest_httpserver import HTTPServer
 
 
 def _resolved(engine: str, *, lora: bool = False, runtime: Runtime = Runtime.KUBERNETES) -> ResolvedPluginDeployment:
@@ -192,6 +194,19 @@ def test_weight_puller_script_preserves_hf_exit_code(tmp_path: Path) -> None:
     assert failed.returncode == 7
 
 
+def test_weight_puller_waits_for_proxy_before_downloading(tmp_path: Path, httpserver: HTTPServer) -> None:
+    httpserver.expect_ordered_request("/healthz").respond_with_data("starting", status=503)
+    httpserver.expect_ordered_request("/healthz").respond_with_data("ready")
+    result = _run_puller_script(
+        tmp_path,
+        _weight_puller_script("org/model", None, proxy_health_url=httpserver.url_for("/healthz")),
+        "#!/bin/sh\necho download-ok >&2\n",
+    )
+    assert result.returncode == 0, result.stderr
+    assert b"download-ok" in result.stderr
+    httpserver.check_assertions()
+
+
 def _run_puller_script(bin_dir: Path, script: str, hf_body: str) -> subprocess.CompletedProcess[bytes]:
     hf = bin_dir / "hf"
     hf.write_text(hf_body)
@@ -199,7 +214,7 @@ def _run_puller_script(bin_dir: Path, script: str, hf_body: str) -> subprocess.C
     return subprocess.run(
         ["sh", "-c", script],
         cwd=bin_dir,
-        env={"PATH": f"{bin_dir}:/bin:/usr/bin", "TMPDIR": str(bin_dir)},
+        env={"PATH": f"{bin_dir}:{Path(sys.executable).parent}:/bin:/usr/bin", "TMPDIR": str(bin_dir)},
         capture_output=True,
         check=False,
     )
@@ -932,6 +947,57 @@ def test_compile_model_deployment_adds_workload_identity_when_auth_context_prese
     assert compiled.puller_config.workload_identity.token_audience == "model-audience"
     assert compiled.server_config.workload_identity.workload_id == "my-dep/v3"
     assert compiled.server_config.workload_identity.token_audience == "model-audience"
+
+
+@pytest.mark.parametrize("engine", ["vllm", "nim", "generic"])
+@pytest.mark.parametrize("runtime", [Runtime.KUBERNETES, Runtime.DOCKER])
+@pytest.mark.parametrize("exchange", [False, True])
+def test_authenticated_weight_puller_uses_creator_scoped_proxy(
+    monkeypatch: pytest.MonkeyPatch, engine: str, runtime: Runtime, exchange: bool
+) -> None:
+    resolved = _resolved(engine, runtime=runtime)
+    if engine == "generic":
+        resolved.view.image_name = "custom/server"
+    resolved.deployment.auth_context = AuthContext(principal_id="service:models", principal_on_behalf_of="user:alice")
+    resolved = replace(resolved, files_hf_url="https://platform.test/apis/files/v2/hf")
+    monkeypatch.setattr("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", lambda: True)
+    monkeypatch.setattr(
+        "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled", lambda: exchange
+    )
+    monkeypatch.setattr("nemo_deployments_plugin.deployment_auth.auth_proxy_port", lambda: 8090)
+    monkeypatch.setattr(
+        "nhx.core.models.controllers.backends.deployments_plugin.compiler.is_workload_identity_token_exchange_enabled",
+        lambda: exchange,
+    )
+
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+
+    puller = compiled.puller_config
+    assert puller is not None
+    env = {item.name: item.value for item in puller.containers[0].env}
+    assert env["HF_ENDPOINT"] == "http://127.0.0.1:8090/apis/files/v2/hf"
+    assert "HF_TOKEN" not in env
+    assert puller.auth_proxy_sidecar is True
+    assert puller.auth_proxy_sidecar_identity == "models"
+    assert puller.auth_proxy_sidecar_on_behalf_of == (None if exchange else "user:alice")
+    assert (puller.workload_identity is not None) is exchange
+    request = deployment_config_create_request(puller)
+    assert request.auth_proxy_sidecar is True
+    assert request.auth_proxy_sidecar_identity == "models"
+    assert request.auth_proxy_sidecar_on_behalf_of == (None if exchange else "user:alice")
+    server_request = CreateDeploymentConfigRequest.model_validate(request.model_dump(by_alias=True, exclude_none=True))
+    assert server_request.auth_proxy_sidecar is True
+    assert server_request.auth_proxy_sidecar_identity == "models"
+    assert server_request.auth_proxy_sidecar_on_behalf_of == (None if exchange else "user:alice")
+
+
+def test_weight_puller_refuses_missing_creator_in_exchange_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", lambda: True)
+    monkeypatch.setattr(
+        "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled", lambda: True
+    )
+    with pytest.raises(ValueError, match="requires creator auth context"):
+        compile_model_deployment(_resolved("vllm"), DeploymentsPluginConfig())
 
 
 @pytest.mark.parametrize("engine", ["vllm", "nim"])

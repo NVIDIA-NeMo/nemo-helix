@@ -7,9 +7,12 @@ Parity ports from ``k8s_nim_operator/nimservice_compiler.py`` — please review
 mapping of ``k8s_nim_operator_config`` → plugin ``K8sDeploymentConfig``.
 """
 
+import logging
 import shlex
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
+from nemo_deployments_plugin.deployment_auth import plan_deployment_auth
 from nemo_deployments_plugin.entities import (
     Container,
     ContainerPort,
@@ -26,6 +29,7 @@ from nemo_deployments_plugin.entities import (
     WorkloadIdentitySpec,
 )
 from nemo_deployments_plugin.secrets import platform_ngc_secret_ref
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.config import get_platform_config
 from nemo_helix_plugin.jobs.image import get_qualified_image
 from nhx.common.auth import get_workload_identity_token_audience, is_workload_identity_token_exchange_enabled
@@ -84,6 +88,8 @@ _SCRATCH_VOLUME_SIZE = "1Gi"
 # never sees the SGLang model-free NIM become ready.
 _READINESS_PROBE_TIMEOUT_SECONDS = 5
 _SHM_GIB_PER_GPU = 8
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -163,13 +169,32 @@ def _env(values: dict[str, str]) -> list[EnvVar]:
 _REMOTE_LOCAL_DIR_FALLBACK = "Returning existing local_dir"
 
 
-def _weight_puller_script(repo_id: str, revision: str | None) -> str:
+def _weight_puller_script(repo_id: str, revision: str | None, *, proxy_health_url: str | None = None) -> str:
     """Run `hf download` and fail if it kept a local dir the remote could not serve."""
     revision_flag = f" --revision {shlex.quote(revision)}" if revision else ""
     marker = shlex.quote(_REMOTE_LOCAL_DIR_FALLBACK)
+    wait_for_proxy = []
+    if proxy_health_url is not None:
+        # Docker starts the primary before its sidecars can join its network.
+        wait_for_proxy = [
+            "python3 - <<'PY'",
+            "import time",
+            "from urllib.request import urlopen",
+            "deadline = time.monotonic() + 60",
+            "while True:",
+            "    try:",
+            f"        with urlopen({proxy_health_url!r}, timeout=1):",
+            "            break",
+            "    except OSError:",
+            "        if time.monotonic() >= deadline:",
+            "            raise SystemExit('weight puller failed: auth proxy did not become ready')",
+            "        time.sleep(1)",
+            "PY",
+        ]
     return "\n".join(
         [
             "set -eu",
+            *wait_for_proxy,
             "log=$(mktemp)",
             "set +e",
             (
@@ -308,6 +333,19 @@ def compile_model_deployment(
     scratch_volume = None
     puller_config = None
     if weighted:
+        source_auth_context = resolved.deployment.auth_context
+        auth_context = AuthContext.model_validate(source_auth_context.model_dump()) if source_auth_context else None
+        auth_plan = plan_deployment_auth(
+            service_identity="models",
+            on_behalf_of=(auth_context.principal_on_behalf_of or auth_context.principal_id) if auth_context else None,
+            auth_context=auth_context,
+            workload_name=resolved.deployment.name,
+            workload_label="Model weight puller",
+        )
+        if auth_plan.error is not None:
+            raise ValueError(auth_plan.error)
+        if auth_plan.warning is not None:
+            logger.warning("%s", auth_plan.warning)
         # On docker, a freshly created named volume is root-owned (0755) and there
         # is no fs_group equivalent, so the puller image's default non-root user
         # (e.g. `nvs`/uid 1000) cannot create its HF cache under --local-dir
@@ -336,9 +374,14 @@ def compile_model_deployment(
         # how other HF consumers scope the cache (unsloth/rl training tasks).
         puller_env = {
             "HF_ENDPOINT": resolved.files_hf_url,
-            "HF_TOKEN": "service:models",
             "HF_HOME": _WEIGHTS_MOUNT,
         }
+        if auth_plan.auth_proxy_base_url is not None:
+            # hf does not use Helix's projected workload token file. The proxy
+            # exchanges it and supplies refreshed access tokens when needed.
+            puller_env["HF_ENDPOINT"] = auth_plan.auth_proxy_base_url + urlsplit(resolved.files_hf_url).path
+        else:
+            puller_env["HF_TOKEN"] = "service:models"
         puller = Container(
             name="weight-puller",
             image=resolved.huggingface_model_puller,
@@ -348,6 +391,11 @@ def compile_model_deployment(
                 _weight_puller_script(
                     f"{resolved.model_namespace}/{resolved.model_name}",
                     resolved.model_revision,
+                    proxy_health_url=(
+                        f"{auth_plan.auth_proxy_base_url}/healthz"
+                        if auth_plan.auth_proxy_base_url and resolved.runtime == Runtime.DOCKER
+                        else None
+                    ),
                 ),
             ],
             env=_env(puller_env),
@@ -362,6 +410,9 @@ def compile_model_deployment(
             backoffLimit=config.max_restart_count,
             backendConfig=backend_config or DeploymentBackendConfig(),
             workloadIdentity=workload_identity,
+            auth_proxy_sidecar=auth_plan.auth_proxy_base_url is not None,
+            auth_proxy_sidecar_identity=auth_plan.auth_proxy_identity,
+            auth_proxy_sidecar_on_behalf_of=auth_plan.auth_proxy_on_behalf_of,
         )
 
     tool_call_inits = tool_call_plugin_init_containers(
