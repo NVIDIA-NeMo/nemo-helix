@@ -1545,6 +1545,25 @@ class TestGrpoPassthroughKnobs:
             "size": {"longest_edge": 2_621_440, "shortest_edge": 65_536}
         }
 
+    def test_caller_mm_processor_kwargs_keep_the_pixel_bounds(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+        step, _ = _prepared_step(
+            tmp_path,
+            has_vision_tower=True,
+            grpo=GRPOConfig(
+                num_generations_per_prompt=4,
+                vllm_kwargs={"mm_processor_kwargs": {"min_pixels": 1, "do_rescale": False}},
+            ),
+        )
+        step.model.max_pixels = 2_621_440
+
+        cfg = compile_grpo_config(step, job_ctx)
+
+        assert cfg["policy"]["generation"]["vllm_kwargs"]["mm_processor_kwargs"] == {
+            "max_pixels": 2_621_440,
+            "min_pixels": 65_536,
+            "do_rescale": False,
+        }
+
     def test_vllm_kwargs_absent_when_unset(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
         step, _ = _prepared_step(tmp_path)
 

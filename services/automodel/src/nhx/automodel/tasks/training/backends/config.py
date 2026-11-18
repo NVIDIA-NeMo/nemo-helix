@@ -543,8 +543,20 @@ def _configure_vlm_datasets(
         model_name=customizer_config.model.name,
         user_template=customizer_config.model.chat_template,
     )
-    cfg["dataset"] = {"_target_": CONVERSATION_DATASET_TARGET, "path_or_dataset": str(train_out)}
-    cfg["validation_dataset"] = {"_target_": CONVERSATION_DATASET_TARGET, "path_or_dataset": str(val_out)}
+    # max_length is Automodel's token cap. Setting it also enables the pretokenized
+    # wrapper, which truncates to this length and replaces a sample whose truncation
+    # would split image tokens.
+    seq_length = customizer_config.model.max_seq_length
+    cfg["dataset"] = {
+        "_target_": CONVERSATION_DATASET_TARGET,
+        "path_or_dataset": str(train_out),
+        "max_length": seq_length,
+    }
+    cfg["validation_dataset"] = {
+        "_target_": CONVERSATION_DATASET_TARGET,
+        "path_or_dataset": str(val_out),
+        "max_length": seq_length,
+    }
     if chat_template:
         cfg["dataset"]["chat_template"] = chat_template
         cfg["validation_dataset"]["chat_template"] = chat_template

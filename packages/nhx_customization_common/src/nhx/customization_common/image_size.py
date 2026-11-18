@@ -42,3 +42,25 @@ def check_max_pixels_or_image_size(max_pixels: int | None, image_size_set: bool)
     """``max_pixels`` and ``image_size`` are two ways to set the same ceiling, so only one may be set."""
     if max_pixels is not None and image_size_set:
         raise ValueError("Set max_pixels or image_size, not both.")
+
+
+def check_seq_length_fits_image(
+    max_seq_length: int,
+    max_pixels: int | None,
+    longest_edge: int | None,
+    vision_patch_size: int | None,
+) -> None:
+    """Reject a token cap that cannot hold one image at the pixel ceiling.
+
+    ``vision_patch_size`` is the side length, in pixels, of one image token from the model spec.
+    Without it the token count is unknown, so the cap is left to the recipe.
+    """
+    ceiling = max_pixels if max_pixels is not None else longest_edge
+    if ceiling is None or not vision_patch_size:
+        return
+    image_tokens = ceiling // (vision_patch_size * vision_patch_size)
+    if image_tokens and max_seq_length <= image_tokens:
+        raise ValueError(
+            f"max_seq_length ({max_seq_length}) must be larger than the {image_tokens} tokens "
+            f"one image can use at this pixel ceiling (one token per {vision_patch_size}x{vision_patch_size} pixels)."
+        )

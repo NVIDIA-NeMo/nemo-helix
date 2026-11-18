@@ -10454,7 +10454,9 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--training.lora.use-triton`: Use the optimized Triton LoRA kernel.
 * `--training.lora.use-memory-efficient-lora`: Use Automodel's lower-memory LoRA path. Recommended for large MoE checkpoints. Omit to use Automodel's default, which is on.
 * `--training.max-seq-length <INTEGER>`: Override `training.max_seq_length` in the spec.
-* `--training.max-pixels <INTEGER>`: Per-image pixel ceiling for vision-language checkpoints. Larger images are downscaled before the vision tower, which bounds image tokens. Unset keeps the processor default. Rejected for text checkpoints.
+* `--training.max-pixels <INTEGER>`: Shorthand for image_size.longest_edge. The compiler writes it as the processor size and does not pass this name to transformers. Unset keeps the checkpoint ceiling. Rejected for text checkpoints.
+* `--training.image-size.longest-edge <INTEGER>`: Maximum pixels in a resized image. The same ceiling as max_pixels.
+* `--training.image-size.shortest-edge <INTEGER>`: Minimum pixels in a resized image.
 * `--training.execution-profile`: Override `training.execution_profile` in the spec.
 * `--training.teacher-model`: Override `training.teacher_model` in the spec.
 * `--training.distillation-ratio <FLOAT>`: Override `training.distillation_ratio` in the spec.

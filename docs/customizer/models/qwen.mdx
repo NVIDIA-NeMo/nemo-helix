@@ -106,7 +106,9 @@ vLLM, 1x 48GB, `--max-model-len 8192`.
     "training_type": "sft",
     "finetuning_type": "lora",
     "lora": {"rank": 16, "alpha": 32},
-    "max_seq_length": 2048
+    "max_seq_length": 4096,
+    "image_size": {"longest_edge": 2621440, "shortest_edge": 65536},
+    "activation_checkpointing": true
   },
   "schedule": {"epochs": 1},
   "batch": {"global_batch_size": 8, "micro_batch_size": 1},

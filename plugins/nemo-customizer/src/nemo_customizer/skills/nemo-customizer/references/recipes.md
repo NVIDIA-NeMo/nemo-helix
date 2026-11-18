@@ -77,7 +77,7 @@ All of [`examples/llm_finetune/nemotron/`](https://github.com/NVIDIA-NeMo/Automo
 
 For a vision LoRA job without a cluster, use `Qwen/Qwen3-VL-8B-Instruct` on one 48 GB GPU. Full-weight SFT does not fit that GPU. CORD ran on this checkpoint on the platform. Use the finance and CLEVR settings below for a 1-GPU experiment on this same checkpoint.
 
-- **CORD:** rank 16, alpha 32, `max_seq_length` 1024, global batch 8, micro batch 1, learning rate 1e-5, one epoch, first 300 train and 30 validation rows, deploy `gpu` 1 and `--max-model-len 8192`. Sequence length 1024 is what fits a 48 GB GPU; 2048 runs out of memory on the vision forward.
+- **CORD:** rank 16, alpha 32, `max_seq_length` 4096, `image_size` `{"longest_edge": 2621440, "shortest_edge": 65536}`, `activation_checkpointing` true, global batch 8, micro batch 1, learning rate 1e-5, one epoch, first 300 train and 30 validation rows, deploy `gpu` 1 and `--max-model-len 8192`. `image_size` is the pixel bound and `max_seq_length` is the token cap; together they keep the run inside 48 GB. Do not set `max_pixels` as well.
 - **Finance OCR:** rank 16, alpha 32, global batch 4, about 200 rows, `attn_implementation` `sdpa`.
 - **CLEVR:** LoRA rank 16, colocated vLLM, `vllm_gpu_memory_utilization` 0.4, sequence length 2048, 512 new tokens, 32/16 split, `--prompt qwen`, tool agent `max_rollout_turns` 2 and `inline_tool_output_images` true.
 

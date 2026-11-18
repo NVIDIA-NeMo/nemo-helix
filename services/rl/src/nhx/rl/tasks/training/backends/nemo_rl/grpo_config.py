@@ -703,7 +703,19 @@ def compile_grpo_config(
             "min_pixels": image_size["shortest_edge"],
         }
     if grpo_hp.vllm_kwargs:
-        vllm_kwargs.update(grpo_hp.vllm_kwargs)
+        # A nested mm_processor_kwargs must not replace the pixel bounds set above.
+        # The platform bounds win; other caller keys in that dict are kept.
+        caller_kwargs = dict(grpo_hp.vllm_kwargs)
+        caller_mm = caller_kwargs.pop("mm_processor_kwargs", None)
+        vllm_kwargs.update(caller_kwargs)
+        if isinstance(caller_mm, dict):
+            platform_mm = vllm_kwargs.get("mm_processor_kwargs")
+            if isinstance(platform_mm, dict):
+                vllm_kwargs["mm_processor_kwargs"] = {**caller_mm, **platform_mm}
+            else:
+                vllm_kwargs["mm_processor_kwargs"] = caller_mm
+        elif caller_mm is not None:
+            vllm_kwargs["mm_processor_kwargs"] = caller_mm
     if vllm_kwargs:
         cfg["policy"]["generation"]["vllm_kwargs"] = vllm_kwargs
 
