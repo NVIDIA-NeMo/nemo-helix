@@ -254,14 +254,20 @@ def test_fabric_image_loads_startup_compatibility_shims() -> None:
     assert (AGENT_ROOT / "sitecustomize.py").is_file()
 
 
-def test_guardrails_skill_is_generic_sdk_workflow_and_copies_match() -> None:
-    source = AGENT_ROOT / "src/nemo_studio_assistant/skills/guardrails/SKILL.md"
-    packaged = AGENT_ROOT / "skills/guardrails/SKILL.md"
-    registered = ETHOS_ROOT / "skills/guardrails/SKILL.md"
-    skill_text = source.read_text(encoding="utf-8")
+def test_registration_skills_mirror_packaged_skills() -> None:
+    packaged_root = AGENT_ROOT / "skills"
+    registered_root = ETHOS_ROOT / "skills"
+    packaged = {path.relative_to(packaged_root): path for path in packaged_root.rglob("*") if path.is_file()}
+    registered = {path.relative_to(registered_root): path for path in registered_root.rglob("*") if path.is_file()}
 
-    assert packaged.read_text(encoding="utf-8") == skill_text
-    assert registered.read_text(encoding="utf-8") == skill_text
+    assert sorted(registered) == sorted(packaged)
+    for relative_path, packaged_path in packaged.items():
+        assert registered[relative_path].read_bytes() == packaged_path.read_bytes(), relative_path
+
+
+def test_guardrails_skill_is_generic_sdk_workflow() -> None:
+    skill_text = (AGENT_ROOT / "skills/guardrails/SKILL.md").read_text(encoding="utf-8")
+
     assert "guardrail.configs" in skill_text
     assert "| List/read backend models | `models` | `list` / `retrieve` |" in skill_text
     assert "inference.virtual_models" in skill_text
