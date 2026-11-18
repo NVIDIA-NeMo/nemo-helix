@@ -131,7 +131,7 @@ const getRepeatedSubtleToolMessage = (toolName: string, count: number): string =
     case 'check_status':
       return `Checked ${count} jobs`;
     case 'deploy_guardrail':
-      return `Completed ${count} guardrail steps`;
+      return `Ran ${count} guardrail steps`;
     case 'nemo_api':
       return `Made ${count} platform API calls`;
     case 'search_docs':
@@ -281,7 +281,7 @@ export const getSubtleToolMessage = (
 
   if (toolName === 'deploy_guardrail') {
     return formatSubtleToolMessage(
-      'Guardrail:',
+      getStringArg(args, ['status']) === 'failed' ? 'Guardrail step failed:' : 'Guardrail:',
       getToolSummary(toolName, args),
       'Deployed guardrail'
     );
