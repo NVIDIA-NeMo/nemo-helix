@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      {{- with .Values.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ . }}
+      {{- end }}
+      containers:
+        - name: helix-operator
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["nemo", "services", "run", "--services", "helix-operator", "--host", "0.0.0.0", "--port", "8080"]
+          ports:
+            - containerPort: 8080
+          env:
+            - name: NHX_BASE_URL
+              value: {{ .Values.helixBaseUrl | quote }}
+            {{- range $key, $value := .Values.config }}
+            - name: NEMO_HELIX_OPERATOR_{{ $key | upper }}
+              value: {{ $value | quote }}
+            {{- end }}

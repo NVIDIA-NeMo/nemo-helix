@@ -69,6 +69,8 @@ version = "0.0.0"
 
 [dependency-groups]
 compass = ["nemo-compass-plugin"]
+# Opt-in: helix-operator runs in its own pod, so it stays out of `enabled-plugins`.
+helix-operator = ["nemo-helix-operator-plugin"]
 typecheck = ["transformers>=5.5.0,<5.9.0"]
 # The scaled-evals plugin is opt-in: it is a path dependency rather than a workspace
 # member, so neither `enabled-plugins` nor `uv sync --all-packages` installs it. It needs
@@ -489,6 +491,7 @@ nemo-agent-optimization-plugin = { workspace = true }
 nemo-unsloth-plugin = { workspace = true }
 nemo-rl-plugin = { workspace = true }
 nemo-builder-plugin = { workspace = true }
+nemo-helix-operator-plugin = { workspace = true }
 nhx-automodel = { workspace = true }
 nhx-unsloth = { workspace = true }
 nhx-rl = { workspace = true }
@@ -550,6 +553,7 @@ members = [
   "plugins/nemo-unsloth",
   "plugins/nemo-rl",
   "plugins/nemo-builder",
+  "plugins/nemo-helix-operator",
   "services/automodel",
   "services/unsloth",
   "services/rl",

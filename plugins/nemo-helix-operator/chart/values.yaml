@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+image:
+  repository: ""
+  tag: ""
+# The Helix API Service the pod calls Files, the builder and Jobs through.
+helixBaseUrl: http://nemo-helix-api:8080
+# A pull secret for the GitLab registry, created by the deploy side.
+imagePullSecret: ""
+# HelixOperatorConfig fields, as NEMO_HELIX_OPERATOR_<FIELD> env vars, e.g. {OUTPUT_REPOSITORY: nhx-api}.
+config: {}
