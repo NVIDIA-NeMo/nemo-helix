@@ -20,4 +20,5 @@ COPY packages/nhx_customization_common packages/nhx_customization_common
 COPY packages/nemo_helix_plugin packages/nemo_helix_plugin
 COPY packages/nemo_helix_ext packages/nemo_helix_ext
 COPY plugins/nemo-deployments plugins/nemo-deployments
+COPY plugins/nemo-customizer plugins/nemo-customizer
 COPY services/core/models services/core/models

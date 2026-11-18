@@ -76,6 +76,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     -e /app/packages/nemo_helix_ext \
     -e /app/packages/nhx_common \
     -e /app/packages/nhx_customization_common \
+    -e /app/plugins/nemo-customizer \
     -e /app/services/core/models
 
 # Pin scanner-tracked runtime packages into /opt/venv before removing stale
