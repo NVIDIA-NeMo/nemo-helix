@@ -231,6 +231,8 @@ class OpenSandboxDriver:
                 network_policy=_network_policy(self._create_options),
                 entrypoint=list(spec.entrypoint) if spec.entrypoint else None,
                 volumes=_volumes(spec) or None,
+                # Set only by the job-host provider; the broker refuses provider_options on episode requests.
+                extensions=dict(spec.provider_options.get("extensions") or {}) or None,
                 # Large runtime images flake on the SDK's create-time probe, and the job host polls
                 # `/health` itself once routes resolve. The caller decides; the SDK default stands.
                 skip_health_check=bool(self._create_options.get("skip_health_check", False)),
