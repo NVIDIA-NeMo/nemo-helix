@@ -36,7 +36,6 @@ from nemo_helix_plugin.agents.skills import (
     SKILL_NAME_MAX_LENGTH,
     SKILL_NAME_PATTERN,
     Skill,
-    SkillFrontmatter,
     SkillInput,
 )
 from nemo_helix_plugin.client.errors import NotFoundError
@@ -517,7 +516,7 @@ class SkillService:
                 verify_revision(head, existing)
                 return (
                     existing,
-                    await self._point_tags(head, tags, existing.revision, latest_frontmatter=existing.frontmatter),
+                    await self._point_tags(head, tags, existing.revision),
                     False,
                 )
 
@@ -540,7 +539,7 @@ class SkillService:
                 continue
             return (
                 created,
-                await self._point_tags(head, tags, ordinal, latest_frontmatter=created.frontmatter),
+                await self._point_tags(head, tags, ordinal),
                 True,
             )
         raise SkillRevisionConflictError(
@@ -552,29 +551,15 @@ class SkillService:
         head: SkillEntity,
         tags: set[str],
         ordinal: int,
-        *,
-        latest_frontmatter: SkillFrontmatter | None = None,
     ) -> SkillEntity:
-        """Point ``tags`` at ``ordinal`` under the head's optimistic lock; ``latest`` only moves forward.
-
-        When ``latest`` moves, the head's search copy of the frontmatter moves with it in the same write.
-        """
+        """Point ``tags`` at ``ordinal`` under the head's optimistic lock; ``latest`` only moves forward."""
         for attempt in range(_MAX_ATTEMPTS):
             moves_forward = ordinal >= head.tags.get(LATEST_TAG, 0)
             applied = {tag: ordinal for tag in tags if tag != LATEST_TAG or moves_forward}
             new_latest = max(head.latest_revision, ordinal)
-            new_frontmatter = (
-                latest_frontmatter if latest_frontmatter is not None and LATEST_TAG in applied else head.frontmatter
-            )
-            if (
-                all(head.tags.get(t) == o for t, o in applied.items())
-                and new_latest == head.latest_revision
-                and new_frontmatter == head.frontmatter
-            ):
+            if all(head.tags.get(t) == o for t, o in applied.items()) and new_latest == head.latest_revision:
                 return head
-            update = head.model_copy(
-                update={"tags": {**head.tags, **applied}, "latest_revision": new_latest, "frontmatter": new_frontmatter}
-            )
+            update = head.model_copy(update={"tags": {**head.tags, **applied}, "latest_revision": new_latest})
             update._parent, update._id, update._db_version = head._parent, head._id, head._db_version
             try:
                 return await self.entity_client.update(update)

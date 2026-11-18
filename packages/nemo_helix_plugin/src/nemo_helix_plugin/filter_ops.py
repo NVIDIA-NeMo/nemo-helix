@@ -314,3 +314,28 @@ class LogicalOperation(FilterOperation):
         if self.operator == FilterOperator.NOT:
             return {self.operator.value: self.operations[0].to_dict()}
         return {self.operator.value: [op.to_dict() for op in self.operations]}
+
+
+class RelationshipOperation(FilterOperation):
+    """Match entities that have a related child entity satisfying ``condition``.
+
+    Serializes to the entities service's relationship filter, ``{relationship: {field: ...}}``, which
+    the service turns into an ``EXISTS`` subquery over the children. The relationship must be
+    registered for the parent's entity type in the entities service. ``condition`` fields name the
+    child's own fields without the ``data.`` prefix (the service adds it). Only the entities service
+    can evaluate this; an in-memory repository cannot.
+    """
+
+    operator: FilterOperator = FilterOperator.EXISTS
+    relationship: str
+    condition: ComparisonOperation | None = None
+
+    def apply(self, repository: FilterRepository) -> Any:
+        raise NotImplementedError(
+            f"Relationship filter {self.relationship!r} must be evaluated by the entities service"
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        if self.condition is None:
+            return {self.relationship: {FilterOperator.EXISTS.value: True}}
+        return {self.relationship: self.condition.to_dict()}

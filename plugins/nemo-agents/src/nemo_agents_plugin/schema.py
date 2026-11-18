@@ -57,6 +57,7 @@ from nemo_helix_plugin.agents.types import (
 )
 from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.api.parsed_filter import ENTITY_BASE_FIELDS
+from nemo_helix_plugin.filter_ops import RelationshipOperation
 from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
 from pydantic import Field
 
@@ -154,37 +155,46 @@ class SkillSort(StrEnum):
     UPDATED_AT_DESC = "-updated_at"
 
 
-#: Where a skill head keeps its search copy of the latest revision's frontmatter.
-_SKILL_FRONTMATTER = "data.frontmatter"
+#: The relationship (registered in the entities service) from a skill head to its revisions, and the
+#: revision field holding the parsed ``SKILL.md`` frontmatter (no ``data.`` prefix: the entities
+#: service adds it to relationship conditions).
+_SKILL_REVISIONS = "revisions"
+_REVISION_FRONTMATTER = "frontmatter"
 
 
 class SkillFilter(NemoFilter):
     """Query filter for ``GET /v2/workspaces/{workspace}/skills``.
 
-    Matches the latest revision's ``SKILL.md`` frontmatter. ``name`` is the skill name, which always
-    equals the frontmatter name.
+    ``description`` and ``tags`` match the ``SKILL.md`` frontmatter of the skill's published
+    revisions through the entities service's relationship filter: a skill matches when *any* of its
+    revisions matches, not only the latest. ``name`` is the skill name, which always equals the
+    frontmatter name.
     """
 
     description: str | None = Field(
         default=None,
-        description="Filter by frontmatter description, e.g. `filter[description][$like]=pdf`.",
+        description="Filter by frontmatter description of any published revision, e.g. "
+        "`filter[description][$like]=pdf`.",
     )
     tags: str | None = Field(
         default=None,
-        description="Filter by frontmatter `metadata.tags` (not revision tags): matches skills carrying the tag. "
-        "Supports `$eq` and `$in`.",
+        description="Filter by frontmatter `metadata.tags` (not revision tags): matches skills with any published "
+        "revision carrying the tag. Supports `$eq` and `$in`.",
     )
 
     @classmethod
     def _get_entity_field_map(cls) -> dict[str, str]:
-        return {"description": f"{_SKILL_FRONTMATTER}.description", "tags": f"{_SKILL_FRONTMATTER}.tags"}
+        return {"description": f"{_REVISION_FRONTMATTER}.description", "tags": f"{_REVISION_FRONTMATTER}.tags"}
 
     @classmethod
     def translate_operation(cls, operation: FilterOperation) -> FilterOperation:
         def _walk(op: FilterOperation) -> FilterOperation:
             if isinstance(op, ComparisonOperation):
                 if op.field == "description":
-                    return op.model_copy(update={"field": f"{_SKILL_FRONTMATTER}.description"})
+                    return RelationshipOperation(
+                        relationship=_SKILL_REVISIONS,
+                        condition=op.model_copy(update={"field": f"{_REVISION_FRONTMATTER}.description"}),
+                    )
                 if op.field == "tags":
                     return _has_frontmatter_tag(op)
                 return op
@@ -196,10 +206,15 @@ class SkillFilter(NemoFilter):
 
 
 def _has_frontmatter_tag(op: ComparisonOperation) -> FilterOperation:
-    def contains(value: object) -> ComparisonOperation:
+    def contains(value: object) -> RelationshipOperation:
         if not isinstance(value, str) or not value:
             raise ValueError("'tags' filters take a non-empty string")
-        return ComparisonOperation(operator=FilterOperator.CONTAINS, field=f"{_SKILL_FRONTMATTER}.tags", value=value)
+        return RelationshipOperation(
+            relationship=_SKILL_REVISIONS,
+            condition=ComparisonOperation(
+                operator=FilterOperator.CONTAINS, field=f"{_REVISION_FRONTMATTER}.tags", value=value
+            ),
+        )
 
     if op.operator == FilterOperator.EQ:
         return contains(op.value)

@@ -2839,8 +2839,8 @@ paths:
         explode: true
         schema:
           $ref: '#/components/schemas/SkillFilter'
-        description: Filter skills by name and by the latest revision's frontmatter
-          description and tags.
+        description: Filter skills by name, and by the frontmatter description and
+          tags of any published revision.
       responses:
         '200':
           description: Return stored skills at their latest revision
@@ -6664,18 +6664,26 @@ components:
       description: 'Query filter for ``GET /v2/workspaces/{workspace}/skills``.
 
 
-        Matches the latest revision''s ``SKILL.md`` frontmatter. ``name`` is the skill
-        name, which always
+        ``description`` and ``tags`` match the ``SKILL.md`` frontmatter of the skill''s
+        published
 
-        equals the frontmatter name.'
+        revisions through the entities service''s relationship filter: a skill matches
+        when *any* of its
+
+        revisions matches, not only the latest. ``name`` is the skill name, which
+        always equals the
+
+        frontmatter name.'
       properties:
         description:
-          description: Filter by frontmatter description, e.g. `filter[description][$like]=pdf`.
+          description: Filter by frontmatter description of any published revision,
+            e.g. `filter[description][$like]=pdf`.
           title: Description
           type: string
         tags:
           description: 'Filter by frontmatter `metadata.tags` (not revision tags):
-            matches skills carrying the tag. Supports `$eq` and `$in`.'
+            matches skills with any published revision carrying the tag. Supports
+            `$eq` and `$in`.'
           title: Tags
           type: string
       title: SkillFilter

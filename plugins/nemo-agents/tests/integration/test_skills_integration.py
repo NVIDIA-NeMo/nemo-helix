@@ -190,15 +190,19 @@ def test_skill_lifecycle_and_permissions() -> None:
         revisions = viewer_skills.list_skill_revisions(workspace=workspace, name=SKILL).page().items
         assert [r.revision for r in revisions] == [2, 1]
 
-        # List filters match the latest revision's frontmatter.
+        # List filters match the frontmatter of any published revision (an entities-service
+        # relationship filter over the skill's revisions), not only the latest.
         def listed(query: str | None = None) -> list[str]:
             params: ListSkillsQueryParams = {"filter": query} if query else {}
             return [s.name for s in viewer_skills.list_skills(workspace=workspace, query_params=params).page().items]
 
         assert listed() == [SKILL]
         assert listed('{"tags": "pdf"}') == [SKILL]
-        assert listed('{"tags": "docs"}') == []
+        assert listed('{"tags": "docs"}') == [SKILL]  # only revision 1 carries "docs"
+        assert listed('{"tags": "nope"}') == []
+        assert listed('{"tags": {"$in": ["nope", "pdf"]}}') == [SKILL]
         assert listed('{"description": {"$like": "split"}}') == [SKILL]
+        assert listed('{"description": {"$like": "nothing-like-this"}}') == []
 
         # Tags: user tags move; 'latest' is reserved; Viewer may not tag.
         tagged = editor_skills.tag_skill_revision(

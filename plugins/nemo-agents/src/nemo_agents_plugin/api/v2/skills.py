@@ -109,7 +109,7 @@ def _raise_mapped(action: str, exc: Exception) -> NoReturn:
     response_model_exclude_none=True,
     openapi_extra=generate_openapi_extra_params(
         filter_schema=SkillFilter,
-        filter_description="Filter skills by name and by the latest revision's frontmatter description and tags.",
+        filter_description="Filter skills by name, and by the frontmatter description and tags of any published revision.",
     ),
 )
 @scope.read
