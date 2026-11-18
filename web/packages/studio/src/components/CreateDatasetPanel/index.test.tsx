@@ -87,6 +87,58 @@ const existingFilesets = (...existing: FilesetOutput[]) =>
     });
   });
 
+/**
+ * Create/upload/delete endpoints for the Upload rollback tests. A name reads as taken from its
+ * POST until a successful DELETE. `puts` holds only uploads that succeeded.
+ */
+function recordFilesetLifecycle(
+  opts: { uploadsFail?: boolean; putGate?: Promise<void>; deleteStatus?: number } = {}
+) {
+  const state = { failUploads: opts.uploadsFail ?? false };
+  const posts: Body[] = [];
+  const puts: string[] = [];
+  const deletes: string[] = [];
+  const live = new Set<string>();
+  server.use(
+    http.get(FILESETS_URL, ({ request }) => {
+      const name = new URL(request.url).searchParams.get('filter[name]') ?? '';
+      const data = live.has(name) ? [filesetRecord(name)] : [];
+      return HttpResponse.json({
+        data,
+        pagination: {
+          page: 1,
+          page_size: 1,
+          current_page_size: data.length,
+          total_pages: 1,
+          total_results: data.length,
+        },
+      });
+    }),
+    http.post(FILESETS_URL, async ({ request }) => {
+      const body = (await request.json()) as Body;
+      posts.push(body);
+      live.add(body.name as string);
+      return HttpResponse.json(filesetRecord(body.name as string));
+    }),
+    http.put(`${FILESETS_URL}/:name/-/*`, async ({ request }) => {
+      await opts.putGate;
+      if (state.failUploads) return HttpResponse.json({ detail: 'boom' }, { status: 500 });
+      puts.push(decodeURIComponent(new URL(request.url).pathname.split('/-/')[1]));
+      return new HttpResponse(null, { status: 200 });
+    }),
+    http.delete(`${FILESETS_URL}/:name`, ({ params }) => {
+      const name = params.name as string;
+      deletes.push(name);
+      if (opts.deleteStatus) {
+        return HttpResponse.json({ detail: 'nope' }, { status: opts.deleteStatus });
+      }
+      live.delete(name);
+      return new HttpResponse(null, { status: 200 });
+    })
+  );
+  return { posts, puts, deletes, state };
+}
+
 const noSecrets = () =>
   http.get(SECRETS_URL, () =>
     HttpResponse.json({
@@ -616,55 +668,86 @@ describe('CreateDatasetPanel', () => {
     expect(onCreated).toHaveBeenCalledTimes(1); // the closed panel's creation is not reported
   });
 
-  it('keeps the panel and input after a failed upload, then retries without creating twice', async () => {
-    const posts: Body[] = [];
-    const puts: string[] = [];
-    let failUploads = true;
-    server.use(
-      http.get(FILESETS_URL, ({ request }) => {
-        const name = new URL(request.url).searchParams.get('filter[name]');
-        const data = posts.some((p) => p.name === name) ? [filesetRecord(name as string)] : [];
-        return HttpResponse.json({
-          data,
-          pagination: {
-            page: 1,
-            page_size: 1,
-            current_page_size: data.length,
-            total_pages: 1,
-            total_results: data.length,
-          },
-        });
-      }),
-      http.post(FILESETS_URL, async ({ request }) => {
-        const body = (await request.json()) as Body;
-        posts.push(body);
-        return HttpResponse.json(filesetRecord(body.name as string));
-      }),
-      http.put(`${FILESETS_URL}/:name/-/*`, ({ request }) => {
-        if (failUploads) return HttpResponse.json({ detail: 'boom' }, { status: 500 });
-        puts.push(decodeURIComponent(new URL(request.url).pathname.split('/-/')[1]));
-        return new HttpResponse(null, { status: 200 });
-      })
-    );
+  it('rolls back a failed upload, keeps the form, and retries by creating the fileset again', async () => {
+    const { posts, puts, deletes, state } = recordFilesetLifecycle({ uploadsFail: true });
+    const { user, onCreated, onClose } = setup();
+    await openTab(user, 'Upload');
+    selectFiles('create-dataset-folder-input', 'my-data/a.jsonl', 'my-data/b.jsonl');
+    await waitFor(() => expect(field('Name')).toHaveValue('my-data'));
+    await user.type(field('Description'), 'first');
+
+    await user.click(createButton());
+    expect(await screen.findByTestId('mock-toast-error')).toBeInTheDocument();
+    // The half-created fileset is deleted, and the panel keeps the whole form
+    await waitFor(() => expect(deletes).toEqual(['my-data']));
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(field('Name')).toHaveValue('my-data');
+    expect(field('Description')).toHaveValue('first');
+    expect(screen.getByText(/my-data\/a\.jsonl/)).toBeInTheDocument();
+    expect(posts).toHaveLength(1);
+    await waitFor(() => expect(createButton()).toBeEnabled());
+
+    // Retry under a new name and description: a new fileset is created and every file is uploaded
+    state.failUploads = false;
+    await user.clear(field('Name'));
+    await user.type(field('Name'), 'my-data-2');
+    await user.type(field('Description'), ' retry');
+    await waitFor(() => expect(createButton()).toBeEnabled());
+    await user.click(createButton());
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toMatchObject({ name: 'my-data-2', description: 'first retry' });
+    expect([...puts].sort()).toEqual(['my-data/a.jsonl', 'my-data/b.jsonl']);
+    expect(deletes).toEqual(['my-data']); // no orphan, and nothing else deleted
+  });
+
+  it('says the dataset may still exist when the rollback delete fails, and keeps the form', async () => {
+    const { deletes } = recordFilesetLifecycle({ uploadsFail: true, deleteStatus: 500 });
     const { user, onCreated, onClose } = setup();
     await openTab(user, 'Upload');
     selectFiles('create-dataset-folder-input', 'my-data/a.jsonl', 'my-data/b.jsonl');
     await waitFor(() => expect(field('Name')).toHaveValue('my-data'));
 
     await user.click(createButton());
-    expect(await screen.findByTestId('mock-toast-error')).toBeInTheDocument();
+    await waitFor(() => expect(deletes).toEqual(['my-data']));
+    // Contract: one error toast naming the dataset and containing "may still exist"
+    await waitFor(() => {
+      const text = screen
+        .getAllByTestId('mock-toast-error')
+        .map((toast) => toast.textContent)
+        .join(' ');
+      expect(text).toMatch(/^(?=.*my-data)(?=.*may still exist)/);
+    });
     expect(onCreated).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(field('Name')).toHaveValue('my-data');
     expect(screen.getByText(/my-data\/a\.jsonl/)).toBeInTheDocument();
-    expect(posts).toHaveLength(1);
-
-    failUploads = false;
     await waitFor(() => expect(createButton()).toBeEnabled());
+  });
+
+  it('still rolls back and reports when the upload fails after the panel was closed', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { posts, deletes } = recordFilesetLifecycle({ uploadsFail: true, putGate: gate });
+    const { user, onCreated } = setup();
+    await openTab(user, 'Upload');
+    selectFiles('create-dataset-folder-input', 'my-data/a.jsonl', 'my-data/b.jsonl');
+    await waitFor(() => expect(field('Name')).toHaveValue('my-data'));
+
     await user.click(createButton());
-    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
-    expect(posts).toHaveLength(1); // the fileset already exists: resume, do not create again
-    expect([...puts].sort()).toEqual(['my-data/a.jsonl', 'my-data/b.jsonl']);
+    expect(await screen.findByRole('button', { name: 'Creating…' })).toBeDisabled();
+    await waitFor(() => expect(posts).toHaveLength(1)); // created; the uploads are held open
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('tab', { name: 'Upload' })).toBeNull());
+
+    release();
+    await waitFor(() => expect(deletes).toEqual(['my-data']));
+    expect(await screen.findByTestId('mock-toast-error')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-toast-success')).not.toBeInTheDocument();
+    expect(onCreated).not.toHaveBeenCalled();
   });
 
   it('keeps rejected-submit errors and per-tab interaction flags across tab switches', async () => {
