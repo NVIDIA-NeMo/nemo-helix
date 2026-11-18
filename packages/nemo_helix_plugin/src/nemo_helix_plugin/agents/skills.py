@@ -23,10 +23,11 @@ from nemo_helix_plugin.revision_refs import PINNED_SUBENTITY_REF_PATTERN, SUBENT
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel
 
 #: A skill's own name, from its ``SKILL.md`` frontmatter (Agent Skills convention): lowercase
-#: alphanumerics separated by single hyphens. It is also the directory name the skill is staged
-#: under, so it must be safe as a single path segment.
-SKILL_NAME_PATTERN = r"^[a-z0-9]+(-[a-z0-9]+)*$"
-SKILL_NAME_MAX_LENGTH = 64
+#: alphanumerics separated by single hyphens. It is also the skill entity's name and the directory
+#: the skill is staged under, so it also satisfies the entity-store name rules (starts with a
+#: letter, 2-63 characters; see ``entity_naming.NAME_PATTERN``) and is a safe single path segment.
+SKILL_NAME_PATTERN = r"^[a-z](-?[a-z0-9])+$"
+SKILL_NAME_MAX_LENGTH = 63
 
 #: A digest-pinned reference that must name its workspace. Used where a ref is persisted inside
 #: another entity, so a default workspace can never re-scope it.

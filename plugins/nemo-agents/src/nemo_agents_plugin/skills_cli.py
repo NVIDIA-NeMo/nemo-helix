@@ -67,7 +67,10 @@ _REVISION_COLUMNS = [
 ]
 
 NameArgument = Annotated[
-    str, typer.Argument(help=f"Skill name (lowercase, hyphenated, at most {SKILL_NAME_MAX_LENGTH}).")
+    str,
+    typer.Argument(
+        help=f"Skill name (starts with a letter; lowercase, hyphenated; 2-{SKILL_NAME_MAX_LENGTH} characters)."
+    ),
 ]
 FromDirOption = Annotated[
     Optional[Path],

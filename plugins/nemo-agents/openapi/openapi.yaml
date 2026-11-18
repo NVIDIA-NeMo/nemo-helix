@@ -2880,8 +2880,8 @@ paths:
         required: true
         schema:
           type: string
-          maxLength: 64
-          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          maxLength: 63
+          pattern: ^[a-z](-?[a-z0-9])+$
           title: Name
       - name: project
         in: query
@@ -2933,8 +2933,8 @@ paths:
         required: true
         schema:
           type: string
-          maxLength: 64
-          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          maxLength: 63
+          pattern: ^[a-z](-?[a-z0-9])+$
           title: Name
       - name: project
         in: query
@@ -2988,8 +2988,8 @@ paths:
         required: true
         schema:
           type: string
-          maxLength: 64
-          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          maxLength: 63
+          pattern: ^[a-z](-?[a-z0-9])+$
           title: Name
       responses:
         '200':
@@ -3028,8 +3028,8 @@ paths:
         required: true
         schema:
           type: string
-          maxLength: 64
-          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          maxLength: 63
+          pattern: ^[a-z](-?[a-z0-9])+$
           title: Name
       responses:
         '204':
@@ -3064,8 +3064,8 @@ paths:
         required: true
         schema:
           type: string
-          maxLength: 64
-          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          maxLength: 63
+          pattern: ^[a-z](-?[a-z0-9])+$
           title: Name
       - name: page
         in: query
@@ -3123,8 +3123,8 @@ paths:
         required: true
         schema:
           type: string
-          maxLength: 64
-          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          maxLength: 63
+          pattern: ^[a-z](-?[a-z0-9])+$
           title: Name
       - name: revision
         in: path
@@ -3169,8 +3169,8 @@ paths:
         required: true
         schema:
           type: string
-          maxLength: 64
-          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          maxLength: 63
+          pattern: ^[a-z](-?[a-z0-9])+$
           title: Name
       - name: tag
         in: path
@@ -6635,8 +6635,8 @@ components:
           description: Lowercase hex SHA-256 of the archive bytes.
         skill_name:
           type: string
-          maxLength: 64
-          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          maxLength: 63
+          pattern: ^[a-z](-?[a-z0-9])+$
           title: Skill Name
           description: The skill's frontmatter name; the directory it is staged under.
       additionalProperties: false
@@ -6684,8 +6684,8 @@ components:
       properties:
         name:
           type: string
-          maxLength: 64
-          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          maxLength: 63
+          pattern: ^[a-z](-?[a-z0-9])+$
           title: Name
           description: Skill name.
         description:

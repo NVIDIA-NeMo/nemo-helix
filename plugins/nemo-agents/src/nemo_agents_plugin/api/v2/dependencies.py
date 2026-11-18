@@ -53,16 +53,21 @@ async def get_skill_service(
 ) -> AsyncGenerator[SkillService, None]:
     """Provide a :class:`SkillService` for one request.
 
-    Files and evals calls go through the agents service delegating the caller, because the service
-    writes its own ``nemo-agents-skills`` fileset, which the caller may not be able to write. That
-    client can read more than the caller can, so :class:`SkillService` checks every caller-supplied
-    source (the source fileset and any linked taskset) with ``authorize``, as the caller, before
-    reading it.
+    The skills fileset is written through the agents service delegating the caller, because the
+    caller may not be able to write the service's own ``nemo-agents-skills`` fileset. The caller's
+    source fileset is listed and downloaded with the request client, as the caller, so the Files
+    service applies the caller's own access to it. The linked-taskset check uses the delegated
+    client, so :class:`SkillService` authorizes the taskset with ``authorize``, as the caller, first.
     """
     async with _delegated_service_client(request_client) as client:
         yield SkillService(
             entity_client,
-            SkillArchiveStore(AsyncFilesClient.from_client(client)),
+            # The caller's source is read with the caller's own client; service authority only
+            # touches the service-owned skills fileset.
+            SkillArchiveStore(
+                AsyncFilesClient.from_client(client),
+                source_files_client=AsyncFilesClient.from_client(request_client),
+            ),
             authorize=authorize,
             evals_client=AsyncEvaluatorClient.from_client(client),
         )
