@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nemo-notif-plugin"
+description = "Ephemeral notification events: publish an event, fan it out to every SSE listener in the workspace."
+requires-python = ">=3.11,<3.15"
+dependencies = ["nemo-helix-plugin", "nemo-helix", "pydantic>=2.0.0"]
+version = "0.0.0"
+
+# Not a member of the root uv workspace (same as plugins/example-plugin), so sibling packages
+# are resolved by path. Install with `uv pip install -e plugins/nemo-notif`.
+[tool.uv.sources]
+nemo-helix = { path = "../../packages/nemo_helix", editable = true }
+nemo-helix-plugin = { path = "../../packages/nemo_helix_plugin", editable = true }
+
+[project.entry-points."nemo.services"]
+notif = "nemo_notif_plugin.service:NotifService"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemo_notif_plugin"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["src"]
