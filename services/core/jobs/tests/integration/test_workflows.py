@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 import pytest
+from nemo_helix_plugin.entities.client import EntitiesClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetOutput
 from nemo_helix_plugin.jobs.client import JobsClient
@@ -15,9 +16,11 @@ from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
 from nemo_helix_plugin.jobs.spec import HelixJobEnvironmentVariable, HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse, HelixJobStatusUpdateRequest
-from nemo_helix_plugin.jobs.workflows import WorkflowInput, WorkflowSpec
+from nemo_helix_plugin.jobs.workflows import WorkflowInput, WorkflowNodeState, WorkflowSpec
+from nhx.common.entities.client import SyncEntityClient
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.app.test_helpers import TestConstants
+from nhx.core.jobs.entities import HelixJobAttempt
 from nhx.core.jobs.service import JobsService
 from nhx.testing import ClientContext, create_test_client
 
@@ -76,6 +79,13 @@ class WorkflowHarness:
 
     def status(self, job: HelixJobResponse) -> HelixJobStatusResponse:
         return self.jobs.get_job_status(workspace="default", name=job.id).data()
+
+    def node_state(self, job: HelixJobResponse, name: str) -> WorkflowNodeState:
+        assert job.attempt_id is not None
+        store = SyncEntityClient(EntitiesClient.from_client(self.context.client))
+        attempt = store.get_by_id(HelixJobAttempt, job.attempt_id)
+        assert attempt.workflow_state is not None
+        return attempt.workflow_state.nodes[name]
 
     def finish(self, job: HelixJobResponse, name: str, status: HelixJobStatus = HelixJobStatus.COMPLETED) -> None:
         state = self.status(job)
@@ -382,6 +392,8 @@ def test_input_commits_during_execution_coalesce_without_overlap(workflow_harnes
     source = harness.fileset()
     job = harness.create({"work": []}, {"work": [source.id]})
     first = harness.tick(job)
+    initial = harness.node_state(job, "work")
+    assert initial.active_inputs == {source.id: source.commit_revision}
     assert job.attempt_id is not None
     harness.jobs.update_attempt_step_status(
         workspace="default",
@@ -395,12 +407,23 @@ def test_input_commits_during_execution_coalesce_without_overlap(workflow_harnes
         pending = harness.tick(job)
         assert len(pending.steps) == 1
         assert pending.workflow is not None and pending.workflow.nodes[0].has_pending_run
+        active = harness.node_state(job, "work")
+        assert active.active_inputs == initial.active_inputs
+        assert active.active_run_revision == initial.active_run_revision
+        assert active.observed_inputs != active.active_inputs
     harness.finish(job, "work")
     settled = harness.tick(job)
     assert settled.workflow is not None and settled.workflow.nodes[0].freshness == "dirty"
     assert not settled.workflow.waiting_for_changes
+    finished = harness.node_state(job, "work")
+    assert finished.successful_inputs == initial.active_inputs
+    assert finished.successful_revision == initial.active_run_revision
+    assert finished.active_inputs is None and finished.active_run_revision is None
     next_run = harness.tick(job)
     assert len(next_run.steps) == 2
+    latest = harness.node_state(job, "work")
+    assert latest.active_inputs == latest.observed_inputs != initial.active_inputs
+    assert latest.active_run_revision != initial.active_run_revision
 
 
 def test_progress_and_usage_details_do_not_replace_controller_state(workflow_harness: WorkflowHarness) -> None:
@@ -698,39 +721,72 @@ def test_watch_reports_workflow_progress_while_status_stays_active(
     assert views[2].nodes[0].freshness == "clean"
 
 
-def test_restart_adopts_execution_created_before_controller_state_save(
+@pytest.mark.parametrize("interruption", ["before_create", "after_create"])
+@pytest.mark.parametrize("trigger", ["unchanged", "input_commit", "manual"])
+def test_restart_recovers_execution_snapshot_from_workflow_state(
     workflow_harness: WorkflowHarness,
     monkeypatch: pytest.MonkeyPatch,
+    interruption: str,
+    trigger: str,
 ) -> None:
-    from nhx.common.entities.client import EntityClient
+    from nhx.common.entities.client import EntityBase, EntityClient
     from nhx.core.jobs.entities import HelixJobStep
 
     harness = workflow_harness
-    job = harness.create({"work": []})
+    source = harness.fileset()
+    job = harness.create({"work": []}, {"work": [source.id]})
     original = EntityClient.create
-    failed = False
 
-    async def create(self, entity):
-        nonlocal failed
-        result = await original(self, entity)
-        if isinstance(entity, HelixJobStep) and not failed:
-            failed = True
-            raise RuntimeError("controller interrupted after execution creation")
-        return result
+    async def create[EntityT: EntityBase](self: EntityClient, entity: EntityT) -> EntityT:
+        if isinstance(entity, HelixJobStep):
+            if interruption == "after_create":
+                await original(self, entity)
+            raise RuntimeError("controller interrupted at execution creation")
+        return await original(self, entity)
 
     with monkeypatch.context() as patch:
         patch.setattr(EntityClient, "create", create)
         with pytest.raises(RuntimeError, match="controller interrupted"):
             harness.tick(job)
     before = harness.status(job)
-    assert len(before.steps) == 1
+    assert len(before.steps) == int(interruption == "after_create")
+    snapshot = harness.node_state(job, "work")
+    assert snapshot.active_step_id is None
+    assert snapshot.active_run_revision == snapshot.requested_run_revision
+    assert snapshot.active_inputs == {source.id: source.commit_revision}
+    if before.steps:
+        assert job.attempt_id is not None
+        contexts = list(
+            harness.jobs.list_attempt_steps(workspace="default", job=job.id, attempt=job.attempt_id).items()
+        )
+        assert len(contexts) == 1 and contexts[0].workflow_held
+
+    if trigger == "input_commit":
+        harness.files.commit_fileset(workspace="default", name=source.name)
+    elif trigger == "manual":
+        harness.invalidate(job, ["work"])
     recovered = harness.tick(job)
-    assert len(recovered.steps) == 1
+    expected = 2 if before.steps and trigger != "unchanged" else 1
+    assert len(recovered.steps) == expected
     assert recovered.workflow is not None
-    assert recovered.workflow.nodes[0].active_execution_id == before.steps[0].id
+    active = harness.node_state(job, "work")
+    assert active.active_step_id == recovered.steps[-1].id
+    if trigger == "unchanged":
+        assert active.active_run_revision == snapshot.active_run_revision
+        assert active.active_inputs == snapshot.active_inputs
+        if before.steps:
+            assert active.active_step_id == before.steps[0].id
+    else:
+        assert active.active_run_revision != snapshot.active_run_revision
+        if before.steps:
+            assert recovered.steps[0].status == HelixJobStatus.CANCELLED
     harness.finish(job, "work")
     completed = harness.tick(job)
     assert completed.workflow is not None and completed.workflow.nodes[0].freshness == "clean"
+    finished = harness.node_state(job, "work")
+    assert finished.successful_revision == active.active_run_revision
+    assert finished.successful_inputs == active.active_inputs
+    assert finished.active_step_id is None and finished.active_run_revision is None and finished.active_inputs is None
 
 
 def test_draining_pause_retention_uses_attempt_clock_without_paused_steps(

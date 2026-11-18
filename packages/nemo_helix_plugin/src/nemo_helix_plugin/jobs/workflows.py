@@ -52,6 +52,8 @@ class WorkflowNodeState(BaseModel):
     successful_revision: str | None = None
     last_attempted_revision: str | None = None
     active_step_id: str | None = None
+    active_run_revision: str | None = None
+    active_inputs: dict[str, str] | None = None
     latest_step_id: str | None = None
     successful_step_id: str | None = None
     last_outcome: Literal["completed", "error", "cancelled"] | None = None

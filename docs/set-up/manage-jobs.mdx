@@ -117,6 +117,8 @@ The status API and `jobs watch` expose each logical node's freshness
 (`unknown`, `dirty`, or `clean`), scheduling state, blockers, requested revision,
 execution IDs, latest outcome and input-observation timestamps/errors. The
 controller alone writes `workflow_state`; ordinary progress details are separate.
+Each node keeps its active execution ID, captured run revision and input commit
+values there; Step records contain ordinary execution status, Tasks and logs.
 Status reads do not poll inputs or schedule work. Use `attempt_id` on status
 reads or `--attempt-id` on watch to select an Attempt. Execution history remains
 available through the existing paginated Attempt step routes. Results keep their

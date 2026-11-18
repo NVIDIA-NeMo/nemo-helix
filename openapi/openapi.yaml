@@ -18071,14 +18071,6 @@ components:
           type: string
           title: Attempt Id
           description: Parent attempt ID
-        workflow_revision:
-          title: Workflow Revision
-          type: string
-        workflow_inputs:
-          title: Workflow Inputs
-          additionalProperties:
-            type: string
-          type: object
         config:
           additionalProperties: true
           type: object

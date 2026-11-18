@@ -155,8 +155,6 @@ class HelixJobStep(EntityBase):
     __entity_type__: ClassVar[str] = "platform_job_step"
 
     attempt_id: str = Field(..., description="Parent attempt ID")
-    workflow_revision: str | None = Field(default=None, exclude_if=lambda value: value is None)
-    workflow_inputs: dict[str, str] | None = Field(default=None, exclude_if=lambda value: value is None)
     config: Dict[str, Any] = Field(default_factory=dict, description="Configuration for the step")
     status: HelixJobStatus = Field(default=HelixJobStatus.CREATED, description="Step status")
     status_details: Dict[str, Any] = Field(default_factory=dict, description="Status details")

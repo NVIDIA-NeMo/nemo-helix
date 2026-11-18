@@ -4341,7 +4341,6 @@ async def test_workflow_steps_keep_the_attempts_execution_context_after_job_edit
             name="wf-execution",
             workspace=DEFAULT_WORKSPACE,
             attempt_id=attempt.id,
-            workflow_revision="opaque-run",
             config={STEP_SPEC_NAME_CONFIG_KEY: logical_name},
         )
     )

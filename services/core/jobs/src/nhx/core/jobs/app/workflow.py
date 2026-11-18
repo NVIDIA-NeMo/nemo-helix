@@ -26,6 +26,10 @@ WORKFLOW_REQUESTS = "_workflow_requests"
 WORKFLOW_CONTROL = "_workflow_control"
 
 
+def _execution_key(attempt_id: str, name: str, revision: str) -> str:
+    return "wf-" + hashlib.sha256(f"{attempt_id}/{name}/{revision}".encode()).hexdigest()[:24]
+
+
 def _has_eligible_pending(attempt: HelixJobAttempt, state: WorkflowState) -> bool:
     return any(
         node.last_poll_error is None
@@ -109,6 +113,17 @@ async def reconcile_workflow(
     now = datetime.now(timezone.utc)
     active: dict[str, HelixJobStep] = {}
     for name, node in state.nodes.items():
+        if node.active_step_id is None and node.active_run_revision is not None:
+            key = _execution_key(attempt.id, name, node.active_run_revision)
+            try:
+                step = await store.get(HelixJobStep, key, workspace=job.workspace, parent=attempt.id)
+            except EntityNotFoundError:
+                node.active_run_revision = None
+                node.active_inputs = None
+                continue
+            node.active_step_id = step.id
+            node.latest_step_id = step.id
+            node.last_attempted_revision = node.active_run_revision
         if node.active_step_id is None:
             continue
         step = await store.get_by_id(HelixJobStep, node.active_step_id)
@@ -128,11 +143,13 @@ async def reconcile_workflow(
         node.reason = None
         node.decision_pass = state.pass_number
         if step.status == HelixJobStatus.COMPLETED:
-            node.successful_inputs = step.workflow_inputs
-            node.successful_revision = step.workflow_revision
+            node.successful_inputs = node.active_inputs
+            node.successful_revision = node.active_run_revision
             node.successful_step_id = step.id
         elif config.mode == "run_to_completion" and step.status == HelixJobStatus.ERROR:
             state.control = "failing"
+        node.active_run_revision = None
+        node.active_inputs = None
 
     if state.control in ("pausing", "cancelling", "failing"):
         running = False
@@ -144,6 +161,8 @@ async def reconcile_workflow(
                     step.status = HelixJobStatus.CANCELLED
                     await store.update(step)
                     node.active_step_id = None
+                    node.active_run_revision = None
+                    node.active_inputs = None
                 continue
             running = True
             if state.control == "cancelling" and step.status != HelixJobStatus.CANCELLING:
@@ -207,7 +226,6 @@ async def reconcile_workflow(
         state.pass_number += 1
         state.pass_open = True
 
-    # Persist requested revisions before creating executions so restart can adopt their stable keys.
     attempt.workflow_state = state
     attempt = await store.update(attempt)
     assert attempt.workflow_state is not None
@@ -223,10 +241,12 @@ async def reconcile_workflow(
         if name in active:
             step = active[name]
             if step.status in (HelixJobStatus.CREATED, HelixJobStatus.QUEUED):
-                if step.workflow_revision != node.requested_run_revision:
+                if node.active_run_revision != node.requested_run_revision:
                     step.status = HelixJobStatus.CANCELLED
                     await store.update(step)
                     node.active_step_id = None
+                    node.active_run_revision = None
+                    node.active_inputs = None
                 else:
                     node.scheduling_state = "waiting_capacity"
                     node.reason = "awaiting_dispatch"
@@ -267,7 +287,16 @@ async def reconcile_workflow(
             node.scheduling_state = "idle"
             node.reason = "awaiting_invalidation"
             continue
-        key = "wf-" + hashlib.sha256(f"{attempt.id}/{name}/{node.requested_run_revision}".encode()).hexdigest()[:24]
+        node.active_run_revision = node.requested_run_revision
+        assert node.observed_inputs is not None
+        node.active_inputs = dict(node.observed_inputs)
+        # Save the execution snapshot before creating its Step so recovery can adopt it.
+        attempt = await store.update(attempt)
+        assert attempt.workflow_state is not None
+        state = attempt.workflow_state
+        node = state.nodes[name]
+        assert node.active_run_revision is not None
+        key = _execution_key(attempt.id, name, node.active_run_revision)
         try:
             step = await store.get(HelixJobStep, key, workspace=job.workspace, parent=attempt.id)
         except EntityNotFoundError:
@@ -278,15 +307,13 @@ async def reconcile_workflow(
                         workspace=job.workspace,
                         attempt_id=attempt.id,
                         config={**spec.config, STEP_SPEC_NAME_CONFIG_KEY: name},
-                        workflow_revision=node.requested_run_revision,
-                        workflow_inputs=node.observed_inputs,
                     )
                 )
             except EntityConflictError:
                 step = await store.get(HelixJobStep, key, workspace=job.workspace, parent=attempt.id)
         node.active_step_id = step.id
         node.latest_step_id = step.id
-        node.last_attempted_revision = node.requested_run_revision
+        node.last_attempted_revision = node.active_run_revision
         node.scheduling_state = "ready"
         node.reason = "changed_inputs" if node.successful_revision else "initial_run"
 
