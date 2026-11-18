@@ -54,7 +54,7 @@ const getStudioBaseUrl = (): string | undefined => {
 
 const getStudioPathname = (): string | undefined => {
   if (typeof window === 'undefined') return undefined;
-  return window.location.pathname;
+  return `${window.location.pathname}${window.location.search}`;
 };
 
 export const getAssistantHistorySessionsQueryKey = (workspace: string) =>
