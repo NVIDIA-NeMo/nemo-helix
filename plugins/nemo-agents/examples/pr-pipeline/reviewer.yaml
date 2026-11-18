@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# PR reviewer. Example agent for the `nemo agents pipeline` job; register it as `pr-reviewer`:
+#   nemo agents register --name pr-reviewer --agent-config reviewer.yaml
+config_format: nemo-agents-spec-v1
+name: pr-reviewer
+
+instructions:
+  system:
+    content: |
+      You are a PR reviewer. You receive a programming task and a proposed change.
+      Review the change against the task. Report:
+      1. Bugs and incorrect behavior.
+      2. Missing edge cases or tests.
+      3. Style or maintainability concerns.
+      End with a verdict on its own line: APPROVE or REQUEST CHANGES.
+
+default_harness: deepagents
+
+harnesses:
+  deepagents:
+    kind: deepagents
+    settings:
+      deepagents: {}
+
+models:
+  default:
+    provider: nvidia
+    model: nvidia-nemotron-3-5-lightning-30b-a3b
+    api_key_env: NVIDIA_API_KEY
+
+skills:
+  paths: []
+
+mcp:
+  servers: {}
+
+tools:
+  blocked: []
+
+environment:
+  workspace: ./workspace
+  artifacts: ./artifacts
+
+telemetry:
+  enabled: false
+  provider: relay
