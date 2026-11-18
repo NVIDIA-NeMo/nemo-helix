@@ -4,7 +4,9 @@
 """Serves Studio's pre-#3857 `generate_data_designer_job_request` tool over MCP stdio."""
 
 import json
+import os
 import re
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,7 @@ COLUMN_SCHEMA = INPUT_SCHEMA["properties"]["job_request"]["properties"]["spec"][
 KNOWN_COLUMN_KEYS = set(COLUMN_SCHEMA["properties"])
 KNOWN_MODEL_CONFIG_KEYS = {"alias", "model", "provider", "inference_parameters", "skip_health_check"}
 
+REJECTION_PREFIX = "TOOL CALL REJECTED:"
 ENTITY_NAME = re.compile(r"^[a-z][a-z0-9\-@.+_]{0,61}[a-z0-9@.+_]$")
 JINJA_REFERENCE = re.compile(r"\{\{-?\s*([A-Za-z_]\w*)")
 JINJA_BUILTINS = {"loop", "range", "true", "false", "none", "True", "False", "None", "not"}
@@ -37,7 +40,44 @@ REQUIRED_BY_TYPE = {
     "llm-structured": ["prompt", "model_alias", "output_format"],
 }
 
+PLATFORM_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080").rstrip("/")
+PLATFORM_WORKSPACE = "default"
+
 server = Server("data-designer-job-request")
+
+
+def _get_json(path: str) -> dict[str, Any]:
+    with urllib.request.urlopen(f"{PLATFORM_URL}{path}", timeout=5) as response:
+        return json.loads(response.read())
+
+
+def _platform_names(path: str, key: str) -> set[str]:
+    names: set[str] = set()
+    for item in _get_json(path)["data"]:
+        qualified = str(item[key])
+        names.add(qualified)
+        names.add(qualified.removeprefix(f"{PLATFORM_WORKSPACE}/"))
+        names.add(f"{PLATFORM_WORKSPACE}/{qualified}")
+    return names
+
+
+def _model_config_platform_errors(model_configs: list[Any]) -> list[str]:
+    try:
+        providers = _platform_names(f"/apis/models/v2/workspaces/{PLATFORM_WORKSPACE}/providers?page_size=1000", "name")
+        models = _platform_names(f"/apis/inference-gateway/v2/workspaces/{PLATFORM_WORKSPACE}/openai/-/v1/models", "id")
+    except OSError as error:
+        return [f"model_configs: could not reach the platform to check providers and models ({error})"]
+    errors: list[str] = []
+    for index, model_config in enumerate(model_configs):
+        if not isinstance(model_config, dict):
+            continue
+        provider = model_config.get("provider")
+        model = model_config.get("model")
+        if isinstance(provider, str) and provider not in providers:
+            errors.append(f"model_configs[{index}]: provider {provider!r} is not registered in workspace 'default'")
+        if isinstance(model, str) and model not in models:
+            errors.append(f"model_configs[{index}]: model {model!r} is not served by the inference gateway")
+    return errors
 
 
 def _schema_errors(arguments: dict[str, Any]) -> list[str]:
@@ -94,6 +134,8 @@ def validate_job_request(arguments: dict[str, Any]) -> list[str]:
         errors.append("spec.num_records must be an integer")
     model_configs = config.get("model_configs") or []
     aliases = {str(mc["alias"]) for mc in model_configs if isinstance(mc, dict) and "alias" in mc}
+    if isinstance(model_configs, list) and model_configs:
+        errors.extend(_model_config_platform_errors(model_configs))
     for index, model_config in enumerate(model_configs):
         if isinstance(model_config, dict):
             errors.extend(
@@ -123,7 +165,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
     errors = validate_job_request(arguments)
     if errors:
         # Returned as plain text: an MCP isError result aborts the DeepAgents run instead of reaching the model.
-        rejection = "422 Unprocessable Entity:\n" + "\n".join(f"- {error}" for error in errors)
+        rejection = f"{REJECTION_PREFIX} 422 Unprocessable Entity:\n" + "\n".join(f"- {error}" for error in errors)
         return [types.TextContent(type="text", text=rejection)]
     job_request = arguments["job_request"]
     columns = [column["name"] for column in job_request["spec"]["config"]["columns"]]

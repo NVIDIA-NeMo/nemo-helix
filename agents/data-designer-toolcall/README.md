@@ -12,7 +12,11 @@ Hackathon agent. It wraps Studio's "Describe with AI" Data Designer tool as it w
 - `mcps/dd_job_request_server.py` serves that tool over MCP stdio. It accepts a call only when it
   would get through Studio's builder and the API: it checks the schema, rejects unknown (corrupted)
   keys, undeclared `model_alias`es, non-entity job names, and `{{ refs }}` to columns that aren't earlier.
-  A rejected call returns a `422` tool error.
+  It also rejects a provider or model that isn't on the platform. A rejected call returns
+  `TOOL CALL REJECTED: 422 ...` as normal tool output, so the model sees it, but traces mark the call a success.
+- `score_tool_calls.py` reads the agent's tool spans from Intake, tags each span with a
+  `tool_call_accepted/v1` evaluator result (1 accepted, 0 rejected, reasons in the comment), and prints the
+  rejection rate. Pass `--dry-run` to print without writing.
 
 ```bash
 nemo agents register --name data-designer-toolcall --agent-config agents/data-designer-toolcall/agent.yaml
