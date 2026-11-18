@@ -183,11 +183,19 @@ def test_forward_omits_on_behalf_of_when_not_configured() -> None:
 
 @respx.mock
 @pytest.mark.parametrize("upstream", ["https://nemo-helix-api:8080", "http://127.0.0.1:15001"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/apis/entities/v2/workspaces",
+        "/apis/files/v2/hf/api/models/default/model/revision/main",
+        "/apis/files/v2/hf/default/model/resolve/main/model.safetensors",
+    ],
+)
 def test_forward_uses_workload_identity_bearer_for_secure_or_loopback_upstream(
-    monkeypatch: pytest.MonkeyPatch, upstream: str
+    monkeypatch: pytest.MonkeyPatch, upstream: str, path: str
 ) -> None:
     token_file = Path("/var/run/secrets/nemo-helix/workload/token")
-    route = respx.get(f"{upstream}/apis/entities/v2/workspaces").mock(return_value=httpx.Response(200, json={}))
+    route = respx.get(f"{upstream}{path}").mock(return_value=httpx.Response(200, json={}))
     monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(token_file))
     with patch(
         "nhx.common.auth.workload_proxy.main.resolve_workload_exchange_provider",
@@ -197,7 +205,7 @@ def test_forward_uses_workload_identity_bearer_for_secure_or_loopback_upstream(
     client = TestClient(app)
 
     client.get(
-        "/apis/entities/v2/workspaces",
+        path,
         headers={
             "authorization": "Bearer inbound-ignored",
             "x-nhx-principal-id": "service:attacker",
