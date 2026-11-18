@@ -9,6 +9,8 @@ from datetime import datetime
 from typing import Any
 
 from nhx.common.api.common import PaginatedResult
+from nhx.common.entities.client import EntityClient, EntityNotFoundError
+from nhx.intake.entities.experiments import Experiment as Evaluation
 from nhx.intake.repository.annotations import AnnotationsRepository
 from nhx.intake.repository.evaluator_results import EvaluatorResultsRepository
 from nhx.intake.repository.session import SessionRepository
@@ -61,6 +63,14 @@ class SessionNotFoundError(Exception):
         self.session_id = session_id
 
 
+class SessionInEvaluationError(Exception):
+    def __init__(self, workspace: str, session_id: str) -> None:
+        super().__init__(
+            f"Session {workspace}/{session_id} is associated with an undeleted or unresolved evaluation "
+            "and cannot be deleted"
+        )
+
+
 class AnnotationNotFoundError(Exception):
     def __init__(self, workspace: str, annotation_id: str) -> None:
         super().__init__(f"Annotation {workspace}/{annotation_id} not found")
@@ -76,12 +86,14 @@ class IntakeSpansService:
         session_repository: SessionRepository,
         evaluator_results_repository: EvaluatorResultsRepository,
         annotations_repository: AnnotationsRepository,
+        entity_client: EntityClient | None = None,
     ) -> None:
         self._spans = span_repository
         self._traces = trace_repository
         self._sessions = session_repository
         self._evaluator_results = evaluator_results_repository
         self._annotations = annotations_repository
+        self._entity_client = entity_client
 
     async def ingest_batch(self, batch: TraceBatch) -> None:
         await self._spans.save_spans(batch.spans)
@@ -190,6 +202,21 @@ class IntakeSpansService:
         if session is None:
             raise SessionNotFoundError(workspace, session_id)
         return session
+
+    async def delete_session(self, *, workspace: str, session_id: str) -> None:
+        await self.get_session(workspace=workspace, session_id=session_id)
+        evaluation_names = await self._sessions.get_evaluation_names(workspace=workspace, session_id=session_id)
+        for name in evaluation_names:
+            if self._entity_client is None:
+                raise SessionInEvaluationError(workspace, session_id)
+            try:
+                evaluation = await self._entity_client.get(Evaluation, workspace=workspace, name=name)
+            except EntityNotFoundError as exc:
+                # A missing/renamed entity is not evidence of a confirmed deletion.
+                raise SessionInEvaluationError(workspace, session_id) from exc
+            if not evaluation.is_deleted:
+                raise SessionInEvaluationError(workspace, session_id)
+        await self._sessions.delete_session(workspace=workspace, session_id=session_id)
 
     async def create_evaluator_result(self, result: EvaluatorResult) -> EvaluatorResult:
         """Persist one evaluator_result. Loose target — no span existence check."""

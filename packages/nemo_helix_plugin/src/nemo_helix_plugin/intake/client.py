@@ -56,6 +56,7 @@ class _IntakeMethods:
     create_spans = method(endpoints.create_spans)
     get_trace_metrics = method(endpoints.get_trace_metrics)
     get_session = method(endpoints.get_session)
+    delete_session = method(endpoints.delete_session)
     create_annotation = method(endpoints.create_annotation)
     delete_annotation = method(endpoints.delete_annotation)
     get_evaluator_result = method(endpoints.get_evaluator_result)
