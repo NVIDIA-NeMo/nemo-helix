@@ -4,13 +4,13 @@
 """Fabric-native MCP boundary for NeMo Studio Assistant tools."""
 
 from fastmcp import FastMCP
-from nemo_studio_assistant.docs_search import search_docs
 from nemo_studio_assistant.register import (
     ask_user_question,
     check_status,
     deploy_guardrail,
     job_progress,
     nemo_api,
+    search_docs,
     select_agent,
     select_dataset_file,
     select_eval_config,

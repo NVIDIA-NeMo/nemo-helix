@@ -35,11 +35,13 @@ from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_studio_assistant import docs_search
 from pydantic import BaseModel, Field
 
 DEFAULT_WORKSPACE = "default"
 STUDIO_CALLBACK_PATH = "/studio/api/assistant/mcp/{session_id}"
 STUDIO_CALLBACK_TIMEOUT_SECONDS = 3600.0
+STUDIO_ACTIVITY_TIMEOUT_SECONDS = 5.0
 _READ_ONLY_ACTIONS = frozenset({"check", "get", "get_logs", "get_status", "list", "read", "retrieve", "search"})
 _API_ERROR_LIMIT = 3
 _GUARDRAIL_CHECK_FAILURE_LIMIT = 3
@@ -543,6 +545,30 @@ def _matches_fields(value: Any, expected: dict[str, Any]) -> bool:
     return _contains_expected_fields(_serialize(value), expected)
 
 
+def _report_activity(
+    studio_session_id: str | None,
+    tool_name: str,
+    summary: str,
+    *,
+    workspace: str | None = None,
+    **fields: str | None,
+) -> None:
+    """Show a progress step for a tool call in the Studio chat."""
+    if not studio_session_id:
+        return
+    try:
+        _call_studio_tool(
+            _validated_session_id(studio_session_id),
+            "assistant_activity",
+            {"tool_name": tool_name, "summary": summary, **{key: value for key, value in fields.items() if value}},
+            workspace=workspace,
+            timeout=STUDIO_ACTIVITY_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        # Activity is presentation-only and must never change the tool result.
+        return
+
+
 def _report_workflow_activity(
     studio_session_id: str,
     step: str,
@@ -551,21 +577,14 @@ def _report_workflow_activity(
     detail: str | None = None,
     workspace: str,
 ) -> None:
-    try:
-        _call_studio_tool(
-            studio_session_id,
-            "assistant_activity",
-            {
-                "tool_name": "deploy_guardrail",
-                "status": status,
-                "step": step,
-                "detail": detail,
-            },
-            workspace=workspace,
-        )
-    except Exception:
-        # Activity is presentation-only and must never change the platform result.
-        return
+    _report_activity(
+        studio_session_id,
+        "deploy_guardrail",
+        detail or step,
+        workspace=workspace,
+        status=status,
+        step=step,
+    )
 
 
 def _guardrail_check(
@@ -686,6 +705,7 @@ def _call_studio_tool(
     *,
     workspace: str | None = None,
     studio_base_url: str | None = None,
+    timeout: float = STUDIO_CALLBACK_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     body = {
         "jsonrpc": "2.0",
@@ -693,7 +713,7 @@ def _call_studio_tool(
         "method": "tools/call",
         "params": {"name": tool_name, "arguments": arguments},
     }
-    with httpx.Client(timeout=STUDIO_CALLBACK_TIMEOUT_SECONDS) as client:
+    with httpx.Client(timeout=timeout) as client:
         response = client.post(
             _studio_callback_url(session_id, workspace=workspace, studio_base_url=studio_base_url), json=body
         )
@@ -1081,6 +1101,14 @@ def nemo_api(
                 return _record_guardrail_check_failure(error_key, message)
             return f"Clarification required: {message}"
         normalized_action = action.strip().lower()
+        _report_activity(
+            studio_session_id,
+            "nemo_api",
+            f"{normalized_action} {resource.strip()}",
+            workspace=workspace,
+            resource=resource.strip(),
+            action=normalized_action,
+        )
         client = _get_client(workspace)
         api_resource = _resolve_resource(resource)
         method_name = _resolve_api_method(api_resource, resource, normalized_action)
@@ -1295,11 +1323,23 @@ def ask_user_question(studio_session_id: str, questions: str | list[dict[str, An
     return json.dumps(approval.get("updatedInput") or {})
 
 
-def check_status(service: str, job_name: str, workspace: str | None = None) -> str:
+def check_status(
+    service: str,
+    job_name: str,
+    workspace: str | None = None,
+    studio_session_id: str | None = None,
+) -> str:
     """Check an evaluation, customization, audit, or Data Designer job."""
     try:
         if workspace is None or not workspace.strip():
             return "Clarification required: which workspace should this status check use?"
+        _report_activity(
+            studio_session_id,
+            "check_status",
+            f"{service} job {job_name}",
+            workspace=workspace.strip(),
+            job_name=job_name,
+        )
         client = _get_client(workspace)
         workspace = workspace.strip()
         if service == "data_designer":
@@ -1321,3 +1361,16 @@ def check_status(service: str, job_name: str, workspace: str | None = None) -> s
         return json.dumps(_serialize(status), indent=2, default=str)
     except Exception as exc:
         return f"Error: {type(exc).__name__}: {exc}"
+
+
+def search_docs(query: str, limit: int = docs_search.DEFAULT_LIMIT, studio_session_id: str | None = None) -> str:
+    """Search the NeMo Helix documentation for how a feature works.
+
+    Use this before explaining a feature, workflow, or concept so the answer
+    matches the documentation. ``query`` is a few keywords, for example
+    ``guardrail virtual model`` or ``add inference provider``. Returns up to
+    ``limit`` sections (at most 10) with the doc path, title, section heading,
+    and a short excerpt. Read-only.
+    """
+    _report_activity(studio_session_id, "search_docs", query.strip(), query=query.strip())
+    return docs_search.search_docs(query, limit)

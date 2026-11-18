@@ -925,9 +925,9 @@ def test_invalid_guardrail_config_action_returns_exact_path_before_approval(
 ) -> None:
     approval_requested = False
 
-    def approve(*_args: object, **_kwargs: object) -> dict[str, str]:
+    def approve(_session: str, tool_name: str, *_args: object, **_kwargs: object) -> dict[str, str]:
         nonlocal approval_requested
-        approval_requested = True
+        approval_requested = approval_requested or tool_name == "approval_prompt"
         return {"behavior": "allow"}
 
     platform = _FakeHelix()
@@ -1151,7 +1151,8 @@ def test_mutating_nemo_api_uses_studio_approval(monkeypatch: pytest.MonkeyPatch)
     approvals: list[tuple[str, str, dict[str, object], dict[str, object]]] = []
 
     def approve(session: str, tool_name: str, arguments: dict[str, object], **kwargs: object) -> dict[str, str]:
-        approvals.append((session, tool_name, arguments, kwargs))
+        if tool_name != "assistant_activity":
+            approvals.append((session, tool_name, arguments, kwargs))
         return {"behavior": "allow"}
 
     platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
@@ -1477,3 +1478,46 @@ def test_ask_user_question_accepts_structured_model_input(monkeypatch: pytest.Mo
 
     assert json.loads(response) == {"workspace": "default"}
     assert callback_input == {"tool_name": "AskUserQuestion", "input": {"questions": questions}}
+
+
+def test_nemo_api_reports_activity_to_studio(monkeypatch: pytest.MonkeyPatch) -> None:
+    session_id = "90a877d5-19f6-49a8-bf09-d0020ae0833a"
+    calls: list[tuple[str, dict[str, object], dict[str, object]]] = []
+
+    def record(_session: str, tool_name: str, arguments: dict[str, object], **kwargs: object) -> dict[str, str]:
+        calls.append((tool_name, arguments, kwargs))
+        return {"status": "recorded"}
+
+    platform = _ok_helix("GET", _WORKSPACES, {"data": [_workspace("default")], "pagination": _PAGINATION})
+    _install_client(monkeypatch, platform.client())
+    monkeypatch.setattr(register, "_call_studio_tool", record)
+
+    register.nemo_api("workspaces", "list", studio_session_id=session_id, workspace="default")
+
+    assert calls == [
+        (
+            "assistant_activity",
+            {"tool_name": "nemo_api", "summary": "list workspaces", "resource": "workspaces", "action": "list"},
+            {"workspace": "default", "timeout": register.STUDIO_ACTIVITY_TIMEOUT_SECONDS},
+        )
+    ]
+
+
+def test_activity_failure_does_not_change_tool_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_args: object, **_kwargs: object) -> dict[str, str]:
+        raise RuntimeError("Studio is down")
+
+    monkeypatch.setattr(register, "_call_studio_tool", fail)
+
+    response = json.loads(register.search_docs("guardrail", studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a"))
+
+    assert response["status"] in {"ok", "no_results", "unavailable"}
+
+
+def test_activity_is_skipped_without_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_args: object, **_kwargs: object) -> dict[str, str]:
+        raise AssertionError("no callback expected without a Studio session")
+
+    monkeypatch.setattr(register, "_call_studio_tool", fail)
+
+    register.search_docs("guardrail")

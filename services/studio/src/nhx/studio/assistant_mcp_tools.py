@@ -12,8 +12,7 @@ SELECT_EVAL_CONFIG_TOOL_NAME = "select_eval_config"
 SELECT_DATASET_FILE_TOOL_NAME = "select_dataset_file"
 SELECT_MODEL_TOOL_NAME = "select_model"
 JOB_PROGRESS_TOOL_NAME = "job_progress"
-# The Studio chat renders job cards for tool-use parts with this name.
-JOB_PROGRESS_UI_TOOL_NAME = f"{JOB_PROGRESS_TOOL_NAME}"
+ASSISTANT_ACTIVITY_TOOL_NAME = "assistant_activity"
 
 APPROVAL_TOOL: dict[str, Any] = {
     "name": APPROVAL_TOOL_NAME,

@@ -153,14 +153,7 @@ def search(query: str, limit: int = DEFAULT_LIMIT, root: Path | None = None) -> 
 
 
 def search_docs(query: str, limit: int = DEFAULT_LIMIT) -> str:
-    """Search the NeMo Helix documentation for how a feature works.
-
-    Use this before explaining a feature, workflow, or concept so the answer
-    matches the documentation. ``query`` is a few keywords, for example
-    ``guardrail virtual model`` or ``add inference provider``. Returns up to
-    ``limit`` sections (at most 10) with the doc path, title, section heading,
-    and a short excerpt. Read-only.
-    """
+    """Return ``search`` results as the JSON payload of the ``search_docs`` tool."""
     if not query.strip():
         return json.dumps({"status": "error", "message": "query is required"})
     if docs_dir() is None:

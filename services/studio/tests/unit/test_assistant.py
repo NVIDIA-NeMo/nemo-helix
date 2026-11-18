@@ -1353,6 +1353,82 @@ def test_mcp_tools_call_job_progress_returns_rendered(service_client: TestClient
     assert json.loads(result_text) == {"status": "rendered"}
 
 
+def _activity_call(arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "assistant_activity", "arguments": arguments},
+    }
+
+
+def test_mcp_tools_call_assistant_activity_streams_tool_use(service_client: TestClient):
+    session_id = str(uuid.uuid4())
+    queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+    assistant._session_streams[session_id] = queue
+
+    response = service_client.post(
+        f"/v2/assistant/mcp/{session_id}",
+        json=_activity_call(
+            {
+                "tool_name": "nemo_api",
+                "summary": "  list workspaces  ",
+                "resource": "workspaces",
+                "action": "list",
+                "studio_session_id": session_id,
+                "params": '{"secret": "value"}',
+                "status": 7,
+            }
+        ),
+    )
+
+    assert json.loads(response.json()["result"]["content"][0]["text"]) == {"status": "recorded"}
+    kind, payload = queue.get_nowait()
+    assert kind == "agent"
+    part = json.loads(payload)["message"]["content"][0]
+    assert part["type"] == "tool_use"
+    assert part["name"] == "nemo_api"
+    assert part["input"] == {"summary": "list workspaces", "resource": "workspaces", "action": "list"}
+
+
+def test_mcp_tools_call_assistant_activity_truncates_values(service_client: TestClient):
+    session_id = str(uuid.uuid4())
+    queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+    assistant._session_streams[session_id] = queue
+
+    service_client.post(
+        f"/v2/assistant/mcp/{session_id}",
+        json=_activity_call({"tool_name": "search_docs", "query": "x" * 500}),
+    )
+
+    part = json.loads(queue.get_nowait()[1])["message"]["content"][0]
+    assert part["input"] == {"query": "x" * 200}
+
+
+@pytest.mark.parametrize("tool_name", [None, "", "Bash; rm", "approval prompt", "x" * 65, 3])
+def test_mcp_tools_call_assistant_activity_ignores_invalid_tool_names(service_client: TestClient, tool_name: Any):
+    session_id = str(uuid.uuid4())
+    queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+    assistant._session_streams[session_id] = queue
+
+    response = service_client.post(
+        f"/v2/assistant/mcp/{session_id}",
+        json=_activity_call({"tool_name": tool_name, "summary": "hi"}),
+    )
+
+    assert json.loads(response.json()["result"]["content"][0]["text"]) == {"status": "ignored"}
+    assert queue.empty()
+
+
+def test_mcp_tools_call_assistant_activity_without_stream_is_recorded(service_client: TestClient):
+    response = service_client.post(
+        f"/v2/assistant/mcp/{uuid.uuid4()}",
+        json=_activity_call({"tool_name": "check_status", "summary": "evaluator job eval-1"}),
+    )
+
+    assert json.loads(response.json()["result"]["content"][0]["text"]) == {"status": "recorded"}
+
+
 def test_mcp_tools_call_select_agent_denies_without_active_stream(service_client: TestClient):
     session_id = str(uuid.uuid4())
 

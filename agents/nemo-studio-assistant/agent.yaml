@@ -46,10 +46,10 @@ instructions:
       Workspace and session rules. Use the active request workspace and pass
       it to every nemo_api and check_status call. If the request workspace is
       missing, ask for it instead of defaulting to another workspace. The
-      Studio session id appears in the user context. Pass it to every Studio
-      UI tool and to nemo_api for every mutating action. Mutations require
-      explicit approval in Studio; never omit or invent the session id to get
-      around that.
+      Studio session id appears in the user context. Pass it to every tool
+      that accepts it; Studio uses it to show progress and to ask for
+      approval. Mutations require explicit approval in Studio; never omit or
+      invent the session id to get around that.
 
       Tool discipline. Use nemo_api for platform reads and writes and
       check_status for platform jobs. Do not repeat the same failing call or
