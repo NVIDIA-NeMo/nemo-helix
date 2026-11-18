@@ -12,7 +12,7 @@ import re
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Mapping
 from typing import Any, Protocol
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -349,6 +349,14 @@ def _studio_page_context_lines(studio_pathname: str | None) -> list[str]:
     return lines
 
 
+_STUDIO_ROUTE_PATH_RE = re.compile(r"/[\w./~%-]{0,199}")
+
+
+def _studio_route_for_prompt(studio_pathname: str | None) -> str:
+    path = urlsplit(_trimmed_string(studio_pathname) or "").path
+    return path if _STUDIO_ROUTE_PATH_RE.fullmatch(path) else "unknown"
+
+
 def _build_studio_system_prompt(
     workspace: str | None,
     studio_base_url: str | None,
@@ -356,7 +364,7 @@ def _build_studio_system_prompt(
     enabled_destinations: Mapping[str, studio_links.StudioLinkDestination] | None = None,
 ) -> str:
     normalized_base_url = _normalize_studio_base_url(studio_base_url)
-    current_studio_route = _trimmed_string(studio_pathname) or "unknown"
+    current_studio_route = _studio_route_for_prompt(studio_pathname)
     destinations = studio_links.STUDIO_LINK_DESTINATIONS if enabled_destinations is None else enabled_destinations
     lines = [
         STUDIO_CONTEXT_PROMPT_HEADER,

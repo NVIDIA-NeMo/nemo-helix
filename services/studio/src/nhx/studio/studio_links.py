@@ -504,8 +504,11 @@ def enabled_destinations(feature_flags: Mapping[str, bool]) -> dict[str, StudioL
 
 
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
-_MAX_PAGE_VALUE_LENGTH = 120
 _MAX_PAGE_SELECTIONS = 5
+# Page context reaches the trusted system prompt, so URL-supplied values must
+# look like identifiers rather than free text that could carry instructions.
+_PAGE_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,31}")
+_PAGE_VALUE_RE = re.compile(r"[A-Za-z0-9][\w.:@/~+-]{0,119}")
 
 
 @dataclass(frozen=True)
@@ -518,9 +521,8 @@ class StudioPage:
     selections: dict[str, str] = field(default_factory=dict)
 
 
-def _page_value(value: str) -> str:
-    cleaned = "".join(character for character in value if character.isprintable()).strip()
-    return cleaned[:_MAX_PAGE_VALUE_LENGTH]
+def _page_value(value: str) -> str | None:
+    return value if _PAGE_VALUE_RE.fullmatch(value) else None
 
 
 def _path_pattern(path_template: str) -> re.Pattern[str]:
@@ -554,7 +556,7 @@ def describe_studio_page(route: str | None) -> StudioPage | None:
     ``route`` is a path with an optional query string. Anything before
     ``/workspaces/`` (such as a ``/studio`` base path) is ignored. The most
     specific matching destination wins; query parameters it does not consume are
-    returned as ``selections``.
+    returned as ``selections``. Values that are not identifier-like are dropped.
     """
     if not route:
         return None
@@ -584,7 +586,11 @@ def describe_studio_page(route: str | None) -> StudioPage | None:
         return None
 
     _, destination, raw_args, consumed = best
-    args = {key: _page_value(value) for key, value in raw_args.items() if key != "workspace"}
+    args = {
+        key: clean_value
+        for key, value in raw_args.items()
+        if key != "workspace" and (clean_value := _page_value(value)) is not None
+    }
     label_args = {
         placeholder: args.get(placeholder, "")
         for placeholder in _PLACEHOLDER_RE.findall(STUDIO_LINK_DESTINATIONS[destination].label)
@@ -592,10 +598,10 @@ def describe_studio_page(route: str | None) -> StudioPage | None:
     label = STUDIO_LINK_DESTINATIONS[destination].label.format(**label_args).strip()
     selections: dict[str, str] = {}
     for key, value in query.items():
-        clean_key, clean_value = _page_value(key), _page_value(value)
-        if key in consumed or not clean_key or not clean_value:
+        clean_value = _page_value(value)
+        if key in consumed or not _PAGE_KEY_RE.fullmatch(key) or clean_value is None:
             continue
-        selections[clean_key] = clean_value
+        selections[key] = clean_value
         if len(selections) == _MAX_PAGE_SELECTIONS:
             break
     return StudioPage(destination=destination, label=label, args=args, selections=selections)
