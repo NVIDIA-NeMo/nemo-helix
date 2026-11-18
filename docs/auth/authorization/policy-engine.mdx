@@ -65,8 +65,7 @@ When the embedded PDP rejects an unknown or malformed service identity during an
 returns HTTP 403 to the caller. The Auth service logs the rejection reason; the
 public response does not disclose the rejected identity.
 
-Failures to contact or execute the PDP remain authorization-service errors.
-Authentication and permission/role query behavior are unchanged.
+Failures to contact or execute the PDP produce authorization-service errors.
 
 ## External OPA
 
