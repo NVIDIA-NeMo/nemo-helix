@@ -45,6 +45,7 @@ from nemo_helix_plugin.jobs.schemas import (
 from nemo_helix_plugin.jobs.types import (
     JobLogsQueryParams,
     JobStatusDetailsUpdate,
+    JobStatusQueryParams,
 )
 from nemo_helix_plugin.jobs.watch_types import JobWatchEvent
 
@@ -55,6 +56,7 @@ class JobStatusClient(Protocol):
         *,
         workspace: str | None = None,
         name: str,
+        query_params: JobStatusQueryParams | None = None,
     ) -> NemoResponse[HelixJobStatusResponse]: ...
 
 
@@ -64,6 +66,7 @@ class AsyncJobStatusClient(Protocol):
         *,
         workspace: str | None = None,
         name: str,
+        query_params: JobStatusQueryParams | None = None,
     ) -> Awaitable[NemoResponse[HelixJobStatusResponse]]: ...
 
 

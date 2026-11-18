@@ -218,3 +218,38 @@ async def test_platform_auth_middleware_applies_entity_field_policy(
     assert user_read.status_code == direct_read.status_code == 200
     assert "_auth_context" not in user_read.json()["data"]
     assert direct_read.json()["data"]["_auth_context"] == {"groups": ["team-a"]}
+
+
+async def test_workflow_state_is_readable_but_only_jobs_controller_can_replace_it(
+    policy_store: SQLAlchemyEntityRepository,
+) -> None:
+    path = "/apis/entities/v2/workspaces/policy-one/entities/platform_job_attempt"
+    original = {"nodes": {"work": {"requested_run_revision": "original"}}}
+    async with AsyncExitStack() as stack:
+        controller = await stack.enter_async_context(_client(Principal(id="service:jobs"), auth_enabled=True))
+        user = await stack.enter_async_context(_client(Principal(id="user@example.com"), auth_enabled=True))
+        other = await stack.enter_async_context(_client(Principal(id="service:evals"), auth_enabled=True))
+        delegated = await stack.enter_async_context(
+            _client(Principal(id="service:jobs", on_behalf_of="user@example.com"), auth_enabled=True)
+        )
+        created = await controller.post(path, json={"name": "workflow-policy", "data": {"workflow_state": original}})
+        assert created.status_code == 201
+        for caller in (user, other, delegated):
+            observed = await caller.get(path + "/workflow-policy")
+            assert observed.status_code == 200 and observed.json()["data"]["workflow_state"] == original
+            forged = await caller.put(path + "/workflow-policy", json={"data": {"workflow_state": {"nodes": {}}}})
+            assert forged.status_code == 200
+            assert forged.json()["data"]["workflow_state"] == original
+            absent = await caller.put(path + "/workflow-policy", json={"data": {"epoch": 2}})
+            assert absent.json()["data"]["workflow_state"] == original
+        changed = await controller.put(path + "/workflow-policy", json={"data": {"workflow_state": {"nodes": {}}}})
+        assert changed.status_code == 200 and changed.json()["data"]["workflow_state"] == {"nodes": {}}
+
+
+async def test_workflow_policy_does_not_reserve_plugin_entity_fields(policy_store: SQLAlchemyEntityRepository) -> None:
+    path = "/apis/entities/v2/workspaces/policy-one/entities/plugin_record"
+    async with _client(Principal(id="user@example.com"), auth_enabled=True) as caller:
+        created = await caller.post(path, json={"name": "plugin-workflow", "data": {"workflow_state": "mine"}})
+        assert created.status_code == 201 and created.json()["data"]["workflow_state"] == "mine"
+        changed = await caller.put(path + "/plugin-workflow", json={"data": {"workflow_state": "updated"}})
+        assert changed.status_code == 200 and changed.json()["data"]["workflow_state"] == "updated"

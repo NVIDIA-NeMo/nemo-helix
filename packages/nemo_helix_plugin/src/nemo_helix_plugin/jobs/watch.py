@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from asyncio import sleep as async_sleep
 from collections.abc import AsyncIterator, Iterable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from time import monotonic, sleep
 from typing import ClassVar, Literal, TypeAlias
@@ -21,14 +21,16 @@ from nemo_helix_plugin.jobs.client import (
     JobsWatchClient,
 )
 from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobStatusResponse
-from nemo_helix_plugin.jobs.types import JobLogsQueryParams
+from nemo_helix_plugin.jobs.types import JobLogsQueryParams, JobStatusQueryParams
 from nemo_helix_plugin.jobs.watch_types import (
     JobLogEvent,
     JobStatusEvent,
     JobWarningEvent,
     JobWatchEvent,
     JobWatchTimeoutError,
+    JobWorkflowEvent,
 )
+from nemo_helix_plugin.jobs.workflows import WorkflowView
 
 _SUCCESSFUL_TERMINAL_STATUSES = {"completed"}
 # A paused job is resumable, but it is no longer making progress. Treat it as
@@ -70,6 +72,7 @@ class _WatchState:
     log_cursor: str | None
     job_id: str | None = None
     last_status: str | None = None
+    last_workflow: WorkflowView | None = None
     previous_drain_seen_logs: dict[_LogKey, int] = field(default_factory=dict)
     current_drain_seen_logs: dict[_LogKey, int] = field(default_factory=dict)
 
@@ -288,8 +291,14 @@ def _watch_job(
     while True:
         deadline.raise_if_expired()
         try:
-            status_response = jobs.status.get_job_status(workspace=options.workspace, name=state.job_id or name)
+            status_response = jobs.status.get_job_status(
+                workspace=options.workspace,
+                name=state.job_id or name,
+                **({"query_params": JobStatusQueryParams(attempt_id=options.attempt_id)} if options.attempt_id else {}),
+            )
             status_info = status_response.data()
+            if options.attempt_id == "current" and status_info.attempt_id is not None:
+                options = replace(options, attempt_id=status_info.attempt_id)
             if state.job_id is None:
                 state.job_id = status_info.id
             status_event = _status_event(status_info, name)
@@ -306,6 +315,16 @@ def _watch_job(
         if status_event.status != state.last_status:
             yield status_event
             state.last_status = status_event.status
+        if status_info.workflow is not None and status_info.attempt_id is not None:
+            if status_info.workflow != state.last_workflow:
+                yield JobWorkflowEvent(
+                    kind="workflow",
+                    job_name=name,
+                    job_id=status_info.id,
+                    attempt_id=status_info.attempt_id,
+                    workflow=status_info.workflow,
+                )
+                state.last_workflow = status_info.workflow.model_copy(deep=True)
 
         logs_drained = True
         sleep_interval = poll_interval
@@ -359,8 +378,14 @@ async def _async_watch_job(
     while True:
         deadline.raise_if_expired()
         try:
-            status_response = await jobs.status.get_job_status(workspace=options.workspace, name=state.job_id or name)
+            status_response = await jobs.status.get_job_status(
+                workspace=options.workspace,
+                name=state.job_id or name,
+                **({"query_params": JobStatusQueryParams(attempt_id=options.attempt_id)} if options.attempt_id else {}),
+            )
             status_info = status_response.data()
+            if options.attempt_id == "current" and status_info.attempt_id is not None:
+                options = replace(options, attempt_id=status_info.attempt_id)
             if state.job_id is None:
                 state.job_id = status_info.id
             status_event = _status_event(status_info, name)
@@ -377,6 +402,16 @@ async def _async_watch_job(
         if status_event.status != state.last_status:
             yield status_event
             state.last_status = status_event.status
+        if status_info.workflow is not None and status_info.attempt_id is not None:
+            if status_info.workflow != state.last_workflow:
+                yield JobWorkflowEvent(
+                    kind="workflow",
+                    job_name=name,
+                    job_id=status_info.id,
+                    attempt_id=status_info.attempt_id,
+                    workflow=status_info.workflow,
+                )
+                state.last_workflow = status_info.workflow.model_copy(deep=True)
 
         logs_drained = True
         sleep_interval = poll_interval
@@ -431,9 +466,13 @@ async def _async_sleep(poll_interval: float, deadline: _WatchDeadline) -> None:
 def _status_event(status_response: HelixJobStatusResponse, job_name: str) -> JobStatusEvent:
     status = _normalized_status(status_response.status)
     terminal = status in _TERMINAL_STATUSES
+    if status_response.workflow is not None and status == "paused":
+        terminal = False
     successful = (
         True if status in _SUCCESSFUL_TERMINAL_STATUSES else False if status in _FAILED_TERMINAL_STATUSES else None
     )
+    if not terminal:
+        successful = None
     error_details = status_response.error_details
     return JobStatusEvent(
         kind="status",

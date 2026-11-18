@@ -66,6 +66,72 @@ nemo jobs update <job-name> \
 
 Definition updates must provide both `spec` and `platform_spec`; the Jobs Factory recompiles plugin job specs before forwarding the paired fields. To clear a job description, use `--input-data '{"description": null}'`.
 
+## DAG workflows (prototype)
+
+Opt a platform job into DAG scheduling with `platform_spec.workflow`. Set its
+`mode` to `run_to_completion` (the default) or `continuous`. Every workflow step
+must declare `depends_on`, including an empty list for roots. Optional `inputs`
+contains objects with a `fileset_id`. Job create and update reject cycles,
+unknown dependencies, duplicate input references, and workflow-only fields on
+sequential jobs.
+
+The controller compares each node's input Filesets' opaque `commit_revision`
+values. Uploading files alone does not request another execution: explicitly
+commit the Fileset after updating its inputs. Outputs do not affect scheduling.
+Dependencies order execution; each node's own inputs determine whether it needs
+to run again.
+
+An Attempt keeps the definition and original execution context it started with.
+Editing the Job takes effect in a new Attempt through the existing start/rerun
+operation. Terminal Attempts stay terminal. Sequential jobs retain their current
+behavior when `workflow` is omitted.
+
+A continuous Attempt stays active when its nodes are clean or a node has failed.
+Unchanged failed inputs wait for an input commit or manual invalidation; backend
+retries are unchanged. To invalidate selected nodes, PATCH the existing
+`/apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/status-details`
+route with this body:
+
+```json
+{
+  "workflow_invalidation": {
+    "request_id": "manual-run-1",
+    "steps": ["prepare", "evaluate"]
+  }
+}
+```
+
+Use another request ID for another invalidation. Repeating the current signal
+for a node does not request extra work. Invalidations can remain pending while
+paused and cannot bypass failed dependencies. Input changes and invalidations
+received during execution coalesce into a later pass after the current pass
+drains. The same logical node never has overlapping executions.
+
+Pause drains dispatched work and holds unscheduled nodes. Resume continues the
+same Attempt. Existing storage-retention TTLs and expiry actions apply; a
+workflow pause uses the time the Attempt reached paused, even when no individual
+Step is paused. A failed node does not expire shared storage while a continuous
+Attempt remains active.
+
+The status API and `jobs watch` expose each logical node's freshness
+(`unknown`, `dirty`, or `clean`), scheduling state, blockers, requested revision,
+execution IDs, latest outcome and input-observation timestamps/errors. The
+controller alone writes `workflow_state`; ordinary progress details are separate.
+Status reads do not poll inputs or schedule work. Use `attempt_id` on status
+reads or `--attempt-id` on watch to select an Attempt. Execution history remains
+available through the existing paginated Attempt step routes. Results keep their
+existing Job-wide names and overwrite behavior.
+
+The initial prototype is verified with real services and controllers in one
+process. Run its edge-case suite from the repository root:
+
+```bash
+uv run --frozen pytest services/core/jobs/tests/integration/test_workflows.py
+```
+
+Container execution and mixed-controller upgrades have not been validated.
+Use controllers from the same workflow-capable build.
+
 ## Viewing Job Logs
 
 Use `nemo jobs get-logs` to inspect paginated job logs:
