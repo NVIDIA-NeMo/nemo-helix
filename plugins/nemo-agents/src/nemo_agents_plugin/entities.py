@@ -487,7 +487,7 @@ SKILL_REVISION_SELF_FIELDS: frozenset[str] = frozenset({"content_hash", "revisio
 
 
 class SkillEntity(NemoEntity, entity_type="agent_skill"):
-    """A stored skill's head: revision pointers, plus a search copy of the latest frontmatter.
+    """A stored skill's head: revision pointers only; content lives in its revisions.
 
     Entity type: ``agent_skill``
     The entity name is the skill name and must equal the ``SKILL.md`` frontmatter
@@ -503,12 +503,6 @@ class SkillEntity(NemoEntity, entity_type="agent_skill"):
     tags: dict[str, int] = Field(
         default_factory=dict,
         description="Tag → revision-ordinal pointers. 'latest' is machine-managed and only moves forward.",
-    )
-    frontmatter: SkillFrontmatter | None = Field(
-        default=None,
-        description="Search index only: a copy of the latest revision's frontmatter, written in the same "
-        "optimistic-locked update that moves 'latest', so list filters can match it. Never served; "
-        "responses read frontmatter from the verified revision.",
     )
 
 

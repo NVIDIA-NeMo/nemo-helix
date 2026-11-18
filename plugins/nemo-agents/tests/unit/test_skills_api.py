@@ -30,7 +30,7 @@ from nemo_agents_plugin.skill_service import (
 from nemo_agents_plugin.skill_storage import SkillSourceError
 from nemo_helix_plugin.agents.skills import Skill, SkillArchiveDescriptor, SkillFrontmatter, SkillInput, SkillSource
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
-from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator, LogicalOperation, RelationshipOperation
 from nemo_helix_plugin.schema import Page, PaginationData
 
 BASE = "/apis/agents/v2/workspaces/default/skills"
@@ -237,11 +237,21 @@ def test_list_translates_frontmatter_filters_and_sort(client: TestClient, servic
         map(
             repr,
             [
-                ComparisonOperation(field="data.frontmatter.description", operator=FilterOperator.LIKE, value="pdf"),
+                RelationshipOperation(
+                    relationship="revisions",
+                    condition=ComparisonOperation(
+                        field="frontmatter.description", operator=FilterOperator.LIKE, value="pdf"
+                    ),
+                ),
                 LogicalOperation(
                     operator=FilterOperator.OR,
                     operations=[
-                        ComparisonOperation(field="data.frontmatter.tags", operator=FilterOperator.CONTAINS, value=v)
+                        RelationshipOperation(
+                            relationship="revisions",
+                            condition=ComparisonOperation(
+                                field="frontmatter.tags", operator=FilterOperator.CONTAINS, value=v
+                            ),
+                        )
                         for v in ("docs", "pdf")
                     ],
                 ),

@@ -31,6 +31,15 @@ _REGISTRY: dict[str, dict[str, Relationship]] = {
             via="parent",
         ),
     },
+    # Skills (nemo-agents): a skill head's published revisions, so skills can be listed by the
+    # frontmatter their revisions carry.
+    "agent_skill": {
+        "revisions": Relationship(
+            kind="one_to_many",
+            target_entity_type="agent_skill_revision",
+            via="parent",
+        ),
+    },
 }
 
 

@@ -93,13 +93,14 @@ searchable metadata, that eval work (and later registered agents) can reference.
 - **Files listing is not paginated.** Source staging validates every entry before allocating
   anything, but the listing response itself is held in memory once.
 
-## Open question
+## List filtering
 
-- **List filtering on frontmatter.** The head carries a search copy of the latest revision's
-  frontmatter, updated in the same locked write that moves `latest`. The entities service also
-  supports relationship filters (`{"revisions": {"frontmatter.tags": ...}}`, an `EXISTS` subquery
-  on child entities, registered in `services/core/entities/.../utils/relationships.py`), but that
-  matches *any* revision rather than the latest one.
+Skills are filtered by frontmatter through the entities service's relationship filter: the
+`agent_skill → revisions` relationship is registered in
+`services/core/entities/.../utils/relationships.py`, and `SkillFilter` translates `description` and
+`tags` into `{"revisions": {...}}` (`RelationshipOperation` in `nemo_helix_plugin/filter_ops.py`).
+A skill matches when *any* of its published revisions matches, not only the latest. The head holds
+pointers only.
 
 ## Separate issue (not today)
 
