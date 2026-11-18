@@ -5,11 +5,12 @@ import { Button, Flex, Text } from '@nvidia/foundations-react-core';
 
 interface FileRowProps {
   path: string;
+  disabled?: boolean;
   onRemove: () => void;
 }
 
 /** One staged loose file with its remove button. */
-export function FileRow({ path, onRemove }: FileRowProps) {
+export function FileRow({ path, disabled, onRemove }: FileRowProps) {
   return (
     <Flex align="center" justify="between" gap="density-md">
       <Text kind="body/regular/md" className="min-w-0 break-all">
@@ -20,6 +21,7 @@ export function FileRow({ path, onRemove }: FileRowProps) {
         kind="tertiary"
         size="small"
         aria-label={`Remove ${path}`}
+        disabled={disabled}
         onClick={onRemove}
       >
         Remove

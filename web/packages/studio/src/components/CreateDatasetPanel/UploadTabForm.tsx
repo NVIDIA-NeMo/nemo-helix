@@ -17,6 +17,8 @@ interface UploadTabFormProps {
   /** Only the errors that should currently be on screen. */
   errors: DraftErrors;
   dispatch: Dispatch<PanelAction>;
+  /** A create is in flight: the selection is what it is uploading, so it must not change. */
+  locked: boolean;
 }
 
 /** A folder-selected file keeps its relative path, including the picked top-level folder (spec 10). */
@@ -30,7 +32,7 @@ const droppedFiles = (data: DataTransfer): File[] =>
     .flatMap((item) => item.getAsFile() ?? []);
 
 /** The Upload tab: stage files or a folder, name the dataset, describe it. Nothing uploads until Create. */
-export function UploadTabForm({ draft, errors, dispatch }: UploadTabFormProps) {
+export function UploadTabForm({ draft, errors, dispatch, locked }: UploadTabFormProps) {
   const filesInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement | null>(null);
   // A stable ref callback, so React does not detach and re-run it on every render.
@@ -45,6 +47,8 @@ export function UploadTabForm({ draft, errors, dispatch }: UploadTabFormProps) {
   const hiddenFolderCount = Math.max(folderFiles.length - FOLDER_PREVIEW_COUNT, 0);
 
   const pick = (event: ChangeEvent<HTMLInputElement>, type: 'files-picked' | 'folder-picked') => {
+    // The buttons are disabled while locked, but a picker can still report a change.
+    if (locked) return;
     const entries = toEntries(event.target.files ?? []);
     // Clear so picking the same selection again still fires a change.
     event.target.value = '';
@@ -53,7 +57,8 @@ export function UploadTabForm({ draft, errors, dispatch }: UploadTabFormProps) {
   };
 
   const drop = (event: DragEvent<HTMLElement>) => {
-    event.preventDefault();
+    event.preventDefault(); // even when locked, so a drop never navigates to the file
+    if (locked) return;
     const entries = toEntries(droppedFiles(event.dataTransfer));
     if (entries.length > 0) dispatch({ type: 'files-picked', entries });
   };
@@ -70,6 +75,7 @@ export function UploadTabForm({ draft, errors, dispatch }: UploadTabFormProps) {
         <Stack gap="density-md" className="w-full">
           {/* Dropping is a pointer-only shortcut; Choose files is the keyboard path. */}
           <Block
+            aria-disabled={locked || undefined}
             className="w-full rounded-md border border-dashed p-4"
             onDragOver={(event) => event.preventDefault()}
             onDrop={drop}
@@ -77,10 +83,20 @@ export function UploadTabForm({ draft, errors, dispatch }: UploadTabFormProps) {
             <Flex direction="col" align="center" gap="density-md">
               <Text kind="body/regular/md">Drag and drop files here</Text>
               <Flex gap="density-md">
-                <Button type="button" kind="secondary" onClick={() => filesInput.current?.click()}>
+                <Button
+                  type="button"
+                  kind="secondary"
+                  disabled={locked}
+                  onClick={() => filesInput.current?.click()}
+                >
                   Choose files
                 </Button>
-                <Button type="button" kind="secondary" onClick={() => folderInput.current?.click()}>
+                <Button
+                  type="button"
+                  kind="secondary"
+                  disabled={locked}
+                  onClick={() => folderInput.current?.click()}
+                >
                   Choose folder
                 </Button>
               </Flex>
@@ -91,6 +107,7 @@ export function UploadTabForm({ draft, errors, dispatch }: UploadTabFormProps) {
             <FileRow
               key={path}
               path={path}
+              disabled={locked}
               onRemove={() => dispatch({ type: 'file-removed', path })}
             />
           ))}
@@ -106,6 +123,7 @@ export function UploadTabForm({ draft, errors, dispatch }: UploadTabFormProps) {
                   kind="tertiary"
                   size="small"
                   aria-label={`Remove folder ${folderName}`}
+                  disabled={locked}
                   onClick={() => dispatch({ type: 'folder-removed' })}
                 >
                   Remove

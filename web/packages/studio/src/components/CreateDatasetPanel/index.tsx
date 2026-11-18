@@ -147,7 +147,12 @@ export function CreateDatasetPanel({
         {/* Only the active tab renders: the other drafts live in the reducer. */}
         <TabsContent className="w-full min-w-0 p-0 items-stretch" value={tab}>
           {tab === 'upload' ? (
-            <UploadTabForm draft={draft} errors={shownErrors} dispatch={dispatch} />
+            <UploadTabForm
+              draft={draft}
+              errors={shownErrors}
+              dispatch={dispatch}
+              locked={isPending}
+            />
           ) : (
             <SourceTabForm
               key={tab}
