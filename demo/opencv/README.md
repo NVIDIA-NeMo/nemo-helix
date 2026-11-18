@@ -3,15 +3,19 @@
 
 # Standalone OpenCV rehearsal
 
-From this directory, run `./demo.sh` with Docker running. The first build downloads Python, OpenCV and NumPy. Both workload containers run with networking disabled. The script prints the path of a fresh run directory and preserves previous runs.
+With Docker running and `NVIDIA_API_KEY` exported, run `./demo.sh` from this directory. The first build downloads Python, OpenCV and NumPy. Edge detection and montage run offline. Captioning uses the NVIDIA API. The script prints the path of a fresh run directory and preserves previous runs.
 
 1. Open `baseline/montage/contact-sheet.png` in the printed directory. The left panel shows Sutro Tower and the right panel shows its edges.
 2. Open `updated/montage/contact-sheet.png`. Adding the cake photo creates a second row. Rows sort by filename, so the cake appears above the tower.
 3. Inspect `updated/edges/` to see the intermediate PNGs the montage consumed.
 
+## Describe the photos, edge maps, and montage with Nemotron
+
+For each batch, a third container sends a resized copy of each original photo, each edge map, and the finished contact sheet to NVIDIA's hosted `nvidia/nemotron-3.5-super-vl-120b-a12b` model. The prompt asks for one sentence describing visible details. The runner prints the answers and saves the source directory, filename, model ID, and returned caption in `captions/descriptions.json` beside the montage directory. Open the updated contact sheet and read the corresponding descriptions. The baseline and updated batches make three and five inference calls, respectively.
+
 ## Step interface
 
-Both steps use `helix-opencv-demo:local`. The image entrypoint accepts these commands:
+All three steps use `helix-opencv-demo:local`. The default image entrypoint handles the two OpenCV commands. The caption step invokes `python /app/captions.py` with read-only mounts for `images`, `edges`, and `montage` and a writable `captions` directory.
 
 ```text
 detect-edges --images /images --edges /edges
