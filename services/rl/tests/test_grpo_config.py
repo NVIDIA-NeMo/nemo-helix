@@ -1533,6 +1533,18 @@ class TestGrpoPassthroughKnobs:
         assert generation["vllm_kwargs"] == {"moe_backend": "triton"}
         assert "vllm_kwargs" not in generation["vllm_cfg"]
 
+    def test_image_size_reaches_vllm_and_the_policy_processor(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+        step, _ = _prepared_step(tmp_path, has_vision_tower=True)
+        step.model.max_pixels = 2_621_440
+
+        cfg = compile_grpo_config(step, job_ctx)
+
+        bounds = {"max_pixels": 2_621_440, "min_pixels": 65_536}
+        assert cfg["policy"]["generation"]["vllm_kwargs"]["mm_processor_kwargs"] == bounds
+        assert cfg["policy"]["tokenizer"]["tokenizer_kwargs"] == {
+            "size": {"longest_edge": 2_621_440, "shortest_edge": 65_536}
+        }
+
     def test_vllm_kwargs_absent_when_unset(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
         step, _ = _prepared_step(tmp_path)
 

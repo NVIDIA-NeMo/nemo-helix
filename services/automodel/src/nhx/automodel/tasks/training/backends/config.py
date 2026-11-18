@@ -50,6 +50,7 @@ from nhx.automodel.tasks.training.sequence_packing import (
     calculate_target_packing_factor,
     estimate_dataset_sequence_lengths,
 )
+from nhx.customization_common.image_size import image_size_bounds
 from nhx.customization_common.schemas.checkpoint import (
     CheckpointTraits,
     traits_from_step_model,
@@ -400,8 +401,13 @@ def _compile_vlm_config(
         "pretrained_model_name_or_path": customizer_config.model.path,
         "trust_remote_code": trust_remote_code,
     }
-    if customizer_config.model.max_pixels is not None:
-        cfg["processor"]["max_pixels"] = customizer_config.model.max_pixels
+    image_size = image_size_bounds(
+        customizer_config.model.max_pixels,
+        customizer_config.model.image_longest_edge,
+        customizer_config.model.image_shortest_edge,
+    )
+    if image_size is not None:
+        cfg["processor"]["size"] = image_size
     freeze_config: dict[str, bool] = {
         "freeze_vision_tower": True,
         "freeze_language_model": False,

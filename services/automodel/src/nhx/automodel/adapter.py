@@ -80,6 +80,7 @@ def _build_training_block(spec: dict[str, Any]) -> SFTTraining | DistillationTra
         "shuffle": (spec.get("dataset") or {}).get("shuffle", True) if isinstance(spec.get("dataset"), dict) else True,
         "max_seq_length": training.get("max_seq_length", 2048),
         "max_pixels": training.get("max_pixels"),
+        "image_size": training.get("image_size"),
         "precision": training.get("precision"),
         "attn_implementation": training.get("attn_implementation", "sdpa"),
         "tokenizer_backend": training.get("tokenizer_backend"),

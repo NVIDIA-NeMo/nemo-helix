@@ -55,6 +55,25 @@ def test_adapter_plumbs_previously_dropped_fields() -> None:
     assert spec.training.retrieval is None
 
 
+def test_adapter_plumbs_image_size_to_vlm_training() -> None:
+    spec = automodel_spec_to_compiler_output(
+        {
+            "model": "nvidia/Qwen3-VL",
+            "dataset": {"training": "default/cord"},
+            "training": {
+                "training_type": "sft",
+                "finetuning_type": "lora",
+                "image_size": {"shortest_edge": 65536, "longest_edge": 2621440},
+            },
+            "output": {"name": "out", "type": "adapter", "fileset": "out-fs"},
+        },
+    )
+    assert isinstance(spec.training, SFTTraining)
+    assert spec.training.image_size is not None
+    assert spec.training.image_size.longest_edge == 2621440
+    assert spec.training.image_size.shortest_edge == 65536
+
+
 def test_adapter_plumbs_max_pixels_to_vlm_training() -> None:
     """max_pixels is the only bound on image tokens for a VLM; dropping it here sends full-size images to the model."""
     spec = automodel_spec_to_compiler_output(
