@@ -35,6 +35,11 @@ const AgentEvaluationDetailRoute = lazy(() =>
     default: m.AgentEvaluationDetailRoute,
   }))
 );
+const AgentDistillationDetailRoute = lazy(() =>
+  import('@studio/routes/agents/AgentDistillationDetailRoute').then((m) => ({
+    default: m.AgentDistillationDetailRoute,
+  }))
+);
 const AgentOptimizationDetailRoute =
   AGENT_OPTIMIZATIONS_ENABLED &&
   lazy(() =>
@@ -62,6 +67,11 @@ export const agentRoutes: RouteObject[] = [
     path: ROUTES.workspace.agentEvaluationDetail,
     element: <AgentEvaluationDetailRoute />,
     errorElement: <RouteErrorPanel title="Agent Evaluation" />,
+  },
+  {
+    path: ROUTES.workspace.agentDistillationDetail,
+    element: <AgentDistillationDetailRoute />,
+    errorElement: <RouteErrorPanel title="Agent Distillation" />,
   },
   ...(AgentOptimizationDetailRoute
     ? [

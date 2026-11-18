@@ -13,7 +13,7 @@ const PRIMARY_ACTION_BY_TAB: Partial<Record<AgentDetailTab, ActionId>> = {
   optimizations: 'optimize',
 };
 
-type ActionId = 'evaluate' | 'deploy' | 'optimize';
+type ActionId = 'evaluate' | 'deploy' | 'optimize' | 'distill';
 
 interface Action {
   id: ActionId;
@@ -37,6 +37,7 @@ export interface AgentDetailCTAsProps {
   onRunEvaluation: () => void;
   /** Omitted until the tab can render the optimization form; the button stays visible but inert. */
   onOptimize?: () => void;
+  onDistill: () => void;
   onImportTraces: () => void;
 }
 
@@ -60,6 +61,7 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
   onDeploy,
   onRunEvaluation,
   onOptimize,
+  onDistill,
   onImportTraces,
 }) => {
   const actions: Action[] = [
@@ -77,6 +79,15 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
       ref: deployButtonRef,
     },
   ];
+
+  if (tab === 'overview' || tab === 'evaluations') {
+    actions.unshift({
+      id: 'distill',
+      label: 'Distill',
+      disabled: !agentName,
+      onClick: onDistill,
+    });
+  }
 
   if (tab === 'optimizations') {
     actions.push({
@@ -96,7 +107,7 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
         ...actions.filter((action) => action.id !== primaryId),
         ...actions.filter((action) => action.id === primaryId),
       ]
-    : actions.filter((action) => action.id === primaryId);
+    : actions.filter((action) => action.id === primaryId || action.id === 'distill');
 
   return (
     <Flex gap="2" wrap="wrap" justify="end">

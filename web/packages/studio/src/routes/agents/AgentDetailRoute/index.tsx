@@ -33,6 +33,7 @@ import {
 import { ChatPlaygroundContent } from '@studio/routes/agents/AgentDetailRoute/ChatPlaygroundContent';
 import { DeploymentLogsView } from '@studio/routes/agents/AgentDetailRoute/DeploymentLogsView';
 import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
+import { DistillModal } from '@studio/routes/agents/AgentDetailRoute/distillation/DistillModal';
 import { EvaluationsTab } from '@studio/routes/agents/AgentDetailRoute/EvaluationsTab';
 import { HeaderDeploymentSelect } from '@studio/routes/agents/AgentDetailRoute/HeaderDeploymentSelect';
 import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
@@ -75,6 +76,7 @@ export const AgentDetailRoute: FC = () => {
   const [importTracesOpen, setImportTracesOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [launchOptimizeOpen, setLaunchOptimizeOpen] = useState(false);
+  const [distillOpen, setDistillOpen] = useState(false);
   const [launchStrategy, setLaunchStrategy] = useState<OptimizationStrategy | undefined>();
   const [deleteDeploymentTarget, setDeleteDeploymentTarget] = useState<AgentDeployment | null>(
     null
@@ -335,6 +337,7 @@ export const AgentDetailRoute: FC = () => {
               onDeploy={onDeploy}
               onRunEvaluation={runEvaluation}
               onOptimize={openOptimize}
+              onDistill={() => setDistillOpen(true)}
               onImportTraces={() => setImportTracesOpen(true)}
             />
           </>
@@ -460,6 +463,14 @@ export const AgentDetailRoute: FC = () => {
         <LaunchOptimizeModal
           open
           onClose={() => setLaunchOptimizeOpen(false)}
+          workspace={workspace}
+          agentName={agentName}
+        />
+      )}
+      {agentName && distillOpen && (
+        <DistillModal
+          open
+          onClose={() => setDistillOpen(false)}
           workspace={workspace}
           agentName={agentName}
         />
