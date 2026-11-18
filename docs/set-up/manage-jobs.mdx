@@ -129,8 +129,24 @@ process. Run its edge-case suite from the repository root:
 uv run --frozen pytest services/core/jobs/tests/integration/test_workflows.py
 ```
 
-Container execution and mixed-controller upgrades have not been validated.
-Use controllers from the same workflow-capable build.
+Local Docker CPU execution is covered by an opt-in integration suite. It uses
+in-process services and the production Docker scheduler/reconciler/backend with
+real `busybox:stable` containers. The Docker daemon must be running and the image
+must be available locally:
+
+```bash
+NHX_TEST_WORKFLOW_DOCKER=1 uv run --frozen pytest services/core/jobs/tests/integration/test_workflows_docker.py
+```
+
+The tests check container start/finish ordering, committed-input and manual
+reruns, draining pause/resume, active cancellation, failure recovery and HTTP
+task-status callbacks.
+Their temporary containers and volumes are removed after each case. The callback
+case exposes a temporary local HTTP bridge for the containers; it uses Docker
+Desktop's `host.docker.internal` hostname. These shell-command tests do not
+validate the `jobs-launcher` binary or a full packaged platform deployment.
+GPU/Kubernetes execution, live token exchange and mixed-controller upgrades
+remain unvalidated. Use controllers from the same workflow-capable build.
 
 ## Viewing Job Logs
 
