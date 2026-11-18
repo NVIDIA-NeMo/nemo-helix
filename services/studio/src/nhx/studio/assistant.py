@@ -22,7 +22,7 @@ from nemo_helix_plugin.authz import CallerKind, path_rule
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError, EntityStoreError
 from nhx.common.entities.constants import NAME_PATTERN
 from nhx.common.service.dependencies import get_entity_client
-from nhx.studio import studio_links
+from nhx.studio import assistant_topic_gate, studio_links
 from nhx.studio.assistant_artifacts import (
     ChatArtifactsResponse,
     record_assistant_model,
@@ -947,16 +947,6 @@ def _assistant_activity_event(args: dict[str, Any]) -> tuple[str, dict[str, str]
     return tool_name, tool_input
 
 
-def _mcp_text_result(request_id: Any, payload: dict[str, Any]) -> JSONResponse:
-    return JSONResponse(
-        {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": {"content": [{"type": "text", "text": json.dumps(payload)}]},
-        }
-    )
-
-
 def _tool_use_stream_event(tool_name: str, tool_input: dict[str, Any]) -> tuple[str, str]:
     safe_input = {key: value for key, value in tool_input.items() if key not in _TOOL_INPUT_INTERNAL_KEYS}
     return (
@@ -1050,6 +1040,42 @@ class _ConversationStore(Protocol):
     async def update(self, entity: AssistantConversation) -> AssistantConversation: ...
 
 
+async def _persist_conversation_turn(
+    entity_store: _ConversationStore,
+    conversation: AssistantConversation,
+    message: str,
+    assistant_text: str,
+    model: str,
+) -> None:
+    _append_conversation_turn(conversation, message, assistant_text, model)
+    try:
+        await entity_store.update(conversation)
+    except EntityConflictError:
+        logger.info("Reloading conflicted NeMo Assistant session %s before retrying", conversation.name)
+        latest_conversation = await entity_store.get(
+            AssistantConversation,
+            conversation.name,
+            workspace=conversation.workspace,
+        )
+        _append_conversation_turn(latest_conversation, message, assistant_text, model)
+        await entity_store.update(latest_conversation)
+
+
+def _assistant_text_event(text: str, model: str) -> str:
+    return _sse(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": f"nemo-studio-assistant-{uuid.uuid4()}",
+                    "model": model,
+                    "content": [{"type": "text", "text": text}],
+                },
+            }
+        )
+    )
+
+
 async def _stream_assistant(
     session_id: str,
     message: str,
@@ -1063,6 +1089,29 @@ async def _stream_assistant(
     if session_id in _session_streams:
         yield _sse(
             json.dumps({"message": "session already has an active stream"}),
+            event="error",
+        )
+        return
+
+    try:
+        off_topic = await assistant_topic_gate.is_off_topic(
+            message,
+            base_url=_studio_assistant_base_url(),
+            workspace=conversation.workspace,
+            headers=headers,
+        )
+        if off_topic:
+            model = _studio_assistant_name()
+            await _persist_conversation_turn(
+                entity_store, conversation, message, assistant_topic_gate.REFUSAL_TEXT, model
+            )
+            yield _assistant_text_event(assistant_topic_gate.REFUSAL_TEXT, model)
+            yield _sse("", event="done")
+            return
+    except EntityStoreError:
+        logger.exception("Failed to persist NeMo Assistant session %s", session_id)
+        yield _sse(
+            json.dumps({"message": "NeMo Assistant could not save this conversation."}),
             event="error",
         )
         return
@@ -1132,30 +1181,8 @@ async def _stream_assistant(
                 yield rendered
 
         assistant_text, model = await invocation
-        _append_conversation_turn(conversation, message, assistant_text, model)
-        try:
-            await entity_store.update(conversation)
-        except EntityConflictError:
-            logger.info("Reloading conflicted NeMo Assistant session %s before retrying", session_id)
-            latest_conversation = await entity_store.get(
-                AssistantConversation,
-                conversation.name,
-                workspace=conversation.workspace,
-            )
-            _append_conversation_turn(latest_conversation, message, assistant_text, model)
-            await entity_store.update(latest_conversation)
-        yield _sse(
-            json.dumps(
-                {
-                    "type": "assistant",
-                    "message": {
-                        "id": f"nemo-studio-assistant-{uuid.uuid4()}",
-                        "model": model,
-                        "content": [{"type": "text", "text": assistant_text}],
-                    },
-                }
-            )
-        )
+        await _persist_conversation_turn(entity_store, conversation, message, assistant_text, model)
+        yield _assistant_text_event(assistant_text, model)
         yield _sse("", event="done")
     except asyncio.CancelledError:
         invocation.cancel()
@@ -1348,16 +1375,16 @@ async def mcp_endpoint(session_id: str, request: Request, config: StudioConfigDe
             queue = _session_streams.get(sid)
             if queue is not None:
                 await queue.put(_tool_use_stream_event(JOB_PROGRESS_TOOL_NAME, args))
-            return _mcp_text_result(request_id, {"status": "rendered"})
+            return JSONResponse(_mcp_tool_result_payload(request_id, {"status": "rendered"}))
 
         if name == ASSISTANT_ACTIVITY_TOOL_NAME:
             activity = _assistant_activity_event(args)
             if activity is None:
-                return _mcp_text_result(request_id, {"status": "ignored"})
+                return JSONResponse(_mcp_tool_result_payload(request_id, {"status": "ignored"}))
             queue = _session_streams.get(sid)
             if queue is not None:
                 await queue.put(_tool_use_stream_event(*activity))
-            return _mcp_text_result(request_id, {"status": "recorded"})
+            return JSONResponse(_mcp_tool_result_payload(request_id, {"status": "recorded"}))
 
         if name == APPROVAL_TOOL_NAME:
             return await _blocking_mcp_tool_response(
