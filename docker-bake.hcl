@@ -1309,7 +1309,6 @@ target "nhx-automodel-base-builder" {
   target          = "nhx-automodel-base"
   context         = "."
   dockerfile      = "docker/automodel/Dockerfile.nhx-automodel-base"
-  no-cache-filter = ["automodel-clone"]
   cache-to        = maybe_registry_cache_to("nhx-automodel-base")
   cache-from      = maybe_registry_cache_from("nhx-automodel-base")
   tags            = base_tags("nhx-automodel-base")
