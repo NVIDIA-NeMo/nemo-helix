@@ -13,7 +13,9 @@ checklist for a person.
 - The platform is running with `NEMO_DEFAULT_MODEL` exported in the shell that
   ran `nemo services run`. The topic gate uses that model.
 - `agents/nemo-studio-assistant/scripts/deploy-local.sh` finished with a
-  successful invocation.
+  successful invocation. Deploy on a Nemotron model such as
+  `nvidia/nvidia/nemotron-3-super-v3`. On `openai/gpt-oss-120b`, follow-up
+  turns often end with an empty answer under the Deep Agents harness.
 - Studio is open at `http://localhost:8080/studio`.
 
 ## Scripted journey
