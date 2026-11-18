@@ -7,6 +7,13 @@ from __future__ import annotations
 
 from abc import abstractmethod
 
+from nemo_helix_plugin.agents.skills import (
+    ListSkillRevisionsQueryParams,
+    ListSkillsQueryParams,
+    Skill,
+    SkillInput,
+    SkillTagQueryParams,
+)
 from nemo_helix_plugin.agents.types import (
     Agent,
     AgentComputeSpec,
@@ -46,7 +53,7 @@ from nemo_helix_plugin.agents.types import (
     RegisterAgentRequest,
     SampleAgentStreamEvent,
 )
-from nemo_helix_plugin.client.endpoint import delete, get, post
+from nemo_helix_plugin.client.endpoint import delete, get, post, put
 from nemo_helix_plugin.client.types import BinaryContent, CursorPagination, Paginated, PreparedRequest, Stream
 
 _PREFIX = "/apis/agents/v2/workspaces/{workspace}"
@@ -58,6 +65,7 @@ _ENVIRONMENTS = f"{_PREFIX}/environments"
 _COMPUTE_SPECS = f"{_PREFIX}/compute-specs"
 _EXECUTE_JOBS = f"{_PREFIX}/jobs/execute"
 _JOBS = f"{_PREFIX}/jobs/{{collection}}"
+_SKILLS = f"{_PREFIX}/skills"
 _SAMPLE_AGENT = "/apis/agents/v2/sample-agent"
 _POST_RUN_ACTIONS = "/apis/agents/v2/post-run-actions"
 
@@ -366,3 +374,54 @@ def get_agent_job_result(
 def download_agent_job_result(
     *, workspace: str | None = None, collection: AgentJobCollection, job: str, name: str
 ) -> BinaryContent: ...
+
+
+# ---------------------------------------------------------------------------
+# Skills CRUD + revisions (mirrors the evals taskset routes)
+# ---------------------------------------------------------------------------
+
+
+@post(f"{_SKILLS}/{{name}}")
+@abstractmethod
+def create_skill(*, workspace: str | None = None, name: str, body: SkillInput) -> Skill: ...
+
+
+@put(f"{_SKILLS}/{{name}}")
+@abstractmethod
+def publish_skill(*, workspace: str | None = None, name: str, body: SkillInput) -> Skill: ...
+
+
+@get(f"{_SKILLS}/{{name}}")
+@abstractmethod
+def get_skill(*, workspace: str | None = None, name: str) -> Skill: ...
+
+
+@get(_SKILLS)
+@abstractmethod
+def list_skills(
+    *, workspace: str | None = None, query_params: ListSkillsQueryParams | None = None
+) -> Paginated[Skill]: ...
+
+
+@get(f"{_SKILLS}/{{name}}/revisions")
+@abstractmethod
+def list_skill_revisions(
+    *, workspace: str | None = None, name: str, query_params: ListSkillRevisionsQueryParams | None = None
+) -> Paginated[Skill]: ...
+
+
+@get(f"{_SKILLS}/{{name}}/revisions/{{revision}}")
+@abstractmethod
+def get_skill_revision(*, workspace: str | None = None, name: str, revision: str) -> Skill: ...
+
+
+@put(f"{_SKILLS}/{{name}}/tags/{{tag}}")
+@abstractmethod
+def tag_skill_revision(
+    *, workspace: str | None = None, name: str, tag: str, query_params: SkillTagQueryParams | None = None
+) -> Skill: ...
+
+
+@delete(f"{_SKILLS}/{{name}}")
+@abstractmethod
+def delete_skill(*, workspace: str | None = None, name: str) -> None: ...

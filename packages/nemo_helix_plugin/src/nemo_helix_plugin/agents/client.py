@@ -60,6 +60,14 @@ class _AgentsMethods:
     get_agent_job_status = method(endpoints.get_agent_job_status)
     get_agent_job_result = method(endpoints.get_agent_job_result)
     download_agent_job_result = method(endpoints.download_agent_job_result)
+    create_skill = method(endpoints.create_skill)
+    publish_skill = method(endpoints.publish_skill)
+    get_skill = method(endpoints.get_skill)
+    list_skills = method(endpoints.list_skills)
+    list_skill_revisions = method(endpoints.list_skill_revisions)
+    get_skill_revision = method(endpoints.get_skill_revision)
+    tag_skill_revision = method(endpoints.tag_skill_revision)
+    delete_skill = method(endpoints.delete_skill)
 
 
 class AgentsClient(_AgentsMethods, NemoClient):
