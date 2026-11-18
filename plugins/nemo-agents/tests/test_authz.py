@@ -161,6 +161,43 @@ def test_gateway_invoke_reaches_both_roles_after_merge() -> None:
     assert "agents.gateway.invoke" in roles["Editor"]["permissions"]
 
 
+def test_skill_bindings() -> None:
+    contrib = _contribution()
+    skill = f"{_BASE}/skills/{{name}}"
+    expected = {
+        (f"{_BASE}/skills", "get"): ("agents.skills.list", "read"),
+        (skill, "post"): ("agents.skills.create", "write"),
+        (skill, "put"): ("agents.skills.create", "write"),
+        (skill, "get"): ("agents.skills.read", "read"),
+        (skill, "delete"): ("agents.skills.delete", "write"),
+        (f"{skill}/revisions", "get"): ("agents.skills.read", "read"),
+        (f"{skill}/revisions/{{revision}}", "get"): ("agents.skills.read", "read"),
+        (f"{skill}/tags/{{tag}}", "put"): ("agents.skills.create", "write"),
+    }
+    for (path, method), (permission, access) in expected.items():
+        binding = contrib.endpoints[path][method]
+        assert binding.permissions == [permission], (path, method)
+        assert binding.scopes == [f"agents:{access}", f"platform:{access}"], (path, method)
+        assert binding.callers == ["principal"], (path, method)
+        assert not binding.deny, (path, method)
+
+
+def test_skill_permissions_get_default_roles() -> None:
+    from nemo_helix_plugin.authz_merge import merge_authz_contributions
+
+    base = {
+        "authz": {
+            "permissions": {},
+            "roles": {"Viewer": {"permissions": []}, "Editor": {"permissions": []}},
+            "endpoints": {},
+        }
+    }
+    roles = merge_authz_contributions(base, [_contribution().to_dict()])["authz"]["roles"]
+    assert {"agents.skills.list", "agents.skills.read"} <= set(roles["Viewer"]["permissions"])
+    assert not {"agents.skills.create", "agents.skills.delete"} & set(roles["Viewer"]["permissions"])
+    assert {"agents.skills.create", "agents.skills.delete"} <= set(roles["Editor"]["permissions"])
+
+
 def test_job_factory_binding() -> None:
     contrib = _contribution()
     # execute maps to the ``agents.execute`` sub-namespace; its collection

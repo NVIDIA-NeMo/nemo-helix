@@ -80,6 +80,7 @@ from nemo_agents_plugin.entities import (
 from nemo_agents_plugin.sdk import agent_refs_filter
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_agents_plugin.skills_cli import build_skills_app
 from nemo_helix_ext.cli.chat_tui import ExitAction, StreamingResponse, run_chat_tui
 from nemo_helix_ext.cli.core.help_formatter import NhxGroup
 from nemo_helix_ext.ui.prompts import is_interactive
@@ -329,6 +330,7 @@ class AgentsCLI(NemoCLI):
         _register_environment_commands(app)
         _register_post_run_action_commands(app)
         _register_job_commands(app)
+        app.add_typer(build_skills_app(), rich_help_panel="Agent Resources")
         return app
 
 

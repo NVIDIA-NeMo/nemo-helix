@@ -83,6 +83,7 @@ class AgentsService(NemoService):
             post_run_actions,
             sample_agent,
             sessions,
+            skills,
         )
 
         _prefix = "/v2/workspaces/{workspace}"
@@ -117,6 +118,7 @@ class AgentsService(NemoService):
             RouterSpec(
                 gateway.router, tag="Agent Gateway", description="Proxy to running agent deployments", prefix=_prefix
             ),
+            RouterSpec(skills.router, tag="Agent Skills", description="Stored skills and revisions", prefix=_prefix),
         ]
         # Job-collection routers, derived from the single _job_collections() source so a new job
         # can't be wired here but missed in the permission map (or vice versa).
