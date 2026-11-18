@@ -49,11 +49,6 @@ class FilesetOutput(BaseModel):
         json_schema_extra={"nullable": True},
         description="Opaque token assigned on creation and explicit commit. Ordinary edits preserve it; absent on older servers.",
     )
-    revision: str | None = Field(
-        default=None,
-        json_schema_extra={"nullable": True},
-        description="Opaque fileset change token. Compare for equality; absent on older servers.",
-    )
     id: str
     name: str
     workspace: str
@@ -83,11 +78,6 @@ class FilesetFileOutput(BaseModel):
     path: str
     size: int
     cache_status: CacheStatus | None = None
-    fileset_revision: str | None = Field(
-        default=None,
-        json_schema_extra={"nullable": True},
-        description="Fileset revision assigned to this upload or deletion; absent on file reads and older servers.",
-    )
 
 
 class ListFilesetFilesResponse(BaseModel):

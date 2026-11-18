@@ -74,7 +74,6 @@ class TestRefreshFileset:
         with _github_at(FIRST_SHA):
             created = _create_github_fileset(test_client, name)
         assert created["storage"]["revision"] == FIRST_SHA
-        initial_token = created["revision"]
 
         with _github_at(SECOND_SHA) as github:
             response = test_client.post(f"{FILESETS_URL}/{name}/refresh")
@@ -82,12 +81,6 @@ class TestRefreshFileset:
         assert response.status_code == 200, response.text
         storage = response.json()["storage"]
         assert storage["revision"] == SECOND_SHA
-        token = response.json()["revision"]
-        assert token != initial_token
-        with _github_at(SECOND_SHA):
-            unchanged = test_client.post(f"{FILESETS_URL}/{name}/refresh")
-        assert unchanged.status_code == 200, unchanged.text
-        assert unchanged.json()["revision"] != token
         assert storage["original_revision"] == "main"
         # The ref is what gets re-resolved; re-resolving the pinned SHA would report
         # the same move without ever asking about the branch.
@@ -184,7 +177,7 @@ class TestRefreshFileset:
         assert response.status_code == 404
 
 
-def test_sdk_refresh_returns_revision(files_client: FilesClient):
+def test_sdk_refresh_preserves_commit_revision(files_client: FilesClient):
     name = f"sdk-refresh-{uuid.uuid4().hex[:8]}"
     with _github_at(FIRST_SHA):
         created = files_client.create_fileset(
@@ -196,9 +189,8 @@ def test_sdk_refresh_returns_revision(files_client: FilesClient):
     try:
         with _github_at(SECOND_SHA):
             refreshed = files_client.refresh_fileset(workspace=DEFAULT_WORKSPACE, name=name).data()
-        assert refreshed.revision and refreshed.revision != created.revision
         assert refreshed.commit_revision == created.commit_revision
         observed = files_client.get_fileset(workspace=DEFAULT_WORKSPACE, name=name).data()
-        assert observed.revision == refreshed.revision
+        assert observed.commit_revision == created.commit_revision
     finally:
         files_client.delete_fileset_by_id(workspace=DEFAULT_WORKSPACE, fileset_id=created.id)

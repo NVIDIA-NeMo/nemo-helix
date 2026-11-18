@@ -13,18 +13,16 @@ from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetOutput, U
 from nhx.common.entities.client import EntityClient
 from nhx.core.files.api.v2.filesets import endpoints
 from nhx.core.files.app.revision import commit_fileset_revision
-from nhx.core.files.entities import DEFAULT_REVISION, Fileset
+from nhx.core.files.entities import DEFAULT_COMMIT_REVISION, Fileset
 
 BASE = "/apis/files/v2/workspaces/default/filesets"
 
 
 def test_commit_rotates_only_commit_marker(files_client: FilesClient, fileset: FilesetOutput):
     assert fileset.commit_revision and UUID(fileset.commit_revision).version == 4
-    assert fileset.commit_revision != fileset.revision
     previous = fileset.commit_revision
     for _ in range(2):
         committed = files_client.commit_fileset(workspace="default", name=fileset.name).data()
-        assert committed.revision == fileset.revision
         assert committed.commit_revision and committed.commit_revision != previous
         observed = files_client.get_fileset_by_id(workspace="default", fileset_id=fileset.id).data()
         assert observed.commit_revision == committed.commit_revision
@@ -33,9 +31,8 @@ def test_commit_rotates_only_commit_marker(files_client: FilesClient, fileset: F
         previous = committed.commit_revision
 
     for content in (b"first", b"second"):
-        uploaded = files_client.upload_file(workspace="default", name=fileset.name, path="file", content=content).data()
+        files_client.upload_file(workspace="default", name=fileset.name, path="file", content=content).data()
         observed = files_client.get_fileset(workspace="default", name=fileset.name).data()
-        assert observed.revision == uploaded.fileset_revision
         assert observed.commit_revision == previous
     updated = files_client.update_fileset(
         workspace="default", name=fileset.name, body=UpdateFilesetRequest(description="changed")
@@ -45,19 +42,13 @@ def test_commit_rotates_only_commit_marker(files_client: FilesClient, fileset: F
     observed = files_client.get_fileset(workspace="default", name=fileset.name).data()
     assert observed.commit_revision == previous
     committed = files_client.commit_fileset(workspace="default", name=fileset.name).data()
-    assert committed.revision == observed.revision
     assert committed.commit_revision != previous
 
 
-@pytest.mark.parametrize("incoming_commit", [False, True])
-def test_conflicts_preserve_the_other_token(
-    files_client: FilesClient,
-    fileset: FilesetOutput,
-    monkeypatch: pytest.MonkeyPatch,
-    incoming_commit: bool,
+def test_commit_conflict_preserves_concurrent_metadata(
+    files_client: FilesClient, fileset: FilesetOutput, monkeypatch: pytest.MonkeyPatch
 ):
     update = EntityClient.update
-    competing_token = str(uuid4())
     updates = 0
 
     async def race(store: EntityClient, proposed: Fileset, *, original_name: str | None = None):
@@ -65,33 +56,17 @@ def test_conflicts_preserve_the_other_token(
         updates += 1
         if updates == 1:
             other = await store.get_by_id(Fileset, proposed.id)
-            if incoming_commit:
-                other.revision = competing_token
-            else:
-                other.commit_revision = competing_token
             other.description = "concurrent metadata"
             await update(store, other)
         return await update(store, proposed, original_name=original_name)
 
     with monkeypatch.context() as patch:
         patch.setattr(EntityClient, "update", race)
-        if incoming_commit:
-            committed = files_client.commit_fileset(workspace="default", name=fileset.name).data()
-            receipt = committed.commit_revision
-        else:
-            uploaded = files_client.upload_file(
-                workspace="default", name=fileset.name, path="file", content=b"hello"
-            ).data()
-            receipt = uploaded.fileset_revision
+        committed = files_client.commit_fileset(workspace="default", name=fileset.name).data()
     assert updates == 2
     observed = files_client.get_fileset(workspace="default", name=fileset.name).data()
     assert observed.description == "concurrent metadata"
-    if incoming_commit:
-        assert observed.revision == competing_token
-        assert observed.commit_revision == receipt
-    else:
-        assert observed.commit_revision == competing_token
-        assert observed.revision == receipt
+    assert observed.commit_revision == committed.commit_revision
 
 
 def test_delayed_commit_returns_its_own_marker(
@@ -109,10 +84,8 @@ def test_delayed_commit_returns_its_own_marker(
     monkeypatch.setattr(endpoints, "commit_fileset_revision", commit_then_supersede)
     result = files_client.commit_fileset(workspace="default", name=fileset.name).data()
     assert result.commit_revision == first_token
-    assert result.revision == fileset.revision
     observed = files_client.get_fileset(workspace="default", name=fileset.name).data()
     assert observed.commit_revision != first_token
-    assert observed.revision == fileset.revision
 
 
 def test_commit_never_retargets_recreated_name(files_client: FilesClient, monkeypatch: pytest.MonkeyPatch):
@@ -162,7 +135,7 @@ def test_unset_commit_has_no_storage_effects(test_client: TestClient, monkeypatc
     assert created.status_code == 201, created.text
     url = f"{BASE}/legacy-commit"
     initial = test_client.get(url).json()
-    assert initial["commit_revision"] == DEFAULT_REVISION
+    assert initial["commit_revision"] == DEFAULT_COMMIT_REVISION
     assert test_client.get(url).json()["commit_revision"] == initial["commit_revision"]
 
     def no_storage(*args, **kwargs):
@@ -171,7 +144,6 @@ def test_unset_commit_has_no_storage_effects(test_client: TestClient, monkeypatc
     monkeypatch.setattr(endpoints, "storage_impl_factory", no_storage)
     response = test_client.post(f"{url}/commit")
     assert response.status_code == 200, response.text
-    assert response.json()["revision"] == initial["revision"]
     assert response.json()["commit_revision"] != initial["commit_revision"]
     assert test_client.get(url).json()["commit_revision"] == response.json()["commit_revision"]
 
@@ -207,5 +179,4 @@ def test_commit_requires_update_permission_without_create_permission():
         with pytest.raises(PermissionDeniedError):
             files.create_fileset(workspace=workspace, body=CreateFilesetRequest(name="forbidden-create"))
         committed = files.commit_fileset(workspace=workspace, name=created.name).data()
-        assert committed.revision == created.revision
         assert committed.commit_revision != created.commit_revision

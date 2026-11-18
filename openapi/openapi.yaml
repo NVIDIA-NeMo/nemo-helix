@@ -3223,8 +3223,7 @@ paths:
       tags:
       - Files
       summary: Commit Fileset
-      description: Record a fresh explicit commit marker without changing files or
-        modification revision.
+      description: Record a fresh explicit commit marker without changing files.
       operationId: commit_fileset_apis_files_v2_workspaces__workspace__filesets__name__commit_post
       parameters:
       - name: workspace
@@ -3387,11 +3386,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OtelExportLogsServiceResponse'
-          headers:
-            X-Fileset-Revision:
-              description: Revision assigned when this request inserted log entries.
-              schema:
-                type: string
         '409':
           description: Fileset storage is read-only
           content:
@@ -16168,12 +16162,6 @@ components:
           title: Size
         cache_status:
           $ref: '#/components/schemas/CacheStatus'
-        fileset_revision:
-          title: Fileset Revision
-          description: Fileset revision assigned to this upload or deletion; absent
-            on file reads and older servers.
-          nullable: true
-          type: string
       type: object
       required:
       - file_ref
@@ -16248,12 +16236,6 @@ components:
           title: Commit Revision
           description: Opaque token assigned on creation and explicit commit. Ordinary
             edits preserve it; absent on older servers.
-          nullable: true
-          type: string
-        revision:
-          title: Revision
-          description: Opaque fileset change token. Compare for equality; absent on
-            older servers.
           nullable: true
           type: string
         id:

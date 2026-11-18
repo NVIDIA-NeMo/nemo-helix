@@ -38,14 +38,7 @@ def test_advertises_the_entity_store_pattern():
     assert schema["maxLength"] == NAME_MAX_LENGTH
 
 
-def test_older_file_response_has_no_revision():
-    from nemo_helix_plugin.files.types import FilesetFileOutput
-
-    result = FilesetFileOutput(file_ref="default/files#file", file_url="/file", path="file", size=1)
-    assert result.fileset_revision is None
-
-
-def test_older_fileset_response_has_no_revision():
+def test_older_fileset_response_has_no_commit_revision():
     from nemo_helix_plugin.files.types import FilesetOutput
 
     result = FilesetOutput.model_validate(
@@ -63,5 +56,4 @@ def test_older_fileset_response_has_no_revision():
             "updated_at": "",
         }
     )
-    assert result.revision is None
     assert result.commit_revision is None

@@ -32,7 +32,7 @@ def test_demo_verifies_sdk_receipts_and_cleanup(
     output = capsys.readouterr().out
     for operation in ("Upload", "Overwrite", "Metadata update", "Delete"):
         assert f"{operation} verified:" in output
-    assert "PASS: SDK revision receipts and file contents verified." in output
+    assert "PASS: SDK commit markers and file contents verified." in output
     assert output.count("Commit verified:") == 3
     files = FilesClient.from_client(client)
     remaining = list(files.list_filesets(workspace="default").items())
@@ -55,4 +55,4 @@ def test_demo_does_not_remove_an_existing_name(
         runpy.run_path(str(DEMO), run_name="__main__")
     observed = FilesClient.from_client(client).get_fileset(workspace="default", name=fileset.name).data()
     assert observed.id == fileset.id
-    assert observed.revision == fileset.revision
+    assert observed.commit_revision == fileset.commit_revision

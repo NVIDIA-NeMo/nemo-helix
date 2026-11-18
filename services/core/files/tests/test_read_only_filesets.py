@@ -11,7 +11,6 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from nhx.common.api.common import SecretRef
-from nhx.common.entities.client import EntityClient
 from nhx.common.files.storage_config import (
     GithubStorageConfig,
     GitStorageConfig,
@@ -23,7 +22,6 @@ from nhx.common.files.storage_config import (
 from nhx.core.files.api.v2.filesets import endpoints
 from nhx.core.files.api.v2.otlp import endpoints as otlp_endpoints
 from nhx.core.files.app.backends.base import FileInfo
-from nhx.core.files.entities import Fileset
 
 
 @pytest.fixture
@@ -34,9 +32,6 @@ def app():
     app.dependency_overrides[otlp_endpoints.dep_log_storage] = lambda: AsyncMock()
     for dependency in (endpoints.get_entity_client, endpoints.get_nemo_client, endpoints.get_auth_client):
         app.dependency_overrides[dependency] = lambda: MagicMock()
-    store = AsyncMock(spec=EntityClient)
-    store.update.side_effect = lambda entity: entity
-    app.dependency_overrides[endpoints.get_entity_client] = lambda: store
     return app
 
 
@@ -116,16 +111,14 @@ async def test_writable_storage_still_uploads_and_deletes(app, monkeypatch, tmp_
         if backend == "local"
         else S3StorageConfig(bucket="test", use_sdk_auth=True)
     )
-    fileset = Fileset(storage=config, name="writable", workspace="default", purpose="generic")
+    fileset = SimpleNamespace(storage=config, name="writable", custom_fields={})
     monkeypatch.setattr(endpoints, "get_fileset", AsyncMock(return_value=fileset))
     monkeypatch.setattr(endpoints, "resolve_storage_secrets_for_user", AsyncMock(return_value={}))
     storage = endpoints.storage_impl_factory(config)
-    upload = AsyncMock(return_value=FileInfo(path="file.txt", size=7))
-    delete = AsyncMock(return_value=FileInfo(path="file.txt", size=7))
     if backend == "s3":
         # No network needed: check that the endpoint still invokes the writable backend.
-        storage.upload = upload
-        storage.delete = delete
+        storage.upload = AsyncMock(return_value=FileInfo(path="file.txt", size=7))
+        storage.delete = AsyncMock(return_value=FileInfo(path="file.txt", size=7))
     monkeypatch.setattr(endpoints, "storage_impl_factory", lambda *_: storage)
     url = "/v2/workspaces/default/filesets/writable/-/file.txt"
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
@@ -134,7 +127,7 @@ async def test_writable_storage_still_uploads_and_deletes(app, monkeypatch, tmp_
         if backend == "local":
             assert (tmp_path / "file.txt").read_bytes() == b"content"
         else:
-            upload.assert_awaited_once()
+            storage.upload.assert_awaited_once()
         response = await client.delete(url)
         assert response.status_code == 200, response.text
         if backend == "local":
@@ -142,7 +135,7 @@ async def test_writable_storage_still_uploads_and_deletes(app, monkeypatch, tmp_
             response = await client.delete(url)
             assert response.status_code == 404, response.text
         else:
-            delete.assert_awaited_once_with("file.txt")
+            storage.delete.assert_awaited_once_with("file.txt")
 
 
 @pytest.mark.parametrize("backend", ["local", "huggingface"])
@@ -152,13 +145,7 @@ async def test_immutable_upload_preserves_authorization_precedence(app, monkeypa
     config = (
         LocalStorageConfig(path=str(tmp_path)) if backend == "local" else HuggingfaceStorageConfig(repo_id="org/repo")
     )
-    fileset = Fileset(
-        storage=config,
-        name="immutable",
-        workspace="default",
-        purpose="generic",
-        custom_fields={"service_source": "models"},
-    )
+    fileset = SimpleNamespace(storage=config, name="immutable", custom_fields={"service_source": "models"})
     monkeypatch.setattr(endpoints, "get_fileset", AsyncMock(return_value=fileset))
     resolve_secrets = AsyncMock(return_value={})
     monkeypatch.setattr(endpoints, "resolve_storage_secrets_for_user", resolve_secrets)

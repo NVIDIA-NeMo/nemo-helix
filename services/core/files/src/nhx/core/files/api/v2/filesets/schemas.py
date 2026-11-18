@@ -24,7 +24,7 @@ from nhx.common.api.common import Page
 from nhx.common.entities.values import DatetimeFilter, Filter, StringFilter, map_entity_field
 from nhx.core.files.app.backends import FileInfo
 from nhx.core.files.app.backends.base import StorageConfigType
-from nhx.core.files.entities import DEFAULT_REVISION, Fileset, FilesetPurpose
+from nhx.core.files.entities import DEFAULT_COMMIT_REVISION, Fileset, FilesetPurpose
 from pydantic import Field
 
 FilesetPage = Page[FilesetOutput]
@@ -38,8 +38,7 @@ FilesetPage = Page[FilesetOutput]
 def fileset_output_from_entity(entity: Fileset) -> FilesetOutput:
     """Convert a Fileset domain entity to a FilesetOutput response DTO."""
     return FilesetOutput(
-        revision=entity.revision or DEFAULT_REVISION,
-        commit_revision=entity.commit_revision or DEFAULT_REVISION,
+        commit_revision=entity.commit_revision or DEFAULT_COMMIT_REVISION,
         id=entity.id,
         name=entity.name,
         workspace=entity.workspace,

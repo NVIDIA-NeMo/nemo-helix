@@ -12,12 +12,10 @@ import pytest
 from aiohttp import web
 from fastapi import HTTPException, Request
 from nhx.common.api.common import SecretRef
-from nhx.common.entities.client import EntityClient
 from nhx.common.files.storage_config import S3StorageConfig
 from nhx.core.files.api.endpoint_helpers import UPSTREAM_STORAGE_ACCESS_DETAIL
 from nhx.core.files.api.v2.filesets import endpoints
 from nhx.core.files.app.backends.s3 import S3AccessError, S3ConfigError, S3StorageImpl, S3UnavailableError
-from nhx.core.files.entities import Fileset
 
 
 @pytest.fixture
@@ -244,16 +242,14 @@ async def test_endpoint_upload_lengths(managed_upload, monkeypatch, multipart, s
         )
     request = upload_request(body, len(body), content_type)
     configure_endpoint(monkeypatch, impl)
-    store = AsyncMock(spec=EntityClient)
-    store.update.side_effect = lambda entity: entity
-    result = await endpoints.upload_file("ws", "files", "file", request, store, MagicMock(), MagicMock())
+    result = await endpoints.upload_file("ws", "files", "file", request, MagicMock(), MagicMock(), MagicMock())
     assert result.size == size
     assert state.saved == data
 
 
 def configure_endpoint(monkeypatch, impl):
     """Resolve a fileset to the real loopback S3 backend."""
-    fileset = Fileset(name="files", workspace="ws", storage=impl.config, purpose="generic")
+    fileset = SimpleNamespace(name="files", storage=impl.config, custom_fields={})
     monkeypatch.setattr(endpoints, "get_fileset", AsyncMock(return_value=fileset))
     monkeypatch.setattr(endpoints, "resolve_storage_secrets_for_user", AsyncMock(return_value={}))
     monkeypatch.setattr(endpoints, "storage_impl_factory", lambda *args: impl)

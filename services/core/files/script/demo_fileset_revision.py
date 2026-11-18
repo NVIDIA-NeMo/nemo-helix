@@ -2,9 +2,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Verify fileset revision receipts through the Helix SDK and the configured context.
+"""Verify fileset commit markers through the Helix SDK and the configured context.
 
-Run from the repository root against a server containing the revision change:
+Run from the repository root against a server containing the commit marker change:
     uv run services/core/files/script/demo_fileset_revision.py --workspace default
 """
 
@@ -16,36 +16,26 @@ from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetOutput, UpdateFilesetRequest
 
 
-def require_revision(value: str | None) -> str:
+def require_commit_revision(value: str | None) -> str:
     if not value:
-        raise RuntimeError("No revision returned. Use an SDK and server containing the fileset revision change.")
+        raise RuntimeError("No commit revision returned. Use an SDK and server containing the fileset commit change.")
     return value
 
 
-def verify_change(
-    files: FilesClient, fileset: FilesetOutput, previous: str, receipt: str | None, operation: str
-) -> str:
-    assigned = require_revision(receipt)
-    if assigned == previous:
-        raise RuntimeError(f"{operation}: revision did not change")
+def verify_unchanged(files: FilesClient, fileset: FilesetOutput, operation: str) -> None:
     observed = files.get_fileset_by_id(workspace=fileset.workspace, fileset_id=fileset.id).data()
     if observed.commit_revision != fileset.commit_revision:
         raise RuntimeError(f"{operation}: an ordinary mutation changed the commit marker")
-    if observed.revision != assigned:
-        raise RuntimeError(f"{operation}: GET revision {observed.revision!r} differs from receipt {assigned!r}")
-    print(f"{operation} verified: {previous} -> {assigned}")
-    return assigned
+    print(f"{operation} verified: commit marker unchanged")
 
 
-def verify_commit(files: FilesClient, fileset: FilesetOutput, previous: str, modification: str) -> str:
+def verify_commit(files: FilesClient, fileset: FilesetOutput) -> str:
     committed = files.commit_fileset(workspace=fileset.workspace, name=fileset.name).data()
-    token = require_revision(committed.commit_revision)
+    token = require_commit_revision(committed.commit_revision)
     observed = files.get_fileset_by_id(workspace=fileset.workspace, fileset_id=fileset.id).data()
-    if token == previous or observed.commit_revision != token:
+    if token == fileset.commit_revision or observed.commit_revision != token:
         raise RuntimeError("Commit: marker did not advance or GET does not match its receipt")
-    if committed.revision != modification or observed.revision != modification:
-        raise RuntimeError("Commit: modification revision changed")
-    print(f"Commit verified: {previous} -> {token}; modification revision unchanged")
+    print(f"Commit verified: {fileset.commit_revision} -> {token}")
     return token
 
 
@@ -55,32 +45,29 @@ def run_demo(files: FilesClient, *, workspace: str, name: str, keep: bool = Fals
         workspace=workspace, body=CreateFilesetRequest(name=name, description="SDK revision demo")
     ).data()
     try:
-        previous = require_revision(fileset.revision)
-        fileset.commit_revision = require_revision(fileset.commit_revision)
-        print(f"Created {workspace}/{name}: modification={previous}, commit={fileset.commit_revision}")
-        fileset.commit_revision = verify_commit(files, fileset, fileset.commit_revision, previous)
+        fileset.commit_revision = require_commit_revision(fileset.commit_revision)
+        print(f"Created {workspace}/{name}: commit={fileset.commit_revision}")
+        fileset.commit_revision = verify_commit(files, fileset)
         for operation, content in (("Upload", b"first version\n"), ("Overwrite", b"second version\n")):
-            uploaded = files.upload_file(workspace=workspace, name=name, path="demo.txt", content=content).data()
-            previous = verify_change(files, fileset, previous, uploaded.fileset_revision, operation)
+            files.upload_file(workspace=workspace, name=name, path="demo.txt", content=content).data()
+            verify_unchanged(files, fileset, operation)
             downloaded = files.download_file(workspace=workspace, name=name, path="demo.txt").read()
             if downloaded != content:
                 raise RuntimeError(f"{operation}: downloaded content differs from uploaded content")
 
         description = "SDK revision demo: metadata updated"
-        updated = files.update_fileset(
-            workspace=workspace, name=name, body=UpdateFilesetRequest(description=description)
-        ).data()
-        previous = verify_change(files, fileset, previous, updated.revision, "Metadata update")
+        files.update_fileset(workspace=workspace, name=name, body=UpdateFilesetRequest(description=description)).data()
+        verify_unchanged(files, fileset, "Metadata update")
         if files.get_fileset(workspace=workspace, name=name).data().description != description:
             raise RuntimeError("Metadata update: description was not saved")
 
-        deleted = files.delete_file(workspace=workspace, name=name, path="demo.txt").data()
-        previous = verify_change(files, fileset, previous, deleted.fileset_revision, "Delete")
-        fileset.commit_revision = verify_commit(files, fileset, fileset.commit_revision, previous)
-        verify_commit(files, fileset, fileset.commit_revision, previous)
+        files.delete_file(workspace=workspace, name=name, path="demo.txt").data()
+        verify_unchanged(files, fileset, "Delete")
+        fileset.commit_revision = verify_commit(files, fileset)
+        verify_commit(files, fileset)
         if files.list_files(workspace=workspace, name=name).data().data:
             raise RuntimeError("Delete: fileset is not empty")
-        print("PASS: SDK revision receipts and file contents verified.")
+        print("PASS: SDK commit markers and file contents verified.")
     finally:
         if keep:
             print(f"Kept fileset {workspace}/{name}")

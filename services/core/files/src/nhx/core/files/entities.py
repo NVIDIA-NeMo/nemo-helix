@@ -13,7 +13,7 @@ from nhx.common.files.metadata import FilesetMetadata
 from nhx.core.files.app.backends.factory import StorageConfig
 from pydantic import Field
 
-DEFAULT_REVISION = "00000000-0000-0000-0000-000000000000"
+DEFAULT_COMMIT_REVISION = "00000000-0000-0000-0000-000000000000"
 
 
 class Fileset(EntityBase):
@@ -34,10 +34,8 @@ class Fileset(EntityBase):
         description="Purpose-specific metadata for the fileset.",
     )
 
-    revision: str = Field(default=DEFAULT_REVISION, description="Opaque token assigned by Files service on mutation.")
-
     commit_revision: str = Field(
-        default=DEFAULT_REVISION, description="Opaque token assigned on creation and explicit commit."
+        default=DEFAULT_COMMIT_REVISION, description="Opaque token assigned on creation and explicit commit."
     )
 
     custom_fields: Dict[str, Any] = Field(default_factory=dict, description="Custom fields for the fileset.")
