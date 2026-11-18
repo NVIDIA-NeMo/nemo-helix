@@ -1304,6 +1304,17 @@ def studio_link(
     return json.dumps(result)
 
 
+def _with_option_objects(question: dict[str, Any]) -> dict[str, Any]:
+    """Studio renders only ``{"label": ...}`` options, so wrap bare string options."""
+    options = question.get("options")
+    if not isinstance(options, list):
+        return question
+    return {
+        **question,
+        "options": [{"label": option} if isinstance(option, str) else option for option in options],
+    }
+
+
 def ask_user_question(studio_session_id: str, questions: str | list[dict[str, Any]]) -> str:
     """Render one or more Studio multiple-choice questions."""
     if isinstance(questions, str):
@@ -1315,6 +1326,7 @@ def ask_user_question(studio_session_id: str, questions: str | list[dict[str, An
         parsed = questions
     if not isinstance(parsed, list) or not parsed or not all(isinstance(question, dict) for question in parsed):
         return "Error: `questions` must be a non-empty JSON array of question objects."
+    parsed = [_with_option_objects(question) for question in parsed]
     approval = _call_studio_tool(
         studio_session_id, "approval_prompt", {"tool_name": "AskUserQuestion", "input": {"questions": parsed}}
     )
