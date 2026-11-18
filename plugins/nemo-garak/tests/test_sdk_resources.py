@@ -427,25 +427,19 @@ class TestSyncJobMethods:
         assert body["spec"]["max_probe_retries"] == 0
         assert body["spec"]["fail_job_on_retries_exhausted"] is True
 
-    def test_submit_omits_publication_by_default(self) -> None:
-        platform = _SyncHelix()
-        platform.http.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
-
-        GarakPluginResource(platform).submit(config="my-cfg", target="my-tgt", workspace="ws")
-
-        assert platform.http.post.call_args.kwargs["json"]["spec"]["publication"] is None
-
     def test_submit_sends_publication(self) -> None:
         platform = _SyncHelix()
         platform.http.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
-        publication = PublicationSpec(intake=IntakePublicationSpec(evaluation_id="qwen-garak", granularity="probe"))
+        publication = PublicationSpec(intake=IntakePublicationSpec(evaluation_id="qwen-garak"))
 
         GarakPluginResource(platform).submit(config="my-cfg", target="my-tgt", workspace="ws", publication=publication)
 
         body = platform.http.post.call_args.kwargs["json"]
-        assert body["spec"]["publication"]["intake"]["evaluation_id"] == "qwen-garak"
-        assert body["spec"]["publication"]["intake"]["granularity"] == "probe"
-        assert body["spec"]["publication"]["intake"]["required"] is True
+        assert body["spec"]["publication"]["intake"] == {
+            "evaluation_id": "qwen-garak",
+            "agent_name": None,
+            "required": True,
+        }
 
     def test_run_passes_publication_and_the_client_to_the_job(self) -> None:
         platform = _SyncHelix()
@@ -603,7 +597,6 @@ async def test_async_run_resolves_names_and_calls_job_in_thread() -> None:
     spec_dict = call.args[1]
     assert spec_dict["config"]["name"] == "my-cfg"
     assert spec_dict["target"]["name"] == "my-tgt"
-    assert spec_dict["publication"] is None
     # The job gets a typed client adapted onto the SDK's transport.
     assert isinstance(call.kwargs["async_sdk"], AsyncNemoClient)
     assert call.kwargs["async_sdk"]._http is platform.http

@@ -139,7 +139,7 @@ The work happens entirely on the host running the SDK call — there is no remot
 | `probes_failed` | `int` | Number of probes that exhausted their retries. Present for `completed` and `partial` results. |
 | `error` | `str` | Failure reason. Present only when `status` is `"failed"`. |
 | `results` | `dict[str, dict]` | One entry per produced report artifact. Each value is a `ResultRef` (`{"name": str, "artifact_url": str}`). For local runs, `artifact_url` is a `file://` URL under the scheduler's temporary results directory. |
-| `publication` | `dict` | What publication did. Present only when the audit asked to publish. See [The `publication` Result](/documentation/vulnerability-scanning/publish-to-experiments#the-publication-result). |
+| `publication` | `dict` | What publication did. Present only when the audit asked to publish. See [Publish an Audit to Experiments](/documentation/vulnerability-scanning/publish-to-experiments#what-gets-published). |
 
 The `results` dict can contain up to three keys, each present only if the corresponding file was produced:
 

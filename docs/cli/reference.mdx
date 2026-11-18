@@ -9131,10 +9131,9 @@ nemo garak audit [OPTIONS] [COMMAND] [ARGS]...
 
 * `--max-probe-retries <INTEGER>`: Override `max_probe_retries` in the spec.
 * `--fail-job-on-retries-exhausted`: Override `fail_job_on_retries_exhausted` in the spec.
-* `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the audit does not create it.
+* `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. The audit does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published session. Defaults to the audit target's name.
-* `--publication.intake.agent-version`: Agent version recorded on each published session. An audit target carries no version, so this defaults to 'unknown'.
-* `--publication.intake.required`: Fail the audit when publication fails. Defaults to True so an audit that asked to publish does not report success with nothing in Experiments. The reports are saved before publication runs, so a failed audit still leaves them intact to re-publish. Set False to keep the audit successful and report the failure in its output instead.
+* `--publication.intake.required`: Fail the audit when publication fails. The reports are saved first either way.
 
 **Spec Source:**
 
@@ -9151,7 +9150,7 @@ nemo garak audit [OPTIONS] [COMMAND] [ARGS]...
 
 Job Spec flags are generated from the AuditInputSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `config`, `target`, `publication.intake.granularity`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `config`, `target`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**

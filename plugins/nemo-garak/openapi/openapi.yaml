@@ -1160,8 +1160,8 @@ components:
         publication:
           allOf:
           - $ref: '#/components/schemas/PublicationSpec'
-          description: Where the finished audit publishes its results, beyond its
-            report artifacts. Omit to publish nowhere.
+          description: Where the finished audit publishes its results. Omit to publish
+            nowhere.
       additionalProperties: false
       type: object
       required:
@@ -2096,57 +2096,27 @@ components:
           type: string
           minLength: 1
           title: Evaluation Id
-          description: Name of the existing Evaluation to publish under. Must already
-            exist; the audit does not create it.
-        granularity:
-          type: string
-          enum:
-          - attempt
-          - probe
-          title: Granularity
-          description: '''attempt'' publishes one session per scored model output,
-            with the prompt, the output and the detector score. ''probe'' publishes
-            one session per probe and detector with the pass rate only; use it when
-            an audit is too large to publish attempt by attempt.'
-          default: attempt
+          description: Name of the existing Evaluation to publish under. The audit
+            does not create it.
         agent_name:
           title: Agent Name
           description: Agent name recorded on each published session. Defaults to
             the audit target's name.
           type: string
           minLength: 1
-        agent_version:
-          type: string
-          minLength: 1
-          title: Agent Version
-          description: Agent version recorded on each published session. An audit
-            target carries no version, so this defaults to 'unknown'.
-          default: unknown
         required:
           type: boolean
           title: Required
-          description: Fail the audit when publication fails. Defaults to True so
-            an audit that asked to publish does not report success with nothing in
-            Experiments. The reports are saved before publication runs, so a failed
-            audit still leaves them intact to re-publish. Set False to keep the audit
-            successful and report the failure in its output instead.
+          description: Fail the audit when publication fails. The reports are saved
+            first either way.
           default: true
       additionalProperties: false
       type: object
       required:
       - evaluation_id
       title: IntakePublicationSpec
-      description: 'Publish this audit''s results to Intake, under an Evaluation that
+      description: Publish the audit's results to Intake, under an Evaluation that
         already exists.
-
-
-        ``evaluation_id`` is the *name* of a ``client.evaluations`` record, the same
-        value the Helix
-
-        Evals plugin takes in ``publication.intake.evaluation_id``. The audit never
-        creates the
-
-        Evaluation: a missing one is an error.'
     JobControl:
       properties:
         pause_ttl_seconds:

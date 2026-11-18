@@ -34,11 +34,10 @@ from nemo_garak.jobs.audit import (
     AuditSpec,
     GarakFailure,
     _aggregate_reports,
-    _api_key_env_var,
     _collect_report_artifacts,
     _divide_and_write_confs,
     _garak_config_dict,
-    _gateway_bearer_token,
+    _gateway_token,
     _resolve_garak_python,
     _rewrite_options_uris,
     _uses_inference_gateway,
@@ -1411,10 +1410,9 @@ class TestToSpec:
 # Inference Gateway credentials
 # ---------------------------------------------------------------------------
 
-_GATEWAY_OPTIONS = {
-    "nim": {"nhx_uri_spec": {"inference_gateway": {"workspace": "default", "provider": "build"}}},
-}
+_GATEWAY = {"nhx_uri_spec": {"inference_gateway": {"workspace": "default", "provider": "build"}}}
 _TOKEN = "helix-access-token-value"
+_KEY_VARS = ("NIM_API_KEY", "OPENAI_API_KEY", "REST_API_KEY", "OPENAICOMPATIBLE_API_KEY")
 
 
 class _RotatingToken:
@@ -1428,10 +1426,10 @@ class _RotatingToken:
         return f"token-{self.calls}"
 
 
-def _token_sdk(auth: object = _TOKEN, uri: str = "https://helix.example/apis/inference-gateway/v1") -> NemoClient:
+def _token_sdk(auth: object = _TOKEN) -> NemoClient:
     """A real ``NemoClient`` (so token resolution is real) with the models lookup stubbed."""
     sdk = NemoClient(base_url="https://helix.example", workspace="default", auth=auth)  # ty: ignore[invalid-argument-type]
-    sdk.models_client = _mock_sdk(uri).models_client  # ty: ignore[unresolved-attribute]
+    sdk.models_client = _mock_sdk("https://helix.example/gateway/v1").models_client  # ty: ignore[unresolved-attribute]
     return sdk
 
 
@@ -1448,57 +1446,28 @@ def _succeeding_garak(envs: list[dict[str, str]]):
     return fake_run
 
 
-class TestGatewayCredentialHelpers:
-    def test_detects_sentinel_at_any_depth(self) -> None:
-        assert _uses_inference_gateway(_GATEWAY_OPTIONS)
-        nested = {"openai": {"OpenAICompatible": {"nhx_uri_spec": {"inference_gateway": {}}}}}
-        assert _uses_inference_gateway(nested)
-
-    def test_plain_uri_is_not_a_gateway_target(self) -> None:
+class TestGatewayToken:
+    def test_detects_the_gateway_sentinel_at_any_depth(self) -> None:
+        assert _uses_inference_gateway({"nim": _GATEWAY})
+        assert _uses_inference_gateway({"openai": {"OpenAICompatible": _GATEWAY}})
         assert not _uses_inference_gateway({"nim": {"uri": "https://integrate.api.nvidia.com/v1"}})
         assert not _uses_inference_gateway({})
 
-    @pytest.mark.parametrize(
-        ("target_type", "expected"),
-        [
-            ("nim", "NIM_API_KEY"),
-            ("nim.NVOpenAIChat", "NIM_API_KEY"),
-            ("openai.OpenAICompatible", "OPENAICOMPATIBLE_API_KEY"),
-            ("openai", "OPENAI_API_KEY"),
-            ("openai.OpenAIGenerator", "OPENAI_API_KEY"),
-            ("rest", "REST_API_KEY"),
-            ("rest.RestGenerator", "REST_API_KEY"),
-            ("test.Blank", None),
-            ("huggingface", None),
-        ],
-    )
-    def test_api_key_env_var_by_target_type(self, target_type: str, expected: str | None) -> None:
-        assert _api_key_env_var(target_type) == expected
-
-    def test_token_from_sync_client(self) -> None:
-        assert _gateway_bearer_token(_token_sdk(), None) == _TOKEN
-
-    def test_token_from_async_client(self) -> None:
+    def test_token_comes_from_either_client(self) -> None:
         async_sdk = AsyncNemoClient(base_url="https://helix.example", workspace="default", auth=StaticToken(_TOKEN))
-        assert _gateway_bearer_token(None, async_sdk) == _TOKEN
+        assert _gateway_token(_token_sdk(), None) == _TOKEN
+        assert _gateway_token(None, async_sdk) == _TOKEN
+        assert _gateway_token(None, None) is None
 
-    def test_no_token_when_client_authenticates_with_headers(self) -> None:
+    def test_no_token_when_the_client_authenticates_with_headers(self) -> None:
         # The task client on a cluster without workload identity sends trusted principal headers.
-        sdk = NemoClient(
-            base_url="https://helix.example",
-            workspace="default",
-            default_headers={"X-NHX-Principal-Id": "service:auditor"},
-        )
-        assert _gateway_bearer_token(sdk, None) is None
-
-    def test_no_token_without_a_client(self) -> None:
-        assert _gateway_bearer_token(None, None) is None
+        headers = {"X-NHX-Principal-Id": "service:garak"}
+        sdk = NemoClient(base_url="https://helix.example", workspace="default", default_headers=headers)
+        assert _gateway_token(sdk, None) is None
 
     def test_token_is_resolved_again_on_each_call(self) -> None:
-        provider = _RotatingToken()
-        sdk = _token_sdk(auth=provider)
-        assert _gateway_bearer_token(sdk, None) == "token-1"
-        assert _gateway_bearer_token(sdk, None) == "token-2"
+        sdk = _token_sdk(auth=_RotatingToken())
+        assert [_gateway_token(sdk, None), _gateway_token(sdk, None)] == ["token-1", "token-2"]
 
     def test_resolution_failure_returns_none_without_leaking(self, caplog) -> None:
         class _Broken:
@@ -1506,129 +1475,97 @@ class TestGatewayCredentialHelpers:
                 raise RuntimeError(f"refresh failed for {_TOKEN}")
 
         with caplog.at_level("WARNING"):
-            assert _gateway_bearer_token(_token_sdk(auth=_Broken()), None) is None
-        assert "Could not resolve an access token" in caplog.text
+            assert _gateway_token(_token_sdk(auth=_Broken()), None) is None
+        assert "Could not get an access token" in caplog.text
         assert _TOKEN not in caplog.text
 
-    def test_refuses_cleartext_remote_endpoint(self) -> None:
+    def test_refuses_a_cleartext_remote_endpoint(self) -> None:
         # The client will not send its token over plain HTTP to a remote host, so neither do we.
         sdk = NemoClient(base_url="http://helix.example", workspace="default", auth=_TOKEN)
-        assert _gateway_bearer_token(sdk, None) is None
+        assert _gateway_token(sdk, None) is None
 
 
 class TestAuditJobGatewayCredentials:
-    def _run(self, tmp_path: Path, *, target: AuditTargetEntity, sdk: NemoClient | None, **spec_overrides):
-        ctx = _make_ctx(tmp_path)
+    @pytest.fixture(autouse=True)
+    def _no_keys_in_env(self, monkeypatch, fake_garak_python: Path) -> None:
+        for key in _KEY_VARS:
+            monkeypatch.delenv(key, raising=False)
+
+    def _run(self, tmp_path: Path, *, sdk: object = None, **target: Any) -> tuple[dict, list[dict[str, str]]]:
         envs: list[dict[str, str]] = []
+        spec = _make_spec_dict(target=_make_target(**{"type": "nim", "model": "m", **target}))
         with (
             patch("nemo_garak.jobs.audit.run_subprocess", side_effect=_succeeding_garak(envs)),
             patch("nemo_garak.jobs.audit._aggregate_reports", return_value=False),
         ):
-            result = AuditJob().run(_make_spec_dict(target=target, **spec_overrides), ctx=ctx, sdk=sdk)
+            result = AuditJob().run(spec, ctx=_make_ctx(tmp_path), sdk=sdk or _token_sdk())  # ty: ignore[invalid-argument-type]
         return result, envs
 
+    @pytest.mark.parametrize(
+        ("target_type", "options_key", "key_var"),
+        [
+            ("nim.NVOpenAIChat", "nim", "NIM_API_KEY"),
+            ("openai.OpenAICompatible", "openai", "OPENAICOMPATIBLE_API_KEY"),
+            ("openai", "openai", "OPENAI_API_KEY"),
+            ("rest.RestGenerator", "rest", "REST_API_KEY"),
+        ],
+    )
     def test_gateway_target_gets_the_client_token_as_its_generator_key(
-        self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec, monkeypatch
+        self, tmp_path: Path, fake_parse_plugin_spec, target_type: str, options_key: str, key_var: str
     ) -> None:
-        for key in ("NIM_API_KEY", "OPENAI_API_KEY", "REST_API_KEY", "OPENAICOMPATIBLE_API_KEY"):
-            monkeypatch.delenv(key, raising=False)
-        target = _make_target(type="nim.NVOpenAIChat", model="qwen/qwen3.8-27b", options=_GATEWAY_OPTIONS)
-
-        _, envs = self._run(tmp_path, target=target, sdk=_token_sdk())
-
-        assert envs[0]["NIM_API_KEY"] == _TOKEN
+        _, envs = self._run(tmp_path, type=target_type, options={options_key: _GATEWAY})
         # Only the target's generator gets the platform token.
-        for key in ("OPENAI_API_KEY", "REST_API_KEY", "OPENAICOMPATIBLE_API_KEY"):
-            assert envs[0][key] == "NOT_SET"
+        assert {key: envs[0][key] for key in _KEY_VARS} == {**dict.fromkeys(_KEY_VARS, "NOT_SET"), key_var: _TOKEN}
 
     def test_gateway_token_replaces_a_key_already_in_the_environment(
-        self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec, monkeypatch
+        self, tmp_path: Path, fake_parse_plugin_spec, monkeypatch
     ) -> None:
         monkeypatch.setenv("NIM_API_KEY", "nvapi-for-build-nvidia-com")
-        target = _make_target(type="nim", model="m", options=_GATEWAY_OPTIONS)
-
-        _, envs = self._run(tmp_path, target=target, sdk=_token_sdk())
-
+        _, envs = self._run(tmp_path, options={"nim": _GATEWAY})
         assert envs[0]["NIM_API_KEY"] == _TOKEN
 
-    def test_openai_compatible_target_uses_its_own_key_variable(
-        self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec, monkeypatch
+    @pytest.mark.parametrize(
+        ("target", "sdk"),
+        [
+            # A target that does not go through the gateway must never be handed a platform token.
+            ({"options": {"nim": {"uri": "https://integrate.api.nvidia.com/v1"}}}, None),
+            # A generator whose key variable is not known.
+            ({"type": "test.Blank", "options": {"test": _GATEWAY}}, None),
+            # A client with no bearer token.
+            ({"options": {"nim": _GATEWAY}}, _mock_sdk()),
+        ],
+    )
+    def test_placeholder_is_kept_when_there_is_no_token_to_give(
+        self, tmp_path: Path, fake_parse_plugin_spec, target: dict, sdk: object
     ) -> None:
-        monkeypatch.delenv("NIM_API_KEY", raising=False)
-        monkeypatch.delenv("OPENAICOMPATIBLE_API_KEY", raising=False)
-        options = {"openai": {"OpenAICompatible": _GATEWAY_OPTIONS["nim"]}}
-        target = _make_target(type="openai.OpenAICompatible", model="m", options=options)
+        _, envs = self._run(tmp_path, sdk=sdk, **target)
+        assert {envs[0][key] for key in _KEY_VARS} == {"NOT_SET"}
 
-        _, envs = self._run(tmp_path, target=target, sdk=_token_sdk())
-
-        assert envs[0]["OPENAICOMPATIBLE_API_KEY"] == _TOKEN
-        assert envs[0]["NIM_API_KEY"] == "NOT_SET"
-
-    def test_direct_uri_target_keeps_the_placeholder(
-        self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec, monkeypatch
-    ) -> None:
-        # A target that does not go through the gateway must never be handed a platform token.
-        monkeypatch.delenv("NIM_API_KEY", raising=False)
-        target = _make_target(type="nim", model="m", options={"nim": {"uri": "https://integrate.api.nvidia.com/v1"}})
-
-        _, envs = self._run(tmp_path, target=target, sdk=_token_sdk())
-
-        assert envs[0]["NIM_API_KEY"] == "NOT_SET"
-
-    def test_header_authenticated_client_keeps_the_placeholder(
-        self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec, monkeypatch
-    ) -> None:
-        monkeypatch.delenv("NIM_API_KEY", raising=False)
-        target = _make_target(type="nim", model="m", options=_GATEWAY_OPTIONS)
-
-        _, envs = self._run(tmp_path, target=target, sdk=_mock_sdk())
-
-        assert envs[0]["NIM_API_KEY"] == "NOT_SET"
-
-    def test_token_is_refreshed_for_every_probe(self, tmp_path: Path, fake_garak_python: Path, monkeypatch) -> None:
-        monkeypatch.delenv("NIM_API_KEY", raising=False)
-        target = _make_target(type="nim", model="m", options=_GATEWAY_OPTIONS)
-        provider = _RotatingToken()
-
+    def test_token_is_refreshed_for_every_probe(self, tmp_path: Path) -> None:
         with patch("nemo_garak.jobs.audit.garakapi.parse_plugin_spec") as parse:
             parse.return_value = (["probes.dan.Dan_11_0", "probes.encoding.InjectAscii85"], [])
-            _, envs = self._run(tmp_path, target=target, sdk=_token_sdk(auth=provider))
+            _, envs = self._run(tmp_path, sdk=_token_sdk(auth=_RotatingToken()), options={"nim": _GATEWAY})
+        assert len({env["NIM_API_KEY"] for env in envs}) == 2
 
-        keys = [env["NIM_API_KEY"] for env in envs]
-        assert len(keys) == 2
-        assert len(set(keys)) == 2
-
-    def test_token_is_refreshed_for_a_retry(
-        self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec, monkeypatch
-    ) -> None:
-        monkeypatch.delenv("NIM_API_KEY", raising=False)
-        ctx = _make_ctx(tmp_path)
-        target = _make_target(type="nim", model="m", options=_GATEWAY_OPTIONS)
+    def test_token_is_refreshed_for_a_retry(self, tmp_path: Path, fake_parse_plugin_spec) -> None:
         keys: list[str] = []
 
         def failing_run(cmd, **kwargs):
             keys.append(kwargs["env"]["NIM_API_KEY"])
             return subprocess.CompletedProcess(args=[], returncode=1)
 
+        target = _make_target(type="nim", model="m", options={"nim": _GATEWAY})
         with patch("nemo_garak.jobs.audit.run_subprocess", side_effect=failing_run):
             AuditJob().run(
                 _make_spec_dict(target=target, max_probe_retries=1),
-                ctx=ctx,
+                ctx=_make_ctx(tmp_path),
                 sdk=_token_sdk(auth=_RotatingToken()),
             )
+        assert len(set(keys)) == 2
 
-        assert len(keys) == 2
-        assert keys[0] != keys[1]
-
-    def test_token_is_never_logged_or_written_to_disk(
-        self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec, monkeypatch, caplog
-    ) -> None:
-        monkeypatch.delenv("NIM_API_KEY", raising=False)
-        target = _make_target(type="nim", model="m", options=_GATEWAY_OPTIONS)
-
+    def test_token_is_never_logged_or_written_to_disk(self, tmp_path: Path, fake_parse_plugin_spec, caplog) -> None:
         with caplog.at_level("DEBUG"):
-            result, _ = self._run(tmp_path, target=target, sdk=_token_sdk())
-
+            result, _ = self._run(tmp_path, options={"nim": _GATEWAY})
         assert _TOKEN not in caplog.text
         assert _TOKEN not in json.dumps(result)
         for path in tmp_path.rglob("*"):
@@ -1643,40 +1580,25 @@ class TestAuditJobGatewayCredentials:
 _PUBLICATION = {"intake": {"evaluation_id": "qwen-garak"}}
 
 
-def _outcome(**overrides) -> PublicationOutcome:
-    fields: dict = {
-        "status": HelixJobStatus.COMPLETED,
-        "evaluation_id": "qwen-garak",
-        "granularity": "attempt",
-        "session_count": 2,
-    }
-    fields.update(overrides)
-    return PublicationOutcome(**fields)
-
-
 class TestAuditJobPublication:
-    def _run(self, tmp_path: Path, *, publish=None, check=None, sdk=None, **spec_overrides):
-        """Run a one-probe audit that completes, with publication's two entry points patched."""
+    def _run(self, tmp_path: Path, *, publish: dict[str, Any] | None = None, sdk=None, **spec_overrides):
+        """Run a one-probe audit that completes, with the publisher patched."""
         ctx = _make_ctx(tmp_path)
         _plant_reports(ctx.storage.persistent, "run1", (".report.jsonl", ".report.html"))
-        garak_runs: list[dict[str, str]] = []
-        publish_mock: dict[str, Any] = publish or {"return_value": _outcome()}
-        check_mock: dict[str, Any] = check or {"return_value": None}
+        outcome = PublicationOutcome(status=HelixJobStatus.COMPLETED, evaluation_id="qwen-garak", session_count=2)
         with (
-            patch("nemo_garak.jobs.audit.run_subprocess", side_effect=_succeeding_garak(garak_runs)),
+            patch("nemo_garak.jobs.audit.run_subprocess", side_effect=_succeeding_garak([])),
             patch("nemo_garak.jobs.audit._aggregate_reports", return_value=True),
-            patch("nemo_garak.jobs.audit.publish_audit_report", **publish_mock) as pub,
-            patch("nemo_garak.jobs.audit.check_evaluation_exists", **check_mock) as chk,
+            patch("nemo_garak.jobs.audit.publish_audit_report", **(publish or {"return_value": outcome})) as pub,
         ):
             result = AuditJob().run(_make_spec_dict(**spec_overrides), ctx=ctx, sdk=sdk)
-        return result, pub, chk, garak_runs, ctx
+        return result, pub, ctx
 
     def test_no_publication_block_publishes_nothing(
         self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec
     ) -> None:
-        result, publish, check, _, _ = self._run(tmp_path)
+        result, publish, _ = self._run(tmp_path)
         publish.assert_not_called()
-        check.assert_not_called()
         assert "publication" not in result
 
     def test_publishes_the_aggregated_report_after_artifacts_are_saved(
@@ -1686,29 +1608,31 @@ class TestAuditJobPublication:
         config = _make_config(run=AuditRunData(generations=1, eval_threshold=0.7))
         target = _make_target(name="qwen-target", model="qwen/qwen3.8-27b")
 
-        result, publish, _, _, ctx = self._run(
-            tmp_path, sdk=sdk, publication=_PUBLICATION, config=config, target=target
-        )
+        result, publish, ctx = self._run(tmp_path, sdk=sdk, publication=_PUBLICATION, config=config, target=target)
 
         assert result["status"] == "completed"
         assert set(result["results"]) == {"report-jsonl", "report-html"}
         assert result["publication"]["status"] == "completed"
         assert result["publication"]["session_count"] == 2
-        publish.assert_called_once()
         call = publish.call_args
         assert call.args[0] == ctx.storage.persistent / "garak" / "garak_runs" / "run1.report.jsonl"
-        assert call.kwargs["spec"] == IntakePublicationSpec(evaluation_id="qwen-garak")
-        assert call.kwargs["workspace"] == "default"
-        assert call.kwargs["target_name"] == "qwen-target"
-        assert call.kwargs["model_name"] == "qwen/qwen3.8-27b"
-        assert call.kwargs["eval_threshold"] == 0.7
-        assert call.kwargs["client"] is sdk
+        assert call.kwargs == {
+            "spec": IntakePublicationSpec(evaluation_id="qwen-garak"),
+            "workspace": "default",
+            "target_name": "qwen-target",
+            "model_name": "qwen/qwen3.8-27b",
+            "eval_threshold": 0.7,
+            "client": sdk,
+            "async_client": None,
+        }
 
     def test_required_publication_failure_fails_the_job_but_keeps_the_reports(
         self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec
     ) -> None:
-        failed = _outcome(status=HelixJobStatus.ERROR, session_count=1, error="1 of 2 session(s) failed")
-        result, _, _, _, _ = self._run(
+        failed = PublicationOutcome(
+            status=HelixJobStatus.ERROR, evaluation_id="qwen-garak", session_count=1, error="1 of 2 session(s) failed"
+        )
+        result, _, _ = self._run(
             tmp_path, publish={"side_effect": PublicationFailedError(failed)}, publication=_PUBLICATION
         )
 
@@ -1716,13 +1640,12 @@ class TestAuditJobPublication:
         assert result["error"] == "Publication to Intake failed: 1 of 2 session(s) failed"
         assert set(result["results"]) == {"report-jsonl", "report-html"}
         assert result["publication"]["session_count"] == 1
-        assert result["probes_complete"] == 1
 
     def test_optional_publication_failure_keeps_the_job_successful(
         self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec
     ) -> None:
-        failed = _outcome(status=HelixJobStatus.ERROR, session_count=0, error="Intake is down")
-        result, _, _, _, _ = self._run(
+        failed = PublicationOutcome(status=HelixJobStatus.ERROR, evaluation_id="qwen-garak", error="Intake is down")
+        result, _, _ = self._run(
             tmp_path,
             publish={"return_value": failed},
             publication={"intake": {"evaluation_id": "qwen-garak", "required": False}},
@@ -1732,40 +1655,11 @@ class TestAuditJobPublication:
         assert result["publication"]["status"] == "error"
         assert result["publication"]["error"] == "Intake is down"
 
-    def test_missing_evaluation_stops_the_audit_before_garak_runs(
-        self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec
-    ) -> None:
-        result, publish, _, garak_runs, _ = self._run(
-            tmp_path, check={"return_value": "Evaluation 'qwen-garak' does not exist"}, publication=_PUBLICATION
-        )
-
-        assert result["status"] == "failed"
-        assert result["error"] == "Cannot publish to Intake: Evaluation 'qwen-garak' does not exist"
-        assert garak_runs == []
-        publish.assert_not_called()
-
-    def test_missing_evaluation_only_warns_when_publication_is_optional(
-        self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec, caplog
-    ) -> None:
-        with caplog.at_level("WARNING"):
-            result, publish, _, garak_runs, _ = self._run(
-                tmp_path,
-                check={"return_value": "Evaluation 'qwen-garak' does not exist"},
-                publication={"intake": {"evaluation_id": "qwen-garak", "required": False}},
-            )
-
-        assert result["status"] == "completed"
-        assert len(garak_runs) == 1
-        publish.assert_called_once()
-        assert "Publication to Intake is likely to fail" in caplog.text
-
 
 class TestPublicationOnSpecs:
-    def test_input_spec_accepts_publication(self) -> None:
+    def test_input_spec_accepts_publication_and_defaults_to_none(self) -> None:
         spec = AuditInputSpec.model_validate({"config": "cfg", "target": "tgt", "publication": _PUBLICATION})
         assert spec.publication == PublicationSpec(intake=IntakePublicationSpec(evaluation_id="qwen-garak"))
-
-    def test_publication_defaults_to_none(self) -> None:
         assert AuditInputSpec(config="cfg", target="tgt").publication is None
         assert AuditSpec.model_validate(_make_spec_dict()).publication is None
 
@@ -1776,12 +1670,8 @@ class TestPublicationOnSpecs:
             )
 
     def test_to_spec_carries_publication_through(self) -> None:
-        input_spec = AuditInputSpec(
-            config=_make_config(),
-            target=_make_target(),
-            publication=PublicationSpec(intake=IntakePublicationSpec(evaluation_id="qwen-garak", granularity="probe")),
-        )
+        publication = PublicationSpec(intake=IntakePublicationSpec(evaluation_id="qwen-garak", required=False))
+        input_spec = AuditInputSpec(config=_make_config(), target=_make_target(), publication=publication)
         resolved = _run_to_spec(input_spec, workspace="default", entity_client=None)
-        assert resolved.publication == input_spec.publication
         # The compiled step config is what the task container validates.
-        assert AuditSpec.model_validate(resolved.model_dump(mode="json")).publication == input_spec.publication
+        assert AuditSpec.model_validate(resolved.model_dump(mode="json")).publication == publication

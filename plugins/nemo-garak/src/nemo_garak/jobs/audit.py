@@ -13,10 +13,6 @@ under persistent storage. SIGTERM is handled by saving partial results so a
 resumed invocation picks up from the last completed probe. Completed per-probe
 reports are aggregated via ``garak.analyze.aggregate_reports`` and registered
 as job results via :meth:`~nemo_helix_plugin.job_results.JobResults.save`.
-
-When the spec carries ``publication.intake``, the aggregated report is then published to Intake
-under the named Evaluation (see :mod:`nemo_garak.jobs.publication`), which is what puts the audit
-in Experiments.
 """
 
 from __future__ import annotations
@@ -38,12 +34,7 @@ from uuid import uuid4
 import garakapi
 import yaml
 from nemo_garak.entities import AuditConfig, AuditTarget
-from nemo_garak.jobs.publication import (
-    PublicationFailedError,
-    PublicationSpec,
-    check_evaluation_exists,
-    publish_audit_report,
-)
+from nemo_garak.jobs.publication import PublicationFailedError, PublicationSpec, publish_audit_report
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.response import NemoResponse
@@ -80,10 +71,14 @@ _REQUIRED_API_KEY_VARS = (
     "REST_API_KEY",
     "OPENAICOMPATIBLE_API_KEY",
 )
-_API_KEY_PLACEHOLDER = "NOT_SET"
 
-_AUTHORIZATION_HEADER = "authorization"
-_BEARER_PREFIX = "Bearer "
+# Variable garak reads the API key from, by target type (or its generator family).
+_API_KEY_VAR_BY_TARGET_TYPE = {
+    "nim": "NIM_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "openai.OpenAICompatible": "OPENAICOMPATIBLE_API_KEY",
+    "rest": "REST_API_KEY",
+}
 
 # Stdout/stderr can be MB-sized after a long garak run; keep just a tail in
 # the result envelope so it stays useful for diagnostics without blowing up
@@ -114,9 +109,7 @@ class AuditInputSpec(BaseModel):
     max_probe_retries: int = Field(default=0, ge=0)
     fail_job_on_retries_exhausted: bool = True
     publication: PublicationSpec | None = Field(
-        default=None,
-        description="Where the finished audit publishes its results, beyond its report artifacts. "
-        "Omit to publish nowhere.",
+        default=None, description="Where the finished audit publishes its results. Omit to publish nowhere."
     )
 
 
@@ -270,77 +263,47 @@ def _rewrite_options_uris(
 def _build_env(persistent_dir: Path) -> dict[str, str]:
     env = os.environ.copy()
     for key in _REQUIRED_API_KEY_VARS:
-        env.setdefault(key, _API_KEY_PLACEHOLDER)
+        env.setdefault(key, "NOT_SET")
     env["XDG_DATA_HOME"] = str(persistent_dir)
     env["GARAK_LOG_FILE"] = str(persistent_dir / "garak.log")
     return env
 
 
-def _uses_inference_gateway(options: dict) -> bool:
-    """Whether the target options name the platform's Inference Gateway (an ``nhx_uri_spec`` sentinel)."""
-    queue: list = list(options.values())
-    while queue:
-        node = queue.pop()
-        if not isinstance(node, dict):
-            continue
-        if node.get("nhx_uri_spec"):
-            return True
-        queue.extend(node.values())
-    return False
+def _uses_inference_gateway(node: object) -> bool:
+    """Whether target options carry an ``nhx_uri_spec`` sentinel at any depth."""
+    return isinstance(node, dict) and (
+        "nhx_uri_spec" in node or any(_uses_inference_gateway(value) for value in node.values())
+    )
 
 
-def _api_key_env_var(target_type: str) -> str | None:
-    """Environment variable garak reads the API key from for a target type, or ``None`` if unknown.
-
-    Only the target's own generator gets the platform token. The other key variables stay as they
-    are, so a detector or judge model that calls a third party never sends that party a platform
-    token.
-    """
-    module, _, class_name = target_type.partition(".")
-    if module == "nim":
-        return "NIM_API_KEY"
-    if module == "rest":
-        return "REST_API_KEY"
-    if module == "openai":
-        return "OPENAICOMPATIBLE_API_KEY" if class_name == "OpenAICompatible" else "OPENAI_API_KEY"
-    return None
-
-
-def _gateway_bearer_token(sdk: NemoClient | None, async_sdk: AsyncNemoClient | None) -> str | None:
+def _gateway_token(sdk: NemoClient | None, async_sdk: AsyncNemoClient | None) -> str | None:
     """The bearer token the platform client sends to the platform, or ``None`` when it sends none.
 
-    An auth-enabled Inference Gateway rejects garak's placeholder key, so a gateway target needs
-    the same token the client itself uses. Asking the client for request headers resolves the token
-    through its provider, which refreshes an expiring one; callers ask again per probe for that
-    reason. A client that authenticates with trusted principal headers has no token to give.
-
-    The token is returned for the garak subprocess environment only and is never logged.
+    An Inference Gateway with auth enabled rejects garak's placeholder key, so a gateway target
+    needs the client's own token. Asking for request headers resolves it through the client's
+    provider, which refreshes an expiring one. A client that authenticates with trusted principal
+    headers has no token to give. The token is never logged.
     """
     import asyncio
 
-    client = sdk if sdk is not None else async_sdk
-    if client is None:
-        return None
-    # The gateway is served from the client's own base URL, so this is the endpoint the client
-    # already sends its token to. Passing it keeps the client's cleartext-endpoint check in force.
-    url = str(client.base_url)
     try:
         if sdk is not None:
-            headers = sdk.request_headers(url=url)
+            headers = sdk.request_headers(url=str(sdk.base_url))
+        elif async_sdk is not None:
+            # As in `_rewrite_options_uris`: run() is on a worker thread here.
+            headers = asyncio.run(async_sdk.request_headers(url=str(async_sdk.base_url)))
         else:
-            assert async_sdk is not None
-            # Same reasoning as in `_rewrite_options_uris`: run() is on a worker thread here.
-            headers = asyncio.run(async_sdk.request_headers(url=url))
+            return None
     except Exception as exc:
         logger.warning(
-            "Could not resolve an access token from the platform client (%s); "
+            "Could not get an access token from the platform client (%s); "
             "garak will call the Inference Gateway without one.",
             type(exc).__name__,
         )
         return None
     for name, value in (headers or {}).items():
-        if name.lower() == _AUTHORIZATION_HEADER and value.startswith(_BEARER_PREFIX):
-            return value.removeprefix(_BEARER_PREFIX).strip() or None
+        if name.lower() == "authorization" and value.startswith("Bearer "):
+            return value.removeprefix("Bearer ").strip() or None
     return None
 
 
@@ -374,8 +337,7 @@ def _aggregate_reports(
     False if no per-probe JSONL files were found.
     """
     jsonl_pattern = str(persistent / "complete" / "*" / "garak" / report_dir_name / f"{report_prefix}.report.jsonl")
-    # Sorted so the lead report, whose run id and start time the aggregate keeps, is the same one
-    # every time. Publication keys sessions on both.
+    # Sorted so the lead report, whose start time the aggregate keeps, is the same one every time.
     jsonls = sorted(glob.glob(jsonl_pattern))
     if not jsonls:
         return False
@@ -637,27 +599,15 @@ class AuditJob(NemoJob):
                                 shutil.copy(src, probe_yaml)
                         shutil.rmtree(probe_dir)
 
-            intake_publication = spec.publication.intake if spec.publication is not None else None
-            if intake_publication is not None:
-                # Checked before the probes run so a mistyped Evaluation costs seconds, not an audit.
-                problem = check_evaluation_exists(
-                    intake_publication, workspace=ctx.workspace, client=sdk, async_client=async_sdk
-                )
-                if problem is not None and intake_publication.required:
-                    raise GarakFailure(f"Cannot publish to Intake: {problem}")
-                if problem is not None:
-                    logger.warning("Publication to Intake is likely to fail: %s", problem)
-
             env = _build_env(persistent)
-            gateway_key_var: str | None = None
-            if _uses_inference_gateway(spec.target.options):
-                gateway_key_var = _api_key_env_var(spec.target.type)
-                if gateway_key_var is None:
-                    logger.warning(
-                        "Target type %r reaches the Inference Gateway but its API key variable is not known; "
-                        "garak will call the gateway without a platform token.",
-                        spec.target.type,
-                    )
+            # Only the target's own generator gets the platform token, so a detector or judge
+            # model that calls a third party never sends that party one.
+            gateway_key_var = (
+                _API_KEY_VAR_BY_TARGET_TYPE.get(spec.target.type)
+                or _API_KEY_VAR_BY_TARGET_TYPE.get(spec.target.type.partition(".")[0])
+                if _uses_inference_gateway(spec.target.options)
+                else None
+            )
             base_cmd = [
                 garak_python,
                 "-m",
@@ -696,12 +646,9 @@ class AuditJob(NemoJob):
 
                 for retry_n in range(spec.max_probe_retries + 1):
                     probe_env = {**env, "XDG_DATA_HOME": str(probe_dir)}
-                    if gateway_key_var is not None:
-                        # Asked for on every try: an access token outlives a probe but not a long
-                        # audit, and a retry after a 401 needs a fresh one.
-                        gateway_token = _gateway_bearer_token(sdk, async_sdk)
-                        if gateway_token is not None:
-                            probe_env[gateway_key_var] = gateway_token
+                    # Asked for on every try: a token can expire during a long audit.
+                    if gateway_key_var and (gateway_token := _gateway_token(sdk, async_sdk)):
+                        probe_env[gateway_key_var] = gateway_token
                     self.report_progress(
                         ctx,
                         work_done=n_done,
@@ -765,19 +712,19 @@ class AuditJob(NemoJob):
             )
             n_failed = len(list(failed_dir.iterdir()))
             status = "completed" if n_failed == 0 else "partial"
-            result: dict = {
+            result = {
                 "status": status,
                 "probes_total": n_total,
                 "probes_complete": n_complete,
                 "probes_failed": n_failed,
                 "results": artifacts,
             }
-            if intake_publication is not None:
+            if spec.publication is not None and spec.publication.intake is not None:
                 # After the reports are saved, so a failed publish leaves them intact to re-publish.
                 try:
                     outcome = publish_audit_report(
                         agg_report_dir / f"{spec.config.reporting.report_prefix}.report.jsonl",
-                        spec=intake_publication,
+                        spec=spec.publication.intake,
                         workspace=ctx.workspace,
                         target_name=spec.target.name,
                         model_name=spec.target.model,
