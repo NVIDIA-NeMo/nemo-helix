@@ -49,6 +49,12 @@ nemo agents package \
 
 step "Removing any previous ${agent_name} deployment and registration"
 nemo agents undeploy "${deployment_name}" --yes >/dev/null 2>&1 || echo "No previous deployment"
+for _ in $(seq 1 60); do
+  nemo agents deployments get "${deployment_name}" >/dev/null 2>&1 || break
+  sleep 2
+done
+nemo agents deployments get "${deployment_name}" >/dev/null 2>&1 \
+  && fail "previous deployment ${deployment_name} is still being removed; re-run in a minute"
 nemo agents delete "${agent_name}" --yes >/dev/null 2>&1 || echo "No previous registration"
 
 step "Registering ${agent_name}"
