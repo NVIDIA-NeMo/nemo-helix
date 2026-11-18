@@ -453,6 +453,26 @@ failure between writing storage and saving the revision can leave changed files
 with the previous token. Older servers omit these fields; an older fileset on an
 updated server has a stable `legacy:<id>` token until its first mutation.
 
+Run the complete SDK demo from this source checkout against a server containing
+the fileset revision change:
+
+```bash
+uv run services/core/files/script/demo_fileset_revision.py --workspace default
+```
+
+It creates a dedicated fileset, uploads and overwrites a file, edits metadata, and
+deletes the file. Each mutation verifies its returned revision with an SDK GET;
+uploads also verify downloaded bytes. The script uses your active Helix context
+and removes its fileset afterward. Pass `--keep` to retain the empty fileset for
+inspection, or `--context` to select another configured deployment. A failed
+verification exits with an error.
+
+The Python SDK exposes `FilesetOutput.revision` and
+`FilesetFileOutput.fileset_revision` in both sync and async clients. For OTLP,
+read the receipt from `response.http_response.headers["X-Fileset-Revision"]`.
+Use the SDK from this checkout; older installed versions may discard the new
+response fields.
+
 ### Listing Files
 
 List all files in a fileset:

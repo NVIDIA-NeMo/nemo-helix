@@ -10,6 +10,8 @@ from typing import Any
 from unittest.mock import patch
 
 import httpx
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 DEFAULT_WORKSPACE = "default"
 FILESETS_URL = f"/apis/files/v2/workspaces/{DEFAULT_WORKSPACE}/filesets"
@@ -180,3 +182,22 @@ class TestRefreshFileset:
         response = test_client.post(f"{FILESETS_URL}/never-created/refresh")
 
         assert response.status_code == 404
+
+
+def test_sdk_refresh_returns_revision(files_client: FilesClient):
+    name = f"sdk-refresh-{uuid.uuid4().hex[:8]}"
+    with _github_at(FIRST_SHA):
+        created = files_client.create_fileset(
+            workspace=DEFAULT_WORKSPACE,
+            body=CreateFilesetRequest(
+                name=name, storage={"type": "github", "owner": "acme", "repo": "agents", "revision": "main"}
+            ),
+        ).data()
+    try:
+        with _github_at(SECOND_SHA):
+            refreshed = files_client.refresh_fileset(workspace=DEFAULT_WORKSPACE, name=name).data()
+        assert refreshed.revision and refreshed.revision != created.revision
+        observed = files_client.get_fileset(workspace=DEFAULT_WORKSPACE, name=name).data()
+        assert observed.revision == refreshed.revision
+    finally:
+        files_client.delete_fileset_by_id(workspace=DEFAULT_WORKSPACE, fileset_id=created.id)
