@@ -513,6 +513,10 @@ def _build_assistant_system_prompt(
                 "because Studio's approval prompt already confirms writes. If the user declines an approval, "
                 "say that nothing was changed and do not ask again for the same action."
             ),
+            (
+                "Never show tool names or tool-call syntax such as nemo_api(...) to the user. "
+                "Describe the Studio page to open or the action you will take instead."
+            ),
         ]
     )
 
