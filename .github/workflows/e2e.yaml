@@ -142,88 +142,6 @@ jobs:
           (github.event_name == 'workflow_dispatch' && inputs.publish)
         }}
 
-  # Separate from build-cpu-smoke-images, whose steps must stay identical to ci.yaml's. nhx-gym-host
-  # is a larger image that only kind-gym-sandbox-e2e uses, so its build cannot fail or delay the other
-  # Kind lanes. The registry and tag are computed as that job computes them, which is why the lane can
-  # pull this image by that job's outputs. The lane's first step checks that the two still agree.
-  build-gym-host-image:
-    name: Build sandboxed Gym host image
-    needs: [eligibility]
-    # Only useful published: the Kind lane pulls the image from GHCR. A manual run that does not
-    # publish skips this job, and with it the lane.
-    if: github.event_name != 'workflow_dispatch' || inputs.publish
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      image_registry: ${{ steps.bake-vars.outputs.image_registry }}
-      image_tag: ${{ steps.bake-vars.outputs.image_tag }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Free disk space
-        uses: ./.github/actions/free-disk-space
-        with:
-          disable_swap: "true"
-          remove_haskell: "true"
-          remove_java: "true"
-          remove_ruby: "true"
-          remove_swift: "true"
-          prune_docker: "true"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-        with:
-          name: nhx-builder
-          driver: docker-container
-          cleanup: true
-
-      - name: Configure bake variables
-        id: bake-vars
-        shell: bash
-        env:
-          INPUT_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -euo pipefail
-
-          image_registry="ghcr.io/${GITHUB_REPOSITORY,,}"
-          source_sha="${SOURCE_SHA:-$GITHUB_SHA}"
-          bake_tag="${INPUT_IMAGE_TAG:-$source_sha}"
-
-          {
-            printf 'IMAGE_REGISTRY=%s\n' "$image_registry"
-            printf 'BASE_REGISTRY=%s\n' "$image_registry"
-            printf 'CACHE_REGISTRY=%s\n' "$image_registry"
-            printf 'BAKE_TAG=%s\n' "$bake_tag"
-            printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
-          } >> "$GITHUB_ENV"
-          {
-            printf 'image_registry=%s\n' "$image_registry"
-            printf 'image_tag=%s\n' "$bake_tag"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Log in to GHCR
-        shell: bash
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-
-      - name: Print Docker bake graph
-        shell: bash
-        run: make docker-print TARGET=docker-gym-host
-
-      - name: Build and publish Gym host image
-        shell: bash
-        run: make docker-push TARGET=docker-gym-host
-
   kind-cpu-e2e:
     name: Kind CPU e2e
     needs: [eligibility, build-cpu-smoke-images]
@@ -378,7 +296,7 @@ jobs:
   # tests in kind-gym-e2e cannot share it.
   kind-gym-sandbox-e2e:
     name: Kind sandboxed Gym agent-evaluate e2e
-    needs: [eligibility, build-cpu-smoke-images, build-gym-host-image]
+    needs: [eligibility, build-cpu-smoke-images]
     if: needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
     # Each of its two tests may take up to 35 minutes. This covers cluster setup and one test
@@ -394,26 +312,6 @@ jobs:
       # tests look for Gym hosts there, and gym-sandbox.yaml builds the one URL a host may reach from it.
       RELEASE_NAMESPACE: nemo-helix
     steps:
-      # This lane pulls nhx-gym-host by build-cpu-smoke-images' registry and tag, while
-      # build-gym-host-image computes its own. Stop here if they differ, rather than at a pull that
-      # fails with a not-found from GHCR.
-      - name: Check the Gym host image was pushed where this lane pulls it
-        shell: bash
-        env:
-          GYM_HOST_REGISTRY: ${{ needs.build-gym-host-image.outputs.image_registry }}
-          GYM_HOST_TAG: ${{ needs.build-gym-host-image.outputs.image_tag }}
-          IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-        run: |
-          set -euo pipefail
-          pushed="${GYM_HOST_REGISTRY}/nhx-gym-host:${GYM_HOST_TAG}"
-          pulled="${IMAGE_REGISTRY}/nhx-gym-host:${IMAGE_TAG}"
-          if [ "${pushed}" != "${pulled}" ]; then
-            echo "::error::build-gym-host-image pushed ${pushed}, but this lane pulls ${pulled}." \
-              "Both jobs must compute the registry and tag the same way."
-            exit 1
-          fi
-
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -972,7 +870,6 @@ jobs:
       - policy-wasm
       - python-auth-idp-static-test
       - build-cpu-smoke-images
-      - build-gym-host-image
       - kind-cpu-e2e
       - kind-gym-e2e
       - kind-gym-sandbox-e2e

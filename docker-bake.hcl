@@ -409,17 +409,6 @@ group "docker-cpu-ci" {
   ]
 }
 
-# The sandboxed Gym host and its smoke test, which the Kind sandboxed Gym e2e
-# provisions through OpenSandbox. The E2E workflow builds this group in a job of
-# its own: the image is larger than the docker-cpu-ci set and one lane uses it, so
-# it stays out of pull request CI and cannot hold up the other E2E lanes.
-group "docker-gym-host" {
-  targets = [
-    "nhx-gym-host-docker",
-    "nhx-gym-host-smoke-test",
-  ]
-}
-
 group "docker-gpu" {
   targets = [
     "nhx-safe-synthesizer-tasks-docker",

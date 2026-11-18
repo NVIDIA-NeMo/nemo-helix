@@ -381,8 +381,8 @@ cluster of its own, and fails if any of them skips or if its report does not hol
 OpenSandbox (`install_opensandbox_minikube.sh` with `batchsandbox-kind-gym-template.yaml`, which ends
 by creating and deleting a sandbox), and installs the platform with `kind.yaml` and
 `gym-sandbox.yaml`.
-The job then pulls `nhx-gym-host` onto the node. That image comes from `build-gym-host-image`, a job
-of its own that builds the `docker-gym-host` bake group, so a failure there stops only this lane.
+The job then pulls `nhx-gym-host` onto the node. `build-cpu-smoke-images` publishes that image with
+the other CI images, from the `docker-cpu-ci` bake group.
 The colocated Gym tests stay in `kind-gym-e2e`: turning on `sandboxed_gym_default` sandboxes every
 Gym target on a cluster.
 
