@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from html import escape
@@ -14,6 +15,9 @@ from typing import ClassVar
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse
 from nemo_helix_plugin.authz import Permission
+from nemo_helix_plugin.community_plugins.assets import AssetStore
+from nemo_helix_plugin.community_plugins.registry import RegistryStore
+from nemo_helix_plugin.config import nhx_user_data_dir
 from nhx.common.config.base import get_auth_config
 from nhx.common.http_clients import shared_async_http_client
 from nhx.common.service import RouterConfig, Service
@@ -453,6 +457,28 @@ class StudioService(Service[StudioConfig]):
             if _CONDITIONAL_GET.is_not_modified(response.headers, request.headers):
                 return NotModifiedResponse(response.headers)
             return response
+
+        @app.get("/plugin-ui/{plugin_name}/{revision}/{filename}", include_in_schema=False)
+        async def serve_community_asset(plugin_name: str, revision: str, filename: str, request: Request) -> Response:
+            # This public, content-addressed route is intentionally under the
+            # existing static bundle auth bypass: browser import() cannot add a
+            # platform bearer. Only consented installed bytes are ever served.
+            store = RegistryStore(nhx_user_data_dir() / "plugins" / "installed.json")
+            try:
+                data, media_type = await asyncio.to_thread(AssetStore(store).read, plugin_name, revision, filename)
+            except FileNotFoundError as exc:
+                raise HTTPException(404, "Community plugin asset is not installed") from exc
+            except (OSError, ValueError) as exc:
+                raise HTTPException(503, "Community plugin asset failed integrity verification") from exc
+            etag = f'"{revision}-{filename}"'
+            headers = {
+                "ETag": etag,
+                "Cache-Control": "public, max-age=31536000, immutable",
+                "X-Content-Type-Options": "nosniff",
+            }
+            if request.headers.get("if-none-match") == etag:
+                return Response(status_code=304, headers=headers)
+            return Response(data, media_type=media_type, headers=headers)
 
         app.include_router(build_plugins_router(manifests))
 

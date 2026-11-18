@@ -9,6 +9,18 @@ describe('isTrustedBundleUrl', () => {
     expect(isTrustedBundleUrl('/plugin-ui/nemo-agents/index.js')).toBe(true);
   });
 
+  it('accepts content-addressed installed community bundles', () => {
+    expect(isTrustedBundleUrl(`/plugin-ui/tavily/${'a'.repeat(64)}/index.js`)).toBe(true);
+  });
+
+  it('rejects malformed revisions and alternate asset paths', () => {
+    for (const revision of ['a'.repeat(63), 'A'.repeat(64), '../escape', 'a%2fb']) {
+      expect(isTrustedBundleUrl(`/plugin-ui/tavily/${revision}/index.js`)).toBe(false);
+    }
+    expect(isTrustedBundleUrl(`/plugin-ui/tavily/${'a'.repeat(64)}/index.js?url=evil`)).toBe(false);
+    expect(isTrustedBundleUrl(`/apis/plugins/tavily/${'a'.repeat(64)}/index.js`)).toBe(false);
+  });
+
   it('rejects single-character plugin names', () => {
     expect(isTrustedBundleUrl('/plugin-ui/a/index.js')).toBe(false);
   });

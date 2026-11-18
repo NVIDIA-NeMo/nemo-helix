@@ -7,7 +7,7 @@
  */
 
 /** Plugin names must start with a letter and contain only lowercase alphanumeric chars and hyphens. */
-const VALID_BUNDLE_URL = /^\/plugin-ui\/[a-z][a-z0-9-]+\/index\.js$/;
+const VALID_BUNDLE_URL = /^\/plugin-ui\/[a-z][a-z0-9-]+\/(?:[a-f0-9]{64}\/)?index\.js$/;
 
 export function isTrustedBundleUrl(url: string): boolean {
   return VALID_BUNDLE_URL.test(url);

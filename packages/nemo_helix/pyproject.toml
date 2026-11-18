@@ -835,6 +835,7 @@ compass = "nemo_compass_plugin.service:CompassService"
 deployments = "nemo_deployments_plugin.service:DeploymentsService"
 customization = "nemo_customizer.router:CustomizationRouterService"
 builder = "nemo_builder_plugin.service:BuilderService"
+plugins = "nhx.platform_runner.community_plugins.gateway:ExternalPluginsService"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.skills"]
@@ -899,7 +900,7 @@ filesets = { source = "../../packages/filesets/src/filesets", module = "filesets
 nhx-sandbox = { source = "../../packages/nhx_sandbox/src/nhx_sandbox", module = "nhx_sandbox" }
 nhx-evals-sdk = { source = "../../packages/nhx_evals_sdk/src/nhx_evals_sdk", module = "nhx_evals_sdk", inherit = { "optional-dependencies" = ["harbor"] } }
 data-designer-nemo = { source = "../../packages/data_designer_nemo/src/data_designer_nemo", module = "data_designer_nemo" }
-nhx-platform-runner = { source = "../../packages/nhx_platform_runner/src/nhx/platform_runner", module = "nhx/platform_runner", deps_group = "services" }
+nhx-platform-runner = { source = "../../packages/nhx_platform_runner/src/nhx/platform_runner", module = "nhx/platform_runner", inherit = { "entry-points" = ["nemo.services"] }, deps_group = "services" }
 garak-api = { source = "../../packages/garak_api/garakapi", module = "garakapi", deps_group = "garak-service" }
 
 # Default first-party plugins
