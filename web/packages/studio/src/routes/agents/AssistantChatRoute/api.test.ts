@@ -125,6 +125,18 @@ describe('Assistant API helpers', () => {
   });
 
   it('posts messages with the active workspace', async () => {
+    const originalLocation = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        pathname: '/workspaces/default/virtual-models',
+        search: '?virtualModel=vm1',
+      },
+    });
+    onTestFinished(() => {
+      Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
+    });
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response('event: done\ndata: \n\n', { status: 200 }));
@@ -150,7 +162,7 @@ describe('Assistant API helpers', () => {
         body: JSON.stringify({
           message: 'list agents',
           studio_base_url: getExpectedStudioBaseUrl(),
-          studio_pathname: window.location.pathname,
+          studio_pathname: '/workspaces/default/virtual-models?virtualModel=vm1',
           workspace: 'default',
         }),
         method: 'POST',
