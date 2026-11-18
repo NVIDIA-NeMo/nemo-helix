@@ -7,6 +7,7 @@ Parity ports from ``k8s_nim_operator/nimservice_compiler.py`` — please review
 mapping of ``k8s_nim_operator_config`` → plugin ``K8sDeploymentConfig``.
 """
 
+import shlex
 from dataclasses import dataclass
 
 from nemo_deployments_plugin.entities import (
@@ -153,6 +154,39 @@ def _workload_identity_for_model(resolved: ResolvedPluginDeployment) -> Workload
 
 def _env(values: dict[str, str]) -> list[EnvVar]:
     return [EnvVar(name=name, value=value) for name, value in values.items()]
+
+
+# huggingface_hub logs this and exits 0 when `snapshot_download` cannot reach the
+# remote but `local_dir` is already non-empty. HF_HOME lives on that same mount,
+# so the hub cache alone makes a fresh volume look populated and a 401 is reported
+# as a completed pull.
+_REMOTE_LOCAL_DIR_FALLBACK = "Returning existing local_dir"
+
+
+def _weight_puller_script(repo_id: str, revision: str | None) -> str:
+    """Run `hf download` and fail if it kept a local dir the remote could not serve."""
+    revision_flag = f" --revision {shlex.quote(revision)}" if revision else ""
+    marker = shlex.quote(_REMOTE_LOCAL_DIR_FALLBACK)
+    return "\n".join(
+        [
+            "set -eu",
+            "log=$(mktemp)",
+            "set +e",
+            (
+                f"hf download {shlex.quote(repo_id)} --local-dir {shlex.quote(_WEIGHTS_MOUNT)}"
+                f'{revision_flag} >"$log" 2>&1'
+            ),
+            "status=$?",
+            "set -e",
+            'cat "$log" >&2',
+            f'if grep -F -q {marker} "$log"; then',
+            '  echo "weight puller failed: remote repository could not be accessed" >&2',
+            "  exit 1",
+            "fi",
+            'exit "$status"',
+            "",
+        ]
+    )
 
 
 def _server_env(engine: str, values: dict[str, str]) -> list[EnvVar]:
@@ -305,14 +339,17 @@ def compile_model_deployment(
             "HF_TOKEN": "service:models",
             "HF_HOME": _WEIGHTS_MOUNT,
         }
-        puller_args = ["download", f"{resolved.model_namespace}/{resolved.model_name}", "--local-dir", _WEIGHTS_MOUNT]
-        if resolved.model_revision:
-            puller_args.extend(["--revision", resolved.model_revision])
         puller = Container(
             name="weight-puller",
             image=resolved.huggingface_model_puller,
-            command=["hf"],
-            args=puller_args,
+            command=[
+                "sh",
+                "-c",
+                _weight_puller_script(
+                    f"{resolved.model_namespace}/{resolved.model_name}",
+                    resolved.model_revision,
+                ),
+            ],
             env=_env(puller_env),
             volumeMounts=[VolumeMount(name=names.volume, mountPath=_WEIGHTS_MOUNT)],
         )
