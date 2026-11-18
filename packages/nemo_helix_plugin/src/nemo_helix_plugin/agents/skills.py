@@ -7,9 +7,8 @@ A *skill* is an agent skill bundle — a directory with a ``SKILL.md`` plus scri
 stored as an immutable, content-addressed archive and versioned the way evals tasks are: a head
 record with tag pointers, and ``rev.<n>`` revisions addressed by ``workspace/name#<tag-or-digest>``.
 
-Shared here (not in the agents plugin) because nemo-evals consumes them: an eval target names
-skills by :class:`SkillRef`, submission freezes each one as a :class:`ResolvedSkill`, and the worker
-fetches exactly the :class:`SkillArchiveDescriptor` it was given.
+Shared here (not in the agents plugin) so other plugins can reference skills by :class:`SkillRef`
+and call the Agents service through the typed client without importing the agents plugin.
 """
 
 from __future__ import annotations
@@ -149,19 +148,6 @@ class Skill(EntityMetadata):
     archive: SkillArchiveDescriptor = Field(description="The revision's immutable archive.")
     taskset: str | None = Field(default=None, description="Linked taskset revision, digest-pinned, if any.")
     published_at: datetime | None = Field(default=None, description="When this revision was published.")
-
-
-class ResolvedSkill(BaseModel):
-    """A skill as frozen into an evaluation spec at submit time.
-
-    Everything the worker needs, and nothing it would have to look up again: the pinned ref for
-    provenance, and the exact archive to fetch and verify.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    ref: PinnedSkillRef = Field(description="The skill revision, pinned by content digest.")
-    archive: SkillArchiveDescriptor = Field(description="The archive to fetch and verify.")
 
 
 class ListSkillsQueryParams(TypedDict, total=False):
