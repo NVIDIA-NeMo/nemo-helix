@@ -5,30 +5,32 @@ from typing import Any
 
 from nemo_distillation_plugin.models import DistillInputs
 
+TASKS_REF = "default/esec-eval-config#eval-config.task-driven.json"
+DATASET_REF = "default/esec-eval-config#eval-config.dataset-driven.yml"
+
+#: What the eval config files in the fileset contain. The workflow carries only the references.
+EVAL_CONFIGS: dict[str, dict[str, Any]] = {
+    TASKS_REF: {
+        "tasks": [
+            {
+                "id": "classify-0",
+                "intent": "Classify.",
+                "inputs": {"instruction": "hi"},
+                "metrics": [{"type": "string-check"}],
+            }
+        ],
+        "max_concurrent_tasks": 1,
+    },
+    DATASET_REF: {
+        "dataset": "<workspace>/<fileset>#dataset.jsonl",
+        "metrics": [{"name": "accuracy"}],
+        "prompt_template": "{{ item.user_message }}",
+    },
+}
+
 EVALS = [
-    {
-        "name": "tasks",
-        "kind": "agent",
-        "spec": {
-            "tasks": [
-                {
-                    "id": "classify-0",
-                    "intent": "Classify.",
-                    "inputs": {"instruction": "hi"},
-                    "metrics": [{"type": "string-check"}],
-                }
-            ]
-        },
-    },
-    {
-        "name": "dataset",
-        "kind": "dataset",
-        "spec": {
-            "dataset": "default/esec#dataset.jsonl",
-            "metrics": [{"name": "accuracy"}],
-            "prompt_template": "{{ item.user_message }}",
-        },
-    },
+    {"name": "tasks", "kind": "agent", "config": TASKS_REF},
+    {"name": "dataset", "kind": "dataset", "config": DATASET_REF, "dataset": "default/esec#dataset.jsonl"},
 ]
 
 INPUTS: dict[str, Any] = {

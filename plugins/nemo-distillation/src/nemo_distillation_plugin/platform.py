@@ -9,6 +9,7 @@ import json
 import logging
 from typing import Any, cast
 
+import yaml
 from nemo_customizer.jobs.atif_convert import AtifConvertJob, AtifConvertSpec, fileset_prefix
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.agents.types import CreateDeploymentRequest, DeploymentMode, RegisterAgentRequest
@@ -266,6 +267,23 @@ class Platform:
             await self.files.delete_fileset(workspace=workspace, name=f"{agent_name}-ethos")
         except NotFoundError:
             return
+
+    async def read_eval_config(self, workspace: str, ref: str) -> dict[str, Any]:
+        """Read one eval config file (JSON or YAML) named ``[workspace/]fileset#path``."""
+        location, _, path = ref.partition("#")
+        ref_workspace, _, fileset = location.rpartition("/")
+        try:
+            response = await self.files.download_file(workspace=ref_workspace or workspace, name=fileset, path=path)
+            blob = await response.read()
+        except NotFoundError as exc:
+            raise ValueError(f"eval config {ref} not found") from exc
+        try:
+            config = yaml.safe_load(blob)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"eval config {ref} is not valid JSON or YAML: {exc}") from exc
+        if not isinstance(config, dict):
+            raise ValueError(f"eval config {ref} must be an object")
+        return config
 
     async def submit_eval(self, *, workspace: str, name: str, spec: dict[str, Any]) -> None:
         await self._post(f"/apis/evals/v2/workspaces/{workspace}/agent-evaluate/jobs", {"name": name, "spec": spec})
