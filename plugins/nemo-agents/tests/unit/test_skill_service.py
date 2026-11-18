@@ -13,6 +13,7 @@ from __future__ import annotations
 import builtins
 import io
 import math
+import sys
 import tarfile
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -27,6 +28,7 @@ from nemo_agents_plugin.entities import SkillEntity, SkillRevisionEntity
 from nemo_agents_plugin.skill_service import (
     LinkedTasksetNotFoundError,
     SkillExistsError,
+    SkillRevisionConflictError,
     SkillRevisionContentMismatchError,
     SkillRevisionNotFoundError,
     SkillService,
@@ -531,8 +533,9 @@ async def test_identical_concurrent_publish_reuses_the_winners_revision(harness:
     harness.source(body="v2\n")
     harness.store.contend[2] = None  # the winner published exactly this content, pointers not yet moved
 
-    skill, _ = await harness.service.publish_skill(WS, SKILL, _input())
+    skill, created = await harness.service.publish_skill(WS, SKILL, _input())
 
+    assert created is False  # the winner created it; this call only finished the pointers
     assert skill.revision == 2
     assert [r.revision for r in harness.store.revisions()] == [1, 2]
     assert harness.store.head().tags["latest"] == 2
@@ -634,3 +637,119 @@ async def test_failed_revision_one_rolls_back_the_head(harness: Harness, monkeyp
     with pytest.raises(RuntimeError, match="store down"):
         await harness.service.create_skill(WS, SKILL, _input())
     assert not any(isinstance(r, SkillEntity) for r in harness.store.records.values())
+
+
+@pytest.mark.parametrize("name", ["3d-tools", "a", "x" * 64, "ab-", "a--b"])
+async def test_names_the_entity_store_would_refuse_are_rejected_before_any_io(harness: Harness, name: str) -> None:
+    with pytest.raises(SkillValidationError):
+        await harness.service.create_skill(WS, name, _input())
+    assert harness.files.downloads == []
+    assert harness.authorize.calls == []
+
+
+async def test_a_63_character_name_is_accepted(harness: Harness) -> None:
+    name = "s" + "k" * 62
+    harness.files.put_dir("src", f"skills/{name}", {"SKILL.md": f"---\nname: {name}\ndescription: d\n---\n".encode()})
+
+    skill = await harness.service.create_skill(
+        WS, name, SkillInput(source=SkillSource(fileset=f"{WS}/src#skills/{name}"))
+    )
+
+    assert skill.name == name
+
+
+async def test_create_resumes_a_head_left_unpublished_by_a_crash(harness: Harness) -> None:
+    await harness.store.create(SkillEntity(name=SKILL, workspace=WS))  # head written, revision 1 never was
+
+    skill = await harness.service.create_skill(WS, SKILL, _input())
+
+    assert skill.revision == 1
+    assert harness.store.head().tags["latest"] == 1
+
+
+async def test_publish_finishes_an_unpublished_head(harness: Harness) -> None:
+    await harness.store.create(SkillEntity(name=SKILL, workspace=WS))
+
+    skill, created = await harness.service.publish_skill(WS, SKILL, _input())
+
+    assert (skill.revision, created) == (1, True)
+
+
+async def test_publish_allocates_above_children_whose_pointers_never_landed(harness: Harness) -> None:
+    await harness.service.create_skill(WS, SKILL, _input())
+    head = harness.store.head()
+    rev1 = harness.store.revisions()[0]
+    # Revisions 2-6 were created but their pointer writes never landed: the head still says latest=1.
+    for n in range(2, 7):
+        stray = rev1.model_copy(update={"name": revision_name(n), "revision": n})
+        stray.frontmatter = stray.frontmatter.model_copy(update={"description": f"stray {n}"})
+        stray.content_hash = revision_digest(stray)
+        stray._parent = head.id
+        await harness.store.create(stray)
+    harness.source(body="v2\n")
+
+    skill, created = await harness.service.publish_skill(WS, SKILL, _input())
+
+    # One conflict, then straight past every stray ordinal rather than five failed attempts.
+    assert (skill.revision, created) == (7, True)
+    assert harness.store.head().tags["latest"] == 7
+
+
+async def test_retry_refuses_to_write_into_a_recreated_skill(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    await harness.service.create_skill(WS, SKILL, _input())
+    harness.source(body="v2\n")
+    harness.store.contend[2] = "different"
+    real_create = harness.store.create
+
+    async def create_then_recreate_head(entity: EntityBase) -> EntityBase:
+        try:
+            return await real_create(entity)
+        except NemoEntityConflictError:
+            harness.store.head()._id = "id-recreated"  # deleted and recreated under the same name
+            raise
+
+    monkeypatch.setattr(harness.store, "create", create_then_recreate_head)
+
+    with pytest.raises(SkillRevisionConflictError, match="was deleted"):
+        await harness.service.publish_skill(WS, SKILL, _input())
+
+
+async def test_source_is_read_with_the_callers_client_not_the_service_client() -> None:
+    service_files, caller_files = FakeFiles(), FakeFiles()
+    caller_files.put_dir("src", f"skills/{SKILL}", skill_files())
+    store = FakeStore()
+    async with (
+        httpx.AsyncClient(transport=httpx.MockTransport(service_files.handler)) as service_http,
+        httpx.AsyncClient(transport=httpx.MockTransport(caller_files.handler)) as caller_http,
+    ):
+        service = SkillService(
+            store,
+            SkillArchiveStore(
+                AsyncFilesClient(base_url=BASE, workspace=WS, http_client=service_http),
+                source_files_client=AsyncFilesClient(base_url=BASE, workspace=WS, http_client=caller_http),
+            ),
+            authorize=Authorizer(),
+        )
+        await service.create_skill(WS, SKILL, _input())
+
+    assert all(path.startswith(f"skills/{SKILL}/") for path in caller_files.downloads)
+    assert caller_files.uploads == []
+    assert not any(path.startswith("skills/") for path in service_files.downloads)
+    assert service_files.uploads  # the archive went to the service-owned fileset
+
+
+async def test_a_pre_created_skills_fileset_on_external_storage_is_refused(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = _fileset_json
+
+    def external(workspace: str, name: str) -> dict[str, object]:
+        return {
+            **real(workspace, name),
+            "storage": {"type": "s3", "bucket": "mine", "prefix": "", "use_sdk_auth": True},
+        }
+
+    monkeypatch.setattr(sys.modules[__name__], "_fileset_json", external)
+
+    with pytest.raises(SkillStorageError, match="reserved"):
+        await harness.service.create_skill(WS, SKILL, _input())

@@ -189,22 +189,38 @@ class SkillService:
     async def create_skill(
         self, workspace: str, name: str, skill_input: SkillInput, *, project: str | None = None
     ) -> Skill:
-        """Create a skill and publish revision 1. Strict: an existing name raises :class:`SkillExistsError`.
+        """Create a skill and publish revision 1. Strict: a published name raises :class:`SkillExistsError`.
 
         The archive is built and stored before the head exists, so a bad source never leaves a
-        head behind. If publishing revision 1 fails after the head is created, the head is deleted.
+        head behind. If publishing revision 1 fails after this call created the head, the head is
+        deleted. A head with no published revision (a create that crashed between the two writes)
+        is resumed rather than refused, so retrying the same create recovers.
         """
         _validate_skill_name(name)
-        if await self._get_head(workspace, name) is not None:
+        existing = await self._get_head(workspace, name)
+        if existing is not None and LATEST_TAG in existing.tags:
             raise SkillExistsError(f"Skill '{workspace}/{name}' already exists")
         staged, tags = await self._prepare(workspace, name, skill_input)
-        try:
-            created = await self.entity_client.create(SkillEntity(name=name, workspace=workspace, project=project))
-        except NemoEntityConflictError as exc:
-            raise SkillExistsError(f"Skill '{workspace}/{name}' already exists") from exc
+        if existing is None:
+            try:
+                existing = await self.entity_client.create(SkillEntity(name=name, workspace=workspace, project=project))
+            except NemoEntityConflictError as exc:
+                existing = await self._get_head(workspace, name)
+                if existing is None or LATEST_TAG in existing.tags:
+                    raise SkillExistsError(f"Skill '{workspace}/{name}' already exists") from exc
+            else:
+                return await self._publish_first(existing, staged, tags)
+        revision, head, _ = await self._commit(existing, staged, tags)
+        logger.info(
+            "Skill created", extra={"workspace": sanitize_for_log(workspace), "skill_name": sanitize_for_log(name)}
+        )
+        return _to_skill(head, revision, all_tags=False)
+
+    async def _publish_first(self, created: SkillEntity, staged: SkillRevisionEntity, tags: set[str]) -> Skill:
+        """Publish revision 1 onto a head this call created; delete the head if that fails."""
         created_db_version = created.db_version
         try:
-            revision, head = await self._commit(created, staged, tags)
+            revision, head, _ = await self._commit(created, staged, tags)
         except Exception:
             logger.exception("Publishing skill revision 1 failed; rolling back the skill head")
             try:
@@ -213,7 +229,8 @@ class SkillService:
                 logger.exception("Rollback of the orphaned skill head also failed")
             raise
         logger.info(
-            "Skill created", extra={"workspace": sanitize_for_log(workspace), "skill_name": sanitize_for_log(name)}
+            "Skill created",
+            extra={"workspace": sanitize_for_log(head.workspace), "skill_name": sanitize_for_log(head.name)},
         )
         return _to_skill(head, revision, all_tags=False)
 
@@ -222,8 +239,9 @@ class SkillService:
     ) -> tuple[Skill, bool]:
         """Publish the next revision, creating the skill if absent. Returns ``(skill, created)``.
 
-        ``created`` is ``False`` when the content was already the latest revision (or an identical
-        publish raced ahead); the requested tags are still applied.
+        ``created`` is ``True`` only when this call created the revision. It is ``False`` when the
+        content was already the latest revision or an identical concurrent publish created it first
+        (the same outcome evals reports); the requested tags are still applied.
         """
         _validate_skill_name(name)
         head = await self._get_head(workspace, name)
@@ -232,10 +250,12 @@ class SkillService:
                 return await self.create_skill(workspace, name, skill_input, project=project), True
             except SkillExistsError:
                 head = await self._require_head(workspace, name)
+        if LATEST_TAG not in head.tags:
+            # An unpublished head left by a crashed create: finishing it is a create.
+            return await self.create_skill(workspace, name, skill_input, project=project), True
         staged, tags = await self._prepare(workspace, name, skill_input)
-        latest = head.tags.get(LATEST_TAG)
-        revision, head = await self._commit(head, staged, tags)
-        return _to_skill(head, revision, all_tags=False), revision.revision != latest
+        revision, head, created = await self._commit(head, staged, tags)
+        return _to_skill(head, revision, all_tags=False), created
 
     async def tag_revision(self, workspace: str, name: str, tag: str, fragment: str) -> Skill | None:
         """Point a user tag at the revision ``fragment`` names; ``None`` if the skill is absent.
@@ -408,6 +428,30 @@ class SkillService:
         except NotFoundError as exc:
             raise LinkedTasksetNotFoundError(f"Linked taskset revision {taskset_ref!r} does not exist") from exc
 
+    async def _reload_head(self, head: SkillEntity) -> SkillEntity:
+        """Re-read ``head`` for a retry, refusing a different skill that now has the same name.
+
+        A retry must keep writing to the skill it started on: if that head was deleted (and maybe
+        recreated under the same name) its ordinals mean nothing for the new one.
+        """
+        fresh = await self._get_head(head.workspace, head.name)
+        if fresh is None or fresh.id != head.id:
+            raise SkillRevisionConflictError(
+                f"Skill '{head.workspace}/{head.name}' was deleted while this publish was in progress"
+            )
+        return fresh
+
+    async def _highest_ordinal(self, head: SkillEntity) -> int:
+        """Highest stored revision ordinal of ``head`` (0 if none). Creation order matches ordinal order."""
+        result = await self.revision_client.list(
+            SkillRevisionEntity,
+            workspace=head.workspace,
+            filter_operation=ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=head.id),
+            sort="-created_at",
+            page_size=1,
+        )
+        return result.data[0].revision if result.data else 0
+
     async def _revision_at(self, head: SkillEntity, ordinal: int) -> SkillRevisionEntity | None:
         try:
             return await self.revision_client.get(
@@ -458,8 +502,11 @@ class SkillService:
 
     async def _commit(
         self, head: SkillEntity, staged: SkillRevisionEntity, tags: set[str]
-    ) -> tuple[SkillRevisionEntity, SkillEntity]:
-        """Create (or reuse) the revision for ``staged`` and point ``tags`` at it."""
+    ) -> tuple[SkillRevisionEntity, SkillEntity, bool]:
+        """Create (or reuse) the revision for ``staged`` and point ``tags`` at it.
+
+        Returns the revision, the updated head, and whether this call created the revision.
+        """
         digest = staged.content_hash
         for attempt in range(_MAX_ATTEMPTS):
             # Reuse an identical revision at or after ``latest``: the current one (a no-op republish), or
@@ -468,8 +515,10 @@ class SkillService:
             existing = await self._find_by_digest(head, digest)
             if existing is not None and existing.revision >= head.tags.get(LATEST_TAG, 0):
                 verify_revision(head, existing)
-                return existing, await self._point_tags(
-                    head, tags, existing.revision, latest_frontmatter=existing.frontmatter
+                return (
+                    existing,
+                    await self._point_tags(head, tags, existing.revision, latest_frontmatter=existing.frontmatter),
+                    False,
                 )
 
             ordinal = head.latest_revision + 1
@@ -482,12 +531,18 @@ class SkillService:
                     "Skill revision ordinal contended, retrying",
                     extra={"skill": f"{head.workspace}/{head.name}", "ordinal": ordinal, "attempt": attempt + 1},
                 )
-                fresh = await self._require_head(head.workspace, head.name)
-                # The failed create proves ``ordinal`` is taken even if the winner's pointer write never landed.
-                fresh.latest_revision = max(fresh.latest_revision, ordinal)
+                fresh = await self._reload_head(head)
+                # The failed create proves ``ordinal`` is taken even if the winner's pointer write never
+                # landed; children whose pointer writes never landed may occupy more, so allocate above the
+                # highest stored one rather than rediscovering them one attempt at a time.
+                fresh.latest_revision = max(fresh.latest_revision, ordinal, await self._highest_ordinal(fresh))
                 head = fresh
                 continue
-            return created, await self._point_tags(head, tags, ordinal, latest_frontmatter=created.frontmatter)
+            return (
+                created,
+                await self._point_tags(head, tags, ordinal, latest_frontmatter=created.frontmatter),
+                True,
+            )
         raise SkillRevisionConflictError(
             f"could not allocate a revision for skill '{head.workspace}/{head.name}' after {_MAX_ATTEMPTS} attempts"
         )
@@ -528,7 +583,7 @@ class SkillService:
                     "Skill pointer update contended, re-reading",
                     extra={"skill": f"{head.workspace}/{head.name}", "attempt": attempt + 1},
                 )
-                head = await self._require_head(head.workspace, head.name)
+                head = await self._reload_head(head)
         raise SkillRevisionConflictError(
             f"could not update revision pointers for skill '{head.workspace}/{head.name}' after {_MAX_ATTEMPTS} attempts"
         )
@@ -537,8 +592,8 @@ class SkillService:
 def _validate_skill_name(name: str) -> None:
     if not _SKILL_NAME_RE.fullmatch(name) or len(name) > SKILL_NAME_MAX_LENGTH:
         raise SkillValidationError(
-            f"Skill name {name!r} must be lowercase alphanumerics separated by single hyphens "
-            f"(at most {SKILL_NAME_MAX_LENGTH} characters)"
+            f"Skill name {name!r} must start with a letter and use lowercase alphanumerics separated by single hyphens "
+            f"(2-{SKILL_NAME_MAX_LENGTH} characters)"
         )
 
 

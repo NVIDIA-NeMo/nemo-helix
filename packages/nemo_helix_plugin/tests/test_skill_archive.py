@@ -489,7 +489,7 @@ def test_parse_frontmatter_splits_tags_and_extra() -> None:
 
 def test_parse_frontmatter_drops_empty_metadata_and_keeps_dates_as_text() -> None:
     frontmatter = parse_skill_frontmatter(
-        "\ufeff---\r\nname: a\r\ndescription: d\r\nupdated: 2026-01-01\r\nmetadata:\r\n  tags: []\r\n---\r\n"
+        "\ufeff---\r\nname: ab\r\ndescription: d\r\nupdated: 2026-01-01\r\nmetadata:\r\n  tags: []\r\n---\r\n"
     )
     assert frontmatter.tags == []
     assert frontmatter.extra == {"updated": "2026-01-01"}
@@ -499,7 +499,7 @@ def test_parse_frontmatter_drops_empty_metadata_and_keeps_dates_as_text() -> Non
     ("text", "match"),
     [
         ("# no frontmatter\n", "must start"),
-        ("---\nname: a\ndescription: d\n", "not closed"),
+        ("---\nname: ab\ndescription: d\n", "not closed"),
         ("---\nname: [unclosed\n---\n", "not valid YAML"),
         ("---\n- a\n- b\n---\n", "mapping"),
         ("---\ndescription: d\n---\n", "'name'"),
@@ -507,15 +507,15 @@ def test_parse_frontmatter_drops_empty_metadata_and_keeps_dates_as_text() -> Non
         ("---\nname: a--b\ndescription: d\n---\n", "'name'"),
         (f"---\nname: {'a' * 65}\ndescription: d\n---\n", "'name'"),
         ("---\nname: 12\ndescription: d\n---\n", "'name'"),
-        ("---\nname: a\n---\n", "'description'"),
-        ("---\nname: a\ndescription: '  '\n---\n", "'description'"),
-        ("---\nname: a\ndescription: d\nmetadata:\n  tags: pdf\n---\n", "metadata.tags"),
-        ("---\nname: a\ndescription: d\nmetadata:\n  tags: [1, 2]\n---\n", "metadata.tags"),
-        ("---\nname: a\ndescription: d\nx: &a [1]\ny: *a\n---\n", "aliases"),
-        ("---\nname: a\ndescription: d\nx: .inf\n---\n", "non-finite"),
-        ("---\nname: a\ndescription: d\n1: x\n---\n", "keys must be strings"),
-        ("---\nname: a\ndescription: d\nx: !!binary aGk=\n---\n", "non-JSON"),
-        ("---\nname: a\ndescription: d\nx: !!python/object:os.system {}\n---\n", "not valid YAML"),
+        ("---\nname: ab\n---\n", "'description'"),
+        ("---\nname: ab\ndescription: '  '\n---\n", "'description'"),
+        ("---\nname: ab\ndescription: d\nmetadata:\n  tags: pdf\n---\n", "metadata.tags"),
+        ("---\nname: ab\ndescription: d\nmetadata:\n  tags: [1, 2]\n---\n", "metadata.tags"),
+        ("---\nname: ab\ndescription: d\nx: &a [1]\ny: *a\n---\n", "aliases"),
+        ("---\nname: ab\ndescription: d\nx: .inf\n---\n", "non-finite"),
+        ("---\nname: ab\ndescription: d\n1: x\n---\n", "keys must be strings"),
+        ("---\nname: ab\ndescription: d\nx: !!binary aGk=\n---\n", "non-JSON"),
+        ("---\nname: ab\ndescription: d\nx: !!python/object:os.system {}\n---\n", "not valid YAML"),
         ("---\n" + "x: " + "y" * MAX_FRONTMATTER_BYTES + "\n---\n", "exceeds"),
     ],
     ids=[
@@ -554,7 +554,7 @@ def test_build_rejects_invalid_frontmatter_and_leaves_nothing(tmp_path: Path) ->
 
 def test_build_rejects_non_utf8_skill_md(tmp_path: Path) -> None:
     source = make_skill(tmp_path / "src")
-    (source / "SKILL.md").write_bytes(b"---\nname: a\ndescription: \xff\n---\n")
+    (source / "SKILL.md").write_bytes(b"---\nname: ab\ndescription: \xff\n---\n")
     with pytest.raises(SkillFrontmatterError, match="UTF-8"):
         build(source, tmp_path)
 
@@ -577,3 +577,9 @@ def test_verify_rejects_global_pax_header(tmp_path: Path) -> None:
     archive.write_bytes(buffer.getvalue())
     with pytest.raises(SkillArchivePathError, match="regular files and directories"):
         verify_skill_archive(archive, expected_files_hash=sha256(archive))
+
+
+def test_frontmatter_parse_ignores_a_huge_body() -> None:
+    # Millions of short lines after the block must not be split; only the bounded prefix is scanned.
+    skill_md = "---\nname: ab\ndescription: d\n---\n" + "x\n" * 5_000_000
+    assert parse_skill_frontmatter(skill_md).name == "ab"

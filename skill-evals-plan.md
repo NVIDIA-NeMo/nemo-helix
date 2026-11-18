@@ -73,8 +73,33 @@ searchable metadata, that eval work (and later registered agents) can reference.
 |----|-----------|--------|
 | A | Shared hash + ref syntax | Done (tag length 255/256 alignment open) |
 | B | Skill archive build/verify | Done |
-| G | Skill entities, storage, publish service | In progress |
-| I | Skill API routes, CLI, OpenAPI regen | Needs G |
+| G | Skill entities, storage, publish service | Done |
+| I | Skill API routes, CLI, OpenAPI regen | Done |
+
+## Known issues (tracked for later)
+
+- **Skills fileset is not reserved.** The Files service cannot reserve a fileset for a service, so
+  a workspace editor can pre-create `nemo-agents-skills` or overwrite or delete its objects. Every
+  read verifies the archive against its pinned hash, so tampering is detected rather than served,
+  but a tampered pin is then unusable. Today publish only refuses a pre-created fileset that is not
+  on platform storage.
+- **Executable bits are lost on publish.** The Files service does not keep file modes, so scripts
+  published from a fileset are archived `0644`, and a change that only adds `+x` publishes no new
+  revision. Fix: a mode-preserving source (e.g. uploading a pre-built archive).
+- **Archive builder trusts its source directory not to change while it runs.** A directory swapped
+  for a symlink mid-build could be followed (`O_NOFOLLOW` covers only the last path component), and
+  hard-linked files are accepted. Publish stages into a private temp directory first, so this
+  matters only for other callers of the builder.
+- **Files listing is not paginated.** Source staging validates every entry before allocating
+  anything, but the listing response itself is held in memory once.
+
+## Open question
+
+- **List filtering on frontmatter.** The head carries a search copy of the latest revision's
+  frontmatter, updated in the same locked write that moves `latest`. The entities service also
+  supports relationship filters (`{"revisions": {"frontmatter.tags": ...}}`, an `EXISTS` subquery
+  on child entities, registered in `services/core/entities/.../utils/relationships.py`), but that
+  matches *any* revision rather than the latest one.
 
 ## Separate issue (not today)
 

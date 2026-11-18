@@ -27,6 +27,7 @@ from typing import BinaryIO
 from nemo_helix_plugin.agents.skills import SkillArchiveDescriptor
 from nemo_helix_plugin.client.errors import NemoTransportError, NotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.storage_config import StorageConfigType
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.skill_archive import (
@@ -107,20 +108,33 @@ class _BoundedWriter:
 class SkillArchiveStore:
     """Stage skill sources and keep verified archives in the service-owned skills fileset.
 
-    ``files_client`` must be able to read the caller's source fileset and write the skills fileset.
-    It does not decide whether the *caller* may read the source; the service checks that first.
+    Two clients, so service authority never reads caller-supplied content:
+
+    - ``files_client`` writes and reads the service-owned skills fileset.
+    - ``source_files_client`` lists and downloads the caller's source. It must carry the *caller's*
+      authority, so the Files service applies the caller's own access (including any storage secret
+      behind the fileset). Defaults to ``files_client`` for callers that have only one client.
     """
 
-    def __init__(self, files_client: AsyncFilesClient, *, limits: SkillArchiveLimits = DEFAULT_LIMITS) -> None:
+    def __init__(
+        self,
+        files_client: AsyncFilesClient,
+        *,
+        source_files_client: AsyncFilesClient | None = None,
+        limits: SkillArchiveLimits = DEFAULT_LIMITS,
+    ) -> None:
         self.files_client = files_client
+        self.source_files_client = source_files_client or files_client
         self.limits = limits
 
     async def stage_source(self, source_ref: str, dest: Path) -> None:
         """Download the directory ``source_ref`` names into the empty private directory ``dest``.
 
-        Bounded before any byte moves (entry count, per-file and total size from the listing) and
-        again while streaming, since a listing is only a claim. Files are created exclusively, so a
-        listing with colliding paths fails rather than overwriting.
+        Every check on the listing — paths, path length, entry count including directories, per-file
+        and total size — runs before anything is created, and sizes are enforced again while
+        streaming, since a listing is only a claim. Files are created exclusively, so a listing with
+        colliding paths fails rather than overwriting. The Files listing is not paginated, so its
+        response is held in memory once; nothing is allocated per entry until it passes the checks.
 
         Raises:
             SkillSourceError: Missing fileset, empty directory, unsafe path, or a limit exceeded.
@@ -129,42 +143,50 @@ class SkillArchiveStore:
         prefix = f"{directory}/" if directory else ""
         try:
             listing = (
-                await self.files_client.list_files(
+                await self.source_files_client.list_files(
                     workspace=workspace, name=fileset, query_params={"path": directory} if directory else None
                 )
             ).data()
         except NotFoundError as exc:
             raise SkillSourceError(f"Source fileset {workspace}/{fileset} was not found") from exc
 
-        members: list[tuple[str, int]] = []
+        members: list[tuple[str, PurePosixPath, int]] = []
+        directories: set[PurePosixPath] = set()
+        total = 0
         for item in listing.data:
             path = item.path.lstrip("/")
             if prefix and not path.startswith(prefix):
                 continue
-            members.append((path, item.size))
-        if not members:
-            raise SkillSourceError(f"Source {source_ref!r} holds no files")
-        if len(members) > self.limits.max_entries:
-            raise SkillSourceError(f"Source {source_ref!r} holds more than {self.limits.max_entries} files")
-        total = 0
-        for path, size in members:
-            if size > self.limits.max_file_bytes:
-                raise SkillSourceError(f"Source file {path!r} exceeds the {self.limits.max_file_bytes}-byte limit")
-            total += size
-        if total > self.limits.max_total_payload_bytes:
-            raise SkillSourceError(
-                f"Source {source_ref!r} exceeds the {self.limits.max_total_payload_bytes}-byte limit"
-            )
-
-        remaining = self.limits.max_total_payload_bytes
-        for path, _ in members:
             relative = PurePosixPath(path[len(prefix) :])
             if not relative.parts or relative.is_absolute() or any(p in {"", ".", ".."} for p in relative.parts):
                 raise SkillSourceError(f"Source file path {path!r} is unsafe")
+            if len(str(relative).encode("utf-8")) > self.limits.max_path_length:
+                raise SkillSourceError(
+                    f"Source file path {path!r} exceeds the {self.limits.max_path_length}-byte limit"
+                )
+            if item.size > self.limits.max_file_bytes:
+                raise SkillSourceError(f"Source file {path!r} exceeds the {self.limits.max_file_bytes}-byte limit")
+            total += item.size
+            if total > self.limits.max_total_payload_bytes:
+                raise SkillSourceError(
+                    f"Source {source_ref!r} exceeds the {self.limits.max_total_payload_bytes}-byte limit"
+                )
+            directories.update(relative.parents)
+            # Files and directories both become archive entries.
+            if len(members) + 1 + len(directories) > self.limits.max_entries:
+                raise SkillSourceError(f"Source {source_ref!r} holds more than {self.limits.max_entries} entries")
+            members.append((path, relative, item.size))
+        if not members:
+            raise SkillSourceError(f"Source {source_ref!r} holds no files")
+
+        remaining = self.limits.max_total_payload_bytes
+        for path, relative, _ in members:
             target = dest.joinpath(*relative.parts)
             await asyncio.to_thread(target.parent.mkdir, mode=0o700, parents=True, exist_ok=True)
             limit = min(self.limits.max_file_bytes, remaining)
-            written = await self._download(workspace, fileset, path, target, limit=limit, what=f"Source file {path!r}")
+            written = await self._download(
+                self.source_files_client, workspace, fileset, path, target, limit=limit, what=f"Source file {path!r}"
+            )
             remaining -= written
 
     async def store(self, workspace: str, archive_path: Path, info: SkillArchiveInfo) -> SkillArchiveDescriptor:
@@ -226,6 +248,7 @@ class SkillArchiveStore:
         local = Path(name)
         try:
             await self._download(
+                self.files_client,
                 workspace,
                 fileset,
                 path,
@@ -246,7 +269,14 @@ class SkillArchiveStore:
         return info
 
     async def _ensure_fileset(self, workspace: str) -> None:
-        (
+        """Create the skills fileset if absent, and refuse one that is not plain platform storage.
+
+        Known gap: the Files service has no way to reserve a fileset for a service, so a workspace
+        editor can still pre-create it or overwrite its objects. Every read verifies the archive
+        against its pinned hash, so tampering is detected, not silently served. Refusing non-local
+        storage at least stops a pre-created fileset from pointing at storage the caller controls.
+        """
+        fileset = (
             await self.files_client.create_fileset(
                 workspace=workspace,
                 body=CreateFilesetRequest(
@@ -255,11 +285,25 @@ class SkillArchiveStore:
                 exist_ok=True,
             )
         ).data()
+        if fileset.storage.type != StorageConfigType.LOCAL:
+            raise SkillStorageError(
+                f"Fileset {workspace}/{SKILLS_FILESET_NAME} is reserved for skill archives and must use platform "
+                f"storage, but it uses {fileset.storage.type!r} storage"
+            )
 
     async def _download(
-        self, workspace: str, fileset: str, path: str, target: Path, *, limit: int, what: str, replace: bool = False
+        self,
+        client: AsyncFilesClient,
+        workspace: str,
+        fileset: str,
+        path: str,
+        target: Path,
+        *,
+        limit: int,
+        what: str,
+        replace: bool = False,
     ) -> int:
-        response = await self.files_client.download_file(workspace=workspace, name=fileset, path=path)
+        response = await client.download_file(workspace=workspace, name=fileset, path=path)
         mode = "wb" if replace else "xb"
         with target.open(mode) as output:
             writer = _BoundedWriter(output, limit, what)

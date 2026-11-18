@@ -133,8 +133,8 @@ def parse_skill_frontmatter(skill_md: str) -> SkillFrontmatter:
     description = fields.pop("description", None)
     if not isinstance(name, str) or not _SKILL_NAME_RE.fullmatch(name) or len(name) > SKILL_NAME_MAX_LENGTH:
         raise SkillFrontmatterError(
-            f"{SKILL_FILE_NAME} frontmatter 'name' must be lowercase alphanumerics separated by single hyphens "
-            f"(at most {SKILL_NAME_MAX_LENGTH} characters)"
+            f"{SKILL_FILE_NAME} frontmatter 'name' must start with a letter and use lowercase alphanumerics separated by single hyphens "
+            f"(2-{SKILL_NAME_MAX_LENGTH} characters)"
         )
     if not isinstance(description, str) or not description.strip():
         raise SkillFrontmatterError(f"{SKILL_FILE_NAME} frontmatter 'description' must be a non-empty string")
@@ -235,7 +235,11 @@ _FrontmatterLoader.yaml_implicit_resolvers = {
 
 def _frontmatter_block(skill_md: str) -> str:
     """Return the YAML text between the leading ``---`` line and the next ``---`` line."""
-    lines = skill_md.removeprefix("﻿").splitlines(keepends=True)
+    # Only the bounded prefix can hold a valid block (opening line, at most MAX_FRONTMATTER_BYTES of
+    # YAML, closing line), so a huge body is never split into lines. Characters are at least one
+    # UTF-8 byte, so this character cut never drops bytes the byte limit below would admit.
+    text = skill_md.removeprefix("﻿")[: MAX_FRONTMATTER_BYTES + 2 * (len(_FRONTMATTER_DELIMITER) + 2)]
+    lines = text.splitlines(keepends=True)
     if not lines or lines[0].rstrip() != _FRONTMATTER_DELIMITER:
         raise SkillFrontmatterError(f"{SKILL_FILE_NAME} must start with a '---' frontmatter block")
     size = 0
@@ -372,39 +376,40 @@ def _inventory_source(source_dir: Path, skill_name: str, limits: SkillArchiveLim
     pending: list[tuple[Path, str]] = [(source_dir, skill_name)]
     while pending:
         directory, archive_dir = pending.pop()
+        # Iterate rather than materialize, so an enormous directory hits the entry limit as it
+        # streams in instead of being listed into memory first.
         with os.scandir(directory) as iterator:
-            children = list(iterator)
-        for child in children:
-            if (
-                directory == source_dir
-                and child.name in EXCLUDED_TOP_LEVEL_DIRS
-                and child.is_dir(follow_symlinks=False)
-            ):
-                continue
-            name = f"{archive_dir}/{_normalise_segment(child.name)}"
-            _check_path_length(name, limits)
-            if name in seen:
-                raise SkillArchivePathError(f"Path {name!r} collides with another entry after normalisation")
-            seen.add(name)
-            if len(entries) >= limits.max_entries:
-                raise SkillArchiveLimitError(f"Skill has more than {limits.max_entries} entries")
-            info = child.stat(follow_symlinks=False)
-            path = Path(child.path)
-            if stat.S_ISDIR(info.st_mode):
-                entries.append(_SourceEntry(name, path, is_dir=True, mode=_DIR_MODE, size=0))
-                pending.append((path, name))
-            elif stat.S_ISREG(info.st_mode):
-                if info.st_size > limits.max_file_bytes:
-                    raise SkillArchiveLimitError(f"File {name!r} exceeds {limits.max_file_bytes} bytes")
-                payload += info.st_size
-                if payload > limits.max_total_payload_bytes:
-                    raise SkillArchiveLimitError(f"Skill payload exceeds {limits.max_total_payload_bytes} bytes")
-                mode = _EXEC_FILE_MODE if info.st_mode & 0o111 else _FILE_MODE
-                entries.append(_SourceEntry(name, path, is_dir=False, mode=mode, size=info.st_size))
-            elif stat.S_ISLNK(info.st_mode):
-                raise SkillArchivePathError(f"Symlinks are not allowed in a skill: {name!r}")
-            else:
-                raise SkillArchivePathError(f"Only regular files and directories are allowed in a skill: {name!r}")
+            for child in iterator:
+                if (
+                    directory == source_dir
+                    and child.name in EXCLUDED_TOP_LEVEL_DIRS
+                    and child.is_dir(follow_symlinks=False)
+                ):
+                    continue
+                name = f"{archive_dir}/{_normalise_segment(child.name)}"
+                _check_path_length(name, limits)
+                if name in seen:
+                    raise SkillArchivePathError(f"Path {name!r} collides with another entry after normalisation")
+                seen.add(name)
+                if len(entries) >= limits.max_entries:
+                    raise SkillArchiveLimitError(f"Skill has more than {limits.max_entries} entries")
+                info = child.stat(follow_symlinks=False)
+                path = Path(child.path)
+                if stat.S_ISDIR(info.st_mode):
+                    entries.append(_SourceEntry(name, path, is_dir=True, mode=_DIR_MODE, size=0))
+                    pending.append((path, name))
+                elif stat.S_ISREG(info.st_mode):
+                    if info.st_size > limits.max_file_bytes:
+                        raise SkillArchiveLimitError(f"File {name!r} exceeds {limits.max_file_bytes} bytes")
+                    payload += info.st_size
+                    if payload > limits.max_total_payload_bytes:
+                        raise SkillArchiveLimitError(f"Skill payload exceeds {limits.max_total_payload_bytes} bytes")
+                    mode = _EXEC_FILE_MODE if info.st_mode & 0o111 else _FILE_MODE
+                    entries.append(_SourceEntry(name, path, is_dir=False, mode=mode, size=info.st_size))
+                elif stat.S_ISLNK(info.st_mode):
+                    raise SkillArchivePathError(f"Symlinks are not allowed in a skill: {name!r}")
+                else:
+                    raise SkillArchivePathError(f"Only regular files and directories are allowed in a skill: {name!r}")
     # A path sorts before every path it prefixes, so each directory precedes its contents.
     entries.sort(key=lambda entry: entry.archive_name)
     return entries
