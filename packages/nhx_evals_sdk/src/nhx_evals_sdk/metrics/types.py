@@ -41,6 +41,36 @@ from nhx_evals_sdk.metrics.retrieval import (
 from nhx_evals_sdk.metrics.rouge import ROUGEMetric
 from nhx_evals_sdk.metrics.runner_rewards import GymRewardMetric, HarborRewardMetric
 from nhx_evals_sdk.metrics.sequence_similarity import SequenceSimilarityMetric
+from nhx_evals_sdk.metrics.skill_readiness import (
+    SkillDescriptionQualityMetric,
+    SkillReliabilityReadinessMetric,
+    SkillScriptQualityMetric,
+    SkillStaticCorrectnessMetric,
+    SkillUnicodeSafetyMetric,
+)
+from nhx_evals_sdk.metrics.skill_scans import (
+    AgentSafetyMetric,
+    SkillBundledTestMetric,
+    SkillCodeRiskMetric,
+    SkillDependencyComplianceMetric,
+    SkillLicenseMetric,
+    SkillPackageConfigurationRiskMetric,
+    SkillSecurityScanMetric,
+    SkillSensitiveDataMetric,
+)
+from nhx_evals_sdk.metrics.skill_traces import (
+    ComponentCoordinationMetric,
+    ComponentUsageMetric,
+    ErrorRecoveryMetric,
+    ExpectedScriptInvocationMetric,
+    SkillOveractivationMetric,
+    SkillRoutingMetric,
+    ToolArgumentComplianceMetric,
+    ToolExecutionOutcomeMetric,
+    ToolProductivityMetric,
+    ToolSelectionMetric,
+    WorkflowComplianceMetric,
+)
 from nhx_evals_sdk.metrics.skills import (
     SkillActivationMetric,
     SkillContextEfficiencyMetric,
@@ -94,6 +124,30 @@ MetricVariants: TypeAlias = (
     | SkillReferenceIntegrityMetric
     | SkillStructureMetric
     | TokenEfficiencyMetric
+    | SkillStaticCorrectnessMetric
+    | SkillDescriptionQualityMetric
+    | SkillReliabilityReadinessMetric
+    | SkillScriptQualityMetric
+    | SkillUnicodeSafetyMetric
+    | SkillSecurityScanMetric
+    | SkillSensitiveDataMetric
+    | SkillCodeRiskMetric
+    | SkillLicenseMetric
+    | SkillDependencyComplianceMetric
+    | SkillPackageConfigurationRiskMetric
+    | AgentSafetyMetric
+    | SkillBundledTestMetric
+    | SkillOveractivationMetric
+    | SkillRoutingMetric
+    | ExpectedScriptInvocationMetric
+    | WorkflowComplianceMetric
+    | ErrorRecoveryMetric
+    | ToolProductivityMetric
+    | ToolSelectionMetric
+    | ToolArgumentComplianceMetric
+    | ToolExecutionOutcomeMetric
+    | ComponentCoordinationMetric
+    | ComponentUsageMetric
 )
 """Raw union of SDK metric configuration models, excluding service-only system metrics."""
 

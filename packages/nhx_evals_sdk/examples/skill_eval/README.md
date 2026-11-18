@@ -152,3 +152,7 @@ Use assertions that every compared revision can satisfy without requiring a
 particular skill invocation. The activation check reports that separately.
 Token scoring requires a known cache partition, using an explicit zero when
 the runner can establish that no cache reads occurred.
+
+The [additional metrics guide](ADDITIONAL_METRICS.md) maps the remaining tier 1
+and tier 3 candidates to SDK metrics, documents their evidence adapters and
+score semantics, and provides a second offline preview for review.
