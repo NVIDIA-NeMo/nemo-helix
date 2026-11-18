@@ -29,3 +29,10 @@ class JobsSandboxClient(SandboxClient):
             timeout=self._timeout,
         )
         return response.sandbox
+
+    def get_draft_policy(self, name: str, *, workspace: str) -> pb.GetDraftPolicyResponse:
+        """Every draft policy chunk of a sandbox, pending and decided."""
+        return self._stub.GetDraftPolicy(
+            pb.GetDraftPolicyRequest(workspace_scope=dm.WorkspaceSelector(workspace=workspace), sandbox=name),
+            timeout=self._timeout,
+        )

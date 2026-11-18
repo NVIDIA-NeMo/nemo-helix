@@ -77,6 +77,7 @@ from nemo_helix_plugin.auth import AuthContext, platform_auth_enabled
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.openshell.draft_events import DraftEventSource, DraftPolicyTracker, publish_events
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding, GatewayWorkload
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 
@@ -247,6 +248,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         self._policy = self._build_executor_policy()
         self._channel = self._create_channel()
         self._stub = pb_grpc.OpenShellStub(self._channel)
+        self._draft_tracker = DraftPolicyTracker()
 
     def _build_executor_policy(self) -> Any:
         """The SandboxPolicy applied to created sandboxes.
@@ -604,6 +606,8 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             message = _condition_message(sandbox.status) or f"Sandbox phase {pb.SandboxPhase.Name(phase)}"
             return BackendStatusUpdate(status=status, status_message=message)
 
+        await self._notify_draft_policy(sandbox_name, workspace, name)
+
         # Sandbox READY: drive provisioning (launch the serve command, expose ports) on
         # the reconciler's poll cycles rather than blocking create.
         try:
@@ -619,8 +623,38 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 error_details={"error": _rpc_detail(exc), "sandbox": sandbox_name},
             )
 
+    async def _notify_draft_policy(self, sandbox_name: str, workspace: str, name: str) -> None:
+        """Publish the sandbox's new and newly decided network requests as notification events."""
+        if not self._draft_tracker.due(sandbox_name):
+            return
+        try:
+            drafts: pb.GetDraftPolicyResponse = await self._unary(
+                self._stub.GetDraftPolicy,
+                pb.GetDraftPolicyRequest(workspace_scope=self._workspace_scope(), sandbox=sandbox_name),
+            )
+        except grpc.RpcError as exc:
+            logger.debug("GetDraftPolicy failed for sandbox %s: %s", sandbox_name, _rpc_detail(exc))
+            return
+        source = DraftEventSource(
+            kind="deployment",
+            workspace=workspace,
+            name=name,
+            sandbox=sandbox_name,
+            link=f"/workspaces/{workspace}/deployments",
+        )
+        events = self._draft_tracker.observe(source, drafts.chunks)
+        if events:
+            await asyncio.to_thread(
+                publish_events,
+                self._nemo_client.base_url,
+                workspace,
+                events,
+                headers=self._nemo_client.default_headers,
+            )
+
     async def delete_deployment(self, workspace: str, name: str) -> BackendStatusUpdate:
         sandbox_name = _sandbox_name(workspace, name)
+        self._draft_tracker.forget(sandbox_name)
         needs_provider_cleanup = self._executor_config.gateway_credentials is not None
         if needs_provider_cleanup:
             try:

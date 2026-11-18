@@ -42,6 +42,7 @@ from nemo_helix_plugin.jobs.execution_profiles import (
 from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.providers import CPUExecutionProvider, GPUExecutionProvider
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
+from nemo_helix_plugin.openshell.draft_events import DraftEventSource, DraftPolicyTracker, publish_events
 from nemo_helix_plugin.openshell.types import GatewayWorkload, ProviderAccessRevoked
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.auth import AuthContext
@@ -244,6 +245,7 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
         self._client = self._create_client()
         self._policy = self._build_executor_policy()
         self._jobs_controller_instance_id = _resolve_jobs_controller_instance_id()
+        self._draft_tracker = DraftPolicyTracker()
 
     # --- policy ---
 
@@ -547,6 +549,7 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
 
         phase = sandbox.status.phase
         terminal = phase in (pb.SANDBOX_PHASE_COMPLETED, pb.SANDBOX_PHASE_ERROR)
+        self._notify_draft_policy(step, sandbox_name, final=terminal)
 
         # A cancel request stops the sandbox so the main process dies. A sandbox that
         # already finished is cancelled as-is: CANCELLING cannot move to COMPLETED.
@@ -640,6 +643,31 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
                     status_details={"message": "Gateway credential renewal failed; retrying. Credentials may expire."},
                 )
         return JobUpdate(status=status, status_details={"message": f"Sandbox phase {phase_name}"})
+
+    def _notify_draft_policy(self, step: HelixJobStepWithContext, sandbox_name: str, *, final: bool) -> None:
+        """Publish the sandbox's new and newly decided network requests as notification events."""
+        if not self._draft_tracker.due(sandbox_name) and not final:
+            return
+        try:
+            drafts = self._client.get_draft_policy(sandbox_name, workspace=self._workspace)
+        except grpc.RpcError as exc:
+            logger.debug("GetDraftPolicy failed for sandbox %s: %s", sandbox_name, _rpc_detail(exc))
+            return
+        source = DraftEventSource(
+            kind="job",
+            workspace=step.workspace,
+            name=step.job,
+            sandbox=sandbox_name,
+            step=step.name,
+            link=f"/workspaces/{step.workspace}/jobs/{step.job}",
+        )
+        events = self._draft_tracker.observe(source, drafts.chunks)
+        if final:
+            self._draft_tracker.forget(sandbox_name)
+        if events:
+            publish_events(
+                self._nemo_client.base_url, step.workspace, events, headers=self._nemo_client.default_headers
+            )
 
     def _sync_ttl_exceeded(self, step: HelixJobStepWithContext, step_status: HelixJobStatus, phase: int) -> int | None:
         """The exceeded TTL in seconds for a non-terminal sandbox, or None."""

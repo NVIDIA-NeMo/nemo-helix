@@ -74,6 +74,10 @@ describe('notifEventToInboxItem', () => {
     expect(parse({ link: null }).link).toBeUndefined();
   });
 
+  it('labels OpenShell draft policy events', () => {
+    expect(parse({ type: 'openshell.policy.draft.pending' }).source).toBe('OpenShell');
+  });
+
   it('derives a readable source from an unknown type prefix', () => {
     expect(parse({ type: 'safe_synth.run.done' }).source).toBe('Safe synth');
   });

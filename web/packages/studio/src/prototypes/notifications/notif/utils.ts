@@ -34,6 +34,7 @@ const SOURCE_LABELS: Record<string, string> = {
   guardrails: 'Guardrails',
   jobs: 'Jobs',
   models: 'Models',
+  openshell: 'OpenShell',
 };
 
 const DEFAULT_LINK_LABEL = 'View details';

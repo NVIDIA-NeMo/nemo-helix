@@ -621,6 +621,47 @@ class TestSync:
             assert backend.sync(step).status == HelixJobStatus.CANCELLED
         assert provisioner.cleanup.await_count == 2
 
+    def test_pending_draft_chunk_is_published_once(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
+        chunk = pb.PolicyChunk(id="c1", status="pending", rule_name="allow_example_com_443", binary="/usr/bin/curl")
+        chunk.proposed_rule.endpoints.add(host="example.com", port=443)
+        backend._client.get_draft_policy.return_value = pb.GetDraftPolicyResponse(chunks=[chunk])
+        step = test_step_pending
+
+        with (
+            patch.object(backend._draft_tracker, "due", return_value=True),
+            patch.object(backend_module, "publish_events") as publish,
+        ):
+            assert backend.sync(step).status == HelixJobStatus.ACTIVE
+            assert backend.sync(step).status == HelixJobStatus.ACTIVE
+
+        publish.assert_called_once()
+        _, workspace, events = publish.call_args.args
+        assert workspace == step.workspace
+        assert [event["type"] for event in events] == ["openshell.policy.draft.pending"]
+        assert events[0]["data"]["source"] == {
+            "kind": "job",
+            "workspace": step.workspace,
+            "name": step.job,
+            "step": step.name,
+        }
+        assert events[0]["link"] == f"/workspaces/{step.workspace}/jobs/{step.job}"
+
+    def test_draft_policy_rpc_error_does_not_change_the_step(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
+        backend._client.get_draft_policy.side_effect = _rpc_error(grpc.StatusCode.UNAVAILABLE)
+
+        with patch.object(backend_module, "publish_events") as publish:
+            assert backend.sync(test_step_pending).status == HelixJobStatus.ACTIVE
+
+        publish.assert_not_called()
+
     def test_completed_zero_exit(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
         backend = _backend(mock_nemo_client, mock_platform_config)
         backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_COMPLETED, exit_code=0)
