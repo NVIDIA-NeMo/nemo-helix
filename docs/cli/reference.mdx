@@ -6247,6 +6247,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 * `environments`: Manage agent environments.
 * `compute-specs`: Manage agent compute specs.
 * `post-run-actions`: Discover the post-run actions an execute-agent job can...
+* `skills`: Manage stored agent skills and their revisions.
 
 *Deployed agent interaction:*
 
@@ -7228,6 +7229,241 @@ nemo agents post-run-actions list [OPTIONS]
 * `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
 * `--no-truncate`: Don't truncate long values in table/markdown/csv output.
 * `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+#### nemo agents skills
+
+Manage stored agent skills and their revisions.
+
+**Usage:**
+
+```shell
+nemo agents skills [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `create`: Create a skill and publish revision 1.
+* `publish`: Publish the skill's next revision, creating the skill if...
+* `get`: Get a skill at its latest revision, or at the revision a...
+* `list`: List skills, each at its latest revision.
+* `revisions`: List a skill's published revisions, newest first.
+* `tag`: Point a tag at an already-published revision.
+* `delete`: Delete a skill and all its revisions.
+
+##### nemo agents skills create
+
+Create a skill and publish revision 1. Fails if the skill exists; use `publish` for later revisions.
+
+The SKILL.md frontmatter `name` must equal the skill name.
+
+**Usage:**
+
+```shell
+nemo agents skills create [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Skill name (lowercase, hyphenated, at most 64).
+
+**Options:**
+
+* `--from-dir <DIRECTORY>`: Local skill directory (holding SKILL.md) to upload and publish. Files are uploaded as regular files: the Files service does not keep file modes, so executable bits are not preserved.
+* `--fileset`: Skill directory already in a fileset you can read: workspace/fileset#path/to/skill.
+* `--upload-fileset`: With `--from-dir`: the fileset in the skill's workspace to upload into (default 'skill-sources', created if missing).
+* `--taskset`: Linked taskset revision, digest-pinned and fully qualified: workspace/taskset#&lt;64-hex digest>.
+* `--tag, -t`: Revision tag to point at the published revision; repeatable.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo agents skills publish
+
+Publish the skill's next revision, creating the skill if absent.
+
+Content identical to the latest revision cuts no new revision; the tags are still applied.
+
+**Usage:**
+
+```shell
+nemo agents skills publish [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Skill name (lowercase, hyphenated, at most 64).
+
+**Options:**
+
+* `--from-dir <DIRECTORY>`: Local skill directory (holding SKILL.md) to upload and publish. Files are uploaded as regular files: the Files service does not keep file modes, so executable bits are not preserved.
+* `--fileset`: Skill directory already in a fileset you can read: workspace/fileset#path/to/skill.
+* `--upload-fileset`: With `--from-dir`: the fileset in the skill's workspace to upload into (default 'skill-sources', created if missing).
+* `--taskset`: Linked taskset revision, digest-pinned and fully qualified: workspace/taskset#&lt;64-hex digest>.
+* `--tag, -t`: Revision tag to point at the published revision; repeatable.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo agents skills get
+
+Get a skill at its latest revision, or at the revision a tag or digest names.
+
+**Usage:**
+
+```shell
+nemo agents skills get [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Skill name (lowercase, hyphenated, at most 64).
+
+**Options:**
+
+* `--revision, -r`: A revision tag or content digest; default: latest.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo agents skills list
+
+List skills, each at its latest revision. Filters match the latest revision's frontmatter.
+
+**Usage:**
+
+```shell
+nemo agents skills list [OPTIONS]
+```
+
+**Options:**
+
+* `--tag, -t`: Only skills whose frontmatter metadata.tags has this tag; repeatable.
+* `--filter`: Filter as JSON, e.g. '`{"description": {"$like": "pdf"}}`'. Fields: name, description, tags.
+* `--sort`: name, created_at or updated_at; prefix '-' to descend.
+* `--page <INTEGER>`: Page number (1-indexed).
+* `--page-size <INTEGER>`: Items per page.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
+
+##### nemo agents skills revisions
+
+List a skill's published revisions, newest first.
+
+**Usage:**
+
+```shell
+nemo agents skills revisions [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Skill name (lowercase, hyphenated, at most 64).
+
+**Options:**
+
+* `--page <INTEGER>`: Page number (1-indexed).
+* `--page-size <INTEGER>`: Items per page.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
+
+##### nemo agents skills tag
+
+Point a tag at an already-published revision.
+
+**Usage:**
+
+```shell
+nemo agents skills tag [OPTIONS] NAME TAG
+```
+
+**Arguments:**
+
+* `<NAME>`: Skill name (lowercase, hyphenated, at most 64).
+* `<TAG>`: Tag to point; 'latest' is reserved.
+
+**Options:**
+
+* `--revision, -r`: Revision to tag: a content digest or another tag.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo agents skills delete
+
+Delete a skill and all its revisions.
+
+**Usage:**
+
+```shell
+nemo agents skills delete [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Skill name (lowercase, hyphenated, at most 64).
+
+**Options:**
+
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
 
 #### nemo agents chat
 

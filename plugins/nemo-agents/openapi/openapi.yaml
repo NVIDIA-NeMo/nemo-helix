@@ -2786,6 +2786,419 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/skills:
+    get:
+      tags:
+      - Agent Skills
+      summary: List Skills
+      description: List stored skills in a workspace, each at its latest revision.
+      operationId: list_skills_apis_agents_v2_workspaces__workspace__skills_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/SkillSort'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/SkillFilter'
+        description: Filter skills by name and by the latest revision's frontmatter
+          description and tags.
+      responses:
+        '200':
+          description: Return stored skills at their latest revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/skills/{name}:
+    post:
+      tags:
+      - Agent Skills
+      summary: Create Skill
+      description: 'Store a new skill from a source directory and publish it as revision
+        1.
+
+
+        Strict create: 409 if the name is taken. Use ``PUT`` to publish a further
+        revision. The
+
+        ``SKILL.md`` frontmatter ``name`` must equal the skill name.'
+      operationId: create_skill_apis_agents_v2_workspaces__workspace__skills__name__post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          title: Name
+      - name: project
+        in: query
+        required: false
+        schema:
+          description: Optional project to associate with the skill.
+          title: Project
+          type: string
+        description: Optional project to associate with the skill.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillInput'
+      responses:
+        '201':
+          description: Store a new skill and publish revision 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '409':
+          description: Skill already exists
+        '422':
+          description: Invalid source, tags or linked taskset
+    put:
+      tags:
+      - Agent Skills
+      summary: Publish Skill
+      description: 'Publish the source as the skill''s next revision, creating the
+        skill if it does not exist.
+
+
+        Publishing content identical to the latest revision cuts no new revision (200);
+        the requested
+
+        tags are still applied.'
+      operationId: publish_skill_apis_agents_v2_workspaces__workspace__skills__name__put
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          title: Name
+      - name: project
+        in: query
+        required: false
+        schema:
+          description: Optional project to associate with a new skill.
+          title: Project
+          type: string
+        description: Optional project to associate with a new skill.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillInput'
+      responses:
+        '200':
+          description: Content already published; no new revision was cut
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '201':
+          description: A new revision was published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '409':
+          description: Concurrent write; refresh and retry
+        '422':
+          description: Invalid source, tags or linked taskset
+    get:
+      tags:
+      - Agent Skills
+      summary: Get Skill
+      description: 'Get a skill at its ``latest`` revision, with every tag pointer.
+
+
+        Use ``GET /skills/{name}/revisions/{revision}`` to read it as of another revision.'
+      operationId: get_skill_apis_agents_v2_workspaces__workspace__skills__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          title: Name
+      responses:
+        '200':
+          description: Return the skill at its latest revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '404':
+          description: Skill not found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Agent Skills
+      summary: Delete Skill
+      description: 'Delete a stored skill and its revisions.
+
+
+        Archives stay in the service-owned skills fileset, since a recorded run may
+        pin one.'
+      operationId: delete_skill_apis_agents_v2_workspaces__workspace__skills__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          title: Name
+      responses:
+        '204':
+          description: Delete a stored skill and its revisions
+        '404':
+          description: Skill not found
+        '409':
+          description: Concurrent write; refresh and retry
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/skills/{name}/revisions:
+    get:
+      tags:
+      - Agent Skills
+      summary: List Skill Revisions
+      description: List a skill's published revisions; each entry's ``content_hash``
+        is what a pinned reference carries.
+      operationId: list_skill_revisions_apis_agents_v2_workspaces__workspace__skills__name__revisions_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
+      responses:
+        '200':
+          description: Return the skill's published revisions, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillsPage'
+        '404':
+          description: Skill not found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/skills/{name}/revisions/{revision}:
+    get:
+      tags:
+      - Agent Skills
+      summary: Get Skill Revision
+      description: Get a skill as of a published revision, named by a tag or its content
+        digest.
+      operationId: get_skill_revision_apis_agents_v2_workspaces__workspace__skills__name__revisions__revision__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          title: Name
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
+          title: Revision
+      responses:
+        '200':
+          description: Return the skill as of a published revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '404':
+          description: Skill or revision not found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/skills/{name}/tags/{tag}:
+    put:
+      tags:
+      - Agent Skills
+      summary: Tag Skill Revision
+      description: Point a tag at an already-published revision. ``latest`` is reserved
+        and machine-managed.
+      operationId: tag_skill_revision_apis_agents_v2_workspaces__workspace__skills__name__tags__tag__put
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          title: Name
+      - name: tag
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
+          title: Tag
+      - name: revision
+        in: query
+        required: true
+        schema:
+          type: string
+          description: 'Revision to tag: a content digest, or another tag.'
+          title: Revision
+        description: 'Revision to tag: a content digest, or another tag.'
+      responses:
+        '200':
+          description: Point a tag at an existing revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '404':
+          description: Skill or revision not found
+        '422':
+          description: Tag is reserved or invalid
 components:
   schemas:
     Agent:
@@ -5153,6 +5566,8 @@ components:
         a
 
         control update, an omitted or null value keeps the job''s current value.'
+    JsonValue:
+      title: JsonValue
     LogLine:
       properties:
         timestamp:
@@ -6104,6 +6519,284 @@ components:
       - closed
       title: SessionStatus
       description: Lifecycle status of an agent session.
+    Skill:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace.
+          default: ''
+        workspace:
+          type: string
+          title: Workspace
+          description: Workspace identifier.
+          default: ''
+        project:
+          title: Project
+          description: Project associated with this entity.
+          type: string
+        id:
+          title: Id
+          description: Entity UUID.
+          type: string
+        entity_id:
+          title: Entity Id
+          description: Compatibility alias for the entity UUID.
+          type: string
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          type: string
+        created_at:
+          title: Created At
+          description: Timestamp of entity creation.
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          description: Principal id for entity creator.
+          type: string
+        updated_at:
+          title: Updated At
+          description: Timestamp of last entity update.
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          description: Principal id for last entity update.
+          type: string
+        db_version:
+          title: Db Version
+          description: Database version for optimistic locking.
+          type: integer
+        revision:
+          type: integer
+          minimum: 1.0
+          title: Revision
+          description: Ordinal of the revision this content belongs to.
+        content_hash:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          title: Content Hash
+          description: Full content digest of this revision.
+        tags:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Tags
+          description: "Tag \u2192 revision-ordinal pointers. For a specific revision,\
+            \ only the tags pointing at it."
+        frontmatter:
+          allOf:
+          - $ref: '#/components/schemas/SkillFrontmatter'
+          description: Parsed SKILL.md frontmatter.
+        archive:
+          allOf:
+          - $ref: '#/components/schemas/SkillArchiveDescriptor'
+          description: The revision's immutable archive.
+        taskset:
+          title: Taskset
+          description: Linked taskset revision, digest-pinned, if any.
+          type: string
+        published_at:
+          title: Published At
+          description: When this revision was published.
+          type: string
+          format: date-time
+      additionalProperties: true
+      type: object
+      required:
+      - revision
+      - content_hash
+      - frontmatter
+      - archive
+      title: Skill
+      description: 'A skill as of one revision: identity from the head, content from
+        the revision.
+
+
+        Reading ``/skills/{name}`` returns the ``latest`` revision; ``/skills/{name}/revisions/{revision}``
+
+        returns the one named. Unlike the taskset DTO, this carries ``content_hash``
+        so a caller can mint
+
+        a pinned ref from a tag lookup.'
+    SkillArchiveDescriptor:
+      properties:
+        archive_ref:
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
+          title: Archive Ref
+          description: Fileset reference to the archive object (workspace/fileset#path).
+        files_hash:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          title: Files Hash
+          description: Lowercase hex SHA-256 of the archive bytes.
+        skill_name:
+          type: string
+          maxLength: 64
+          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          title: Skill Name
+          description: The skill's frontmatter name; the directory it is staged under.
+      additionalProperties: false
+      type: object
+      required:
+      - archive_ref
+      - files_hash
+      - skill_name
+      title: SkillArchiveDescriptor
+      description: 'Where a revision''s archive lives and what its bytes must hash
+        to.
+
+
+        ``files_hash`` is the SHA-256 of the deterministic archive bytes (see
+
+        :mod:`nemo_helix_plugin.skill_archive`). Every consumer re-hashes what it
+        downloads and refuses a
+
+        mismatch. ``archive_ref`` always points into the service-owned skills fileset,
+        never at a
+
+        location a caller chose.'
+    SkillFilter:
+      additionalProperties: false
+      description: 'Query filter for ``GET /v2/workspaces/{workspace}/skills``.
+
+
+        Matches the latest revision''s ``SKILL.md`` frontmatter. ``name`` is the skill
+        name, which always
+
+        equals the frontmatter name.'
+      properties:
+        description:
+          description: Filter by frontmatter description, e.g. `filter[description][$like]=pdf`.
+          title: Description
+          type: string
+        tags:
+          description: 'Filter by frontmatter `metadata.tags` (not revision tags):
+            matches skills carrying the tag. Supports `$eq` and `$in`.'
+          title: Tags
+          type: string
+      title: SkillFilter
+      type: object
+    SkillFrontmatter:
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          title: Name
+          description: Skill name.
+        description:
+          type: string
+          title: Description
+          description: When the skill should be used; what the agent reads to decide.
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+          description: Frontmatter `metadata.tags`, for search and filtering. Unrelated
+            to revision tags.
+        extra:
+          additionalProperties:
+            $ref: '#/components/schemas/JsonValue'
+          type: object
+          title: Extra
+          description: Every other frontmatter key, verbatim, for display.
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - description
+      title: SkillFrontmatter
+      description: The searchable subset of a ``SKILL.md`` frontmatter, parsed from
+        the archived bytes.
+    SkillInput:
+      properties:
+        source:
+          allOf:
+          - $ref: '#/components/schemas/SkillSource'
+          description: The skill directory to publish.
+        taskset:
+          title: Taskset
+          description: Optional linked taskset revision, fully qualified and digest-pinned
+            (workspace/taskset#<64-hex digest>). Tags are not accepted.
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+#[0-9a-f]{64}$
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+          description: Extra revision tags to point at this revision; 'latest' is
+            automatic.
+      additionalProperties: false
+      type: object
+      required:
+      - source
+      title: SkillInput
+      description: 'Create/replace body for a stored skill (the entity name comes
+        from the path).
+
+
+        Create publishes revision 1; replace publishes the next revision.'
+    SkillSort:
+      type: string
+      enum:
+      - name
+      - -name
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      title: SkillSort
+      description: Sort fields for ``GET /v2/workspaces/{workspace}/skills``.
+    SkillSource:
+      properties:
+        fileset:
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
+          title: Fileset
+          description: Fileset reference to the skill directory (workspace/fileset#path/to/skill).
+      additionalProperties: false
+      type: object
+      required:
+      - fileset
+      title: SkillSource
+      description: 'Where to publish a skill from: a directory in a fileset the caller
+        can read.
+
+
+        The directory must hold ``SKILL.md`` at its root. Publishing copies it into
+        a service-owned
+
+        archive, so later changes to the source never affect a published revision.'
+    SkillsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/Skill'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: SkillsPage
     StringFilter:
       additionalProperties: false
       properties:
