@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Any, Dict, List, Optional, Type, Union
@@ -74,11 +73,15 @@ def get_main_model_from_config(models: List[Model]) -> Optional[Model]:
 
 
 def get_merged_custom_headers_token(token: str | None) -> str:
-    """Merge the custom headers from the request context into the token."""
-    headers = {
-        **get_request_default_headers_from_context(),
-        **get_platform_auth_headers_from_context(),
-    }
+    """The per-caller part of the rails engine cache key: what is built into the engine.
+
+    That is the caller's model credential and the platform auth headers, which are written into the
+    models' ``default_headers`` when the engine is built. The caller's own ``x-*`` headers are not
+    built in (the main model sends them per call; task models never get them), so they are left
+    out: a proxy such as Envoy stamps a unique ``x-request-id`` on every request, which would
+    otherwise rebuild the engine on every call.
+    """
+    headers = get_platform_auth_headers_from_context()
     headers_str = json.dumps(headers, sort_keys=True)
     merged_token_headers = f"{token}{headers_str}" if token else headers_str
     return merged_token_headers
@@ -108,7 +111,13 @@ def model_with_req_scoped_custom_headers(model: Model, req_custom_headers: dict[
 
 
 def set_main_model_merged_custom_headers_into_context(model: Optional[Model]) -> None:
-    """Set the merged custom headers for the main model."""
+    """Set the headers the main model sends on this request: its configured ``default_headers``,
+    overridden by this request's headers (case-insensitive).
+
+    The main model reads them from the request context on every call. They are merged here, per
+    request, because the engine (and so ``model``) is shared across requests and carries only the
+    configured headers.
+    """
     # for /v1/checks, main model is currently set, but not required technically and might be removed in the future
     # so we don't raise an error on no main model here
     if model is None:
@@ -119,7 +128,9 @@ def set_main_model_merged_custom_headers_into_context(model: Optional[Model]) ->
     default_headers = (model.parameters or {}).get("default_headers", None)
     if not default_headers:
         return
-    set_request_default_headers_into_context(default_headers)
+    set_request_default_headers_into_context(
+        get_merged_custom_headers(default_headers, get_request_default_headers_from_context())
+    )
 
 
 def update_models_in_config(config: RailsConfig, main_model: Model):
@@ -131,17 +142,14 @@ def update_models_in_config(config: RailsConfig, main_model: Model):
     models = config.models.copy()
     main_model_index = None
 
-    # Custom headers defined in the guardrail config
-    req_custom_headers = get_request_default_headers_from_context()
-
     for index, model in enumerate(models):
         if model.type == main_model.type:
             main_model_index = index
-        # Merge the custom headers from the request context into the model
-        # The model.parameters["default_headers"] is a source of truth for the request custom headers
-        # Although this object is cached, the cache key includes the custom headers,
-        # so it will be invalidated when any request custom header changes
-        models[index] = model_with_req_scoped_custom_headers(model, req_custom_headers)
+        # Only the configured headers go into the models: the engine built from this config is shared
+        # across requests. The main model gets the request's headers per call (see
+        # `set_main_model_merged_custom_headers_into_context`); task models share a client across
+        # requests and are documented not to receive inbound headers.
+        models[index] = model_with_req_scoped_custom_headers(model, None)
 
     main_model_parameters = {k: v for k, v in (main_model.parameters or {}).items() if v is not None}
 
@@ -193,57 +201,6 @@ def get_main_model_from_rails_config(rails_config: RailsConfig) -> Model | None:
     return next((model for model in rails_config.models if model.type == "main"), None)
 
 
-def _run_generate_in_new_loop(
-    llm_rails: RailsEngine,
-    messages: Optional[List[dict]] = None,
-    prompt: Optional[str] = None,
-    options: Optional[Any] = None,
-    state: Optional[Any] = None,
-) -> Any:
-    """Run LLMRails.generate_async in a new event loop in the current thread.
-
-    Called via asyncio.to_thread, which copies the current context so all
-    context variables (auth token, headers, main model, etc.) are available.
-
-    NemoGuardrails' generate_async has CPU-intensive Colang flow processing
-    between LLM calls that can hold the asyncio event loop for multiple seconds at
-    a time. This could block the event loop for an extended period, causing Kubernetes
-    liveness probes to time out and kill the pod. Running the function in a
-    dedicated thread with its own event loop keeps the main event loop free to
-    respond to health checks and other concurrent requests.
-    """
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(
-            llm_rails.generate_async(
-                messages=messages,
-                prompt=prompt,
-                options=options,
-                state=state,
-            )
-        )
-    finally:
-        try:
-            # Cancel any tasks that are still pending (ex. aiohttp/httpx cleanup tasks
-            # that were created during generate_async but not yet completed).
-            pending = asyncio.all_tasks(loop)
-            for task in pending:
-                task.cancel()
-            if pending:
-                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            # Exit the worker threads created for each LLM call in this request.
-            # Without this, they linger as idle pool threads into the next request.
-            # When the next request initializes a new LLMRails object, those idle
-            # threads compete for the Python GIL with LLMRails' internal setup thread.
-            # The main event loop is starved of the GIL for that duration and cannot
-            # respond to Kubernetes liveness probes, which kills the pod.
-            loop.run_until_complete(loop.shutdown_default_executor())
-        finally:
-            loop.close()
-            asyncio.set_event_loop(None)
-
-
 async def run_generate_async(
     llm_rails: RailsEngine,
     messages: Optional[List[dict]] = None,
@@ -251,27 +208,16 @@ async def run_generate_async(
     options: Optional[Any] = None,
     state: Optional[Any] = None,
 ) -> Any:
-    """Run LLMRails.generate_async without blocking the FastAPI event loop.
+    """Run the rails on the server event loop, as the standalone NeMo Guardrails server does.
 
-    asyncio.to_thread copies the current contextvars context before entering
-    the thread, so context variables set prior to this call remain accessible
-    inside the guardrails pipeline.
-
-    IORails engines run on the server loop instead: their HTTP clients and queue workers are bound to
-    the loop that first used them, and the registry shares one engine across requests, so the
-    per-request loop below would strand them and hang the next request.
+    Both engines keep HTTP clients bound to the event loop that first used them: NeMo Guardrails
+    shares one client per model endpoint across the whole process, and IORails holds its own. Running
+    on a separate loop per request strands those clients, and every later request pays a
+    sleep-and-retry on the dead loop, or hangs under load. Engines are cached and reused across
+    requests, so the only per-request work left here is rail processing between LLM calls; building
+    an engine, the expensive part, still runs in a worker thread.
     """
-    if uses_iorails(llm_rails):
-        return await llm_rails.generate_async(messages=messages, prompt=prompt, options=options, state=state)
-
-    return await asyncio.to_thread(
-        _run_generate_in_new_loop,
-        llm_rails,
-        messages=messages,
-        prompt=prompt,
-        options=options,
-        state=state,
-    )
+    return await llm_rails.generate_async(messages=messages, prompt=prompt, options=options, state=state)
 
 
 def _text_of_content_parts(parts: List[Any]) -> str:
