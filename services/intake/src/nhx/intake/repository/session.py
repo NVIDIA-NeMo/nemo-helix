@@ -22,6 +22,18 @@ class SessionRepository(ABC):
     """Domain-facing interface for session persistence."""
 
     @abstractmethod
+    async def rename_evaluation_references(self, *, workspace: str, original_name: str, deleted_name: str) -> None:
+        """Relink stored span versions and trace-index entries, including tombstones."""
+        pass
+
+    @abstractmethod
+    async def list_evaluation_session_ids(
+        self, *, workspace: str, evaluation_name: str, after: str | None, limit: int
+    ) -> list[str]:
+        """Page distinct current session IDs, including evaluation references on child spans."""
+        pass
+
+    @abstractmethod
     async def get_session(self, *, workspace: str, session_id: str) -> IntakeSession | None:
         """Return one session, or ``None`` when it has no current spans."""
         pass

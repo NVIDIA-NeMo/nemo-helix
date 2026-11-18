@@ -277,9 +277,9 @@ Scoped requests require `intake:write` or `platform:write`; insufficient permiss
 or scopes return `403` before deletion runs.
 
 Every associated evaluation must be confirmed soft-deleted before session deletion.
-An undeleted or unresolved evaluation causes `409`. Evaluation soft deletion reserves
-the original name, and reuse returns `409`, so retained telemetry can resolve its owner.
-Older renamed evaluations remain protected when their association cannot be resolved.
+An undeleted or unresolved evaluation causes `409`. Evaluation deletion updates retained
+telemetry to reference the renamed deleted evaluation before releasing its original name
+for reuse. Older renamed evaluations remain protected when their association cannot be resolved.
 
 Before any write, the repository checks the exact root-span trace-index keys against
 current spans and raw index history, including retained tombstones. Conflicting
@@ -294,6 +294,35 @@ concurrent ingestion. New telemetry or a new collision can arrive between those 
 Coordinated ingestion or a separately reviewed storage migration is needed to close that
 race. Later ingestion into the same session ID is permitted. No single-trace DELETE
 endpoint or ingestion blocking is included.
+
+## Evaluation deletion
+
+Deleting an evaluation automatically soft-deletes its eligible sessions' current
+spans and traces through the existing session deletion service. Discovery includes
+child spans and historical evaluation attribute names. Sessions shared with another
+live or unresolved evaluation stay protected until every association is confirmed
+deleted. Evaluator results and annotations remain retained.
+
+Deleting an experiment also cleans sessions for evaluations deleted with their last
+experiment membership. These routes additionally require `intake.sessions.delete`,
+so workspace Admin access is required under the default roles.
+
+After session cleanup, deletion rewrites `nemo.evaluation.name` and the historical
+`nemo.experiment.id` span attributes, plus the trace index's `evaluation_name`, to the
+evaluation's generated deleted name. Both live rows in shared sessions and retained
+historical versions/tombstones are relinked; other evaluation names, attributes, workspaces,
+and deletion flags are preserved. Sessions derive their associations from spans, so there
+is no separate session row to update. The two ClickHouse mutations complete synchronously
+before the entity is renamed and its original name becomes reusable.
+
+The generated destination name is saved on the evaluation before cleanup. Storage failures
+return `503` and leave the original name reserved; retrying DELETE resumes cleanup and the
+same reference update. Successful deletion returns `204`; a later DELETE using the old name
+returns `404` unless a new evaluation has claimed it. An experiment retains its original
+name until member cleanup succeeds, allowing its DELETE to be retried too. Trace-index
+ownership conflicts return `409`. Cleanup and reference updates are separate operations
+across storage systems and retain the documented concurrent-ingestion limitation. Large
+retained telemetry sets may make the synchronous reference updates take longer.
 
 ## Trace identity and historical collisions
 

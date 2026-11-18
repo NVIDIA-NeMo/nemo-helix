@@ -164,16 +164,15 @@ def test_delete_session_requires_evaluation_deletion(
         assert ingested.json() == {"errors": []}
     if evaluation_deleted:
         assert client.delete(f"{BASE}/evaluations/{evaluation_name}").status_code == 204
-        # Evaluation deletion itself leaves telemetry intact for explicit cleanup.
+        # Evaluation deletion cascades to the session's traces and spans.
         before = client.get(f"{BASE}/sessions/protected-session")
-        assert before.status_code == 200, before.text
-        assert before.json()["span_count"] == 4
+        assert before.status_code == 404, before.text
 
     response = client.delete(f"{BASE}/sessions/protected-session")
 
     session = client.get(f"{BASE}/sessions/protected-session")
     if evaluation_deleted:
-        assert response.status_code == 204, response.text
+        assert response.status_code == 404, response.text
         assert session.status_code == 404, session.text
     else:
         assert response.status_code == 409, response.text

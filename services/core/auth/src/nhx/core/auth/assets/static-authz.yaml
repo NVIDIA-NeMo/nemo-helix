@@ -1501,10 +1501,12 @@ authz:
         direct:
           actor_perms:
           - intake.evaluations.delete
+          - intake.sessions.delete
         delegated:
           actor_perms: []
           subject_perms:
           - intake.evaluations.delete
+          - intake.sessions.delete
         scopes:
         - intake:write
         - platform:write
@@ -1643,10 +1645,12 @@ authz:
         direct:
           actor_perms:
           - intake.experiments.delete
+          - intake.sessions.delete
         delegated:
           actor_perms: []
           subject_perms:
           - intake.experiments.delete
+          - intake.sessions.delete
         scopes:
         - intake:write
         - platform:write
@@ -1707,10 +1711,12 @@ authz:
         direct:
           actor_perms:
           - intake.experiments.delete
+          - intake.sessions.delete
         delegated:
           actor_perms: []
           subject_perms:
           - intake.experiments.delete
+          - intake.sessions.delete
         scopes:
         - intake:write
         - platform:write
