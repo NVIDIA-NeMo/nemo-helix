@@ -508,6 +508,11 @@ def _build_assistant_system_prompt(
             ),
             "Do not reveal the Studio session id to the user.",
             ("Read-only nemo_api calls run immediately; mutating calls pause until the user approves them in Studio."),
+            (
+                "Do not ask the user to confirm a read-only lookup or a mutating call: just make the call, "
+                "because Studio's approval prompt already confirms writes. If the user declines an approval, "
+                "say that nothing was changed and do not ask again for the same action."
+            ),
         ]
     )
 
