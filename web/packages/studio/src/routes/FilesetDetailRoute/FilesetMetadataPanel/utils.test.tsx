@@ -148,5 +148,15 @@ describe('getMetadataSections', () => {
         'https://huggingface.co/meta-llama/Llama-2-7b'
       );
     });
+
+    it('uses a custom endpoint as the link origin', () => {
+      expect(
+        sourceHref({
+          repo_id: 'org/data',
+          repo_type: 'dataset',
+          endpoint: 'https://hf.example.com',
+        })
+      ).toBe('https://hf.example.com/datasets/org/data');
+    });
   });
 });

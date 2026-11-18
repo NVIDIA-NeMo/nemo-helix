@@ -30,4 +30,26 @@ describe('getHuggingFaceRepoUrl', () => {
       'https://huggingface.co/datasets/org/data.v2'
     );
   });
+
+  it('replaces the origin with a custom endpoint, with or without a trailing slash', () => {
+    const { dataset, space, model } = HuggingfaceStorageConfigRepoType;
+    ['https://hf.example.com', 'https://hf.example.com/'].forEach((endpoint) => {
+      expect(getHuggingFaceRepoUrl(dataset, 'o/d', endpoint)).toBe(
+        'https://hf.example.com/datasets/o/d'
+      );
+      expect(getHuggingFaceRepoUrl(space, 'o/s', endpoint)).toBe(
+        'https://hf.example.com/spaces/o/s'
+      );
+      expect(getHuggingFaceRepoUrl(model, 'o/m', endpoint)).toBe('https://hf.example.com/o/m');
+      expect(getHuggingFaceRepoUrl(undefined, 'o/m', endpoint)).toBe('https://hf.example.com/o/m');
+    });
+  });
+
+  it('falls back to huggingface.co for an empty or missing endpoint', () => {
+    const { dataset } = HuggingfaceStorageConfigRepoType;
+    expect(getHuggingFaceRepoUrl(dataset, 'o/d', undefined)).toBe(
+      'https://huggingface.co/datasets/o/d'
+    );
+    expect(getHuggingFaceRepoUrl(dataset, 'o/d', '')).toBe('https://huggingface.co/datasets/o/d');
+  });
 });

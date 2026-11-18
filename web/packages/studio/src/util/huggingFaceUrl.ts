@@ -13,7 +13,9 @@ const REPO_PATH_PREFIX: Partial<Record<HuggingfaceStorageConfigRepoType, string>
 /** The huggingface.co web page for a repo: datasets and spaces live under their own path prefix. */
 export function getHuggingFaceRepoUrl(
   repoType: HuggingfaceStorageConfigRepoType | undefined,
-  repoId: string
+  repoId: string,
+  endpoint?: string
 ): string {
+  void endpoint; // not honoured yet
   return `${HF_DEFAULT_ENDPOINT}/${(repoType && REPO_PATH_PREFIX[repoType]) ?? ''}${repoId}`;
 }
