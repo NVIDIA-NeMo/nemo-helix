@@ -13,10 +13,21 @@ from nhx.guardrails.app.utils.key_generator import generate_key
 logger = logging.getLogger(__name__)
 
 
+ConfigVersions = tuple[tuple[str, int], ...]
+"""The ``(entity id, db_version)`` of each config an engine was built from, in request order.
+
+The id is included because a config that's deleted and recreated with the same name starts over at
+``db_version`` 1.
+"""
+
+
 @dataclass
 class RailsCacheEntry:
     llm_rails: RailsEngine
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # None if we don't know which config versions the engine came from. It never matches, so the
+    # engine gets rebuilt on the next request.
+    config_versions: ConfigVersions | None = None
 
 
 class RailsRegistry:
@@ -64,6 +75,7 @@ class RailsRegistry:
         model_name: str,
         token_hash,
         llm_rails: RailsEngine,
+        config_versions: ConfigVersions | None = None,
     ):
         model_key = generate_model_key(engine, model_name, token_hash)
 
@@ -74,7 +86,9 @@ class RailsRegistry:
         if (replaced := self._llm_rails_instances[cache_key].get(model_key)) and replaced.llm_rails is not llm_rails:
             retire_rails_engine(replaced.llm_rails)
 
-        self._llm_rails_instances[cache_key][model_key] = RailsCacheEntry(llm_rails=llm_rails)
+        self._llm_rails_instances[cache_key][model_key] = RailsCacheEntry(
+            llm_rails=llm_rails, config_versions=config_versions
+        )
 
         self._llm_rails_events_history_cache[cache_key][model_key] = llm_rails.events_history_cache
 
