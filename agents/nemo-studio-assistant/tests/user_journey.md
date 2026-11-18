@@ -45,7 +45,8 @@ on any failure. Pass `--verbose` to print each answer in full.
 
 Walk through the same steps in the browser and check what the script cannot:
 
-1. Open the assistant from the top bar on the dashboard and send the greeting.
+1. On the dashboard, click Felix (the cat in the bottom-right corner) to open the
+   assistant, and send the greeting.
    The answer streams in, and no "summary" accordion hides a short answer.
 2. Go to **Virtual Models** and ask "How do I add a guardrail here?" The
    answer refers to the Virtual Models page, includes a working Studio link,
@@ -62,8 +63,8 @@ Walk through the same steps in the browser and check what the script cannot:
    ask again, and the workspace list does not include `journey-smoke`.
 7. Open a page with a query string, such as a Virtual Model's chat tab, and
    ask "What am I looking at?" The answer names that Virtual Model.
-8. Reload the page and reopen the conversation from history. The earlier
-   turns are all there, including the refusal.
+8. Reload the page and click Felix again. The last conversation is restored, and
+   the earlier turns are all there, including the refusal.
 
 ## Cleanup
 

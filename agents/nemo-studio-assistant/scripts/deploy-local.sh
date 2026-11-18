@@ -72,7 +72,7 @@ nemo agents invoke --agent-deployment "${deployment_name}" \
 
 cat <<EOF
 
-${agent_name} is running. Open ${NHX_BASE_URL}/studio and use the assistant in the top bar.
+${agent_name} is running. Open ${NHX_BASE_URL}/studio and click Felix, the cat in the bottom-right corner, to use the assistant.
 The Studio topic gate uses STUDIO_ASSISTANT_TOPIC_GATE_MODEL, or NEMO_DEFAULT_MODEL when unset,
 from the environment of the process running 'nemo services run'.
 Tear down with:
