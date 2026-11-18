@@ -425,6 +425,54 @@ with open("./data.jsonl", "rb") as f:
 The CLI `nemo files upload` supports uploading an entire directory and auto-creating a fileset when you omit the fileset name (generating a name like `fileset-a1b2c3d4`). The SDK `upload_file` uploads one file to an existing fileset.
 
 </Tip>
+### Committing a fileset
+
+Fileset metadata includes a `commit_revision` token. Creation assigns a fresh
+UUID, and an explicit commit replaces it. Uploads, deletions, metadata edits,
+source refreshes and OTLP log ingestion preserve the token.
+
+Finish your intended uploads, then commit through the Python SDK:
+
+```python
+client.files.upload_file(name="my-files", path="example.txt", content=b"hello")
+committed = client.files.commit_fileset(name="my-files").data()
+commit_token = committed.commit_revision
+observed = client.files.get_fileset(name="my-files").data()
+print(observed.commit_revision == commit_token)
+```
+
+Save the token and compare it with a later metadata response to detect another
+explicit commit. Every successful commit assigns a fresh token, including commits
+without intervening edits. The response contains that operation's token even if
+another caller commits before you receive it. Compare tokens for equality within
+the same fileset; they are opaque markers, not content hashes or timestamps.
+
+Commit updates metadata without freezing files, scanning storage or waiting for
+in-flight uploads. It provides no locking or snapshot and does not detect
+uncommitted edits. An unset token starts at
+`00000000-0000-0000-0000-000000000000` until the first explicit commit. Reads never
+generate tokens or write data. Commit also works on read-only filesets without
+changing their external data.
+
+Run the complete SDK demo from this source checkout against a server containing
+the fileset commit change:
+
+```bash
+uv run services/core/files/script/demo_fileset_revision.py --workspace default
+```
+
+It creates a dedicated fileset, commits it, uploads and overwrites a file, edits
+metadata, deletes the file, and commits again. SDK reads verify that ordinary
+mutations preserve the commit marker and each commit advances it, including a
+repeated commit without edits. Uploads also verify downloaded bytes. The script
+uses your active Helix context and removes its fileset afterward. Pass `--keep`
+to retain the empty fileset for inspection, or `--context` to select another
+configured deployment. A failed verification exits with an error.
+
+Both sync and async Python clients expose `commit_fileset()` and
+`FilesetOutput.commit_revision`. Use the SDK from this checkout; older installed
+versions may discard the new response field.
+
 ### Listing Files
 
 List all files in a fileset:

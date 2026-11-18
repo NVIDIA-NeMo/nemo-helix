@@ -200,3 +200,12 @@ def test_query_otlp_logs() -> None:
     assert isinstance(prepared.content, bytes)
     assert json.loads(prepared.content) == {"limit": 10, "artifact_base_path": "logs/run-1"}
     assert prepared.content_type == "application/json"
+
+
+def test_commit_fileset() -> None:
+    prepared = endpoints.commit_fileset(workspace="default", name="my-fileset")
+    assert prepared.method == "POST"
+    assert prepared.path_template == "/apis/files/v2/workspaces/{workspace}/filesets/{name}/commit"
+    assert prepared.path_params == {"workspace": "default", "name": "my-fileset"}
+    assert prepared.content is None
+    assert prepared.response_type is FilesetOutput

@@ -3218,6 +3218,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/files/v2/workspaces/{workspace}/filesets/{name}/commit:
+    post:
+      tags:
+      - Files
+      summary: Commit Fileset
+      description: Record a fresh explicit commit marker without changing files.
+      operationId: commit_fileset_apis_files_v2_workspaces__workspace__filesets__name__commit_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '503':
+          description: Commit revision could not be persisted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/files/v2/workspaces/{workspace}/filesets/{name}/files:
     get:
       tags:
@@ -16181,6 +16232,12 @@ components:
         \            schema={\"columns\": [\"id\", \"name\"]},\n        )\n    )"
     FilesetOutput:
       properties:
+        commit_revision:
+          title: Commit Revision
+          description: Opaque token assigned on creation and explicit commit. Ordinary
+            edits preserve it; absent on older servers.
+          nullable: true
+          type: string
         id:
           type: string
           title: Id

@@ -66,6 +66,13 @@ def update_fileset(*, workspace: str | None = None, name: str, body: UpdateFiles
 def delete_fileset(*, workspace: str | None = None, name: str) -> FilesetOutput: ...
 
 
+@post("/apis/files/v2/workspaces/{workspace}/filesets/{name}/commit")
+@abstractmethod
+def commit_fileset(*, workspace: str | None = None, name: str) -> FilesetOutput:
+    """Assign a fresh commit token without changing the modification revision."""
+    ...
+
+
 @post("/apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh")
 @abstractmethod
 def refresh_fileset(*, workspace: str | None = None, name: str) -> FilesetOutput:
