@@ -61,6 +61,10 @@ export const AgentDistillationDetailRoute: FC = () => {
           <Button
             color="brand"
             disabled={!isDone}
+            // TODO(api): promote creates the new agent version (proposed shape).
+            // promoteDistillation({ workspace, name: distillationName }) then invalidate the agent
+            // and its deployments; for source-backed agents fall back to showing the model slug and
+            // the `nemo agents redeploy` command.
             onClick={() =>
               toast.success(`Promoted ${workflow.studentModel} to "${workflow.agentName}" (mock)`)
             }

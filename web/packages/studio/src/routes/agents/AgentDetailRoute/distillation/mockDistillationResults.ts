@@ -36,6 +36,9 @@ export const estimateCostPer1kTasks = (
   (1000 * (inputTokensPerTask * price.inputPerMillion + outputTokensPerTask * price.outputPerMillion)) /
   1_000_000;
 
+// TODO(api): read each arm's aggregate scores from its agent-eval-results record
+// (GET .../agent-eval-results/{evalJobName}), with tokens and latency from the trial measurements.
+// Cost stays computed client-side with estimateCostPer1kTasks until the backend prices runs.
 export const buildMockResults = (distillationName: string, studentModel: string): MockArmResult[] => [
   {
     id: 'original',
