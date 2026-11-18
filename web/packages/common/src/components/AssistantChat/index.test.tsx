@@ -19,7 +19,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ChatCompletion, ChatCompletionChunk } from 'openai/resources/index.mjs';
 import type { Stream } from 'openai/streaming.mjs';
-import { type ReactElement, useState } from 'react';
+import { type ComponentProps, type ReactElement, useState } from 'react';
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
@@ -146,12 +146,16 @@ const renderAssistantChat = (element: ReactElement) =>
   );
 
 const StaticAssistantChatThread = ({
+  emptyState,
   hideAssistantMessageActions,
+  hideResetButton,
   isRunning = false,
   messages: initialMessages = defaultStaticMessages,
   toolCallPartComponent,
 }: {
+  emptyState?: ComponentProps<typeof AssistantChatThread>['emptyState'];
   hideAssistantMessageActions?: boolean;
+  hideResetButton?: boolean;
   isRunning?: boolean;
   messages?: readonly ThreadMessageLike[];
   toolCallPartComponent?: ToolCallMessagePartComponent;
@@ -174,7 +178,9 @@ const StaticAssistantChatThread = ({
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <AssistantChatThread
+        emptyState={emptyState}
         hideAssistantMessageActions={hideAssistantMessageActions}
+        hideResetButton={hideResetButton}
         placeholder="Task prompt"
         onReset={() => undefined}
         toolCallPartComponent={toolCallPartComponent}
@@ -608,6 +614,49 @@ describe('AssistantChat', () => {
     );
 
     expect(screen.getByRole('button', { name: /Add image/i })).toBeDisabled();
+  });
+
+  it('shows the composer reset button by default', () => {
+    renderAssistantChat(<StaticAssistantChatThread />);
+
+    expect(screen.getByRole('button', { name: /Reset/i })).toBeInTheDocument();
+  });
+
+  it('can hide the composer reset button', () => {
+    renderAssistantChat(<StaticAssistantChatThread hideResetButton />);
+
+    expect(screen.queryByRole('button', { name: /Reset/i })).not.toBeInTheDocument();
+    // The rest of the composer is untouched.
+    expect(screen.getByRole('button', { name: /Submit/i })).toBeInTheDocument();
+  });
+
+  it('renders the full-size empty state with its nebula by default', () => {
+    renderAssistantChat(
+      <StaticAssistantChatThread
+        messages={[]}
+        emptyState={{ slotHeading: 'Start here', slotSubheading: 'Say something.' }}
+      />
+    );
+
+    expect(screen.getByText('Start here')).toBeInTheDocument();
+    expect(screen.getByTestId('nv-nebula')).toBeInTheDocument();
+  });
+
+  it('renders a quiet greeting without the nebula for the compact empty state', () => {
+    renderAssistantChat(
+      <StaticAssistantChatThread
+        messages={[]}
+        emptyState={{
+          slotHeading: "Hi, I'm Felix",
+          slotSubheading: 'What can I help you with?',
+          variant: 'compact',
+        }}
+      />
+    );
+
+    expect(screen.getByText("Hi, I'm Felix")).toBeInTheDocument();
+    expect(screen.getByText('What can I help you with?')).toBeInTheDocument();
+    expect(screen.queryByTestId('nv-nebula')).not.toBeInTheDocument();
   });
 
   it('renders image content parts in a user message', () => {

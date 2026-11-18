@@ -23,6 +23,16 @@ const EMPTY_STATE = {
   slotSubheading: 'Ask NeMo Assistant to work in this workspace.',
 };
 
+// Felix's pop-out is a small surface, so it gets a quiet greeting instead of the full empty state.
+const COMPACT_EMPTY_STATE = {
+  slotHeading: "Hi, I'm Felix",
+  slotSubheading: 'What can I help you with?',
+  variant: 'compact' as const,
+};
+
+const PLACEHOLDER = 'Ask NeMo Assistant to work in this workspace';
+const COMPACT_PLACEHOLDER = 'Ask Felix…';
+
 const CHAT_VIEWPORT_SCROLLBAR_CLASS = [
   '[scrollbar-width:thin]',
   '[scrollbar-color:var(--border-color-interaction-base)_transparent]',
@@ -49,6 +59,7 @@ export const AssistantChatThread: FC<AssistantChatThreadProps> = ({
 }) => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
+  const isCompact = mode === 'compact';
   const chatViewportRef = useRef<HTMLDivElement>(null);
   const {
     decisionChoices,
@@ -163,12 +174,14 @@ export const AssistantChatThread: FC<AssistantChatThreadProps> = ({
             ref: chatViewportRef,
           },
         }}
-        placeholder="Ask NeMo Assistant to work in this workspace"
-        minInputRows={3}
+        placeholder={isCompact ? COMPACT_PLACEHOLDER : PLACEHOLDER}
+        minInputRows={isCompact ? 2 : 3}
+        // The compact surface (Felix) already has a "New chat" button in its header.
+        hideResetButton={isCompact}
         onReset={handleChatReset}
         showRunningIndicator={!studioNavigationRequest && !decisionRequest && !inputRequest}
         messageContentProps={MESSAGE_CONTENT_PROPS}
-        emptyState={EMPTY_STATE}
+        emptyState={isCompact ? COMPACT_EMPTY_STATE : EMPTY_STATE}
         composerOverride={
           studioNavigationRequest ? (
             <AgentDecisionInput
