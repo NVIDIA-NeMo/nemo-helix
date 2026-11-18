@@ -61,6 +61,15 @@ if TYPE_CHECKING:
     from nhx_evals_sdk.metrics.remote import NemoAgentToolkitRemoteMetric, RemoteMetric
     from nhx_evals_sdk.metrics.rouge import ROUGEMetric
     from nhx_evals_sdk.metrics.sequence_similarity import SequenceSimilarityMetric
+    from nhx_evals_sdk.metrics.skills import (
+        SkillActivationMetric,
+        SkillContextEfficiencyMetric,
+        SkillReferenceIntegrityMetric,
+        SkillStructureMetric,
+        TokenEfficiencyMetric,
+        expected_behavior_metric,
+    )
+    from nhx_evals_sdk.values.skills import SkillSnapshot
     from nhx_evals_sdk.metrics.string_check import StringCheckMetric
     from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
     from nhx_evals_sdk.metrics.tunable_rag_evaluator import TunableRagEvaluatorMetric
@@ -163,6 +172,13 @@ _LAZY_ATTRS: dict[str, str] = {
     "RemoteMetric": ".metrics.remote",
     "ROUGEMetric": ".metrics.rouge",
     "SequenceSimilarityMetric": ".metrics.sequence_similarity",
+    "SkillActivationMetric": ".metrics.skills",
+    "SkillContextEfficiencyMetric": ".metrics.skills",
+    "SkillReferenceIntegrityMetric": ".metrics.skills",
+    "SkillStructureMetric": ".metrics.skills",
+    "TokenEfficiencyMetric": ".metrics.skills",
+    "expected_behavior_metric": ".metrics.skills",
+    "SkillSnapshot": ".values.skills",
     "StringCheckMetric": ".metrics.string_check",
     "ToolCallingMetric": ".metrics.tool_calling",
     "TunableRagEvaluatorMetric": ".metrics.tunable_rag_evaluator",
@@ -285,6 +301,13 @@ __all__ = [
     "SecretResolver",
     "SequenceSimilarityMetric",
     "SseFrame",
+    "SkillActivationMetric",
+    "SkillContextEfficiencyMetric",
+    "SkillReferenceIntegrityMetric",
+    "SkillStructureMetric",
+    "TokenEfficiencyMetric",
+    "expected_behavior_metric",
+    "SkillSnapshot",
     "StringCheckMetric",
     "StructuredOutput",
     "StructuredOutputMode",

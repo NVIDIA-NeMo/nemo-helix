@@ -587,6 +587,8 @@ nhx-evals-sdk = [
   "jinja2>=3.1.6",
   "jsonschema>=4.23.0",
   "jsonpath-ng>=1.7.0",
+  "pyyaml>=6.0.2",
+  "markdown-it-py>=3.0.0,<5",
   "pyarrow>=19.0.1",
   "pandas>=1.5.3",
   "openai>=1.61.0",
@@ -851,7 +853,6 @@ safe-synthesizer = "nemo_safe_synthesizer_plugin.skills:get_skills_path"
 compass = "nemo_compass_plugin.skills:skills_dir"
 deployments = "nemo_deployments_plugin.skills:skills_dir"
 customizer = "nemo_customizer.skills:get_skills_path"
-
 [tool.uv.sources]
 nemo-helix-ext = { workspace = true }
 nhx-evals-sdk = { workspace = true }

@@ -115,8 +115,7 @@ emitted only by the index task and the gcd task respectively.)
 From the repository root, with the Evals SDK installed in the workspace:
 
 ```bash
-uv run --no-sync --with 'markdown-it-py>=3,<5' --with 'pyyaml>=6,<7' \
-  python -m packages.nhx_evals_sdk.examples.skill_eval.run_metric_preview
+uv run --no-sync python -m packages.nhx_evals_sdk.examples.skill_eval.run_metric_preview
 ```
 
 The preview scores two synthetic revisions against the same task and assertions.
@@ -141,9 +140,10 @@ supplied by the fixture adapter. A per-skill activation value of `false` require
 adequate observation to establish non-activation. Omit the value when the skill
 is absent or instrumentation is insufficient. The built-in `SkillUsedMetric`
 is a useful trace heuristic, but its `false` result alone is insufficient to
-populate this field. These inputs are local example conventions for review.
+populate this field. These experimental SDK inputs are populated by the preview fixtures.
 A beta integration can adapt its stored artifacts and harness observations at
-this boundary.
+this boundary. The scoring implementations live in `nhx_evals_sdk.metrics.skills`
+and their configurations are registered for inline plugin submission.
 
 The expected-behavior factory configures the existing Helix LLM judge. Its two
 views require all assertion scores to be finite, so an invalid or missing

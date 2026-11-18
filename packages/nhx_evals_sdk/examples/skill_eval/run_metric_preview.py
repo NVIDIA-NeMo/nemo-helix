@@ -12,18 +12,17 @@ from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput, TrialMeasurements
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
-from nhx_evals_sdk.structured_output import StructuredOutputMode
-from nhx_evals_sdk.values.models import Model
-
-from .prototype_metrics import (
+from nhx_evals_sdk.metrics.skills import (
     SkillActivationMetric,
     SkillContextEfficiencyMetric,
     SkillReferenceIntegrityMetric,
-    SkillSnapshot,
     SkillStructureMetric,
     TokenEfficiencyMetric,
     expected_behavior_metric,
 )
+from nhx_evals_sdk.structured_output import StructuredOutputMode
+from nhx_evals_sdk.values.models import Model
+from nhx_evals_sdk.values.skills import SkillSnapshot
 
 _SKILL = "incident-summary"
 _PROMPT = "Summarize this incident for the next shift: uploads timed out until the service restarted."
@@ -52,7 +51,7 @@ async def _preview_revision(
     )
     for metric in (SkillStructureMetric(), SkillReferenceIntegrityMetric(), SkillContextEfficiencyMetric()):
         measured = await metric.compute_scores(artifact_input)
-        print(f"  {metric.type}: {', '.join(f'{output.name}={output.value}' for output in measured.outputs)}")
+        print(f"  {metric.type.value}: {', '.join(f'{output.name}={output.value}' for output in measured.outputs)}")
 
     judge, views = expected_behavior_metric(Model(name="fixture-judge", url="http://judge.invalid/v1"), _ASSERTIONS)
     judge.set_inference_fn(
@@ -66,7 +65,7 @@ async def _preview_revision(
         id="handoff",
         intent="Summarize a resolved incident for the next shift.",
         inputs={"instruction": _PROMPT},
-        metrics=[judge, SkillActivationMetric(_SKILL, should_activate=True), TokenEfficiencyMetric()],
+        metrics=[judge, SkillActivationMetric(skill_name=_SKILL, should_activate=True), TokenEfficiencyMetric()],
         views=views,
     )
     trial = AgentEvalTrial(

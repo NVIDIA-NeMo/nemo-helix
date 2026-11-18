@@ -1,44 +1,35 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""SkillEvaluator-inspired metrics for the skill evaluation prototype."""
+"""Skill artifact and trial scoring inspired by SkillEvaluator.
+
+The experimental artifact and activation inputs can be supplied by a runtime adapter
+or by fixtures while beta integration is developed. These scorers implement the SDK
+metric protocol and serialize as built-in metric configurations.
+"""
 
 import posixpath
 import re
 from collections.abc import Sequence
 from pathlib import PurePosixPath
+from typing import Literal
 from urllib.parse import unquote, urlsplit
 
 import yaml
 from markdown_it import MarkdownIt
 from nhx_evals_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
 from nhx_evals_sdk.agent_eval.trials import TrialMeasurements
+from nhx_evals_sdk.enums import MetricType
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.protocol import MetricDiagnostic, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+from nhx_evals_sdk.values.metrics import MetricBase
 from nhx_evals_sdk.values.models import Model, ModelRef
 from nhx_evals_sdk.values.scores import Rubric, RubricScore
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from nhx_evals_sdk.values.skills import SkillSnapshot
+from pydantic import Field, ValidationError
 
 _SKILL_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _MARKDOWN = MarkdownIt()
-
-
-class SkillSnapshot(BaseModel):
-    """Prototype grader input. The caller supplies the original document and full file inventory."""
-
-    directory_name: str
-    digest: str = Field(pattern=r"^[a-f0-9]{64}$")
-    document: str | None
-    files: list[str]
-
-    @field_validator("files")
-    @classmethod
-    def validate_files(cls, files: list[str]) -> list[str]:
-        for name in files:
-            path = PurePosixPath(name)
-            if not path.parts or path.is_absolute() or ".." in path.parts or path.as_posix() != name or "\\" in name:
-                raise ValueError("skill inventory must contain canonical package-relative file paths")
-        return files
 
 
 def _snapshot(input: MetricInput) -> SkillSnapshot | None:
@@ -59,10 +50,10 @@ def _split_document(document: str) -> tuple[str | None, str]:
     return None, document
 
 
-class SkillStructureMetric:
+class SkillStructureMetric(MetricBase):
     """Check the portable SKILL.md requirements and return individual defects."""
 
-    type = "skill_structure"
+    type: Literal[MetricType.SKILL_STRUCTURE] = MetricType.SKILL_STRUCTURE
 
     def output_spec(self) -> list[MetricOutputSpec]:
         return [
@@ -109,10 +100,10 @@ class SkillStructureMetric:
         )
 
 
-class SkillReferenceIntegrityMetric:
+class SkillReferenceIntegrityMetric(MetricBase):
     """Check local file links and images in SKILL.md against the original inventory."""
 
-    type = "skill_reference_integrity"
+    type: Literal[MetricType.SKILL_REFERENCE_INTEGRITY] = MetricType.SKILL_REFERENCE_INTEGRITY
 
     def output_spec(self) -> list[MetricOutputSpec]:
         return [
@@ -161,15 +152,12 @@ class SkillReferenceIntegrityMetric:
         )
 
 
-class SkillContextEfficiencyMetric:
+class SkillContextEfficiencyMetric(MetricBase):
     """Measure document size and compare the estimated token count to an advisory budget."""
 
-    type = "skill_context_efficiency"
+    type: Literal[MetricType.SKILL_CONTEXT_EFFICIENCY] = MetricType.SKILL_CONTEXT_EFFICIENCY
 
-    def __init__(self, token_budget: int = 5000) -> None:
-        if type(token_budget) is not int or token_budget <= 0:
-            raise ValueError("token_budget must be a positive integer")
-        self.token_budget = token_budget
+    token_budget: int = Field(default=5000, gt=0, strict=True, description="Advisory estimated-token budget.")
 
     def output_spec(self) -> list[MetricOutputSpec]:
         return [
@@ -192,14 +180,13 @@ class SkillContextEfficiencyMetric:
         )
 
 
-class SkillActivationMetric:
+class SkillActivationMetric(MetricBase):
     """Score intended activation or non-activation when the runner can establish it."""
 
-    type = "skill_activation"
+    type: Literal[MetricType.SKILL_ACTIVATION] = MetricType.SKILL_ACTIVATION
 
-    def __init__(self, skill_name: str, *, should_activate: bool) -> None:
-        self.skill_name = skill_name
-        self.should_activate = should_activate
+    skill_name: str = Field(min_length=1, description="Target skill whose activation is being evaluated.")
+    should_activate: bool = Field(strict=True, description="Whether this case should activate the target skill.")
 
     def output_spec(self) -> list[MetricOutputSpec]:
         return [
@@ -208,7 +195,7 @@ class SkillActivationMetric:
         ]
 
     async def compute_scores(self, input: MetricInput) -> MetricResult:
-        # Mock runner contract: False requires coverage sufficient to rule out activation.
+        # Experimental adapter contract: False requires sufficient coverage to rule out activation.
         # A missing or null entry covers insufficient evidence and arms without that skill.
         observations = input.row.data.get("trial", {}).get("metadata", {}).get("skill_activation", {})
         observed = observations.get(self.skill_name) if isinstance(observations, dict) else None
@@ -226,7 +213,11 @@ def expected_behavior_metric(
     model: Model | ModelRef, assertions: Sequence[str]
 ) -> tuple[LLMJudgeMetric, dict[str, SemanticView]]:
     """Build an outcome-only judge and views for shared assertions in a comparison."""
-    if not assertions or any(not assertion.strip() for assertion in assertions):
+    if (
+        isinstance(assertions, str)
+        or not assertions
+        or any(not isinstance(assertion, str) or not assertion.strip() for assertion in assertions)
+    ):
         raise ValueError("provide at least one nonempty outcome assertion")
     scores: list[RubricScore] = []
     for index, assertion in enumerate(assertions, start=1):
@@ -262,15 +253,14 @@ def expected_behavior_metric(
     }
 
 
-class TokenEfficiencyMetric:
+class TokenEfficiencyMetric(MetricBase):
     """Score uncached prompt and completion tokens from canonical trial measurements."""
 
-    type = "token_efficiency"
+    type: Literal[MetricType.TOKEN_EFFICIENCY] = MetricType.TOKEN_EFFICIENCY
 
-    def __init__(self, half_life: int = 200_000) -> None:
-        if type(half_life) is not int or half_life <= 0:
-            raise ValueError("half_life must be a positive integer")
-        self.half_life = half_life
+    half_life: int = Field(
+        default=200_000, gt=0, strict=True, description="Efficiency token count that produces a score of 0.5."
+    )
 
     def output_spec(self) -> list[MetricOutputSpec]:
         return [
