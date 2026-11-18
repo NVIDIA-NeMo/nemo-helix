@@ -16,7 +16,7 @@ export const ChatEmptyState: FC<ChatEmptyStateProps> = ({ hasModels }) => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
 
-  const headline = hasModels ? 'Ready' : 'No models available';
+  const headline = hasModels ? 'Ready' : 'No Models Available';
   const subhead = hasModels
     ? 'Prompt your model to get started.'
     : 'Connect an inference provider or create a deployment to start chatting.';
@@ -31,19 +31,19 @@ export const ChatEmptyState: FC<ChatEmptyStateProps> = ({ hasModels }) => {
           !hasModels && (
             <Flex gap="density-md" justify="center" wrap="wrap">
               <Button
+                kind="secondary"
+                onClick={() => navigate(generatePath(ROUTES.workspace.deployments, { workspace }))}
+              >
+                Create Deployment
+              </Button>
+              <Button
                 kind="primary"
                 color="brand"
                 onClick={() =>
                   navigate(generatePath(ROUTES.workspace.inferenceProviders, { workspace }))
                 }
               >
-                Connect inference provider
-              </Button>
-              <Button
-                kind="secondary"
-                onClick={() => navigate(generatePath(ROUTES.workspace.deployments, { workspace }))}
-              >
-                Create deployment
+                Connect Inference Provider
               </Button>
             </Flex>
           )
