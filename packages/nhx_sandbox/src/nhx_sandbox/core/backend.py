@@ -11,6 +11,8 @@ didn't ask for. Backends raise the errors in ``nhx_sandbox.core.errors``, never 
 Some backends are managed services whose operator, not the caller, decides a sandbox's size, lifetime,
 user and network. ``check`` lets a runner find out up front whether a task fits, and ``PlatformEgress``
 lets a task accept network rules it can't set.
+
+``nhx_sandbox.conformance`` turns this contract into tests, and every backend must pass them.
 """
 
 from __future__ import annotations
