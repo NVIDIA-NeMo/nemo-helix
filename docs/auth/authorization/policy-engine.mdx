@@ -58,6 +58,16 @@ Use embedded PDP for:
 
 This is the default in both Helm and quickstart deployments.
 
+### Rejected service identities
+
+When the embedded PDP rejects an unknown or malformed service identity during an
+`allow` evaluation, it returns a normal negative decision. The protected API
+returns HTTP 403 to the caller. The Auth service logs the rejection reason; the
+public response does not disclose the rejected identity.
+
+Failures to contact or execute the PDP remain authorization-service errors.
+Authentication and permission/role query behavior are unchanged.
+
 ## External OPA
 
 An external Open Policy Agent sidecar (or server) fetches policy bundles from the auth service and evaluates requests independently.
