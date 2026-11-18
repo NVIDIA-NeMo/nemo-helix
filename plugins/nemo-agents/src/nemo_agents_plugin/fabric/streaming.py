@@ -42,6 +42,8 @@ _ATOF_EVENT_KINDS = frozenset({"scope", "mark"})
 _REASONING_PART_TYPES = frozenset({"reasoning", "thinking"})
 _REASONING_FIELDS = ("reasoning_content", "reasoning")
 _ASSISTANT_MESSAGE_KEYS = ("__nemo_relay_integrations_langchain_model_response", "message", "data", "payload")
+_TOOL_RESULT_PREVIEW_CHARS = 300
+_TOOL_FAILURE_MARKERS = ("TOOL CALL REJECTED", "Error", "error")
 _TEXT_EVENT_TYPES = frozenset(
     {
         "agentMessage",
@@ -211,10 +213,10 @@ async def iter_fabric_assistant_deltas(stream: FabricRuntimeStream) -> AsyncIter
         is_llm_step = _is_atof_record(record) and _is_llm_output_scope(record)
         if is_llm_step and not agents.is_primary(record):
             continue
-        delta = extract_assistant_delta(record)
+        delta = extract_assistant_delta(record) or _tool_result_delta(record)
         if delta is None:
             continue
-        if is_llm_step:
+        if is_llm_step or delta.reasoning_content is not None:
             delta = _separate_from_previous_step(delta, after_text=emitted_text, after_reasoning=emitted_reasoning)
         emitted_text = emitted_text or delta.content is not None
         emitted_reasoning = emitted_reasoning or delta.reasoning_content is not None
@@ -259,6 +261,20 @@ class _PrimaryAgentScopes:
                 return uuid
             uuid = parent_uuid
         return None
+
+
+def _tool_result_delta(record: Mapping[str, Any]) -> ChatCompletionStreamDelta | None:
+    """Narrate a finished tool call as reasoning, so chat clients see tool failures the agent retries past."""
+    if not (
+        record.get("kind") == "scope" and record.get("scope_category") == "end" and record.get("category") == "tool"
+    ):
+        return None
+    data = record.get("data")
+    result = _text_from_content(data.get("content")) if isinstance(data, Mapping) else _text_from_content(data)
+    result = (result or "done").strip()
+    if len(result) > _TOOL_RESULT_PREVIEW_CHARS and not result.startswith(_TOOL_FAILURE_MARKERS):
+        result = f"{result[:_TOOL_RESULT_PREVIEW_CHARS]}…"
+    return ChatCompletionStreamDelta(reasoning_content=f"→ {record.get('name') or 'tool'}: {result}")
 
 
 def _separate_from_previous_step(

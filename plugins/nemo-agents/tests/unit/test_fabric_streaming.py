@@ -480,6 +480,39 @@ def test_extract_assistant_delta_skips_tool_scopes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_iter_fabric_assistant_deltas_narrates_tool_results_as_reasoning() -> None:
+    rejection = "TOOL CALL REJECTED: 422 Unprocessable Entity:\n- columns[0]: unknown field 'na\"me'"
+    stream = _FakeFabricRuntimeStream(
+        [
+            {
+                "kind": "scope",
+                "scope_category": "end",
+                "category": "tool",
+                "name": "generate_job",
+                "data": {"content": [{"type": "text", "text": rejection}], "type": "tool"},
+            },
+            {
+                "kind": "scope",
+                "scope_category": "end",
+                "category": "tool",
+                "name": "add",
+                "data": {"content": "3", "type": "tool"},
+            },
+            _llm_end({}, annotated_response={"message": "Done."}),
+        ],
+        result=FabricRuntimeResult(status="succeeded", response="Done."),
+    )
+
+    deltas = [delta.model_dump(exclude_none=True) async for delta in iter_fabric_assistant_deltas(stream)]
+
+    assert deltas == [
+        {"reasoning_content": f"→ generate_job: {rejection}"},
+        {"reasoning_content": "\n\n→ add: 3"},
+        {"content": "Done."},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_iter_fabric_assistant_deltas_omits_tool_calls() -> None:
     stream = _FakeFabricRuntimeStream(
         [
