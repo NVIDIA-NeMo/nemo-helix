@@ -33,6 +33,12 @@ echo "Platform ${NHX_BASE_URL}, model ${NEMO_DEFAULT_MODEL}"
 step "Snapshotting docs for search_docs"
 "${agent_dir}/scripts/snapshot-docs.sh"
 
+step "Packaging ${image_tag}"
+nemo agents package \
+  --agent agents/nemo-studio-assistant/agent.yaml \
+  --pyproject agents/nemo-studio-assistant/pyproject.toml \
+  --tag "${image_tag}"
+
 step "Removing any previous ${agent_name} deployment and registration"
 nemo agents undeploy "${deployment_name}" --yes >/dev/null 2>&1 || echo "No previous deployment"
 nemo agents delete "${agent_name}" --yes >/dev/null 2>&1 || echo "No previous registration"
@@ -40,12 +46,6 @@ nemo agents delete "${agent_name}" --yes >/dev/null 2>&1 || echo "No previous re
 step "Registering ${agent_name}"
 nemo agents register --name "${agent_name}" \
   --agent-config agents/nemo-studio-assistant-ethos/agent.yaml
-
-step "Packaging ${image_tag}"
-nemo agents package \
-  --agent agents/nemo-studio-assistant/agent.yaml \
-  --pyproject agents/nemo-studio-assistant/pyproject.toml \
-  --tag "${image_tag}"
 
 step "Deploying ${deployment_name}"
 nemo agents deploy --agent "${agent_name}" \
