@@ -26,7 +26,22 @@ from nemo_evals.shared.metric_bundles.bundles import (
     BundledMetricOutputSpec,
     MetricMetadata,
 )
-from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FILESET_REF_PATTERN, parse_entity_ref
+from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FILESET_REF_PATTERN
+from nemo_helix_plugin.revision_refs import (
+    LATEST_TAG as LATEST_TAG,
+)
+from nemo_helix_plugin.revision_refs import (
+    REF_FRAGMENT_CHARSET as REF_FRAGMENT_CHARSET,
+)
+from nemo_helix_plugin.revision_refs import (
+    REF_FRAGMENT_SEPARATOR as REF_FRAGMENT_SEPARATOR,
+)
+from nemo_helix_plugin.revision_refs import (
+    SUBENTITY_REF_PATTERN,
+)
+from nemo_helix_plugin.revision_refs import (
+    parse_subentity_ref as parse_subentity_ref,
+)
 from nhx_evals_sdk.values.common import SecretRef
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, JsonValue, RootModel, field_validator
 
@@ -114,46 +129,9 @@ class MetricInline(BaseModel):
     payload: MetricPayload = Field(description="Format-specific serialized metric.")
 
 
-#: The charset a ``#fragment`` may use. Exported because anything that *mints* a fragment — notably
-#: revision tag names — has to be constrained by it: a value outside this set can be stored happily
-#: and then never appear in a reference, which is a silent dead end rather than an error.
-REF_FRAGMENT_CHARSET = r"[\w\-.]+"
-
-# A *sub-entity* reference adds an optional ``#fragment`` to the platform's ``ENTITY_REF_PATTERN``,
-# which is the standard way of addressing something contained within an entity (filesets address a
-# contained file the same way: ``workspace/fileset#path``). For a revisioned entity the fragment
-# selects a revision — either a tag (``#latest``, ``#candidate``) or a full 64-char content digest.
-#
-# Deliberately a sibling of ``ENTITY_REF_PATTERN`` rather than a widening of it: that constant is
-# still shared by ``MetricRef``, which has no revisions, and admitting a fragment there would accept
-# input nothing is built to resolve. ``TaskRef`` and ``TasksetRef`` both use this pattern, since both
-# name revisioned records; ``MetricRef`` joins them when (if) metrics gain revisions.
-#
-# The base alternation is spliced in from the shared constant (minus its anchors) so the two shapes
-# cannot drift: widening what counts as a ``workspace/name`` widens both at once.
-_SUBENTITY_REF_PATTERN = rf"^{ENTITY_REF_PATTERN.removeprefix('^').removesuffix('$')}(#{REF_FRAGMENT_CHARSET})?$"
-#: The fragment separator for sub-entity references. Matches the fileset/job ref convention.
-REF_FRAGMENT_SEPARATOR = "#"
-#: The tag applied to every publish and used when a ref carries no fragment.
-LATEST_TAG = "latest"
-
-
-def parse_subentity_ref(root: str, default_workspace: str) -> tuple[str, str, str]:
-    """Split a reference into ``(workspace, name, fragment)``.
-
-    The ``workspace/name`` split is delegated to the platform's :func:`~nemo_helix_plugin.refs.
-    parse_entity_ref`; this only adds the revision fragment on top, so evaluator refs and every other
-    plugin's refs agree on what a ``workspace/name`` is. Callers that don't care about revisions
-    discard the third element — that, rather than a second parser, is how a pinned ref is read
-    unpinned.
-
-    An absent fragment resolves to :data:`LATEST_TAG` — a bare ``workspace/name`` means "the current
-    revision", never "unpinned". The fragment is returned verbatim: it may be a tag or a content
-    digest, and telling them apart is resolution's job, not parsing's.
-    """
-    base, separator, fragment = root.partition(REF_FRAGMENT_SEPARATOR)
-    parsed = parse_entity_ref(base, default_workspace)
-    return parsed.workspace, parsed.name, fragment if separator and fragment else LATEST_TAG
+# The revision ``#fragment`` grammar lives in :mod:`nemo_helix_plugin.revision_refs`, shared with
+# every plugin that publishes revisions; re-exported here for existing importers.
+_SUBENTITY_REF_PATTERN = SUBENTITY_REF_PATTERN
 
 
 class MetricRef(RootModel[str]):

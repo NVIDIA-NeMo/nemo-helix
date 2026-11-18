@@ -26,12 +26,11 @@ head update is slow.
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Sequence
 from typing import Protocol, TypeVar, cast
 
-from nemo_evals.api.schemas import LATEST_TAG, REF_FRAGMENT_CHARSET
-from nemo_evals.content_hash import DIGEST_PATTERN, content_hash
+from nemo_evals.api.schemas import LATEST_TAG
+from nemo_evals.content_hash import content_hash
 from nemo_evals.entities import (
     REVISION_POINTER_EXCLUDE,
     REVISION_POINTER_FIELDS,
@@ -53,6 +52,9 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityNotFoundError,
 )
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.revision_refs import is_digest as is_digest
+from nemo_helix_plugin.revision_refs import validate_movable_tag as validate_movable_tag
+from nemo_helix_plugin.revision_refs import validate_tag_name as validate_tag_name
 
 logger = logging.getLogger(__name__)
 
@@ -65,13 +67,6 @@ _MAX_ALLOCATION_ATTEMPTS = 5
 #: chars, so a revision is ``rev.<ordinal>`` — a bare ordinal is not a legal name, and the full
 #: 64-char digest is both too long and usually digit-leading.
 _REVISION_NAME_PREFIX = "rev."
-
-#: Shape of a content digest in a ref fragment — what distinguishes a digest from a tag name.
-_DIGEST_FRAGMENT = re.compile(DIGEST_PATTERN)
-
-#: A tag has to be usable as a ref ``#fragment``, so it is bound by the same charset. Sharing the
-#: constant keeps the two from drifting into a state where a tag is mintable but unreferenceable.
-_TAG_NAME = re.compile(REF_FRAGMENT_CHARSET)
 
 HeadT = TypeVar("HeadT", TaskEntity, TasksetEntity)
 RevisionT = TypeVar("RevisionT", TaskRevisionEntity, TasksetRevisionEntity)
@@ -120,64 +115,6 @@ def head_digest(head: EntityBase) -> str:
     *which* content is current, not what the content is.
     """
     return content_hash(head, exclude=REVISION_POINTER_EXCLUDE)
-
-
-def validate_tag_name(tag: str) -> str:
-    """Reject tag names that could be stored but never resolved.
-
-    - **Empty**: an absent fragment already means ``latest``, so an empty tag is unaddressable.
-    - **Outside the fragment charset** (a slash, a space): a ref's ``#fragment`` admits only
-      ``[\\w\\-.]+``, so such a tag could be applied and listed but never written into a member
-      reference — the one thing tags exist for.
-    - **Digest-shaped** (64 lowercase hex): resolution checks the digest form *first*, so such a
-      tag would be queried as a content hash and the tag map never consulted.
-
-    Each is silently useless rather than obviously wrong, which is why they are refused here
-    rather than left to surprise someone later. ``latest`` is *not* rejected: whether it is
-    acceptable depends on the operation, so that check lives with the caller.
-    """
-    if not tag.strip():
-        raise ValueError("tag name must not be empty")
-    if not _TAG_NAME.fullmatch(tag):
-        raise ValueError(
-            f"tag {tag!r} contains characters that cannot appear in a reference fragment; such a "
-            "tag could be stored but never used to pin a member, because a ref's '#fragment' "
-            "admits only letters, digits, underscores, hyphens and dots"
-        )
-    if is_digest(tag):
-        raise ValueError(
-            f"tag {tag!r} looks like a content digest; such a tag could be stored but never "
-            "resolved, because a digest-shaped reference is looked up as a digest, not as a tag"
-        )
-    return tag
-
-
-def validate_movable_tag(tag: str) -> str:
-    """Validate a tag a caller is asking to *point somewhere* by hand.
-
-    Adds the ``latest`` restriction on top of :func:`validate_tag_name`: ``latest`` is
-    machine-managed and only ever advances on publish, so moving it manually would break the
-    forward-only guarantee that keeps concurrent publishes consistent.
-    """
-    if tag == LATEST_TAG:
-        raise ValueError(
-            f"{LATEST_TAG!r} is managed automatically and always names the most recently published "
-            "revision; it cannot be moved by hand"
-        )
-    return validate_tag_name(tag)
-
-
-def is_digest(fragment: str) -> bool:
-    """Whether a ref fragment is a content digest rather than a tag.
-
-    Unambiguous by construction: a digest is exactly 64 lowercase hex chars, and tag names are
-    bound to the same charset a fragment allows, which cannot produce that shape by accident.
-
-    ``fullmatch`` rather than ``match``: Python's ``$`` also matches before a trailing newline, so
-    ``match`` would classify a 64-hex string with a newline glued on as a digest and send it down
-    the query path instead of the tag path.
-    """
-    return bool(_DIGEST_FRAGMENT.fullmatch(fragment))
 
 
 async def find_by_digest(
