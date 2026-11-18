@@ -29,8 +29,8 @@ from nhx.studio.assistant_artifacts import (
 )
 from nhx.studio.assistant_mcp_tools import (
     APPROVAL_TOOL_NAME,
+    ASSISTANT_ACTIVITY_TOOL_NAME,
     JOB_PROGRESS_TOOL_NAME,
-    JOB_PROGRESS_UI_TOOL_NAME,
     MCP_TOOLS,
     SELECT_AGENT_TOOL_NAME,
     SELECT_DATASET_FILE_TOOL_NAME,
@@ -481,7 +481,8 @@ def _build_assistant_system_prompt(
             "Deployed NeMo Assistant callback behavior:",
             (
                 f"For every select_agent, select_model, select_dataset_file, select_eval_config, "
-                f"job_progress, studio_link, and ask_user_question call, pass studio_session_id='{session_id}'."
+                f"job_progress, studio_link, ask_user_question, nemo_api, check_status, and search_docs call, "
+                f"pass studio_session_id='{session_id}'."
             ),
             "Do not reveal the Studio session id to the user.",
             (
@@ -928,6 +929,34 @@ def _assistant_request_payload(
 _TOOL_INPUT_INTERNAL_KEYS = frozenset({"studio_session_id"})
 
 
+_ACTIVITY_TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_ACTIVITY_INPUT_KEYS = ("summary", "status", "step", "resource", "action", "query", "job_name")
+_ACTIVITY_VALUE_MAX_LENGTH = 200
+
+
+def _assistant_activity_event(args: dict[str, Any]) -> tuple[str, dict[str, str]] | None:
+    """Return the tool name and browser-safe input for an agent activity report."""
+    tool_name = args.get("tool_name")
+    if not isinstance(tool_name, str) or not _ACTIVITY_TOOL_NAME_PATTERN.fullmatch(tool_name):
+        return None
+    tool_input = {
+        key: value.strip()[:_ACTIVITY_VALUE_MAX_LENGTH]
+        for key in _ACTIVITY_INPUT_KEYS
+        if isinstance(value := args.get(key), str) and value.strip()
+    }
+    return tool_name, tool_input
+
+
+def _mcp_text_result(request_id: Any, payload: dict[str, Any]) -> JSONResponse:
+    return JSONResponse(
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {"content": [{"type": "text", "text": json.dumps(payload)}]},
+        }
+    )
+
+
 def _tool_use_stream_event(tool_name: str, tool_input: dict[str, Any]) -> tuple[str, str]:
     safe_input = {key: value for key, value in tool_input.items() if key not in _TOOL_INPUT_INTERNAL_KEYS}
     return (
@@ -1318,37 +1347,17 @@ async def mcp_endpoint(session_id: str, request: Request, config: StudioConfigDe
         if name == JOB_PROGRESS_TOOL_NAME:
             queue = _session_streams.get(sid)
             if queue is not None:
-                await queue.put(
-                    (
-                        "agent",
-                        json.dumps(
-                            {
-                                "type": "assistant",
-                                "message": {
-                                    "id": f"nemo-studio-assistant-tool-{uuid.uuid4()}",
-                                    "model": _studio_assistant_name(),
-                                    "content": [
-                                        {
-                                            "type": "tool_use",
-                                            "id": f"tool-{uuid.uuid4()}",
-                                            "name": JOB_PROGRESS_UI_TOOL_NAME,
-                                            "input": args,
-                                        }
-                                    ],
-                                },
-                            }
-                        ),
-                    )
-                )
-            return JSONResponse(
-                {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {
-                        "content": [{"type": "text", "text": json.dumps({"status": "rendered"})}],
-                    },
-                }
-            )
+                await queue.put(_tool_use_stream_event(JOB_PROGRESS_TOOL_NAME, args))
+            return _mcp_text_result(request_id, {"status": "rendered"})
+
+        if name == ASSISTANT_ACTIVITY_TOOL_NAME:
+            activity = _assistant_activity_event(args)
+            if activity is None:
+                return _mcp_text_result(request_id, {"status": "ignored"})
+            queue = _session_streams.get(sid)
+            if queue is not None:
+                await queue.put(_tool_use_stream_event(*activity))
+            return _mcp_text_result(request_id, {"status": "recorded"})
 
         if name == APPROVAL_TOOL_NAME:
             return await _blocking_mcp_tool_response(
