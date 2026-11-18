@@ -2592,6 +2592,561 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/pipeline:
+    post:
+      tags:
+      - Agents
+      summary: Create Job
+      operationId: create_job_apis_agents_v2_workspaces__workspace__jobs_pipeline_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PipelineJobRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Agents
+      summary: List Jobs
+      operationId: list_jobs_apis_agents_v2_workspaces__workspace__jobs_pipeline_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/PipelineJobsSortField'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: -created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/PipelineJobsListFilter'
+        description: Filter jobs on various criteria.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineJobsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/pipeline/{job}/results/{name}:
+    get:
+      tags:
+      - Agents
+      summary: Get Job Result
+      operationId: get_job_result_apis_agents_v2_workspaces__workspace__jobs_pipeline__job__results__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/pipeline/{job}/results/{name}/download:
+    get:
+      tags:
+      - Agents
+      summary: Download Job Result
+      operationId: download_job_result_apis_agents_v2_workspaces__workspace__jobs_pipeline__job__results__name__download_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/pipeline/{name}:
+    get:
+      tags:
+      - Agents
+      summary: Get Job
+      operationId: get_job_apis_agents_v2_workspaces__workspace__jobs_pipeline__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Agents
+      summary: Update Job
+      operationId: update_job_apis_agents_v2_workspaces__workspace__jobs_pipeline__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PipelineJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Agents
+      summary: Delete Job
+      operationId: delete_job_apis_agents_v2_workspaces__workspace__jobs_pipeline__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/pipeline/{name}/attempts:
+    get:
+      tags:
+      - Agents
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_agents_v2_workspaces__workspace__jobs_pipeline__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/pipeline/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Agents
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_agents_v2_workspaces__workspace__jobs_pipeline__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineJobAttempt'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/pipeline/{name}/cancel:
+    post:
+      tags:
+      - Agents
+      summary: Cancel Job
+      operationId: cancel_job_apis_agents_v2_workspaces__workspace__jobs_pipeline__name__cancel_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/pipeline/{name}/logs:
+    get:
+      tags:
+      - Agents
+      summary: Get Job Logs
+      operationId: get_job_logs_apis_agents_v2_workspaces__workspace__jobs_pipeline__name__logs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: limit
+        in: query
+        required: false
+        schema:
+          title: Limit
+          type: integer
+      - name: page_cursor
+        in: query
+        required: false
+        schema:
+          title: Page Cursor
+          type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobLogPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/pipeline/{name}/results:
+    get:
+      tags:
+      - Agents
+      summary: List Job Results
+      operationId: list_job_results_apis_agents_v2_workspaces__workspace__jobs_pipeline__name__results_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobListResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/pipeline/{name}/status:
+    get:
+      tags:
+      - Agents
+      summary: Get Job Status
+      operationId: get_job_status_apis_agents_v2_workspaces__workspace__jobs_pipeline__name__status_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/sessions:
     post:
       tags:
@@ -5838,6 +6393,274 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    PipelineJob:
+      properties:
+        id:
+          title: Id
+          type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
+        name:
+          type: string
+          title: Name
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        workspace:
+          title: Workspace
+          type: string
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+        spec:
+          $ref: '#/components/schemas/PipelineJobConfig'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          title: Status Details
+          additionalProperties: true
+          type: object
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
+      type: object
+      required:
+      - name
+      - spec
+      title: PipelineJob
+    PipelineJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/PipelineJobConfig'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: PipelineJobAttempt
+    PipelineJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/PipelineJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: PipelineJobAttemptsPage
+    PipelineJobConfig:
+      properties:
+        task:
+          type: string
+          title: Task
+          description: Programming task description. It is the planner's input.
+        environment:
+          title: Environment
+          description: AgentEnvironment ("workspace/name" ref) every step runs under.
+            Omit for none.
+          type: string
+      type: object
+      required:
+      - task
+      title: PipelineJobConfig
+      description: 'Input for ``agents.pipeline``: the task description (the agents
+        per role are hardcoded for now).'
+    PipelineJobRequest:
+      properties:
+        name:
+          title: Name
+          type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        spec:
+          $ref: '#/components/schemas/PipelineJobConfig'
+        profile:
+          title: Profile
+          type: string
+        options:
+          title: Options
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+        output_location:
+          title: Output Location
+          type: string
+      type: object
+      required:
+      - spec
+      title: PipelineJobRequest
+    PipelineJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/PipelineJobConfig'
+      additionalProperties: false
+      type: object
+      title: PipelineJobUpdate
+    PipelineJobsListFilter:
+      additionalProperties: false
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+      title: PipelineJobsListFilter
+      type: object
+    PipelineJobsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/PipelineJob'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: PipelineJobsPage
+    PipelineJobsSortField:
+      type: string
+      enum:
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      title: PipelineJobsSortField
     PostRunActionConfig:
       properties:
         kind:

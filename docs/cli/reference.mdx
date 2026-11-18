@@ -6259,6 +6259,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 * `evaluate`: Evaluate an agent workflow against a dataset as a...
 * `execute`: Execute an agent to completion as a scheduled platform job.
 * `package-agent`: Build a container image for an agent stored on the platform.
+* `pipeline`: Run a PR planner, writer and reviewer agent in sequence...
 
 *Local commands:*
 
@@ -7364,7 +7365,7 @@ nemo agents list-jobs [OPTIONS]
 
 **Options:**
 
-* `--type, -t TYPE`: Only list jobs of this type, e.g. evaluate, execute or package-agent. Repeat for several. Default: all.
+* `--type, -t TYPE`: Only list jobs of this type, e.g. evaluate, execute, package-agent or pipeline. Repeat for several. Default: all.
 * `--agent, -a AGENT`: Only list runs of this agent: NAME in the listing workspace, or WORKSPACE/NAME. Repeat for several. Lists execute jobs, the only jobs that record their agent. With `--workspace` -, use WORKSPACE/NAME.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
@@ -7576,6 +7577,63 @@ Show input/output schemas.
 
 ```shell
 nemo agents package-agent explain [OPTIONS]
+```
+
+**Options:**
+
+* `--profile`: Annotate the bundle with this profile.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo agents pipeline
+
+Run a PR planner, writer and reviewer agent in sequence as one platform job.
+
+**Usage:**
+
+```shell
+nemo agents pipeline [OPTIONS] [COMMAND] [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Job Spec:**
+
+* `--task`: Programming task description. It is the planner's input.
+* `--environment`: AgentEnvironment ("workspace/name" ref) every step runs under. Omit for none.
+
+**Spec Source:**
+
+* `--spec`: Spec as a JSON string. [default: \{}]
+* `--spec-file <PATH>`: Path to a YAML or JSON spec file (used as base; per-flag values override).
+
+**Submission:**
+
+* `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
+* `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
+* `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
+* `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+Job Spec flags are generated from the PipelineJobConfig Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
+​
+
+**Commands:**
+
+* `explain`: Show input/output schemas.
+
+##### nemo agents pipeline explain
+
+Show input/output schemas.
+
+**Usage:**
+
+```shell
+nemo agents pipeline explain [OPTIONS]
 ```
 
 **Options:**

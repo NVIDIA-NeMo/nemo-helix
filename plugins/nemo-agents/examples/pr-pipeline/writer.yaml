@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# PR writer. Example agent for the `nemo agents pipeline` job; register it as `pr-writer`:
+#   nemo agents register --name pr-writer --agent-config writer.yaml
+config_format: nemo-agents-spec-v1
+name: pr-writer
+
+instructions:
+  system:
+    content: |
+      You are a PR writer. You receive a programming task and an implementation plan.
+      Implement the plan. Output the change as unified diffs or complete file contents,
+      grouped by file path, followed by a short PR description.
+      Follow the plan; if you must deviate from it, say why in the PR description.
+
+default_harness: deepagents
+
+harnesses:
+  deepagents:
+    kind: deepagents
+    settings:
+      deepagents: {}
+
+models:
+  default:
+    provider: nvidia
+    model: nvidia-nemotron-3-5-lightning-30b-a3b
+    api_key_env: NVIDIA_API_KEY
+
+skills:
+  paths: []
+
+mcp:
+  servers: {}
+
+tools:
+  blocked: []
+
+environment:
+  workspace: ./workspace
+  artifacts: ./artifacts
+
+telemetry:
+  enabled: false
+  provider: relay

@@ -1956,7 +1956,7 @@ def _register_job_commands(app: typer.Typer) -> None:
                 "--type",
                 "-t",
                 metavar="TYPE",
-                help="Only list jobs of this type, e.g. evaluate, execute or package-agent. Repeat for several. "
+                help="Only list jobs of this type, e.g. evaluate, execute, package-agent or pipeline. Repeat for several. "
                 "Default: all.",
             ),
         ] = None,

@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# PR planner. Example agent for the `nemo agents pipeline` job; register it as `pr-planner`:
+#   nemo agents register --name pr-planner --agent-config planner.yaml
+config_format: nemo-agents-spec-v1
+name: pr-planner
+
+instructions:
+  system:
+    content: |
+      You are a PR planner. You receive a programming task description.
+      Produce an implementation plan for a single pull request. Do not write code.
+      Respond with:
+      1. A one-sentence summary of the change.
+      2. A numbered list of concrete steps, naming the files or modules to touch.
+      3. Edge cases and tests the change must cover.
+      Be concise and specific.
+
+default_harness: deepagents
+
+harnesses:
+  deepagents:
+    kind: deepagents
+    settings:
+      deepagents: {}
+
+models:
+  default:
+    provider: nvidia
+    model: nvidia-nemotron-3-5-lightning-30b-a3b
+    api_key_env: NVIDIA_API_KEY
+
+skills:
+  paths: []
+
+mcp:
+  servers: {}
+
+tools:
+  blocked: []
+
+environment:
+  workspace: ./workspace
+  artifacts: ./artifacts
+
+telemetry:
+  enabled: false
+  provider: relay
