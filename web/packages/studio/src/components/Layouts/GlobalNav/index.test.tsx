@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ROUTES } from '@studio/constants/routes';
 import { mockUseParams } from '@studio/tests/util/mockUseParams';
 import { SIDE_NAV_OPEN_KEY } from '@studio/util/localStorage';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { createMemoryRouter, generatePath, MemoryRouter, RouterProvider } from 'react-router';
+import { MemoryRouter } from 'react-router';
 
 vi.mock('@studio/components/Breadcrumbs', () => ({
   Breadcrumbs: () => <div data-testid="breadcrumbs" />,
@@ -18,10 +17,6 @@ vi.mock('@studio/components/UserPopover', () => ({
 
 vi.mock('@studio/components/Layouts/GlobalNav/components/ThemeSwitch', () => ({
   ThemeSwitch: () => <div data-testid="theme-switch" />,
-}));
-
-vi.mock('@studio/routes/agents/AssistantChatRoute/AssistantTopBarChat', () => ({
-  AssistantTopBarChat: () => <div data-testid="assistant-top-bar-chat" />,
 }));
 
 vi.mock('@studio/components/Layouts/GlobalNav/components/DocumentationLink', () => ({
@@ -95,62 +90,6 @@ describe('GlobalNav', () => {
 
       expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument();
       expect(screen.getByText('NeMo Studio')).toBeInTheDocument();
-    });
-
-    it('starts collapsed on the NeMo Assistant route when no preference is saved', async () => {
-      createMatchMediaMock(true);
-
-      await renderGlobalNav(
-        generatePath(ROUTES.workspace.assistantChat, { workspace: 'test-workspace' })
-      );
-
-      expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
-      expect(screen.queryByText('NeMo Studio')).not.toBeInTheDocument();
-    });
-
-    it('respects a saved expanded preference on the NeMo Assistant route', async () => {
-      localStorage.setItem(SIDE_NAV_OPEN_KEY, JSON.stringify('true'));
-      createMatchMediaMock(true);
-
-      await renderGlobalNav(
-        generatePath(ROUTES.workspace.assistantChat, { workspace: 'test-workspace' })
-      );
-
-      expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument();
-      expect(screen.getByText('NeMo Studio')).toBeInTheDocument();
-    });
-
-    it('uses the NeMo Assistant default during in-app navigation', async () => {
-      createMatchMediaMock(true);
-      const { GlobalNav } = await import('@studio/components/Layouts/GlobalNav/index');
-      const router = createMemoryRouter(
-        [
-          {
-            path: '*',
-            element: (
-              <GlobalNav sideNav={() => <div data-testid="side-nav">Side Nav Content</div>} />
-            ),
-          },
-        ],
-        { initialEntries: ['/workspaces/test-workspace/jobs'] }
-      );
-      render(<RouterProvider router={router} />);
-
-      expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument();
-
-      await act(async () => {
-        await router.navigate(
-          generatePath(ROUTES.workspace.assistantChat, { workspace: 'test-workspace' })
-        );
-      });
-
-      expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
-
-      await act(async () => {
-        await router.navigate('/workspaces/test-workspace/jobs');
-      });
-
-      expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument();
     });
 
     it('auto-collapses sidebar when initial viewport is narrow', async () => {
@@ -242,33 +181,13 @@ describe('GlobalNav', () => {
     });
   });
 
-  describe('NeMo Assistant top bar chat', () => {
-    it('mounts outside the dashboard and full NeMo Assistant routes', async () => {
-      createMatchMediaMock(true);
+  it('does not render the NeMo Assistant in the top bar (Felix owns it)', async () => {
+    createMatchMediaMock(true);
 
-      await renderGlobalNav('/workspaces/test-workspace/jobs');
+    await renderGlobalNav('/workspaces/test-workspace/jobs');
 
-      expect(screen.getByTestId('assistant-top-bar-chat')).toBeInTheDocument();
-    });
-
-    it('does not mount on the dashboard route', async () => {
-      createMatchMediaMock(true);
-
-      await renderGlobalNav(
-        generatePath(ROUTES.workspace.dashboard, { workspace: 'test-workspace' })
-      );
-
-      expect(screen.queryByTestId('assistant-top-bar-chat')).not.toBeInTheDocument();
-    });
-
-    it('does not mount on the full NeMo Assistant route', async () => {
-      createMatchMediaMock(true);
-
-      await renderGlobalNav(
-        generatePath(ROUTES.workspace.assistantChat, { workspace: 'test-workspace' })
-      );
-
-      expect(screen.queryByTestId('assistant-top-bar-chat')).not.toBeInTheDocument();
-    });
+    expect(
+      screen.queryByRole('button', { name: 'Open NeMo Assistant chat' })
+    ).not.toBeInTheDocument();
   });
 });
