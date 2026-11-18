@@ -59,9 +59,11 @@ def _resources(key: str, node: GraphNode) -> list[str]:
         return ["job", "model"]
     if node.kind == "model_deployment":
         return ["config", "deployment"]
-    if node.kind == "agent_eval":
-        return ["agent", "job"]
-    if node.kind == "delete_deployment":
+    if node.kind in {"agent_eval", "dataset_eval"}:
+        return ["job"]
+    if node.kind == "agent_deployment":
+        return ["agent", "deployment"]
+    if node.kind in {"delete_deployment", "delete_agent_deployment"}:
         return []
     if node.kind == "experiment":
         arms = node.inputs.get("arms")

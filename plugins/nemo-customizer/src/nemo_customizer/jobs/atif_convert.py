@@ -3,9 +3,10 @@
 
 """Stub ATIF convert job.
 
-Writes a schema-valid ``train.jsonl``, ``validation.jsonl`` and ``output.json``
-into the workflow fileset. The rows are synthetic. A later pass replaces this
-with the real trajectory converter; the fileset layout stays the same.
+The input is the evaluation runs' output filesets. This pass records those
+filesets and still writes synthetic ``train.jsonl`` and ``validation.jsonl``
+rows. A later pass reads the trajectories and replaces the rows. The fileset
+layout stays the same.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.providers import ContainerSpec, CPUExecutionProvider
 from nemo_helix_plugin.jobs.spec import HelixJobEnvironmentVariable, HelixJobSpec, HelixJobStepSpec
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 SOURCE = "customization"
 
@@ -33,6 +34,8 @@ class AtifConvertSpec(BaseModel):
     workspace: str
     fileset: str
     node_key: str
+    trajectory_filesets: list[str] = Field(default_factory=list)
+    pass_filter: dict[str, Any] = Field(default_factory=dict)
 
 
 def fileset_prefix(node_key: str) -> str:
@@ -71,16 +74,19 @@ def stub_row() -> dict[str, Any]:
     }
 
 
-def stub_output(*, workspace: str, fileset: str, node_key: str) -> dict[str, Any]:
+def stub_output(
+    *, workspace: str, fileset: str, node_key: str, trajectory_filesets: list[str] | None = None
+) -> dict[str, Any]:
     """The ``output.json`` the workflow controller reads after this job completes."""
     prefix = fileset_prefix(node_key)
+    sources = list(trajectory_filesets or [])
     return {
         "fileset": f"{workspace}/{fileset}",
         "dataset": f"{workspace}/{fileset}#{prefix}/",
-        "held_out": ["stub-task-1"],
-        "runs": 1,
+        "trajectory_filesets": sources,
+        "held_out": [],
+        "runs": len(sources),
         "examples": 2,
-        "tasks": [{"id": "stub-task-1", "intent": "Stub task for distillation plumbing."}],
     }
 
 
@@ -146,13 +152,20 @@ class AtifConvertJob(NemoJob):
     def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient | None = None) -> dict[str, Any]:
         del ctx
         spec = AtifConvertSpec.model_validate(config)
+        if not spec.trajectory_filesets:
+            raise RuntimeError("atif-convert needs the evaluation output filesets")
         if sdk is None:
             raise RuntimeError("atif-convert requires a platform client to upload the workflow fileset")
         prefix = fileset_prefix(spec.node_key)
         rows = [stub_row(), stub_row()]
         rows[1]["messages"][1]["content"] = "What is 3+3?"
         payload = b"".join(_jsonl(row) for row in rows)
-        output = stub_output(workspace=spec.workspace, fileset=spec.fileset, node_key=spec.node_key)
+        output = stub_output(
+            workspace=spec.workspace,
+            fileset=spec.fileset,
+            node_key=spec.node_key,
+            trajectory_filesets=spec.trajectory_filesets,
+        )
         files = FilesClient.from_client(sdk)
         files.upload_file(workspace=spec.workspace, name=spec.fileset, path=f"{prefix}/train.jsonl", content=payload)
         files.upload_file(

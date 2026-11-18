@@ -5,9 +5,10 @@ from typing import cast
 
 from nemo_distillation_plugin.controller import DistillationWorkflowController
 from nemo_distillation_plugin.executor import Poll, Ports
-from nemo_distillation_plugin.models import DistillInputs, Workflow
+from nemo_distillation_plugin.models import Workflow
 from nemo_distillation_plugin.template import assemble
 from nemo_helix_plugin.entities import EntityClient, EntityConflictError
+from samples import inputs
 
 
 class _Page:
@@ -70,7 +71,7 @@ class _Ports:
 
 
 async def test_a_tick_is_saved_before_the_node_starts() -> None:
-    workflow = assemble("distill", "default", DistillInputs(source_agent="default/teacher", student_model="student"))
+    workflow = assemble("distill", "default", inputs(student_model="student"))
     events: list[str] = []
     entities = Entities(workflow, events=events)
     ports = _Ports(events)
@@ -79,12 +80,13 @@ async def test_a_tick_is_saved_before_the_node_starts() -> None:
     await controller.reconcile()
 
     assert events[0] == "save"
-    assert ports.started == ["prepare"]
-    assert entities.workflow.nodes["prepare"].status == "running"
+    assert ports.started == ["experiment", "deploy_teacher"]
+    assert entities.workflow.nodes["experiment"].status == "running"
+    assert entities.workflow.nodes["prepare"].status == "pending"
 
 
 async def test_a_version_conflict_does_not_start_the_node() -> None:
-    workflow = assemble("distill", "default", DistillInputs(source_agent="default/teacher", student_model="student"))
+    workflow = assemble("distill", "default", inputs(student_model="student"))
     entities = Entities(workflow, conflict=True, events=[])
     ports = _Ports([])
     controller = DistillationWorkflowController(entities=cast(EntityClient, entities), ports=cast(Ports, ports))

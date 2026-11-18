@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Any
 from unittest.mock import AsyncMock
 from urllib.parse import quote
 
@@ -15,8 +14,7 @@ from nemo_helix_plugin.entity_client import (
     NemoPaginationInfo,
     get_entity_client,
 )
-
-INPUTS: dict[str, Any] = {"source_agent": "default/teacher", "student_model": "default/student"}
+from samples import INPUTS
 
 
 def _page(items: list[Workflow]):
@@ -88,7 +86,9 @@ def test_render_writes_nothing() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["counts"]["candidates"] == 1
-    assert body["counts"]["nodes"] == 10
+    assert body["counts"]["nodes"] == 21
+    assert body["counts"]["gpu_hours"] == 4
+    assert body["counts"]["parallel_jobs"] == 1
     assert "train[lora]" in body["graph"]
     entities.create.assert_not_called()
 
@@ -103,7 +103,9 @@ def test_get_lists_and_cancel() -> None:
 
     got = client.get("/v2/workspaces/default/workflows/distill")
     assert got.status_code == 200
-    assert got.json()["graph"]["experiment"]["depends_on"] == ["prepare"]
+    body = got.json()
+    assert body["graph"]["experiment"]["depends_on"] == []
+    assert body["graph"]["prepare"]["depends_on"] == ["eval_original[tasks]", "eval_original[dataset]"]
 
     listed = client.get("/v2/workspaces/default/workflows", params={"filter[source_agent]": "default/teacher"})
     assert listed.status_code == 200

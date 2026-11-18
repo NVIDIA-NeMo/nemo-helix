@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any, Literal, Protocol
 
+from nemo_helix_plugin.jobs.types import derive_job_fileset_name
+
 from nemo_distillation_plugin.executor import Poll
 from nemo_distillation_plugin.graph import resolve
 from nemo_distillation_plugin.models import Workflow
@@ -27,7 +29,16 @@ _DEPLOY_FAILED = frozenset({"ERROR", "LOST", "UNKNOWN"})
 
 
 class PlatformPort(Protocol):
-    async def submit_convert(self, *, workspace: str, name: str, fileset: str, node_key: str) -> None: ...
+    async def submit_convert(
+        self,
+        *,
+        workspace: str,
+        name: str,
+        fileset: str,
+        node_key: str,
+        trajectory_filesets: list[str],
+        pass_filter: dict[str, Any],
+    ) -> None: ...
 
     async def submit_customization(self, *, workspace: str, name: str, spec: dict[str, Any]) -> None: ...
 
@@ -62,6 +73,36 @@ class PlatformPort(Protocol):
 
     async def cancel_eval(self, *, workspace: str, name: str) -> None: ...
 
+    async def submit_dataset_eval(
+        self,
+        *,
+        workspace: str,
+        name: str,
+        agent_name: str,
+        deployment_name: str,
+        spec: dict[str, Any],
+        evaluation_id: str,
+    ) -> None: ...
+
+    async def create_agent_deployment(
+        self,
+        *,
+        workspace: str,
+        name: str,
+        agent_name: str,
+        mode: str,
+        image: str,
+        use_image_entrypoint: bool,
+    ) -> None: ...
+
+    async def agent_deployment_status(self, *, workspace: str, name: str) -> str: ...
+
+    async def delete_agent_deployment(self, *, workspace: str, name: str) -> None: ...
+
+    async def dataset_eval_status(self, *, workspace: str, name: str) -> str: ...
+
+    async def cancel_dataset_eval(self, *, workspace: str, name: str) -> None: ...
+
     async def ensure_experiment(
         self,
         *,
@@ -82,11 +123,19 @@ class _Adapter:
 class ConvertAdapter(_Adapter):
     async def start(self, workflow: Workflow, node_key: str) -> None:
         external = workflow.nodes[node_key].external
+        inputs = resolve(workflow.graph[node_key].inputs, workflow)
+        filesets = inputs.get("trajectory_filesets")
+        if not isinstance(filesets, list) or not filesets:
+            raise ValueError(f"{node_key} has no evaluation output filesets")
+        if not all(isinstance(item, str) and item for item in filesets):
+            raise ValueError(f"{node_key} has no evaluation output filesets")
         await self.platform.submit_convert(
             workspace=workflow.workspace,
             name=external["job"],
             fileset=workflow.fileset,
             node_key=node_key,
+            trajectory_filesets=list(filesets),
+            pass_filter=dict(inputs.get("pass_filter") or {}),
         )
 
     async def poll(self, workflow: Workflow, node_key: str) -> Poll:
@@ -100,10 +149,16 @@ class CustomizationAdapter(_Adapter):
     async def start(self, workflow: Workflow, node_key: str) -> None:
         external = workflow.nodes[node_key].external
         inputs = resolve(workflow.graph[node_key].inputs, workflow)
+        training: dict[str, Any] = {
+            "type": "sft",
+            "parallelism": {"num_gpus_per_node": int(inputs.get("gpu") or 1)},
+        }
+        if inputs["finetuning_type"] == "lora":
+            training["peft"] = {"type": "lora"}
         spec = {
             "model": inputs["student_model"],
-            "dataset": {"training": inputs["dataset"]},
-            "training": {"finetuning_type": inputs["finetuning_type"]},
+            "dataset": str(inputs["dataset"]),
+            "training": training,
             "output": {"name": external["model"]},
         }
         await self.platform.submit_customization(workspace=workflow.workspace, name=external["job"], spec=spec)
@@ -160,13 +215,13 @@ class DeploymentAdapter(_Adapter):
 
 class DeleteDeploymentAdapter(_Adapter):
     async def start(self, workflow: Workflow, node_key: str) -> None:
-        inputs = resolve(workflow.graph[node_key].inputs, workflow)
-        await self.platform.delete_deployment(workspace=workflow.workspace, name=str(inputs["deployment"]))
+        workspace, name = _deployment_address(workflow, node_key)
+        await self.platform.delete_deployment(workspace=workspace, name=name)
 
     async def poll(self, workflow: Workflow, node_key: str) -> Poll:
-        name = str(resolve(workflow.graph[node_key].inputs, workflow)["deployment"])
+        workspace, name = _deployment_address(workflow, node_key)
         try:
-            status = await self.platform.deployment_status(workspace=workflow.workspace, name=name)
+            status = await self.platform.deployment_status(workspace=workspace, name=name)
         except Missing:
             return Poll(phase="completed", outputs={"deployment": name, "deleted": True})
         if status == "DELETED":
@@ -179,7 +234,7 @@ class DeleteDeploymentAdapter(_Adapter):
         del workflow, node_key
 
 
-class AgentEvalAdapter(_Adapter):
+class AgentDeploymentAdapter(_Adapter):
     async def start(self, workflow: Workflow, node_key: str) -> None:
         external = workflow.nodes[node_key].external
         inputs = resolve(workflow.graph[node_key].inputs, workflow)
@@ -192,24 +247,84 @@ class AgentEvalAdapter(_Adapter):
             workflow_name=workflow.name,
             arm=str(inputs["arm"]),
         )
-        tasks = inputs.get("tasks")
-        if not isinstance(tasks, list) or not tasks:
-            raise ValueError(f"{node_key} has no tasks to evaluate")
-        await self.platform.submit_eval(
+        await self.platform.create_agent_deployment(
             workspace=workflow.workspace,
-            name=external["job"],
-            spec={
-                "tasks": tasks,
-                "target": {
-                    "kind": "fabric",
-                    "source": {"agent": f"{workflow.workspace}/{external['agent']}"},
-                },
-                "publication": {"intake": {"evaluation_id": inputs["evaluation_id"]}},
-            },
+            name=external["deployment"],
+            agent_name=external["agent"],
+            mode=str(inputs["mode"]),
+            image=str(inputs.get("image") or ""),
+            use_image_entrypoint=bool(inputs.get("use_image_entrypoint")),
         )
 
     async def poll(self, workflow: Workflow, node_key: str) -> Poll:
         external = workflow.nodes[node_key].external
+        try:
+            status = await self.platform.agent_deployment_status(
+                workspace=workflow.workspace, name=external["deployment"]
+            )
+        except Missing:
+            return Poll(phase="missing")
+        if status == "running":
+            return Poll(
+                phase="completed",
+                outputs={"deployment": external["deployment"], "agent": external["agent"]},
+            )
+        if status == "failed":
+            return Poll(phase="failed", error=f"agent deployment {external['deployment']} is {status}")
+        if status == "deleting":
+            return Poll(phase="cancelled")
+        return Poll(phase="running")
+
+    async def cancel(self, workflow: Workflow, node_key: str) -> None:
+        external = workflow.nodes[node_key].external
+        await self.platform.delete_agent_deployment(workspace=workflow.workspace, name=external["deployment"])
+        await self.platform.delete_agent(workspace=workflow.workspace, agent_name=external["agent"])
+
+
+class DeleteAgentDeploymentAdapter(_Adapter):
+    async def start(self, workflow: Workflow, node_key: str) -> None:
+        inputs = resolve(workflow.graph[node_key].inputs, workflow)
+        await self.platform.delete_agent_deployment(workspace=workflow.workspace, name=str(inputs["deployment"]))
+        await self.platform.delete_agent(workspace=workflow.workspace, agent_name=str(inputs["agent"]))
+
+    async def poll(self, workflow: Workflow, node_key: str) -> Poll:
+        name = str(resolve(workflow.graph[node_key].inputs, workflow)["deployment"])
+        try:
+            status = await self.platform.agent_deployment_status(workspace=workflow.workspace, name=name)
+        except Missing:
+            return Poll(phase="completed", outputs={"deployment": name, "deleted": True})
+        if status == "failed":
+            return Poll(phase="completed", outputs={"deployment": name, "deleted": True})
+        return Poll(phase="running")
+
+    async def cancel(self, workflow: Workflow, node_key: str) -> None:
+        del workflow, node_key
+
+
+class AgentEvalAdapter(_Adapter):
+    async def start(self, workflow: Workflow, node_key: str) -> None:
+        external = workflow.nodes[node_key].external
+        inputs = resolve(workflow.graph[node_key].inputs, workflow)
+        agent_name = str(inputs["agent_name"])
+        spec = inputs.get("spec")
+        tasks = spec.get("tasks") if isinstance(spec, dict) else None
+        if not isinstance(tasks, list) or not tasks:
+            raise ValueError(f"{node_key} has no tasks to evaluate")
+        submitted: dict[str, Any] = {
+            "tasks": tasks,
+            "target": {
+                "kind": "fabric",
+                "source": {"agent": f"{workflow.workspace}/{agent_name}"},
+            },
+            "publication": {"intake": {"evaluation_id": inputs["evaluation_id"]}},
+        }
+        if isinstance(spec, dict) and spec.get("max_concurrent_tasks") is not None:
+            submitted["max_concurrent_tasks"] = spec["max_concurrent_tasks"]
+        await self.platform.submit_eval(workspace=workflow.workspace, name=external["job"], spec=submitted)
+
+    async def poll(self, workflow: Workflow, node_key: str) -> Poll:
+        external = workflow.nodes[node_key].external
+        inputs = resolve(workflow.graph[node_key].inputs, workflow)
         try:
             status = await self.platform.eval_status(workspace=workflow.workspace, name=external["job"])
         except Missing:
@@ -217,28 +332,58 @@ class AgentEvalAdapter(_Adapter):
         phase = _JOB_DONE.get(status)
         if phase is None:
             return Poll(phase="running")
-        await self.platform.delete_agent(workspace=workflow.workspace, agent_name=external["agent"])
         if phase == "completed":
             return Poll(
                 phase="completed",
-                outputs={
-                    "score": None,
-                    "input_tokens_per_task": None,
-                    "output_tokens_per_task": None,
-                    "median_latency_sec": None,
-                    "estimated_cost_per_1k_tasks": None,
-                    "eval_job": external["job"],
-                    "agent": external["agent"],
-                },
+                outputs=_eval_outputs(workflow.workspace, external["job"], str(inputs["agent_name"])),
             )
         if phase == "cancelled":
             return Poll(phase="cancelled")
         return Poll(phase="failed", error=f"eval job {external['job']} is {status}")
 
     async def cancel(self, workflow: Workflow, node_key: str) -> None:
+        await self.platform.cancel_eval(workspace=workflow.workspace, name=workflow.nodes[node_key].external["job"])
+
+
+class DatasetEvalAdapter(_Adapter):
+    async def start(self, workflow: Workflow, node_key: str) -> None:
         external = workflow.nodes[node_key].external
-        await self.platform.cancel_eval(workspace=workflow.workspace, name=external["job"])
-        await self.platform.delete_agent(workspace=workflow.workspace, agent_name=external["agent"])
+        inputs = resolve(workflow.graph[node_key].inputs, workflow)
+        spec = inputs.get("spec")
+        if not isinstance(spec, dict) or not spec.get("dataset") or not spec.get("metrics"):
+            raise ValueError(f"{node_key} has no dataset eval spec")
+        await self.platform.submit_dataset_eval(
+            workspace=workflow.workspace,
+            name=external["job"],
+            agent_name=str(inputs["agent_name"]),
+            deployment_name=str(inputs["agent_deployment"]),
+            spec=dict(spec),
+            evaluation_id=str(inputs["evaluation_id"]),
+        )
+
+    async def poll(self, workflow: Workflow, node_key: str) -> Poll:
+        external = workflow.nodes[node_key].external
+        inputs = resolve(workflow.graph[node_key].inputs, workflow)
+        try:
+            status = await self.platform.dataset_eval_status(workspace=workflow.workspace, name=external["job"])
+        except Missing:
+            return Poll(phase="missing")
+        phase = _JOB_DONE.get(status)
+        if phase is None:
+            return Poll(phase="running")
+        if phase == "completed":
+            return Poll(
+                phase="completed",
+                outputs=_eval_outputs(workflow.workspace, external["job"], str(inputs["agent_name"])),
+            )
+        if phase == "cancelled":
+            return Poll(phase="cancelled")
+        return Poll(phase="failed", error=f"eval job {external['job']} is {status}")
+
+    async def cancel(self, workflow: Workflow, node_key: str) -> None:
+        await self.platform.cancel_dataset_eval(
+            workspace=workflow.workspace, name=workflow.nodes[node_key].external["job"]
+        )
 
 
 class ExperimentAdapter(_Adapter):
@@ -278,8 +423,34 @@ def build_adapters(platform: PlatformPort) -> dict[str, _Adapter]:
         "customization_job": CustomizationAdapter(platform),
         "model_deployment": DeploymentAdapter(platform),
         "delete_deployment": DeleteDeploymentAdapter(platform),
+        "agent_deployment": AgentDeploymentAdapter(platform),
+        "delete_agent_deployment": DeleteAgentDeploymentAdapter(platform),
         "agent_eval": AgentEvalAdapter(platform),
+        "dataset_eval": DatasetEvalAdapter(platform),
         "experiment": ExperimentAdapter(platform),
+    }
+
+
+def _deployment_address(workflow: Workflow, node_key: str) -> tuple[str, str]:
+    """A ``workspace/name`` deployment ref, or a name in the workflow workspace."""
+    value = str(resolve(workflow.graph[node_key].inputs, workflow)["deployment"])
+    if "/" in value:
+        workspace, name = value.split("/", 1)
+        if workspace and name:
+            return workspace, name
+    return workflow.workspace, value
+
+
+def _eval_outputs(workspace: str, job: str, agent: str) -> dict[str, Any]:
+    return {
+        "score": None,
+        "input_tokens_per_task": None,
+        "output_tokens_per_task": None,
+        "median_latency_sec": None,
+        "estimated_cost_per_1k_tasks": None,
+        "eval_job": job,
+        "agent": agent,
+        "fileset": f"{workspace}/{derive_job_fileset_name(job, workspace)}",
     }
 
 

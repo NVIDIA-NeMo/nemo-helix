@@ -54,6 +54,7 @@ class RenderCounts(BaseModel):
     passing_trials: int
     estimated_tokens: int
     gpu_hours: int
+    parallel_jobs: int
 
 
 class RenderResponse(BaseModel):
