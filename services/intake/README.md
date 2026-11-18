@@ -15,6 +15,7 @@ Active v2 workspace endpoints:
 - `GET /apis/intake/v2/workspaces/{workspace}/spans/groups`
 - `GET /apis/intake/v2/workspaces/{workspace}/spans/{span_id}`
 - `GET /apis/intake/v2/workspaces/{workspace}/sessions/{id}`
+- `DELETE /apis/intake/v2/workspaces/{workspace}/sessions/{id}`
 - `GET /apis/intake/v2/workspaces/{workspace}/traces`
 - `GET /apis/intake/v2/workspaces/{workspace}/traces/{id}`
 - `GET /apis/intake/v2/workspaces/{workspace}/annotations`
@@ -263,6 +264,36 @@ make test-service SERVICE=intake
 ## Generated API Artifacts
 
 Run `make refresh-openapi` after Intake route or schema changes.
+
+## Session deletion
+
+`DELETE /apis/intake/v2/workspaces/{workspace}/sessions/{id}` soft-deletes all current
+traces and spans belonging to the session in this workspace. It returns `204` on
+success and `404` for a missing or already-deleted session. Other sessions remain intact.
+
+Deletion requires `intake.sessions.delete`, granted by default to workspace Admin.
+Viewer and Editor cannot delete telemetry. Platform-admin access is preserved.
+Scoped requests require `intake:write` or `platform:write`; insufficient permissions
+or scopes return `403` before deletion runs.
+
+Every associated evaluation must be confirmed soft-deleted before session deletion.
+An undeleted or unresolved evaluation causes `409`. Evaluation soft deletion reserves
+the original name, and reuse returns `409`, so retained telemetry can resolve its owner.
+Older renamed evaluations remain protected when their association cannot be resolved.
+
+Before any write, the repository checks the exact root-span trace-index keys against
+current spans and raw index history, including retained tombstones. Conflicting
+session/source owners cause `409` for the entire request. Repeated versions of the
+same owner and sessions without roots pass the check; lookup failures prevent deletion.
+Root-span tombstones update the trace index through its materialized view. Evaluator
+results and annotations are preserved under their independent retention policies.
+This is logical deletion; physical disk-space reclamation follows ClickHouse retention.
+
+The collision and evaluation checks precede the insert and are not a transaction with
+concurrent ingestion. New telemetry or a new collision can arrive between those operations.
+Coordinated ingestion or a separately reviewed storage migration is needed to close that
+race. Later ingestion into the same session ID is permitted. No single-trace DELETE
+endpoint or ingestion blocking is included.
 
 ## Trace identity and historical collisions
 

@@ -553,7 +553,7 @@ def test_evaluation_filter_by_created_by(client: TestClient) -> None:
     assert response.status_code == 200, response.text
 
 
-def test_soft_delete_frees_name_for_reuse(client: TestClient) -> None:
+def test_soft_delete_reserves_evaluation_name(client: TestClient) -> None:
     group = _create_group(client)
     first = client.post(EVALUATIONS, json=_evaluation_body(name="reusable", experiment_group_id=group["id"]))
     assert first.status_code == 201, first.text
@@ -561,18 +561,13 @@ def test_soft_delete_frees_name_for_reuse(client: TestClient) -> None:
     deleted = client.delete(f"{EVALUATIONS}/reusable")
     assert deleted.status_code == 204, deleted.text
 
-    # The original name is now free; a new evaluation can claim it.
+    # Retained telemetry must resolve the same evaluation even after deletion.
     second = client.post(EVALUATIONS, json=_evaluation_body(name="reusable", experiment_group_id=group["id"]))
-    assert second.status_code == 201, second.text
-    assert second.json()["id"] != first.json()["id"]
+    assert second.status_code == 409, second.text
 
 
-def test_recreated_evaluation_reads_are_bound_to_its_own_created_at(client: TestClient) -> None:
-    """A recreated Evaluation must not inherit the deleted namesake's results.
-
-    Delete frees the name, so the new entity can claim it; its rollup reads must then be
-    bounded to the new entity's created_at, not the deleted one's lifetime.
-    """
+def test_new_evaluation_reads_are_bound_to_its_own_created_at(client: TestClient) -> None:
+    """Deleting another evaluation does not change the new evaluation's rollup boundary."""
 
     class CapturingRollupRepository:
         def __init__(self) -> None:
@@ -589,7 +584,7 @@ def test_recreated_evaluation_reads_are_bound_to_its_own_created_at(client: Test
     assert first.status_code == 201, first.text
     assert client.delete(f"{EVALUATIONS}/recreated").status_code == 204
 
-    second = client.post(EVALUATIONS, json=_evaluation_body(name="recreated", experiment_group_id=group["id"]))
+    second = client.post(EVALUATIONS, json=_evaluation_body(name="replacement", experiment_group_id=group["id"]))
     assert second.status_code == 201, second.text
     assert second.json()["id"] != first.json()["id"]
 
@@ -597,15 +592,15 @@ def test_recreated_evaluation_reads_are_bound_to_its_own_created_at(client: Test
     app = cast(FastAPI, client.app)
     app.dependency_overrides[get_evaluation_rollup_repository] = lambda: capturing
     try:
-        fetched = client.get(f"{EVALUATIONS}/recreated")
+        fetched = client.get(f"{EVALUATIONS}/replacement")
         assert fetched.status_code == 200, fetched.text
     finally:
         app.dependency_overrides.pop(get_evaluation_rollup_repository, None)
 
-    # The rollup request is bounded to the recreated entity's created_at — the one the
+    # The rollup request is bounded to the new entity's created_at — the one the
     # store stamped on the new row, not the deleted evaluation's.
     assert len(capturing.calls) == 1
-    created_after = capturing.calls[0].get("recreated")
+    created_after = capturing.calls[0].get("replacement")
     assert created_after is not None
     assert created_after == datetime.fromisoformat(second.json()["created_at"])
 
@@ -633,14 +628,12 @@ def test_filter_is_deleted_true_returns_only_deleted(client: TestClient) -> None
     response = client.get(EVALUATIONS, params={"filter[is_deleted]": "true"})
     assert response.status_code == 200, response.text
     data = response.json()["data"]
-    # Live evaluations are excluded; only deleted rows (with mangled names) appear. The
-    # response body intentionally omits ``is_deleted``; the filter context and mangled name
-    # are the signal that these are trash-bin rows.
-    assert any(e["name"].startswith("exp-trash-deleted-") for e in data)
+    # Deleted evaluations retain their original names; the filter selects the trash view.
+    assert any(e["name"] == "exp-trash" for e in data)
     assert not any(e["name"] == "exp-still-here" for e in data)
 
 
-def test_group_soft_delete_cascades_and_frees_names(client: TestClient) -> None:
+def test_group_soft_delete_cascades_and_reserves_evaluation_names(client: TestClient) -> None:
     group = client.post(EXPERIMENTS, json={"name": "doomed-group-v2"}).json()
     client.post(EVALUATIONS, json=_evaluation_body(name="child-1", experiment_group_id=group["id"]))
     client.post(EVALUATIONS, json=_evaluation_body(name="child-2", experiment_group_id=group["id"]))
@@ -653,21 +646,21 @@ def test_group_soft_delete_cascades_and_frees_names(client: TestClient) -> None:
     for child_name in ("child-1", "child-2"):
         assert client.get(f"{EVALUATIONS}/{child_name}").status_code == 404
 
-    # Names are reusable in a fresh group.
+    # The group name is reusable, but the child evaluation names stay reserved.
     fresh_group = client.post(EXPERIMENTS, json={"name": "doomed-group-v2"})
     assert fresh_group.status_code == 201, fresh_group.text
     revived = client.post(
         EVALUATIONS, json=_evaluation_body(name="child-1", experiment_group_id=fresh_group.json()["id"])
     )
-    assert revived.status_code == 201, revived.text
+    assert revived.status_code == 409, revived.text
 
     # Trash view still surfaces the cascaded rows.
     deleted_groups = client.get(EXPERIMENTS, params={"filter[is_deleted]": "true"})
     assert any(g["name"].startswith("doomed-group-v2-deleted-") for g in deleted_groups.json()["data"])
     deleted_exps = client.get(EVALUATIONS, params={"filter[is_deleted]": "true"})
     deleted_names = {e["name"] for e in deleted_exps.json()["data"]}
-    assert any(n.startswith("child-1-deleted-") for n in deleted_names)
-    assert any(n.startswith("child-2-deleted-") for n in deleted_names)
+    assert "child-1" in deleted_names
+    assert "child-2" in deleted_names
 
 
 def test_create_evaluation_in_deleted_group_rejected(client: TestClient) -> None:
@@ -687,7 +680,7 @@ def test_update_or_delete_deleted_evaluation_returns_404(client: TestClient) -> 
     client.post(EVALUATIONS, json=_evaluation_body(name="exp-once", experiment_group_id=group["id"]))
     client.delete(f"{EVALUATIONS}/exp-once")
 
-    # GET, PUT, and a second DELETE all 404 on the (now-renamed) deleted row.
+    # GET, PUT, and a second DELETE all 404 on the soft-deleted row.
     assert client.get(f"{EVALUATIONS}/exp-once").status_code == 404
     assert (
         client.put(

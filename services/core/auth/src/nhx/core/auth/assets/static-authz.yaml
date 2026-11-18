@@ -149,6 +149,8 @@ authz:
         create:
           description: "Ingest traces into intake"
       sessions:
+        delete:
+          description: "Delete intake sessions and their traces and spans"
         read:
           description: "Read intake sessions"
       spans:
@@ -395,6 +397,7 @@ authz:
       - iam.read
       - iam.delete
       - iam.list
+      - intake.sessions.delete
       - workspaces.update
       - workspaces.delete
       - workspaces.members.list
@@ -1784,6 +1787,17 @@ authz:
         - intake:write
         - platform:write
     /apis/intake/v2/workspaces/{workspace}/sessions/{id}:
+      delete:
+        direct:
+          actor_perms:
+          - intake.sessions.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.sessions.delete
+        scopes:
+        - intake:write
+        - platform:write
       get:
         direct:
           actor_perms:

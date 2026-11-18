@@ -126,6 +126,14 @@ class ClickHouseExecutor:
         rows = await self.fetch_all(query)
         return next(iter(rows[0].values())) if rows else None
 
+    async def execute(self, query: ClickHouseQuery) -> None:
+        """Execute a named statement without a result set, such as INSERT SELECT."""
+        try:
+            await self._client.command(query.statement, parameters=dict(query.parameters))
+        except ClickHouseError as exc:
+            logger.exception("ClickHouse repository statement failed", extra={"query_name": query.name})
+            raise ClickHouseQueryError(query.name) from exc
+
     async def insert(self, insert: ClickHouseInsert) -> None:
         if not insert.rows:
             return

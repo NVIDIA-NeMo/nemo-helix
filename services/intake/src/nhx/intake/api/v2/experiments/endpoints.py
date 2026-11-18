@@ -312,7 +312,7 @@ async def delete_experiment(
     # Reference-counted cascade, sequential — one update per member. Linear in group size, fine for
     # now. A member whose *sole* membership was this group is soft-deleted; a member also in another
     # group just drops this membership and survives there. Both outcomes remove the member from the
-    # live-membership filter below (soft-delete renames + flips is_deleted; membership removal drops
+    # live-membership filter below (soft-delete flips is_deleted; membership removal drops
     # the group id from experiment_ids and leaves no legacy scalar), so re-fetching page 1 keeps
     # returning the next unprocessed batch until nothing is left. No fixed cap on group size.
     live_children_filter = LogicalOperation(
@@ -900,10 +900,11 @@ def _to_base36(value: int) -> str:
 
 
 async def _soft_delete(entity_client: EntityClient, entity: Evaluation | ExperimentGroup) -> None:
-    """Flip ``is_deleted`` and rename the entity in a single update."""
+    """Reserve deleted evaluation names so telemetry ownership remains resolvable."""
     original_name = entity.name
     entity.is_deleted = True
-    entity.name = _deleted_name(original_name)
+    if isinstance(entity, ExperimentGroup):
+        entity.name = _deleted_name(original_name)
     await entity_client.update(entity, original_name=original_name)
 
 
