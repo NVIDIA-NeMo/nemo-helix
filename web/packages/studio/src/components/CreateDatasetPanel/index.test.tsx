@@ -764,4 +764,50 @@ describe('CreateDatasetPanel', () => {
     ).not.toBeInTheDocument();
     expect(posts).toHaveLength(0);
   });
+
+  it('flags only the URL, not the empty Name, when a pasted URL yields no name', async () => {
+    const { user } = setup();
+    await screen.findByRole('tab', { name: 'HuggingFace' });
+
+    // A GitHub URL pasted into HuggingFace: the wrong-tab message, and nothing about the name
+    await paste(user, 'HuggingFace URL', GITHUB_URL);
+    expect(await screen.findByRole('button', { name: 'GitHub' })).toBeInTheDocument();
+    expect(field('Name')).toHaveValue('');
+    expect(screen.queryByText(NAME_REQUIRED)).not.toBeInTheDocument();
+    await user.tab(); // blur
+    expect(screen.queryByText(NAME_REQUIRED)).not.toBeInTheDocument();
+
+    // An incomplete HuggingFace URL, pasted and then blurred: the URL error only
+    await paste(user, 'HuggingFace URL', 'https://huggingface.co/datasets/tatsu-lab');
+    expect(await screen.findByText(URL_ERRORS.hf)).toBeInTheDocument();
+    expect(screen.queryByText(NAME_REQUIRED)).not.toBeInTheDocument();
+    await user.tab();
+    expect(screen.getByText(URL_ERRORS.hf)).toBeInTheDocument();
+    expect(screen.queryByText(NAME_REQUIRED)).not.toBeInTheDocument();
+
+    // Typed rather than pasted: the same on blur
+    await user.clear(field('HuggingFace URL'));
+    await user.type(field('HuggingFace URL'), 'https://huggingface.co/datasets/tatsu-lab');
+    await user.tab();
+    expect(await screen.findByText(URL_ERRORS.hf)).toBeInTheDocument();
+    expect(screen.queryByText(NAME_REQUIRED)).not.toBeInTheDocument();
+
+    // Submit still reports everything, including the empty name
+    await user.click(createButton());
+    expect(await screen.findByText(NAME_REQUIRED)).toBeInTheDocument();
+  });
+
+  it('shows a name error for a pasted URL only when its inferred name is nonempty and invalid', async () => {
+    const { user } = setup();
+    await screen.findByRole('tab', { name: 'HuggingFace' });
+
+    await paste(user, 'HuggingFace URL', HF_URL);
+    await waitFor(() => expect(field('Name')).toHaveValue('alpaca'));
+    expect(screen.queryByText(/^Names |^Use lowercase|^Enter a name/)).not.toBeInTheDocument();
+
+    // `3d-assets` is inferred but starts with a digit: flagged at once (spec 3.3, 11.1)
+    await paste(user, 'HuggingFace URL', 'https://huggingface.co/datasets/o/3d-assets');
+    await waitFor(() => expect(field('Name')).toHaveValue('3d-assets'));
+    expect(await screen.findByText('Names must start with a lowercase letter')).toBeInTheDocument();
+  });
 });
