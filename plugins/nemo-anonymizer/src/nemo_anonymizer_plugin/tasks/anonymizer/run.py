@@ -31,7 +31,7 @@ from nemo_anonymizer_plugin.app.task_config import AnonymizerStepConfig
 from nemo_anonymizer_plugin.app.upstream_logging import preserve_root_logging
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.client_provider import get_nemo_client
+from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import HelixJobResults, job_storage_context_from_env
 from nemo_helix_plugin.job_usage import HelixJobUsageReporter
@@ -54,7 +54,7 @@ _TASK_LOG_HANDLER_MARKER = "_nemo_anonymizer_task_handler"
 
 def run(sdk: NemoClient | None = None) -> int:
     try:
-        service_sdk = sdk or get_nemo_client(as_service="anonymizer")
+        service_sdk = sdk or get_task_nemo_client("anonymizer")
         return run_step_config(_load_step_config(), ctx=_get_ctx(service_sdk), sdk=service_sdk)
     except Exception:
         logger.exception("Anonymizer task failed")
