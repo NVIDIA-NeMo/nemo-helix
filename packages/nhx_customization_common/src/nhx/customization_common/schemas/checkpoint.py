@@ -42,6 +42,7 @@ class CheckpointTraits:
     expert_count: int | None = None
     num_nextn_predict_layers: int | None = None
     checkpoint_model_name: str | None = None
+    vision_patch_size: int | None = None
 
     @property
     def declares_nextn_predict_layers(self) -> bool:
@@ -115,6 +116,7 @@ def traits_from_model_spec(spec: Any) -> CheckpointTraits:
         expert_count=_expert_count(spec, fields),
         num_nextn_predict_layers=nextn,
         checkpoint_model_name=name if isinstance(name, str) else None,
+        vision_patch_size=_optional_int(getattr(spec, "vision_patch_size", None)),
     )
 
 
@@ -126,6 +128,7 @@ def traits_from_step_model(model: Any) -> CheckpointTraits:
         expert_count=_optional_int(getattr(model, "num_experts", None)),
         num_nextn_predict_layers=_optional_int(getattr(model, "num_nextn_predict_layers", None)),
         checkpoint_model_name=_optional_str(getattr(model, "checkpoint_model_name", None)),
+        vision_patch_size=_optional_int(getattr(model, "vision_patch_size", None)),
     )
 
 

@@ -76,7 +76,9 @@ PROFILES = {
         "validation_limit": 30,
         "lora_rank": 16,
         "lora_alpha": 32,
-        "max_seq_length": 1024,
+        "max_seq_length": 4096,
+        "image_size": {"longest_edge": 2_621_440, "shortest_edge": 65_536},
+        "activation_checkpointing": True,
         "epochs": 1,
         "max_steps": None,
         "global_batch_size": 8,
@@ -253,6 +255,8 @@ while True:
 
 ## 6. Dry-run, then train
 
+`image_size` bounds the pixels, and therefore the image tokens, before the vision tower. `max_seq_length` is the token cap after that: the recipe truncates longer samples, and replaces a sample when truncation would split image tokens. The 8B profile uses 4096 so a receipt at this pixel ceiling still fits.
+
 Leave `lora.exclude_modules` unset. The compiler freezes the vision tower and excludes the fused Mamba `*.out_proj` on this checkpoint. vLLM's "no matching PunicaWrapper" lines for vision modules are harmless.
 
 ```python
@@ -274,15 +278,21 @@ parallelism: dict[str, Any] = {
 if profile["expert_parallel_size"]:
     parallelism["expert_parallel_size"] = profile["expert_parallel_size"]
 
+training = {
+    "training_type": "sft",
+    "finetuning_type": "lora",
+    "lora": {"rank": profile["lora_rank"], "alpha": profile["lora_alpha"]},
+    "max_seq_length": profile["max_seq_length"],
+}
+if profile.get("image_size"):
+    training["image_size"] = profile["image_size"]
+if profile.get("activation_checkpointing"):
+    training["activation_checkpointing"] = True
+
 spec = AutomodelJobInput(
     model=f"default/{model_name}",
     dataset={"training": f"default/{dataset_name}"},
-    training={
-        "training_type": "sft",
-        "finetuning_type": "lora",
-        "lora": {"rank": profile["lora_rank"], "alpha": profile["lora_alpha"]},
-        "max_seq_length": profile["max_seq_length"],
-    },
+    training=training,
     schedule={"epochs": profile["epochs"], "max_steps": profile["max_steps"]},
     batch={"global_batch_size": profile["global_batch_size"], "micro_batch_size": 1},
     optimizer={"learning_rate": profile["learning_rate"]},
@@ -429,6 +439,23 @@ similarity = evaluator.submit(
     **common,
 )
 print(exact, similarity)
+
+```
+
+## 9. Remove the deployment
+
+The scoring jobs use the deployment. Wait for them to finish, then delete the deployment and its config.
+
+```python
+exact.wait_until_done()
+similarity.wait_until_done()
+
+deployment = find_deployment(model_name)
+config_name = deployment.config
+client.models.delete_deployment(name=deployment.name, workspace="default")
+if config_name:
+    client.models.delete_deployment_config(name=config_name, workspace="default")
+print(f"Deleted deployment {deployment.name}")
 
 ```
 

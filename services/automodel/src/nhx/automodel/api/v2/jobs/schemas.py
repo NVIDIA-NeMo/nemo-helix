@@ -501,16 +501,20 @@ class _TrainingBase(BaseModel):
     max_seq_length: int = Field(
         default=2048,
         gt=0,
-        description="Maximum token sequence length for training. Higher = more memory, longer training.",
+        description=(
+            "Maximum token sequence length for training. Higher means more memory and longer training. "
+            "With a pixel ceiling, this must be larger than the tokens one image can use. The model spec's "
+            "vision patch size decides how many pixels that is; a shorter cap is rejected."
+        ),
     )
     max_pixels: Optional[int] = Field(
         default=None,
         gt=0,
         description=(
             "Shorthand for image_size.longest_edge. The compiler writes it as the processor size and does not "
-            "pass this name to transformers. Larger images are downscaled before the vision tower, which bounds "
-            "image tokens (about one per 32x32 pixels on Qwen3-VL). Unset keeps the checkpoint ceiling, which can "
-            "be large enough to exceed max_seq_length. Rejected for text checkpoints."
+            "pass this name to transformers. Larger images are downscaled before the vision tower. The model "
+            "spec's vision patch size turns that ceiling into a token count, which max_seq_length must exceed. "
+            "Unset keeps the checkpoint ceiling. Rejected for text checkpoints."
         ),
     )
     image_size: Optional[ImageSize] = Field(
