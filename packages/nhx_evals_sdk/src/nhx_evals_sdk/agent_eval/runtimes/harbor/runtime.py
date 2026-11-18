@@ -98,6 +98,9 @@ logger = logging.getLogger(__name__)
 
 # Default reward key inside Harbor's ``verifier_result.rewards`` mapping.
 DEFAULT_REWARD_KEY = "reward"
+# Temporary input for the skills evaluation demo. The same env_vars field reaches every worker.
+_MOCK_SKILL_ENV = "NHX_HARBOR_MOCK_SKILL"
+_MOCK_SKILL_DIR = Path(__file__).resolve().parents[2] / "example_skills" / "supercool-guidelines"
 #: The Harbor jobs of a split run (see :data:`HARBOR_SPLIT_MARKER`): public tasks with the host-gateway
 #: alias, and network-restricted tasks, where Docker refuses it.
 HOST_ALIAS_JOB = "host-alias"
@@ -864,6 +867,8 @@ def _cache_stamp(
     # Missing execution storage is invalid configuration, not a best-effort filesystem failure.
     jobs_dir = _require_jobs_dir(config)
     options = config.model_dump(exclude=set(_CACHE_IRRELEVANT_OPTIONS), mode="json")
+    if skill_dir := _mock_skill_path(config):
+        options["mock_skill_digest"] = _digest_directory(skill_dir)
     # `_safe_resolve` throughout, matching `_task_dirs_for`: fingerprinting is
     # best-effort, so a symlink loop or a vanished link under any of these must
     # degrade to an unresolved path rather than raise out of `run_tasks` and fail a
@@ -1003,6 +1008,15 @@ def _trial_network_plan(task_config: Any, agent: Any, environment: Any, step: An
     return resolve_trial_network_plan(task_config, agent, environment, step, verifier_mode=verifier_mode)
 
 
+def _mock_skill_path(config: HarborRuntimeConfig) -> Path | None:
+    if config.env_vars.get(_MOCK_SKILL_ENV) != "1":
+        return None
+    manifest = _MOCK_SKILL_DIR / "SKILL.md"
+    if not manifest.is_file():
+        raise FileNotFoundError(f"The bundled Harbor mock skill is missing {manifest}")
+    return _MOCK_SKILL_DIR
+
+
 def _build_native_job(
     config: HarborRuntimeConfig,
     dataset_path: Path,
@@ -1059,6 +1073,7 @@ def _build_native_job(
                 config.environment.kwargs, field="environment.kwargs", alternative="worker environment"
             )
         validate_harbor_env(config.env_vars, config.env_secrets)
+        mock_skill = _mock_skill_path(config)
         # Warn rather than refuse: some agents read a fixed variable name the caller can't rename.
         warn_unscrubbed_secret_keys(config.env_secrets)
         try:
@@ -1237,12 +1252,14 @@ def _build_native_job(
                 environment=EnvironmentConfig(extra_docker_compose=sidecar_alias),
             )
 
+        agent_env = {**config.env_vars, **env_templates}
+        if mock_skill is not None:
+            del agent_env[_MOCK_SKILL_ENV]
         agent_options: dict[str, Any] = {
             "model_name": config.agent_model_name,
             "kwargs": dict(config.agent_kwargs),
-            # Secret templates merged last, so a secret always wins over a same-named literal. Literal
-            # env_vars reach only the agent: nothing here is written to os.environ.
-            "env": {**config.env_vars, **env_templates},
+            "env": agent_env,
+            "skills": [mock_skill] if mock_skill is not None else [],
         }
         if config.agent_import_path is None:
             await _create_and_run(AgentConfig(name=config.agent_name or "oracle", **agent_options))
