@@ -2111,6 +2111,38 @@ async def test_stream_assistant_rejects_concurrent_send_while_topic_check_runs(m
 
 
 @pytest.mark.asyncio
+async def test_stream_assistant_reports_an_empty_answer_without_persisting(monkeypatch: pytest.MonkeyPatch):
+    session_id = str(uuid.uuid4())
+    conversation = AssistantConversation(
+        name=f"assistant-{session_id}",
+        workspace="default",
+        session_id=session_id,
+        owner_id="local-user",
+    )
+    entity_store = FakeEntityStore()
+    await entity_store.create(conversation)
+
+    async def fake_invoke(agent_url, headers, messages, studio_session_id):
+        return "  \n", "model-x"
+
+    monkeypatch.setattr(assistant, "_invoke_assistant", fake_invoke)
+
+    frames = "".join(
+        [
+            frame
+            async for frame in assistant._stream_assistant(
+                session_id, "question", "https://agent.test/x", {}, "sys prompt", conversation, entity_store
+            )
+        ]
+    )
+
+    assert "event: error" in frames
+    assert assistant.EMPTY_ANSWER_MESSAGE in frames
+    assert conversation.messages == []
+    assert session_id not in assistant._session_streams
+
+
+@pytest.mark.asyncio
 async def test_stream_assistant_retries_conflicted_conversation_update(monkeypatch: pytest.MonkeyPatch):
     session_id = str(uuid.uuid4())
     conversation = AssistantConversation(
