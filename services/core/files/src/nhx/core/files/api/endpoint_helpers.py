@@ -15,6 +15,8 @@ from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.auth import AuthClient, Principal
+from nhx.common.auth.headers import AUTHENTICATION_CONTEXT_HEADERS
+from nhx.common.auth.workload_tokens import ServiceWorkloadAccessTokenProvider
 from nhx.common.entities.client import EntityClient, EntityNotFoundError
 from nhx.common.entities.utils import parse_entity_ref
 from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
@@ -362,6 +364,24 @@ _REQUEST_PRINCIPAL_HEADERS = (
 def delegated_secrets_client(client: AsyncNemoClient, auth_client: AuthClient) -> AsyncSecretsClient:
     """Return a Secrets client authenticated as ``service:files`` on behalf of the current user."""
     effective_principal = auth_client.principal.effective_principal
+    if auth_client.config.enabled and auth_client.config.oidc.workload is not None:
+        headers = {
+            name: value
+            for name, value in client.default_headers.items()
+            if name.lower() not in AUTHENTICATION_CONTEXT_HEADERS
+        }
+        headers.update(MARK_INTERNAL_REQUEST_HEADERS)
+        return AsyncSecretsClient(
+            base_url=client.base_url,
+            workspace=client.workspace,
+            auth=ServiceWorkloadAccessTokenProvider(auth_client.config, "files", effective_principal),
+            default_headers=headers,
+            timeout=client._timeout,
+            retry=client._retry,
+            http_client=client.http_client,
+            owns_http_client=False,
+            client_runtime=client.nemo_client_runtime,
+        )
     service_principal = Principal(
         id="service:files",
         authz_aliases=["service:files"],
