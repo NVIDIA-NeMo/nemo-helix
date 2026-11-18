@@ -44,6 +44,11 @@ class CacheStatus(StrEnum):
 class FilesetOutput(BaseModel):
     """Response DTO for fileset operations."""
 
+    commit_revision: str | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description="Opaque token assigned on creation and explicit commit. Ordinary edits preserve it; absent on older servers.",
+    )
     revision: str | None = Field(
         default=None,
         json_schema_extra={"nullable": True},

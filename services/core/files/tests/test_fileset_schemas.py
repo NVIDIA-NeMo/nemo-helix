@@ -54,5 +54,8 @@ def test_legacy_revision_is_deterministic():
     entity._id = "fileset-id"
     assert fileset_output_from_entity(entity).revision == "legacy:fileset-id"
     assert fileset_output_from_entity(entity).revision == "legacy:fileset-id"
+    assert fileset_output_from_entity(entity).commit_revision == "legacy-commit:fileset-id"
+    entity.commit_revision = "committed-token"
+    assert fileset_output_from_entity(entity).commit_revision == "committed-token"
     entity.revision = "assigned-token"
     assert fileset_output_from_entity(entity).revision == "assigned-token"

@@ -33,6 +33,7 @@ def test_demo_verifies_sdk_receipts_and_cleanup(
     for operation in ("Upload", "Overwrite", "Metadata update", "Delete"):
         assert f"{operation} verified:" in output
     assert "PASS: SDK revision receipts and file contents verified." in output
+    assert output.count("Commit verified:") == 3
     files = FilesClient.from_client(client)
     remaining = list(files.list_filesets(workspace="default").items())
     assert len(remaining) == int(keep)

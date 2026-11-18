@@ -442,7 +442,7 @@ current = client.files.get_fileset(name="my-files").data().revision
 print(current == uploaded.fileset_revision)
 ```
 
-The last comparison is true when no later mutation has committed. Compare tokens
+The last comparison is true when no later ordinary mutation has completed. Compare tokens
 for equality; they are not content hashes or timestamps. Metadata edits, source
 refreshes and successful OTLP log insertion also advance the token. OTLP returns
 its token in the `X-Fileset-Revision` response header. Reads and cache fills leave
@@ -453,6 +453,25 @@ failure between writing storage and saving the revision can leave changed files
 with the previous token. Older servers omit these fields; an older fileset on an
 updated server has a stable `legacy:<id>` token until its first mutation.
 
+A fileset also has a `commit_revision` marker. Creation initializes both tokens.
+Ordinary edits preserve the commit marker; call `commit_fileset` explicitly to
+replace it:
+
+```python
+committed = client.files.commit_fileset(name="my-files").data()
+commit_token = committed.commit_revision
+observed = client.files.get_fileset(name="my-files").data()
+print(observed.commit_revision == commit_token)
+```
+
+Every successful commit assigns a fresh token, even without edits, and leaves
+`revision` unchanged. Compare each token with an earlier value of the same field;
+comparing the two fields does not indicate uncommitted changes. Commit records a
+metadata marker without freezing files, scanning storage or waiting for in-flight
+uploads. Finish your intended uploads before calling it. Older filesets expose
+`legacy-commit:<id>` until their first explicit commit; ordinary edits preserve
+that baseline.
+
 Run the complete SDK demo from this source checkout against a server containing
 the fileset revision change:
 
@@ -460,15 +479,17 @@ the fileset revision change:
 uv run services/core/files/script/demo_fileset_revision.py --workspace default
 ```
 
-It creates a dedicated fileset, uploads and overwrites a file, edits metadata, and
-deletes the file. Each mutation verifies its returned revision with an SDK GET;
-uploads also verify downloaded bytes. The script uses your active Helix context
+It creates a dedicated fileset, commits it, uploads and overwrites a file, edits
+metadata, deletes the file, and commits again. SDK reads verify that ordinary
+mutations preserve the commit marker and commits preserve the modification token.
+Uploads also verify downloaded bytes, and a repeated unchanged commit verifies
+that each explicit commit advances its marker. The script uses your active Helix context
 and removes its fileset afterward. Pass `--keep` to retain the empty fileset for
 inspection, or `--context` to select another configured deployment. A failed
 verification exits with an error.
 
-The Python SDK exposes `FilesetOutput.revision` and
-`FilesetFileOutput.fileset_revision` in both sync and async clients. For OTLP,
+The Python SDK exposes `FilesetOutput.revision`, `FilesetOutput.commit_revision`
+and `FilesetFileOutput.fileset_revision` in both sync and async clients. For OTLP,
 read the receipt from `response.http_response.headers["X-Fileset-Revision"]`.
 Use the SDK from this checkout; older installed versions may discard the new
 response fields.

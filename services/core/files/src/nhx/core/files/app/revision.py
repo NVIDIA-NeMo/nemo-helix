@@ -29,6 +29,30 @@ async def advance_fileset_revision(
     only the intended metadata changes to the latest entity on conflict.
     """
     revision = str(uuid4())
+
+    def apply_revision(current: Fileset) -> Fileset:
+        proposed = transform(current).model_copy()
+        proposed.revision = revision
+        return proposed
+
+    return await _update_fileset(fileset, entity_store, apply_revision)
+
+
+async def commit_fileset_revision(fileset: Fileset, entity_store: EntityClient) -> Fileset:
+    """Assign this explicit commit a token while preserving the modification revision."""
+    revision = str(uuid4())
+
+    def apply_commit(current: Fileset) -> Fileset:
+        proposed = current.model_copy()
+        proposed.commit_revision = revision
+        return proposed
+
+    return await _update_fileset(fileset, entity_store, apply_commit)
+
+
+async def _update_fileset(
+    fileset: Fileset, entity_store: EntityClient, transform: Callable[[Fileset], Fileset]
+) -> Fileset:
     current = fileset
     for attempt in range(3):
         try:
@@ -37,7 +61,7 @@ async def advance_fileset_revision(
                 current = await entity_store.get_by_id(Fileset, fileset.id)
                 if current.workspace != fileset.workspace:
                     raise EntityNotFoundError("Fileset is no longer in the original workspace")
-            proposed = transform(current).model_copy(update={"revision": revision})
+            proposed = transform(current)
             return await entity_store.update(proposed)
         except EntityNotFoundError as exc:
             raise HTTPException(404, "Fileset no longer exists.") from exc

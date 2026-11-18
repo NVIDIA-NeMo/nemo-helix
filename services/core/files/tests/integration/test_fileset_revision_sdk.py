@@ -38,6 +38,10 @@ def test_sync_sdk_exposes_otlp_revision_header(files_client: FilesClient, filese
     response = files_client.upload_otlp_logs(workspace="default", name=fileset.name, content=log_payload())
     assert response.data().partial_success is None
     revision = response.http_response.headers["X-Fileset-Revision"]
+    assert (
+        files_client.get_fileset(workspace="default", name=fileset.name).data().commit_revision
+        == fileset.commit_revision
+    )
     assert revision != fileset.revision
     assert files_client.get_fileset(workspace="default", name=fileset.name).data().revision == revision
 
@@ -48,6 +52,9 @@ async def test_async_sdk_revision_fields_and_otlp_header(async_files_client: Asy
         await files.create_fileset(workspace="default", body=CreateFilesetRequest(name="async-sdk-revisions"))
     ).data()
     try:
+        committed = (await files.commit_fileset(workspace="default", name=created.name)).data()
+        assert committed.revision == created.revision
+        assert committed.commit_revision and committed.commit_revision != created.commit_revision
         initial = created.revision
         assert initial
         uploaded = (
@@ -80,5 +87,9 @@ async def test_async_sdk_revision_fields_and_otlp_header(async_files_client: Asy
         assert revision != deleted.fileset_revision
         observed = (await files.get_fileset(workspace="default", name=created.name)).data()
         assert observed.revision == revision
+        assert observed.commit_revision == committed.commit_revision
+        committed_again = (await files.commit_fileset(workspace="default", name=created.name)).data()
+        assert committed_again.revision == revision
+        assert committed_again.commit_revision != committed.commit_revision
     finally:
         await files.delete_fileset_by_id(workspace="default", fileset_id=created.id)

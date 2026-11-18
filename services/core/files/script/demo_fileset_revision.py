@@ -29,10 +29,24 @@ def verify_change(
     if assigned == previous:
         raise RuntimeError(f"{operation}: revision did not change")
     observed = files.get_fileset_by_id(workspace=fileset.workspace, fileset_id=fileset.id).data()
+    if observed.commit_revision != fileset.commit_revision:
+        raise RuntimeError(f"{operation}: an ordinary mutation changed the commit marker")
     if observed.revision != assigned:
         raise RuntimeError(f"{operation}: GET revision {observed.revision!r} differs from receipt {assigned!r}")
     print(f"{operation} verified: {previous} -> {assigned}")
     return assigned
+
+
+def verify_commit(files: FilesClient, fileset: FilesetOutput, previous: str, modification: str) -> str:
+    committed = files.commit_fileset(workspace=fileset.workspace, name=fileset.name).data()
+    token = require_revision(committed.commit_revision)
+    observed = files.get_fileset_by_id(workspace=fileset.workspace, fileset_id=fileset.id).data()
+    if token == previous or observed.commit_revision != token:
+        raise RuntimeError("Commit: marker did not advance or GET does not match its receipt")
+    if committed.revision != modification or observed.revision != modification:
+        raise RuntimeError("Commit: modification revision changed")
+    print(f"Commit verified: {previous} -> {token}; modification revision unchanged")
+    return token
 
 
 def run_demo(files: FilesClient, *, workspace: str, name: str, keep: bool = False) -> None:
@@ -42,7 +56,9 @@ def run_demo(files: FilesClient, *, workspace: str, name: str, keep: bool = Fals
     ).data()
     try:
         previous = require_revision(fileset.revision)
-        print(f"Created {workspace}/{name}: {previous}")
+        fileset.commit_revision = require_revision(fileset.commit_revision)
+        print(f"Created {workspace}/{name}: modification={previous}, commit={fileset.commit_revision}")
+        fileset.commit_revision = verify_commit(files, fileset, fileset.commit_revision, previous)
         for operation, content in (("Upload", b"first version\n"), ("Overwrite", b"second version\n")):
             uploaded = files.upload_file(workspace=workspace, name=name, path="demo.txt", content=content).data()
             previous = verify_change(files, fileset, previous, uploaded.fileset_revision, operation)
@@ -59,7 +75,9 @@ def run_demo(files: FilesClient, *, workspace: str, name: str, keep: bool = Fals
             raise RuntimeError("Metadata update: description was not saved")
 
         deleted = files.delete_file(workspace=workspace, name=name, path="demo.txt").data()
-        verify_change(files, fileset, previous, deleted.fileset_revision, "Delete")
+        previous = verify_change(files, fileset, previous, deleted.fileset_revision, "Delete")
+        fileset.commit_revision = verify_commit(files, fileset, fileset.commit_revision, previous)
+        verify_commit(files, fileset, fileset.commit_revision, previous)
         if files.list_files(workspace=workspace, name=name).data().data:
             raise RuntimeError("Delete: fileset is not empty")
         print("PASS: SDK revision receipts and file contents verified.")

@@ -197,6 +197,7 @@ def test_sdk_refresh_returns_revision(files_client: FilesClient):
         with _github_at(SECOND_SHA):
             refreshed = files_client.refresh_fileset(workspace=DEFAULT_WORKSPACE, name=name).data()
         assert refreshed.revision and refreshed.revision != created.revision
+        assert refreshed.commit_revision == created.commit_revision
         observed = files_client.get_fileset(workspace=DEFAULT_WORKSPACE, name=name).data()
         assert observed.revision == refreshed.revision
     finally:

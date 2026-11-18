@@ -64,3 +64,4 @@ def test_older_fileset_response_has_no_revision():
         }
     )
     assert result.revision is None
+    assert result.commit_revision is None

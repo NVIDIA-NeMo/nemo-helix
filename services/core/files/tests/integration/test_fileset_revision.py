@@ -92,6 +92,13 @@ def test_legacy_reads_are_stable_and_first_upload_persists_revision(client_conte
     stored = portal.call(store.get_by_id, Fileset, legacy.id)
     assert result.fileset_revision == stored.revision
     assert UUID(stored.revision).version == 4
+    assert stored.commit_revision == ""
+    assert (
+        files.get_fileset(workspace="default", name=legacy.name).data().commit_revision == f"legacy-commit:{legacy.id}"
+    )
+    committed = files.commit_fileset(workspace="default", name=legacy.name).data()
+    assert committed.revision == stored.revision
+    assert committed.commit_revision and UUID(committed.commit_revision).version == 4
 
 
 def test_real_version_conflict_preserves_metadata_without_repeating_upload(
@@ -246,9 +253,18 @@ def test_revision_bookkeeping_preserves_authorization():
         writer = FilesClient.from_client(as_user(client, "writer@example.com"))
         reader = FilesClient.from_client(as_user(client, "reader@example.com"))
         created = writer.create_fileset(workspace=workspace, body=CreateFilesetRequest(name="authorized-files")).data()
+        committed = writer.commit_fileset(workspace=workspace, name=created.name).data()
+        assert committed.revision == created.revision
+        assert committed.commit_revision != created.commit_revision
         receipt = writer.upload_file(workspace=workspace, name=created.name, path="file.txt", content=b"hello").data()
         assert receipt.fileset_revision != created.revision
         assert reader.get_fileset(workspace=workspace, name=created.name).data().revision == receipt.fileset_revision
+        with pytest.raises(PermissionDeniedError):
+            reader.commit_fileset(workspace=workspace, name=created.name)
+        assert (
+            reader.get_fileset(workspace=workspace, name=created.name).data().commit_revision
+            == committed.commit_revision
+        )
         with pytest.raises(PermissionDeniedError):
             reader.upload_file(workspace=workspace, name=created.name, path="file.txt", content=b"denied")
         assert writer.get_fileset(workspace=workspace, name=created.name).data().revision == receipt.fileset_revision

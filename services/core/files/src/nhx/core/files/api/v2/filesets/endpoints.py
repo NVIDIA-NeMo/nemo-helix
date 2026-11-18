@@ -78,7 +78,7 @@ from nhx.core.files.app.external_hosts import (
     ExternalHostNotAllowedError,
 )
 from nhx.core.files.app.file_lock import FileLockManager
-from nhx.core.files.app.revision import advance_fileset_revision
+from nhx.core.files.app.revision import advance_fileset_revision, commit_fileset_revision
 from nhx.core.files.app.streaming import (
     MultipartChunkProcessor,
     OctetStreamChunkProcessor,
@@ -369,6 +369,7 @@ async def create_fileset(
             name=create_request.name,
             workspace=workspace,
             revision=str(uuid4()),
+            commit_revision=str(uuid4()),
             storage=storage,
             purpose=create_request.purpose,
             metadata=create_request.metadata,
@@ -709,6 +710,30 @@ async def update_fileset_metadata(
     fileset = await advance_fileset_revision(fileset, entity_store, apply_metadata_patch)
 
     return fileset_output_from_entity(fileset)
+
+
+@router.post(
+    "/v2/workspaces/{workspace}/filesets/{name}/commit",
+    summary="Commit Fileset",
+    response_model=FilesetOutput,
+    status_code=HTTP_200_OK,
+    responses={
+        HTTP_404_NOT_FOUND: {"description": "Fileset not found", **_HTTP_EXCEPTION_DETAIL},
+        HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "Commit revision could not be persisted",
+            **_HTTP_EXCEPTION_DETAIL,
+        },
+    },
+)
+async def commit_fileset(
+    workspace: str,
+    name: str,
+    entity_store: EntityClient = Depends(get_entity_client),
+) -> FilesetOutput:
+    """Record a fresh explicit commit marker without changing files or modification revision."""
+    fileset = await get_fileset(workspace, name, entity_store)
+    updated = await commit_fileset_revision(fileset, entity_store)
+    return fileset_output_from_entity(updated)
 
 
 @router.post(

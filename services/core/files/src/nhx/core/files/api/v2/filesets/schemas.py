@@ -39,6 +39,7 @@ def fileset_output_from_entity(entity: Fileset) -> FilesetOutput:
     """Convert a Fileset domain entity to a FilesetOutput response DTO."""
     return FilesetOutput(
         revision=entity.effective_revision,
+        commit_revision=entity.effective_commit_revision,
         id=entity.id,
         name=entity.name,
         workspace=entity.workspace,

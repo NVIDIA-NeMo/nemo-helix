@@ -34,6 +34,12 @@ class Fileset(EntityBase):
 
     revision: str = Field(default="", description="Opaque token assigned by Files service on mutation.")
 
+    commit_revision: str = Field(default="", description="Opaque token assigned on creation and explicit commit.")
+
+    @property
+    def effective_commit_revision(self) -> str:
+        return self.commit_revision or f"legacy-commit:{self.id}"
+
     @property
     def effective_revision(self) -> str:
         return self.revision or f"legacy:{self.id}"
