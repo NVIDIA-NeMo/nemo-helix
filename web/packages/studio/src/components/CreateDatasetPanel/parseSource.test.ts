@@ -361,4 +361,30 @@ describe('parseSource review regressions', () => {
     expect(parseSource('s3', 'https://bucket.s3evil.amazonaws.com/key').status).toBe('invalid');
     expect(parseSource('s3', 'https://s3evil.amazonaws.com/bucket/key').status).toBe('invalid');
   });
+
+  it('GitHub and HuggingFace: a suffix the fields cannot keep is incomplete, not silently dropped (spec 4.2)', () => {
+    const status = (tab: 'github' | 'huggingface', url: string) => parseSource(tab, url).status;
+
+    // GitHub: blob URLs and a `/tree` with no revision
+    expect(status('github', 'https://github.com/o/r/blob/main/README.md')).toBe('incomplete');
+    expect(status('github', 'https://github.com/o/r/tree')).toBe('incomplete');
+    expect(status('github', 'https://github.com/o/r/tree/')).toBe('incomplete');
+    // ...while every shape GithubFields can hold still parses, path included
+    expect(status('github', 'https://github.com/o/r')).toBe('ok');
+    expect(status('github', 'https://github.com/o/r.git')).toBe('ok');
+    expect(status('github', 'https://github.com/o/r/tree/dev')).toBe('ok');
+    const withPath = parseSource('github', 'https://github.com/o/r/tree/dev/data/train');
+    expect(withPath.status === 'ok' && withPath.fields).toMatchObject({ path: 'data/train' });
+
+    // HuggingFace: blob/resolve files, a bare `/tree`, and a subdirectory (HuggingFaceFields has no path)
+    const hf = 'https://huggingface.co/datasets/o/r';
+    expect(status('huggingface', `${hf}/blob/main/x.json`)).toBe('incomplete');
+    expect(status('huggingface', `${hf}/resolve/main/x.json`)).toBe('incomplete');
+    expect(status('huggingface', `${hf}/tree`)).toBe('incomplete');
+    expect(status('huggingface', `${hf}/tree/main/subdir`)).toBe('incomplete');
+    // ...while the root, a single-segment revision and the spec 15 example still parse
+    expect(status('huggingface', hf)).toBe('ok');
+    expect(status('huggingface', `${hf}/tree/v2`)).toBe('ok');
+    expect(status('huggingface', 'https://huggingface.co/datasets/tatsu-lab/alpaca')).toBe('ok');
+  });
 });

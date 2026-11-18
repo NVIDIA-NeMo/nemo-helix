@@ -490,7 +490,7 @@ describe('CreateDatasetPanel', () => {
     selectFiles('create-dataset-files-input', 'data.final.jsonl');
     await waitFor(() => expect(field('Name')).toHaveValue('data.final'));
 
-    // Folder selection: nested paths kept, folder name wins, pickers hidden behind the folder card
+    // Folder selection: nested paths kept, folder name wins, and the pickers stay available
     selectFiles(
       'create-dataset-folder-input',
       'my-data/train/a.jsonl',
@@ -498,9 +498,22 @@ describe('CreateDatasetPanel', () => {
       'my-data/train/deep/c.jsonl'
     );
     await waitFor(() => expect(field('Name')).toHaveValue('my-data'));
+    expect(screen.getByText(/3 files/)).toBeInTheDocument();
     expect(screen.getByText(/my-data\/train\/a\.jsonl/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Choose files' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Choose folder' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose files' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Choose folder' })).toBeEnabled();
+
+    // Loose files picked after a folder are added beside it; the folder still names the dataset
+    selectFiles('create-dataset-files-input', 'notes.txt');
+    expect(await screen.findByRole('button', { name: 'Remove notes.txt' })).toBeInTheDocument();
+    expect(screen.getByText(/my-data\/train\/a\.jsonl/)).toBeInTheDocument();
+    expect(field('Name')).toHaveValue('my-data');
+
+    // Picking the same folder again replaces that folder's earlier selection
+    selectFiles('create-dataset-folder-input', 'my-data/b.jsonl', 'my-data/train/z.jsonl');
+    expect(await screen.findByText(/my-data\/train\/z\.jsonl/)).toBeInTheDocument();
+    expect(screen.queryByText(/my-data\/train\/a\.jsonl/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove notes.txt' })).toBeInTheDocument();
 
     await user.click(createButton());
     await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
@@ -508,13 +521,7 @@ describe('CreateDatasetPanel', () => {
     expect(posts[0]).toMatchObject({ name: 'my-data', purpose: 'dataset' });
     expect(posts[0]).not.toHaveProperty('storage');
     expect(posts[0]).not.toHaveProperty('cache');
-    expect(puts).toEqual(
-      expect.arrayContaining([
-        'my-data/train/a.jsonl',
-        'my-data/b.jsonl',
-        'my-data/train/deep/c.jsonl',
-      ])
-    );
+    expect([...puts].sort()).toEqual(['my-data/b.jsonl', 'my-data/train/z.jsonl', 'notes.txt']);
   });
 
   it('keeps the panel on outside clicks, and Cancel then reopen clears every draft', async () => {
