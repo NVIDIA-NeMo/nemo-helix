@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any, Self
 
 from nemo_agents_plugin.session_protocol import session_id_to_uuid
+from nemo_helix_plugin.agents.skills import (
+    QUALIFIED_PINNED_REF_PATTERN,
+    SkillArchiveDescriptor,
+    SkillFrontmatter,
+)
 from nemo_helix_plugin.agents.types import (
     CONTEXT_SCHEMA_DESCRIPTION,
     DEFAULT_INPUT_DESCRIPTION,
@@ -60,6 +65,7 @@ from nemo_helix_plugin.agents.types import (
     ModelProviderOverride as ModelProviderOverride,
 )
 from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import FilesetRef
@@ -463,3 +469,61 @@ class AgentSession(NemoEntity, entity_type="agent_session"):
     @property
     def session_uuid(self) -> str:
         return session_id_to_uuid(self.id) if self.id else ""
+
+
+# ---------------------------------------------------------------------------
+# Skills
+# ---------------------------------------------------------------------------
+#
+# A skill follows the evals task/taskset revision design with one difference:
+# the head holds *pointers only*. Content lives solely on immutable ``rev.<n>``
+# children, so there is no head copy that a concurrent publisher could leave
+# disagreeing with ``latest``. Reading the current skill is "head → tags['latest']
+# → revision", re-hashed on the way out.
+
+SKILL_REVISION_SELF_FIELDS: frozenset[str] = frozenset({"content_hash", "revision"})
+"""Revision bookkeeping excluded from a skill revision's content digest."""
+
+
+class SkillEntity(NemoEntity, entity_type="agent_skill"):
+    """A stored skill's head: revision pointers, nothing else.
+
+    Entity type: ``agent_skill``
+    The entity name is the skill name and must equal the ``SKILL.md`` frontmatter
+    ``name`` of every revision, because that is the directory a harness discovers
+    the skill under.
+    """
+
+    latest_revision: int = Field(
+        default=0,
+        ge=0,
+        description="Highest revision ordinal this head knows about; 0 before the first publish.",
+    )
+    tags: dict[str, int] = Field(
+        default_factory=dict,
+        description="Tag → revision-ordinal pointers. 'latest' is machine-managed and only moves forward.",
+    )
+
+
+class SkillRevisionEntity(NemoEntity, entity_type="agent_skill_revision"):
+    """An immutable published skill revision, child of its :class:`SkillEntity`, named ``rev.<n>``.
+
+    Entity type: ``agent_skill_revision``
+    ``content_hash`` covers every other non-identity field (frontmatter, archive descriptor,
+    linked taskset). The archive bytes are covered through ``archive.files_hash``.
+    """
+
+    content_hash: str = Field(
+        min_length=DIGEST_LENGTH,
+        max_length=DIGEST_LENGTH,
+        pattern=DIGEST_PATTERN,
+        description="Full lowercase hex SHA-256 of this revision's content.",
+    )
+    revision: int = Field(ge=1, description="1-based ordinal within the parent skill; matches ``rev.<n>``.")
+    frontmatter: SkillFrontmatter = Field(description="SKILL.md frontmatter parsed from the archived bytes.")
+    archive: SkillArchiveDescriptor = Field(description="The revision's immutable, service-owned archive.")
+    taskset: str | None = Field(
+        default=None,
+        pattern=QUALIFIED_PINNED_REF_PATTERN,
+        description="Optional linked taskset revision, fully qualified and digest-pinned.",
+    )
