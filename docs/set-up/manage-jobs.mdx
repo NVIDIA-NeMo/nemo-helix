@@ -120,7 +120,8 @@ controller alone writes `workflow_state`; ordinary progress details are separate
 Each node keeps its active execution ID, captured run revision and input commit
 values there; Step records contain ordinary execution status, Tasks and logs.
 Status reads do not poll inputs or schedule work. Use `attempt_id` on status
-reads or `--attempt-id` on watch to select an Attempt. Execution history remains
+reads or `--attempt-id` on watch to select an Attempt. The sync and async typed
+clients accept `get_job_status(..., attempt_id=...)`. Execution history remains
 available through the existing paginated Attempt step routes. Results keep their
 existing Job-wide names and overwrite behavior.
 

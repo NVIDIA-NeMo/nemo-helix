@@ -1554,25 +1554,24 @@ class JobDispatcher:
         if "workflow_reconcile" in status_details:
             if status_details != {"workflow_reconcile": True}:
                 raise JobOperationConflictError("Invalid workflow reconciliation request")
-            async with _get_job_mutation_lock(job.name, workspace):
-                store = self.store.as_service("jobs", internal=True)
-                job = await store.get_by_id(HelixJob, job.id)
-                attempt = await store.get_by_id(HelixJobAttempt, attempt.id)
-                files = self.files
-                if attempt.auth_context is not None:
-                    files = AsyncFilesClient.from_client(
-                        get_async_nemo_client(
-                            as_service="jobs",
-                            internal=True,
-                            on_behalf_of=attempt.auth_context.to_principal(),
-                            http_client=files.http_client,
-                            base_url=files.base_url,
-                        )
+            store = self.store.as_service("jobs", internal=True)
+            job = await store.get_by_id(HelixJob, job.id)
+            attempt = await store.get_by_id(HelixJobAttempt, attempt.id)
+            files = self.files
+            if attempt.auth_context is not None:
+                files = AsyncFilesClient.from_client(
+                    get_async_nemo_client(
+                        as_service="jobs",
+                        internal=True,
+                        on_behalf_of=attempt.auth_context.to_principal(),
+                        http_client=files.http_client,
+                        base_url=files.base_url,
                     )
-                attempt = await reconcile_workflow(store, files, job, attempt)
-                attempt = await self._retain_workflow_storage(store, job, attempt)
-                await self._save_job_status(attempt)
-                return create_platform_job_response(job, attempt)
+                )
+            attempt = await reconcile_workflow(store, files, job, attempt)
+            attempt = await self._retain_workflow_storage(store, job, attempt)
+            await self._save_job_status(attempt)
+            return create_platform_job_response(job, attempt)
         if "workflow_invalidation" in status_details:
             if len(status_details) != 1:
                 raise JobOperationConflictError("Invalidation cannot be mixed with progress details")

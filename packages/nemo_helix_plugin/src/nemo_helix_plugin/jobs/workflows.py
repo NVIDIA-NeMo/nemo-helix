@@ -111,18 +111,48 @@ class WorkflowView(BaseModel):
     nodes: list[WorkflowNodeView]
 
 
-def workflow_order(dependencies: dict[str, list[str]]) -> list[str]:
-    """Return stable dependency order or identify an invalid dependency chain."""
-    followers: dict[str, list[str]] = {name: [] for name in dependencies}
-    remaining: dict[str, int] = {}
+def validate_workflow_dependencies(dependencies: dict[str, list[str]]) -> None:
+    """Reject unknown/duplicate dependencies and cycles before persistence."""
     for name, parents in dependencies.items():
         if len(parents) != len(set(parents)):
             raise ValueError(f"Duplicate dependencies for workflow step {name}")
         for parent in parents:
             if parent not in dependencies:
                 raise ValueError(f"Unknown dependency {parent} for workflow step {name}")
-            followers[parent].append(name)
+
+    visited: set[str] = set()
+    path: list[str] = []
+    positions: dict[str, int] = {}
+    for root in dependencies:
+        if root in visited:
+            continue
+        path.append(root)
+        positions[root] = 0
+        stack = [iter(dependencies[root])]
+        while stack:
+            parent = next(stack[-1], None)
+            if parent is None:
+                finished = path.pop()
+                visited.add(finished)
+                del positions[finished]
+                stack.pop()
+            elif parent in positions:
+                cycle = path[positions[parent] :] + [parent]
+                raise ValueError("Workflow cycle: " + " -> ".join(cycle))
+            elif parent not in visited:
+                positions[parent] = len(path)
+                path.append(parent)
+                stack.append(iter(dependencies[parent]))
+
+
+def workflow_order(dependencies: dict[str, list[str]]) -> list[str]:
+    """Order an already validated workflow, preserving declaration order for ties."""
+    followers: dict[str, list[str]] = {name: [] for name in dependencies}
+    remaining: dict[str, int] = {}
+    for name, parents in dependencies.items():
         remaining[name] = len(parents)
+        for parent in parents:
+            followers[parent].append(name)
     ready = deque(name for name, count in remaining.items() if count == 0)
     order: list[str] = []
     while ready:
@@ -132,13 +162,4 @@ def workflow_order(dependencies: dict[str, list[str]]) -> list[str]:
             remaining[child] -= 1
             if remaining[child] == 0:
                 ready.append(child)
-    if len(order) != len(dependencies):
-        pending = {name for name, count in remaining.items() if count}
-        path: list[str] = []
-        name = next(name for name in dependencies if name in pending)
-        while name not in path:
-            path.append(name)
-            name = next(parent for parent in dependencies[name] if parent in pending)
-        cycle = path[path.index(name) :] + [name]
-        raise ValueError("Workflow cycle: " + " -> ".join(cycle))
     return order

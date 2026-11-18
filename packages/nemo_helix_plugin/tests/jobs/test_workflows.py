@@ -3,7 +3,7 @@
 
 import pytest
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
-from nemo_helix_plugin.jobs.workflows import workflow_order
+from nemo_helix_plugin.jobs.workflows import validate_workflow_dependencies, workflow_order
 from pydantic import ValidationError
 
 
@@ -22,10 +22,9 @@ def test_sequential_wire_shape_omits_workflow_fields() -> None:
     [
         {"depends_on": None},
         {"inputs": None, "depends_on": []},
-        {"outputs": []},
     ],
 )
-def test_unsupported_or_null_workflow_fields_fail(extra: dict) -> None:
+def test_null_workflow_fields_fail(extra: dict) -> None:
     with pytest.raises(ValidationError):
         HelixJobSpec.model_validate(
             {
@@ -50,9 +49,10 @@ def test_workflow_configuration_is_closed(config: dict) -> None:
 
 def test_cycle_error_contains_a_closed_dependency_chain() -> None:
     with pytest.raises(ValueError, match="alpha -> beta -> gamma -> alpha"):
-        workflow_order({"root": [], "alpha": ["beta"], "beta": ["gamma"], "gamma": ["alpha"]})
+        validate_workflow_dependencies({"root": [], "alpha": ["beta"], "beta": ["gamma"], "gamma": ["alpha"]})
 
 
 def test_deep_workflow_does_not_depend_on_python_recursion_limit() -> None:
     dependencies = {f"node-{i}": [f"node-{i - 1}"] if i else [] for i in range(2000)}
+    validate_workflow_dependencies(dependencies)
     assert workflow_order(dependencies) == list(dependencies)

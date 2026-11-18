@@ -56,7 +56,7 @@ class JobStatusClient(Protocol):
         *,
         workspace: str | None = None,
         name: str,
-        query_params: JobStatusQueryParams | None = None,
+        attempt_id: str | None = None,
     ) -> NemoResponse[HelixJobStatusResponse]: ...
 
 
@@ -66,7 +66,7 @@ class AsyncJobStatusClient(Protocol):
         *,
         workspace: str | None = None,
         name: str,
-        query_params: JobStatusQueryParams | None = None,
+        attempt_id: str | None = None,
     ) -> Awaitable[NemoResponse[HelixJobStatusResponse]]: ...
 
 
@@ -114,9 +114,6 @@ class _JobsMethods:
     rerun_job = method(endpoints.rerun_job)
     update_job_control = method(endpoints.update_job_control)
 
-    # Job status
-    get_job_status = method(endpoints.get_job_status)
-
     # Job attempts
     list_job_attempts = method(endpoints.list_job_attempts)
     get_job_attempt = method(endpoints.get_job_attempt)
@@ -149,6 +146,17 @@ class _JobsMethods:
 
 class JobsClient(_JobsMethods, NemoClient):
     """Sync client for the Jobs service API."""
+
+    def get_job_status(
+        self, *, workspace: str | None = None, name: str, attempt_id: str | None = None
+    ) -> NemoResponse[HelixJobStatusResponse]:
+        return self.send(
+            endpoints.get_job_status(
+                workspace=workspace,
+                name=name,
+                query_params=JobStatusQueryParams(attempt_id=attempt_id) if attempt_id is not None else None,
+            )
+        )
 
     def list_execution_profiles(self) -> builtins.list[endpoints.ExecutionProfile]:
         return self.get_execution_profiles().data()
@@ -208,6 +216,17 @@ class JobsClient(_JobsMethods, NemoClient):
 
 class AsyncJobsClient(_JobsMethods, AsyncNemoClient):
     """Async client for the Jobs service API."""
+
+    async def get_job_status(
+        self, *, workspace: str | None = None, name: str, attempt_id: str | None = None
+    ) -> NemoResponse[HelixJobStatusResponse]:
+        return await self.send(
+            endpoints.get_job_status(
+                workspace=workspace,
+                name=name,
+                query_params=JobStatusQueryParams(attempt_id=attempt_id) if attempt_id is not None else None,
+            )
+        )
 
     async def list_execution_profiles(self) -> builtins.list[endpoints.ExecutionProfile]:
         return (await self.get_execution_profiles()).data()

@@ -20,8 +20,8 @@ from nemo_helix_plugin.jobs.client import (
     JobStatusClient,
     JobsWatchClient,
 )
-from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobStatusResponse
-from nemo_helix_plugin.jobs.types import JobLogsQueryParams, JobStatusQueryParams
+from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobStatus, HelixJobStatusResponse
+from nemo_helix_plugin.jobs.types import JobLogsQueryParams
 from nemo_helix_plugin.jobs.watch_types import (
     JobLogEvent,
     JobStatusEvent,
@@ -32,10 +32,10 @@ from nemo_helix_plugin.jobs.watch_types import (
 )
 from nemo_helix_plugin.jobs.workflows import WorkflowView
 
-_SUCCESSFUL_TERMINAL_STATUSES = {"completed"}
+_SUCCESSFUL_TERMINAL_STATUSES = {HelixJobStatus.COMPLETED}
 # A paused job is resumable, but it is no longer making progress. Treat it as
 # failure-terminal so wait/watch callers do not report incomplete work as done.
-_FAILED_TERMINAL_STATUSES = {"cancelled", "error", "paused"}
+_FAILED_TERMINAL_STATUSES = {HelixJobStatus.CANCELLED, HelixJobStatus.ERROR, HelixJobStatus.PAUSED}
 _TERMINAL_STATUSES = _SUCCESSFUL_TERMINAL_STATUSES | _FAILED_TERMINAL_STATUSES
 _TRANSIENT_STATUS_CODES = {429, 502, 503, 504}
 _TRANSPORT_ERRORS = (NemoTransportError,)
@@ -294,7 +294,7 @@ def _watch_job(
             status_response = jobs.status.get_job_status(
                 workspace=options.workspace,
                 name=state.job_id or name,
-                **({"query_params": JobStatusQueryParams(attempt_id=options.attempt_id)} if options.attempt_id else {}),
+                attempt_id=options.attempt_id,
             )
             status_info = status_response.data()
             if options.attempt_id == "current" and status_info.attempt_id is not None:
@@ -381,7 +381,7 @@ async def _async_watch_job(
             status_response = await jobs.status.get_job_status(
                 workspace=options.workspace,
                 name=state.job_id or name,
-                **({"query_params": JobStatusQueryParams(attempt_id=options.attempt_id)} if options.attempt_id else {}),
+                attempt_id=options.attempt_id,
             )
             status_info = status_response.data()
             if options.attempt_id == "current" and status_info.attempt_id is not None:
@@ -466,7 +466,7 @@ async def _async_sleep(poll_interval: float, deadline: _WatchDeadline) -> None:
 def _status_event(status_response: HelixJobStatusResponse, job_name: str) -> JobStatusEvent:
     status = _normalized_status(status_response.status)
     terminal = status in _TERMINAL_STATUSES
-    if status_response.workflow is not None and status == "paused":
+    if status_response.workflow is not None and status == HelixJobStatus.PAUSED:
         terminal = False
     successful = (
         True if status in _SUCCESSFUL_TERMINAL_STATUSES else False if status in _FAILED_TERMINAL_STATUSES else None

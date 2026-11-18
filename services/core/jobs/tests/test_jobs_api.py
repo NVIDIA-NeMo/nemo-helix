@@ -2258,3 +2258,43 @@ async def test_job_reads_preserve_attempt_lookup_failures(
     assert not any(record.getMessage() == "Invalid current Attempt reference" for record in caplog.records)
     current = await mock_store.get_by_id(HelixJob, owner.id)
     assert current.current_attempt_id == owner.current_attempt_id and current.db_version == owner.db_version
+
+
+@pytest.mark.parametrize("selector", [None, "current", "previous", "missing"])
+async def test_factory_status_forwards_optional_attempt_selector(
+    test_client: AsyncClient, mock_store: EntityClient, selector: str | None
+) -> None:
+    response = await test_client.post(
+        "/apis/jobs/v2/workspaces/default/hello-world/jobs",
+        json={"name": "factory-status-attempt", "spec": {"config": "value", "target": "test"}},
+    )
+    assert response.status_code == 201, response.text
+    job = await mock_store.get(HelixJob, "factory-status-attempt", workspace="default")
+    assert job.current_attempt_id is not None
+    previous = await mock_store.get_by_id(HelixJobAttempt, job.current_attempt_id)
+    previous.status = HelixJobStatus.COMPLETED
+    previous = await mock_store.update(previous)
+    current = await mock_store.create(
+        HelixJobAttempt(
+            name="next-attempt",
+            workspace="default",
+            job=job.id,
+            seq=previous.seq + 1,
+            spec=previous.spec,
+            platform_spec=previous.platform_spec,
+            status=HelixJobStatus.ACTIVE,
+        )
+    )
+    job.current_attempt_id = current.id
+    job.status = current.status
+    await mock_store.update(job)
+    params = {} if selector is None else {"attempt_id": previous.id if selector == "previous" else selector}
+    selected = await test_client.get(
+        "/apis/jobs/v2/workspaces/default/hello-world/jobs/factory-status-attempt/status", params=params
+    )
+    if selector == "missing":
+        assert selected.status_code == 404
+    else:
+        assert selected.status_code == 200, selected.text
+        assert selected.json()["attempt_id"] == (previous.id if selector == "previous" else current.id)
+        assert selected.json()["status"] == ("completed" if selector == "previous" else "active")

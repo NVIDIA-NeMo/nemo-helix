@@ -717,6 +717,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1782,6 +1788,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -2622,6 +2634,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response

@@ -21,7 +21,7 @@ from nemo_helix_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTI
 from nemo_helix_plugin.jobs._mapping_access import JobSpecModel
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.providers import Provider
-from nemo_helix_plugin.jobs.workflows import WorkflowInput, WorkflowSpec, workflow_order
+from nemo_helix_plugin.jobs.workflows import WorkflowInput, WorkflowSpec, validate_workflow_dependencies
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
@@ -179,13 +179,6 @@ class HelixJobStepSpec(JobSpecModel):
                 return True
         return False
 
-    @model_validator(mode="before")
-    @classmethod
-    def reject_workflow_outputs(cls, value: Any) -> Any:
-        if isinstance(value, dict) and "outputs" in value:
-            raise ValueError("Workflow output declarations are not supported")
-        return value
-
     model_config = ConfigDict(regex_engine="python-re")
 
 
@@ -219,7 +212,7 @@ class HelixJobSpec(JobSpecModel):
                 if len(ids) != len(set(ids)):
                     raise ValueError(f"Duplicate input Fileset for step {step.name}")
         if self.workflow is not None:
-            workflow_order({step.name: step.depends_on or [] for step in self.steps})
+            validate_workflow_dependencies({step.name: step.depends_on or [] for step in self.steps})
         return self
 
 

@@ -12,7 +12,7 @@ from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoRespons
 from nemo_helix_plugin.client.types import CursorPagination, PreparedRequest
 from nemo_helix_plugin.jobs import watch as watch_module
 from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobStatus, HelixJobStatusResponse
-from nemo_helix_plugin.jobs.types import JobLogsQueryParams, JobStatusQueryParams
+from nemo_helix_plugin.jobs.types import JobLogsQueryParams
 from nemo_helix_plugin.jobs.watch import _status_event, watch_job
 
 
@@ -120,7 +120,7 @@ class _StatusOnlyClient:
         *,
         workspace: str | None = None,
         name: str,
-        query_params: JobStatusQueryParams | None = None,
+        attempt_id: str | None = None,
     ) -> NemoResponse[HelixJobStatusResponse]:
         self.calls += 1
         result = self._results.pop(0)

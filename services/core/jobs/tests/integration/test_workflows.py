@@ -689,10 +689,10 @@ def test_watch_reports_workflow_progress_while_status_stays_active(
     original = harness.jobs.get_job_status
     polls = 0
     assert job.attempt_id is not None
-    attempt_id = job.attempt_id
+    captured_attempt_id = job.attempt_id
 
     def get_status(
-        self: JobsClient, *, workspace: str | None = None, name: str
+        self: JobsClient, *, workspace: str | None = None, name: str, attempt_id: str | None = None
     ) -> NemoResponse[HelixJobStatusResponse]:
         nonlocal polls
         polls += 1
@@ -700,16 +700,16 @@ def test_watch_reports_workflow_progress_while_status_stays_active(
             harness.jobs.update_attempt_step_status(
                 workspace="default",
                 job=job.id,
-                attempt=attempt_id,
+                attempt=captured_attempt_id,
                 name=first.steps[0].id,
                 body=HelixJobStatusUpdateRequest(
                     status=HelixJobStatus.ACTIVE if polls == 2 else HelixJobStatus.COMPLETED
                 ),
             )
             harness.jobs.update_attempt_status_details(
-                job.id, attempt_id, workspace="default", body={"workflow_reconcile": True}
+                job.id, captured_attempt_id, workspace="default", body={"workflow_reconcile": True}
             )
-        return original(workspace=workspace, name=name)
+        return original(workspace=workspace, name=name, attempt_id=attempt_id)
 
     monkeypatch.setattr(JobsClient, "get_job_status", get_status)
     events = list(harness.jobs.watch_job(job.id, workspace="default", include_logs=False, poll_interval=0))
