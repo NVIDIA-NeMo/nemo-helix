@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import signal
+import subprocess
+import sys
+import textwrap
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -176,10 +179,43 @@ def test_reap_completes_when_called_inside_a_running_event_loop(
     assert "failed to reap" not in caplog.text
 
 
+def test_reap_resolves_the_control_plane_from_a_real_atexit_hook() -> None:
+    """Thread pools refuse work before atexit hooks run, and DNS resolution runs on the loop's pool.
+
+    A subprocess, because only a real interpreter exit puts the pools in that state. The hook also
+    refuses new threads, as CPython 3.12.0 does during atexit, so the reap must not start one.
+    """
+    script = textwrap.dedent(
+        """
+        import asyncio, atexit, threading
+        import sandboxed_gym.job_reaper as job_reaper
+
+        class _Provider:
+            async def destroy_job_sandboxes(self, job_id):
+                await asyncio.get_running_loop().getaddrinfo("localhost", 80)
+                return ("gym-host-1",)
+
+        def _refuse_threads(self):
+            raise RuntimeError("can't create new thread at interpreter shutdown")
+
+        def _reap_at_exit():
+            threading.Thread.start = _refuse_threads
+            print("removed", job_reaper.reap_job_sandboxes("rl-1", host_provider="opensandbox"))
+
+        job_reaper.get_host_provider = lambda name, options=None: _Provider()
+        atexit.register(_reap_at_exit)
+        """
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=True)
+
+    assert "removed ('gym-host-1',)" in result.stdout
+    assert "failed to reap" not in result.stderr
+
+
 def test_exit_and_cancel_both_reap(monkeypatch: pytest.MonkeyPatch, restore_process_state) -> None:
     """atexit covers a failed process. SIGTERM covers a cancel, which does not run atexit."""
     calls: list[str] = []
-    monkeypatch.setattr("os.kill", lambda pid, sig: calls.append(f"kill:{sig}"))
+    monkeypatch.setattr(orchestrator_module, "kill", lambda pid, sig: calls.append(f"kill:{sig}"))
     monkeypatch.setattr(
         "sandboxed_gym.job_reaper.reap_job_sandboxes",
         lambda job_id, **kwargs: calls.append(job_id) or (),

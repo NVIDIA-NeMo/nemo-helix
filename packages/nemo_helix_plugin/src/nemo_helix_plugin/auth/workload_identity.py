@@ -95,6 +95,11 @@ def get_workload_delegation_audience() -> str:
         return DEFAULT_WORKLOAD_AUDIENCE
 
 
+def docker_job_workload_group(workspace: str) -> str:
+    """Stable actor group for verified Docker jobs, requiring explicit workspace role grants."""
+    return f"nhx:docker:jobs:{workspace}"
+
+
 def workload_delegation_expires_at(
     *,
     ttl_seconds_active: int,

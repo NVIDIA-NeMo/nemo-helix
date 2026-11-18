@@ -14,7 +14,7 @@ import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/en
 import {
   EXPERIMENT_SETTINGS_DEFAULTS,
   experimentSettingsSchemaShape,
-} from '@studio/components/evaluation/shared/experimentSettings';
+} from '@studio/components/evaluation/experimentSettings';
 import { z } from 'zod';
 
 // Everything below the name is the shared experiment-settings shape, so this form, the edit form,

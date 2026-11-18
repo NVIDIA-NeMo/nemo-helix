@@ -152,6 +152,8 @@ docs/fern/versions/v[0-9]*.yml
 
 # Generated from k8s/helm/values.yaml + README.md at docs build time (docs/fern/scripts/sync-helm-docs.mjs)
 docs/helm/index.mdx
+# Generated from lockfiles and image pins by docs/fern/scripts/sync-library-versions.mjs.
+docs/fern/snippets/_snippets/library-versions.mdx
 
 # nektos/act files commonly used
 .act-variables

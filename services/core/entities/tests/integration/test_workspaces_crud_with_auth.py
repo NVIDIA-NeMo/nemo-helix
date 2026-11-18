@@ -26,6 +26,7 @@ from nemo_helix_plugin.workspaces.types import (
     CreateWorkspaceRequest,
     UpdateWorkspaceMemberRequest,
     UpdateWorkspaceRequest,
+    WorkspaceLimits,
 )
 from nhx.core.entities.service import EntitiesService
 from nhx.testing import TEST_USER_EMAIL, ClientContext, create_test_client, short_unique_name
@@ -409,6 +410,47 @@ class TestWorkspaceCRUDWithAuth:
         assert updated.created_by == creator_email
         # updated_by should be the user who made the update
         assert updated.updated_by == updater_email
+
+    def test_only_admin_can_set_workspace_limits(self, client: WorkspacesClient):
+        """Admin may set limits; an Editor (who can update descriptions) may not."""
+        admin_email = f"admin-{uuid.uuid4().hex[:8]}@example.com"
+        editor_email = f"editor-{uuid.uuid4().hex[:8]}@example.com"
+        workspace_name = short_unique_name("lim-auth")
+
+        admin_workspaces = as_user(client, admin_email)
+        admin_workspaces.create_workspace(body=CreateWorkspaceRequest(name=workspace_name)).data()
+        admin_workspaces.create_workspace_member(
+            workspace=workspace_name,
+            body=CreateWorkspaceMemberRequest(principal=editor_email, roles=["Editor"]),
+        ).data()
+
+        updated = admin_workspaces.update_workspace(
+            name=workspace_name, body=UpdateWorkspaceRequest(limits=WorkspaceLimits(max_concurrent_jobs=5))
+        ).data()
+        assert updated.limits is not None
+        assert updated.limits.max_concurrent_jobs == 5
+
+        editor_workspaces = as_user(client, editor_email)
+        assert (
+            editor_workspaces.update_workspace(name=workspace_name, body=UpdateWorkspaceRequest(description="ok"))
+            .data()
+            .description
+            == "ok"
+        )
+        with pytest.raises(PermissionDeniedError):
+            editor_workspaces.update_workspace(
+                name=workspace_name, body=UpdateWorkspaceRequest(limits=WorkspaceLimits(max_concurrent_jobs=500))
+            ).data()
+
+    def test_non_platform_admin_cannot_set_limits_on_create(self, client: WorkspacesClient):
+        """The creator becomes Admin of a new workspace, so create-time limits need a platform admin."""
+        user_workspaces = as_user(client, f"user-{uuid.uuid4().hex[:8]}@example.com")
+        with pytest.raises(PermissionDeniedError):
+            user_workspaces.create_workspace(
+                body=CreateWorkspaceRequest(
+                    name=short_unique_name("lim-create"), limits=WorkspaceLimits(max_concurrent_jobs=5)
+                )
+            ).data()
 
     def test_viewer_cannot_update_workspace(self, client: WorkspacesClient):
         """Test that a Viewer cannot update a workspace."""

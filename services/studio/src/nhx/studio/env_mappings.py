@@ -112,11 +112,6 @@ ENV_MAPPINGS: list[EnvMapping] = [
         default="true",
     ),
     EnvMapping(
-        marker="STUDIO_UI_VITE_FF_FILESET_DETAILS_ENABLED",
-        config_path="studio.feature_flags.fileset_details_enabled",
-        default="false",
-    ),
-    EnvMapping(
         marker="STUDIO_UI_VITE_FF_FLAG_OVERRIDES_ENABLED",
         config_path="studio.feature_flags.flag_overrides_enabled",
         default="false",
@@ -125,11 +120,6 @@ ENV_MAPPINGS: list[EnvMapping] = [
         marker="STUDIO_UI_VITE_FF_GUARDRAILS_ENABLED",
         config_path="studio.feature_flags.guardrails_enabled",
         default="false",
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_INFERENCE_PROVIDER_ENABLED",
-        config_path="studio.feature_flags.inference_provider_enabled",
-        default="true",
     ),
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_INTAKE_ENABLED", config_path="studio.feature_flags.intake_enabled", default="true"
@@ -156,5 +146,10 @@ ENV_MAPPINGS: list[EnvMapping] = [
         marker="STUDIO_UI_VITE_FF_OPTIMIZER_ENABLED",
         config_path="studio.feature_flags.optimizer_enabled",
         default="true",
+    ),
+    EnvMapping(
+        marker="STUDIO_UI_VITE_FF_TASKSETS_ENABLED",
+        config_path="studio.feature_flags.tasksets_enabled",
+        default="false",
     ),
 ]

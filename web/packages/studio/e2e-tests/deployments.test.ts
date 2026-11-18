@@ -138,11 +138,10 @@ test.describe('Model Deployments', () => {
 
       // Confirmation modal — scope to the dialog by name so we don't collide with the
       // details panel's "Delete" button, which stays mounted behind the modal.
-      const modal = page.getByRole('dialog', { name: `Delete deployment: ${deploymentName}` });
+      const modal = page.getByRole('dialog', { name: `Delete deployment '${deploymentName}'?` });
       await expect(modal).toBeVisible();
 
-      // DeleteConfirmationModal overrides submitButtonText to "Delete".
-      await modal.getByRole('button', { name: 'Delete', exact: true }).click();
+      await modal.getByRole('button', { name: 'Delete Deployment', exact: true }).click();
       await expect(modal).toBeHidden({ timeout: 30_000 });
     });
 

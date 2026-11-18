@@ -1,0 +1,39 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- if and .Values.postgresql.enabled .Values.networkPolicies.enabled .Values.networkPolicies.postgresql.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-postgres-ingress" (include "nemo-helix.fullname" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    app.kubernetes.io/component: postgres
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: postgres
+      {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
+              {{- include "nemo-helix.selectorLabels" . | nindent 14 }}
+        {{- if .Values.core.enabled }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: {{ .Values.core.controller.componentLabel | quote }}
+              {{- include "nemo-helix.selectorLabels" . | nindent 14 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 5432
+    {{- with .Values.networkPolicies.postgresql.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

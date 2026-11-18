@@ -48,7 +48,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
-from nemo_helix_plugin.job_results import HelixJobResults
+from nemo_helix_plugin.job_results import HelixJobResults, job_storage_context_from_env
 from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import (
@@ -192,12 +192,15 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
     exists inside task containers.
 
     ``HelixJobResults.job_name`` is the *submitted* platform job name, not
-    the job class name — :class:`~nemo_helix_plugin.jobs.result_manager.ResultManager`
-    uses it to look up the job via the typed Jobs client so each
-    ``ctx.results.save()`` registers against the correct job record. The
-    backends inject this as ``NEMO_JOB_ID = step.job``; the NemoJob class
-    identifier (e.g. ``"evaluate"``) would point at a non-existent job and
-    break result registration.
+    the job class name. The result sink is also handed the job's fileset and
+    artifact base path so it never needs to read the job record itself: a
+    sandbox on the restricted platform policy is allowed to post results but
+    not to ``GET /jobs/{job}``. The backends inject these as
+    ``NEMO_JOB_FILESET`` and ``NEMO_JOB_ARTIFACT_BASE_PATH``; ``NEMO_JOB_ID =
+    step.job`` names the job, and the NemoJob class identifier (e.g.
+    ``"evaluate"``) would point at a non-existent job and break result
+    registration. A missing ``NEMO_JOB_FILESET`` raises instead of falling back
+    to the job record, which the restricted platform policy denies.
     """
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "").strip()
     if not workspace:
@@ -212,6 +215,7 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
     attempt_id = os.environ.get(NEMO_JOB_ATTEMPT_ID_ENVVAR, "").strip()
     if not attempt_id:
         raise RuntimeError(f"{NEMO_JOB_ATTEMPT_ID_ENVVAR} not set; running outside the platform?")
+    fileset_name, artifact_base_path = job_storage_context_from_env()
     return JobContext(
         workspace=workspace,
         storage=StoragePaths(
@@ -223,6 +227,8 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
             workspace=workspace,
             client=client,
             attempt_id=attempt_id,
+            fileset_name=fileset_name,
+            artifact_base_path=artifact_base_path,
         ),
         usage=HelixJobUsageReporter(
             job_name=job_id,

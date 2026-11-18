@@ -9,7 +9,7 @@ These are the database table definitions, separate from Pydantic API schemas.
 from datetime import datetime, timezone
 from typing import Optional
 
-from nhx.core.entities.entities import Entity, Workspace, WorkspaceDeletionStage
+from nhx.core.entities.entities import Entity, Workspace, WorkspaceDeletionStage, WorkspaceLimits
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.engine.default import DefaultExecutionContext
 from sqlalchemy.orm import Mapped, mapped_column
@@ -38,6 +38,9 @@ class DBWorkspace(Base):
     id: Mapped[str] = mapped_column(String(255), primary_key=True, comment="System-generated UUID")
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, comment="User-provided workspace name")
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Optional description")
+    limits: Mapped[Optional[dict]] = mapped_column(
+        JSON, nullable=True, comment="Optional per-workspace limits; NULL when none were set"
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, server_default=func.now(), nullable=False)
     created_by: Mapped[str] = mapped_column(String(255), nullable=True)
@@ -57,6 +60,7 @@ class DBWorkspace(Base):
             id=self.id,
             name=self.name,
             description=self.description,
+            limits=WorkspaceLimits.model_validate(self.limits) if self.limits is not None else None,
             created_at=self.created_at,
             created_by=self.created_by,
             updated_at=self.updated_at,

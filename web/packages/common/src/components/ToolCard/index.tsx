@@ -3,14 +3,12 @@
 
 import { EntityCard } from '@nemo/common/src/components/EntityCard';
 import type { ToolParameter } from '@nemo/common/src/components/ToolCard/types';
+import { asString } from '@nemo/common/src/utils/asString';
 import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import { Code, Star, Wrench } from '@nemo/icons/icons';
 import type { ChatCompletionTool } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
-
-const asString = (value: unknown): string | undefined =>
-  typeof value === 'string' ? value : undefined;
 
 const schemaType = (schema: Record<string, unknown>): string | undefined => {
   const { type } = schema;

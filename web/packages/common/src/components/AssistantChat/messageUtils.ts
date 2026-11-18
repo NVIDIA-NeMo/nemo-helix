@@ -43,9 +43,9 @@ export const createTextMessage = (
 });
 
 /**
- * The content and status of an assistant reply whose request failed: the explanation as the body
- * (see `humanizeChatError`) and the raw error in the status, where the error banner and the copy
- * action read it.
+ * The content and status of an assistant reply whose request failed: the explanation as the last
+ * text part (see `humanizeChatError`), which the error banner shows, and the raw error in the
+ * status, which the banner's "Show details" row shows.
  */
 export const getFailedReply = (
   errorMessage: string,
@@ -58,6 +58,15 @@ export const getFailedReply = (
 const isTextPart = (part: unknown): part is TextMessagePart => {
   if (typeof part !== 'object' || part === null) return false;
   return 'type' in part && part.type === 'text' && 'text' in part && typeof part.text === 'string';
+};
+
+export const getFailedReplyExplanationPart = (
+  parts: readonly unknown[]
+): TextMessagePart | undefined => parts.findLast(isTextPart);
+
+export const getFailedReplyExplanation = (parts: readonly unknown[]): string | undefined => {
+  const explanation = getFailedReplyExplanationPart(parts)?.text.trim();
+  return explanation || undefined;
 };
 
 const isImagePart = (part: unknown): part is ImageMessagePart => {

@@ -1413,6 +1413,29 @@ def test_setuptools_override_keeps_the_pkg_resources_ceiling(tmp_path: Path) -> 
     assert overrides == ["setuptools<81,>=80.10.2", "fastapi[standard]>=0.133.0,<0.137.0"]
 
 
+def test_rl_dependency_policy_skips_package_scoped_overrides(tmp_path: Path) -> None:
+    from nhx.rl.tasks.environment.convert import rl_dependency_policy
+
+    rl = tmp_path / "RL"
+    rl.mkdir()
+    (rl / "pyproject.toml").write_text(
+        """
+[tool.uv]
+override-dependencies = [
+  "setuptools>=80.10.2",
+  { package = { name = "vllm", version = "0.29.0" }, dependencies = ["flashinfer-python==0.6.18.post1"] },
+]
+constraint-dependencies = ["urllib3>=2.7.0"]
+""",
+        encoding="utf-8",
+    )
+
+    overrides, constraints = rl_dependency_policy(rl)
+
+    assert overrides == ["setuptools<81,>=80.10.2"]
+    assert constraints == ["urllib3>=2.7.0"]
+
+
 def test_rl_dependency_policy_rejects_a_checkout_without_uv_limits(tmp_path: Path) -> None:
     from nhx.rl.tasks.environment.convert import rl_dependency_policy
 

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
@@ -16,20 +18,36 @@ from fastapi.testclient import TestClient
 from nemo_builder_plugin import service
 from nemo_builder_plugin.completion import Caller, current_caller, submit_refusal
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.service import BuilderService
+from nemo_builder_plugin.service import BuilderService, get_settle
+from nemo_builder_plugin.settle import settle
 from nemo_builder_plugin.submit import SubmitResult
 from nemo_helix_plugin.authz import CallerKind, get_path_rules
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 
-def _app(entities: AsyncMock, caller: Caller = Caller(auth=False)) -> FastAPI:
+def _app(
+    entities: AsyncMock,
+    caller: Caller = Caller(auth=False),
+    job_status: AsyncMock | None = None,
+    builder: AsyncMock | None = None,
+) -> FastAPI:
+    """``entities`` is the caller's entity store; ``builder`` the builder's, which settling writes through."""
     app = FastAPI()
     for spec in BuilderService().get_routers():
         app.include_router(spec.router, prefix=spec.prefix)
     app.dependency_overrides[get_entity_client] = lambda: entities
     app.dependency_overrides[current_caller] = lambda: caller
+    # Every build job still running, unless a test says otherwise.
+    jobs = job_status or AsyncMock(return_value=HelixJobStatus.ACTIVE)
+    rows = builder or AsyncMock(update=AsyncMock(side_effect=lambda updated: updated))
+
+    async def settle_as_builder(image: ContainerImage) -> ContainerImage:
+        return (await settle(rows, [image], jobs))[0]
+
+    app.dependency_overrides[get_settle] = lambda: settle_as_builder
     return app
 
 
@@ -92,6 +110,32 @@ class TestListingOneJobsImages:
         response = TestClient(_app(entities)).get("/v2/workspaces/team-a/container-images", params={"status": "done"})
         assert response.status_code == 422
         entities.list.assert_not_awaited()
+
+    def test_the_deprecated_queued_status_still_filters(self) -> None:
+        """0.10's builder wrote it, and a 0.10 client may still ask for it."""
+        entities = AsyncMock()
+        page = MagicMock()
+        page.data = [_row().model_copy(update={"status": "queued"})]
+        entities.list.return_value = page
+        response = TestClient(_app(entities)).get("/v2/workspaces/team-a/container-images", params={"status": "queued"})
+        assert response.status_code == 200
+        assert entities.list.await_args.kwargs["filter_obj"] == {"status": "queued"}
+        assert [image["status"] for image in response.json()] == ["queued"]
+
+    def test_listing_returns_the_stored_status_and_asks_jobs_nothing(self) -> None:
+        """Settling as it lists would move rows out of a `status` filter between pages: builder-settle does it."""
+        entities = _entities(_row())
+        page = MagicMock()
+        page.data = [_row()]
+        entities.list.return_value = page
+        job_status = AsyncMock(return_value=HelixJobStatus.ERROR)
+        response = TestClient(_app(entities, job_status=job_status)).get(
+            "/v2/workspaces/ws-a/container-images", params={"status": "pending"}
+        )
+        assert response.status_code == 200
+        assert [image["status"] for image in response.json()] == ["pending"]
+        job_status.assert_not_awaited()
+        entities.update.assert_not_awaited()
 
 
 DIGEST = "sha256:" + "d" * 64
@@ -245,6 +289,57 @@ class TestReadingOneImage:
         entities = AsyncMock()
         entities.get.side_effect = NemoEntityNotFoundError("no")
         assert TestClient(_app(entities, SERVICE_STEP)).get(IMAGE).status_code == 404
+
+    def test_a_pending_image_whose_job_ended_fails_as_it_is_read(self) -> None:
+        entities = _entities(_row())
+        builder = _entities(_row())
+        job_status = AsyncMock(return_value=HelixJobStatus.COMPLETED)
+        response = TestClient(_app(entities, job_status=job_status, builder=builder)).get(IMAGE)
+        assert response.status_code == 200
+        assert response.json()["status"] == "failed"
+        assert "ended (completed) without publishing it" in response.json()["status_detail"]
+        # As the builder: a reader who may not write the image must not be refused, nor be its writer.
+        builder.update.assert_awaited_once()
+        entities.update.assert_not_awaited()
+
+    def test_a_pending_image_whose_job_runs_is_read_as_it_is(self) -> None:
+        entities = _entities(_row())
+        response = TestClient(_app(entities)).get(IMAGE)
+        assert response.json()["status"] == "pending"
+        entities.update.assert_not_awaited()
+
+    def test_a_refused_reader_settles_nothing(self) -> None:
+        entities = _entities(_row())
+        job_status = AsyncMock(return_value=HelixJobStatus.ERROR)
+        builder = _entities(_row())
+        app = _app(entities, Caller(auth=True, actor="service:evals"), job_status=job_status, builder=builder)
+        assert TestClient(app).get(IMAGE).status_code == 403
+        job_status.assert_not_awaited()
+        builder.update.assert_not_awaited()
+
+    @pytest.mark.parametrize("fails", ["constructing", "entering"])
+    def test_a_builder_client_that_cant_be_had_returns_the_image_as_stored(
+        self, fails: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Settling is best effort: the next read, or builder-settle, settles it."""
+
+        @asynccontextmanager
+        async def unenterable(**_kwargs: object) -> AsyncGenerator[AsyncNemoClient]:
+            raise RuntimeError("no service token")
+            yield
+
+        def unconstructible(**_kwargs: object) -> object:
+            raise RuntimeError("no service token")
+
+        monkeypatch.setattr(
+            service, "get_async_nemo_client", unconstructible if fails == "constructing" else unenterable
+        )
+        app = _app(_entities(_row()))
+        del app.dependency_overrides[get_settle]
+        response = TestClient(app).get(IMAGE)
+        assert response.status_code == 200
+        assert response.json()["status"] == "pending"
+        assert "could not settle image ws-a/" in caplog.text
 
 
 class TestSubmitting:

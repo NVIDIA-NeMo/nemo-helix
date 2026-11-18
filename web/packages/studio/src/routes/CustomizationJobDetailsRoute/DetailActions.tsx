@@ -12,7 +12,8 @@ import { useCustomizationCancelAutomodelJob } from '@nemo/sdk/generated/customiz
 import { useCustomizationCancelRlJob } from '@nemo/sdk/generated/customizer/rl-jobs';
 import { useCustomizationCancelUnslothJob } from '@nemo/sdk/generated/customizer/unsloth-jobs';
 import { getJobsGetJobQueryKey } from '@nemo/sdk/generated/platform/jobs';
-import { HelixJobStatus, type HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { Flex } from '@nvidia/foundations-react-core';
 import { getCustomizationJobStatusQueryKey } from '@studio/hooks/useCustomizationJobStatus';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

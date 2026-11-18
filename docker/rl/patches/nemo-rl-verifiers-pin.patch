@@ -1,7 +1,44 @@
-diff --git a/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/requirements.txt b/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/requirements.txt
---- a/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/requirements.txt
-+++ b/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/requirements.txt
-@@ -1,2 +1,2 @@
- -e nemo-gym[dev] @ ../../
--verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.3.1
-+verifiers==0.3.1
+diff --git a/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/pyproject.toml b/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/pyproject.toml
+--- a/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/pyproject.toml
++++ b/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/pyproject.toml
+@@ -7,7 +7,7 @@ version = "0.0.0"
+ requires-python = ">=3.13.14"
+ dependencies = [
+     "nemo-gym[dev]",
+-    "verifiers@ git+https://github.com/PrimeIntellect-ai/verifiers.git@b2e4e8157783b2c0dffc7821044c87f29f1c3ccf",
++    "verifiers==0.3.1",
+ ]
+ 
+ [tool.uv]
+diff --git a/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/uv.lock b/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/uv.lock
+--- a/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/uv.lock
++++ b/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/uv.lock
+@@ -875,7 +875,7 @@ telemetry = [
+ requires-dist = [
+     { name = "nemo-gym", extras = ["dev"], editable = "../../" },
+     { name = "nemo-gym", extras = ["telemetry"], marker = "extra == 'telemetry'", editable = "../../" },
+-    { name = "verifiers", git = "https://github.com/PrimeIntellect-ai/verifiers.git?rev=b2e4e8157783b2c0dffc7821044c87f29f1c3ccf" },
++    { name = "verifiers", specifier = "==0.3.1" },
+ ]
+ provides-extras = ["telemetry"]
+ 
+@@ -3142,7 +3142,7 @@ wheels = [
+ [[package]]
+ name = "verifiers"
+ version = "0.3.1"
+-source = { git = "https://github.com/PrimeIntellect-ai/verifiers.git?rev=b2e4e8157783b2c0dffc7821044c87f29f1c3ccf#b2e4e8157783b2c0dffc7821044c87f29f1c3ccf" }
++source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "aiohttp" },
+     { name = "aiolimiter" },
+@@ -3171,6 +3171,10 @@ dependencies = [
+     { name = "typing-extensions" },
+     { name = "uvloop", marker = "platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'" },
+ ]
++sdist = { url = "https://files.pythonhosted.org/packages/0b/7f/79e4cd16e17c663beb346e5e4a7bf9afc947cdb11782f888c08c1ae3e64b/verifiers-0.3.1.tar.gz", hash = "sha256:bb1f7681f44693e9fdfcc9e7194561e0b5cbc05ee6506a8d82b384a045292ee6", size = 836867, upload-time = "2026-08-24T20:53:07.689Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/dd/1b/0e5e7edffde7076b9223ac50916cd6755848e83ef29e0f94950cf9f4c7e8/verifiers-0.3.1-py3-none-any.whl", hash = "sha256:105cd114184625895b3d1a07ddc418f08a0ddadcd9cb20dad5acb763ccb01725", size = 880325, upload-time = "2026-08-24T20:53:05.679Z" },
++]
+ 
+ [[package]]
+ name = "virtualenv"

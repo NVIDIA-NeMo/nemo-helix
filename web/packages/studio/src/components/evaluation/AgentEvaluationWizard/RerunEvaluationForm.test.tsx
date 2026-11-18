@@ -9,8 +9,10 @@ import {
   getListEvaluationsQueryKey,
 } from '@nemo/sdk/generated/platform/evaluations';
 import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experiments';
+import { getFilesListFilesetFilesQueryKey } from '@nemo/sdk/generated/platform/files';
 import { jobsGetJob } from '@nemo/sdk/generated/platform/jobs';
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
+import { DATASET_SNAPSHOT_KEY } from '@studio/components/evaluation/AgentEvaluationWizard/datasetSnapshot';
 import { RerunEvaluationForm } from '@studio/components/evaluation/AgentEvaluationWizard/RerunEvaluationForm';
 import {
   createRunEvaluation,
@@ -63,6 +65,19 @@ const DATASET_SPEC = {
   publication: { intake: { evaluation_id: 'baseline' } },
 };
 
+const SNAPSHOT = JSON.stringify({
+  ref: DATASET_SPEC.dataset,
+  files: [{ path: 'dataset.jsonl', size: 10 }],
+});
+
+/** Answers the dataset's fileset listing with ``files``. */
+const mockDatasetFiles = (files: { path: string; size: number }[]) =>
+  server.use(
+    http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
+      HttpResponse.json({ data: files })
+    )
+  );
+
 const renderForm = () =>
   renderRoute(undefined, {
     history: `/workspaces/${DEFAULT_WORKSPACE}`,
@@ -90,6 +105,7 @@ beforeEach(() => {
       HttpResponse.json({ data: [] })
     )
   );
+  mockDatasetFiles([{ path: 'dataset.jsonl', size: 10 }]);
   vi.mocked(jobsGetJob).mockResolvedValue({
     name: SOURCE_JOB,
     workspace: DEFAULT_WORKSPACE,
@@ -99,7 +115,7 @@ beforeEach(() => {
     id: 'eval_baseline',
     name: 'baseline',
     experiment_ids: ['grp_primary'],
-    metadata: { [EVAL_CONFIG_FILESET_KEY]: 'baseline-data' },
+    metadata: { [EVAL_CONFIG_FILESET_KEY]: 'baseline-data', [DATASET_SNAPSHOT_KEY]: SNAPSHOT },
   } as never);
   vi.mocked(createRunEvaluation).mockImplementation(async (_ws, { name }) => name);
   vi.mocked(evalsCreateEvaluateJob).mockResolvedValue({ name: 'job-2' } as never);
@@ -127,20 +143,50 @@ describe('RerunEvaluationForm', () => {
     await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    const metadata = {
+      [EVAL_CONFIG_FILESET_KEY]: 'baseline-data',
+      [DATASET_SNAPSHOT_KEY]: SNAPSHOT,
+    };
     expect(createRunEvaluation).toHaveBeenCalledWith(DEFAULT_WORKSPACE, {
       experimentIds: ['grp_primary'],
       name: 'baseline-again',
       filesetName: 'baseline-data',
       parentEvaluationId: 'eval_baseline',
+      metadata,
     });
     const [, request] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
     expect(request.spec).toEqual({
       ...DATASET_SPEC,
-      publication: { intake: { evaluation_id: 'baseline-again' } },
+      publication: { intake: { evaluation_id: 'baseline-again', agent_name: AGENT } },
     });
-    expect(recordRunJob).toHaveBeenCalledWith(DEFAULT_WORKSPACE, 'baseline-again', 'job-2', {
-      [EVAL_CONFIG_FILESET_KEY]: 'baseline-data',
-    });
+    expect(recordRunJob).toHaveBeenCalledWith(
+      DEFAULT_WORKSPACE,
+      'baseline-again',
+      'job-2',
+      metadata
+    );
+  });
+
+  it('blocks a re-run whose dataset no longer exists', async () => {
+    mockDatasetFiles([]);
+    renderForm();
+
+    expect(
+      await screen.findByText(
+        `The dataset this evaluation read, ${DATASET_SPEC.dataset}, no longer exists.`
+      )
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
+  });
+
+  it('warns about a re-run whose dataset changed, and still lets it run', async () => {
+    mockDatasetFiles([{ path: 'dataset.jsonl', size: 99 }]);
+    renderForm();
+
+    expect(await screen.findByText(/The dataset has changed since baseline ran/)).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
   });
 
   it('re-submits a task-based job to the agent-evaluate endpoint', async () => {

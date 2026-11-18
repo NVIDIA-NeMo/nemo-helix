@@ -4,12 +4,12 @@
 /**
  * Canonical tab IDs for the Fileset Detail page.
  *
- * These string values appear as TabsTrigger/TabsContent `value` props and as
- * the `?tab=<id>` URL query value. Add a tab here, reference it everywhere.
+ * These string values are the tab's path segment
+ * (`/filesets/:filesetName/<id>`). Add a tab here, reference it everywhere.
  *
  * The Card tab's label is purpose-dependent (e.g. "Model Card" vs "Dataset
- * Card"), but the tab id is the same for all purposes so the `?tab=` URL is
- * stable across fileset types.
+ * Card"), but the tab id is the same for all purposes so the URL is stable
+ * across fileset types.
  */
 export enum FilesetDetailTab {
   Card = 'card',

@@ -3,11 +3,8 @@
 
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs/index';
 import { jobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
-import {
-  HelixJobStatus,
-  type HelixJobLog,
-  type HelixJobLogPage,
-} from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobLog, HelixJobLogPage } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';

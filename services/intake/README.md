@@ -55,7 +55,7 @@ mapping, and a troubleshooting table, see the **`nemo-experiments-upload`** agen
 `POST /apis/intake/v2/workspaces/{workspace}/ingest/spans` accepts a provider-neutral JSON batch of
 1–1000 spans. It supports arbitrary provider IDs, parent references outside the batch, structured
 input/output, semantic attributes, and lossless native JSON for unmodeled attributes. Reposting the
-same `(workspace, source, trace_id, span_id)` updates the logical span.
+same `(workspace, session_id, source, trace_id, span_id)` updates the logical span.
 
 Customers should use the `nemo-intake` skill's bundled MLflow, LangSmith, Phoenix, and Braintrust
 scripts. They page bounded provider exports, write spans before scores/annotations, retain native
@@ -263,3 +263,30 @@ make test-service SERVICE=intake
 ## Generated API Artifacts
 
 Run `make refresh-openapi` after Intake route or schema changes.
+
+## Trace identity and historical collisions
+
+Trace reads and evaluation usage rollups keep `(workspace, session_id, source_format,
+trace_id)` together. When opening a trace from a session, pass `session_id` to
+`GET /apis/intake/v2/workspaces/{workspace}/traces/{id}`. An omitted session remains
+supported for IDs belonging to one session; IDs present in multiple sessions return
+`409` with a request to supply `session_id`. A supplied session never falls back to a
+trace in another session. Workspace authorization applies to both forms. Individual span detail reads
+(`GET /apis/intake/v2/workspaces/{workspace}/spans/{span_id}`) accept the same
+optional session and return `409` for an unscoped span ID shared by sessions.
+
+Root selection, page hydration, span usage, and evaluation agent/model facets are
+partitioned by session. Reingesting a span updates its session's rollups without
+choosing a different session as the winner for the same trace/span IDs.
+
+This is a query correction, not a storage migration. The current `trace_index`
+ReplacingMergeTree sorting/replacement key omits `session_id`. Historical records
+with different root start times remain distinguishable and are covered by these
+queries. If two sessions have the same physical replacement key (including the root
+start time), `FINAL` or a background merge can already have discarded one row. Stop
+any proposed metadata replay in that case: query changes cannot recover the lost
+identity, and replaying it against the existing key can replace another session.
+Before such a repair, operators must review a separate migration proposal that adds
+session identity to the physical key, inventories surviving rows and authoritative
+source evidence, validates counts and identity in a replacement table, and defines
+an explicit cutover and rollback. No migration or replay runs automatically.

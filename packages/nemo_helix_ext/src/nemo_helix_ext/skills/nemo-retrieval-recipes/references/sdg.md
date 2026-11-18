@@ -121,6 +121,13 @@ roughly an hour for a ~190k-row split at the default batch of 16. Raise
 `mining.query_embedding_batch_size` / `mining.document_embedding_batch_size`
 (64–128 fits a 48 GB card) before assuming a long run is hung.
 
+Leave `tokenizer_backend` at its default, `nemo_wrapped_auto`. That loads the encoder's own Hugging Face
+`tokenizer.json`, the one it is trained and served with. `nemo_auto` lets Automodel pick a tokenizer
+registered for the model type instead. For Nemotron 3 Embed 1B (model type `ministral3`) that is Mistral's
+`tekken.json` format, which the checkpoint does not ship, so mining fails with `Some kwargs ... are not
+supported by MistralCommonBackend.from_pretrained`. Use `nemo_auto` only for an encoder that ships its own
+Mistral tokenizer file.
+
 Convert-only (`enable_mining: false`, the default) writes `training.jsonl` with
 `neg_doc: []`. Automodel `bi_encoder` / `cross_encoder` still samples
 `train_n_passages - 1` negatives (default **4**) and fails with

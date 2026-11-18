@@ -63,7 +63,8 @@ def _padded_data(static_authz_data: dict[str, Any], extra_routes: int) -> dict[s
     for i in range(extra_routes):
         endpoints[f"/apis/plugin-{i % 50}/v2/workspaces/{{workspace}}/resource-{i}"] = {
             method: {
-                "permissions": [f"plugin{i % 50}.resource.{method}"],
+                "direct": {"actor_perms": [f"plugin{i % 50}.resource.{method}"]},
+                "delegated": {"actor_perms": [], "subject_perms": [f"plugin{i % 50}.resource.{method}"]},
                 "scopes": [
                     f"plugin{i % 50}:{'read' if method == 'get' else 'write'}",
                     "platform:read",

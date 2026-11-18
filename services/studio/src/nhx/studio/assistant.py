@@ -483,7 +483,7 @@ def _build_studio_system_prompt(
         "If the user asks for a deployment, deployment chat, or deployment playground link and the agent name is known from the conversation, use destination='agent_chat' with the agent name; otherwise use destination='agents'.",
         "For a newly started job, use destination='job' and the job name when available; otherwise use destination='jobs'.",
         "For generated filesets, custom models, deployments, evaluations, guardrails, secrets, Data Designer, Safe Synthesizer, settings, members, or intake work, choose the matching studio_link destination.",
-        "For created datasets or filesets use destination='fileset_panel' with the fileset name when available; otherwise use destination='filesets'.",
+        "For created datasets or filesets use destination='fileset' with the fileset name when available; otherwise use destination='filesets'.",
         "For started evaluations use destination='evaluation_result' with the result or job name when available; otherwise use destination='evaluation_results' or destination='evaluation_metrics'.",
         "For the evaluation results list specifically, use destination='evaluation_results'; it resolves to /workspaces/{workspace}/evaluation/results.",
         "For Data Designer jobs use destination='data_designer_job' with the job name when available; otherwise use destination='data_designer'.",

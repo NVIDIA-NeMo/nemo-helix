@@ -3,7 +3,7 @@
 
 import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
 import { useFilesDownloadFile } from '@nemo/sdk/generated/platform/files';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import {
   useSafeSynthesizerDownloadJobResultSyntheticData,
   useSafeSynthesizerListJobResults,
@@ -158,6 +158,7 @@ const createMockJobWithFilesetUrl = (overrides?: Partial<GenerateJob>): Generate
 
 describe('SafeSynthesizerFilesetPreview', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mockUseParams({
       workspace: 'test-workspace',
       safeSynthesizerJobName: 'test-job-id',

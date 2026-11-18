@@ -17,7 +17,12 @@ from nhx.automodel.tasks.training.backends.checkpoints import (  # noqa: E402
     export_onnx,
 )
 from nhx.automodel.tasks.training.schemas import ExportConfig  # noqa: E402
-from transformers import AutoModel, AutoModelForSequenceClassification, AutoTokenizer  # noqa: E402
+from transformers import (  # noqa: E402
+    AutoModel,
+    AutoModelForCausalLM,
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+)
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase  # noqa: E402
 
 pytestmark = [pytest.mark.gpu_integration, pytest.mark.slow]
@@ -57,6 +62,33 @@ def _write_checkpoint(path, *, cross_encoder: bool):
     return path
 
 
+def _write_causal_reranker_checkpoint(path):
+    """Write a tiny Qwen3 causal LM, which Automodel trains as a yes/no reranker (no network)."""
+    from transformers import BertTokenizer, Qwen3Config, Qwen3ForCausalLM
+
+    path.mkdir(parents=True, exist_ok=True)
+    vocab = [*_VOCAB, "yes", "no"]
+    vocab_file = path / "vocab.txt"
+    vocab_file.write_text("\n".join(vocab) + "\n")
+    config = Qwen3Config.from_dict(
+        {
+            "vocab_size": len(vocab),
+            "hidden_size": HIDDEN_SIZE,
+            "intermediate_size": 64,
+            "num_hidden_layers": 2,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 2,
+            "head_dim": 8,
+            "max_position_embeddings": 64,
+            "tie_word_embeddings": True,
+        }
+    )
+    torch.manual_seed(0)
+    Qwen3ForCausalLM(config).save_pretrained(path)
+    BertTokenizer(vocab_file=str(vocab_file)).save_pretrained(path)
+    return path
+
+
 @pytest.fixture
 def embedding_checkpoint(tmp_path):
     return _write_checkpoint(tmp_path / "embed", cross_encoder=False)
@@ -75,9 +107,9 @@ def _parity_config(**overrides) -> ExportConfig:
     """Export config for HF-parity checks.
 
     The references below run in float32 on CPU, so these tests pin the graph to
-    fp32 rather than taking the fp16 job default; fp16 only agrees to the 1e-2
-    that ``export_onnx`` itself applies, which is too loose to catch a pooling
-    or layout regression.
+    fp32 rather than taking the fp16 job default; fp16 only agrees to the
+    tolerance ``export_onnx`` itself applies, which is too loose to catch a
+    pooling or layout regression.
     """
     return ExportConfig(precision="fp32", **overrides)
 
@@ -244,5 +276,45 @@ class TestCrossEncoderExport:
         assert actual.shape == expected.shape == (2, 1)
         np.testing.assert_allclose(actual, expected, atol=1e-4)
         assert [inp.name for inp in session.get_inputs()] == ["input_ids", "attention_mask", "token_type_ids"]
+        assert [result.name for result in session.get_outputs()] == ["logits"]
+        assert (out / "tokenizer").is_dir()
+
+
+class TestCausalRerankerExport:
+    def test_onnx_logits_are_yes_minus_no_at_the_last_token(self, tmp_path):
+        """A Qwen3 reranker scores by its LM head, as Automodel trains it; there is no score head to export."""
+        checkpoint = _write_causal_reranker_checkpoint(tmp_path / "qwen3-rerank")
+        out = tmp_path / "out-causal-rerank"
+        onnx_path = export_onnx(
+            model_path=checkpoint,
+            output_path=out,
+            tokenizer_path=str(checkpoint),
+            model_type=ModelType.CROSS_ENCODER,
+            cfg=_parity_config(),
+            causal_reranker=True,
+        )
+
+        pairs = [
+            "question:hello \n \n passage:world",
+            "question:an example \n \n passage:sentence for tracing",
+        ]
+        batch = _tokenize(checkpoint, pairs)
+        tokenizer = AutoTokenizer.from_pretrained(str(checkpoint))
+        assert tokenizer is not None
+        yes, no = cast(list[int], tokenizer.convert_tokens_to_ids(["yes", "no"]))
+        model = AutoModelForCausalLM.from_pretrained(str(checkpoint), torch_dtype=torch.float32).eval()
+        with torch.no_grad():
+            logits = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]).logits
+        last = batch["attention_mask"].sum(dim=1) - 1
+        rows = logits[torch.arange(logits.shape[0]), last]
+        expected = (rows[:, yes] - rows[:, no]).unsqueeze(-1).numpy()
+
+        session = _session(onnx_path)
+        feed = {name: batch[name].numpy() for name in ("input_ids", "attention_mask")}
+        actual = session.run(["logits"], feed)[0]
+
+        assert actual.shape == expected.shape == (2, 1)
+        np.testing.assert_allclose(actual, expected, atol=1e-4)
+        assert [inp.name for inp in session.get_inputs()] == ["input_ids", "attention_mask"]
         assert [result.name for result in session.get_outputs()] == ["logits"]
         assert (out / "tokenizer").is_dir()

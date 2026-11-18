@@ -9,11 +9,8 @@ import {
   type ModelWorkspaceGroup,
 } from '@nemo/common/src/api/models/modelPages';
 import { groupModelsByWorkspace } from '@nemo/common/src/utils/models';
-import {
-  type ModelEntity,
-  ModelEntitySortField,
-  type ModelEntityFilter,
-} from '@nemo/sdk/generated/platform/schema';
+import type { ModelEntity, ModelEntityFilter } from '@nemo/sdk/generated/platform/schema';
+import { ModelEntitySortField } from '@nemo/sdk/generated/platform/schema/ModelEntitySortField';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 

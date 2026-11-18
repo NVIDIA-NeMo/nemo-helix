@@ -539,7 +539,13 @@ class TestLaunchModel:
             workspace="other",
             fileset=FileSetRef(workspace="other", name="x"),
             model_entity="other/base",
-            deployment_config=DeploymentParams(gpu=1, image_name="img", image_tag="1.0", disk_size="300Gi"),
+            deployment_config=DeploymentParams(
+                gpu=1,
+                image_name="img",
+                image_tag="1.0",
+                disk_size="300Gi",
+                additional_args=["--max-model-len", "8192"],
+            ),
         )
 
         runner.launch_model(config, me)
@@ -556,6 +562,7 @@ class TestLaunchModel:
         assert config_body.executor_config.image_name == "img"
         assert config_body.executor_config.image_tag == "1.0"
         assert config_body.executor_config.disk_size == "300Gi"
+        assert config_body.executor_config.additional_args == ["--max-model-len", "8192"]
 
         deployment_call = models.create_deployment.call_args
         assert deployment_call.kwargs["workspace"] == "other"

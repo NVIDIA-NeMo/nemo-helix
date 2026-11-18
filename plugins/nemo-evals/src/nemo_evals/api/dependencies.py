@@ -86,8 +86,14 @@ def get_metric_service(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
     async_client: AsyncNemoClient = Depends(get_nemo_client),
 ) -> MetricService:
-    """Provide a MetricService wired to the Entity Store and Files service."""
+    """Provide metric operations with caller-authorized Entity and Files clients."""
     return MetricService(entity_client, AsyncFilesClient.from_client(async_client))
+
+
+async def get_metric_files_metadata_client() -> AsyncGenerator[AsyncFilesClient, None]:
+    """Provide service-authorized Files metadata lookup for metric deletion."""
+    async with get_async_nemo_client(as_service="evals", internal=True) as metadata_client:
+        yield AsyncFilesClient.from_client(metadata_client)
 
 
 def get_result_service(

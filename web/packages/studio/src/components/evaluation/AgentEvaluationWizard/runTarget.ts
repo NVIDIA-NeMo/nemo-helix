@@ -6,7 +6,7 @@ import { toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
 import type { RunTargetFormFields } from '@studio/components/evaluation/AgentEvaluationWizard/types';
 import { ensureDefaultExperiment } from '@studio/components/evaluation/defaultExperiment';
-import { entityNameField } from '@studio/components/evaluation/shared/entityNameField';
+import { entityNameField } from '@studio/components/evaluation/EvalWizard/entityNameField';
 import { bareName, buildEvalJobName } from '@studio/components/evaluation/submitEvaluationJob';
 import { nameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { type Control, useWatch } from 'react-hook-form';

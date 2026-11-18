@@ -16,7 +16,7 @@ import {
   MessageActionButton,
 } from '@nemo/common/src/components/AssistantChat/messageActions';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
-import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMessageError';
+import { useIsFailedReply } from '@nemo/common/src/components/AssistantChat/useMessageError';
 import { Retry } from '@nemo/icons/icons';
 import { Flex, Skeleton, Stack, Tooltip } from '@nvidia/foundations-react-core';
 
@@ -39,7 +39,7 @@ export const AssistantMessage = ({
     state.message.parts.some((part) => part.type !== 'text' || part.text.trim().length > 0)
   );
   const completed = useAuiState((state) => state.message.status?.type === 'complete');
-  const failed = useMessageError() !== undefined;
+  const failed = useIsFailedReply();
   const messageContent = (
     <Stack align="start" className="w-full min-w-0" gap="density-xs">
       <AssistantChatMessageContent

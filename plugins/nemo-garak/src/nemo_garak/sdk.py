@@ -107,7 +107,9 @@ class GarakPluginResource:
             json={"spec": spec.model_dump(mode="json")},
         )
         response.raise_for_status()
-        return GarakJobResource(job_name=response.json()["name"], platform=self._platform, workspace=ws)
+        return GarakJobResource(
+            job_name=response.json()["name"], job_id=response.json()["id"], platform=self._platform, workspace=ws
+        )
 
     def list_jobs(
         self,
@@ -227,7 +229,9 @@ class AsyncGarakPluginResource:
             json={"spec": spec.model_dump(mode="json")},
         )
         response.raise_for_status()
-        return AsyncGarakJobResource(job_name=response.json()["name"], platform=self._platform, workspace=ws)
+        return AsyncGarakJobResource(
+            job_name=response.json()["name"], job_id=response.json()["id"], platform=self._platform, workspace=ws
+        )
 
     async def list_jobs(
         self,

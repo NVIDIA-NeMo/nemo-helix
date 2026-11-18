@@ -47,6 +47,13 @@ class _FakeTaskService:
             raise NemoEntityNotFoundError(f"{workspace}/{name} not found")
         return hashlib.sha256(f"{workspace}/{name}#{fragment}".encode()).hexdigest()
 
+    async def resolve_pinned_revisions(self, workspace: str, pins) -> None:
+        """Digest pins verify in a batch; the fake knows tasks, not revisions, so it checks existence."""
+        self.batched_pins = [*getattr(self, "batched_pins", []), *((workspace, name, digest) for name, digest in pins)]
+        for name, _ in pins:
+            if (workspace, name) not in self.existing:
+                raise NemoEntityNotFoundError(f"{workspace}/{name} not found")
+
     def digest_for(self, workspace: str, name: str, fragment: str = "latest") -> str:
         """The digest a test should expect for a member — same derivation as ``resolve_revision``."""
         return hashlib.sha256(f"{workspace}/{name}#{fragment}".encode()).hexdigest()
@@ -236,10 +243,15 @@ async def test_member_naming_an_unknown_revision_is_rejected(
         async def resolve_revision(self, workspace: str, name: str, fragment: str = "latest") -> str:
             raise RevisionNotFoundError(f"no revision {fragment!r}")
 
+        async def resolve_pinned_revisions(self, workspace: str, pins) -> None:
+            raise RevisionNotFoundError(f"no revision {pins[0][1]!r}")
+
     service = TasksetService(entity_store, _NoSuchRevision(existing_tasks), authorize_task_read=AsyncMock())
 
-    with pytest.raises(TaskRefNotFoundError, match="no published revision"):
-        await service.create_taskset("ts-1", TasksetInput(tasks=[TaskRef(f"task-a#{'c' * 64}")]), workspace="default")
+    # A digest pin (verified in a batch) and a tag pin (resolved one by one) are both refused.
+    for ref in (f"task-a#{'c' * 64}", "task-a#blessed"):
+        with pytest.raises(TaskRefNotFoundError, match="no published revision"):
+            await service.create_taskset("ts-1", TasksetInput(tasks=[TaskRef(ref)]), workspace="default")
 
 
 async def test_members_resolve_concurrently(existing_tasks: set[tuple[str, str]], entity_store) -> None:

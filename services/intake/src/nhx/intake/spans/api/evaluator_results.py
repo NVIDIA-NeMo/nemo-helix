@@ -10,7 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
-from nhx.common.api.common import Page
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.filter import FilterOperator
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
@@ -138,6 +138,7 @@ async def list_evaluator_results(
 
 @router.get(
     "/v2/workspaces/{workspace}/evaluator-results/{evaluator_result_id}",
+    responses={404: {"model": ErrorResponse, "description": "Evaluator result not found"}},
     response_model=EvaluatorResult,
     response_model_exclude_none=True,
     tags=[API_TAG],

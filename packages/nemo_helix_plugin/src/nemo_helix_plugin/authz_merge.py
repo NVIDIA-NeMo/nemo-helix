@@ -70,7 +70,7 @@ def merge_authz_contributions(
     Each contribution dict may contain:
 
     - ``permissions``: flat ``permission_id -> description`` for the registry
-    - ``endpoints``: ``path -> {method: {permissions, scopes?}}``
+    - ``endpoints``: ``path -> {method: {direct?, delegated?, scopes?, callers?, deny?}}``
     - ``role_permissions``: optional ``role -> [permission_id, ...]`` extra grants
       (defaults: ``.list``/``.read`` → Viewer+Editor, ``.admin`` → none,
       else Editor only)

@@ -237,6 +237,17 @@ does not require GPUs or OpenSandbox.
 | `S3_BUCKET` / `S3_ENDPOINT_URL` | Override the asset bucket or S3 endpoint | manifest bucket |
 | `HF_TOKEN` | Hugging Face token for models pulled at runtime | (optional for public repos) |
 
+### Feature: Taskset runs (Kubernetes)
+
+`e2e/test_taskset_runs.py` submits the 2-task Harbor dataset in `e2e/data/taskset_runs_dataset/` with `nemo evals runs submit --harbor-dir`, waits for the run, and checks its task Jobs through the Jobs API, its rewards (1 and 0), and the downloaded merged bundle. It then resubmits by `--taskset` and checks that no image was rebuilt. The cluster needs the taskset run controller, Builder with `system/`-qualified registry and signing secrets, and OpenSandbox. With auth on, pass a token that can create workspaces with `--access-token` or `NHX_E2E_ACCESS_TOKEN`; without one the test stops at once and prints the `nemo auth login` to run. The test writes the run and task Job IDs to `taskset-runs-e2e-<uuid>.json` under `$E2E_SERVICES_LOG_DIR` (default `.pytest_cache/taskset-runs-e2e/`) after every step, and cancels its runs on teardown. Set `NHX_E2E_WORKSPACE` to reuse a workspace and its images, and `NHX_E2E_KUBE_CONTEXT` to add the leftover-sandbox check and sandbox diagnostics on failure (it needs cluster-wide read on `batchsandboxes`).
+
+```bash
+uv run pytest e2e/test_taskset_runs.py --cluster-url http://127.0.0.1:18080 --feature taskset-runs -v
+# Auth on:
+uv run pytest e2e/test_taskset_runs.py --cluster-url https://nemo-helix.example.com --feature taskset-runs \
+  --access-token "$(nemo --context <context> auth token)" -v
+```
+
 ### Custom Registry and Tag (Docker)
 
 ```bash

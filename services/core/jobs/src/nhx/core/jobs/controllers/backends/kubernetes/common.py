@@ -59,6 +59,7 @@ from nhx.common.jobs.constants import (
     DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,
     DEFAULT_TASK_STORAGE_PATH,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -104,7 +105,7 @@ from nhx.core.jobs.controllers.backends.base import (
     resolve_gpu_job_shm_size,
     resolve_task_image,
     step_ttl_seconds_active,
-    validate_no_reserved_managed_job_environment_variable_names,
+    validate_step_environment,
 )
 from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError, JobStorageError
 from pydantic import BaseModel, ConfigDict, Field
@@ -1544,10 +1545,7 @@ def create_pod_template_spec(
             ),
         )
     env.extend(_opensandbox_job_env(platform_config))
-    validate_no_reserved_managed_job_environment_variable_names(
-        (envvar.name for envvar in step.step_spec.environment or []),
-        source="Job step environment keys",
-    )
+    validate_step_environment(step.step_spec.environment or [], source="Job step environment keys")
     env.extend(
         [
             client.V1EnvVar(name=NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR, value=DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH),
@@ -1556,6 +1554,7 @@ def create_pod_template_spec(
             client.V1EnvVar(name=NEMO_JOB_STEP_ENVVAR, value=step.name),
             client.V1EnvVar(name=NEMO_JOB_WORKSPACE_ENVVAR, value=step.workspace),
             client.V1EnvVar(name=NEMO_JOB_FILESET_ENVVAR, value=step.fileset),
+            client.V1EnvVar(name=NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR, value=step.artifact_base_path or ""),
             client.V1EnvVar(
                 name=NEMO_JOB_TASK_ENVVAR,
                 value_from=client.V1EnvVarSource(field_ref=client.V1ObjectFieldSelector(field_path="metadata.uid")),

@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import type {
   AnnotationInput,
   HTTPValidationError,
@@ -62,14 +61,6 @@ const rejectLegacySearchParam = (request: Request) => {
     { status: 400 }
   );
 };
-
-export interface ProjectParams {
-  projectId: string;
-}
-
-export interface HypermodelParams {
-  hypermodelId: string;
-}
 
 /** Shared by the agents list and get-by-name handlers so both agree on the same fixtures. */
 const mockAgents = (workspace: unknown) => {
@@ -789,7 +780,3 @@ export const handlers = [
   ...insightsHandlers,
   ...agentOptimizeJobsHandlers,
 ];
-
-// Re-export EvaluateJob so consumers of this module that previously relied on
-// MetricEvaluationJob can import it from here without touching their own imports.
-export type { EvaluateJob };

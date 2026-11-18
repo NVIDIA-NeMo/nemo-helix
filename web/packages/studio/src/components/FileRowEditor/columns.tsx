@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
-import { type DropdownEntry, Tag, Text } from '@nvidia/foundations-react-core';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
+import { Tag, Text } from '@nvidia/foundations-react-core';
 import { formatCellValue } from '@studio/components/FileRowEditor/schema';
 import type { DataFileColumn, DataFileRow } from '@studio/components/FileRowEditor/types';
 import type { ComponentProps } from 'react';
@@ -77,14 +78,14 @@ export const makeDataFileColumns =
     rowActionsColumn({
       size: 58,
       enableResizing: false,
-      rowActions: (row): DropdownEntry[] => [
-        { children: 'Edit row', onSelect: () => onEdit(row) },
-        { children: 'Duplicate row', onSelect: () => onDuplicate(row) },
-        {
-          children: 'Delete row',
-          danger: true,
-          onSelect: () => onDelete(row),
-        },
-      ],
+      cell: ({ row: { original: row } }) => (
+        <QuickActionsMenuRoot
+          actions={[
+            { label: 'Edit row', onSelect: () => onEdit(row) },
+            { label: 'Duplicate row', onSelect: () => onDuplicate(row) },
+          ]}
+          deleteAction={{ label: 'Delete row', onSelect: () => onDelete(row) }}
+        />
+      ),
     }),
   ];

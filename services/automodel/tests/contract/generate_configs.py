@@ -54,7 +54,10 @@ if AUTOMODEL_SRC.is_dir():
 else:
     sys.path.insert(0, "/app/services/automodel/src")
 
-from nhx.automodel.tasks.training.backends.config import compile_automodel_config  # noqa: E402
+from nhx.automodel.tasks.training.backends.config import (  # noqa: E402
+    _expert_count_from_config,
+    compile_automodel_config,
+)
 from nhx.automodel.tasks.training.schemas import TrainingStepConfig  # noqa: E402
 from nhx.customization_common.service.context import NHXJobContext  # noqa: E402
 
@@ -169,7 +172,9 @@ def _detect_model_flags(model_local_dir: Path) -> dict[str, bool]:
 
     flags: dict[str, bool] = {}
 
-    if arch_name == "NemotronHForCausalLM" and "moe" not in hf_config:
+    # Production overrides only the dense Nemotron-H (v2), whose model spec records no MoE config;
+    # the MoE Nemotron-3 Nano trains on Automodel's own class. Expert counts are what that spec reads.
+    if arch_name == "NemotronHForCausalLM" and _expert_count_from_config(hf_config) is None:
         flags["override_custom_impl"] = True
 
     return flags

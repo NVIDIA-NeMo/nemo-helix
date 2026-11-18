@@ -4,6 +4,7 @@
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experiments';
+import { getFilesListFilesetFilesQueryKey } from '@nemo/sdk/generated/platform/files';
 import type { EvaluationResponse, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
 import { DEFAULT_EXPERIMENT_AGENT_KEY } from '@studio/components/evaluation/defaultExperiment';
@@ -13,11 +14,48 @@ import { server } from '@studio/mocks/node';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
-import { renderRoute, screen } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
+vi.mock('@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer', () => ({
+  useFetchFileAsArrayBuffer: () => async () =>
+    new TextEncoder().encode('{"prompt": "hi", "expected": "hi"}\n').buffer,
+}));
+
+vi.mock('@nemo/common/src/components/DatasetFileSelect/ControlledDatasetFileSelect', async () =>
+  (await import('@studio/tests/util/mockDatasetPick')).datasetFileSelectMock()
+);
+
+vi.mock('@studio/components/evaluation/EvalWizard/useDatasetPreview', async (importOriginal) =>
+  (await import('@studio/tests/util/mockDatasetPick')).datasetPreviewMock(await importOriginal(), {
+    prompt: 'hi',
+    expected: 'hi',
+  })
+);
+
 const AGENT = 'my-agent';
+
+/** A minimal eval config: parsed locally, never submitted. */
+const EVAL_CONFIG = `prompt_template: "{{ item.prompt }}"
+metrics:
+  - bundle_kind: metric-bundle
+    bundle_format_version: v1
+    metric_type: string-check
+    metadata: {}
+    outputs:
+      - name: string-check
+        value_json_schema:
+          type: number
+    secrets: {}
+    payload:
+      kind: inline
+      metric:
+        type: string-check
+        operation: equals
+        left_template: "{{ sample.output_text }}"
+        right_template: "{{ item.expected }}"
+`;
 
 const emptyPage = { data: [], pagination: { total: 0, page: 1, page_size: 100 } };
 
@@ -54,7 +92,10 @@ const mockLists = () => {
       // The only evaluation lookup left is the name-conflict probe.
       const name = new URL(request.url).searchParams.get('filter[name]');
       return HttpResponse.json({ ...emptyPage, data: name === TAKEN.name ? [TAKEN] : [] });
-    })
+    }),
+    http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
+      HttpResponse.json({ data: [] })
+    )
   );
 };
 
@@ -70,36 +111,55 @@ const renderWizard = () =>
     ],
   });
 
+type User = ReturnType<typeof userEvent.setup>;
+
+/** Configure a dataset and an uploaded eval config, then move on to the Run step. */
+const openRunStep = async (user: User) => {
+  await user.click(await screen.findByLabelText('Dataset file ref'));
+  await user.paste(`${DEFAULT_WORKSPACE}/data#rows.jsonl`);
+  await user.click(
+    within(await screen.findByRole('radiogroup', { name: 'Eval configuration source' })).getByRole(
+      'radio',
+      { name: 'Upload' }
+    )
+  );
+  await user.upload(
+    screen.getByLabelText('Eval configuration file'),
+    new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
+  );
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  await screen.findByRole('button', { name: 'Run Evaluation' });
+};
+
 describe('AgentEvaluationWizard', () => {
   beforeEach(mockLists);
 
-  it('opens straight on the dataset and eval config, with no steps to walk through', async () => {
+  it('opens on Configuration, with only Run after it', async () => {
     renderWizard();
 
-    expect(await screen.findByLabelText('Dataset file')).toBeInTheDocument();
-    expect(screen.getByLabelText('Eval configuration file')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Dataset file ref')).toBeInTheDocument();
+    expect(screen.getByText('Configuration')).toBeInTheDocument();
+    expect(screen.getByText('Run')).toBeInTheDocument();
     expect(screen.queryByText('How do you want to start?')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeInTheDocument();
+  });
+
+  it('asks nothing on the Run step that has to be filled in', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openRunStep(user);
+
+    expect(screen.getByLabelText('Evaluation Name (Optional)')).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled();
   });
 
-  it('asks only for the dataset and eval config before running', async () => {
+  it("offers real experiments to link, but not the agent's default one", async () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await user.click(await screen.findByRole('button', { name: 'Run Evaluation' }));
-
-    expect(await screen.findByText('Add a dataset')).toBeVisible();
-    expect(screen.getByText('Select an eval configuration')).toBeVisible();
-    // Where the results land is optional, so neither field reports anything missing.
-    expect(screen.getByLabelText('Evaluation Name (Optional)')).toHaveValue('');
-    expect(screen.queryByText(/Evaluation name is required/)).not.toBeInTheDocument();
-  });
-
-  it("offers real experiments to link up front, but not the agent's default one", async () => {
-    const user = userEvent.setup();
-    renderWizard();
-
+    await openRunStep(user);
     await user.click(await screen.findByRole('combobox', { name: /^Experiment/ }));
 
     expect(
@@ -112,16 +172,20 @@ describe('AgentEvaluationWizard', () => {
   });
 
   it('offers a parallel-requests setting that defaults to 1', async () => {
+    const user = userEvent.setup();
     renderWizard();
 
-    expect(await screen.findByRole('spinbutton', { name: 'Parallel requests' })).toHaveValue(1);
+    await openRunStep(user);
+
+    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toHaveValue(1);
   });
 
   it('holds Run Evaluation on a taken name, saying so only under the name field', async () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await user.type(await screen.findByLabelText('Evaluation Name (Optional)'), 'baseline');
+    await openRunStep(user);
+    await user.type(screen.getByLabelText('Evaluation Name (Optional)'), 'baseline');
 
     expect(await screen.findByText(/named baseline already exists/)).toBeInTheDocument();
     expect(screen.getAllByText(/named baseline already exists/)).toHaveLength(1);

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
-from nemo_helix_plugin.job_results import HelixJobResults
+from nemo_helix_plugin.job_results import HelixJobResults, job_storage_context_from_env
 from nemo_helix_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
@@ -20,7 +20,7 @@ from nemo_helix_plugin.jobs.constants import (
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
 from nhx.automodel.tasks.retrieval_mine.runner import RetrievalMineStepConfig, run_mine, work_dir
-from nhx.common.client_factory import get_nemo_client
+from nhx.common.client_factory import get_task_nemo_client
 
 
 def _get_ctx(client: NemoClient) -> JobContext:
@@ -32,7 +32,15 @@ def _get_ctx(client: NemoClient) -> JobContext:
         ephemeral=Path(os.environ[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR]),
         persistent=Path(persistent_env) if persistent_env else None,
     )
-    results = HelixJobResults(workspace=workspace, job_name=job_name, client=client, attempt_id=attempt_id)
+    fileset_name, artifact_base_path = job_storage_context_from_env()
+    results = HelixJobResults(
+        workspace=workspace,
+        job_name=job_name,
+        client=client,
+        attempt_id=attempt_id,
+        fileset_name=fileset_name,
+        artifact_base_path=artifact_base_path,
+    )
     return JobContext(
         workspace=workspace,
         job_id=job_name,
@@ -45,7 +53,7 @@ def _get_ctx(client: NemoClient) -> JobContext:
 def main() -> int:
     with open(os.environ[NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR], encoding="utf-8") as handle:
         spec = RetrievalMineStepConfig.model_validate_json(handle.read())
-    client = get_nemo_client(as_service="data-designer")
+    client = get_task_nemo_client("data-designer")
     ctx = _get_ctx(client)
     result = run_mine(
         spec.job_config,

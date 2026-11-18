@@ -5,7 +5,7 @@ import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSel
 import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/ControlledSliderWithTextInput';
 import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { RadioCard } from '@nemo/common/src/components/RadioCard';
-import { RlGRPOTrainingFinetuningType } from '@nemo/sdk/generated/customizer/schema';
+import { RlGRPOTrainingFinetuningType } from '@nemo/sdk/generated/customizer/schema/RlGRPOTrainingFinetuningType';
 import {
   AccordionContent,
   AccordionItem,

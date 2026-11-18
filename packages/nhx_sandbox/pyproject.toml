@@ -22,8 +22,9 @@ build-backend = "hatchling.build"
 packages = ["src/nhx_sandbox"]
 
 # Read when the tests run from this directory, as in the per-Harbor-runner CI step. Repo-wide runs use
-# the root pytest.ini, which carries the same settings.
+# the root pytest.ini, which carries the same settings. `opensandbox_ext` is the OpenSandbox server
+# extension: source the stock server loads from a ConfigMap, so it is on the test path, not in the wheel.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-pythonpath = ["tests"]
+pythonpath = ["tests", "opensandbox_ext"]

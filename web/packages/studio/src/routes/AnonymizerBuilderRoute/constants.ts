@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { RiskTolerance } from '@nemo/sdk/generated/anonymizer/schema';
+import { RiskTolerance } from '@nemo/sdk/generated/anonymizer/schema/RiskTolerance';
 import type { Tag } from '@nvidia/foundations-react-core';
 import type { ComponentProps } from 'react';
 

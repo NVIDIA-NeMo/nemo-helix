@@ -26,6 +26,7 @@ from nemo_helix_plugin.jobs.types import AuthContext
 from nemo_helix_plugin.openshell.types import GatewayCredentialConfig, GatewayProviderBinding, ProviderAccessRevoked
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.providers import ComputeResources, ContainerSpec, CPUExecutionProvider, GPUExecutionProvider
+from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable
 from nhx.core.jobs.controllers.backends.openshell import (
     OpenShellJobBackend,
     OpenShellJobEgressConfig,
@@ -526,6 +527,19 @@ class TestSchedule:
         request = _create_request(backend)
         env = dict(request.spec.environment)
         assert env["NHX_BASE_URL"] == "http://localhost:8080"
+
+    @pytest.mark.parametrize("name", ["NHX_PRINCIPAL", "NEMO_JOB_SECRETS"])
+    def test_step_env_cannot_override_platform_injected_names(
+        self, mock_nemo_client, mock_platform_config, test_step_pending, name
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending.model_copy(deep=True)
+        step.step_spec.environment = [HelixJobEnvironmentVariable(name=name, value="attacker-chosen")]
+
+        with pytest.raises(ValueError, match=name):
+            backend.schedule(step.step_spec.executor, step)
+
+        backend._client.create.assert_not_called()
 
     def test_task_storage_defaults_without_step_override(
         self, mock_nemo_client, mock_platform_config, test_step_pending
@@ -1149,3 +1163,36 @@ async def test_provider_revocation_uses_async_transport_and_timeout(
         ),
         timeout=7,
     )
+
+
+class TestResultStorageContext:
+    """The sandbox is handed the job's fileset and artifact base path.
+
+    Provider-bound sandboxes may only POST results, not GET the job record, so the
+    result sink has to receive this context through the environment.
+    """
+
+    def test_step_context_reaches_the_sandbox_env(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending.model_copy(deep=True)
+        step.artifact_base_path = "jobs/test-job"
+
+        backend.schedule(step.step_spec.executor, step)
+
+        env = dict(_create_request(backend).spec.environment)
+        assert env["NEMO_JOB_FILESET"] == "test-logs-fileset"
+        assert env["NEMO_JOB_ARTIFACT_BASE_PATH"] == "jobs/test-job"
+
+    def test_job_without_output_location_sets_an_empty_base_path(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending.model_copy(deep=True)
+        step.artifact_base_path = None
+
+        backend.schedule(step.step_spec.executor, step)
+
+        env = dict(_create_request(backend).spec.environment)
+        assert env["NEMO_JOB_ARTIFACT_BASE_PATH"] == ""

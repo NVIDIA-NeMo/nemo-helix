@@ -75,7 +75,7 @@ export const EvalWizard: FC<EvalWizardProps> = ({
 
   return (
     <AccessibleTitle title={heading}>
-      <form noValidate aria-label={heading} onSubmit={submit} className="h-full">
+      <form noValidate aria-label={heading} onSubmit={submit}>
         <Stack className="h-full">
           <Stack gap="density-2xl" className="shrink-0 px-6 pb-4 pt-6">
             <PageHeader slotHeading={heading} slotDescription={headingDescription} />

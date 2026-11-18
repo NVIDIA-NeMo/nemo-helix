@@ -65,6 +65,38 @@ def test_authentik_compose_disables_model_provider_seed_without_ngc_key():
     assert "ports" not in nemo_service
 
 
+def test_authentik_compose_reaches_docker_through_socket_proxy():
+    compose = yaml.safe_load(Path("contrib/auth/authentik/compose/docker-compose.yml").read_text())
+    services = compose["services"]
+    nemo_service = services["nemo"]
+
+    assert not any("docker.sock" in volume for volume in nemo_service["volumes"])
+    assert nemo_service["environment"]["DOCKER_HOST"] == "unix:///run/docker-proxy/docker.sock"
+    assert "no-new-privileges:true" in nemo_service["security_opt"]
+    assert nemo_service["depends_on"]["docker-socket-proxy"]["condition"] == "service_healthy"
+    assert "healthcheck" in services["docker-socket-proxy"]
+
+    proxy_volumes = services["docker-socket-proxy"]["volumes"]
+    assert proxy_volumes == [
+        "/var/run/docker.sock:/var/run/docker.sock:ro",
+        "./docker-proxy-entrypoint.sh:/usr/local/bin/docker-proxy-entrypoint.sh:ro",
+        "docker-proxy-socket:/run/docker-proxy",
+    ]
+    assert "ports" not in services["docker-socket-proxy"]
+    # The filter listens on a Unix socket shared only with nemo, not on a TCP port or network.
+    assert "networks" not in services["docker-socket-proxy"]
+    assert "docker-api" not in compose["networks"]
+    assert [
+        name
+        for name, service in services.items()
+        if "docker-proxy-socket:/run/docker-proxy" in service.get("volumes", [])
+    ] == ["nemo", "docker-socket-proxy"]
+    docker_sockets = [
+        name for name, service in services.items() if any("docker.sock" in v for v in service.get("volumes", []))
+    ]
+    assert docker_sockets == ["docker-socket-proxy"]
+
+
 def test_authentik_compose_runs_required_services_and_controllers():
     compose = yaml.safe_load(Path("contrib/auth/authentik/compose/docker-compose.yml").read_text())
 

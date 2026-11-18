@@ -14,9 +14,10 @@ import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/
 import { getAgentRunEvaluationRoute } from '@studio/routes/utils';
 import { LG_SELECTOR_TIMEOUT, LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
-import { renderRoute, waitFor, within } from '@studio/tests/util/render';
+import { menuFor } from '@studio/tests/util/menuFor';
+import { renderRoute } from '@studio/tests/util/render';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter } from 'react-router';
@@ -34,6 +35,7 @@ const renderTable = (evaluations: AgentEvaluationRow[], jobs: EvalJobRow[] = [])
     <TestProviders>
       <MemoryRouter>
         <EvaluationsTable workspace="default" evaluations={evaluations} jobs={jobs} />
+        <LocationDisplay />
       </MemoryRouter>
     </TestProviders>
   );
@@ -129,6 +131,29 @@ describe('EvaluationsTable Job column', () => {
     for (const link of links) {
       expect(link).toHaveAttribute('href', '/workspaces/default/jobs/my-eval-job');
     }
+  });
+});
+
+describe('EvaluationsTable row actions', () => {
+  it('offers View job in the quick actions menu and navigates to the job', async () => {
+    const user = userEvent.setup();
+    renderTable([], [toEvalJobRow(makeEvaluatorJob({ name: 'my-eval-job' }))]);
+
+    const [trigger] = await screen.findAllByRole(
+      'button',
+      { name: 'Open quick actions menu' },
+      { timeout: LG_SELECTOR_TIMEOUT }
+    );
+    await user.click(trigger);
+
+    const menu = menuFor(trigger);
+    const items = within(menu).getAllByTestId('quick-actions-menu-item');
+    expect(items.map((item) => item.textContent)).toEqual(['Re-run', 'View job']);
+
+    await user.click(within(menu).getByRole('menuitem', { name: 'View job' }));
+    expect(screen.getByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
+      '/workspaces/default/jobs/my-eval-job'
+    );
   });
 });
 

@@ -10,6 +10,7 @@ import {
 import { AssistantChatThread } from '@nemo/common/src/components/AssistantChat/AssistantChatThread';
 import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import { AssistantChat } from '@nemo/common/src/components/AssistantChat/index';
+import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
 import {
   ThemeProvider as KaizenThemeProvider,
   TooltipProvider,
@@ -138,7 +139,9 @@ interface CompletionRequestWithSignal {
 const renderAssistantChat = (element: ReactElement) =>
   render(
     <KaizenThemeProvider className="h-full" density="standard" theme="light">
-      <TooltipProvider>{element}</TooltipProvider>
+      <MockToastProvider>
+        <TooltipProvider>{element}</TooltipProvider>
+      </MockToastProvider>
     </KaizenThemeProvider>
   );
 
@@ -806,7 +809,7 @@ describe('AssistantChat', () => {
   );
 
   it(
-    'explains a recognised failure in a red-barred message and keeps the raw error in the banner',
+    'explains a recognised failure in the error banner and keeps the raw error behind details',
     async () => {
       const user = userEvent.setup({ delay: null });
       const retired =
@@ -819,20 +822,29 @@ describe('AssistantChat', () => {
       await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
       await user.click(screen.getByRole('button', { name: /Submit/i }));
 
-      const surface = await screen.findByTestId('assistant-chat-message-surface');
-      expect(surface).toHaveTextContent(/The model "acme\/old-model" has been retired\./);
-      expect(surface).toHaveClass('border-l-feedback-danger');
-      expect(surface).not.toHaveClass('border-l-[var(--border-color-brand)]');
-      expect(await screen.findByText(/APIStatusError: Error code: 410/)).toBeInTheDocument();
+      const banner = await screen.findByTestId('assistant-chat-error-banner');
+      expect(banner).toHaveTextContent(/The model "acme\/old-model" has been retired\./);
+      expect(banner).not.toHaveTextContent(/APIStatusError/);
+      expect(within(banner).queryByRole('button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('assistant-chat-message-surface')).not.toBeInTheDocument();
       expect(
         screen.queryByText('There was an error generating a response.')
       ).not.toBeInTheDocument();
+
+      const details = screen.getByTestId('assistant-chat-error-details');
+      expect(banner).not.toContainElement(details);
+      await user.click(within(details).getByText('Show details'));
+      expect(details).toHaveTextContent(/APIStatusError: Error code: 410/);
+      expect(screen.getAllByText(/APIStatusError: Error code: 410/)).toHaveLength(1);
+
+      await user.click(within(details).getByText('Hide details'));
+      expect(within(details).getByText('Show details')).toBeInTheDocument();
     },
     interactionTimeoutMs
   );
 
   it(
-    'shows the generic line in the message and the raw error in the banner when no rule matches',
+    'shows the generic line in the error banner when no rule matches',
     async () => {
       const user = userEvent.setup({ delay: null });
       mocks.createChatCompletion.mockRejectedValueOnce(new Error('Something nobody mapped'));
@@ -841,31 +853,157 @@ describe('AssistantChat', () => {
       await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
       await user.click(screen.getByRole('button', { name: /Submit/i }));
 
-      const surface = await screen.findByTestId('assistant-chat-message-surface');
-      expect(surface).toHaveTextContent('There was an error generating a response.');
-      expect(surface).toHaveClass('border-l-feedback-danger');
-      expect(await screen.findByText('Something nobody mapped')).toBeInTheDocument();
+      const banner = await screen.findByTestId('assistant-chat-error-banner');
+      expect(banner).toHaveTextContent('There was an error generating a response.');
+      expect(screen.getByTestId('assistant-chat-error-details')).toBeInTheDocument();
     },
     interactionTimeoutMs
   );
 
+  it('omits the details row when a failed reply carries no raw error', async () => {
+    renderAssistantChat(
+      <StaticAssistantChatThread
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'There was an error generating a response.' }],
+            status: { type: 'incomplete', reason: 'error' },
+          },
+        ]}
+      />
+    );
+
+    const banner = await screen.findByTestId('assistant-chat-error-banner');
+    expect(banner).toHaveTextContent('There was an error generating a response.');
+    expect(screen.queryByTestId('assistant-chat-error-details')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      outcome: 'copied',
+      writeText: () => Promise.resolve(),
+      toast: 'Successfully copied to clipboard!',
+    },
+    {
+      outcome: 'blocked',
+      writeText: () => Promise.reject(new Error('denied')),
+      toast: 'Error copying text to clipboard',
+    },
+  ])(
+    'copies the raw error from the details row when the clipboard is $outcome',
+    async ({ writeText, toast }) => {
+      const user = userEvent.setup({ delay: null });
+      const writeTextMock = vi.fn(writeText);
+      vi.spyOn(navigator, 'clipboard', 'get').mockReturnValue({
+        writeText: writeTextMock,
+      } as unknown as Clipboard);
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      renderAssistantChat(
+        <StaticAssistantChatThread
+          messages={[
+            { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+            {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'There was an error generating a response.' }],
+              status: { type: 'incomplete', reason: 'error', error: '502 Bad Gateway' },
+            },
+          ]}
+        />
+      );
+
+      const details = await screen.findByTestId('assistant-chat-error-details');
+      await user.click(within(details).getByText('Show details'));
+      await user.click(within(details).getByRole('button', { name: 'Copy' }));
+
+      expect(writeTextMock).toHaveBeenCalledWith('502 Bad Gateway');
+      expect(await screen.findByText(toast)).toBeInTheDocument();
+    }
+  );
+
   it(
-    'copies the raw error, not the explanation, from a failed reply',
+    'offers Regenerate response on a failed reply instead of an action in the banner',
     async () => {
       const user = userEvent.setup({ delay: null });
-      const raw = 'RuntimeError: internal error: APIStatusError: Error code: 429 - rate limited';
-      mocks.createChatCompletion.mockRejectedValueOnce(new Error(raw));
+      mocks.createChatCompletion.mockRejectedValueOnce(
+        new Error('RuntimeError: internal error: APIStatusError: Error code: 429 - rate limited')
+      );
 
       renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
       await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
       await user.click(screen.getByRole('button', { name: /Submit/i }));
 
-      await user.click(await screen.findByRole('button', { name: 'Copy error' }));
-
-      await expect(navigator.clipboard.readText()).resolves.toBe(raw);
+      await screen.findByTestId('assistant-chat-error-banner');
+      const actions = screen.getByTestId('assistant-chat-message-actions');
+      expect(
+        within(actions).getByRole('button', { name: /Regenerate response/i })
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Copy error' })).not.toBeInTheDocument();
     },
     interactionTimeoutMs
   );
+
+  it(
+    'renders the partial answer of a failed run as markdown and only the explanation in the banner',
+    async () => {
+      const user = userEvent.setup({ delay: null });
+      const raw = 'Connection to NeMo Assistant was interrupted.';
+      renderAssistantChat(
+        <StaticAssistantChatThread
+          messages={[
+            { role: 'user', content: [{ type: 'text', text: 'Create a guardrail' }] },
+            {
+              role: 'assistant',
+              content: [
+                { type: 'text', text: '## Partial findings\n\nI inspected the configuration.' },
+                { type: 'text', text: 'NeMo Assistant stopped before completing.' },
+              ],
+              status: { type: 'incomplete', reason: 'error', error: raw },
+            },
+          ]}
+        />
+      );
+
+      const surface = await screen.findByTestId('assistant-chat-message-surface');
+      expect(
+        within(surface).getByRole('heading', { name: 'Partial findings' })
+      ).toBeInTheDocument();
+      expect(surface).toHaveTextContent('I inspected the configuration.');
+      expect(surface).not.toHaveTextContent('NeMo Assistant stopped before completing.');
+
+      const banner = screen.getByTestId('assistant-chat-error-banner');
+      expect(banner).toHaveTextContent(/^NeMo Assistant stopped before completing\.$/);
+
+      const details = screen.getByTestId('assistant-chat-error-details');
+      await user.click(within(details).getByText('Show details'));
+      expect(details).toHaveTextContent(raw);
+      expect(screen.getAllByText(raw)).toHaveLength(1);
+    },
+    interactionTimeoutMs
+  );
+
+  it('keeps an earlier part that matches the explanation word for word in the reply', async () => {
+    const explanation = 'NeMo Assistant stopped before completing.';
+    renderAssistantChat(
+      <StaticAssistantChatThread
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'Quote the failure line' }] },
+          {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: explanation },
+              { type: 'text', text: explanation },
+            ],
+            status: { type: 'incomplete', reason: 'error', error: 'interrupted' },
+          },
+        ]}
+      />
+    );
+
+    const surface = await screen.findByTestId('assistant-chat-message-surface');
+    expect(surface).toHaveTextContent(explanation);
+    expect(screen.getByTestId('assistant-chat-error-banner')).toHaveTextContent(explanation);
+  });
 
   it(
     'leaves a recognisable failure unexplained when the surface passes no describeError',
@@ -879,9 +1017,9 @@ describe('AssistantChat', () => {
       await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
       await user.click(screen.getByRole('button', { name: /Submit/i }));
 
-      const surface = await screen.findByTestId('assistant-chat-message-surface');
-      expect(surface).toHaveTextContent('There was an error generating a response.');
-      expect(await screen.findByText(/APIStatusError: Error code: 410/)).toBeInTheDocument();
+      const banner = await screen.findByTestId('assistant-chat-error-banner');
+      expect(banner).toHaveTextContent('There was an error generating a response.');
+      expect(banner).not.toHaveTextContent(/APIStatusError: Error code: 410/);
     },
     interactionTimeoutMs
   );

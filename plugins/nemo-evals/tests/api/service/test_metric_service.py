@@ -7,6 +7,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
+import httpx
 import nemo_evals.shared.metric_bundles.inline  # noqa: F401
 import pytest
 from nemo_evals.api.schemas import MetricInline
@@ -20,8 +21,10 @@ from nemo_evals.shared.metric_bundles.cloudpickle import (
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.entities import ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.filter_ops import FilterOperation
+from nhx.testing.client import mock_async_nemo_client
 from nhx.testing.files import InMemoryFilesService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
@@ -194,22 +197,22 @@ async def test_get_returns_none_when_missing(service: MetricService) -> None:
 async def test_delete_removes_entity_and_bundle(service: MetricService, fake_files) -> None:
     created = await service.create_metric("m", _bundle(), workspace="default")
 
-    assert await service.delete_metric("default", "m") is True
+    assert await service.delete_metric("default", "m", files_metadata_client=fake_files.client()) is True
     assert await service.get_metric("default", "m") is None
     assert _fileset_of(service, created.bundle_ref) not in fake_files.filesets
 
 
-async def test_delete_returns_false_when_missing(service: MetricService) -> None:
-    assert await service.delete_metric("default", "nope") is False
+async def test_delete_returns_false_when_missing(service: MetricService, fake_files: InMemoryFilesService) -> None:
+    assert await service.delete_metric("default", "nope", files_metadata_client=fake_files.client()) is False
 
 
 async def test_delete_handles_concurrent_delete_race(
-    service: MetricService, fake_entity_client: _FakeEntityClient
+    service: MetricService, fake_entity_client: _FakeEntityClient, fake_files: InMemoryFilesService
 ) -> None:
     await service.create_metric("m", _bundle(), workspace="default")
 
     fake_entity_client.delete_error = NemoEntityNotFoundError("deleted concurrently")
-    assert await service.delete_metric("default", "m") is False
+    assert await service.delete_metric("default", "m", files_metadata_client=fake_files.client()) is False
 
 
 async def test_list_returns_workspace_metrics(service: MetricService) -> None:
@@ -350,14 +353,14 @@ async def test_delete_metric_keeps_a_replacement_fileset(service, fake_files, fa
     await files.upload_file(workspace=workspace, name=name, path="replacement.txt", content=b"keep me")
 
     assert replacement.id != entity.bundle_fileset_id
-    assert await service.delete_metric("default", "original") is True
+    assert await service.delete_metric("default", "original", files_metadata_client=fake_files.client()) is True
     assert fake_files.filesets[(workspace, name)] == {"replacement.txt": b"keep me"}
 
 
-async def test_delete_legacy_metric_retains_storage_without_an_id(
+async def test_delete_legacy_metric_resolves_its_id_before_cleanup(
     service, fake_files, fake_entity_client, caplog
 ) -> None:
-    """A legacy name is insufficient evidence to delete the current allocation."""
+    """Legacy deletion captures the current allocation once and deletes that ID."""
     await service.create_metric("legacy", _bundle(), workspace="default")
     entity = fake_entity_client.entities[("default", "legacy")]
     entity.bundle_fileset_id = None
@@ -366,9 +369,9 @@ async def test_delete_legacy_metric_retains_storage_without_an_id(
     fake_files.calls.clear()
     caplog.clear()
     caplog.set_level("WARNING")
-    assert await service.delete_metric("default", "legacy") is True
-    assert (workspace, name) in fake_files.filesets
-    assert fake_files.calls == []
+    assert await service.delete_metric("default", "legacy", files_metadata_client=fake_files.client()) is True
+    assert (workspace, name) not in fake_files.filesets
+    assert fake_files.calls == [("get", workspace, name), ("delete", workspace, name)]
     assert caplog.records == []
 
 
@@ -382,5 +385,43 @@ async def test_delete_metric_uses_its_fileset_id_without_parsing_the_read_refere
     workspace, name, _ = parse_bundle_ref(entity.bundle_ref)
     entity.bundle_ref = "unusable-read-reference"
 
-    assert await service.delete_metric("default", "owned") is True
+    assert await service.delete_metric("default", "owned", files_metadata_client=fake_files.client()) is True
     assert (workspace, name) not in fake_files.filesets
+
+
+async def test_legacy_metric_deletion_does_not_require_caller_files_read(fake_files, fake_entity_client) -> None:
+    async def delete_only(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(403, json={"detail": "files.read denied"})
+        return await fake_files(request)
+
+    caller_files = mock_async_nemo_client(delete_only, AsyncFilesClient)
+    service = MetricService(fake_entity_client, caller_files)
+    await service.create_metric("legacy", _bundle(), workspace="default")
+    entity = fake_entity_client.entities[("default", "legacy")]
+    entity.bundle_fileset_id = None
+    assert await service.delete_metric("default", "legacy", files_metadata_client=fake_files.client()) is True
+    assert fake_files.filesets == {}
+
+
+async def test_legacy_metric_delete_pins_before_owner_removal(
+    service, fake_files, fake_entity_client, monkeypatch
+) -> None:
+    await service.create_metric("legacy", _bundle(), workspace="default")
+    entity = fake_entity_client.entities[("default", "legacy")]
+    entity.bundle_fileset_id = None
+    workspace, name, _ = parse_bundle_ref(entity.bundle_ref)
+    delete_owner = fake_entity_client.delete_by_id
+
+    async def replace_then_delete(
+        entity_type: type[MetricBundleEntity], entity_id: str, *, expected_db_version: int
+    ) -> None:
+        fake_files.allocations[(workspace, name)] = "replacement-id"
+        fake_files.filesets[(workspace, name)] = {"replacement.txt": b"keep"}
+        await delete_owner(entity_type, entity_id, expected_db_version=expected_db_version)
+
+    monkeypatch.setattr(fake_entity_client, "delete_by_id", replace_then_delete)
+    fake_files.calls.clear()
+    assert await service.delete_metric("default", "legacy", files_metadata_client=fake_files.client()) is True
+    assert fake_files.filesets[(workspace, name)] == {"replacement.txt": b"keep"}
+    assert fake_files.calls.count(("get", workspace, name)) == 1

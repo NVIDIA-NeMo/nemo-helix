@@ -1,11 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  type Adapter,
-  FinetuningType,
-  type ModelEntity,
-} from '@nemo/sdk/generated/platform/schema';
+import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import { FinetuningType } from '@nemo/sdk/generated/platform/schema/FinetuningType';
 import { ModelPanel } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
 import { mockUseModelChatAvailability } from '@studio/tests/util/mockUseModelChatAvailability';
 import { TestProviders } from '@studio/tests/util/TestProviders';

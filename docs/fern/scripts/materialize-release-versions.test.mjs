@@ -54,7 +54,7 @@ function fixture(t, { shallow = false } = {}) {
   git(seed, "remote", "add", "origin", remote);
   git(seed, "push", "origin", "main", "--tags");
   git(root, "clone", ...(shallow ? ["--depth=1"] : []), `file://${remote}`, checkout);
-  for (const name of ["materialize-release-versions.mjs", "sync-colab-links.mjs", "sync-helm-docs.mjs"]) {
+  for (const name of ["materialize-release-versions.mjs", "sync-colab-links.mjs", "sync-helm-docs.mjs", "sync-library-versions.mjs"]) {
     const target = join(checkout, "docs/fern/scripts", name);
     mkdirSync(dirname(target), { recursive: true });
     cpSync(join(scriptDir, name), target);
@@ -73,6 +73,29 @@ function fixture(t, { shallow = false } = {}) {
   const redirects = () => parse(readFileSync(join(checkout, "docs/fern/docs.yml"), "utf8")).redirects ?? [];
   return { root, seed, checkout, run, versions, redirects, branch, commit };
 }
+
+test("pins library versions to the release's locks rather than the current shared snippet", t => {
+  const f = fixture(t);
+  const lock = version => `[[package]]\nname = "nemo-anonymizer"\nversion = "${version}"\nsource = { registry = "https://pypi.org/simple" }\n`;
+  put(f.seed, "uv.lock", lock("1.2.3"));
+  put(f.seed, "docker/Dockerfile.nhx-garak-tasks", "RUN uv pip install garak==2.3.4\n");
+  put(f.seed, "docker/locks/hardener/uv.lock", '[[package]]\nname = "nvidia-agent-hardener"\nversion = "4.5.6"\nsource = { registry = "https://pypi.org/simple" }\n');
+  put(f.seed, "docs/support-matrix.mdx", '# Support Matrix\n\n<Markdown src="/snippets/_snippets/library-versions.mdx" />\n');
+  git(f.seed, "add", ".");
+  git(f.seed, "commit", "-s", "-m", "release dependency sources");
+  f.branch("release/0.9");
+  put(f.checkout, "uv.lock", lock("9.9.9"));
+  put(f.checkout, "docker/Dockerfile.nhx-garak-tasks", "RUN uv pip install garak==9.9.9\n");
+  put(f.checkout, "docs/fern/snippets/_snippets/library-versions.mdx", "Latest-only library versions\n");
+  f.run();
+  const snapshot = readFileSync(join(f.checkout, "docs/fern/generated/release-versions/v0.9/support-matrix.mdx"), "utf8");
+  assert.ok(snapshot.includes("`nemo-anonymizer` | `1.2.3`"));
+  assert.ok(snapshot.includes("`nvidia-agent-hardener` | `4.5.6`"));
+  assert.ok(snapshot.includes("`garak` | `2.3.4`"));
+  assert.ok(!snapshot.includes("9.9.9"));
+  assert.ok(!snapshot.includes("Latest-only"));
+  assert.ok(!snapshot.includes("/snippets/_snippets/library-versions.mdx"));
+});
 
 test("discovers and sorts branch lines, not tag snapshots or local-only branches", (t) => {
   const f = fixture(t);

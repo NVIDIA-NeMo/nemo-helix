@@ -4,11 +4,9 @@
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/ControlledSliderWithTextInput';
 import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
-import {
-  BatchingStrategy,
-  PolicyBackend,
-  RlGRPOTrainingTruncatedImportanceSamplingType,
-} from '@nemo/sdk/generated/customizer/schema';
+import { BatchingStrategy } from '@nemo/sdk/generated/customizer/schema/BatchingStrategy';
+import { PolicyBackend } from '@nemo/sdk/generated/customizer/schema/PolicyBackend';
+import { RlGRPOTrainingTruncatedImportanceSamplingType } from '@nemo/sdk/generated/customizer/schema/RlGRPOTrainingTruncatedImportanceSamplingType';
 import { Divider, FormField, Stack, TextInput } from '@nvidia/foundations-react-core';
 import { ControlledJsonInput } from '@studio/components/NewCustomizationForm/ControlledJsonInput';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';

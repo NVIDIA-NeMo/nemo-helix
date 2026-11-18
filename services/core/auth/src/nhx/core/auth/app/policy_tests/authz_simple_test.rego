@@ -19,12 +19,12 @@ mock_authz_data := {
     },
     "endpoints": {
         "/apis/models/v2/workspaces/{workspace}/models": {
-            "get": {"permissions": ["models.list"]},
-            "post": {"permissions": ["models.create"]}
+            "get": {"direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]}},
+            "post": {"direct": {"actor_perms": ["models.create"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.create"]}}
         },
         "/apis/models/v2/workspaces/{workspace}/models/{name}": {
-            "get": {"permissions": ["models.read"]},
-            "patch": {"permissions": ["models.update"]}
+            "get": {"direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]}},
+            "patch": {"direct": {"actor_perms": ["models.update"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.update"]}}
         }
     },
     "workspaces": {
@@ -43,7 +43,7 @@ mock_authz_data := {
 
 # Test 1: Basic viewer permissions
 test_viewer_can_read_models if {
-    authz.allow with input as {
+    data.authz.allow with input as {
         "principal_id": "viewer@test.com",
         "method": "GET",
         "path": "/apis/models/v2/workspaces/test-ns/models/123"
@@ -56,7 +56,7 @@ test_viewer_can_read_models if {
 
 # Test 2: Health endpoint (simpler test)
 test_health_endpoint if {
-    authz.allow with input as {
+    data.authz.allow with input as {
         "principal_id": "",
         "method": "GET",
         "path": "/health"
@@ -83,9 +83,10 @@ test_endpoint_normalization if {
     normalized == "/apis/models/v2/workspaces/{workspace}/models/{name}"
 }
 
-# Debug test - check if required permissions are found
+# Debug test - check if the direct branch requirements are found
 test_required_permissions if {
-    perms := common.get_required_permissions("/apis/models/v2/workspaces/-/models", "GET")
+    perms := common.selected_route_contract.actor_perms
+        with input as {"principal_id": "viewer@test.com", "path": "/apis/models/v2/workspaces/-/models", "method": "GET"}
         with data.authz.endpoints as mock_authz_data.endpoints
     "models.list" in perms
 }
@@ -101,7 +102,7 @@ test_minimal_auth if {
 
 # Test allow for LIST operations
 test_allow_list_operation if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "viewer@test.com",
         "method": "GET",
         "path": "/apis/models/v2/workspaces/-/models"
@@ -116,8 +117,9 @@ test_allow_list_operation if {
 
 # Debug test for list operation permissions
 test_debug_list_permissions if {
-    # Check if required permissions are found for list
-    perms := common.get_required_permissions("/apis/models/v2/workspaces/-/models", "GET")
+    # Check if the direct branch requirements are found for list
+    perms := common.selected_route_contract.actor_perms
+        with input as {"principal_id": "viewer@test.com", "path": "/apis/models/v2/workspaces/-/models", "method": "GET"}
         with data.authz.endpoints as mock_authz_data.endpoints
     perms == ["models.list"]
 
@@ -135,7 +137,7 @@ test_debug_list_permissions if {
 
 # Test allow for non-LIST operations
 test_allow_single_resource if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "viewer@test.com",
         "method": "GET",
         "path": "/apis/models/v2/workspaces/test-ns/models/123"
@@ -150,7 +152,7 @@ test_allow_single_resource if {
 
 # Test allow for denied access
 test_allow_denied if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "viewer@test.com",
         "method": "POST",
         "path": "/apis/models/v2/workspaces/test-ns/models"
@@ -167,7 +169,7 @@ test_allow_denied if {
 
 # Test allow with public workspace access
 test_allow_public_workspace if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "viewer@test.com",
         "method": "GET",
         "path": "/apis/models/v2/workspaces/-/models"

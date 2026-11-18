@@ -4,13 +4,13 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { useListAnnotations } from '@nemo/sdk/generated/platform/annotations';
-import {
-  AnnotationSortField,
-  type FeedbackAnnotationInputValue,
-  type Span,
-  SpanStatus,
-  type Trace,
+import type {
+  FeedbackAnnotationInputValue,
+  Span,
+  Trace,
 } from '@nemo/sdk/generated/platform/schema';
+import { AnnotationSortField } from '@nemo/sdk/generated/platform/schema/AnnotationSortField';
+import { SpanStatus } from '@nemo/sdk/generated/platform/schema/SpanStatus';
 import {
   type ListSpansQueryError,
   useGetSpan,
@@ -136,9 +136,12 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
     data: linkedSpanDetail,
     error: linkedSpanError,
     isLoading: isLinkedSpanLoading,
-  } = useGetSpan(workspace, linkedSpanId ?? '', {
-    query: { enabled: shouldFetchLinkedSpan },
-  });
+  } = useGetSpan(
+    workspace,
+    linkedSpanId ?? '',
+    { session_id: trace.session_id },
+    { query: { enabled: shouldFetchLinkedSpan } }
+  );
   const linkedSpanMatchesTrace =
     linkedSpanDetail === undefined ||
     ((linkedSpanDetail.trace_id === undefined || linkedSpanDetail.trace_id === trace.id) &&

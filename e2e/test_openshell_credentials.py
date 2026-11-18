@@ -75,6 +75,8 @@ class Observation(BaseModel):
     forbidden_status: int | None
     forbidden_error: str | None
     public_status: int | None
+    result_status: int | None = None
+    result_error: str | None = None
     accepted: bool
     version: str | None
 
@@ -365,6 +367,16 @@ def test_original_placeholder_survives_rotation_then_secret_deletion_revokes_acc
         )
         providers = set(sandboxes[0].spec.providers)
         assert providers, "The actual controller must attach a provider"
+        if backend == "job":
+            assert original.result_status == 201, (
+                f"The sandbox could not save a job result: {original.result_status} {original.result_error}"
+            )
+            saved = (
+                JobsClient.from_client(client).list_job_results(workspace=config.workspace, name=workload.name).data()
+            )
+            assert any(result.name == "credential-probe" for result in saved.data), (
+                "The sandbox saved a result but the platform did not record it"
+            )
 
         rows = wait_until(
             lambda: workload_observations(client, receiver, workload, probe_id, after=original.sequence),

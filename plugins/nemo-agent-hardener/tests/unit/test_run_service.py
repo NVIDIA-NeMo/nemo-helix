@@ -1286,12 +1286,12 @@ def test_frozen_manifest_takes_the_current_gateway_route(tmp_path: Path, monkeyp
 
 def test_legacy_manifest_re_resolves_then_freezes_itself(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Manifests made before freezing keep working, and upgrade on their first run — no user action."""
-    record = SimpleNamespace(data={"agent": "default/clockbot"})  # no agent_fileset
+    record = SimpleNamespace(id="manifest-id", db_version=4, data={"agent": "default/clockbot"})  # no agent_fileset
     updated: dict[str, Any] = {}
     sdk = SimpleNamespace(
         entities=SimpleNamespace(
             get_entity_by_name=lambda **_k: record,
-            update_entity_by_name=lambda **kw: updated.update(kw),
+            update_entity_by_id=lambda **kw: updated.update(kw),
         )
     )
     seen = _capture_resolve(monkeypatch)
@@ -1304,9 +1304,13 @@ def test_legacy_manifest_re_resolves_then_freezes_itself(tmp_path: Path, monkeyp
     manifest_mod._materialize_manifest(sdk, "clockbot-hardening", make_job_context(tmp_path))
 
     assert seen != {}, "the legacy path still resolves"
-    assert updated["data"]["agent_fileset"] == "default/new-fs"
-    assert updated["data"]["agent_fileset_id"] == "scaffold-id"
-    assert updated["data"]["manifest_yaml"]
+    assert updated["entity_id"] == "manifest-id"
+    assert updated["workspace"] == "default"
+    assert updated["entity_type"] == manifest_mod.AGENT_HARDENER_MANIFEST_TYPE
+    assert updated["body"].expected_db_version == 4
+    assert updated["body"].data["agent_fileset"] == "default/new-fs"
+    assert updated["body"].data["agent_fileset_id"] == "scaffold-id"
+    assert updated["body"].data["manifest_yaml"]
 
 
 def test_legacy_upgrade_failure_does_not_fail_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

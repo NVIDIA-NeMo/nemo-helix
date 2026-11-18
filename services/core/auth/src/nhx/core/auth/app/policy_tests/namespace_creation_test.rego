@@ -26,16 +26,16 @@ workspace_test_data := {
     },
     "endpoints": {
         "/apis/entities/v2/workspaces": {
-            "get": {"permissions": ["workspaces.list"]},
+            "get": {"direct": {"actor_perms": ["workspaces.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.list"]}},
             "post": {
-                "permissions": ["workspaces.create"],
+                "direct": {"actor_perms": ["workspaces.create"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.create"]},
                 "scopes": ["entities:write", "platform:write"]
             }
         },
         "/apis/entities/v2/workspaces/{name}": {
-            "get": {"permissions": ["workspaces.read"]},
-            "put": {"permissions": ["workspaces.update"]},
-            "delete": {"permissions": ["workspaces.delete"]}
+            "get": {"direct": {"actor_perms": ["workspaces.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.read"]}},
+            "put": {"direct": {"actor_perms": ["workspaces.update"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.update"]}},
+            "delete": {"direct": {"actor_perms": ["workspaces.delete"]}, "delegated": {"actor_perms": [], "subject_perms": ["workspaces.delete"]}}
         }
     },
     "workspaces": {
@@ -58,7 +58,7 @@ workspace_test_data := {
 
 # Test that wildcard WorkspaceCreator preserves current default behavior
 test_workspace_creation_allowed_via_wildcard_binding if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "plain@test.com",
         "method": "POST",
         "path": "/apis/entities/v2/workspaces",
@@ -75,7 +75,7 @@ test_workspace_creation_allowed_via_wildcard_binding if {
 
 # Test that a plain user is denied once the wildcard binding is removed
 test_workspace_creation_denied_without_creator_binding if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "plain@test.com",
         "method": "POST",
         "path": "/apis/entities/v2/workspaces",
@@ -91,7 +91,7 @@ test_workspace_creation_denied_without_creator_binding if {
 
 # Test that unauthenticated users cannot create workspaces
 test_unauthenticated_user_cannot_create_workspace if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "",  # Empty principal ID
         "method": "POST",
         "path": "/apis/entities/v2/workspaces",
@@ -108,7 +108,7 @@ test_unauthenticated_user_cannot_create_workspace if {
 # Test that listing workspaces requires the system-level workspaces.list permission.
 test_listing_workspaces_requires_permission if {
     # existing-user@test.com holds workspaces.list in the system workspace, so it can list.
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "existing-user@test.com",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces"
@@ -124,7 +124,7 @@ test_listing_workspaces_requires_permission if {
 test_listing_workspaces_without_permission_denied if {
     # new-user@test.com has no roles at all, so it lacks workspaces.list in the system
     # workspace and can no longer list workspaces.
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "new-user@test.com",
         "method": "GET",
         "path": "/apis/entities/v2/workspaces"
@@ -139,7 +139,7 @@ test_listing_workspaces_without_permission_denied if {
 
 # Test workspace creation allowed via group binding in system workspace
 test_workspace_creation_allowed_via_group_binding if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "lead@test.com",
         "principal_groups": ["group:ml-leads"],
         "method": "POST",
@@ -155,9 +155,10 @@ test_workspace_creation_allowed_via_group_binding if {
     result.allowed == true
 }
 
-# Test that get_required_permissions returns workspaces.create for workspace creation
+# Test that selected_route_contract returns workspaces.create for workspace creation
 test_workspace_creation_requires_permission if {
-    perms := common.get_required_permissions("/apis/entities/v2/workspaces", "POST")
+    perms := common.selected_route_contract.actor_perms
+        with input as {"principal_id": "viewer@test.com", "path": "/apis/entities/v2/workspaces", "method": "POST"}
         with data.authz.endpoints as workspace_test_data.endpoints
     perms == ["workspaces.create"]
 }

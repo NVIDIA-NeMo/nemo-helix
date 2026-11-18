@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Resolve bake cache branch
+description: >
+  Chooses the registry cache branch for docker bake. Pull requests import the
+  base branch cache and never write one. Push, merge queue, and manual runs on
+  main or release/* write the cache for their branch.
+
+inputs:
+  base-ref:
+    description: Base branch for the run, such as main or release/0.10. Defaults to main when empty.
+    required: false
+    default: ""
+  event-name:
+    description: GitHub event name for the run.
+    required: true
+
+outputs:
+  source-branch:
+    description: Cache branch to import, sanitized for use in a Docker tag.
+    value: ${{ steps.resolve.outputs.source-branch }}
+  target-branch:
+    description: Cache branch to export, or empty when this run does not write a cache.
+    value: ${{ steps.resolve.outputs.target-branch }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve cache branches
+      id: resolve
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+        EVENT_NAME: ${{ inputs.event-name }}
+      run: |
+        set -euo pipefail
+        # Docker tags cannot contain slashes. release/0.10 becomes release-0.10.
+        cache_branch="${BASE_REF:-main}"
+        cache_branch="${cache_branch#refs/heads/}"
+        cache_branch="$(printf '%s' "$cache_branch" | tr '[:upper:]' '[:lower:]' | tr '/' '-' | tr -c 'a-z0-9_.-' '-')"
+        cache_branch="${cache_branch#-}"
+        cache_branch="${cache_branch%-}"
+        # Pull requests read the base branch cache. Only long-lived refs publish it,
+        # so a feature branch does not write a tag the next run will not read.
+        cache_target_branch=""
+        case "$EVENT_NAME" in
+          push|merge_group)
+            cache_target_branch="$cache_branch"
+            ;;
+          workflow_dispatch)
+            case "$cache_branch" in
+              main|release-*) cache_target_branch="$cache_branch" ;;
+            esac
+            ;;
+        esac
+        {
+          printf 'source-branch=%s\n' "$cache_branch"
+          printf 'target-branch=%s\n' "$cache_target_branch"
+        } >> "$GITHUB_OUTPUT"

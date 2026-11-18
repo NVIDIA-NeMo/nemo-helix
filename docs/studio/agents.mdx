@@ -61,13 +61,21 @@ Agent evaluations are not a separate item under the **Agents** navigation parent
 2. Select an agent.
 3. Select the **Evaluations** tab.
 
-Select **Run Evaluation** in the page header to open the **Run Agent Evaluation** form. The button is available whenever the agent has a stored configuration; the agent doesn't need a running deployment. The form is a single screen:
+Select **Run Evaluation** in the page header to open the **Run Agent Evaluation** wizard. The button is available whenever the agent has a stored configuration; the agent doesn't need a running deployment. The wizard has two steps:
 
-- **Dataset File**: Upload the dataset or choose it from a fileset. Datasets can be `.jsonl`, `.json`, `.csv`, or `.parquet` files, and you can upload several Parquet files to combine them. When a fileset folder holds more than one Parquet file, the file list also offers all of them as one dataset, which the evaluator reads through a `<folder>/*.parquet` pattern.
-- **Eval Configuration File**: Upload the evaluator config as a JSON or YAML file, or choose one from a fileset.
-- **Experiment** (optional): Link the run to an existing experiment. When you leave it empty, the run is kept in the agent's default `<agent>-runs` experiment and shows as **Not linked** until you link it.
-- **Evaluation Name** (optional): Name the run. When you leave it empty, a name is generated from the agent's name.
-- **Parallel requests**: Set how many dataset rows are sent to the agent at once.
+1. **Configuration**: Select a dataset file from a fileset or upload one; datasets can be `.jsonl`, `.json`, `.csv`, or `.parquet` files. When the selected Parquet file shares its folder with other Parquet files, **Use All N Parquet Files** reads them as one dataset through a `<folder>/*.parquet` pattern. Then choose how to provide the eval config:
+   - **Build with Form**: Under **Agent Prompt**, select the dataset fields to send to the agent. Each field is added to the prompt under its name, in the order you select it; leave out fields the agent shouldn't see, such as expected answers. Select the pencil icon to view or edit the prompt itself. After you edit it, the checkboxes show which fields the prompt reads, and **Reset** discards the edit. Then set up the LLM-as-a-Judge metric: select a **Judge Model**, select the fields the **Judge Prompt** compares the response against (the agent's response is always included), and define the scores the judge returns.
+   - **Choose from Fileset** or **Upload**: Pick a JSON or YAML eval config from a fileset, or upload one from your computer. Model evaluation configs work too. The wizard lists the config's metrics, lets you override its judge models, and blocks a config that reads fields the dataset doesn't have.
+
+   Either way, the run targets this agent.
+2. **Run**: Everything on this step is optional except **Parallel Requests**.
+   - **Experiment**: Link the run to an existing experiment. When you leave it empty, the run is kept in the agent's default `<agent>-runs` experiment and shows as **Not linked** until you link it.
+   - **Evaluation Name**: Name the run. When you leave it empty, a name is generated from the agent's name.
+   - **Parallel Requests**: Set how many dataset rows are sent to the agent at once.
+
+The run saves its eval config as `eval-config.json` (or `.yaml`) in the `<evaluation>-data` fileset, where **Choose from Fileset** can find it later.
+
+The dataset is read where it lives, not copied, so a re-run reads the file as it is now. The run records each dataset file's name and size, and a re-run compares them: if the files are gone, the re-run is blocked, and if any file was added, removed, or changed size, a warning says scores may not compare. An edit that keeps every file the same size isn't detected.
 
 The tab's **Evaluations** view lists completed evaluations and in-progress runs in a single table. Each row's actions include:
 

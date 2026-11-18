@@ -19,6 +19,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/NVIDIA-NeMo/nemo-helix/services/core/jobs/jobs-launcher/nhxclient"
 	"github.com/spf13/cobra"
@@ -350,12 +351,13 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 	// Function to tail output
 	tailOutput := func(reader io.Reader, level slog.Level) {
 		defer wg.Done()
-		scanner := bufio.NewScanner(reader)
-		for scanner.Scan() {
-			line := scanner.Text()
+		// Keep reading until EOF. A bufio.Scanner stops at its 64KB token limit,
+		// and then the child blocks writing to a pipe nobody drains. Progress bars
+		// redraw with \r and no \n, so they hit that limit.
+		forEachLogLine(reader, func(line string) {
 			fmt.Println(line)                                           // Print to console without any extra formatting, so it can be captured by stdout logging collectors
 			slog.Log(context.Background(), logLevel(line, level), line) // Submit structured log to OTEL pipeline within the platform
-		}
+		})
 	}
 
 	// Stream stdout and stderr concurrently
@@ -395,6 +397,97 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 
 	logger.Printf("Process completed successfully.")
 	return exitCode, nil
+}
+
+// maxLogLineBytes caps one emitted log line. A longer run of bytes with no
+// line break is split so the reader never stops and the child cannot block
+// on a full pipe.
+const maxLogLineBytes = 64 * 1024
+
+// forEachLogLine calls fn for each line from r until EOF or a read error.
+// It never stops early, so the child process cannot block on a full pipe.
+//
+// A bare \r discards the text before it when another snapshot follows, as a
+// progress bar redraw does. The text still pending at the next \n, or at EOF
+// when nothing follows the \r, is logged. \r\n is one break.
+func forEachLogLine(r io.Reader, fn func(line string)) {
+	br := bufio.NewReaderSize(r, 32*1024)
+	pending := make([]byte, 0, 256)
+	replaced := false
+	emit := func(line []byte) {
+		if replaced {
+			line = trimRightSpace(line)
+		}
+		fn(string(line))
+		pending = pending[:0]
+		replaced = false
+	}
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			if len(pending) > 0 {
+				emit(pending)
+			}
+			return
+		}
+		switch b {
+		case '\n':
+			emit(pending)
+		case '\r':
+			next, readErr := br.ReadByte()
+			if readErr == nil && next == '\n' {
+				emit(pending)
+				continue
+			}
+			if readErr != nil {
+				// No later snapshot replaces this one. A program that finishes
+				// on a carriage return, with no newline, would otherwise lose
+				// its last line.
+				if len(pending) > 0 {
+					emit(pending)
+				}
+				return
+			}
+			_ = br.UnreadByte()
+			// The following snapshot overwrites this one. Keep reading so the
+			// pipe drains, and log whichever snapshot a newline leaves in place.
+			pending = pending[:0]
+			replaced = true
+		default:
+			pending = append(pending, b)
+			if len(pending) >= maxLogLineBytes {
+				cut := splitAtRuneBoundary(pending)
+				fn(string(pending[:cut]))
+				rest := append([]byte(nil), pending[cut:]...)
+				pending = append(pending[:0], rest...)
+				replaced = false
+			}
+		}
+	}
+}
+
+// trimRightSpace drops the trailing spaces a carriage-return progress bar
+// appends so the next snapshot covers the previous one.
+func trimRightSpace(line []byte) []byte {
+	end := len(line)
+	for end > 0 && line[end-1] == ' ' {
+		end--
+	}
+	return line[:end]
+}
+
+// splitAtRuneBoundary returns a cut index at or before len(line) that does
+// not divide a UTF-8 sequence. A 64KB cap falling inside a multibyte
+// character would otherwise show up as a replacement glyph in the log.
+func splitAtRuneBoundary(line []byte) int {
+	cut := len(line)
+	for i := 0; i < utf8.UTFMax && cut > 0; i++ {
+		if utf8.Valid(line[:cut]) {
+			return cut
+		}
+		cut--
+	}
+	return len(line)
 }
 
 // logLevel preserves an application's explicit textual level even when the

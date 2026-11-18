@@ -76,6 +76,16 @@ export const evaluationConfigError = async (
     : `Fileset "${filesetName}" has no ${EVAL_CONFIG_FILENAMES.join(' or ')} at its root, so evaluation "${evaluation.name}" cannot be reused. Pick another evaluation.`;
 };
 
+/** The metadata a run's Evaluation is created with; pass it back to ``recordRunJob``, which
+ *  replaces metadata wholesale. */
+export const runMetadata = (
+  filesetName?: string,
+  metadata?: Record<string, string>
+): Record<string, string> => ({
+  ...metadata,
+  ...(filesetName ? { [EVAL_CONFIG_FILESET_KEY]: filesetName } : {}),
+});
+
 /** Create the Intake Evaluation this run publishes under, returning its **name** —
  *  which is what ``publication.intake.evaluation_id`` takes (the entity id is not it).
  *  ``metadata`` is the documented "config snapshot" home, so the eval-config fileset pointer
@@ -86,13 +96,17 @@ export const createRunEvaluation = async (
     experimentIds,
     name,
     filesetName,
+    datasetName = filesetName ?? name,
     parentEvaluationId,
+    metadata,
     signal,
   }: {
     experimentIds: string[];
     name: string;
     filesetName?: string;
+    datasetName?: string;
     parentEvaluationId?: string;
+    metadata?: Record<string, string>;
     signal?: AbortSignal;
   }
 ): Promise<string> => {
@@ -101,8 +115,8 @@ export const createRunEvaluation = async (
     {
       name,
       experiment_ids: experimentIds,
-      dataset_name: filesetName ?? name,
-      metadata: filesetName ? { [EVAL_CONFIG_FILESET_KEY]: filesetName } : {},
+      dataset_name: datasetName,
+      metadata: runMetadata(filesetName, metadata),
       ...(parentEvaluationId ? { parent_evaluation_id: parentEvaluationId } : {}),
     },
     signal

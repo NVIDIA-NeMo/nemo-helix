@@ -10,8 +10,8 @@ import type { Meta, StoryObj } from '@storybook/react';
 
 // Review how an agent chat failure is explained to the user. Pick a failure in the Controls panel
 // (or choose "Custom" and paste any error text) to see the reply the chat renders for it: the
-// explanation in the red-barred message, the raw error in the red box. The wording comes from
-// `describeChatError.ts`, so edit it there and the story updates.
+// explanation as the error banner's message, the raw error behind its "Show details" toggle. The
+// wording comes from `describeChatError.ts`, so edit it there and the story updates.
 //
 // Each option is the error text the OpenAI client surfaces to the chat for that failure. The
 // platform answers HTTP 502 for all of them, and the code in each label is the model provider's

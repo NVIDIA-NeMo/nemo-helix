@@ -1,19 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  LogFrameLevel,
-  ModelDownloadFrameStatus,
-  type Done,
-  type Error as ErrorFrame,
-  type FailedRecordsFrame,
-  type Heartbeat,
-  type LogFrame,
-  type ModelDownloadFrame,
-  type PreviewDatasetFrame,
-  type PreviewRequest,
-  type TraceDatasetFrame,
+import type {
+  Done,
+  Error as ErrorFrame,
+  FailedRecordsFrame,
+  Heartbeat,
+  LogFrame,
+  ModelDownloadFrame,
+  PreviewDatasetFrame,
+  PreviewRequest,
+  TraceDatasetFrame,
 } from '@nemo/sdk/generated/anonymizer/schema';
+import { LogFrameLevel } from '@nemo/sdk/generated/anonymizer/schema/LogFrameLevel';
+import { ModelDownloadFrameStatus } from '@nemo/sdk/generated/anonymizer/schema/ModelDownloadFrameStatus';
 import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { asRecord } from '@studio/util/guards';

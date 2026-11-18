@@ -133,6 +133,24 @@ describe('useModelLineage', () => {
     expect(result.current.deployment).toEqual({ kind: 'unknown' });
   });
 
+  it('falls back to another workspace when the model is not in this one', () => {
+    const notFound = Object.assign(new Error('not found'), { response: { status: 404 } });
+    mockGetModel.mockImplementation(
+      (workspace) =>
+        (workspace === 'default'
+          ? { data: model, isLoading: false, isError: false }
+          : { error: notFound, isLoading: false, isError: true }) as unknown as ReturnType<
+          typeof useModelsGetModel
+        >
+    );
+    const { result } = renderHook(() =>
+      useModelLineage('ws', 'my-model', undefined, { fallbackWorkspace: 'default' })
+    );
+
+    expect(result.current.model).toBe(model);
+    expect(result.current.isError).toBe(false);
+  });
+
   describe('when nothing serves the model', () => {
     beforeEach(() => {
       mockModelQuery({ data: model });

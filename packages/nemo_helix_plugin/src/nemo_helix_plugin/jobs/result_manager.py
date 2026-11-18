@@ -14,7 +14,6 @@ from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
 from nemo_helix_plugin.jobs.file_manager import AsyncFilesetFileManager, FilesetFileManager, TmpDirPath
 from nemo_helix_plugin.jobs.schemas import HelixJobResultCreateRequest, HelixJobResultResponse
-from nemo_helix_plugin.jobs.types import job_artifact_base_path
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +50,6 @@ class BaseResultManager:
     both versions of the ResultManager, try to lift it up into this class to reduce duplication.
     """
 
-    job_name: str
-    workspace: str
-    attempt_id: str
-
     def _validate_local_path(self, artifact_local_path: str | Path) -> Path:
         if isinstance(artifact_local_path, str):
             artifact_local_path = Path(artifact_local_path)
@@ -70,18 +65,15 @@ class BaseResultManager:
         return f"{prefix}results/{attempt_id}/{result_name}"
 
 
-@dataclass
+@dataclass(frozen=True)
 class ResultManager(BaseResultManager):
-    job_name: str
+    job_id: str
     workspace: str
     files_client: FilesClient
     jobs_client: JobsClient
     attempt_id: str
-
-    def _fetch_job_metadata(self) -> tuple[str, str, str | None]:
-        """Fetch job and return (attempt_id, fileset_name, output_location)."""
-        job = self.jobs_client.get_job(name=self.job_name, workspace=self.workspace).data()
-        return self.attempt_id, job.fileset, job.output_location
+    fileset_name: str
+    artifact_base_path: str | None = None
 
     def _create_file_manager(self, fileset_name: str) -> FilesetFileManager:
         """Create a file manager for the given fileset."""
@@ -96,21 +88,21 @@ class ResultManager(BaseResultManager):
         result_name: str,
         artifact_local_path: str | Path,
         ignore_patterns: list[str] | str | None = None,
+        *,
+        stage: bool = False,
     ) -> HelixJobResultResponse:
-        attempt_id, fileset_name, output_location = self._fetch_job_metadata()
-        file_manager = self._create_file_manager(fileset_name)
+        attempt_id = self.attempt_id
+        file_manager = self._create_file_manager(self.fileset_name)
         file_manager.validate_storage()
         artifact_local_path = self._validate_local_path(artifact_local_path)
-        remote_path = self._result_remote_path(
-            attempt_id, result_name, base=job_artifact_base_path(self.job_name, output_location)
-        )
+        remote_path = self._result_remote_path(attempt_id, result_name, base=self.artifact_base_path)
         artifact_url = file_manager.upload(
-            local_path=artifact_local_path, remote_path=remote_path, ignore_patterns=ignore_patterns
+            local_path=artifact_local_path, remote_path=remote_path, ignore_patterns=ignore_patterns, stage=stage
         )
         try:
             job_result = self.jobs_client.create_job_result(
                 name=result_name,
-                job=self.job_name,
+                job=self.job_id,
                 workspace=self.workspace,
                 body=HelixJobResultCreateRequest(
                     attempt_id=attempt_id,
@@ -123,7 +115,7 @@ class ResultManager(BaseResultManager):
             # This supports the use case of saving partial results across multiple batches
             job_result = self.jobs_client.get_job_result(
                 name=result_name,
-                job=self.job_name,
+                job=self.job_id,
                 workspace=self.workspace,
             ).data()
         except NemoClientError as e:
@@ -141,18 +133,15 @@ class ResultManager(BaseResultManager):
         return file_manager.download_from_url(url=artifact_url, local_dir=local_dir)
 
 
-@dataclass
+@dataclass(frozen=True)
 class AsyncResultManager(BaseResultManager):
-    job_name: str
+    job_id: str
     workspace: str
     files_client: AsyncFilesClient
     jobs_client: AsyncJobsClient
     attempt_id: str
-
-    async def _fetch_job_metadata(self) -> tuple[str, str, str | None]:
-        """Fetch job and return (attempt_id, fileset_name, output_location)."""
-        job = (await self.jobs_client.get_job(name=self.job_name, workspace=self.workspace)).data()
-        return self.attempt_id, job.fileset, job.output_location
+    fileset_name: str
+    artifact_base_path: str | None = None
 
     def _create_file_manager(self, fileset_name: str) -> AsyncFilesetFileManager:
         """Create a file manager for the given fileset."""
@@ -167,22 +156,22 @@ class AsyncResultManager(BaseResultManager):
         result_name: str,
         artifact_local_path: str | Path,
         ignore_patterns: list[str] | str | None = None,
+        *,
+        stage: bool = False,
     ) -> HelixJobResultResponse:
-        attempt_id, fileset_name, output_location = await self._fetch_job_metadata()
-        file_manager = self._create_file_manager(fileset_name)
+        attempt_id = self.attempt_id
+        file_manager = self._create_file_manager(self.fileset_name)
         await file_manager.validate_storage()
         artifact_local_path = self._validate_local_path(artifact_local_path)
-        remote_path = self._result_remote_path(
-            attempt_id, result_name, base=job_artifact_base_path(self.job_name, output_location)
-        )
+        remote_path = self._result_remote_path(attempt_id, result_name, base=self.artifact_base_path)
         artifact_url = await file_manager.upload(
-            local_path=artifact_local_path, remote_path=remote_path, ignore_patterns=ignore_patterns
+            local_path=artifact_local_path, remote_path=remote_path, ignore_patterns=ignore_patterns, stage=stage
         )
         try:
             job_result = (
                 await self.jobs_client.create_job_result(
                     name=result_name,
-                    job=self.job_name,
+                    job=self.job_id,
                     workspace=self.workspace,
                     body=HelixJobResultCreateRequest(
                         attempt_id=attempt_id,
@@ -197,7 +186,7 @@ class AsyncResultManager(BaseResultManager):
             job_result = (
                 await self.jobs_client.get_job_result(
                     name=result_name,
-                    job=self.job_name,
+                    job=self.job_id,
                     workspace=self.workspace,
                 )
             ).data()
@@ -218,49 +207,72 @@ class AsyncResultManager(BaseResultManager):
 
 
 def result_manager_factory(
-    job_name: str,
+    job_id: str,
     *,
     attempt_id: str,
     workspace: str | None = None,
     files_client: FilesClient,
+    fileset_name: str,
     jobs_client: JobsClient | None = None,
+    artifact_base_path: str | None = None,
 ) -> ResultManager:
-    """Create a sync ResultManager for uploading job results."""
+    """Create a sync ResultManager for uploading job results.
+
+    Args:
+        job_id: Job identifier supplied by the caller, forwarded unchanged for result registration.
+        attempt_id: Concrete attempt ID that produces uploaded results.
+        workspace: Job workspace. If not provided, falls back to the client workspace resolution.
+        files_client: Files service client.
+        fileset_name: Fileset holding the job's artifacts.
+        jobs_client: Jobs service client. If not provided, one is created from
+            files_client's shared transport.
+        artifact_base_path: Folder inside ``fileset_name`` the job's artifacts nest under;
+            ``None`` means the job owns the whole fileset.
+    """
     resolved_workspace = files_client.resolve_workspace(workspace)
     return ResultManager(
-        job_name=job_name,
+        job_id=job_id,
         workspace=resolved_workspace,
         attempt_id=attempt_id,
         files_client=files_client,
         jobs_client=jobs_client or JobsClient.from_client(files_client),
+        fileset_name=fileset_name,
+        artifact_base_path=artifact_base_path,
     )
 
 
 def async_result_manager_factory(
-    job_name: str,
+    job_id: str,
     *,
     attempt_id: str,
     workspace: str | None = None,
     files_client: AsyncFilesClient,
+    fileset_name: str,
     jobs_client: AsyncJobsClient | None = None,
+    artifact_base_path: str | None = None,
 ) -> AsyncResultManager:
     """Create a ResultManager for uploading job results.
 
     Args:
-        job_name: Name of the job to create results for.
+        job_id: Job identifier supplied by the caller, forwarded unchanged for result registration.
         attempt_id: Concrete attempt ID that produces uploaded results.
         workspace: Job workspace. If not provided, falls back to the client workspace resolution.
         files_client: Files service client.
+        fileset_name: Fileset holding the job's artifacts.
         jobs_client: Jobs service client. If not provided, one is created from
             files_client's shared transport.
+        artifact_base_path: Folder inside ``fileset_name`` the job's artifacts nest under;
+            ``None`` means the job owns the whole fileset.
     """
     resolved_workspace = files_client.resolve_workspace(workspace)
     return AsyncResultManager(
-        job_name=job_name,
+        job_id=job_id,
         workspace=resolved_workspace,
         attempt_id=attempt_id,
         files_client=files_client,
         jobs_client=jobs_client or AsyncJobsClient.from_client(files_client),
+        fileset_name=fileset_name,
+        artifact_base_path=artifact_base_path,
     )
 
 

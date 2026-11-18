@@ -175,8 +175,10 @@ layout, so there is no refit conversion). That is why it has no registry entry o
 
 `mcore` also requires `TORCH_CUDA_ARCH_LIST` to be set at **runtime**, not just at build
 (`lm_policy.py` raises without it; mcore's inference unified-memory API calls a torch API
-that reads it). The publish stage is `FROM builder`, so it inherits the builder's
-`TORCH_CUDA_ARCH_LIST="9.0 10.0"` — the same value NeMo-RL's own `docker/Dockerfile` sets.
+that reads it). The publish stage starts from `base` and sets
+`TORCH_CUDA_ARCH_LIST="9.0 10.0"` again — the same value the builder used, and
+the same value NeMo-RL's own `docker/Dockerfile` sets. A new stage does not
+inherit the builder's environment.
 
 **Transformer-Engine is shared between `automodel` and `mcore`.** TE is a
 training-time *transformer layer* library (fused attention / LayerNorm / GEMM kernels,
@@ -211,8 +213,9 @@ so the warmup syncs do not accumulate).
 
 Megatron-Bridge pins `setuptools<80.0.0` for its own build, so uv builds its metadata in a
 PEP 517 environment against an old setuptools and leaves it in the shipped cache. RL's
-`setuptools>=80.10.2` override cannot reach a build environment, so the publish stage drops
-cached setuptools archives that no venv symlinks into.
+`setuptools>=80.10.2` override cannot reach a build environment. The builder
+prunes archives no venv links to before the publish stage copies the cache, so
+that setuptools is not in the image.
 
 ### NeMo-Gym environments: a second, separate venv layer
 
@@ -532,7 +535,10 @@ readable by the non-root user. Hence `UV_CACHE_DIR=/opt/uv_cache`:
   training image runs as a configured non-root UID (1000 by default, the same reason
   CPython is copied under `/opt/cpython`).
 - **`/opt/uv_cache` must never be deleted** — pruning it breaks every venv that points into
-  it. The prune step in the publish stage deliberately leaves it alone.
+  it. `prune-unreferenced-uv-archives.sh` removes archives no venv links to, then
+  removes `files-v0` blobs that no longer have an archive name. A later layer
+  of the same stage can only hide those files. The publish stage copies the merged builder
+  tree onto `base`, so those hidden archives are left behind and are not in the pull.
 
 **It does not warm runtime installs in the training image.** `Dockerfile.nhx-rl-training`
 repoints `UV_CACHE_DIR` at a writable per-user path, because `/opt/uv_cache` holds the code
@@ -547,26 +553,27 @@ That is the main argument for prefetching: a venv that is not baked in is not ju
 un-materialized, it is rebuilt against a cold cache — which for the `automodel` tier would
 mean compiling Transformer-Engine on every node at job time.
 
-#### `vllm/` is a private copy per vLLM venv
+#### `vllm/` Python sources are a private copy per vLLM venv
 
 NeMo-RL **patches vLLM in place at worker startup** (`nemo_rl/models/generation/vllm/patches.py`
-rewrites `v1/executor/ray_executor.py`, `model_executor/models/llama_eagle3.py` and
-`tool_parsers/hermes_tool_parser.py`, taking a `<file>.patch_lock` beside each). Symlinking breaks
-that in two independent ways, both observed on the shipped image:
+rewrites Python files under the package, including `v1/executor/ray_executor.py`, and takes a
+`<file>.patch_lock` beside each). Symlinking those files breaks that in two ways:
 
-1. **Permission** — the prefetched venvs are build-owned/read-only for the configured runtime UID
-   (1000 by default), so creating `ray_executor.py.patch_lock` fails with `EACCES` and the
-   `VllmAsyncGenerationWorker` actor dies in its creation task.
-2. **Sharing** — every vLLM-tier venv symlinks that file to *one* physical copy in `/opt/uv_cache`.
-   The patch writes a **per-venv `py_executable`** into it, so two venvs cannot share it. No amount
-   of `chown` fixes this; the file must not be shared at all.
+1. **Permission** — the prefetched `.py` files are build-owned, and the patch rewrites them
+   in place. Creating `<file>.patch_lock` is optional: `_locked_file_patch` falls back to a
+   lock in the temp directory when that open raises `OSError`, so the lock failure alone does
+   not stop the actor. The rewrite of the `.py` file still has to succeed for the runtime UID
+   (1000 by default).
+2. **Sharing** — every vLLM-tier venv symlinks `ray_executor.py` to *one* physical copy in
+   `/opt/uv_cache`. The patch writes a **per-venv `py_executable`** into it, so two venvs cannot
+   share that file.
 
-So the publish stage replaces `site-packages/vllm/` with a real, private, runtime-owned copy in each
-vLLM-tier venv.
+The publish stage gives the runtime user the `vllm/` directories and replaces each `*.py` symlink
+with a private file. The `.so` files and headers are not patched (about 0.7 GB of the 0.76 GB
+tree) and stay symlinks into the one cache copy. Copying the whole tree made three extra copies.
 
-The two need separate fixes: **ownership** solves (1), **private copies** solve (2). Running as root
-would silence the `EACCES` but leaves the sharing intact — the first venv to patch wins and the next
-one launches under another venv's interpreter.
+Running as root would make that shared file writable. The first venv to patch still writes its
+`py_executable` into the one copy, and the next venv launches under that interpreter.
 
 Note this is *not* what upstream NeMo-RL does. Its published image symlinks too (74,567 symlinks vs
 925 real files in one vLLM venv, both vLLM venvs sharing one `ray_executor.py`), and it runs as

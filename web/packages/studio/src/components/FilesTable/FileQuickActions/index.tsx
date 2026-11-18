@@ -17,6 +17,7 @@ import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileS
 import { RenameFileModal } from '@studio/components/FilesTable/RenameFileModal';
 import { TransformFileModal } from '@studio/components/FilesTable/TransformFileModal';
 import type { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
+import { getDeleteFilesDescription } from '@studio/constants/filesets';
 import { useSelectedDatasetId } from '@studio/hooks/useSelectedDatasetId';
 import { resolveDatasetFilePath } from '@studio/util/files';
 import { type FC, useState } from 'react';
@@ -48,7 +49,7 @@ export const FileQuickActions: FC<Props> = ({
   const datasetFullName = useSelectedDatasetId({ datasetId });
   const { workspace, name } = getPartsFromReference(datasetFullName);
 
-  const { mutateAsync, error: deleteError } = useDatasetFileDelete();
+  const { mutateAsync } = useDatasetFileDelete();
 
   // Use currentFolder only for basename-only paths; tree/API paths are already full paths
   const path = resolveDatasetFilePath(file.path, currentFolder ?? undefined);
@@ -140,11 +141,10 @@ export const FileQuickActions: FC<Props> = ({
       {openModal === 'delete' && modalFile && (
         <DeleteConfirmationModal
           open
+          entity="file"
+          ids={[path]}
+          description={getDeleteFilesDescription(1)}
           onDelete={handleDeleteFile}
-          simpleConfirm
-          title="Delete File"
-          confirmationText={path}
-          errorText={deleteError?.message}
           onClose={() => setOpenModal(undefined)}
         />
       )}

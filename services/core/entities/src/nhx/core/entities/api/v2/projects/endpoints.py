@@ -210,6 +210,7 @@ async def get_project(
     response_model=Project,
     tags=[API_TAG],
     summary="Update project",
+    responses={404: {"model": ErrorResponse, "description": "Project not found"}},
     description=textwrap.dedent("""
         Update a project's description.
 
@@ -261,6 +262,7 @@ async def update_project(
     response_model=DeleteResponse,
     tags=[API_TAG],
     summary="Delete project",
+    responses={404: {"model": ErrorResponse, "description": "Project not found"}},
     description=textwrap.dedent("""
         Delete a project.
 

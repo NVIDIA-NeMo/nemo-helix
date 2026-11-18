@@ -186,3 +186,51 @@ def test_watch_job_propagates_unclassified_exceptions(monkeypatch: pytest.Monkey
 
     with pytest.raises(RuntimeError, match="boom"):
         list(watch_job(client, "job-a", include_logs=False, poll_interval=0))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_watch_retains_status_id_for_logs_and_next_poll_after_name_reuse(
+    monkeypatch: pytest.MonkeyPatch, asynchronous: bool
+) -> None:
+    from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+    from nemo_helix_plugin.client.errors import NotFoundError
+    from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
+    from nemo_helix_plugin.jobs.watch import async_watch_job
+
+    monkeypatch.setattr(watch_module, "sleep", lambda _: None)
+    paths: list[str] = []
+    initial = _completed().model_copy(
+        update={"id": "platform-job-original", "name": "training", "status": HelixJobStatus.ACTIVE}
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/training/status"):
+            # Only initial discovery may use the display name. A later request
+            # under that name would now select a replacement.
+            assert paths.count(request.url.path) == 1
+            return httpx.Response(200, json=initial.model_dump(mode="json"))
+        if request.url.path.endswith("/platform-job-original/logs"):
+            return httpx.Response(200, json={"data": [], "total": 0, "next_page": None, "prev_page": None})
+        assert request.url.path.endswith("/platform-job-original/status")
+        return httpx.Response(404, json={"detail": "original Job disappeared"})
+
+    if asynchronous:
+        async with AsyncNemoClient(
+            base_url="http://test",
+            workspace="default",
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        ) as client:
+            with pytest.raises(NotFoundError):
+                async for _ in async_watch_job(AsyncJobsClient.from_client(client), "training", poll_interval=0):
+                    pass
+    else:
+        with NemoClient(
+            base_url="http://test",
+            workspace="default",
+            http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        ) as client:
+            with pytest.raises(NotFoundError):
+                list(watch_job(JobsClient.from_client(client), "training", poll_interval=0))
+    assert [path.rsplit("/", 2)[-2] for path in paths] == ["training", "platform-job-original", "platform-job-original"]

@@ -40,7 +40,7 @@ from nemo_evals.taskset_runs.store import (
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.client.errors import AuthenticationError, PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import Page
@@ -369,6 +369,8 @@ async def cancel_taskset_run(
         raise HTTPException(status_code=409, detail=str(exc), headers={"x-should-retry": "false"}) from exc
     except CancelContended as exc:
         raise HTTPException(status_code=503, detail=str(exc), headers={"x-should-retry": "true"}) from exc
+    except (AuthenticationError, PermissionDeniedError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail="Fileset lookup access denied") from exc
     except Exception:
         logger.exception("Failed to cancel taskset run %s/%s", sanitize_for_log(workspace), sanitize_for_log(run_id))
         raise HTTPException(status_code=500, detail="Internal server error") from None

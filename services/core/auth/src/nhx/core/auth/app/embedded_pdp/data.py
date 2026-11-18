@@ -13,7 +13,7 @@ from typing import Any, Optional
 from nhx.common.entities import EntityClient
 
 from ..bundle import build_authorization_data
-from .engine import set_policy_data
+from .engine import has_policy_data, set_policy_data
 
 logger = logging.getLogger(__name__)
 
@@ -97,9 +97,11 @@ async def _load_policy_data_impl(entities_client: Optional[EntityClient] = None)
         # Elevate to service principal for internal entity store access
         # Mark as internal to suppress access logging
         service_client = entities_client.as_service("auth", internal=True) if entities_client else None
+        # Bootstrap only on cold start. Re-applying it here would briefly replace the loaded
+        # role bindings, so concurrent evaluations (and the refresh loop) could deny bound callers.
         data = await apply_embedded_policy_document(
             service_client,
-            skip_static_bootstrap=False,
+            skip_static_bootstrap=has_policy_data(),
         )
         principals_count = len(data.get("authz", {}).get("principals", {}))
         logger.info(

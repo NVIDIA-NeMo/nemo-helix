@@ -1133,3 +1133,31 @@ async def test_plan_write_permission_denial_preserves_typed_error_and_cleanup(
     assert [op for op, _, _ in files_service.calls] == (
         ["create"] if operation == "create" else ["create", "upload", "delete"]
     )
+
+
+@pytest.mark.parametrize("action", ["state", "start", "cancel"])
+async def test_run_mutations_pin_the_legacy_plan(
+    store, entity_store, files_service, files_client, acceptance, action: str
+) -> None:
+    allocation = (
+        await files_client.create_fileset(workspace="default", body=CreateFilesetRequest(name="existing-plan"))
+    ).data()
+    run = await entity_store.create(make_run(acceptance))
+    before_digest = run.plan_digest
+    files_service.calls.clear()
+    if action == "state":
+        updated = await store.set_state(run, error="progress")
+    elif action == "start":
+        updated = await store.start(run, now=acceptance.accepted_at)
+    else:
+        updated = await store.request_cancel(run.workspace, run.name, now=acceptance.accepted_at)
+    assert updated.plan_fileset_id == allocation.id
+    assert updated.plan_digest == before_digest
+    assert files_service.calls == [("get", "default", "existing-plan")]
+
+    # Reusing the name after the mutation must not change the recorded allocation.
+    files_service.allocations[("default", "existing-plan")] = "replacement-id"
+    files_service.calls.clear()
+    updated = await store.set_state(updated, error="next progress")
+    assert updated.plan_fileset_id == allocation.id
+    assert files_service.calls == []

@@ -233,6 +233,7 @@ async def list_deployment_config_versions(
 @router.get(
     "/v2/workspaces/{workspace}/deployment-configs/{config}/versions/{name}",
     summary="Get Specific ModelDeploymentConfig Version",
+    responses={404: {"model": ErrorResponse, "description": "Deployment configuration version not found"}},
     response_description="Return a specific version of a model deployment configuration",
     status_code=status.HTTP_200_OK,
 )

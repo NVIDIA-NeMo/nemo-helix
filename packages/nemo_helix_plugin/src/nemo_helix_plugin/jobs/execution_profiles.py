@@ -24,6 +24,7 @@ from nemo_helix_plugin.config import NHX_CONFIG_WARNINGS_DISABLED_ENV_VAR
 from nemo_helix_plugin.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -53,6 +54,7 @@ RESERVED_JOB_ENVIRONMENT_VARIABLE_NAMES: frozenset[str] = frozenset(
         # Job runtime (from nemo_helix_plugin.jobs.constants)
         CONFIG_TASK_STORAGE_PATH_ENVVAR,
         EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+        NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
         NEMO_JOB_ATTEMPT_ID_ENVVAR,
         NEMO_JOB_FILESET_ENVVAR,
         NEMO_JOB_ID_ENVVAR,

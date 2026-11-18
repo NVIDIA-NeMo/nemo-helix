@@ -5,15 +5,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from nemo_anonymizer_plugin.tasks.anonymizer import run as task_run
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.job_results import HelixJobResults
 from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
+    NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
@@ -66,14 +67,13 @@ def test_get_ctx_uses_platform_usage_reporter(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setenv(NEMO_JOB_ID_ENVVAR, "anonymizer-job")
     monkeypatch.setenv(NEMO_JOB_ATTEMPT_ID_ENVVAR, "attempt-a")
     monkeypatch.setenv(NEMO_JOB_WORKSPACE_ENVVAR, "team-a")
+    monkeypatch.setenv(NEMO_JOB_FILESET_ENVVAR, "job-fileset-anonymizer-job")
     monkeypatch.setenv(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, str(tmp_path / "ephemeral"))
     monkeypatch.setenv(PERSISTENT_JOB_STORAGE_PATH_ENVVAR, str(tmp_path / "persistent"))
     client = NemoClient(base_url="http://platform.test", workspace="team-a")
 
-    with patch.object(task_run, "HelixJobResults") as results_cls:
-        ctx = task_run._get_ctx(client)
+    ctx = task_run._get_ctx(client)
 
     assert isinstance(ctx.usage, HelixJobUsageReporter)
+    assert isinstance(ctx.results, HelixJobResults)
     assert ctx.attempt_id == "attempt-a"
-    assert ctx.results is results_cls.return_value
-    assert results_cls.call_args.kwargs["attempt_id"] == "attempt-a"

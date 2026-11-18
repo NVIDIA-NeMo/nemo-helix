@@ -10,6 +10,10 @@ from nhx.common.api.common import PaginatedResult
 from nhx.intake.spans.domain import IntakeResponseMode, IntakeSpan, SpanGroup, SpanListFilter
 
 
+class SpanAmbiguousError(Exception):
+    """A workspace span ID belongs to more than one session."""
+
+
 class SpanRepository(ABC):
     """Domain-facing interface for span persistence."""
 
@@ -50,5 +54,5 @@ class SpanRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_span(self, *, workspace: str, span_id: str) -> IntakeSpan | None:
+    async def get_span(self, *, workspace: str, span_id: str, session_id: str | None = None) -> IntakeSpan | None:
         pass

@@ -47,8 +47,6 @@ jobs:
 
       - name: Validate Fern configuration
         working-directory: ./docs/fern
-        env:
-          FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
         run: npm run check
 
   python-snippets:
@@ -85,6 +83,4 @@ jobs:
 
       - name: Check for broken links
         working-directory: ./docs/fern
-        env:
-          FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
         run: npm run broken-links

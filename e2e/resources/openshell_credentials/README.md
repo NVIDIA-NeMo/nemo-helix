@@ -15,6 +15,8 @@ The profile endpoint allows only `POST /probe`. An authored sandbox rule allows 
 
 `probe.py` runs at `/app/credential_probe.py` in an image containing Python 3.13, `/tools/jobs-launcher`, curl and the configured sandbox user. The deployment executor's `platform_egress.binaries` must include `/usr/local/bin/python3.13`, the probe interpreter. This lets its Helix request reach the HTTP policy so the test can distinguish a denied Secrets route from a binary that cannot contact Helix at all.
 
+When the probe runs as a job it also saves a result from inside the sandbox: it uploads the artifact into the job's fileset and registers the result record, using the storage context the backend injects. The test requires that save to succeed and the platform to record the result, which keeps the result route of the restricted platform policy under test alongside the credential checks.
+
 Point the existing E2E client at that installation and provide its test settings:
 
 ```sh

@@ -15,10 +15,12 @@ from collections.abc import Mapping
 from typing import Literal
 
 from nhx_evals_sdk.agent_eval.reward_keys import (
+    GYM_REWARD_COMPONENTS_KEY,
     REWARD_DETAILS_KEY,
     HarborRewardValueRejection,
     ParsedHarborRewards,
     finite_reward,
+    reward_key_rejection,
     validate_reward_key,
 )
 from nhx_evals_sdk.enums import MetricType
@@ -43,20 +45,58 @@ class GymRewardMetric(MetricBase):
     candidate metadata (populated by ``GymAgentTaskRunner``); a trial with no reward is left
     **unscored** (``None`` → ``nan``), excluded from the mean and surfaced as ``nan_count`` rather
     than counted as a spurious ``0.0``. Gym owns the scoring — this metric only surfaces it.
+
+    A multi-reward resources-server also returns per-objective ``reward_components``. Each one named in
+    ``reward_components`` is emitted as an optional score of its own, omitted on a trial that did not
+    report it. Gym runners fill the names from the components found in the trials, so a task built with
+    a plain ``GymRewardMetric()`` reports them too.
     """
 
     type: Literal[MetricType.GYM_REWARD] = MetricType.GYM_REWARD
     output_name: str = Field(
         default="reward", description="Name of the emitted score, read from the trial's `reward` metadata."
     )
+    reward_components: tuple[str, ...] = Field(
+        default=(),
+        description="Reward components to emit as optional scores, read from the trial's `reward_components` "
+        "metadata (a multi-reward resources-server's per-objective scores). Gym runners add the components found "
+        "in the trials, so set this only to rescore saved trials without a runner.",
+    )
+
+    @field_validator("reward_components")
+    @classmethod
+    def _component_names_are_safe(cls, names: tuple[str, ...]) -> tuple[str, ...]:
+        # Every name becomes a declared output, so a reserved `<name>.pass@k` would collide with the
+        # SDK's aggregate names; fail at construction rather than after the run.
+        for name in names:
+            rejection = reward_key_rejection(name)
+            if rejection is not None:
+                raise ValueError(f"invalid Gym reward component name {name!r}: {rejection}")
+        if len(set(names)) != len(names):
+            raise ValueError("Gym reward component names must be unique")
+        return names
+
+    def _component_names(self) -> tuple[str, ...]:
+        # A component named like the primary output would declare it twice; the primary wins.
+        return tuple(name for name in self.reward_components if name != self.output_name)
 
     def output_spec(self) -> list[MetricOutputSpec]:
-        return [MetricOutputSpec.continuous_score(self.output_name)]
+        return [
+            MetricOutputSpec.continuous_score(self.output_name),
+            *(MetricOutputSpec.continuous_score(name, required=False) for name in self._component_names()),
+        ]
 
     async def compute_scores(self, input: MetricInput) -> MetricResult:
         reward = input.candidate.metadata.get("reward")
         value = float(reward) if reward is not None else None
-        return MetricResult(outputs=[MetricOutput(name=self.output_name, value=value)])
+        outputs = [MetricOutput(name=self.output_name, value=value)]
+        components = input.candidate.metadata.get(GYM_REWARD_COMPONENTS_KEY)
+        if isinstance(components, Mapping):
+            for name in self._component_names():
+                component = finite_reward(components.get(name))
+                if component is not None:
+                    outputs.append(MetricOutput(name=name, value=component))
+        return MetricResult(outputs=outputs)
 
 
 class HarborRewardMetric(MetricBase):

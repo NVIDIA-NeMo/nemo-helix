@@ -12,6 +12,12 @@ import { Banner, Stack, Text } from '@nvidia/foundations-react-core';
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { evalJobKind, publishedEvaluationName } from '@studio/api/evaluation/utils';
 import {
+  DATASET_SNAPSHOT_KEY,
+  datasetDrift,
+  datasetSnapshotOf,
+  takeDatasetSnapshot,
+} from '@studio/components/evaluation/AgentEvaluationWizard/datasetSnapshot';
+import {
   resolveRunTarget,
   RUN_TARGET_DEFAULTS,
   useRunNameCheck,
@@ -20,18 +26,18 @@ import { RunTargetFields } from '@studio/components/evaluation/AgentEvaluationWi
 import type { RunTargetFormFields } from '@studio/components/evaluation/AgentEvaluationWizard/types';
 import { isDefaultExperiment } from '@studio/components/evaluation/defaultExperiment';
 import { EvalWizard } from '@studio/components/evaluation/EvalWizard';
+import { submitErrorMessage } from '@studio/components/evaluation/EvalWizard/entityNameField';
 import {
   createRunEvaluation,
-  EVAL_CONFIG_FILESET_KEY,
   evaluationFilesetName,
   recordRunJob,
+  runMetadata,
 } from '@studio/components/evaluation/experimentEvalConfig';
-import { submitErrorMessage } from '@studio/components/evaluation/shared/entityNameField';
 import { buildRerunRequestBody } from '@studio/components/evaluation/submitEvaluationJob';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
@@ -88,6 +94,16 @@ export const RerunEvaluationForm: FC<RerunEvaluationFormProps> = ({
     if (linked) setValue('experimentId', linked.id);
   }, [sourceEvaluation, experimentsPage, getFieldState, setValue]);
 
+  // Datasets are read in place, so the copy reads the file as it is now; say so when it moved on.
+  const sourceSnapshot = sourceEvaluation ? datasetSnapshotOf(sourceEvaluation) : null;
+  const { data: drift, isFetching: isCheckingDataset } = useQuery({
+    queryKey: ['evaluation-dataset-drift', workspace, sourceEvaluationName],
+    queryFn: sourceSnapshot
+      ? ({ signal }) => datasetDrift(workspace, sourceSnapshot, signal)
+      : skipToken,
+    retry: false,
+  });
+
   const { status: nameStatus } = useRunNameCheck(workspace, methods.control);
 
   const {
@@ -101,11 +117,21 @@ export const RerunEvaluationForm: FC<RerunEvaluationFormProps> = ({
       const { experimentIds, name } = await resolveRunTarget(workspace, agent, formData);
       const filesetName =
         (sourceEvaluation && evaluationFilesetName(sourceEvaluation)) ?? configFilesetLabel(spec);
+      const datasetRef = typeof spec.dataset === 'string' ? spec.dataset : null;
+      const snapshot = datasetRef
+        ? await takeDatasetSnapshot(workspace, datasetRef).catch(() => undefined)
+        : undefined;
+      if (snapshot === null) throw new Error(`The dataset ${datasetRef} no longer exists.`);
+      const metadata = runMetadata(
+        filesetName,
+        snapshot ? { [DATASET_SNAPSHOT_KEY]: JSON.stringify(snapshot) } : undefined
+      );
       await createRunEvaluation(workspace, {
         experimentIds,
         name,
         filesetName,
         parentEvaluationId: sourceEvaluation?.id,
+        metadata,
       }).catch((err: unknown) => {
         if (isConflictError(err)) {
           throw new Error(
@@ -115,18 +141,13 @@ export const RerunEvaluationForm: FC<RerunEvaluationFormProps> = ({
         throw err;
       });
       try {
-        const body = buildRerunRequestBody(spec, name, name);
+        const body = buildRerunRequestBody(spec, name, name, agent);
         const created =
           evalJobKind(job) === 'dataset'
             ? await evalsCreateEvaluateJob(workspace, body as EvaluateJobRequest)
             : await submitAgentEvalJob(workspace, body as AgentEvaluateJobRequest);
         if (!created?.name) throw new Error('Submission did not return a job name');
-        await recordRunJob(
-          workspace,
-          name,
-          created.name,
-          filesetName ? { [EVAL_CONFIG_FILESET_KEY]: filesetName } : {}
-        );
+        await recordRunJob(workspace, name, created.name, metadata);
         return created.name;
       } catch (err) {
         await deleteEvaluation(workspace, name).catch(() => undefined);
@@ -143,7 +164,13 @@ export const RerunEvaluationForm: FC<RerunEvaluationFormProps> = ({
   if (jobQuery.isLoading) return <Loading description="Loading job..." />;
 
   const nameBusy = nameStatus === 'checking' || nameStatus === 'conflict';
-  const blockedHint = isLoadingEvaluation ? 'Loading the source evaluation...' : undefined;
+  const datasetMissing = drift === 'missing';
+  const hints: [boolean, string][] = [
+    [isLoadingEvaluation, 'Loading the source evaluation...'],
+    [isCheckingDataset, 'Checking the dataset...'],
+    [datasetMissing, `The dataset this evaluation read, ${sourceSnapshot?.ref}, no longer exists.`],
+  ];
+  const blockedHint = hints.find(([when]) => when)?.[1];
   const errorMessage = jobQuery.error
     ? `Could not load job "${sourceJob}". It may have been deleted.`
     : submitErrorMessage(submitError);
@@ -168,7 +195,7 @@ export const RerunEvaluationForm: FC<RerunEvaluationFormProps> = ({
       cancelTo={getAgentEvaluationsTabRoute(workspace, agent)}
       continueLabel="Run Evaluation"
       continueLoading={isPending}
-      canContinue={!!job && !nameBusy && !isLoadingEvaluation}
+      canContinue={!!job && !nameBusy && !blockedHint}
       blockedHint={blockedHint}
       onContinue={run}
     >
@@ -180,6 +207,12 @@ export const RerunEvaluationForm: FC<RerunEvaluationFormProps> = ({
             {sourceEvaluationName ? ` (evaluation ${sourceEvaluationName})` : ''}. Only where the
             results publish changes.
           </Text>
+          {drift === 'changed' ? (
+            <Banner kind="inline" status="warning">
+              The dataset has changed since {sourceEvaluationName} ran, so its scores may not
+              compare with this run&apos;s.
+            </Banner>
+          ) : null}
           <RunTargetFields workspace={workspace} agent={agent} disabled={isPending || !job} />
         </Stack>
       </FormProvider>

@@ -891,6 +891,64 @@ class TestAgentRunDeclarations:
         assert "context_schema is not a valid JSON Schema" in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
 
+    @staticmethod
+    def _spec_config(harness_kind: str) -> dict[str, Any]:
+        return {
+            "config_format": "nemo-agents-spec-v1",
+            "name": "analyst",
+            "default_harness": "main",
+            "harnesses": {"main": {"kind": harness_kind}},
+            "models": {"default": {"provider": "openai", "model": "openai/gpt-5.4"}},
+        }
+
+    def test_register_rejects_a_context_schema_a_stock_adapter_would_ignore(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={
+                "name": "analyst",
+                "config_format": "nemo-agents-spec-v1",
+                "config": self._spec_config("hermes"),
+                "context_schema": {"type": "object"},
+            },
+        )
+
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "default harness 'main' (nvidia.fabric.hermes) does not read the request context" in detail
+        mock_entity_client.create.assert_not_called()
+
+    def test_register_accepts_a_context_schema_for_an_adapter_that_reads_context(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        self._echo_create(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={
+                "name": "analyst",
+                "config_format": "nemo-agents-spec-v1",
+                "config": self._spec_config("nvidia.helix.compass.analyst"),
+                "context_schema": {"type": "object"},
+            },
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["context_schema"] == {"type": "object"}
+
+    def test_register_accepts_a_stock_adapter_without_a_context_schema(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        self._echo_create(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={"name": "analyst", "config_format": "nemo-agents-spec-v1", "config": self._spec_config("hermes")},
+        )
+
+        assert resp.status_code == 201
+
     def test_register_rejects_a_registration_block_inside_config(
         self, client: TestClient, mock_entity_client: AsyncMock
     ) -> None:

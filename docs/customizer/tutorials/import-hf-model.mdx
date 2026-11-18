@@ -152,7 +152,7 @@ try:
         ),
     ).data()
     print(f"Created model fileset: {base_model_fs.name}")
-except FilesConflictError:
+except ConflictError:
     print(f"Model fileset '{MODEL_NAME}' already exists, refreshing Hugging Face settings...")
     client.files.delete_fileset(name=MODEL_NAME)
     base_model_fs = client.files.create_fileset(

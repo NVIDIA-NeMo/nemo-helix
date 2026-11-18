@@ -12,8 +12,10 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin
+from urllib.parse import quote, urlencode, urljoin
 from urllib.request import Request, urlopen
+
+RESULT_NAME = "credential-probe"
 
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -39,6 +41,51 @@ def request_status(request: Request, context: ssl.SSLContext) -> tuple[int | Non
         return None, type(exc).__name__
 
 
+def save_job_result(base_url: str, context: ssl.SSLContext) -> tuple[int | None, str | None]:
+    """Register a job result the way a task's result sink does.
+
+    Uploads the artifact into the job's fileset and posts the result record, using only
+    routes the restricted platform policy allows. A sandbox without the job's storage
+    context cannot do this: reading the job record is denied to provider-bearing sandboxes.
+    """
+    workspace = os.environ["NEMO_JOB_WORKSPACE"]
+    fileset = os.environ["NEMO_JOB_FILESET"]
+    job = os.environ["NEMO_JOB_ID"]
+    attempt = os.environ["NEMO_JOB_ATTEMPT_ID"]
+    base_path = os.environ.get("NEMO_JOB_ARTIFACT_BASE_PATH", "").strip()
+    prefix = f"{base_path}/" if base_path else ""
+    remote_path = f"{prefix}results/{attempt}/{RESULT_NAME}"
+    upload_path = (
+        f"/apis/files/v2/workspaces/{quote(workspace)}/filesets/{quote(fileset)}/-/{quote(remote_path, safe='/')}"
+    )
+    status, error = request_status(
+        Request(
+            base_url + upload_path,
+            data=b'{"probe": "saved by the sandbox"}',
+            headers={"Content-Type": "application/json"},
+            method="PUT",
+        ),
+        context,
+    )
+    if status is None or not 200 <= status < 300:
+        return status, error or f"artifact upload returned {status}"
+    body = {
+        "attempt_id": attempt,
+        "artifact_url": f"fileset://{workspace}/{fileset}#{remote_path}",
+        "artifact_storage_type": "fileset",
+    }
+    result_path = f"/apis/jobs/v2/workspaces/{quote(workspace)}/jobs/{quote(job)}/results/{RESULT_NAME}"
+    return request_status(
+        Request(
+            base_url + result_path,
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        ),
+        context,
+    )
+
+
 def main() -> None:
     placeholder = os.environ["API_TOKEN"]
     service_url = os.environ["SERVICE_URL"]
@@ -61,6 +108,11 @@ def main() -> None:
     attempt = 0
     last_status: int | None = None
     last_error: str | None = None
+    result_status: int | None = None
+    result_error: str | None = None
+    if "NEMO_JOB_FILESET" in os.environ:
+        result_status, result_error = save_job_result(base_url, context)
+        print(json.dumps({"result_status": result_status, "result_error": result_error}), flush=True)
     if os.environ.get("PROBE_HEALTH_SERVER") == "1":
         health_server = ThreadingHTTPServer(("0.0.0.0", 8000), HealthHandler)
         threading.Thread(target=health_server.serve_forever, daemon=True).start()
@@ -82,6 +134,8 @@ def main() -> None:
                 "forbidden_status": forbidden_status,
                 "forbidden_error": forbidden_error,
                 "public_status": public_status,
+                "result_status": result_status,
+                "result_error": result_error,
             }
             status, error = request_status(
                 Request(

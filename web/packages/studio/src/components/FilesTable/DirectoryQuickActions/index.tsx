@@ -11,6 +11,7 @@ import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { useDatasetDirectoryDelete } from '@studio/api/datasets/useDatasetDirectoryDelete';
 import type { FileSystemDirectory } from '@studio/components/FilesTable/utils';
+import { getDeleteFoldersDescription } from '@studio/constants/filesets';
 import { useSelectedDatasetId } from '@studio/hooks/useSelectedDatasetId';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { resolveDatasetFilePath } from '@studio/util/files';
@@ -42,7 +43,7 @@ export const DirectoryQuickActions: FC<Props> = ({
   const datasetFullName = useSelectedDatasetId({ datasetId });
   const { workspace, name } = getPartsFromReference(datasetFullName);
 
-  const { mutateAsync: deleteDirectory, error: deleteError } = useDatasetDirectoryDelete();
+  const { mutateAsync: deleteDirectory } = useDatasetDirectoryDelete();
   const { getQueryParam } = useQueryParams();
 
   const folderFromQuery = getQueryParam(QUERY_PARAMETERS.filesetFolder);
@@ -57,16 +58,8 @@ export const DirectoryQuickActions: FC<Props> = ({
       return false;
     }
 
-    try {
-      const response = await deleteDirectory({ workspace, datasetName: name, path });
-      toast.success('Directory deleted successfully');
-      return Boolean(response);
-    } catch (error) {
-      toast.error(
-        `Failed to delete directory: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
-      return false;
-    }
+    const response = await deleteDirectory({ workspace, datasetName: name, path });
+    return Boolean(response);
   };
 
   const actions: QuickActionItem[] = [
@@ -88,10 +81,10 @@ export const DirectoryQuickActions: FC<Props> = ({
       />
       <DeleteConfirmationModal
         open={openModal === 'delete'}
+        entity="folder"
+        ids={[path]}
+        description={getDeleteFoldersDescription(1)}
         onDelete={handleDeleteDirectory}
-        simpleConfirm
-        title="Delete Directory"
-        errorText={deleteError?.message}
         onClose={() => setOpenModal(undefined)}
       />
     </>

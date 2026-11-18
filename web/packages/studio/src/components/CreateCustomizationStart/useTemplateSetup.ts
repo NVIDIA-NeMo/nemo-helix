@@ -13,7 +13,7 @@ import {
   getModelsListModelsQueryKey,
   useModelsCreateModel,
 } from '@nemo/sdk/generated/platform/models';
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import {
   findAvailableFilesetName,
   preflightConvertedFileset,
