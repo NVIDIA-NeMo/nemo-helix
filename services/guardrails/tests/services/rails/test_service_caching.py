@@ -18,12 +18,11 @@ from nhx.guardrails.entities.values._private import Model, RailsConfig
 
 
 class TestRailsServiceCaching(unittest.IsolatedAsyncioTestCase):
-    """Engine reuse across requests, wired the way the API wires it.
+    """Engine reuse across requests, set up the same way the API does it.
 
-    The API builds a new ConfigRegistry (with the caller's entity client) for every request and
-    shares one RailsRegistry, so each ``get_rails`` call here goes through a fresh RailsService
-    and ConfigRegistry. Mocking a config-cache hit instead is what hid the engine being rebuilt
-    on every request.
+    The API creates a new ConfigRegistry for every request and shares one RailsRegistry, so each
+    ``get_rails`` call here uses a new RailsService and ConfigRegistry. The old tests mocked a config
+    cache hit instead, which is how the rebuild-on-every-request bug went unnoticed.
     """
 
     def setUp(self):
@@ -60,7 +59,7 @@ class TestRailsServiceCaching(unittest.IsolatedAsyncioTestCase):
         return mock_llm
 
     async def get_rails(self, token: str = "token"):
-        """One request: a new ConfigRegistry per call, the shared RailsRegistry."""
+        """Simulate one request: a new ConfigRegistry, but the shared RailsRegistry."""
         service = RailsService(
             config_registry=ConfigRegistry(entities_client=self.entities_client),
             rails_registry=self.rails_registry,
@@ -85,7 +84,7 @@ class TestRailsServiceCaching(unittest.IsolatedAsyncioTestCase):
         assert self.entities_client.get.await_count == 2
 
     async def test_caching_with_different_tokens(self):
-        """Engines are cached per caller credential, so different tokens never share one."""
+        """Engines are cached per caller credential, so different tokens get different engines."""
         valid = await self.get_rails(token="valid_token_12345")
         invalid = await self.get_rails(token="invalid_token_67890")
 
@@ -104,7 +103,7 @@ class TestRailsServiceCaching(unittest.IsolatedAsyncioTestCase):
         assert self.mock_create_engine.call_count == 2
 
     async def test_rebuilds_when_config_is_recreated_under_the_same_name(self):
-        """A recreated config restarts at db_version 1; its new entity id must still miss."""
+        """A recreated config starts over at db_version 1, but its new entity id still forces a rebuild."""
         first = await self.get_rails()
         self.stored = self._stored_config(entity_id="config-2", db_version=1)
         second = await self.get_rails()

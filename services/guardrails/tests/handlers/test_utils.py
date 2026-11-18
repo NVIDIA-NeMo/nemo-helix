@@ -142,9 +142,11 @@ class TestUpdateModelsInConfig:
         assert updated_config.models[1].parameters.default_headers == {}
 
     def test_request_headers_are_not_built_into_models(self, config: RailsConfig, mocker: MockerFixture):
-        """The engine built from this config is shared across requests, so one request's headers
-        (for example the unique ``x-request-id`` a proxy adds) must not be built into its models.
-        Only the configured headers are, normalized to lower case."""
+        """Only the configured headers (lower-cased) go into the models, not the request's headers.
+
+        The engine is shared across requests, so building in something like a proxy's unique
+        ``x-request-id`` would be wrong for every other request.
+        """
         mocker.patch(
             "nhx.guardrails.app.handlers.utils.get_request_default_headers_from_context",
             return_value={"x-request-id": "unique-per-request", "x-custom-header1": "from-request"},
@@ -268,7 +270,7 @@ class TestModelWithReqScopedCustomHeaders:
 
 class TestEngineCacheKeyHeaders:
     def test_request_headers_do_not_change_the_key(self, mocker: MockerFixture):
-        """A proxy stamps a unique ``x-request-id`` on every request. It must not rebuild the engine."""
+        """A unique ``x-request-id`` per request (added by proxies like Envoy) mustn't change the key."""
         mocker.patch(
             "nhx.guardrails.app.handlers.utils.get_platform_auth_headers_from_context",
             return_value={"X-NHX-Principal-Id": "service:guardrails"},
@@ -284,8 +286,8 @@ class TestEngineCacheKeyHeaders:
         assert len(keys) == 1
 
     def test_credentials_built_into_the_engine_change_the_key(self, mocker: MockerFixture):
-        """The caller's model credential and the platform auth headers are built into the engine,
-        so callers that differ in either must not share one."""
+        """The caller's model credential and platform auth headers are built into the engine, so
+        callers with different values need different engines."""
         auth = mocker.patch("nhx.guardrails.app.handlers.utils.get_platform_auth_headers_from_context")
         auth.return_value = {"X-NHX-Principal-On-Behalf-Of": "user:a"}
         user_a = get_merged_custom_headers_token("token")
@@ -336,8 +338,8 @@ class TestSetMainModelMergedCustomHeadersIntoContext:
     def test_request_headers_override_configured_headers(
         self, set_headers_into_context_mock: MagicMock, mocker: MockerFixture
     ):
-        """The main model sends this request's headers on top of its configured ones. The engine is
-        shared, so they come from the current request context, not from the model."""
+        """The main model sends its configured headers with this request's headers on top. They come
+        from the request context, since the model itself is shared across requests."""
         mocker.patch(
             "nhx.guardrails.app.handlers.utils.get_request_default_headers_from_context",
             return_value={"x-header": "from-request", "x-request-id": "this-request"},
@@ -445,9 +447,9 @@ class TestRunGenerateAsync:
 
     @pytest.mark.asyncio
     async def test_every_request_runs_on_the_server_loop(self):
-        """Engines share HTTP clients bound to the loop that first used them, so every request must
-        run on the same (server) loop. A loop per request strands those clients: each later
-        request then sleeps and retries on a closed loop, or hangs under load."""
+        """Model clients are tied to the loop that first used them, so every request has to run on
+        the server loop. With a new loop per request, later requests found the client on a closed
+        loop and had to wait and retry."""
         server_loop = asyncio.get_running_loop()
         loops: list[asyncio.AbstractEventLoop] = []
 

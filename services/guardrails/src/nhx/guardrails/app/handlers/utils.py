@@ -73,13 +73,12 @@ def get_main_model_from_config(models: List[Model]) -> Optional[Model]:
 
 
 def get_merged_custom_headers_token(token: str | None) -> str:
-    """The per-caller part of the rails engine cache key: what is built into the engine.
+    """Return the caller-specific part of the engine cache key.
 
-    That is the caller's model credential and the platform auth headers, which are written into the
-    models' ``default_headers`` when the engine is built. The caller's own ``x-*`` headers are not
-    built in (the main model sends them per call; task models never get them), so they are left
-    out: a proxy such as Envoy stamps a unique ``x-request-id`` on every request, which would
-    otherwise rebuild the engine on every call.
+    Only values that get built into the engine belong here: the caller's model credential and the
+    platform auth headers. Request ``x-*`` headers aren't built into the engine, so they're left out.
+    Including them would rebuild the engine on every request whenever a proxy like Envoy adds a
+    unique ``x-request-id``.
     """
     headers = get_platform_auth_headers_from_context()
     headers_str = json.dumps(headers, sort_keys=True)
@@ -111,12 +110,11 @@ def model_with_req_scoped_custom_headers(model: Model, req_custom_headers: dict[
 
 
 def set_main_model_merged_custom_headers_into_context(model: Optional[Model]) -> None:
-    """Set the headers the main model sends on this request: its configured ``default_headers``,
-    overridden by this request's headers (case-insensitive).
+    """Set the headers the main model sends for this request.
 
-    The main model reads them from the request context on every call. They are merged here, per
-    request, because the engine (and so ``model``) is shared across requests and carries only the
-    configured headers.
+    That's the model's configured ``default_headers`` with the request's headers on top (header
+    names are compared case-insensitively). The engine is shared across requests, so this has to
+    happen per request instead of when the engine is built.
     """
     # for /v1/checks, main model is currently set, but not required technically and might be removed in the future
     # so we don't raise an error on no main model here
@@ -145,10 +143,9 @@ def update_models_in_config(config: RailsConfig, main_model: Model):
     for index, model in enumerate(models):
         if model.type == main_model.type:
             main_model_index = index
-        # Only the configured headers go into the models: the engine built from this config is shared
-        # across requests. The main model gets the request's headers per call (see
-        # `set_main_model_merged_custom_headers_into_context`); task models share a client across
-        # requests and are documented not to receive inbound headers.
+        # The engine built from this config is shared across requests, so only the configured
+        # headers go into its models. The main model gets request headers per call (see
+        # `set_main_model_merged_custom_headers_into_context`). Task models don't get them at all.
         models[index] = model_with_req_scoped_custom_headers(model, None)
 
     main_model_parameters = {k: v for k, v in (main_model.parameters or {}).items() if v is not None}
@@ -208,14 +205,13 @@ async def run_generate_async(
     options: Optional[Any] = None,
     state: Optional[Any] = None,
 ) -> Any:
-    """Run the rails on the server event loop, as the standalone NeMo Guardrails server does.
+    """Run the rails on the server event loop, like the standalone NeMo Guardrails server does.
 
-    Both engines keep HTTP clients bound to the event loop that first used them: NeMo Guardrails
-    shares one client per model endpoint across the whole process, and IORails holds its own. Running
-    on a separate loop per request strands those clients, and every later request pays a
-    sleep-and-retry on the dead loop, or hangs under load. Engines are cached and reused across
-    requests, so the only per-request work left here is rail processing between LLM calls; building
-    an engine, the expensive part, still runs in a worker thread.
+    Model HTTP clients are tied to the event loop that first used them. NeMo Guardrails shares one
+    client per endpoint across the whole process, and IORails keeps its own. We used to run each
+    request on a new loop, which left those clients attached to a closed loop. Later requests then
+    had to wait and retry, or hung under load. Building an engine is the slow part, and that still
+    happens in a worker thread.
     """
     return await llm_rails.generate_async(messages=messages, prompt=prompt, options=options, state=state)
 

@@ -14,10 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 ConfigVersions = tuple[tuple[str, int], ...]
-"""The ``(entity id, db_version)`` of each stored config an engine was built from, in request order.
+"""The ``(entity id, db_version)`` of each config an engine was built from, in request order.
 
-The entity id distinguishes a config that was deleted and recreated under the same name, whose
-``db_version`` starts over.
+The id is included because a config that's deleted and recreated with the same name starts over at
+``db_version`` 1.
 """
 
 
@@ -25,7 +25,8 @@ The entity id distinguishes a config that was deleted and recreated under the sa
 class RailsCacheEntry:
     llm_rails: RailsEngine
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    # None when the engine's source configs are unknown; such an entry never matches, so it is rebuilt.
+    # None if we don't know which config versions the engine came from. It never matches, so the
+    # engine gets rebuilt on the next request.
     config_versions: ConfigVersions | None = None
 
 

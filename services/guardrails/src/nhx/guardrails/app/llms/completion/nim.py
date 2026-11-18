@@ -119,11 +119,10 @@ class NIM(FlexibleLLMBase, BaseRequest):
         return f"{api_host}/completions"
 
     def _get_api_host(self) -> str:
-        """This model's own endpoint, resolved from its config when the engine was built.
+        """Return the endpoint this model was built with.
 
-        Engines are cached and reused across requests, so the endpoint must come from the instance:
-        state shared by the class would hold whichever engine was built last, sending one config's
-        requests to another config's endpoint.
+        Engines are reused across requests, so the endpoint has to be stored on each instance. It used
+        to be stored on the class, where whichever engine was built last overwrote it for all of them.
         """
         if self.api_host is None:
             raise ValueError(f"No API host resolved for model {self.model}")

@@ -128,8 +128,8 @@ def create_rails_engine(config: RailsConfig) -> RailsEngine:
         logger.warning("IORails is enabled but this config stays on LLMRails: %s", reason)
         return LLMRails(config)
 
-    # The engine is shared across requests, so the main model gets each request's headers per call;
-    # both shims must be in place before the engine serves its first request.
+    # The engine is shared across requests, so the main model gets request headers per call (see
+    # iorails_headers). Both hooks need to be in place before the engine handles its first request.
     install_main_model_header_merge()
     # IORails starts its HTTP clients lazily on the first request, so nothing to await here.
     engine = Guardrails(_with_caller_main_model_key(config), require_iorails=True)

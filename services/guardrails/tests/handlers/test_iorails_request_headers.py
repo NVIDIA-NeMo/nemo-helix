@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A cached IORails engine sends each request's headers to its main model, and only to it.
+"""Check that a cached IORails engine sends request headers to its main model, and only to it.
 
-Request headers are not built into engines (one per request would rebuild the engine every time),
-so the IORails main model must get them per call, as the LLMRails main model does. These run a
-real IORails engine against a fake model server and read the headers each model received.
+Request headers aren't built into engines, so the IORails main model has to get them on each call.
+These tests run a real IORails engine against a fake model server and check the headers each model
+received.
 """
 
 import asyncio
@@ -37,7 +37,7 @@ def _chat_response(content: str) -> dict:
 
 @pytest.fixture
 def model_server(httpserver: HTTPServer) -> HTTPServer:
-    """Serves the main model and the safety judge. Every input is safe and every self-check passes."""
+    """Fake main model and safety judge. Everything is safe and every self-check passes."""
 
     def handler(request: Request) -> Response:
         body = request.get_json()
@@ -97,7 +97,7 @@ def content_safety_config(model_server: HTTPServer) -> RailsConfig:
 
 @pytest.fixture
 def self_check_config(model_server: HTTPServer) -> RailsConfig:
-    """Self-check rails ask the main model to judge the input, so a ``/checks`` call reaches it."""
+    """Self-check rails use the main model, so a ``/checks`` call reaches it."""
     return RailsConfig.from_content(
         config={
             "models": _models(model_server.url_for("/v1")),
@@ -114,7 +114,7 @@ def _iorails(monkeypatch: pytest.MonkeyPatch):
 
 
 def _received(server: HTTPServer, model: str) -> list[dict[str, str]]:
-    """Headers of each call ``model`` received, with lower-case names."""
+    """Headers from each call ``model`` received, with lower-case names."""
     return [
         {name.lower(): value for name, value in request.headers.items()}
         for request, _ in server.log
@@ -123,7 +123,7 @@ def _received(server: HTTPServer, model: str) -> list[dict[str, str]]:
 
 
 def _in_request(headers: dict[str, str]) -> None:
-    """Stand in for the handler: the request's headers merged over the main model's configured ones."""
+    """Set the request headers the way the handler does before running the rails."""
     set_request_default_headers_into_context(headers)
 
 
@@ -171,7 +171,7 @@ async def test_checks_send_request_headers_to_a_self_check_on_the_main_model(
 async def test_concurrent_requests_each_send_only_their_own_headers(
     model_server: HTTPServer, content_safety_config: RailsConfig
 ) -> None:
-    """Non-streaming work runs on IORails' shared queue workers; headers must not cross requests."""
+    """IORails runs non-streaming work on shared queue workers. Headers must not leak between requests."""
     engine = create_rails_engine(content_safety_config)
     tenants = [f"tenant-{i}" for i in range(6)]
 

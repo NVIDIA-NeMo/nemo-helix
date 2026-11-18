@@ -67,7 +67,6 @@ class ConfigRegistry:
         # for this event to finish, then access the cache, rather than directly querying the database for the config.
         self._cache_loading_events: Dict[str, asyncio.Event] = {}
 
-        # Debug, not info: the API builds one registry per request, so this would log on every call.
         logger.debug(f"ConfigRegistry initialized with TTL {ttl} seconds")
 
     async def register(self, config: RailsConfig, config_ids: Union[str, List[str]]):
@@ -259,11 +258,11 @@ class ConfigRegistry:
         return rails_config
 
     async def fetch_entities(self, config_ids: List[str]) -> Dict[str, GuardrailConfig]:
-        """Fetch the stored configs with this registry's (request-scoped) entity client.
+        """Fetch the stored configs using this request's entity client.
 
-        Reading as the caller is what enforces their access to each config, so this deliberately
-        bypasses the cache. The result also carries each config's identity and version, which tells
-        a caller whether something built from an earlier read is still current.
+        This always goes to the entity store and skips the cache, because fetching as the caller is
+        how we check they can read each config. The returned entities also carry the id and version
+        that decide whether a cached engine is still current.
         """
         if not self.entities_client:
             raise ValueError("No entities client available")

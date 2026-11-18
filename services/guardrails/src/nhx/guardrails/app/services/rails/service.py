@@ -36,14 +36,14 @@ class RailsService:
         engine = model.engine or "nim"
         model_name = model.model or "main"
 
-        # Read the stored configs on every request, as the caller: this is the caller's access check,
-        # and a shared cached engine must never be handed to someone who cannot read its config. It
-        # is one entity lookup per config, far cheaper than building an engine.
+        # Fetch the configs on every request, as the caller. This is the access check: a cached engine
+        # must never go to someone who can't read its config. It's one entity lookup per config, which
+        # is much cheaper than building an engine.
         entities = await self._config_registry.fetch_entities(config_ids)
         config_versions = tuple((entities[cid].id, entities[cid].db_version) for cid in config_ids)
 
-        # Reuse the engine only when it was built from exactly these config versions. Comparing
-        # versions, not timestamps, also catches an update made through another replica.
+        # Only reuse the engine if it was built from these exact config versions. Comparing versions
+        # instead of timestamps also picks up updates made on other replicas.
         if (
             cached_rails_entry := self._rails_registry.get_cache_entry(
                 config_ids, engine, model_name, req_headers_cache_key
