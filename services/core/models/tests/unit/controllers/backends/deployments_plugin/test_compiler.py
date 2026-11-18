@@ -16,7 +16,12 @@ from nemo_helix_plugin.models.types import K8sNIMOperatorConfig, ToolCallConfig
 from nhx.common.config import Runtime
 from nhx.core.models.app import ModelWeightsType
 from nhx.core.models.controllers.backends.common import DeploymentConfigView
-from nhx.core.models.controllers.backends.deployments_plugin.compiler import _busybox_image, compile_model_deployment
+from nhx.core.models.controllers.backends.deployments_plugin.compiler import (
+    _REMOTE_LOCAL_DIR_FALLBACK,
+    _busybox_image,
+    _weight_puller_script,
+    compile_model_deployment,
+)
 from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
 from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import (
     compile_nim_server_env,
@@ -155,9 +160,49 @@ def test_vllm_server_command_image_args_and_gpu() -> None:
     # HF cache bookkeeping must land on the mounted PVC, not ephemeral container
     # storage, so large checkpoints don't overflow $HOME/.cache with ENOSPC.
     assert puller_env["HF_HOME"] == MODEL_STORE_PATH
-    assert puller.command == ["hf"]
-    assert puller.args == ["download", "org/model", "--local-dir", "/model-store"]
+    assert puller.command[:2] == ["sh", "-c"]
+    assert "hf download org/model --local-dir /model-store" in puller.command[2]
+    assert _REMOTE_LOCAL_DIR_FALLBACK in puller.command[2]
+    assert puller.args == []
     assert "nvidia.com/gpu" not in puller.resources.limits
+
+
+def test_weight_puller_script_fails_when_snapshot_download_keeps_local_dir(tmp_path: Path) -> None:
+    """A 401 that huggingface_hub turns into a local-dir return must fail the puller."""
+    result = _run_puller_script(
+        tmp_path,
+        _weight_puller_script("org/model", None),
+        f"#!/bin/sh\necho {_REMOTE_LOCAL_DIR_FALLBACK} >&2\nexit 0\n",
+    )
+    assert result.returncode == 1
+    assert b"remote repository could not be accessed" in result.stderr
+
+
+def test_weight_puller_script_preserves_hf_exit_code(tmp_path: Path) -> None:
+    ok = _run_puller_script(
+        tmp_path,
+        _weight_puller_script("org/model", "main"),
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >&2\necho download-ok >&2\nexit 0\n",
+    )
+    assert ok.returncode == 0
+    assert b"download-ok" in ok.stderr
+    assert b"--revision" in ok.stderr and b"main" in ok.stderr
+
+    failed = _run_puller_script(tmp_path, _weight_puller_script("org/model", None), "#!/bin/sh\nexit 7\n")
+    assert failed.returncode == 7
+
+
+def _run_puller_script(bin_dir: Path, script: str, hf_body: str) -> subprocess.CompletedProcess[bytes]:
+    hf = bin_dir / "hf"
+    hf.write_text(hf_body)
+    hf.chmod(0o755)
+    return subprocess.run(
+        ["sh", "-c", script],
+        cwd=bin_dir,
+        env={"PATH": f"{bin_dir}:/bin:/usr/bin", "TMPDIR": str(bin_dir)},
+        capture_output=True,
+        check=False,
+    )
 
 
 def test_nim_defaults_to_the_model_free_nim_image() -> None:
