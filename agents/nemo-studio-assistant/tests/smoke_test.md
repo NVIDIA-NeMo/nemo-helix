@@ -26,15 +26,19 @@ approval gating for mutations.
 ## One-command local deploy
 
 With the platform running (`nemo services run`, see `SETUP.md`), Docker up, and
-`NEMO_DEFAULT_MODEL` set to a model entity id from `nemo models list`:
+`NEMO_DEFAULT_MODEL` set to a model entity id from `nemo models list`, run the
+script inside the repo toolchain so it gets the pinned uv:
 
 ```bash
-agents/nemo-studio-assistant/scripts/deploy-local.sh
+flox activate -- agents/nemo-studio-assistant/scripts/deploy-local.sh
 ```
 
-The script snapshots `docs/` for `search_docs`, replaces any previous
-registration and deployment, runs the steps below, and finishes with a one-line
-invocation. Run the steps by hand when one fails and you need its output.
+The script snapshots `docs/` for `search_docs` and builds a nemo-helix wheel
+from the checkout unless `NEMO_AGENTS_WHEEL` is set. It then packages the image
+before replacing any previous registration and deployment, runs the steps
+below, and finishes with a one-line invocation. Run the steps by hand when one
+fails and you need its output. For the end-to-end walk-through, see
+[user_journey.md](user_journey.md).
 
 ## Register, package, and deploy
 
