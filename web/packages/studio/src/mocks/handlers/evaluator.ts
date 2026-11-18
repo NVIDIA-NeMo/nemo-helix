@@ -180,7 +180,8 @@ const findTask = (workspace: unknown, name: unknown) =>
 
 /** The revision a tag or content digest points at. */
 const resolveRevision = (task: Task, key: string) =>
-  task.tags?.[key] ?? revisionsOf(task).find(({ content_hash }) => content_hash === key)?.revision;
+  (task.tags && Object.hasOwn(task.tags, key) ? task.tags[key] : undefined) ??
+  revisionsOf(task).find(({ content_hash }) => content_hash === key)?.revision;
 
 /** Pins a member ref to a content hash (latest when unversioned), as the server does on write;
  *  undefined when the task or the requested revision doesn't exist. */
