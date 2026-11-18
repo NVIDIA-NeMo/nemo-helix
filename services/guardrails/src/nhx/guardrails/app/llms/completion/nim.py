@@ -20,7 +20,6 @@ from nhx.guardrails.app.llms.completion.base import FlexibleLLMBase
 from nhx.guardrails.app.llms.utils import (
     determine_main_model_base_url,
     get_main_model_api_key,
-    get_provider_from_context,
 )
 from nhx.guardrails.app.utils.context_utils import (
     get_main_model_from_context,
@@ -70,17 +69,13 @@ class NIM(FlexibleLLMBase, BaseRequest):
             # Determine Base URL for model
             inference_base_url = determine_main_model_base_url(values)
             values["api_host"] = inference_base_url
-            cls._endpoint_url = inference_base_url
-
-            # Determine provider for model
-            cls._endpoint_provider = get_provider_from_context()
 
             # Determine API key for model
             api_key = get_main_model_api_key()
             if api_key:
                 values["api_key"] = api_key
 
-            log.info(f"Setting base URL to {cls._endpoint_url} for model {main_model.model if main_model else ''}")
+            log.info(f"Setting base URL to {inference_base_url} for model {main_model.model if main_model else ''}")
 
         except Exception as e:
             log.error(f"Failed to determine base URL and API key for {main_model.model if main_model else ''}: {e}")
@@ -124,9 +119,15 @@ class NIM(FlexibleLLMBase, BaseRequest):
         return f"{api_host}/completions"
 
     def _get_api_host(self) -> str:
-        if self._endpoint_url is None:
-            return self.api_host
-        return self._endpoint_url
+        """This model's own endpoint, resolved from its config when the engine was built.
+
+        Engines are cached and reused across requests, so the endpoint must come from the instance:
+        state shared by the class would hold whichever engine was built last, sending one config's
+        requests to another config's endpoint.
+        """
+        if self.api_host is None:
+            raise ValueError(f"No API host resolved for model {self.model}")
+        return self.api_host
 
     def _append_v1_if_not_present(self, api_host: str) -> str:
         return api_host if api_host.endswith("/v1") else f"{api_host}/v1"

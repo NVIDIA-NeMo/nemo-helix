@@ -18,6 +18,10 @@ from nemoguardrails import Guardrails, RailsConfig
 from nemoguardrails.guardrails.iorails import IORails
 from nemoguardrails.rails.llm.llmrails import LLMRails
 from nhx.guardrails.app.constants import NIM_LLM
+from nhx.guardrails.app.services.rails.iorails_headers import (
+    carry_request_headers_through_queue,
+    install_main_model_header_merge,
+)
 from nhx.guardrails.app.utils.context_utils import get_x_model_auth_token_from_context
 
 logger = logging.getLogger(__name__)
@@ -124,5 +128,10 @@ def create_rails_engine(config: RailsConfig) -> RailsEngine:
         logger.warning("IORails is enabled but this config stays on LLMRails: %s", reason)
         return LLMRails(config)
 
+    # The engine is shared across requests, so the main model gets each request's headers per call;
+    # both shims must be in place before the engine serves its first request.
+    install_main_model_header_merge()
     # IORails starts its HTTP clients lazily on the first request, so nothing to await here.
-    return Guardrails(_with_caller_main_model_key(config), require_iorails=True)
+    engine = Guardrails(_with_caller_main_model_key(config), require_iorails=True)
+    carry_request_headers_through_queue(engine)
+    return engine
