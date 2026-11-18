@@ -63,6 +63,7 @@ STUDIO_CONTEXT_START = "<nemo_studio_context>"
 STUDIO_CONTEXT_END = "</nemo_studio_context>"
 STUDIO_CONTEXT_USER_REQUEST_PREFIX = "User request:"
 STUDIO_CONTEXT_PROMPT_HEADER = "You are NeMo Assistant, running inside NeMo Studio."
+EMPTY_ANSWER_MESSAGE = "NeMo Assistant finished without an answer. Try asking again."
 STUDIO_MESSAGE_SUMMARY_START = "<<<NEMO_STUDIO_MESSAGE_SUMMARY_V1>>>"
 STUDIO_MESSAGE_SUMMARY_END = "<<<END_NEMO_STUDIO_MESSAGE_SUMMARY_V1>>>"
 WORKSPACE_NAME_RE = re.compile(NAME_PATTERN)
@@ -1224,6 +1225,10 @@ async def _stream_agent_turn(
                 yield rendered
 
         assistant_text, model = await invocation
+        if not assistant_text.strip():
+            logger.warning("NeMo Assistant returned an empty answer for session %s", session_id)
+            yield _sse(json.dumps({"message": EMPTY_ANSWER_MESSAGE}), event="error")
+            return
         await _persist_conversation_turn(entity_store, conversation, message, assistant_text, model)
         yield _assistant_text_event(assistant_text, model)
         yield _sse("", event="done")
