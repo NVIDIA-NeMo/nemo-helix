@@ -43,6 +43,7 @@ The agent guides by default and acts on request. "What is this", "how do I", and
 |---|---|---|---|---|
 | NeMo Helix Python SDK (`nemo_api`) over packaged MCP | Access supported platform resources and actions through dot-separated SDK resource paths | Uses the deployment's platform base URL and active workspace; mutations require a valid Studio session and approval | Read and write operations depend on the requested SDK action | Workspace-scoped calls fail when no workspace is supplied; unavailable plugin resources or invalid SDK paths must be reported without repeated retries |
 | Platform status helper (`check_status`) | Check evaluation, customization, audit, and Data Designer jobs | Same platform access as the SDK client | Read-only | A service may expose different status subresources; report when no supported status method exists |
+| Documentation search (`search_docs`) | Keyword search over the NeMo Helix docs snapshot bundled into the image by `scripts/snapshot-docs.sh` | None | Read-only | The snapshot is as fresh as the last package build; reports `unavailable` when no snapshot is bundled |
 | Packaged agent skills | Supply task-specific playbooks when spec-compliant skills are included in the image | No separate credentials | Depends on the selected playbook and SDK action | The agent must log which skills are loaded; an empty or malformed skills directory means no playbooks are available |
 
 ## Harness

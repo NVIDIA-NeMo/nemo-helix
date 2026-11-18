@@ -293,6 +293,7 @@ def test_mcp_server_exposes_expected_tools() -> None:
         "job_progress",
         "studio_link",
         "ask_user_question",
+        "search_docs",
     }
     deploy_tool = next(tool for tool in tools if tool.name == "deploy_guardrail")
     blocked_schema = deploy_tool.parameters["properties"]["blocked_message"]

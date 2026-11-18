@@ -4,6 +4,7 @@
 """Fabric-native MCP boundary for NeMo Studio Assistant tools."""
 
 from fastmcp import FastMCP
+from nemo_studio_assistant.docs_search import search_docs
 from nemo_studio_assistant.register import (
     ask_user_question,
     check_status,
@@ -28,6 +29,7 @@ TOOLS = (
     job_progress,
     studio_link,
     ask_user_question,
+    search_docs,
 )
 
 
