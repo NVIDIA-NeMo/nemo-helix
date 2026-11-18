@@ -24,6 +24,12 @@ from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
 
 logger = logging.getLogger(__name__)
 
+# The principal the task authenticates as, ``service:garak``. It has to be the name the plugin's
+# service is registered under: the authorization service only accepts service principals it knows,
+# and answers an unknown one (the pre-rename ``service:auditor`` was one) with an error that
+# callers see as ``502 Authorization service error``.
+TASK_SERVICE_NAME = "garak"
+
 
 def _shutdown_handler(signum: int, frame: FrameType | None) -> None:
     logger.warning("Received shutdown signal (%d). Exiting.", signum)
@@ -34,9 +40,8 @@ def main() -> int:
     configure_task_logging()
     signal.signal(signal.SIGTERM, _shutdown_handler)
     try:
-        # The task authenticates as the legacy ``service:auditor`` principal until auth migrates.
-        client = get_task_nemo_client("auditor")
-        async_client = get_async_task_nemo_client("auditor")
+        client = get_task_nemo_client(TASK_SERVICE_NAME)
+        async_client = get_async_task_nemo_client(TASK_SERVICE_NAME)
         ctx = build_ctx_from_env(client)
         config = read_step_config()
         job = AuditJob()
