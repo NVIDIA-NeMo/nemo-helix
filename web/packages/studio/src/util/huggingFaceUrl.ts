@@ -10,12 +10,16 @@ const REPO_PATH_PREFIX: Partial<Record<HuggingfaceStorageConfigRepoType, string>
   space: 'spaces/',
 };
 
-/** The huggingface.co web page for a repo: datasets and spaces live under their own path prefix. */
+/**
+ * The web page for a repo on the Hugging Face host `endpoint` (default: huggingface.co): datasets
+ * and spaces live under their own path prefix. A blank endpoint falls back to the default, and
+ * trailing slashes on it are ignored.
+ */
 export function getHuggingFaceRepoUrl(
   repoType: HuggingfaceStorageConfigRepoType | undefined,
   repoId: string,
   endpoint?: string
 ): string {
-  void endpoint; // not honoured yet
-  return `${HF_DEFAULT_ENDPOINT}/${(repoType && REPO_PATH_PREFIX[repoType]) ?? ''}${repoId}`;
+  const origin = endpoint?.trim().replace(/\/+$/, '') || HF_DEFAULT_ENDPOINT;
+  return `${origin}/${(repoType && REPO_PATH_PREFIX[repoType]) ?? ''}${repoId}`;
 }

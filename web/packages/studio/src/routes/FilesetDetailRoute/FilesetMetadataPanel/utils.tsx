@@ -57,7 +57,7 @@ const getSourceRows = (fileset: FilesetOutput): MetadataRow[] => {
       value:
         storage.type === 'huggingface' ? (
           <Anchor
-            href={getHuggingFaceRepoUrl(storage.repo_type, source.path)}
+            href={getHuggingFaceRepoUrl(storage.repo_type, source.path, storage.endpoint)}
             target="_blank"
             rel="noopener noreferrer"
           >
