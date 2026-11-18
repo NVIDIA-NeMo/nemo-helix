@@ -82,6 +82,8 @@ The plugin publishes one session per scored model output, with the prompt garak 
 
 garak does not score every output: a detector returns no score for an empty response, for example. Those outputs are left out, as they are in garak's own pass rate.
 
+garak records an audit's start time without a time zone. The published sessions use that time as UTC, so publishing the same report again gives the same sessions from any machine. If the audit ran on a machine that isn't set to UTC, the time shown in Experiments is that machine's local clock time.
+
 The audit result has a `publication` key with the `status` (`"completed"` or `"error"`), the `evaluation_id`, the `session_count` published, the `unscored_count` left out and the `error`, if any.
 
 ## Publish a Saved Report Again
