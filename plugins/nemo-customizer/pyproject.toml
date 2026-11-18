@@ -22,6 +22,9 @@ customization = "nemo_customizer.cli:CustomizationCLI"
 [project.entry-points."nemo.sdk"]
 customization = "nemo_customizer.sdk.resources:customization_sdk_resources"
 
+[project.entry-points."nemo.jobs"]
+"customization.atif-convert" = "nemo_customizer.jobs.atif_convert:AtifConvertJob"
+
 [project.entry-points."nemo.skills"]
 customizer = "nemo_customizer.skills:get_skills_path"
 

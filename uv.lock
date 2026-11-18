@@ -35,6 +35,7 @@ members = [
     "nemo-customizer-plugin",
     "nemo-data-designer-plugin",
     "nemo-deployments-plugin",
+    "nemo-distillation-plugin",
     "nemo-evals-plugin",
     "nemo-garak-plugin",
     "nemo-guardrails-plugin",
@@ -4727,6 +4728,41 @@ dev = [
 ]
 
 [[package]]
+name = "nemo-distillation-plugin"
+version = "0.1.0"
+source = { editable = "plugins/nemo-distillation" }
+dependencies = [
+    { name = "nemo-customizer-plugin" },
+    { name = "nemo-helix-plugin" },
+    { name = "nhx-customization-common" },
+    { name = "pydantic" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
+    { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
+    { name = "nhx-customization-common", editable = "packages/nhx_customization_common" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "pytest", specifier = ">=8.3.4" },
+    { name = "pytest-asyncio", specifier = ">=0.25.3" },
+]
+
+[[package]]
 name = "nemo-evals-plugin"
 version = "0.0.0"
 source = { editable = "plugins/nemo-evals" }
@@ -7823,6 +7859,7 @@ agents-deepagents-e2e-services = [
     { name = "nemo-customizer-plugin" },
     { name = "nemo-data-designer-plugin", extra = ["retrieval-sdg"] },
     { name = "nemo-deployments-plugin", extra = ["docker", "k8s", "openshell"] },
+    { name = "nemo-distillation-plugin" },
     { name = "nemo-evals-plugin" },
     { name = "nemo-garak-plugin" },
     { name = "nemo-guardrails-plugin" },
@@ -7872,6 +7909,7 @@ core-services = [
     { name = "nemo-customizer-plugin" },
     { name = "nemo-data-designer-plugin", extra = ["retrieval-sdg"] },
     { name = "nemo-deployments-plugin", extra = ["docker", "k8s", "openshell"] },
+    { name = "nemo-distillation-plugin" },
     { name = "nemo-evals-plugin" },
     { name = "nemo-garak-plugin" },
     { name = "nemo-guardrails-plugin" },
@@ -7985,6 +8023,7 @@ enabled-plugins = [
     { name = "nemo-customizer-plugin" },
     { name = "nemo-data-designer-plugin", extra = ["retrieval-sdg"] },
     { name = "nemo-deployments-plugin", extra = ["docker", "k8s", "openshell"] },
+    { name = "nemo-distillation-plugin" },
     { name = "nemo-evals-plugin" },
     { name = "nemo-garak-plugin" },
     { name = "nemo-guardrails-plugin" },
@@ -8006,6 +8045,7 @@ functional-services = [
     { name = "nemo-customizer-plugin" },
     { name = "nemo-data-designer-plugin", extra = ["retrieval-sdg"] },
     { name = "nemo-deployments-plugin", extra = ["docker", "k8s", "openshell"] },
+    { name = "nemo-distillation-plugin" },
     { name = "nemo-evals-plugin" },
     { name = "nemo-garak-plugin" },
     { name = "nemo-guardrails-plugin" },
@@ -8114,6 +8154,7 @@ agents-deepagents-e2e-services = [
     { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },
     { name = "nemo-deployments-plugin", extras = ["docker", "k8s", "openshell"], editable = "plugins/nemo-deployments" },
+    { name = "nemo-distillation-plugin", editable = "plugins/nemo-distillation" },
     { name = "nemo-evals-plugin", editable = "plugins/nemo-evals" },
     { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
@@ -8161,6 +8202,7 @@ core-services = [
     { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },
     { name = "nemo-deployments-plugin", extras = ["docker", "k8s", "openshell"], editable = "plugins/nemo-deployments" },
+    { name = "nemo-distillation-plugin", editable = "plugins/nemo-distillation" },
     { name = "nemo-evals-plugin", editable = "plugins/nemo-evals" },
     { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
@@ -8278,6 +8320,7 @@ enabled-plugins = [
     { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },
     { name = "nemo-deployments-plugin", extras = ["docker", "k8s", "openshell"], editable = "plugins/nemo-deployments" },
+    { name = "nemo-distillation-plugin", editable = "plugins/nemo-distillation" },
     { name = "nemo-evals-plugin", editable = "plugins/nemo-evals" },
     { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
@@ -8299,6 +8342,7 @@ functional-services = [
     { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },
     { name = "nemo-deployments-plugin", extras = ["docker", "k8s", "openshell"], editable = "plugins/nemo-deployments" },
+    { name = "nemo-distillation-plugin", editable = "plugins/nemo-distillation" },
     { name = "nemo-evals-plugin", editable = "plugins/nemo-evals" },
     { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },

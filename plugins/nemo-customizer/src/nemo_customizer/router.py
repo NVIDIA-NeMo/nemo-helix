@@ -36,6 +36,21 @@ _JOB_TEMPLATE_ROUTER_SPEC = RouterSpec(
 )
 
 
+def atif_convert_router_spec() -> RouterSpec:
+    """Job routes for the stub ATIF convert CPU job. Built lazily so import stays light."""
+    from nemo_helix_plugin.jobs.routes import add_job_routes
+
+    from nemo_customizer.api.v2.templates import scope
+    from nemo_customizer.jobs.atif_convert import AtifConvertJob
+
+    return RouterSpec(
+        router=add_job_routes(AtifConvertJob, service_name="customization", authz=scope),
+        tag="Customization ATIF Convert",
+        description="Stub job that writes a synthetic training fileset into a workflow fileset.",
+        prefix="/v2/workspaces/{workspace}",
+    )
+
+
 def merge_router_dependencies(contributors: Mapping[str, object]) -> list[str]:
     """Union platform router deps with each contributor's ``dependencies``."""
     deps = set(_ROUTER_BASE_DEPENDENCIES)
@@ -78,6 +93,7 @@ def _assert_no_route_collisions(contributors: dict[str, CustomizationContributor
     # Map (method, full_path) -> contributor key
     seen: dict[tuple[str, str], str] = {}
     _record_router_spec_routes(seen, owner="customization job templates", specs=[_JOB_TEMPLATE_ROUTER_SPEC])
+    _record_router_spec_routes(seen, owner="customization atif-convert", specs=[atif_convert_router_spec()])
     for key, contributor in contributors.items():
         _record_router_spec_routes(seen, owner=key, specs=contributor.get_routers())
 
@@ -119,6 +135,7 @@ class CustomizationRouterService(NemoService):
                 prefix="/v2",
             ),
             _JOB_TEMPLATE_ROUTER_SPEC,
+            atif_convert_router_spec(),
         ]
 
         for key in sorted(self._contributors.keys()):
