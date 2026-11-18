@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from nhx.customization_common.image_size import image_size_bounds
 from nhx.customization_common.schemas.checkpoint import (
     CheckpointTraits,
     traits_from_step_model,
@@ -690,9 +691,17 @@ def compile_grpo_config(
             "limit_mm_per_prompt": {"image": max(max_images, 1)},
             "mm_processor_cache_gb": 0,
         }
-    if customizer_config.model.max_pixels is not None:
-        # Rollouts must see the same image budget the policy trains on (see tokenizer_kwargs below).
-        vllm_kwargs["mm_processor_kwargs"] = {"max_pixels": customizer_config.model.max_pixels}
+    image_size = image_size_bounds(
+        customizer_config.model.max_pixels,
+        customizer_config.model.image_longest_edge,
+        customizer_config.model.image_shortest_edge,
+    )
+    if image_size is not None:
+        # vLLM reads these names and writes them onto the image processor size.
+        vllm_kwargs["mm_processor_kwargs"] = {
+            "max_pixels": image_size["longest_edge"],
+            "min_pixels": image_size["shortest_edge"],
+        }
     if grpo_hp.vllm_kwargs:
         vllm_kwargs.update(grpo_hp.vllm_kwargs)
     if vllm_kwargs:
@@ -721,9 +730,9 @@ def compile_grpo_config(
     if hf_config_overrides:
         cfg["policy"]["hf_config_overrides"] = hf_config_overrides
 
-    if customizer_config.model.max_pixels is not None:
+    if image_size is not None:
         # The policy processor and the Gym actor both load through AutoProcessor with these kwargs.
-        cfg["policy"]["tokenizer"]["tokenizer_kwargs"] = {"max_pixels": customizer_config.model.max_pixels}
+        cfg["policy"]["tokenizer"]["tokenizer_kwargs"] = {"size": image_size}
 
     cfg["data"] = {
         "max_input_seq_length": customizer_config.model.max_seq_length,

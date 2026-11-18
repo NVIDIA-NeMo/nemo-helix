@@ -115,7 +115,15 @@ class ModelConfig(BaseModel):
     )
     max_pixels: int | None = Field(
         default=None,
-        description="Per-image pixel ceiling passed to the vision-language processor; None keeps its default",
+        description="Shorthand for image_longest_edge. None keeps the checkpoint ceiling.",
+    )
+    image_longest_edge: int | None = Field(
+        default=None,
+        description="Maximum pixels in a resized image. None keeps the checkpoint ceiling.",
+    )
+    image_shortest_edge: int | None = Field(
+        default=None,
+        description="Minimum pixels in a resized image. None keeps the checkpoint floor.",
     )
 
     # Model loading options

@@ -485,8 +485,9 @@ def _build_grpo_training_step_config(
         )
 
     recorded = traits or CheckpointTraits()
-    if t.max_pixels is not None and not recorded.has_vision_tower:
-        raise HelixJobCompilationError("max_pixels applies only to vision-language checkpoints.")
+    image_size = t.image_size
+    if (t.max_pixels is not None or image_size is not None) and not recorded.has_vision_tower:
+        raise HelixJobCompilationError("max_pixels and image_size apply only to vision-language checkpoints.")
     return TrainingStepConfig(
         backend=TrainingBackend.NEMO_RL,
         model=ModelConfig(
@@ -494,6 +495,8 @@ def _build_grpo_training_step_config(
             name=job_spec.model,
             max_seq_length=t.max_seq_length,
             max_pixels=t.max_pixels,
+            image_longest_edge=None if image_size is None else image_size.longest_edge,
+            image_shortest_edge=None if image_size is None else image_size.shortest_edge,
             trust_remote_code=trust_remote_code,
             has_vision_tower=recorded.has_vision_tower,
             has_audio_tower=recorded.has_audio_tower,
