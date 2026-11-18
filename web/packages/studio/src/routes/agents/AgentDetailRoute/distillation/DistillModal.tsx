@@ -67,6 +67,21 @@ export const DistillModal: FC<DistillModalProps> = ({ open, onClose, workspace, 
   const submit = () => {
     if (!studentModel) return;
     const name = `distill-${agentName}-${Date.now().toString(36)}`;
+    // TODO(api): replace the mock with the real workflow create call (proposed shape).
+    // const { mutate: createDistillation } = useAgentDistillationsCreate();
+    // createDistillation(
+    //   {
+    //     workspace,
+    //     data: {
+    //       name,
+    //       agent: agentName,
+    //       evaluation_runs: [...selectedRuns],
+    //       student_model: studentModel,
+    //       held_out_fraction: 0.2,
+    //     },
+    //   },
+    //   { onSuccess: (job) => navigate(getAgentDistillationDetailRoute(workspace, job.name)) }
+    // );
     startMockDistillation({
       name,
       agentName,

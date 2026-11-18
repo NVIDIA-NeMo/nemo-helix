@@ -15,6 +15,9 @@ export interface MockStudentModel {
   params: string;
 }
 
+// TODO(api): list the agent's task evaluations that captured trajectories (proposed shape).
+// const { data } = useAgentEvaluateListJobs(workspace, { agent: agentName, has_trajectories: true });
+// Map each job to { name, createdAt, taskCount, passedCount } from its agent-eval-results record.
 export const MOCK_TRACE_EVAL_RUNS: MockTraceEvalRun[] = [
   {
     name: 'email-triage-fabric-eval-3',
@@ -46,6 +49,7 @@ export const MOCK_TRACE_EVAL_RUNS: MockTraceEvalRun[] = [
   },
 ];
 
+// TODO(api): swap for the models search the judge picker uses (useModelSearch, chat-capable only).
 export const MOCK_STUDENT_MODELS: MockStudentModel[] = [
   {
     value: 'default/nemotron-35-lightning-30b-a3b-bf16',

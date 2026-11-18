@@ -170,6 +170,15 @@ export const buildMockWorkflow = (
  * the distillation was started, and falls back to a fresh run when the page is opened directly.
  */
 export const useMockDistillationWorkflow = (name: string, agentName?: string): MockWorkflow => {
+  // TODO(api): poll the workflow entity until it reaches a terminal status (proposed shape).
+  // const { data: workflow } = useAgentDistillationsGet(workspace, name, {
+  //   query: {
+  //     refetchInterval: (query) =>
+  //       TERMINAL_STATUSES.has(query.state.data?.status) ? false : JOB_POLLING_INTERVAL_MS,
+  //   },
+  // });
+  // Each stage maps to a job reference: workflow.stages[].job_ref -> { kind, name }, with progress
+  // and metrics read from that job's own status endpoint.
   const [now, setNow] = useState(() => Date.now());
 
   if (!requests.has(name)) {
