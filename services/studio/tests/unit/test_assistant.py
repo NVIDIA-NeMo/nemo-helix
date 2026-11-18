@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 from nhx.common.entities.client import EntityConflictError, EntityNotFoundError
 from nhx.common.service.dependencies import get_entity_client
-from nhx.studio import assistant, assistant_artifacts, studio_links
+from nhx.studio import assistant, assistant_artifacts, assistant_topic_gate, studio_links
 from nhx.studio.config import StudioConfig
 from nhx.studio.entities import AssistantConversation, AssistantMessage, LegacyAssistantConversation
 from nhx.studio.service import StudioService
@@ -88,6 +88,11 @@ class FakeEntityStore:
             del self.entities[(workspace or "default", name)]
         except KeyError as exc:
             raise EntityNotFoundError(name) from exc
+
+
+@pytest.fixture(autouse=True)
+def disable_topic_gate(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv(assistant_topic_gate.TOPIC_GATE_MODEL_ENV, "off")
 
 
 @pytest.fixture(autouse=True)
@@ -2091,6 +2096,53 @@ async def test_stream_assistant_flushes_tool_events_before_final_response(monkey
     deployment_run_id = contextual_message.split("deployment_run_id='", 1)[1].split("'", 1)[0]
     assert str(uuid.UUID(deployment_run_id)) == deployment_run_id
     assert [message.content for message in conversation.messages] == ["hello", "final answer"]
+
+
+@pytest.mark.asyncio
+async def test_stream_assistant_refuses_off_topic_message_without_invoking_agent(monkeypatch: pytest.MonkeyPatch):
+    session_id = str(uuid.uuid4())
+    entity_store = FakeEntityStore()
+    conversation = AssistantConversation(
+        name=f"assistant-{session_id}",
+        workspace="default",
+        session_id=session_id,
+        owner_id="local-user",
+    )
+    await entity_store.create(conversation)
+    checked: list[tuple[str, str]] = []
+
+    async def off_topic(message: str, *, base_url: str, workspace: str, headers: dict[str, str]) -> bool:
+        checked.append((message, workspace))
+        return True
+
+    async def fail_invoke(*_args: object, **_kwargs: object) -> tuple[str, str]:
+        raise AssertionError("an off-topic message must not reach the agent")
+
+    monkeypatch.setattr(assistant_topic_gate, "is_off_topic", off_topic)
+    monkeypatch.setattr(assistant, "_invoke_assistant", fail_invoke)
+
+    frames = [
+        frame
+        async for frame in assistant._stream_assistant(
+            session_id,
+            "How do I bake a cheesecake?",
+            "https://agent.test/x",
+            {},
+            "sys prompt",
+            conversation,
+            entity_store,
+        )
+    ]
+
+    body = "".join(frames)
+    assert checked == [("How do I bake a cheesecake?", "default")]
+    assert json.dumps(assistant_topic_gate.REFUSAL_TEXT)[1:-1] in body
+    assert "event: done" in body
+    assert [message.content for message in conversation.messages] == [
+        "How do I bake a cheesecake?",
+        assistant_topic_gate.REFUSAL_TEXT,
+    ]
+    assert session_id not in assistant._session_streams
 
 
 @pytest.mark.asyncio
