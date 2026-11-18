@@ -102,6 +102,14 @@ async def evaluate_policy(
 
     except ServicePrincipalNotAllowedError as e:
         logger.warning("Service principal resolution failed closed: %s", e)
+        if entrypoint == "allow":
+            return AuthzResponse(
+                result={
+                    "allowed": False,
+                    "reason": "service_principal_not_allowed",
+                    "headers": {"X-NHX-Authorized": "false"},
+                }
+            )
         raise HTTPException(status_code=403, detail=str(e)) from e
     except AccountResolutionError as e:
         logger.warning("Account resolution failed: %s", e)
