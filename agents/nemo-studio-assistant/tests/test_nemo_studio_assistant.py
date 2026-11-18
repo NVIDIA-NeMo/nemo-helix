@@ -1452,6 +1452,27 @@ def test_ask_user_question_accepts_structured_model_input(monkeypatch: pytest.Mo
     assert callback_input == {"tool_name": "AskUserQuestion", "input": {"questions": questions}}
 
 
+def test_ask_user_question_wraps_string_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    callback_input: dict[str, object] = {}
+
+    def callback(_session_id: str, _tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
+        callback_input.update(arguments)
+        return {"behavior": "allow", "updatedInput": {}}
+
+    monkeypatch.setattr(register, "_call_studio_tool", callback)
+
+    register.ask_user_question(
+        "90a877d5-19f6-49a8-bf09-d0020ae0833a",
+        [{"question": "Continue?", "options": ["Yes", {"label": "No", "description": "Stop here"}]}],
+    )
+
+    assert callback_input["input"] == {
+        "questions": [
+            {"question": "Continue?", "options": [{"label": "Yes"}, {"label": "No", "description": "Stop here"}]}
+        ]
+    }
+
+
 def test_nemo_api_reports_activity_to_studio(monkeypatch: pytest.MonkeyPatch) -> None:
     session_id = "90a877d5-19f6-49a8-bf09-d0020ae0833a"
     calls: list[tuple[str, dict[str, object], dict[str, object]]] = []
