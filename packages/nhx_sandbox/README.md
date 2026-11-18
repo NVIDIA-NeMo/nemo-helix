@@ -9,10 +9,13 @@ Shared sandbox semantics for NeMo Helix components that create sandboxes.
 
 ## The backend protocol
 
-One interface for every sandbox backend, so Harbor environments and Gym brokers can run on any of them. Nothing implements it yet. A local test backend and a conformance suite come next, then OpenSandbox and OpenShell, and the interface also fits a managed service such as Astra Sandbox Runtime.
+One interface for every sandbox backend, so Harbor environments and Gym brokers can run on any of them. So far only the local test backend implements it. OpenSandbox and OpenShell come next, and the interface also fits a managed service such as Astra Sandbox Runtime.
 
 - `nhx_sandbox.core.backend`: `SandboxBackend` (check, create, get, list, delete, exec, files and directories), plus `EgressControl` for changing a running sandbox's egress. Callers describe what they want in a `SandboxSpec`, and each backend declares what it supports, including how strongly it isolates workloads, in `Capabilities`. `check` reports why a task won't fit before anything is created, and backends raise `UnsupportedOperation` rather than quietly doing less. A task that accepts the platform's own network rules says so with `PlatformEgress`.
 - `nhx_sandbox.core.errors`: the errors backends raise in place of their SDKs' own, and how a runner should treat each one: retry the call (`TransientBackendError`), retry the trial (`SandboxLost`, `ExecInterrupted`) or refuse the task (`UnsupportedOperation`).
+- `nhx_sandbox.core.archive`: the gzipped tar format directories move in, with safe extraction.
+- `nhx_sandbox.conformance`: `run_suite` checks a live backend against the interface's promises, including that egress is denied by default. It runs against the local backend in CI.
+- `nhx_sandbox.backends.local:LocalProcessBackend`: sandboxes as local temporary directories. It isolates nothing and exists for tests.
 
 ## Egress and OpenSandbox
 
