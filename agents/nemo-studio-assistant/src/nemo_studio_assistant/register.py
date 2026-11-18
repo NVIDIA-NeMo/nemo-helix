@@ -1101,14 +1101,6 @@ def nemo_api(
                 return _record_guardrail_check_failure(error_key, message)
             return f"Clarification required: {message}"
         normalized_action = action.strip().lower()
-        _report_activity(
-            studio_session_id,
-            "nemo_api",
-            f"{normalized_action} {resource.strip()}",
-            workspace=workspace,
-            resource=resource.strip(),
-            action=normalized_action,
-        )
         client = _get_client(workspace)
         api_resource = _resolve_resource(resource)
         method_name = _resolve_api_method(api_resource, resource, normalized_action)
@@ -1143,6 +1135,14 @@ def nemo_api(
             method_name = _resolve_api_method(api_resource, resource, normalized_action)
             if is_guardrail_check:
                 _preflight_guardrail_model(client, workspace, parsed_params, error_key)
+        _report_activity(
+            studio_session_id,
+            "nemo_api",
+            f"{normalized_action} {resource.strip()}",
+            workspace=workspace,
+            resource=resource.strip(),
+            action=normalized_action,
+        )
         result = _call_api_method(client, api_resource, method_name, workspace, parsed_params)
         if is_guardrail_check:
             serialized_result = _serialize(result)

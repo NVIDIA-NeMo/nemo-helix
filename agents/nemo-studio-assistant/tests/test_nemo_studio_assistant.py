@@ -1475,6 +1475,29 @@ def test_nemo_api_reports_activity_to_studio(monkeypatch: pytest.MonkeyPatch) ->
     ]
 
 
+@pytest.mark.parametrize(
+    ("resource", "action"),
+    [("workspaces", "create"), ("workspaces", "explode"), ("not-a-resource", "list")],
+)
+def test_nemo_api_reports_no_activity_for_denied_or_invalid_calls(
+    monkeypatch: pytest.MonkeyPatch, resource: str, action: str
+) -> None:
+    activity: list[dict[str, object]] = []
+
+    def record(_session: str, tool_name: str, arguments: dict[str, object], **_kwargs: object) -> dict[str, str]:
+        if tool_name == "assistant_activity":
+            activity.append(arguments)
+        return {"behavior": "deny", "message": "declined"}
+
+    platform = _ok_helix("GET", _WORKSPACES, {"data": [_workspace("default")], "pagination": _PAGINATION})
+    _install_client(monkeypatch, platform.client())
+    monkeypatch.setattr(register, "_call_studio_tool", record)
+
+    register.nemo_api(resource, action, studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a", workspace="default")
+
+    assert activity == []
+
+
 def test_activity_failure_does_not_change_tool_result(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(*_args: object, **_kwargs: object) -> dict[str, str]:
         raise RuntimeError("Studio is down")
