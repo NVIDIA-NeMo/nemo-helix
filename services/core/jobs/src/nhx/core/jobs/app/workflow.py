@@ -26,6 +26,16 @@ WORKFLOW_REQUESTS = "_workflow_requests"
 WORKFLOW_CONTROL = "_workflow_control"
 
 
+def _has_eligible_pending(attempt: HelixJobAttempt, state: WorkflowState) -> bool:
+    return any(
+        node.last_poll_error is None
+        and node.requested_run_revision != node.last_attempted_revision
+        and all(state.nodes[parent].freshness == "clean" for parent in spec.depends_on or [])
+        for spec in attempt.platform_spec.steps
+        for node in [state.nodes[spec.name]]
+    )
+
+
 def workflow_view(attempt: HelixJobAttempt) -> WorkflowView | None:
     config = attempt.platform_spec.workflow
     state = attempt.workflow_state
@@ -35,7 +45,11 @@ def workflow_view(attempt: HelixJobAttempt) -> WorkflowView | None:
         mode=config.mode,
         pass_number=state.pass_number,
         control=state.control,
-        waiting_for_changes=not state.pass_open and state.control == "running",
+        waiting_for_changes=config.mode == "continuous"
+        and not attempt.status.is_terminal()
+        and not state.pass_open
+        and state.control == "running"
+        and not _has_eligible_pending(attempt, state),
         degraded=any(node.last_poll_error or node.last_outcome == "error" for node in state.nodes.values()),
         nodes=[
             WorkflowNodeView(
@@ -187,14 +201,7 @@ async def reconcile_workflow(
             node.reason = None
 
     if not state.pass_open:
-        eligible = any(
-            node.last_poll_error is None
-            and node.requested_run_revision != node.last_attempted_revision
-            and all(state.nodes[parent].freshness == "clean" for parent in spec.depends_on or [])
-            for spec in attempt.platform_spec.steps
-            for node in [state.nodes[spec.name]]
-        )
-        if not eligible:
+        if not _has_eligible_pending(attempt, state):
             attempt.workflow_state = state
             return await store.update(attempt)
         state.pass_number += 1

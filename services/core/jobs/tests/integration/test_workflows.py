@@ -166,6 +166,7 @@ def test_continuous_failure_waits_then_recovers(workflow_harness: WorkflowHarnes
     failed = harness.tick(job)
     assert failed.status == HelixJobStatus.ACTIVE
     assert failed.workflow is not None and failed.workflow.degraded
+    assert failed.workflow.waiting_for_changes
     assert len(failed.steps) == 2
     for _ in range(2):
         assert len(harness.tick(job).steps) == 2
@@ -290,6 +291,7 @@ def test_pause_holds_queued_work_and_manual_request_until_resume(workflow_harnes
     harness.jobs.pause_job(workspace="default", name=job.id)
     paused = harness.tick(job)
     assert paused.status == HelixJobStatus.PAUSED
+    assert paused.workflow is not None and not paused.workflow.waiting_for_changes
     harness.invalidate(job, ["work"])
     assert harness.tick(job).status == HelixJobStatus.PAUSED
     assert len(harness.status(job).steps) == 1
@@ -348,6 +350,7 @@ def test_mode_completion_and_fresh_attempt(workflow_harness: WorkflowHarness, mo
     done = harness.tick(job)
     assert done.status == (HelixJobStatus.ACTIVE if mode == "continuous" else HelixJobStatus.COMPLETED)
     if mode == "run_to_completion":
+        assert done.workflow is not None and not done.workflow.waiting_for_changes
         assert job.attempt_id is not None
         again = harness.jobs.rerun_job(workspace="default", job=job.id).data()
         assert again.attempt_id != job.attempt_id
@@ -395,6 +398,7 @@ def test_input_commits_during_execution_coalesce_without_overlap(workflow_harnes
     harness.finish(job, "work")
     settled = harness.tick(job)
     assert settled.workflow is not None and settled.workflow.nodes[0].freshness == "dirty"
+    assert not settled.workflow.waiting_for_changes
     next_run = harness.tick(job)
     assert len(next_run.steps) == 2
 
@@ -725,7 +729,8 @@ def test_restart_adopts_execution_created_before_controller_state_save(
     assert recovered.workflow is not None
     assert recovered.workflow.nodes[0].active_execution_id == before.steps[0].id
     harness.finish(job, "work")
-    assert harness.tick(job).workflow.nodes[0].freshness == "clean"
+    completed = harness.tick(job)
+    assert completed.workflow is not None and completed.workflow.nodes[0].freshness == "clean"
 
 
 def test_draining_pause_retention_uses_attempt_clock_without_paused_steps(

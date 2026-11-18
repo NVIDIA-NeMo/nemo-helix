@@ -138,13 +138,25 @@ must be available locally:
 NHX_TEST_WORKFLOW_DOCKER=1 uv run --frozen pytest services/core/jobs/tests/integration/test_workflows_docker.py
 ```
 
-The tests check container start/finish ordering, committed-input and manual
-reruns, draining pause/resume, active cancellation, failure recovery and HTTP
-task-status callbacks.
-Their temporary containers and volumes are removed after each case. The callback
-case exposes a temporary local HTTP bridge for the containers; it uses Docker
-Desktop's `host.docker.internal` hostname. These shell-command tests do not
-validate the `jobs-launcher` binary or a full packaged platform deployment.
+The suite requires Go and builds a static Linux `jobs-launcher` from this
+checkout using the toolchain selected by its `go.mod`. Each workload runs through
+that binary. To use a binary you have already built, set
+`NHX_TEST_WORKFLOW_LAUNCHER` to its absolute path.
+
+The tests cover dependency ordering, changes during execution, coalesced reruns,
+controller replacement while running/paused, immutable Attempt configuration,
+late task callbacks, draining pause, cancellation, launch failures, active
+execution timeouts and real storage-retention cleanup. They also check launcher
+stdout/stderr flushing, exit-code propagation and log attribution across node
+executions. A continuous workflow reports `waiting_for_changes` only when the
+recorded state has no eligible pending run; a completed once-mode Attempt does
+not report that it is waiting.
+
+Temporary containers and volumes are removed after each case. Container callbacks
+and launcher OTLP exports use a temporary local HTTP bridge via Docker Desktop's
+`host.docker.internal`. Log ingestion and queries use the real Files service.
+The tests leave the daemon's default log driver unchanged. Full packaged platform
+images and live workload-token exchange remain outside this suite.
 GPU/Kubernetes execution, live token exchange and mixed-controller upgrades
 remain unvalidated. Use controllers from the same workflow-capable build.
 
