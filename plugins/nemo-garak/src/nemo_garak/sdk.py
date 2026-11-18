@@ -29,6 +29,7 @@ from pathlib import Path
 
 from nemo_garak.entities import AuditConfig, AuditTarget
 from nemo_garak.jobs.audit import AuditInputSpec, AuditJob
+from nemo_garak.jobs.publication import PublicationSpec
 from nemo_garak.sdk_resources.configs import _AsyncConfigResource, _ConfigResource
 from nemo_garak.sdk_resources.job_resources import AsyncGarakJobResource, GarakJobResource
 from nemo_garak.sdk_resources.targets import _AsyncTargetResource, _TargetResource
@@ -88,12 +89,16 @@ class GarakPluginResource:
         workspace: str | None = None,
         max_probe_retries: int = 0,
         fail_job_on_retries_exhausted: bool = True,
+        publication: PublicationSpec | None = None,
     ) -> GarakJobResource:
         """Submit an audit job to the K8s executor via the plugin job endpoint.
 
         Returns an :class:`~nemo_garak.sdk_resources.job_resources.GarakJobResource`
         handle. Call ``.wait_until_done()`` to block until the job completes, then
         ``.download_artifacts()`` to fetch the garak report tarball.
+
+        ``publication`` names an existing Evaluation to publish the results under, so the
+        audit shows up in Experiments.
         """
         ws = workspace or "default"
         spec = AuditInputSpec(
@@ -101,6 +106,7 @@ class GarakPluginResource:
             target=target,
             max_probe_retries=max_probe_retries,
             fail_job_on_retries_exhausted=fail_job_on_retries_exhausted,
+            publication=publication,
         )
         response = self._http_client.post(
             self._url(f"/v2/workspaces/{ws}/jobs/audit"),
@@ -142,6 +148,7 @@ class GarakPluginResource:
         config: AuditConfig | str,
         target: AuditTarget | str,
         workspace: str | None = None,
+        publication: PublicationSpec | None = None,
     ) -> dict:
         """Run an audit locally, in-process — no jobs-service submission.
 
@@ -151,11 +158,14 @@ class GarakPluginResource:
         ``self.targets.get`` before the spec is handed to the scheduler, so
         the scheduler always sees inline entities and ``AuditJob.to_spec``
         becomes a no-op.
+
+        ``publication`` names an existing Evaluation to publish the results under, so the
+        audit shows up in Experiments. The run publishes with this client's identity.
         """
         ws = workspace or "default"
         resolved_config = self._resolve_config(config, default_workspace=ws)
         resolved_target = self._resolve_target(target, default_workspace=ws)
-        spec = AuditInputSpec(config=resolved_config, target=resolved_target)
+        spec = AuditInputSpec(config=resolved_config, target=resolved_target, publication=publication)
         return AuditJob().run(
             spec.model_dump(mode="json"),
             ctx=_local_job_context(workspace=ws, job_name=AuditJob.name),
@@ -215,6 +225,7 @@ class AsyncGarakPluginResource:
         workspace: str | None = None,
         max_probe_retries: int = 0,
         fail_job_on_retries_exhausted: bool = True,
+        publication: PublicationSpec | None = None,
     ) -> AsyncGarakJobResource:
         """Async twin of :meth:`GarakPluginResource.submit`."""
         ws = workspace or "default"
@@ -223,6 +234,7 @@ class AsyncGarakPluginResource:
             target=target,
             max_probe_retries=max_probe_retries,
             fail_job_on_retries_exhausted=fail_job_on_retries_exhausted,
+            publication=publication,
         )
         response = await self._http_client.post(
             self._url(f"/v2/workspaces/{ws}/jobs/audit"),
@@ -264,6 +276,7 @@ class AsyncGarakPluginResource:
         config: AuditConfig | str,
         target: AuditTarget | str,
         workspace: str | None = None,
+        publication: PublicationSpec | None = None,
     ) -> dict:
         """Async twin of :meth:`GarakPluginResource.run`.
 
@@ -273,7 +286,7 @@ class AsyncGarakPluginResource:
         ws = workspace or "default"
         resolved_config = await self._resolve_config(config, default_workspace=ws)
         resolved_target = await self._resolve_target(target, default_workspace=ws)
-        spec = AuditInputSpec(config=resolved_config, target=resolved_target)
+        spec = AuditInputSpec(config=resolved_config, target=resolved_target, publication=publication)
         return await to_thread(
             AuditJob().run,
             spec.model_dump(mode="json"),

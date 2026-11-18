@@ -79,6 +79,17 @@ When you run an audit against this target, the plugin internally rewrites `optio
 
 The resolved `uri` reflects whatever the provider is configured to point at — change the provider once and every target that references it picks up the new endpoint on the next run.
 
+## Credentials
+
+garak calls the gateway with an API key it reads from the environment, such as `NIM_API_KEY` for a `nim` target. When the target uses `nhx_uri_spec`, the plugin sets that key to the access token of the client that runs the audit, so an Inference Gateway that requires authentication accepts garak's requests. You do not export a key yourself.
+
+- Only the target's own generator gets the token: `NIM_API_KEY` for `nim` targets, `OPENAICOMPATIBLE_API_KEY` for `openai.OpenAICompatible`, `OPENAI_API_KEY` for other `openai` targets and `REST_API_KEY` for `rest` targets. The other key variables keep their values.
+- A key you exported for that generator is replaced for the run, because the gateway only accepts a platform token.
+- The token is refreshed before every probe and every retry. A single probe that runs longer than the token's lifetime can still fail with `401`; split it into smaller runs or lower `generations`.
+- The token is passed to the garak subprocess only. It is not logged and not written to the reports.
+- A target that sets `uri` directly never receives a platform token.
+- If the client does not authenticate with a bearer token, garak calls the gateway with the placeholder key, as before.
+
 ## When Not to Use `nhx_uri_spec`
 
 For ad-hoc audits against a local endpoint you don't intend to keep around, you can specify `uri` directly and skip `nhx_uri_spec`:

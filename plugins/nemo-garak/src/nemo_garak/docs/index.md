@@ -18,7 +18,7 @@ The garak plugin is a first-party scaffold for garak functionality. It keeps the
 
 ## Current Job
 
-`garak.audit` is a `NemoJob` that runs the probes selected by an audit config against an audit target. Its input (`AuditInputSpec`) requires both `config` and `target`, each given as an inline entity payload or a workspace-qualified name such as `default/<name>`. It also accepts `max_probe_retries` and `fail_job_on_retries_exhausted`. The job executes each probe with the garak interpreter and returns a `status`, the `probes_complete` and `probes_failed` counts, and the report artifacts under `results`.
+`garak.audit` is a `NemoJob` that runs the probes selected by an audit config against an audit target. Its input (`AuditInputSpec`) requires both `config` and `target`, each given as an inline entity payload or a workspace-qualified name such as `default/<name>`. It also accepts `max_probe_retries`, `fail_job_on_retries_exhausted` and an optional `publication.intake` block naming an existing Evaluation to publish the results under. The job executes each probe with the garak interpreter and returns a `status`, the `probes_complete` and `probes_failed` counts, and the report artifacts under `results`. When it was asked to publish, it then writes the results to NeMo Intake so the audit appears in Experiments, and reports what it published under `publication`.
 
 ## CLI Examples
 

@@ -1,0 +1,133 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Publish an Audit to Experiments"
+description: "Publish garak audit results to NeMo Intake so they appear in Experiments next to other evaluation runs."
+---
+<a id="garak-publish-to-experiments"></a>
+
+By default an audit saves garak's JSONL, HTML and hitlog reports and doesn't send anything to NeMo Intake. To see the results in [Experiments](/documentation/evaluate-models/experiments) and compare audits of different models, add a `publication.intake` block to the audit. The plugin then publishes the results to Intake under the Evaluation you name.
+
+Publication runs after the reports are saved. It works the same way for a submitted job (`submit()`) and for a local run (`run()`), and it publishes with the identity of the client that started the audit.
+
+## Create the Evaluation First
+
+The audit does not create the Evaluation. Create an Experiment and an Evaluation before you start the audit, one Evaluation per audit run:
+
+```python
+from nemo_garak.sdk import GarakPluginResource
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.intake.client import IntakeClient
+from nemo_helix_plugin.intake.types import EvaluationCreateRequest, ExperimentCreateRequest
+
+client = NemoClient.from_config()
+garak = GarakPluginResource(client)
+intake = IntakeClient.from_client(client)
+
+experiment = intake.create_experiment(
+    workspace="default",
+    body=ExperimentCreateRequest(name="model-safety-audits"),
+    exist_ok=True,
+).data()
+
+intake.create_evaluation(
+    workspace="default",
+    body=EvaluationCreateRequest(
+        name="nemotron-lightning-quick-scan",
+        experiment_ids=[experiment.id],
+        dataset_name="garak",
+    ),
+)
+```
+
+The audit checks that the Evaluation exists before it runs any probe, so a mistyped name fails in seconds.
+
+## Publish from an Audit
+
+Pass `publication` to `run()` or `submit()`:
+
+```python
+from nemo_garak.jobs.publication import IntakePublicationSpec, PublicationSpec
+
+publication = PublicationSpec(intake=IntakePublicationSpec(evaluation_id="nemotron-lightning-quick-scan"))
+
+result = garak.run(
+    config="quick-scan",
+    target="nemotron-3.5-lightning-30b",
+    workspace="default",
+    publication=publication,
+)
+print(result["publication"])
+```
+
+In a job spec file for `nemo garak audit --spec-file`, the same block looks like this:
+
+```yaml
+config: quick-scan
+target: nemotron-3.5-lightning-30b
+publication:
+  intake:
+    evaluation_id: nemotron-lightning-quick-scan
+```
+
+You can also set the Evaluation on the command line with `--publication.intake.evaluation-id`, which overrides the value in the spec.
+
+## `publication.intake` Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `evaluation_id` | `str` | _required_ | Name of the existing Evaluation to publish under. |
+| `granularity` | `"attempt" \| "probe"` | `"attempt"` | How much detail to publish. See [What Gets Published](#what-gets-published). |
+| `agent_name` | `str \| None` | `None` | Agent name recorded on each published session. Defaults to the audit target's name. |
+| `agent_version` | `str` | `"unknown"` | Agent version recorded on each published session. |
+| `required` | `bool` | `True` | When `True`, the audit fails if publication fails. Set to `False` to keep the audit successful and report the failure in its output. |
+
+## What Gets Published
+
+Each published session belongs to the test case `garak/<probe>/<detector>`, for example `garak/malwaregen.Evasion/malwaregen.AnyCode`. Both granularities use the same test case names and the same `pass_rate` evaluator, so audits published either way line up in one Experiment.
+
+| Granularity | One session per | Session content | Evaluators |
+|-------------|-----------------|-----------------|------------|
+| `attempt` | Scored model output | The prompt garak sent and the output the target returned | `pass_rate` (1.0 when the output passed the detector, 0.0 when it did not) and `detector_score` (the detector's raw score from 0 to 1, where higher means a stronger hit) |
+| `probe` | Probe and detector pair | A one-line summary | `pass_rate` (passed outputs divided by evaluated outputs) |
+
+With `attempt` granularity, the mean of `pass_rate` over a test case equals the pass rate garak reports for that probe and detector. An output passes when its detector score is below `run.eval_threshold` in the audit configuration.
+
+An audit with many probes and several generations per prompt produces thousands of sessions at `attempt` granularity. Use `probe` when you only need the scores.
+
+garak does not score every output: a detector returns no score for an empty response, for example. Those outputs are left out of the pass rate, as they are in garak's own report, and counted in `unscored_count`.
+
+## The `publication` Result
+
+When the audit asked to publish, its result has a `publication` key:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `status` | `str` | `"completed"` when every session published, `"error"` otherwise. |
+| `evaluation_id` | `str` | Evaluation the results were published under. |
+| `granularity` | `str` | Granularity the sessions were published at. |
+| `session_count` | `int` | Sessions published. On a failure this is how many landed before it. |
+| `unscored_count` | `int` | Results left out because garak did not score them. |
+| `error` | `str \| None` | Why publication failed. Absent on success. |
+
+## Publish a Saved Report Again
+
+If publication fails, the reports are still saved, so you can publish the saved `report.jsonl` without running the audit again. Publishing the same report twice replaces the sessions instead of duplicating them.
+
+```python
+from pathlib import Path
+
+from nemo_garak.jobs.publication import IntakePublicationSpec, publish_audit_report
+
+outcome = publish_audit_report(
+    Path("my-reports/quick-scan.report.jsonl"),
+    spec=IntakePublicationSpec(evaluation_id="nemotron-lightning-quick-scan"),
+    workspace="default",
+    target_name="nemotron-3.5-lightning-30b",
+    model_name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    eval_threshold=0.5,
+    client=client,
+)
+print(outcome.session_count)
+```
