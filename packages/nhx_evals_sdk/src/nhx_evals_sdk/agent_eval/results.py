@@ -562,18 +562,6 @@ class AgentEvalSummary(BaseModel):
         )
 
 
-class InjectedSkill(BaseModel):
-    """A skill injected into every trial of a run, as the runtime delivered it."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: str = Field(description="Skill name; the directory the harness discovers it under.")
-    digest: str = Field(
-        description="Lowercase hex SHA-256 over the injected tree: sorted relative paths, normalised "
-        "executable bit, and file bytes. Local meaning only; not the platform archive's files_hash."
-    )
-
-
 class RunMetadata(BaseModel):
     """Provenance for a run: what was evaluated, by what, and when.
 
@@ -596,11 +584,6 @@ class RunMetadata(BaseModel):
     finished_at: datetime | None = Field(default=None, description="UTC timestamp when scoring completed.")
     duration_sec: float | None = Field(default=None, description="Wall-clock seconds from start to finish.")
     sdk_version: str | None = Field(default=None, description="nhx-evals-sdk version that produced the run.")
-    skills: list[InjectedSkill] | None = Field(
-        default=None,
-        description="Skills injected into the run. None when the run did not manage skills; an empty list "
-        "means none were injected and none were allowed in from the task or agent configuration.",
-    )
 
 
 class BundleLocation(BaseModel):
