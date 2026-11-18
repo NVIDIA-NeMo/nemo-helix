@@ -72,6 +72,7 @@ class TestRefreshFileset:
         with _github_at(FIRST_SHA):
             created = _create_github_fileset(test_client, name)
         assert created["storage"]["revision"] == FIRST_SHA
+        initial_token = created["revision"]
 
         with _github_at(SECOND_SHA) as github:
             response = test_client.post(f"{FILESETS_URL}/{name}/refresh")
@@ -79,6 +80,12 @@ class TestRefreshFileset:
         assert response.status_code == 200, response.text
         storage = response.json()["storage"]
         assert storage["revision"] == SECOND_SHA
+        token = response.json()["revision"]
+        assert token != initial_token
+        with _github_at(SECOND_SHA):
+            unchanged = test_client.post(f"{FILESETS_URL}/{name}/refresh")
+        assert unchanged.status_code == 200, unchanged.text
+        assert unchanged.json()["revision"] != token
         assert storage["original_revision"] == "main"
         # The ref is what gets re-resolved; re-resolving the pinned SHA would report
         # the same move without ever asking about the branch.

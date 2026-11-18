@@ -36,3 +36,31 @@ def test_advertises_the_entity_store_pattern():
     schema = CreateFilesetRequest.model_json_schema()["properties"]["name"]
     assert schema["pattern"] == NAME_PATTERN
     assert schema["maxLength"] == NAME_MAX_LENGTH
+
+
+def test_older_file_response_has_no_revision():
+    from nemo_helix_plugin.files.types import FilesetFileOutput
+
+    result = FilesetFileOutput(file_ref="default/files#file", file_url="/file", path="file", size=1)
+    assert result.fileset_revision is None
+
+
+def test_older_fileset_response_has_no_revision():
+    from nemo_helix_plugin.files.types import FilesetOutput
+
+    result = FilesetOutput.model_validate(
+        {
+            "id": "id",
+            "name": "files",
+            "workspace": "default",
+            "description": "",
+            "purpose": "generic",
+            "storage": {"type": "local", "path": "/tmp/files"},
+            "metadata": {},
+            "custom_fields": {},
+            "project": "",
+            "created_at": "",
+            "updated_at": "",
+        }
+    )
+    assert result.revision is None

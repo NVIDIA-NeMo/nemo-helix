@@ -47,3 +47,12 @@ def test_fileset_filter_targets_principal_columns_not_data(field: str):
 
     assert isinstance(translated, ComparisonOperation)
     assert translated.field == field
+
+
+def test_legacy_revision_is_deterministic():
+    entity = _make_fileset(None, None)
+    entity._id = "fileset-id"
+    assert fileset_output_from_entity(entity).revision == "legacy:fileset-id"
+    assert fileset_output_from_entity(entity).revision == "legacy:fileset-id"
+    entity.revision = "assigned-token"
+    assert fileset_output_from_entity(entity).revision == "assigned-token"

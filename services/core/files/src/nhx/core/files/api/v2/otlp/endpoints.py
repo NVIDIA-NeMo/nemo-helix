@@ -6,7 +6,7 @@
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.entities.client import (
@@ -30,6 +30,7 @@ from nhx.core.files.api.v2.otlp.schemas import (
 )
 from nhx.core.files.app.backends import storage_impl_factory
 from nhx.core.files.app.log_storage import LogEntry, LogStorage, dep_log_storage
+from nhx.core.files.app.revision import advance_fileset_revision
 from nhx.core.files.exceptions import InvalidFilterError, InvalidPathError
 from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
 from pydantic import BaseModel, Field
@@ -153,16 +154,25 @@ async def query_otlp_logs(
     response_model=OtelExportLogsServiceResponse,
     status_code=HTTP_200_OK,
     responses={
+        HTTP_200_OK: {
+            "headers": {
+                "X-Fileset-Revision": {
+                    "description": "Revision assigned when this request inserted log entries.",
+                    "schema": {"type": "string"},
+                }
+            }
+        },
         HTTP_409_CONFLICT: {
             "description": "Fileset storage is read-only",
             **HTTP_EXCEPTION_DETAIL,
-        }
+        },
     },
 )
 async def upload_otlp_logs(
     workspace: str,
     name: str,
     raw_request: Request,
+    response: Response,
     content_type: str = Header(default="application/json"),
     artifact_base_path: str | None = Query(default=None, description="Folder inside the fileset to nest logs under"),
     entity_store: EntityClient = Depends(get_entity_client),
@@ -278,6 +288,9 @@ async def upload_otlp_logs(
                 storage, log_entries=log_entries, artifact_base_path=artifact_base_path
             )
             logger.debug(f"Successfully ingested {inserted_count} log entries")
+            if inserted_count > 0:
+                updated = await advance_fileset_revision(fileset, entity_store)
+                response.headers["X-Fileset-Revision"] = updated.revision
         # Prepare response
         if rejected_count > 0:
             logger.debug(f"Partially ingested logs: {rejected_count} records rejected")
@@ -292,6 +305,8 @@ async def upload_otlp_logs(
             # Full success
             logger.debug("All log records ingested successfully")
             return OtelExportLogsServiceResponse()
+    except HTTPException:
+        raise
     except InvalidPathError as e:
         logger.error(f"Invalid artifact base path: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))

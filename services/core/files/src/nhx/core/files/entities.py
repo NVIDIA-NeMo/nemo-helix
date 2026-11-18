@@ -32,6 +32,12 @@ class Fileset(EntityBase):
         description="Purpose-specific metadata for the fileset.",
     )
 
+    revision: str = Field(default="", description="Opaque token assigned by Files service on mutation.")
+
+    @property
+    def effective_revision(self) -> str:
+        return self.revision or f"legacy:{self.id}"
+
     custom_fields: Dict[str, Any] = Field(default_factory=dict, description="Custom fields for the fileset.")
 
 

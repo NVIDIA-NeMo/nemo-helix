@@ -3335,6 +3335,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OtelExportLogsServiceResponse'
+          headers:
+            X-Fileset-Revision:
+              description: Revision assigned when this request inserted log entries.
+              schema:
+                type: string
         '409':
           description: Fileset storage is read-only
           content:
@@ -16111,6 +16116,12 @@ components:
           title: Size
         cache_status:
           $ref: '#/components/schemas/CacheStatus'
+        fileset_revision:
+          title: Fileset Revision
+          description: Fileset revision assigned to this upload or deletion; absent
+            on file reads and older servers.
+          nullable: true
+          type: string
       type: object
       required:
       - file_ref
@@ -16181,6 +16192,12 @@ components:
         \            schema={\"columns\": [\"id\", \"name\"]},\n        )\n    )"
     FilesetOutput:
       properties:
+        revision:
+          title: Revision
+          description: Opaque fileset change token. Compare for equality; absent on
+            older servers.
+          nullable: true
+          type: string
         id:
           type: string
           title: Id

@@ -425,6 +425,34 @@ with open("./data.jsonl", "rb") as f:
 The CLI `nemo files upload` supports uploading an entire directory and auto-creating a fileset when you omit the fileset name (generating a name like `fileset-a1b2c3d4`). The SDK `upload_file` uploads one file to an existing fileset.
 
 </Tip>
+### Detecting fileset changes
+
+Compare the fileset's `revision` with a saved value to detect mutations made through
+Files service. Upload and file-delete responses include the `fileset_revision`
+assigned to that operation:
+
+```python
+before = client.files.get_fileset(name="my-files").data().revision
+uploaded = client.files.upload_file(
+    name="my-files", path="example.txt", content=b"hello"
+).data()
+print(uploaded.fileset_revision != before)
+
+current = client.files.get_fileset(name="my-files").data().revision
+print(current == uploaded.fileset_revision)
+```
+
+The last comparison is true when no later mutation has committed. Compare tokens
+for equality; they are not content hashes or timestamps. Metadata edits, source
+refreshes and successful OTLP log insertion also advance the token. OTLP returns
+its token in the `X-Fileset-Revision` response header. Reads and cache fills leave
+it unchanged, and direct bucket or filesystem writes are outside this signal.
+
+This is a best-effort change signal. It provides no locking or snapshot, and a
+failure between writing storage and saving the revision can leave changed files
+with the previous token. Older servers omit these fields; an older fileset on an
+updated server has a stable `legacy:<id>` token until its first mutation.
+
 ### Listing Files
 
 List all files in a fileset:

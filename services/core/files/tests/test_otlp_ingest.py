@@ -36,6 +36,7 @@ from opentelemetry.proto.logs.v1 import logs_pb2
 def mock_entity_client():
     """Create a mock EntityClient for testing."""
     mock_client = AsyncMock(spec=EntityClient)
+    mock_client.update.side_effect = lambda entity: entity
     return mock_client
 
 
@@ -1723,3 +1724,60 @@ async def test_content_type_variations(test_client, mock_log_storage):
 
         assert response.status_code == 200, f"Failed for content-type: {content_type}"
         mock_log_storage.insert_logs.assert_called_once()
+
+
+@pytest.mark.parametrize("inserted", [0, 1])
+def test_ingestion_receipt_header(test_client, mock_entity_client, mock_log_storage, valid_otlp_request, inserted):
+    mock_log_storage.insert_logs.return_value = inserted
+    response = test_client.post(
+        "/v2/workspaces/test-workspace/filesets/test-logs-fileset/otlp/v1/logs", json=valid_otlp_request
+    )
+    assert response.status_code == 200, response.text
+    if inserted:
+        assert response.headers["X-Fileset-Revision"] == mock_entity_client.update.call_args.args[0].revision
+        mock_entity_client.update.assert_awaited_once()
+    else:
+        assert "X-Fileset-Revision" not in response.headers
+        mock_entity_client.update.assert_not_awaited()
+
+
+def test_empty_ingestion_has_no_receipt(test_client, mock_entity_client):
+    response = test_client.post(
+        "/v2/workspaces/test-workspace/filesets/test-logs-fileset/otlp/v1/logs", json={"resourceLogs": []}
+    )
+    assert response.status_code == 200
+    assert "X-Fileset-Revision" not in response.headers
+    mock_entity_client.update.assert_not_awaited()
+
+
+def test_ingestion_revision_failure_keeps_503(test_client, mock_entity_client, valid_otlp_request):
+    from nhx.common.entities.client import EntityStoreError
+
+    mock_entity_client.update.side_effect = EntityStoreError("unavailable")
+    response = test_client.post(
+        "/v2/workspaces/test-workspace/filesets/test-logs-fileset/otlp/v1/logs", json=valid_otlp_request
+    )
+    assert response.status_code == 503, response.text
+    assert "X-Fileset-Revision" not in response.headers
+    mock_entity_client.update.assert_awaited_once()
+
+
+@pytest.mark.parametrize("partially_accepted", [False, True])
+def test_rejected_entries_only_get_a_receipt_when_other_entries_insert(
+    test_client, mock_entity_client, valid_otlp_request, partially_accepted
+):
+    invalid_resource = {
+        "resource": {},
+        "scopeLogs": [{"logRecords": [{"timeUnixNano": "1704110400000000000", "body": {"stringValue": "rejected"}}]}],
+    }
+    if partially_accepted:
+        valid_otlp_request["resourceLogs"].append(invalid_resource)
+    else:
+        valid_otlp_request["resourceLogs"] = [invalid_resource]
+    response = test_client.post(
+        "/v2/workspaces/test-workspace/filesets/test-logs-fileset/otlp/v1/logs", json=valid_otlp_request
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["partialSuccess"]["rejectedLogRecords"] == 1
+    assert ("X-Fileset-Revision" in response.headers) == partially_accepted
+    assert mock_entity_client.update.await_count == int(partially_accepted)

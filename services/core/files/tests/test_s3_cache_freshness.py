@@ -19,6 +19,7 @@ from aiobotocore.credentials import AioCredentials
 from botocore.exceptions import ClientError
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from nemo_helix_plugin.files.types import CacheStatus
+from nhx.common.entities.client import EntityClient
 from nhx.common.files.storage_config import S3StorageConfig
 from nhx.core.files.api.endpoint_helpers import (
     UPSTREAM_STORAGE_ACCESS_DETAIL,
@@ -36,6 +37,7 @@ from nhx.core.files.app.backends.local import LocalStorageConfig, LocalStorageIm
 from nhx.core.files.app.backends.s3 import S3BackendError, S3StorageImpl, S3UnavailableError
 from nhx.core.files.app.cache import cache_file_directly, cache_write_lock_key, warm_fileset_cache
 from nhx.core.files.config import FilesConfig
+from nhx.core.files.entities import Fileset
 from nhx.core.files.exceptions import NotFoundError, StorageObjectChangedError
 
 
@@ -158,9 +160,10 @@ def app(env, monkeypatch):
     app.state.service_configs = {FilesConfig: env.config}
     for dependency in (endpoints.get_entity_client, endpoints.get_nemo_client, endpoints.get_auth_client):
         app.dependency_overrides[dependency] = lambda: MagicMock()
-    fileset = SimpleNamespace(
-        storage=env.storage.config, name="test", workspace="default", updated_at=None, custom_fields={}
-    )
+    store = AsyncMock(spec=EntityClient)
+    store.update.side_effect = lambda entity: entity
+    app.dependency_overrides[endpoints.get_entity_client] = lambda: store
+    fileset = Fileset(storage=env.storage.config, name="test", workspace="default", purpose="generic")
     for module in (endpoints, hf_endpoints):
         monkeypatch.setattr(module, "get_fileset", AsyncMock(return_value=fileset))
         monkeypatch.setattr(module, "resolve_storage_secrets_for_user", AsyncMock(return_value={}))

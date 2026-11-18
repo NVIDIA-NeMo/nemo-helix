@@ -6,6 +6,7 @@
 import logging
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
+from uuid import uuid4
 
 import anyio
 from fastapi import (
@@ -77,6 +78,7 @@ from nhx.core.files.app.external_hosts import (
     ExternalHostNotAllowedError,
 )
 from nhx.core.files.app.file_lock import FileLockManager
+from nhx.core.files.app.revision import advance_fileset_revision
 from nhx.core.files.app.streaming import (
     MultipartChunkProcessor,
     OctetStreamChunkProcessor,
@@ -366,6 +368,7 @@ async def create_fileset(
         fileset = Fileset(
             name=create_request.name,
             workspace=workspace,
+            revision=str(uuid4()),
             storage=storage,
             purpose=create_request.purpose,
             metadata=create_request.metadata,
@@ -688,18 +691,22 @@ async def update_fileset_metadata(
             f"Fileset '{workspace}/{name}' not found",
         )
 
-    # Temporary fix for making immutable datasets and preserving trust_remote_code
-    if request.custom_fields:
-        original_service_source = fileset.custom_fields.get("service_source", None)
-        new_service_source = request.custom_fields.pop("service_source", original_service_source)
-        if not auth_client.principal.id.startswith("service:"):
-            new_service_source = original_service_source
+    if not request.model_fields_set:
+        return fileset_output_from_entity(fileset)
 
-        if new_service_source:
-            request.custom_fields["service_source"] = new_service_source
+    def apply_metadata_patch(current: Fileset) -> Fileset:
+        patch = request.model_copy(deep=True)
+        # Preserve the service marker against edits by ordinary callers, including retries.
+        if patch.custom_fields:
+            original_source = current.custom_fields.get("service_source")
+            new_source = patch.custom_fields.pop("service_source", original_source)
+            if not auth_client.principal.id.startswith("service:"):
+                new_source = original_source
+            if new_source:
+                patch.custom_fields["service_source"] = new_source
+        return current.model_copy(update=patch.model_dump(exclude_unset=True))
 
-    diff = request.model_dump(include=request.model_fields_set)
-    fileset = await entity_store.update(fileset.model_copy(update=diff))
+    fileset = await advance_fileset_revision(fileset, entity_store, apply_metadata_patch)
 
     return fileset_output_from_entity(fileset)
 
@@ -800,7 +807,10 @@ async def refresh_fileset(
         logger.warning(f"Storage refresh failed: {exc}")
         raise HTTPException(HTTP_400_BAD_REQUEST, f"Error refreshing fileset: {exc}") from exc
 
-    fileset = await entity_store.update(fileset.model_copy(update={"storage": storage}))
+    def apply_storage_refresh(current: Fileset) -> Fileset:
+        return current.model_copy(update={"storage": storage})
+
+    fileset = await advance_fileset_revision(fileset, entity_store, apply_storage_refresh)
 
     return fileset_output_from_entity(fileset)
 
@@ -1065,11 +1075,6 @@ async def upload_file(
             else:
                 async with streaming_file_upload(request, chunk_processor) as upload:
                     file_info = await storage.upload(path, upload, content_length=content_length)
-            return fileset_file_output_from_info(
-                workspace=workspace,
-                name=name,
-                file_info=file_info,
-            )
         except InvalidPathError as e:
             logger.warning(f"Invalid path for upload attempt: {workspace}/{name}/-/{path}")
             raise HTTPException(
@@ -1097,6 +1102,11 @@ async def upload_file(
                 status_code=HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Upload failed: {str(e)}",
             )
+
+    updated = await advance_fileset_revision(fileset, entity_store)
+    result = fileset_file_output_from_info(workspace, name, file_info)
+    result.fileset_revision = updated.revision
+    return result
 
 
 @router.delete(
@@ -1145,4 +1155,7 @@ async def delete_file(
             f"File '{path}' not found in fileset '{workspace}/{name}'",
         ) from e
 
-    return fileset_file_output_from_info(workspace, name, file_info)
+    updated = await advance_fileset_revision(fileset, entity_store)
+    result = fileset_file_output_from_info(workspace, name, file_info)
+    result.fileset_revision = updated.revision
+    return result
