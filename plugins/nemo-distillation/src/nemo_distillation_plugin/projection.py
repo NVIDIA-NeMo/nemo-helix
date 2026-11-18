@@ -3,7 +3,10 @@
 
 """Derived ``stages`` and ``results`` on a workflow.
 
-``results`` is filled once the three eval groups have succeeded. It is not a node.
+``results`` is filled once every base and distilled eval has succeeded, and every
+original eval too when the workflow ran the teacher stage (``original`` is null when
+the caller supplied trajectory filesets). It is not a node. A group may hold one node
+per eval spec.
 """
 
 from __future__ import annotations
@@ -31,6 +34,8 @@ def stages(workflow: Workflow) -> list[dict[str, Any]]:
     view: list[dict[str, Any]] = []
     for stage_id, title, prefix in _STAGES:
         keys = _keys(workflow, prefix)
+        if not keys and prefix == "eval_original":
+            continue
         nodes = [workflow.nodes[key] for key in keys]
         status, progress = _stage_status(nodes)
         job_ref = next((node.external.get("job") for node in nodes if node.external.get("job")), None)
@@ -52,16 +57,16 @@ def results(workflow: Workflow) -> dict[str, Any] | None:
     original = _nodes(workflow, "eval_original")
     base = _nodes(workflow, "eval_base")
     distilled = _nodes(workflow, "eval_distilled")
-    groups = (original, base, distilled)
+    groups = (original, base, distilled) if original else (base, distilled)
     if any(not group for group in groups):
         return None
     if any(node.status != "succeeded" for group in groups for node in group):
         return None
     prices = workflow.inputs.get("prices") if isinstance(workflow.inputs, dict) else None
     return {
-        "original": _arm(original[0]),
-        "base": _arm(base[0]),
-        "distilled": _arm(distilled[0]),
+        "original": _arm(original) if original else None,
+        "base": _arm(base),
+        "distilled": _arm(distilled),
         "prices": prices or {},
     }
 
@@ -80,7 +85,13 @@ def descendants(graph: dict, key: str) -> set[str]:
 
 
 def _keys(workflow: Workflow, prefix: str) -> list[str]:
-    return [key for key in workflow.graph if key == prefix or key.startswith(prefix + "[")]
+    """Keys for a stage. ``eval_original[tasks]`` and ``eval_distilled_tasks[lora]`` both match."""
+    found: list[str] = []
+    for key in workflow.graph:
+        head = key.split("[", 1)[0]
+        if head == prefix or head.startswith(prefix + "_"):
+            found.append(key)
+    return found
 
 
 def _nodes(workflow: Workflow, prefix: str) -> list[RuntimeNode]:
@@ -102,13 +113,14 @@ def _stage_status(nodes: list[RuntimeNode]) -> tuple[str, int]:
     return "pending", 0
 
 
-def _arm(node: RuntimeNode) -> dict[str, Any]:
-    outputs = node.outputs
+def _arm(nodes: list[RuntimeNode]) -> dict[str, Any]:
+    outputs = nodes[0].outputs
     return {
         "score": outputs.get("score"),
         "input_tokens_per_task": outputs.get("input_tokens_per_task"),
         "output_tokens_per_task": outputs.get("output_tokens_per_task"),
         "median_latency_sec": outputs.get("median_latency_sec"),
         "estimated_cost_per_1k_tasks": outputs.get("estimated_cost_per_1k_tasks"),
-        "eval_job": node.external.get("job"),
+        "eval_job": nodes[0].external.get("job"),
+        "filesets": [node.outputs.get("fileset") for node in nodes],
     }

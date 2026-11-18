@@ -15,12 +15,11 @@ from typing import Any
 
 from nemo_customizer.jobs.atif_convert import fileset_prefix, stub_output
 from nemo_distillation_plugin.executor import tick
-from nemo_distillation_plugin.models import DistillInputs, Workflow
+from nemo_distillation_plugin.models import Workflow
 from nemo_distillation_plugin.nodes.adapters import build_adapters
 from nemo_distillation_plugin.runtime import Missing
 from nemo_distillation_plugin.template import assemble
-
-INPUTS = DistillInputs(source_agent="default/teacher", student_model="default/student")
+from samples import inputs
 
 
 class FakePlatform:
@@ -35,12 +34,28 @@ class FakePlatform:
         self.evals: dict[str, dict[str, Any]] = {}
         self.agents: list[dict[str, Any]] = []
         self.customizations: list[dict[str, Any]] = []
+        self.trajectory_filesets: list[str] = []
+        self.dataset_evals: dict[str, dict[str, Any]] = {}
+        self.agent_deployments: dict[str, str] = {}
 
-    async def submit_convert(self, *, workspace: str, name: str, fileset: str, node_key: str) -> None:
+    async def submit_convert(
+        self,
+        *,
+        workspace: str,
+        name: str,
+        fileset: str,
+        node_key: str,
+        trajectory_filesets: list[str],
+        pass_filter: dict[str, Any],
+    ) -> None:
+        del pass_filter
         self.events.append(("convert", name))
+        self.trajectory_filesets = list(trajectory_filesets)
         self.jobs[name] = "completed"
         prefix = fileset_prefix(node_key)
-        output = stub_output(workspace=workspace, fileset=fileset, node_key=node_key)
+        output = stub_output(
+            workspace=workspace, fileset=fileset, node_key=node_key, trajectory_filesets=trajectory_filesets
+        )
         self.files[(fileset, f"{prefix}/output.json")] = json.dumps(output).encode()
 
     async def submit_customization(self, *, workspace: str, name: str, spec: dict[str, Any]) -> None:
@@ -76,8 +91,34 @@ class FakePlatform:
 
     async def delete_deployment(self, *, workspace: str, name: str) -> None:
         del workspace
+        self.events.append(("delete", name))
         self.deleted.append(name)
         self.deployments.pop(name, None)
+
+    async def create_agent_deployment(
+        self,
+        *,
+        workspace: str,
+        name: str,
+        agent_name: str,
+        mode: str,
+        image: str,
+        use_image_entrypoint: bool,
+    ) -> None:
+        del workspace, agent_name, mode, image, use_image_entrypoint
+        self.events.append(("agent-deploy", name))
+        self.agent_deployments[name] = "running"
+
+    async def agent_deployment_status(self, *, workspace: str, name: str) -> str:
+        del workspace
+        if name not in self.agent_deployments:
+            raise Missing(name)
+        return self.agent_deployments[name]
+
+    async def delete_agent_deployment(self, *, workspace: str, name: str) -> None:
+        del workspace
+        self.events.append(("delete-agent-deployment", name))
+        self.agent_deployments.pop(name, None)
 
     async def prepare_agent(
         self,
@@ -110,6 +151,35 @@ class FakePlatform:
     async def cancel_eval(self, *, workspace: str, name: str) -> None:
         del workspace
         self.evals.pop(name, None)
+
+    async def submit_dataset_eval(
+        self,
+        *,
+        workspace: str,
+        name: str,
+        agent_name: str,
+        deployment_name: str,
+        spec: dict[str, Any],
+        evaluation_id: str,
+    ) -> None:
+        del workspace
+        self.events.append(("eval", name))
+        self.dataset_evals[name] = {
+            "agent": agent_name,
+            "deployment": deployment_name,
+            "spec": spec,
+            "evaluation_id": evaluation_id,
+        }
+
+    async def dataset_eval_status(self, *, workspace: str, name: str) -> str:
+        del workspace
+        if name not in self.dataset_evals:
+            raise Missing(name)
+        return "completed"
+
+    async def cancel_dataset_eval(self, *, workspace: str, name: str) -> None:
+        del workspace
+        self.dataset_evals.pop(name, None)
 
     async def ensure_experiment(
         self, *, workspace: str, name: str, evaluations: dict[str, str], dataset_name: str
@@ -156,43 +226,121 @@ async def _apply(workflow: Workflow, harness: Harness) -> None:
 
 
 async def test_the_stub_flows_through_train_deploy_and_eval() -> None:
-    workflow = assemble("distill", "default", INPUTS)
+    workflow = assemble("distill", "default", inputs())
     harness = Harness()
 
-    for _ in range(40):
+    for _ in range(80):
         await _apply(workflow, harness)
         if workflow.status in {"completed", "failed", "cancelled"}:
             break
 
     assert workflow.status == "completed", _stuck(workflow)
-    kinds = [kind for kind, _ in harness.platform.events]
-    assert kinds.index("experiment") < kinds.index("eval")
+    events = harness.platform.events
+    kinds = [kind for kind, _ in events]
+    assert kinds.index("experiment") < kinds.index("eval") < kinds.index("convert")
+    teacher = workflow.nodes["deploy_teacher"].external["deployment"]
+    teacher_agent = workflow.nodes["deploy_agent_original"].external["deployment"]
+    base = workflow.nodes["deploy_base"].external["deployment"]
+    assert events.index(("deploy", teacher)) < events.index(("agent-deploy", teacher_agent))
+    assert events.index(("agent-deploy", teacher_agent)) < events.index(
+        ("eval", workflow.nodes["eval_original[tasks]"].external["job"])
+    )
+    assert events.index(("delete", teacher)) < events.index(("deploy", base))
     train = harness.platform.customizations[0]
     assert "deployment_config" not in train
     assert train["output"]["name"] == workflow.nodes["train[lora]"].external["model"]
-    assert train["dataset"]["training"] == "default/distill-data#nodes/prepare/"
-    assert train["training"]["finetuning_type"] == "lora"
-    agents = {agent["arm"]: agent for agent in harness.platform.agents}
-    assert agents["original"]["model"] is None
-    assert agents["base"]["model"] == "default/student"
+    assert train["dataset"] == "default/distill-data#nodes/prepare/"
+    assert train["training"] == {"type": "sft", "peft": {"type": "lora"}, "parallelism": {"num_gpus_per_node": 1}}
+    by_arm: dict[str, list[dict[str, Any]]] = {}
+    for agent in harness.platform.agents:
+        by_arm.setdefault(agent["arm"], []).append(agent)
+    assert all(agent["model"] == "default/qwen36" for agent in by_arm["original"])
+    assert all(agent["model"] == "default/student" for agent in by_arm["base"])
     adapter = workflow.nodes["train[lora]"].external["model"]
-    assert agents["lora"]["model"] == f"default/student&adapters/default/{adapter}"
-    original_job = workflow.nodes["eval_original"].external["job"]
+    assert all(agent["model"] == f"default/student&adapters/default/{adapter}" for agent in by_arm["lora"])
+    original_job = workflow.nodes["eval_original[tasks]"].external["job"]
     original_eval = harness.platform.evals[original_job]
     assert (
         original_eval["publication"]["intake"]["evaluation_id"]
         == (workflow.nodes["experiment"].external["evaluation_original"])
     )
-    assert original_eval["tasks"] == [{"id": "stub-task-1", "intent": "Stub task for distillation plumbing."}]
+    assert original_eval["tasks"][0]["id"] == "classify-0"
+    dataset_job = workflow.nodes["eval_original[dataset]"].external["job"]
+    assert harness.platform.dataset_evals[dataset_job]["spec"]["dataset"] == "default/esec#dataset.jsonl"
+    assert harness.platform.dataset_evals[dataset_job]["deployment"] == teacher_agent
+    assert harness.platform.trajectory_filesets == [
+        workflow.nodes["eval_original[tasks]"].outputs["fileset"],
+        workflow.nodes["eval_original[dataset]"].outputs["fileset"],
+    ]
     assert {name for name, _ in harness.platform.created} <= set(harness.platform.deleted)
     assert harness.platform.deployments == {}
+    assert harness.platform.agent_deployments == {}
     assert workflow.results is not None
     assert set(workflow.results) >= {"original", "base", "distilled"}
     assert workflow.stages[0]["status"] == "completed"
 
 
+async def test_one_gpu_runs_each_job_to_the_end_before_the_next() -> None:
+    candidates = [{"name": "lora-r16", "finetuning_type": "lora"}, {"name": "full", "finetuning_type": "all_weights"}]
+    workflow = assemble("distill", "default", inputs(candidates=candidates, gpu_budget=1))
+    harness = Harness()
+
+    for _ in range(120):
+        await _apply(workflow, harness)
+        if workflow.status in {"completed", "failed", "cancelled"}:
+            break
+
+    assert workflow.status == "completed", _stuck(workflow)
+    events = harness.platform.events
+    external = {key: node.external for key, node in workflow.nodes.items()}
+    teacher = external["deploy_teacher"]["deployment"]
+    base = external["deploy_base"]["deployment"]
+    first = external["deploy[lora-r16]"]["deployment"]
+    second = external["deploy[full]"]["deployment"]
+    order = [
+        ("deploy", teacher),
+        ("eval", external["eval_original[tasks]"]["job"]),
+        ("delete", teacher),
+        ("deploy", base),
+        ("eval", external["eval_base[tasks]"]["job"]),
+        ("delete", base),
+        ("train", external["train[lora-r16]"]["job"]),
+        ("deploy", first),
+        ("eval", external["eval_distilled_tasks[lora-r16]"]["job"]),
+        ("delete", first),
+        ("train", external["train[full]"]["job"]),
+        ("deploy", second),
+        ("eval", external["eval_distilled_tasks[full]"]["job"]),
+        ("delete", second),
+    ]
+    positions = [events.index(event) for event in order]
+    assert positions == sorted(positions)
+
+
+async def test_existing_trajectories_start_at_conversion() -> None:
+    workflow = assemble("distill", "default", inputs(teacher=None, trajectory_filesets=["default/runs-a"]))
+    harness = Harness()
+
+    for _ in range(80):
+        await _apply(workflow, harness)
+        if workflow.status in {"completed", "failed", "cancelled"}:
+            break
+
+    assert workflow.status == "completed", _stuck(workflow)
+    assert harness.platform.trajectory_filesets == ["default/runs-a"]
+    assert not [key for key in workflow.nodes if "teacher" in key or "original" in key]
+    events = harness.platform.events
+    assert events.index(("deploy", workflow.nodes["deploy_base"].external["deployment"])) < events.index(
+        ("train", workflow.nodes["train[lora]"].external["job"])
+    )
+    assert workflow.results is not None
+    assert workflow.results["original"] is None
+    assert [stage["id"] for stage in workflow.stages][:2] == ["prepare", "customization"]
+    assert "eval-original" not in [stage["id"] for stage in workflow.stages]
+
+
 async def test_cancel_leaves_no_deployments() -> None:
-    workflow = assemble("distill", "default", INPUTS)
+    workflow = assemble("distill", "default", inputs())
     harness = Harness()
     saw_deployment = False
 
@@ -206,8 +354,10 @@ async def test_cancel_leaves_no_deployments() -> None:
 
     assert saw_deployment
     assert workflow.status == "cancelled", _stuck(workflow)
-    assert workflow.nodes["eval_distilled[lora]"].status == "cancelled"
+    assert workflow.nodes["eval_distilled_tasks[lora]"].status == "cancelled"
+    assert workflow.nodes["eval_distilled_dataset[lora]"].status == "cancelled"
     assert harness.platform.deployments == {}
+    assert harness.platform.agent_deployments == {}
     assert {name for name, _ in harness.platform.created} <= set(harness.platform.deleted)
 
 

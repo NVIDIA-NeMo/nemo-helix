@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 from nemo_customizer.jobs.atif_convert import AtifConvertJob, AtifConvertSpec, fileset_prefix
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
-from nemo_helix_plugin.agents.types import RegisterAgentRequest
+from nemo_helix_plugin.agents.types import CreateDeploymentRequest, DeploymentMode, RegisterAgentRequest
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.evals.client import AsyncEvaluatorClient
@@ -81,8 +81,23 @@ class Platform:
             content=json.dumps(payload).encode("utf-8"),
         )
 
-    async def submit_convert(self, *, workspace: str, name: str, fileset: str, node_key: str) -> None:
-        spec = AtifConvertSpec(workspace=workspace, fileset=fileset, node_key=node_key)
+    async def submit_convert(
+        self,
+        *,
+        workspace: str,
+        name: str,
+        fileset: str,
+        node_key: str,
+        trajectory_filesets: list[str],
+        pass_filter: dict[str, Any],
+    ) -> None:
+        spec = AtifConvertSpec(
+            workspace=workspace,
+            fileset=fileset,
+            node_key=node_key,
+            trajectory_filesets=trajectory_filesets,
+            pass_filter=pass_filter,
+        )
         platform_spec = await AtifConvertJob.compile(
             workspace=workspace,
             spec=spec,
@@ -160,6 +175,43 @@ class Platform:
             raise Missing(name) from exc
         return _status_value(payload.status)
 
+    async def create_agent_deployment(
+        self,
+        *,
+        workspace: str,
+        name: str,
+        agent_name: str,
+        mode: str,
+        image: str,
+        use_image_entrypoint: bool,
+    ) -> None:
+        try:
+            await self.agents.create_deployment(
+                workspace=workspace,
+                body=CreateDeploymentRequest(
+                    agent=agent_name,
+                    name=name,
+                    deployment_mode=cast(DeploymentMode, mode),
+                    image=image,
+                    use_image_entrypoint=use_image_entrypoint,
+                ),
+            )
+        except ConflictError:
+            return
+
+    async def agent_deployment_status(self, *, workspace: str, name: str) -> str:
+        try:
+            payload = (await self.agents.get_deployment(workspace=workspace, name=name)).data()
+        except NotFoundError as exc:
+            raise Missing(name) from exc
+        return _status_value(payload.status)
+
+    async def delete_agent_deployment(self, *, workspace: str, name: str) -> None:
+        try:
+            await self.agents.delete_deployment(workspace=workspace, name=name)
+        except NotFoundError:
+            return
+
     async def delete_deployment(self, *, workspace: str, name: str) -> None:
         try:
             await self.models.delete_deployment(workspace=workspace, name=name)
@@ -228,6 +280,41 @@ class Platform:
     async def cancel_eval(self, *, workspace: str, name: str) -> None:
         try:
             await self.evals.cancel_agent_eval_job(workspace=workspace, name=name)
+        except NotFoundError:
+            return
+
+    async def submit_dataset_eval(
+        self,
+        *,
+        workspace: str,
+        name: str,
+        agent_name: str,
+        deployment_name: str,
+        spec: dict[str, Any],
+        evaluation_id: str,
+    ) -> None:
+        body = dict(spec)
+        body["target"] = _agent_chat_target(self.client.base_url, workspace, deployment_name)
+        body["publication"] = {"intake": {"evaluation_id": evaluation_id, "agent_name": agent_name}}
+        body.setdefault(
+            "params",
+            {"parallelism": 4, "request_timeout": 300, "max_retries": 5, "ignore_request_failure": False},
+        )
+        await self._post(
+            f"/apis/evals/v2/workspaces/{workspace}/evaluate/jobs",
+            {"name": name, "spec": body},
+        )
+
+    async def dataset_eval_status(self, *, workspace: str, name: str) -> str:
+        try:
+            payload = (await self.evals.get_evaluate_job_status(workspace=workspace, name=name)).data()
+        except NotFoundError as exc:
+            raise Missing(name) from exc
+        return _status_value(payload.status)
+
+    async def cancel_dataset_eval(self, *, workspace: str, name: str) -> None:
+        try:
+            await self.evals.cancel_evaluate_job(workspace=workspace, name=name)
         except NotFoundError:
             return
 
@@ -306,6 +393,19 @@ class Platform:
         if response.status_code >= 400:
             logger.info("POST %s returned %s", sanitize_for_log(path), response.status_code)
             raise RuntimeError(f"POST {path} failed ({response.status_code}): {response.text[:500]}")
+
+
+def _agent_chat_target(base_url: str, workspace: str, deployment_name: str) -> dict[str, Any]:
+    """The dataset-driven eval target: the workflow-owned agent deployment's chat endpoint."""
+    root = base_url.rstrip("/")
+    return {
+        "format": "generic",
+        "url": (f"{root}/apis/agents/v2/workspaces/{workspace}/deployments/{deployment_name}/-/v1/chat/completions"),
+        "name": deployment_name,
+        "body": {"model": deployment_name, "messages": [{"role": "user", "content": "{{ prompt }}"}], "stream": False},
+        "response_path": "$.choices[0].message.content",
+        "stream": False,
+    }
 
 
 def _split_ref(ref: str, workspace: str) -> tuple[str, str]:

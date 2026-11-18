@@ -17,9 +17,15 @@ def test_stub_rows_match_the_sft_chat_schema() -> None:
     second["messages"][1]["content"] = "What is 3+3?"
     SFTPChatDatasetItemSchema.model_validate(first)
     SFTPChatDatasetItemSchema.model_validate(second)
-    output = stub_output(workspace="default", fileset="distill-data", node_key="prepare")
+    output = stub_output(
+        workspace="default",
+        fileset="distill-data",
+        node_key="prepare",
+        trajectory_filesets=["default/job-fileset-eval"],
+    )
     assert output["dataset"] == "default/distill-data#nodes/prepare/"
-    assert output["tasks"][0]["id"] == "stub-task-1"
+    assert output["trajectory_filesets"] == ["default/job-fileset-eval"]
+    assert "tasks" not in output
     assert fileset_prefix("train[lora]") == "nodes/train_lora"
 
 
@@ -43,7 +49,13 @@ async def test_compile_requests_the_customizer_tasks_image(monkeypatch: pytest.M
     assert step.executor.provider == "cpu"
     assert step.executor.container.image == "example.invalid/nhx-customizer-tasks:test"
     assert step.executor.container.command == ["nemo_customizer.tasks.atif_convert"]
-    assert step.config == {"workspace": "default", "fileset": "distill-data", "node_key": "prepare"}
+    assert step.config == {
+        "workspace": "default",
+        "fileset": "distill-data",
+        "node_key": "prepare",
+        "trajectory_filesets": [],
+        "pass_filter": {},
+    }
 
 
 def test_run_uploads_schema_valid_jsonl_and_output(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,7 +73,12 @@ def test_run_uploads_schema_valid_jsonl_and_output(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(module.FilesClient, "from_client", lambda client: Files())
     result = AtifConvertJob().run(
-        {"workspace": "default", "fileset": "distill-data", "node_key": "prepare"},
+        {
+            "workspace": "default",
+            "fileset": "distill-data",
+            "node_key": "prepare",
+            "trajectory_filesets": ["default/job-fileset-eval"],
+        },
         ctx=cast(JobContext, None),
         sdk=cast(NemoClient, SDK()),
     )
@@ -74,4 +91,5 @@ def test_run_uploads_schema_valid_jsonl_and_output(monkeypatch: pytest.MonkeyPat
             SFTPChatDatasetItemSchema.model_validate(row)
     output = json.loads(uploaded["nodes/prepare/output.json"])
     assert output["fileset"] == "default/distill-data"
+    assert output["trajectory_filesets"] == ["default/job-fileset-eval"]
     assert output["examples"] == 2

@@ -2,19 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nemo_distillation_plugin.models import MAX_RESOURCE_NAME_LEN, DistillInputs, GraphError, GraphNode
+from nemo_distillation_plugin.models import MAX_RESOURCE_NAME_LEN, GraphError, GraphNode
 from nemo_distillation_plugin.names import allocate
 from nemo_distillation_plugin.template import assemble
-
-INPUTS = DistillInputs(source_agent="default/teacher", student_model="default/student")
+from samples import inputs
 
 
 def test_names_are_assigned_once_in_graph_order() -> None:
-    workflow = assemble("distill", "default", INPUTS)
+    workflow = assemble("distill", "default", inputs())
     names = [value for node in workflow.nodes.values() for value in node.external.values()]
 
     assert names == [f"distill-t{number}" for number in range(1, len(names) + 1)]
-    assert workflow.nodes["prepare"].external == {"job": "distill-t1"}
+    assert workflow.nodes["experiment"].external["experiment"] == "distill-t1"
     assert workflow.nodes["train[lora]"].external["model"] != workflow.nodes["train[lora]"].external["job"]
     assert workflow.experiment == workflow.nodes["experiment"].external["experiment"]
     assert workflow.fileset == "distill-data"
@@ -25,21 +24,26 @@ def test_names_are_assigned_once_in_graph_order() -> None:
         workflow.graph["undeploy[lora]"].inputs["deployment"] == workflow.nodes["deploy[lora]"].external["deployment"]
     )
     assert (
-        workflow.graph["eval_original"].inputs["evaluation_id"]
+        workflow.graph["undeploy_teacher"].inputs["deployment"]
+        == workflow.nodes["deploy_teacher"].external["deployment"]
+    )
+    assert workflow.graph["deploy_agent_original"].inputs["model"] == workflow.graph["deploy_teacher"].inputs["model"]
+    assert (
+        workflow.graph["eval_original[tasks]"].inputs["agent_name"]
+        == workflow.nodes["deploy_agent_original"].external["agent"]
+    )
+    assert (
+        workflow.graph["eval_original[tasks]"].inputs["evaluation_id"]
         == (workflow.nodes["experiment"].external["evaluation_original"])
+    )
+    assert (
+        workflow.graph["eval_original[dataset]"].inputs["evaluation_id"]
+        == workflow.graph["eval_original[tasks]"].inputs["evaluation_id"]
     )
 
 
 def test_full_weights_deploys_the_output_model() -> None:
-    workflow = assemble(
-        "distill",
-        "default",
-        DistillInputs(
-            source_agent="default/teacher",
-            student_model="default/student",
-            candidates=[{"name": "full", "finetuning_type": "all_weights"}],
-        ),
-    )
+    workflow = assemble("distill", "default", inputs(candidates=[{"name": "full", "finetuning_type": "all_weights"}]))
 
     output = workflow.nodes["train[full]"].external["model"]
     assert workflow.graph["deploy[full]"].inputs["lora_enabled"] is False
@@ -52,4 +56,4 @@ def test_a_name_that_cannot_fit_a_suffix_is_rejected() -> None:
     assert len("a" * 53 + "-t1") > MAX_RESOURCE_NAME_LEN
 
     with pytest.raises(GraphError, match="workflow name"):
-        assemble("a" * 40, "default", INPUTS)
+        assemble("a" * 40, "default", inputs())
