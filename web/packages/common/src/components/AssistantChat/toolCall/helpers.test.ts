@@ -20,6 +20,11 @@ describe('Studio Assistant activity messages', () => {
       { summary: 'Created guardrail config' },
       'Guardrail: Created guardrail config',
     ],
+    [
+      'deploy_guardrail',
+      { summary: 'ValueError: model not found', status: 'failed' },
+      'Guardrail step failed: ValueError: model not found',
+    ],
   ])('describes %s activity', (toolName, args, expected) => {
     expect(getSubtleToolMessage(toolName, args)).toBe(expected);
   });
