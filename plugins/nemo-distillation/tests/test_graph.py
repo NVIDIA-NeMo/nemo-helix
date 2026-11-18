@@ -177,3 +177,23 @@ def test_a_cycle_cannot_be_expanded() -> None:
                 "b": GraphNode(kind="delete_deployment", depends_on=["a"]),
             }
         )
+
+
+def test_eval_inputs_are_fileset_references() -> None:
+    import pytest
+    from nemo_distillation_plugin.models import EvalInput
+    from pydantic import ValidationError
+    from samples import DATASET_REF, TASKS_REF
+
+    graph = build_graph(inputs())
+    assert graph["eval_base[tasks]"].inputs["config"] == TASKS_REF
+    assert graph["eval_base[dataset]"].inputs["config"] == DATASET_REF
+    assert graph["eval_base[dataset]"].inputs["dataset"] == "default/esec#dataset.jsonl"
+    assert "spec" not in graph["eval_base[tasks]"].inputs
+
+    with pytest.raises(ValidationError, match="fileset file reference"):
+        EvalInput(name="tasks", kind="agent", config="no-hash-here")
+    with pytest.raises(ValidationError, match="only applies to kind 'dataset'"):
+        EvalInput(name="tasks", kind="agent", config=TASKS_REF, dataset="default/esec#dataset.jsonl")
+    with pytest.raises(ValidationError):
+        EvalInput.model_validate({"name": "tasks", "kind": "agent", "config": TASKS_REF, "tasks": [{"id": "inline"}]})

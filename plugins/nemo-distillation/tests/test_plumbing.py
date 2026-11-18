@@ -19,7 +19,7 @@ from nemo_distillation_plugin.models import Workflow
 from nemo_distillation_plugin.nodes.adapters import build_adapters
 from nemo_distillation_plugin.runtime import Missing
 from nemo_distillation_plugin.template import assemble
-from samples import inputs
+from samples import DATASET_REF, EVAL_CONFIGS, TASKS_REF, inputs
 
 
 class FakePlatform:
@@ -37,6 +37,7 @@ class FakePlatform:
         self.trajectory_filesets: list[str] = []
         self.dataset_evals: dict[str, dict[str, Any]] = {}
         self.agent_deployments: dict[str, str] = {}
+        self.config_reads: list[str] = []
 
     async def submit_convert(
         self,
@@ -136,6 +137,11 @@ class FakePlatform:
     async def delete_agent(self, *, workspace: str, agent_name: str) -> None:
         del workspace
         self.events.append(("delete-agent", agent_name))
+
+    async def read_eval_config(self, workspace: str, ref: str) -> dict[str, Any]:
+        del workspace
+        self.config_reads.append(ref)
+        return dict(EVAL_CONFIGS[ref])
 
     async def submit_eval(self, *, workspace: str, name: str, spec: dict[str, Any]) -> None:
         del workspace
@@ -267,6 +273,10 @@ async def test_the_stub_flows_through_train_deploy_and_eval() -> None:
     assert original_eval["tasks"][0]["id"] == "classify-0"
     dataset_job = workflow.nodes["eval_original[dataset]"].external["job"]
     assert harness.platform.dataset_evals[dataset_job]["spec"]["dataset"] == "default/esec#dataset.jsonl"
+    assert harness.platform.dataset_evals[dataset_job]["spec"]["metrics"] == EVAL_CONFIGS[DATASET_REF]["metrics"]
+    assert original_eval["max_concurrent_tasks"] == 1
+    assert set(harness.platform.config_reads) == {TASKS_REF, DATASET_REF}
+    assert "classify-0" not in workflow.model_dump_json()
     assert harness.platform.dataset_evals[dataset_job]["deployment"] == teacher_agent
     assert harness.platform.trajectory_filesets == [
         workflow.nodes["eval_original[tasks]"].outputs["fileset"],

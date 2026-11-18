@@ -4736,6 +4736,7 @@ dependencies = [
     { name = "nemo-helix-plugin" },
     { name = "nhx-customization-common" },
     { name = "pydantic" },
+    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -4752,6 +4753,7 @@ requires-dist = [
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nhx-customization-common", editable = "packages/nhx_customization_common" },
     { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
 ]
 
 [package.metadata.requires-dev]

@@ -67,6 +67,8 @@ class PlatformPort(Protocol):
 
     async def delete_agent(self, *, workspace: str, agent_name: str) -> None: ...
 
+    async def read_eval_config(self, workspace: str, ref: str) -> dict[str, Any]: ...
+
     async def submit_eval(self, *, workspace: str, name: str, spec: dict[str, Any]) -> None: ...
 
     async def eval_status(self, *, workspace: str, name: str) -> str: ...
@@ -306,10 +308,10 @@ class AgentEvalAdapter(_Adapter):
         external = workflow.nodes[node_key].external
         inputs = resolve(workflow.graph[node_key].inputs, workflow)
         agent_name = str(inputs["agent_name"])
-        spec = inputs.get("spec")
-        tasks = spec.get("tasks") if isinstance(spec, dict) else None
+        config = await self.platform.read_eval_config(workflow.workspace, str(inputs["config"]))
+        tasks = config.get("tasks")
         if not isinstance(tasks, list) or not tasks:
-            raise ValueError(f"{node_key} has no tasks to evaluate")
+            raise ValueError(f"{node_key}: {inputs['config']} has no tasks to evaluate")
         submitted: dict[str, Any] = {
             "tasks": tasks,
             "target": {
@@ -318,8 +320,8 @@ class AgentEvalAdapter(_Adapter):
             },
             "publication": {"intake": {"evaluation_id": inputs["evaluation_id"]}},
         }
-        if isinstance(spec, dict) and spec.get("max_concurrent_tasks") is not None:
-            submitted["max_concurrent_tasks"] = spec["max_concurrent_tasks"]
+        if config.get("max_concurrent_tasks") is not None:
+            submitted["max_concurrent_tasks"] = config["max_concurrent_tasks"]
         await self.platform.submit_eval(workspace=workflow.workspace, name=external["job"], spec=submitted)
 
     async def poll(self, workflow: Workflow, node_key: str) -> Poll:
@@ -349,15 +351,22 @@ class DatasetEvalAdapter(_Adapter):
     async def start(self, workflow: Workflow, node_key: str) -> None:
         external = workflow.nodes[node_key].external
         inputs = resolve(workflow.graph[node_key].inputs, workflow)
-        spec = inputs.get("spec")
-        if not isinstance(spec, dict) or not spec.get("dataset") or not spec.get("metrics"):
-            raise ValueError(f"{node_key} has no dataset eval spec")
+        spec = dict(await self.platform.read_eval_config(workflow.workspace, str(inputs["config"])))
+        if inputs.get("dataset"):
+            spec["dataset"] = str(inputs["dataset"])
+        dataset = spec.get("dataset")
+        if not isinstance(dataset, str) or not dataset or dataset.startswith("<"):
+            raise ValueError(
+                f"{node_key}: {inputs['config']} has no usable dataset reference (set the eval's `dataset`)"
+            )
+        if not spec.get("metrics"):
+            raise ValueError(f"{node_key}: {inputs['config']} has no metrics")
         await self.platform.submit_dataset_eval(
             workspace=workflow.workspace,
             name=external["job"],
             agent_name=str(inputs["agent_name"]),
             deployment_name=str(inputs["agent_deployment"]),
-            spec=dict(spec),
+            spec=spec,
             evaluation_id=str(inputs["evaluation_id"]),
         )
 

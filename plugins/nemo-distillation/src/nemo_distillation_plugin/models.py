@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from nemo_helix_plugin.entity import NemoEntity
@@ -33,6 +34,8 @@ WORKFLOW_STATUSES = frozenset({"pending", "running", "cancelling", "completed", 
 OWN_OUTPUT_KINDS = frozenset({"convert_atif"})
 
 FABRIC_AGENT_CONFIG_FORMAT = "nemo-agents-spec-v1"
+#: ``[workspace/]fileset#path``: one file in a fileset.
+FILE_REF = re.compile(r"^(?:[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+#[^\s#]+$")
 CONFIRM_GRACE_SECONDS = 60.0
 MAX_RESOURCE_NAME_LEN = 55
 
@@ -68,33 +71,35 @@ class CandidateSpec(BaseModel):
 
 
 class EvalInput(BaseModel):
-    """One evaluation run on every arm.
+    """One evaluation run on every arm. The eval definition lives in a fileset, not in the request.
 
-    ``agent`` is a task-driven agent-eval spec (``tasks`` inline). ``dataset`` is a
-    dataset-driven evaluate spec (``dataset``, ``metrics``, ``prompt_template``). The
-    per-arm target is filled in when the node starts. Only the original arm's output
-    filesets are the convert step's input.
+    ``config`` names one file as ``workspace/fileset#path`` (the workspace may be omitted to mean the
+    workflow's own). For ``agent`` it is a task-driven agent-eval config (a ``tasks`` list). For ``dataset``
+    it is a dataset-driven evaluate config (``dataset``, ``prompt_template``, ``metrics``); ``dataset``
+    here overrides the file's placeholder dataset reference. The eval node reads the file when it starts
+    and fills in the per-arm target, so the workflow entity carries only the reference. Only the original
+    arm's output filesets are the convert step's input.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
     kind: Literal["agent", "dataset"]
-    spec: dict[str, Any]
+    config: str = Field(description="Eval config file in a fileset: `workspace/fileset#path/to/file.(json|yaml)`.")
+    dataset: str | None = Field(
+        default=None,
+        description="kind=dataset only: dataset file reference `workspace/fileset#path`. Replaces the config's `dataset`.",
+    )
 
     @model_validator(mode="after")
-    def _spec_matches_kind(self) -> EvalInput:
-        if self.kind == "agent":
-            tasks = self.spec.get("tasks")
-            if not isinstance(tasks, list) or not tasks:
-                raise ValueError(f"eval {self.name!r} needs a non-empty tasks list")
-        else:
-            dataset = self.spec.get("dataset")
-            metrics = self.spec.get("metrics")
-            if not isinstance(dataset, str) or not dataset:
-                raise ValueError(f"eval {self.name!r} needs a dataset fileset reference")
-            if not isinstance(metrics, list) or not metrics:
-                raise ValueError(f"eval {self.name!r} needs a non-empty metrics list")
+    def _refs_are_files(self) -> EvalInput:
+        if not FILE_REF.match(self.config):
+            raise ValueError(f"eval {self.name!r}: config must be a fileset file reference `workspace/fileset#path`")
+        if self.dataset is not None:
+            if self.kind != "dataset":
+                raise ValueError(f"eval {self.name!r}: dataset only applies to kind 'dataset'")
+            if not FILE_REF.match(self.dataset):
+                raise ValueError(f"eval {self.name!r}: dataset must be a file reference `workspace/fileset#path`")
         return self
 
 

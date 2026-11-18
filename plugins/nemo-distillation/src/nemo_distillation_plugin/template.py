@@ -198,8 +198,10 @@ def _eval_inputs(inputs: DistillInputs, spec: EvalInput, arm: str | None) -> dic
     body: dict[str, Any] = {
         "source_agent": inputs.source_agent,
         "eval": spec.name,
-        "spec": dict(spec.spec),
+        "config": spec.config,
     }
+    if spec.dataset is not None:
+        body["dataset"] = spec.dataset
     if arm is not None:
         body["arm"] = arm
     return body
