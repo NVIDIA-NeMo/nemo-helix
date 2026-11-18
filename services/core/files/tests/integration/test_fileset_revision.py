@@ -15,7 +15,7 @@ from nhx.common.entities.client import EntityClient
 from nhx.core.files.api.v2.filesets import endpoints
 from nhx.core.files.app.backends.local import LocalStorageImpl
 from nhx.core.files.app.revision import advance_fileset_revision
-from nhx.core.files.entities import Fileset
+from nhx.core.files.entities import DEFAULT_REVISION, Fileset
 from nhx.testing import ClientContext
 
 BASE = "/apis/files/v2/workspaces/default/filesets"
@@ -62,7 +62,7 @@ def test_revision_round_trip(files_client: FilesClient, fileset: FilesetOutput, 
     assert files_client.get_fileset(workspace="default", name=fileset.name).data().revision == deleted.fileset_revision
 
 
-def test_legacy_reads_are_stable_and_first_upload_persists_revision(client_context: ClientContext, tmp_path: Path):
+def test_unset_revisions_are_stable_and_first_upload_persists_revision(client_context: ClientContext, tmp_path: Path):
     portal = client_context.test_client.portal
     assert portal is not None
     store = client_context.entity_client
@@ -84,18 +84,16 @@ def test_legacy_reads_are_stable_and_first_upload_persists_revision(client_conte
     legacy = portal.call(get_legacy)
     files = FilesClient.from_client(client_context.client)
     for _ in range(2):
-        assert files.get_fileset(workspace="default", name=legacy.name).data().revision == f"legacy:{legacy.id}"
+        assert files.get_fileset(workspace="default", name=legacy.name).data().revision == DEFAULT_REVISION
     stored = portal.call(store.get_by_id, Fileset, legacy.id)
     assert stored.db_version == legacy.db_version
-    assert stored.revision == ""
+    assert stored.revision == DEFAULT_REVISION
     result = files.upload_file(workspace="default", name=legacy.name, path="file.txt", content=b"hello").data()
     stored = portal.call(store.get_by_id, Fileset, legacy.id)
     assert result.fileset_revision == stored.revision
     assert UUID(stored.revision).version == 4
-    assert stored.commit_revision == ""
-    assert (
-        files.get_fileset(workspace="default", name=legacy.name).data().commit_revision == f"legacy-commit:{legacy.id}"
-    )
+    assert stored.commit_revision == DEFAULT_REVISION
+    assert files.get_fileset(workspace="default", name=legacy.name).data().commit_revision == DEFAULT_REVISION
     committed = files.commit_fileset(workspace="default", name=legacy.name).data()
     assert committed.revision == stored.revision
     assert committed.commit_revision and UUID(committed.commit_revision).version == 4

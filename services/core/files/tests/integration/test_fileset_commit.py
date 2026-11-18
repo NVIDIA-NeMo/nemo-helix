@@ -13,7 +13,7 @@ from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetOutput, U
 from nhx.common.entities.client import EntityClient
 from nhx.core.files.api.v2.filesets import endpoints
 from nhx.core.files.app.revision import commit_fileset_revision
-from nhx.core.files.entities import Fileset
+from nhx.core.files.entities import DEFAULT_REVISION, Fileset
 
 BASE = "/apis/files/v2/workspaces/default/filesets"
 
@@ -146,9 +146,7 @@ def test_commit_never_retargets_recreated_name(files_client: FilesClient, monkey
 
 
 @pytest.mark.parametrize("read_only", [False, True])
-def test_legacy_commit_has_no_storage_effects(
-    test_client: TestClient, monkeypatch: pytest.MonkeyPatch, read_only: bool
-):
+def test_unset_commit_has_no_storage_effects(test_client: TestClient, monkeypatch: pytest.MonkeyPatch, read_only: bool):
     storage = (
         {"type": "github", "owner": "org", "repo": "repo", "revision": "main"}
         if read_only
@@ -164,7 +162,7 @@ def test_legacy_commit_has_no_storage_effects(
     assert created.status_code == 201, created.text
     url = f"{BASE}/legacy-commit"
     initial = test_client.get(url).json()
-    assert initial["commit_revision"] == f"legacy-commit:{initial['id']}"
+    assert initial["commit_revision"] == DEFAULT_REVISION
     assert test_client.get(url).json()["commit_revision"] == initial["commit_revision"]
 
     def no_storage(*args, **kwargs):

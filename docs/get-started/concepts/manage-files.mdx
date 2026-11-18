@@ -450,8 +450,10 @@ it unchanged, and direct bucket or filesystem writes are outside this signal.
 
 This is a best-effort change signal. It provides no locking or snapshot, and a
 failure between writing storage and saving the revision can leave changed files
-with the previous token. Older servers omit these fields; an older fileset on an
-updated server has a stable `legacy:<id>` token until its first mutation.
+with the previous token. An unset token starts at the fixed default
+`00000000-0000-0000-0000-000000000000`; the first relevant operation replaces it
+with a fresh UUID. Reads never generate tokens or write data. Compare tokens
+within the same fileset.
 
 A fileset also has a `commit_revision` marker. Creation initializes both tokens.
 Ordinary edits preserve the commit marker; call `commit_fileset` explicitly to
@@ -468,9 +470,9 @@ Every successful commit assigns a fresh token, even without edits, and leaves
 `revision` unchanged. Compare each token with an earlier value of the same field;
 comparing the two fields does not indicate uncommitted changes. Commit records a
 metadata marker without freezing files, scanning storage or waiting for in-flight
-uploads. Finish your intended uploads before calling it. Older filesets expose
-`legacy-commit:<id>` until their first explicit commit; ordinary edits preserve
-that baseline.
+uploads. Finish your intended uploads before calling it. An unset commit token
+uses the same fixed default until the first explicit commit; ordinary edits
+preserve it.
 
 Run the complete SDK demo from this source checkout against a server containing
 the fileset revision change:
