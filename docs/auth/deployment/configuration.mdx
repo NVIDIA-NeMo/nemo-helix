@@ -244,8 +244,10 @@ auth:
      kubernetes_token_review_enabled: true
 ```
 
-Create the RSA signing key, mount it on the API, and grant TokenReview before
-you add `auth.oidc.workload`. See
+Create the RSA signing key and mount it on the API before you add
+`auth.oidc.workload`. The Helm chart grants TokenReview to the API ServiceAccount
+when Kubernetes token review is enabled; other installations must grant it
+explicitly. See
 [Deployment Secrets](/documentation/access-control/deployment/deployment-secrets).
 
 Workload token exchange is a platform-wide mode. When
