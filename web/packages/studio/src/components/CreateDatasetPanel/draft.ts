@@ -102,14 +102,18 @@ function reduceDraft(tab: TabId, draft: Draft, action: PanelAction): Draft {
       const next = { ...draft, source: action.value, sourceShown: action.pasted };
       if (draft.nameTouched) return next;
       // Every edit reparses the whole input, so a stale seed never survives (spec 4.3).
-      return {
-        ...next,
-        name: inferDatasetName(parsed.status === 'ok' ? parsed.nameSeed : ''),
-        nameShown: action.pasted,
-      };
+      const name = inferDatasetName(parsed.status === 'ok' ? parsed.nameSeed : '');
+      // A pasted URL shows its inferred name's error at once; an empty name is not an inferred one.
+      return { ...next, name, nameShown: action.pasted && name !== '' };
     }
     case 'source-blurred':
-      return { ...draft, sourceShown: true, nameShown: draft.nameShown || !draft.nameTouched };
+      // Blur reveals an inferred name's error (spec 11.1), but an empty name was not inferred:
+      // nothing to flag until a submit asks for one.
+      return {
+        ...draft,
+        sourceShown: true,
+        nameShown: draft.nameShown || (!draft.nameTouched && draft.name !== ''),
+      };
     case 'name-changed':
       return { ...draft, name: action.value, nameTouched: true, nameShown: false };
     case 'name-blurred':
