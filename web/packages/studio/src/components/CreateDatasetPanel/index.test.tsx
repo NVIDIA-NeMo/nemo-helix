@@ -810,4 +810,62 @@ describe('CreateDatasetPanel', () => {
     await waitFor(() => expect(field('Name')).toHaveValue('3d-assets'));
     expect(await screen.findByText('Names must start with a lowercase letter')).toBeInTheDocument();
   });
+
+  it('locks the Upload selection while Create is pending and unlocks it when Create fails', async () => {
+    const { puts } = recordRequests();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(FILESETS_URL, async () => {
+        await gate;
+        return HttpResponse.json({ detail: 'boom' }, { status: 500 });
+      })
+    );
+    const { user, onCreated } = setup();
+    await openTab(user, 'Upload');
+    selectFiles('create-dataset-folder-input', 'my-data/a.jsonl', 'my-data/train/b.jsonl');
+    selectFiles('create-dataset-files-input', 'notes.txt');
+    await waitFor(() => expect(field('Name')).toHaveValue('my-data'));
+
+    await user.click(createButton());
+    expect(await screen.findByRole('button', { name: 'Creating…' })).toBeDisabled();
+
+    // Every way to change the selection is disabled while the request is in flight
+    expect(screen.getByRole('button', { name: 'Choose files' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Choose folder' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Remove notes.txt' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Remove folder my-data' })).toBeDisabled();
+
+    // ...and a change event that still reaches a picker must not alter the draft
+    selectFiles('create-dataset-folder-input', 'other/x.jsonl');
+    selectFiles('create-dataset-files-input', 'loose2.txt');
+    expect(screen.getByRole('button', { name: 'Remove notes.txt' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove loose2.txt' })).not.toBeInTheDocument();
+    expect(screen.getByText(/my-data\/a\.jsonl/)).toBeInTheDocument();
+    expect(screen.queryByText(/other\/x\.jsonl/)).not.toBeInTheDocument();
+
+    // The create fails: the panel stays open, the controls come back and the selection is intact
+    release();
+    expect(await screen.findByTestId('mock-toast-error')).toBeInTheDocument();
+    expect(onCreated).not.toHaveBeenCalled();
+    await waitFor(() => expect(createButton()).toBeEnabled());
+    expect(screen.getByRole('button', { name: 'Choose files' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Choose folder' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Remove notes.txt' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Remove folder my-data' })).toBeEnabled();
+    expect(field('Name')).toHaveValue('my-data');
+
+    // A retry uploads exactly the original selection
+    server.use(
+      http.post(FILESETS_URL, async ({ request }) => {
+        const body = (await request.json()) as Body;
+        return HttpResponse.json(filesetRecord(body.name as string));
+      })
+    );
+    await user.click(createButton());
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    expect([...puts].sort()).toEqual(['my-data/a.jsonl', 'my-data/train/b.jsonl', 'notes.txt']);
+  });
 });
