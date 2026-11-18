@@ -52,6 +52,13 @@ class MetricType(str, Enum):
     TOOL_CALL_COUNT = "tool_call_count"
     TOOL_ARGUMENT_MATCHES_INPUT = "tool_argument_matches_input"
 
+    # Skill artifact readiness and trial scoring.
+    SKILL_STRUCTURE = "skill_structure"
+    SKILL_REFERENCE_INTEGRITY = "skill_reference_integrity"
+    SKILL_CONTEXT_EFFICIENCY = "skill_context_efficiency"
+    SKILL_ACTIVATION = "skill_activation"
+    TOKEN_EFFICIENCY = "token_efficiency"
+
     SYSTEM = "system"
 
 

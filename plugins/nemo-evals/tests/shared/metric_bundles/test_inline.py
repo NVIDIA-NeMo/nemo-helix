@@ -45,6 +45,14 @@ from nhx_evals_sdk.metrics.ragas import (
 from nhx_evals_sdk.metrics.remote import NemoAgentToolkitRemoteMetric, RemoteMetric
 from nhx_evals_sdk.metrics.rouge import ROUGEMetric
 from nhx_evals_sdk.metrics.sequence_similarity import SequenceSimilarityMetric
+from nhx_evals_sdk.metrics.skills import (
+    SkillActivationMetric,
+    SkillContextEfficiencyMetric,
+    SkillReferenceIntegrityMetric,
+    SkillStructureMetric,
+    TokenEfficiencyMetric,
+    expected_behavior_metric,
+)
 from nhx_evals_sdk.metrics.string_check import StringCheckMetric
 from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
 from nhx_evals_sdk.values import Model, SecretRef
@@ -79,6 +87,12 @@ def _builtin_metric_cases() -> Sequence[tuple[str, Metric]]:
     """One configured instance of each built-in metric the inline packager must round-trip."""
     judge_model = _judge_model()
     return [
+        ("skill_structure", SkillStructureMetric()),
+        ("skill_references", SkillReferenceIntegrityMetric()),
+        ("skill_context", SkillContextEfficiencyMetric(token_budget=1200)),
+        ("skill_activation", SkillActivationMetric(skill_name="my-skill", should_activate=False)),
+        ("token_efficiency", TokenEfficiencyMetric(half_life=50_000)),
+        ("expected_behavior", expected_behavior_metric(judge_model, ["Reports the recovery action."])[0]),
         ("exact_match", ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")),
         ("f1", F1Metric(reference="{{item.expected}}", candidate="{{item.output}}")),
         ("bleu", BLEUMetric(references=["{{item.expected}}"], candidate="{{item.output}}")),
