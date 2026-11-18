@@ -2,12 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
 import httpx
 import pytest
 from nhx.studio import assistant_topic_gate
+
+
+@pytest.fixture(autouse=True)
+def reset_warned_failures(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(assistant_topic_gate, "_warned_failures", set())
 
 
 @pytest.fixture
@@ -122,3 +128,20 @@ async def test_is_off_topic_skips_check_when_disabled(monkeypatch: pytest.Monkey
 
     assert await _check() is False
     assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_is_off_topic_warns_once_per_failure_kind(
+    monkeypatch: pytest.MonkeyPatch, gate_requests, caplog: pytest.LogCaptureFixture
+):
+    monkeypatch.setenv(assistant_topic_gate.TOPIC_GATE_MODEL_ENV, "default/judge")
+    gate_requests(httpx.Response(401, json={"detail": "unauthorized"}))
+
+    with caplog.at_level(logging.WARNING, logger=assistant_topic_gate.logger.name):
+        await _check()
+        await _check()
+
+    [record] = caplog.records
+    assert "HTTP 401" in record.getMessage()
+    assert "not being filtered" in record.getMessage()
+    assert record.exc_info is None

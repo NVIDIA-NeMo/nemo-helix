@@ -78,6 +78,27 @@ def topic_check_request(model: str, message: str) -> dict[str, Any]:
     }
 
 
+_warned_failures: set[str] = set()
+
+
+def _log_check_failure(exc: Exception, model: str, url: str) -> None:
+    failure = type(exc).__name__
+    if isinstance(exc, httpx.HTTPStatusError):
+        failure = f"HTTP {exc.response.status_code}"
+    if failure in _warned_failures:
+        logger.debug("Studio Assistant topic check failed (%s); allowing the message", failure, exc_info=True)
+        return
+    _warned_failures.add(failure)
+    logger.warning(
+        "Studio Assistant topic check failed (%s) for model %s at %s; off-topic messages are not being filtered. "
+        "Set %s=off to disable the check.",
+        failure,
+        model,
+        url,
+        TOPIC_GATE_MODEL_ENV,
+    )
+
+
 async def is_off_topic(
     message: str,
     *,
@@ -97,7 +118,7 @@ async def is_off_topic(
             response = await client.post(url, headers=dict(headers), json=topic_check_request(model, message))
             response.raise_for_status()
             result = response.json()
-    except (httpx.HTTPError, ValueError):
-        logger.warning("Studio Assistant topic check failed; allowing the message", exc_info=True)
+    except (httpx.HTTPError, ValueError) as exc:
+        _log_check_failure(exc, model, url)
         return False
     return isinstance(result, dict) and result.get("status") == "blocked"
