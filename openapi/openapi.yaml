@@ -2999,6 +2999,15 @@ paths:
               schema:
                 type: string
                 format: binary
+        '409':
+          description: Upstream object changed; retry the request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -6768,6 +6777,14 @@ paths:
         schema:
           type: string
           title: Span Id
+      - name: session_id
+        in: query
+        required: false
+        schema:
+          description: Session containing the span. Required for ambiguous span IDs.
+          title: Session Id
+          type: string
+        description: Session containing the span. Required for ambiguous span IDs.
       responses:
         '200':
           description: Successful Response
@@ -6781,6 +6798,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Span ID belongs to multiple sessions; supply session_id.
         '422':
           description: Validation Error
           content:
@@ -7000,6 +7019,15 @@ paths:
         schema:
           type: string
           title: Id
+      - name: session_id
+        in: query
+        required: false
+        schema:
+          description: Session containing the trace. Required for ambiguous trace
+            IDs.
+          title: Session Id
+          type: string
+        description: Session containing the trace. Required for ambiguous trace IDs.
       - name: mode
         in: query
         required: false
@@ -7030,6 +7058,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Trace ID belongs to multiple sessions; supply session_id.
         '422':
           description: Validation Error
           content:
@@ -17635,8 +17665,8 @@ components:
           type: string
           title: Id
         attempt_id:
-          type: string
           title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -17668,7 +17698,7 @@ components:
         fileset:
           type: string
           title: Fileset
-          description: Fileset ID for storing job artifacts
+          description: Fileset name for storing job artifacts
         output_location:
           title: Output Location
           description: Caller-supplied artifact fileset; None when the fileset was
@@ -17705,7 +17735,6 @@ components:
       type: object
       required:
       - id
-      - attempt_id
       - name
       - workspace
       - source
@@ -17857,6 +17886,8 @@ components:
     HelixJobStatus:
       type: string
       enum:
+      - creation_pending
+      - deletion_pending
       - created
       - queued
       - pending

@@ -6532,6 +6532,8 @@ components:
     HelixJobStatus:
       type: string
       enum:
+      - creation_pending
+      - deletion_pending
       - created
       - queued
       - pending

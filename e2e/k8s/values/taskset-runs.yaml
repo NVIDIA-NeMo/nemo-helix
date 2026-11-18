@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Taskset runs on kind, for e2e/test_taskset_runs.py (the nightly-taskset-runs-e2e workflow). Layer it on kind.yaml
+# and builder.yaml, after install_opensandbox_kind.sh has installed OpenSandbox and copied its key into the release
+# namespace. With builder.enabled, sandboxClusterCapable makes the chart render evals.runs.harbor (harbor-standard).
+
+sandboxClusterCapable: true
+
+platformConfig:
+  evals:
+    runs:
+      controller:
+        # Default 20 s; each phase hop waits a cycle.
+        interval_seconds: 5
+        # Default unset. With auth off every run belongs to one creator, so this caps task Jobs cluster-wide: the
+        # cancel-paths test holds both slots with one run and checks a second run stays queued.
+        max_concurrent_task_jobs_per_creator: 2
+  builder:
+    # Shared by every workspace, as the MVP kit sets them; the workflow creates them once in `system`, so the test
+    # provisions none.
+    registry_username_secret: system/builder-registry-username
+    registry_password_secret: system/builder-registry-password
+    signing_key_secret: system/builder-signing-key

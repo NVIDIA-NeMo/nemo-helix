@@ -50,10 +50,6 @@ class BaseResultManager:
     both versions of the ResultManager, try to lift it up into this class to reduce duplication.
     """
 
-    job_name: str
-    workspace: str
-    attempt_id: str
-
     def _validate_local_path(self, artifact_local_path: str | Path) -> Path:
         if isinstance(artifact_local_path, str):
             artifact_local_path = Path(artifact_local_path)
@@ -69,9 +65,9 @@ class BaseResultManager:
         return f"{prefix}results/{attempt_id}/{result_name}"
 
 
-@dataclass
+@dataclass(frozen=True)
 class ResultManager(BaseResultManager):
-    job_name: str
+    job_id: str
     workspace: str
     files_client: FilesClient
     jobs_client: JobsClient
@@ -106,7 +102,7 @@ class ResultManager(BaseResultManager):
         try:
             job_result = self.jobs_client.create_job_result(
                 name=result_name,
-                job=self.job_name,
+                job=self.job_id,
                 workspace=self.workspace,
                 body=HelixJobResultCreateRequest(
                     attempt_id=attempt_id,
@@ -119,7 +115,7 @@ class ResultManager(BaseResultManager):
             # This supports the use case of saving partial results across multiple batches
             job_result = self.jobs_client.get_job_result(
                 name=result_name,
-                job=self.job_name,
+                job=self.job_id,
                 workspace=self.workspace,
             ).data()
         except NemoClientError as e:
@@ -137,9 +133,9 @@ class ResultManager(BaseResultManager):
         return file_manager.download_from_url(url=artifact_url, local_dir=local_dir)
 
 
-@dataclass
+@dataclass(frozen=True)
 class AsyncResultManager(BaseResultManager):
-    job_name: str
+    job_id: str
     workspace: str
     files_client: AsyncFilesClient
     jobs_client: AsyncJobsClient
@@ -175,7 +171,7 @@ class AsyncResultManager(BaseResultManager):
             job_result = (
                 await self.jobs_client.create_job_result(
                     name=result_name,
-                    job=self.job_name,
+                    job=self.job_id,
                     workspace=self.workspace,
                     body=HelixJobResultCreateRequest(
                         attempt_id=attempt_id,
@@ -190,7 +186,7 @@ class AsyncResultManager(BaseResultManager):
             job_result = (
                 await self.jobs_client.get_job_result(
                     name=result_name,
-                    job=self.job_name,
+                    job=self.job_id,
                     workspace=self.workspace,
                 )
             ).data()
@@ -211,7 +207,7 @@ class AsyncResultManager(BaseResultManager):
 
 
 def result_manager_factory(
-    job_name: str,
+    job_id: str,
     *,
     attempt_id: str,
     workspace: str | None = None,
@@ -223,7 +219,7 @@ def result_manager_factory(
     """Create a sync ResultManager for uploading job results.
 
     Args:
-        job_name: Name of the job to create results for.
+        job_id: Job identifier supplied by the caller, forwarded unchanged for result registration.
         attempt_id: Concrete attempt ID that produces uploaded results.
         workspace: Job workspace. If not provided, falls back to the client workspace resolution.
         files_client: Files service client.
@@ -235,7 +231,7 @@ def result_manager_factory(
     """
     resolved_workspace = files_client.resolve_workspace(workspace)
     return ResultManager(
-        job_name=job_name,
+        job_id=job_id,
         workspace=resolved_workspace,
         attempt_id=attempt_id,
         files_client=files_client,
@@ -246,7 +242,7 @@ def result_manager_factory(
 
 
 def async_result_manager_factory(
-    job_name: str,
+    job_id: str,
     *,
     attempt_id: str,
     workspace: str | None = None,
@@ -258,7 +254,7 @@ def async_result_manager_factory(
     """Create a ResultManager for uploading job results.
 
     Args:
-        job_name: Name of the job to create results for.
+        job_id: Job identifier supplied by the caller, forwarded unchanged for result registration.
         attempt_id: Concrete attempt ID that produces uploaded results.
         workspace: Job workspace. If not provided, falls back to the client workspace resolution.
         files_client: Files service client.
@@ -270,7 +266,7 @@ def async_result_manager_factory(
     """
     resolved_workspace = files_client.resolve_workspace(workspace)
     return AsyncResultManager(
-        job_name=job_name,
+        job_id=job_id,
         workspace=resolved_workspace,
         attempt_id=attempt_id,
         files_client=files_client,

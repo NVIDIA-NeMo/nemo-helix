@@ -33,6 +33,7 @@ from nemo_helix_plugin.intake.types import (
     ListSpanGroupsQueryParams,
     ListSpansQueryParams,
     ListTracesQueryParams,
+    RetrieveSpanQueryParams,
     RetrieveTraceQueryParams,
     Session,
     Span,
@@ -170,7 +171,9 @@ def list_evaluator_results_for_span(*, workspace: str | None = None, span_id: st
 
 @get(f"{_INTAKE_BASE}/spans/{{span_id}}")
 @abstractmethod
-def get_span(*, workspace: str | None = None, span_id: str) -> Span: ...
+def get_span(
+    *, workspace: str | None = None, span_id: str, query_params: RetrieveSpanQueryParams | None = None
+) -> Span: ...
 
 
 @get(f"{_INTAKE_BASE}/annotations")

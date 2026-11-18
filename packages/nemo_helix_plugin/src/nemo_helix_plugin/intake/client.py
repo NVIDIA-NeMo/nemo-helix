@@ -18,6 +18,7 @@ from nemo_helix_plugin.intake.types import (
     ListAnnotationsQueryParams,
     ListSpanGroupsQueryParams,
     ListSpansQueryParams,
+    RetrieveSpanQueryParams,
     Span,
     SpanGroup,
     SpanGroupsPage,
@@ -171,8 +172,13 @@ class _SpansCompat:
             query_params=_list_spans_params(page=page, page_size=page_size, sort=sort, filter=filter, mode=mode),
         )
 
-    def retrieve(self, span_id: str, *, workspace: str | None = None) -> Span:
-        return self._client.get_span(span_id=span_id, workspace=workspace).data()
+    def retrieve(self, span_id: str, *, workspace: str | None = None, session_id: str | None = None) -> Span:
+        query_params: RetrieveSpanQueryParams | None = {"session_id": session_id} if session_id is not None else None
+        return self._client.get_span(
+            span_id=span_id,
+            workspace=workspace,
+            query_params=query_params,
+        ).data()
 
 
 class _AsyncSpansCompat:
@@ -202,8 +208,15 @@ class _AsyncSpansCompat:
             query_params=_list_spans_params(page=page, page_size=page_size, sort=sort, filter=filter, mode=mode),
         )
 
-    async def retrieve(self, span_id: str, *, workspace: str | None = None) -> Span:
-        return (await self._client.get_span(span_id=span_id, workspace=workspace)).data()
+    async def retrieve(self, span_id: str, *, workspace: str | None = None, session_id: str | None = None) -> Span:
+        query_params: RetrieveSpanQueryParams | None = {"session_id": session_id} if session_id is not None else None
+        return (
+            await self._client.get_span(
+                span_id=span_id,
+                workspace=workspace,
+                query_params=query_params,
+            )
+        ).data()
 
 
 class _SpanGroupsCompat:

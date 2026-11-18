@@ -4,6 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
+import { requestStatus } from '@nemo/common/src/components/DataView/requestStatus';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
@@ -14,7 +15,7 @@ import { useEvalsListTasksets } from '@nemo/sdk/generated/evals/evals-plugin-tas
 import type { Taskset, TasksetFilter, TasksetSort } from '@nemo/sdk/generated/evals/schema';
 import { Flex, Tag, Text } from '@nvidia/foundations-react-core';
 import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
-import { requestStatus, tagNames } from '@studio/routes/evaluation/tasksets/helpers';
+import { tagNames } from '@studio/routes/evaluation/tasksets/helpers';
 import { getTasksetDetailRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
 import type { ComponentProps, FC } from 'react';

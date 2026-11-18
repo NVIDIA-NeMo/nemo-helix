@@ -66,6 +66,7 @@ jobs:
       deployments-openshell: ${{ steps.changes.outputs.deployments-openshell }}
       jobs-openshell: ${{ steps.changes.outputs.jobs-openshell }}
       ngc-metadata: ${{ steps.changes.outputs.ngc-metadata }}
+      nightly-taskset-runs-report: ${{ steps.changes.outputs.nightly-taskset-runs-report }}
       auth-idp: ${{ steps.changes.outputs.auth-idp }}
       customization-auth: ${{ steps.changes.outputs.customization-auth }}
       builder-e2e: ${{ steps.changes.outputs.builder-e2e }}
@@ -114,6 +115,27 @@ jobs:
           enable-cache: false
       - name: Run NGC metadata unit tests
         run: uv run --no-cache .github/scripts/tests/test_ngc_metadata.py
+
+  nightly-taskset-runs-report-test:
+    name: Test nightly taskset-runs report
+    needs: [changes]
+    if: >
+      !cancelled() &&
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.nightly-taskset-runs-report == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+      - name: Run nightly report unit tests
+        run: uv run --no-cache .github/scripts/tests/test_nightly_taskset_runs_report.py
 
   test-gates:
     name: Check test gates
@@ -202,170 +224,22 @@ jobs:
         needs.changes.outputs.customization-auth == 'true' ||
         needs.changes.outputs.builder-e2e == 'true'
       )
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
-    outputs:
-      image_registry: ${{ steps.bake-vars.outputs.image_registry }}
-      image_tag: ${{ steps.bake-vars.outputs.image_tag }}
-      publish_images: ${{ steps.bake-vars.outputs.publish_images }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Free disk space
-        uses: ./.github/actions/free-disk-space
-        with:
-          disable_swap: "true"
-          remove_haskell: "true"
-          remove_java: "true"
-          remove_ruby: "true"
-          remove_swift: "true"
-          prune_docker: "true"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-        with:
-          name: nhx-builder
-          driver: docker-container
-          cleanup: true
-
-      - name: Resolve bake cache branch
-        id: cache-branch
-        uses: ./.github/actions/bake-cache-branch
-        with:
-          base-ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.base_ref || github.ref_name }}
-          event-name: ${{ github.event_name }}
-
-      - name: Configure bake variables
-        id: bake-vars
-        shell: bash
-        env:
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          INPUT_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
-          INPUT_PUBLISH: ${{ inputs.publish }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          CACHE_SOURCE_BRANCH: ${{ steps.cache-branch.outputs.source-branch }}
-          CACHE_TARGET_BRANCH: ${{ steps.cache-branch.outputs.target-branch }}
-        run: |
-          set -euo pipefail
-
-          image_registry="ghcr.io/${GITHUB_REPOSITORY,,}"
-          source_sha="${SOURCE_SHA:-$GITHUB_SHA}"
-          bake_tag="${INPUT_IMAGE_TAG:-$source_sha}"
-          fastembed_cache_dir="${RUNNER_TEMP}/fastembed-cache"
-          publish_images="false"
-
-          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
-            publish_images="true"
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPOSITORY" = "$GITHUB_REPOSITORY" ]; then
-            publish_images="true"
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
-            publish_images="true"
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$INPUT_PUBLISH" = "true" ]; then
-            publish_images="true"
-          fi
-
-          {
-            printf 'IMAGE_REGISTRY=%s\n' "$image_registry"
-            printf 'BASE_REGISTRY=%s\n' "$image_registry"
-            printf 'CACHE_REGISTRY=%s\n' "$image_registry"
-            printf 'BAKE_TAG=%s\n' "$bake_tag"
-            printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
-            printf 'FASTEMBED_CACHE_CONTEXT=%s\n' "$fastembed_cache_dir"
-            printf 'FASTEMBED_CACHE_DIR=%s\n' "$fastembed_cache_dir"
-            printf 'DOCKER_BAKE_ALLOW_FS_READ=%s\n' "$fastembed_cache_dir"
-            printf 'FASTEMBED_MODEL_REPO=%s\n' "qdrant/all-MiniLM-L6-v2-onnx"
-            printf 'FASTEMBED_MODEL_REVISION=%s\n' "main"
-            printf 'PUBLISH_IMAGES=%s\n' "$publish_images"
-            printf 'BAKE_CACHE_SOURCE_BRANCH=%s\n' "$CACHE_SOURCE_BRANCH"
-            printf 'BAKE_CACHE_TARGET_BRANCH=%s\n' "$CACHE_TARGET_BRANCH"
-          } >> "$GITHUB_ENV"
-          {
-            printf 'image_registry=%s\n' "$image_registry"
-            printf 'image_tag=%s\n' "$bake_tag"
-            printf 'publish_images=%s\n' "$publish_images"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Prepare fastembed model cache directory
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "${FASTEMBED_CACHE_DIR}"
-          touch "${FASTEMBED_CACHE_DIR}/.cache-context"
-
-      - name: Restore fastembed model cache
-        id: fastembed-cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ${{ runner.temp }}/fastembed-cache
-          key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
-
-      - name: Install uv for fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          cache-dependency-glob: uv.lock
-
-      - name: Populate fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          HF_HUB_DISABLE_UPDATE_CHECK=1 uv run --no-project --with 'huggingface-hub>=1.0.1,<2.0.0' hf download \
-            "${FASTEMBED_MODEL_REPO}" \
-            --revision "${FASTEMBED_MODEL_REVISION}" \
-            --cache-dir "${FASTEMBED_CACHE_DIR}" \
-            --format quiet
-          find "${FASTEMBED_CACHE_DIR}/models--qdrant--all-MiniLM-L6-v2-onnx/snapshots" \
-            -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .
-
-      - name: Log in to GHCR
-        if: env.PUBLISH_IMAGES == 'true' || env.BAKE_CACHE_TARGET_BRANCH != ''
-        shell: bash
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-
-      - name: Print Docker bake graph
-        shell: bash
-        run: |
-          target=docker-cpu
-          if [ "${PUBLISH_IMAGES}" = "true" ]; then
-            target=docker-cpu-ci
-          fi
-          make docker-print TARGET="${target}"
-
-      - name: Build CPU images
-        if: env.PUBLISH_IMAGES != 'true'
-        shell: bash
-        run: make docker-load TARGET=docker-cpu
-
-      - name: Build and publish CPU images
-        if: env.PUBLISH_IMAGES == 'true'
-        shell: bash
-        run: make docker-push TARGET=docker-cpu-ci
-
-      - name: Save fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}/fastembed-cache
-          key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
+    # Shared with e2e.yaml and nightly-taskset-runs-e2e.yaml.
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+      # Publish on a push to main, a same-repo PR, the merge queue, or a dispatch that asks to.
+      publish: >-
+        ${{
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+          github.event_name == 'merge_group' ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish)
+        }}
 
   build-garak-test-image:
     name: Build garak test image
@@ -835,7 +709,7 @@ jobs:
           path: report.xml
 
   python-unit-test:
-    name: Python unit tests (py${{ matrix.python-version }})
+    name: Python unit tests (py${{ matrix.python-version }}, ${{ matrix.group }})
     needs: [policy-wasm]
     runs-on: ubuntu-latest
     permissions:
@@ -847,6 +721,9 @@ jobs:
         # the only one that answers "does the code work here". Packaging and install are
         # covered elsewhere; running them is not the same as running the tests.
         python-version: ["3.12", "3.13", "3.14"]
+        # Path-based groups balanced by JUnit durations (tests/unit_groups.py); each group
+        # also skips importing the others' test files.
+        group: [core, plugins, misc]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -870,30 +747,35 @@ jobs:
           EXTRA: cpu
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           PYTEST_WORKERS: "4"
+          PYTEST_EXTRA: --unit-group=${{ matrix.group }}
+          # coverage-comment reads only py3.12; tracing the other legs only slows them.
+          PYTEST_COVERAGE: ${{ matrix.python-version == '3.12' }}
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-unit-test-results-py${{ matrix.python-version }}
+          name: python-unit-test-results-py${{ matrix.python-version }}-${{ matrix.group }}
           retention-days: 30
+          include-hidden-files: true
           path: |
             report.xml
             coverage.xml
             coverage.json
             coverage-html/
+            .coverage
       - name: Upload worker crash dumps
         # Separate artifact so coverage-comment keeps receiving exactly the files it expects.
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-unit-crash-dumps-py${{ matrix.python-version }}
+          name: python-unit-crash-dumps-py${{ matrix.python-version }}-${{ matrix.group }}
           retention-days: 30
           if-no-files-found: ignore
           path: crash-dumps/
 
   # The `main-and-release-checks` ruleset requires a check named exactly "Python unit tests".
-  # Now that the job is a matrix, its legs report "Python unit tests (py3.12)" and friends, and
+  # Now that the job is a matrix, its legs report "Python unit tests (py3.12, core)" and friends, and
   # nothing carries the bare name -- the required check would sit on "Expected — Waiting for
   # status to be reported" forever. This job reports that name, and is red whenever any leg is.
   # Removing it means updating the ruleset, which needs repository admin.
@@ -956,6 +838,10 @@ jobs:
         run: uv run --frozen --group scaled-evals pytest plugins/_temporary-scaled-evals/tests -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      # The OpenSandbox server extension is tested against the real opensandbox-server package, which only
+      # the opt-in `opensandbox-ext` group installs; without it these tests skip themselves.
+      - name: Run OpenSandbox server extension tests
+        run: uv run --frozen --group opensandbox-ext pytest packages/nhx_sandbox/tests/opensandbox_ext -v
       # The workspace venv carries a single Harbor release, but NemoOpenSandboxEnvironment must run on
       # every runner harbor_opensandbox accepts: those whose requirements pin the OpenSandbox SDK.
       # Build each runner's venv from its own requirements, as the image does, and run the tests there.
@@ -1953,11 +1839,10 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          # One interpreter's results, so the coverage table stays a single number. Pinned
-          # rather than globbed: this download is `continue-on-error`, so a name that stops
-          # matching would quietly render "N/A" instead of failing.
-          name: python-unit-test-results-py3.12
-          path: unit-coverage
+          # One interpreter's groups, so the coverage table stays a single number. The combine
+          # step below renders "N/A" unless every group's data is present.
+          pattern: python-unit-test-results-py3.12-*
+          path: unit-coverage/groups
       - name: Download integration test coverage
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -1970,6 +1855,16 @@ jobs:
           version: ${{ env.UV_VERSION }}
           python-version: "3.13"
           enable-cache: false
+      - name: Combine unit coverage
+        # Never report one group's coverage as coverage of the whole suite.
+        continue-on-error: true
+        shell: bash
+        run: |
+          for group in core plugins misc; do
+            test -s "unit-coverage/groups/python-unit-test-results-py3.12-${group}/.coverage"
+          done
+          uvx --from coverage==7.15.3 coverage combine --keep unit-coverage/groups/*/.coverage
+          uvx --from coverage==7.15.3 coverage xml -o unit-coverage/coverage.xml
       - name: Combine integration coverage
         # Never report one group's coverage as coverage of the whole suite.
         continue-on-error: true
@@ -2027,6 +1922,7 @@ jobs:
       - lint
       - evaluator-integration-test
       - ngc-metadata-test
+      - nightly-taskset-runs-report-test
       - test-gates
       - policy-wasm
       - python-unit-test-tools

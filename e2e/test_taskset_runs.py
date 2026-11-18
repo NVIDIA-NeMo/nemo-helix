@@ -47,6 +47,8 @@ from e2e.taskset_runs_driver import (
     Evidence,
     RunDriver,
     check_bundle,
+    check_cancelled_while_queued,
+    check_foreign_job_cancel,
     check_run,
     check_scores,
     check_snapshot,
@@ -58,19 +60,25 @@ from e2e.taskset_runs_driver import (
 )
 
 pytestmark = [
-    pytest.mark.taskset_runs_e2e,
     pytest.mark.feature("taskset-runs"),
     pytest.mark.platform("kubernetes"),
     pytest.mark.timeout(PYTEST_TIMEOUT),  # see RunDriver: it must never fire
 ]
 
 #: Step caps, in seconds, within BUDGET.
-TEST_1_SUBMIT_CAP = 900  # publish, and build 3 images in a fresh workspace
-RUN_CAP = 900
-TEST_2_CAP = 600  # test_2's submit and wait together
+# Ten kind copies in Actions run 42940499475: nearest-rank p95 was 78/102/95 s, respectively.
+# Use 3x p95, rounded up to whole minutes; test_2's cap covers submit and wait together.
+TEST_1_SUBMIT_CAP = 240  # publish, and build 3 images in a fresh workspace
+RUN_CAP = 360
+TEST_2_CAP = 300
+#: How long a cancel-paths ``slow`` task's oracle sleeps (its ``solve.sh``): its Job stays active while the test
+#: cancels around it.
+SLOW_SECONDS = 180
 
 #: Two Harbor tasks: ``solved`` (shared verifier, oracle right) and ``unsolved`` (separate verifier, oracle wrong).
 DATASET = Path(__file__).parent / "data" / "taskset_runs_dataset"
+#: Cancel paths: ``slow-1`` and ``slow-2`` hold the creator's 2 slots; ``quick`` is the run that queues behind them.
+CANCEL_DATASET = Path(__file__).parent / "data" / "taskset_runs_cancel_dataset"
 
 
 @pytest.fixture
@@ -126,6 +134,7 @@ def driver(
     return driver
 
 
+@pytest.mark.taskset_runs_e2e
 def test_taskset_run_on_kubernetes(
     driver: RunDriver,
     subtests: pytest.Subtests,
@@ -133,6 +142,9 @@ def test_taskset_run_on_kubernetes(
     record_property: Callable[[str, object], None],
 ) -> None:
     fresh = driver.evidence.data["fresh_workspace"]
+    # The nightly's report warns when a green step used more than half its cap.
+    driver.evidence.record("test_1", caps_s={"submit": TEST_1_SUBMIT_CAP, "run": RUN_CAP})
+    driver.evidence.record("test_2", caps_s={"submit": TEST_2_CAP, "run": TEST_2_CAP})
     run_id = driver.submit("test_1", "--harbor-dir", str(DATASET), "--agent", "oracle", cap=TEST_1_SUBMIT_CAP)
     record_property("run_id", run_id)
     taskset_ref = driver.evidence.data["test_1"].get("taskset_ref")
@@ -186,3 +198,68 @@ def test_taskset_run_on_kubernetes(
         after = driver.snapshot(taskset_ref)
         check_snapshot_unchanged(before, after)
         driver.evidence.record("test_2", builds_unchanged=True)
+
+
+def _created_ref(driver: RunDriver, dataset: Path, tasks: str) -> str:
+    """Publish ``tasks`` of ``dataset`` as a taskset and build its images; return its ref."""
+    out = driver.cli("evals", "tasksets", "create", "--harbor-dir", str(dataset), "--tasks", tasks, cap=120)
+    assert out.returncode == 0, f"[build] `tasksets create` exited {out.returncode}: {out.stderr.strip()}"
+    ref = out.stdout.strip().splitlines()[-1]  # without --json the last line is the ref
+    built = driver.cli("evals", "tasksets", "build-images", ref, "--wait", cap=900)
+    assert built.returncode == 0, f"[build] `build-images {ref}` exited {built.returncode}: {built.stdout[-2000:]}"
+    return ref
+
+
+@pytest.mark.taskset_runs_cancel_e2e
+@pytest.mark.feature("taskset-runs", "taskset-runs-cancel")  # needs the per-creator cap of 2 (taskset-runs.yaml)
+def test_taskset_run_cancel_paths(driver: RunDriver) -> None:
+    """E1: a run cancelled while queued never creates a task Job. C3: a task Job cancelled from outside fails only
+    its task, and the run completes over the rest.
+
+    Run H's two slow tasks hold both of the creator's slots, so run Q waits. Each cancel waits for its precondition
+    (Q still queued, H's Job active) rather than sleeping a fixed time.
+    """
+    hold_ref = _created_ref(driver, CANCEL_DATASET, "slow-1,slow-2")  # images first: building after H starts would let
+    queue_ref = _created_ref(driver, CANCEL_DATASET, "quick")  # H's tasks finish before Q is even submitted
+
+    hold = driver.submit("hold", "--taskset", hold_ref, "--agent", "oracle", cap=120)
+    held = driver.wait_for(
+        "cancel",
+        f"both task Jobs of {hold} active",
+        lambda: driver.status(hold),
+        lambda status: [task.task.job_status if task.task else None for task in status.tasks] == ["active"] * 2,
+        cap=600,
+    )
+    hold_jobs = [task.task.job for task in held.tasks if task.task and task.task.job]
+
+    queued = driver.submit("e1", "--taskset", queue_ref, "--agent", "oracle", cap=120)
+    driver.wait_for(  # status lists the taskset's tasks before their rows exist, as task=None
+        "cancel",
+        f"{queued}'s task row",
+        lambda: driver.status(queued),
+        lambda s: bool(s.tasks) and s.tasks[0].task is not None,
+        cap=60,
+    )
+    driver.pause(10)  # two controller cycles (interval_seconds 5): a slot would have been given by now
+    still = driver.status(queued)
+    row = still.tasks[0].task
+    assert row is not None and row.phase in {"image_preparing", "image_ready"} and not row.job, (
+        f"[cancel] {queued} got a slot while {hold} held both: {row}"
+    )
+    statuses = {job: driver.job_status(job) for job in hold_jobs}  # None: the Jobs API didn't find it
+    assert all(status == "active" for status in statuses.values()), (
+        f"[cancel] H's Jobs ended before E1's cancel: {statuses}"
+    )
+    out = driver.cli("evals", "runs", "cancel", queued, "--json", cap=30)
+    assert out.returncode == 0, f"[cancel] `runs cancel {queued}` exited {out.returncode}: {out.stderr.strip()}"
+    cancelled = driver.wait("e1", queued, cap=120)
+    jobs, _ = driver.task_jobs(cancelled)
+    check_cancelled_while_queued(cancelled, jobs)
+
+    assert driver.job_status(hold_jobs[0]) == "active", f"[cancel] {hold_jobs[0]} ended before C3's cancel"
+    out = driver.cli("jobs", "cancel", hold_jobs[0], cap=30)
+    assert out.returncode == 0, f"[cancel] `jobs cancel {hold_jobs[0]}` exited {out.returncode}: {out.stderr.strip()}"
+    driver.evidence.record("c3", run_id=hold, cancelled_job=hold_jobs[0])
+    driver.wait("hold", hold, cap=SLOW_SECONDS + 300)
+    results = driver.results(hold, stage="cancel")
+    check_foreign_job_cancel(results, hold_jobs[0])

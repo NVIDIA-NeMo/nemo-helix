@@ -20,6 +20,7 @@ import {
 import type { GuardrailConfig } from '@nemo/sdk/generated/platform/schema';
 import { Button, PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { GuardrailsDataView } from '@studio/components/dataViews/GuardrailsDataView';
+import { getDeleteGuardrailConfigsDescription } from '@studio/constants/guardrails';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { CreateGuardrailModal } from '@studio/routes/guardrails/CreateGuardrailModal';
@@ -116,9 +117,9 @@ export const GuardrailsRoute: FC = () => {
       {configToDelete ? (
         <DeleteConfirmationModal
           open
-          simpleConfirm
-          title={`Delete guardrail config: ${configToDelete.name}`}
-          successText="Guardrail config deleted successfully."
+          entity="guardrail config"
+          ids={[configToDelete.name ?? 'unnamed']}
+          description={getDeleteGuardrailConfigsDescription(1)}
           onDelete={handleDelete}
           onClose={() => setConfigToDelete(null)}
         />
@@ -127,11 +128,10 @@ export const GuardrailsRoute: FC = () => {
       {configsToDelete.length > 0 ? (
         <DeleteConfirmationModal
           open
-          simpleConfirm
-          title={`Delete ${configsToDelete.length} guardrail config${configsToDelete.length === 1 ? '' : 's'}?`}
-          description={`This will permanently delete ${configsToDelete.length} guardrail config${configsToDelete.length === 1 ? '' : 's'}. This action cannot be undone.`}
-          successText={`${configsToDelete.length} guardrail config${configsToDelete.length === 1 ? '' : 's'} deleted successfully.`}
-          errorText="Failed to delete some guardrail configs. Please try again."
+          entity="guardrail config"
+          ids={configsToDelete.map((config) => config.name ?? 'unnamed')}
+          description={getDeleteGuardrailConfigsDescription(configsToDelete.length)}
+          errorText="Some guardrail configs couldn't be deleted."
           onDelete={handleBulkDelete}
           onClose={() => setConfigsToDelete([])}
         />

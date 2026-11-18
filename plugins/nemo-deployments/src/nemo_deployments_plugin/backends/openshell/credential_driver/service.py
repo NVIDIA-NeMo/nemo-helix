@@ -144,9 +144,7 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
                 raise RegistrationDenied("Missing job execution identity.")
             jobs = AsyncJobsClient.from_client(self.secrets_client)
             job = (await jobs.get_job(workspace=workload.workspace, name=workload.name)).data()
-            step = (
-                await jobs.get_job_step(workspace=workload.workspace, job=workload.name, name=workload.step_name)
-            ).data()
+            step = (await jobs.get_job_step(workspace=workload.workspace, job=job.id, name=workload.step_name)).data()
             active = {"created", "pending", "active"}
             if (
                 step.id != workload.id

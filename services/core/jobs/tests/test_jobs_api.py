@@ -11,8 +11,8 @@ from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
-from httpx import AsyncClient
+from fastapi import FastAPI, HTTPException
+from httpx import ASGITransport, AsyncClient
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
@@ -20,9 +20,10 @@ from nemo_helix_plugin.jobs.file_manager import TmpDirPath
 from nemo_helix_plugin.jobs.schemas import FileStorageType, HelixJobResultCreateRequest
 from nemo_helix_plugin.jobs.types import HelixJobStatusUpdateRequest, HelixJobTaskUpdate, UpdateHelixJobRequest
 from nhx.common.auth.models import Principal
-from nhx.common.entities import ALL_WORKSPACES, DEFAULT_WORKSPACE
+from nhx.common.entities import ALL_WORKSPACES, DEFAULT_WORKSPACE, SYSTEM_WORKSPACE, EntityClient
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
 from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.api.dependencies import dep_dispatcher
 from nhx.core.jobs.api.v2.jobs import endpoints
 from nhx.core.jobs.api.v2.jobs.endpoints import (
     _format_create_job_conflict,
@@ -53,7 +54,7 @@ from nhx.core.jobs.app.schemas import (
     HelixJobStepSpec,
 )
 from nhx.core.jobs.app.test_helpers import TestConstants
-from nhx.core.jobs.entities import HelixJobResult
+from nhx.core.jobs.entities import HelixJob, HelixJobAttempt, HelixJobResult
 from pydantic import ValidationError
 from starlette.datastructures import QueryParams
 
@@ -1926,8 +1927,10 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
     projects = ["default/test-project", "other-workspace/test-project"]
     with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
         mock_files = AsyncMock()
+        mock_files.with_retry = MagicMock(return_value=mock_files)
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
+        mock_fileset_obj.id = "fileset-owned-allocation"
         mock_resp = MagicMock()
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
@@ -2153,3 +2156,105 @@ async def test_create_job_with_full_length_name_submits_without_output_location(
     assert body["name"] == name
     # The derived artifact fileset name stays within the entity-name limit.
     assert len(body["fileset"]) <= 63
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["", "/status"])
+@pytest.mark.parametrize("reference", ["absent", "missing", "job_mismatch", "workspace_mismatch"])
+async def test_job_reads_report_invalid_attempt_references_without_repair(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+    caplog: pytest.LogCaptureFixture,
+    suffix: str,
+    reference: str,
+):
+    created = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    owner = await mock_store.get_by_id(HelixJob, created.id)
+    if reference == "absent":
+        owner.current_attempt_id = None
+    elif reference == "missing":
+        owner.current_attempt_id = "platform-job-attempt-missing"
+    else:
+        other_workspace = SYSTEM_WORKSPACE if reference == "workspace_mismatch" else DEFAULT_WORKSPACE
+        other_job = await mock_store.create(
+            HelixJob(
+                name="other-job",
+                workspace=other_workspace,
+                source="test",
+                platform_spec=owner.platform_spec,
+                fileset="other-artifacts",
+            )
+        )
+        other_attempt = await mock_store.create(
+            HelixJobAttempt(
+                name="other-attempt", workspace=other_workspace, job=other_job.id, platform_spec=owner.platform_spec
+            )
+        )
+        owner.current_attempt_id = other_attempt.id
+    owner = await mock_store.update(owner)
+    app = FastAPI()
+    app.dependency_overrides[dep_dispatcher] = lambda: mock_dispatcher
+    app.include_router(endpoints.router, prefix="/apis/jobs")
+
+    with (
+        caplog.at_level(logging.ERROR, logger="nhx.core.jobs.app.dispatcher"),
+        patch.object(mock_dispatcher, "get_attempt", wraps=mock_dispatcher.get_attempt) as lookup,
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test"
+        ) as client:
+            response = await client.get(f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{owner.id}{suffix}")
+    assert lookup.await_count == (0 if reference == "absent" else 1)
+    diagnostics = [record for record in caplog.records if record.getMessage() == "Invalid current Attempt reference"]
+    if reference == "absent":
+        assert response.status_code == 200
+        assert not diagnostics
+        if suffix:
+            assert response.json()["steps"] == []
+        else:
+            assert response.json().get("attempt_id") is None
+    else:
+        assert response.status_code == 500 and response.text == "Internal Server Error"
+        assert len(diagnostics) == 1
+        # Logging adds structured context to LogRecord's framework-managed dictionary.
+        context = diagnostics[0].__dict__
+        assert context["job"] == owner.id
+        assert context["workspace"] == DEFAULT_WORKSPACE
+        assert context["attempt"] == owner.current_attempt_id
+        assert context["reason"] == reference
+        with pytest.raises(JobHasNoAttemptError):
+            await mock_dispatcher.update_job(owner.id, DEFAULT_WORKSPACE, UpdateHelixJobRequest(description="changed"))
+    current = await mock_store.get_by_id(HelixJob, owner.id)
+    assert current.current_attempt_id == owner.current_attempt_id
+    assert current.db_version == owner.db_version
+    assert current.description == owner.description
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["", "/status"])
+async def test_job_reads_preserve_attempt_lookup_failures(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+    caplog: pytest.LogCaptureFixture,
+    suffix: str,
+):
+    created = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    owner = await mock_store.get_by_id(HelixJob, created.id)
+    app = FastAPI()
+    app.dependency_overrides[dep_dispatcher] = lambda: mock_dispatcher
+    app.include_router(endpoints.router, prefix="/apis/jobs")
+    with (
+        caplog.at_level(logging.ERROR, logger="nhx.core.jobs.app.dispatcher"),
+        patch.object(mock_dispatcher, "get_attempt", side_effect=RuntimeError("Attempt store unavailable")) as lookup,
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test"
+        ) as client:
+            response = await client.get(f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{owner.id}{suffix}")
+    assert response.status_code == 500 and response.text == "Internal Server Error"
+    lookup.assert_awaited_once_with(owner.current_attempt_id)
+    assert not any(record.getMessage() == "Invalid current Attempt reference" for record in caplog.records)
+    current = await mock_store.get_by_id(HelixJob, owner.id)
+    assert current.current_attempt_id == owner.current_attempt_id and current.db_version == owner.db_version

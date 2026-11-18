@@ -30,7 +30,7 @@ from nhx.testing.pytest_outcomes import pytest_skip as skip_test  # noqa: E402
 
 from tests.auth_idp.xdist import append_xdist_group_suffix  # noqa: E402
 
-pytest_plugins = ["tests.integration_groups", "tests.shared_patch_guard"]
+pytest_plugins = ["tests.integration_groups", "tests.shared_patch_guard", "tests.unit_groups"]
 
 # Set test environment variables BEFORE any imports
 # This must happen at module level, before pytest even starts processing

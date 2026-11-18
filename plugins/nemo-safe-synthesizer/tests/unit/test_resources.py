@@ -151,7 +151,7 @@ def test_job_builder_uploads_dataframe_and_creates_job() -> None:
     client = _mock_client([])
     files = MagicMock()
     jobs_resource = MagicMock()
-    jobs_resource.create.return_value = SimpleNamespace(name="safe-synth-job")
+    jobs_resource.create.return_value = SimpleNamespace(id="platform-job-original", name="safe-synth-job")
 
     builder = (
         SafeSynthesizerJobBuilder(client, workspace="default")
@@ -188,7 +188,7 @@ def test_job_builder_creates_pretrained_model_job_for_adapter_reuse() -> None:
     client = _mock_client([])
     files = MagicMock()
     jobs_resource = MagicMock()
-    jobs_resource.create.return_value = SimpleNamespace(name="adapter-reuse-job")
+    jobs_resource.create.return_value = SimpleNamespace(id="platform-job-original", name="adapter-reuse-job")
 
     builder = (
         SafeSynthesizerJobBuilder(client, workspace="default")
@@ -217,7 +217,7 @@ def _make_job(mock_jobs: MagicMock, name: str = "safe-synth-job", workspace: str
     so we patch that lookup in the job module during construction.
     """
     with patch("nemo_safe_synthesizer_plugin.sdk.job.JobsClient.from_client", return_value=mock_jobs):
-        return SafeSynthesizerJob(name, _mock_client([]), workspace=workspace)
+        return SafeSynthesizerJob(name, _mock_client([]), workspace=workspace, job_id="platform-job-original")
 
 
 @pytest.mark.parametrize("status", ["error", "cancelled"])
@@ -235,7 +235,7 @@ def test_safe_synthesizer_job_wait_for_completion_raises_on_terminal_failure(sta
     with pytest.raises(RuntimeError, match=f"ended with status '{status}'"):
         job.wait_for_completion(poll_interval=0, verbose=False)
 
-    mock_jobs.get_job_status.assert_called_once_with(name="safe-synth-job", workspace="default")
+    mock_jobs.get_job_status.assert_called_once_with(name="platform-job-original", workspace="default")
 
 
 def test_safe_synthesizer_job_wait_ignores_typed_client_log_failures() -> None:
@@ -265,7 +265,7 @@ def test_safe_synthesizer_job_fetch_data_reads_synthetic_csv() -> None:
     result = job.fetch_data()
 
     mock_jobs.download_job_result.assert_called_once_with(
-        name="synthetic-data", job="safe-synth-job", workspace="default"
+        name="synthetic-data", job="platform-job-original", workspace="default"
     )
     assert list(result.columns) == ["name", "value"]
     assert result["value"].tolist() == [1, 2]
@@ -288,7 +288,9 @@ def test_safe_synthesizer_job_fetch_summary_parses_json() -> None:
 
     summary = job.fetch_summary()
 
-    mock_jobs.download_job_result.assert_called_once_with(name="summary", job="safe-synth-job", workspace="default")
+    mock_jobs.download_job_result.assert_called_once_with(
+        name="summary", job="platform-job-original", workspace="default"
+    )
     assert summary.synthetic_data_quality_score == 8.5
     assert summary.data_privacy_score == 9.0
     assert summary.timing.total_time_sec == 12.5
@@ -320,5 +322,5 @@ def test_safe_synthesizer_job_fetch_logs_follows_pagination() -> None:
 
     assert [log.message for log in logs] == ["first", "second"]
     mock_jobs.with_options.assert_called_once_with(timeout=5.0)
-    options_client.list_job_logs.assert_called_once_with(name="safe-synth-job", workspace="default")
+    options_client.list_job_logs.assert_called_once_with(name="platform-job-original", workspace="default")
     paginated_response.items.assert_called_once_with()

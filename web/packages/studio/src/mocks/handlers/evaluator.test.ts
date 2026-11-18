@@ -29,10 +29,41 @@ describe('mock taskset handlers', () => {
     expect(await names(`default/tasksets?${query}`)).toEqual(expected);
   });
 
+  it('gets a task revision by tag or content digest', async () => {
+    const byDigest = await evals(`default/tasks/sort-strings/revisions/${'1'.padStart(64, 'c')}`);
+    expect((await byDigest.json()).revision).toBe(1);
+    expect(
+      (await (await evals('default/tasks/sort-strings/revisions/latest')).json()).revision
+    ).toBe(2);
+    expect((await evals('default/tasks/sort-strings/revisions/missing')).status).toBe(404);
+  });
+
+  it('sorts tasksets by the sort param', async () => {
+    expect(await names('default/tasksets?sort=name')).toEqual(['phishing-triage', 'sort-suite']);
+    expect(await names('default/tasksets?sort=-name')).toEqual(['sort-suite', 'phishing-triage']);
+  });
+
   it('filters tasks by a name list', async () => {
     expect(
       await names('default/tasks?filter[name][$in]=sort-ints&filter[name][$in]=missing')
     ).toEqual(['sort-ints']);
+  });
+
+  it('filters tasks by kind and tasksets by member task at any revision', async () => {
+    expect(await names('default/tasks?filter[kind][$in]=evaluator')).toEqual(['sort-strings']);
+    expect(await names('default/tasksets?filter[tasks]=default/sort-strings')).toEqual([
+      'sort-suite',
+      'phishing-triage',
+    ]);
+  });
+
+  it('gets a task with its revisions and 404s on an unknown one', async () => {
+    await expect((await evals('default/tasks/sort-strings')).json()).resolves.toMatchObject({
+      revision: 2,
+    });
+    const page = await (await evals('default/tasks/sort-strings/revisions')).json();
+    expect(page.data.map((r: { revision: number }) => r.revision)).toEqual([2, 1]);
+    expect((await evals('default/tasks/missing')).status).toBe(404);
   });
 
   it('gets a taskset and 404s on an unknown one', async () => {

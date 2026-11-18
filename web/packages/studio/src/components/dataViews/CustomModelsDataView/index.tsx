@@ -46,6 +46,7 @@ import { KindTag } from '@studio/components/dataViews/CustomModelsDataView/KindT
 import { BaseModelSearchFilterField } from '@studio/components/FilterFields';
 import type { ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
 import { INTAKE_ENABLED } from '@studio/constants/environment';
+import { DELETE_ADAPTER_DESCRIPTION, DELETE_MODEL_DESCRIPTION } from '@studio/constants/models';
 import { useCustomizationJobsForModels } from '@studio/hooks/useCustomizationJobsForModels';
 import { useModelDeploymentStatuses } from '@studio/hooks/useModelDeploymentStatuses';
 import {
@@ -546,14 +547,13 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
       {deleteTarget && (
         <DeleteConfirmationModal
           open
-          title={`Delete ${deleteTarget.kind === 'adapter' ? 'Adapter' : 'Model'}`}
+          entity={deleteTarget.kind}
+          ids={[deleteTarget.kind === 'adapter' ? deleteTarget.adapterName : deleteTarget.name]}
+          description={
+            deleteTarget.kind === 'adapter' ? DELETE_ADAPTER_DESCRIPTION : DELETE_MODEL_DESCRIPTION
+          }
           onDelete={handleDelete}
           onClose={() => setDeleteTarget(null)}
-          confirmationText={
-            deleteTarget.kind === 'adapter' ? deleteTarget.adapterName : deleteTarget.name
-          }
-          successText={`Successfully deleted ${deleteTarget.kind} ${deleteTarget.kind === 'adapter' ? deleteTarget.adapterName : deleteTarget.name}`}
-          simpleConfirm
         />
       )}
     </>

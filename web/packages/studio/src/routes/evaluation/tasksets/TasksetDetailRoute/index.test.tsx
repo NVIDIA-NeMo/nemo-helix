@@ -15,7 +15,10 @@ const EVALS_URL = `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace`;
 const renderDetail = (path = '/workspaces/default/evaluation/tasksets/sort-suite') =>
   renderRoute(undefined, {
     history: path,
-    routes: [{ path: ROUTES.workspace.tasksetDetail, element: <TasksetDetailRoute /> }],
+    routes: [
+      { path: ROUTES.workspace.tasksetDetail, element: <TasksetDetailRoute /> },
+      { path: ROUTES.workspace.tasksetDetailTab, element: <TasksetDetailRoute /> },
+    ],
   });
 
 describe('TasksetDetailRoute', () => {
@@ -48,6 +51,11 @@ describe('TasksetDetailRoute', () => {
     expect(
       within(drawer).getByRole('link', { name: 'default/sort-suite-files#tasks/sort-ints.tar.gz' })
     ).toBeInTheDocument();
+    expect(within(drawer).getByText('Harbor reward')).toBeInTheDocument();
+    expect(within(drawer).getByRole('link', { name: /view task/i })).toHaveAttribute(
+      'href',
+      '/workspaces/default/evaluation/tasks/sort-ints'
+    );
   });
 
   it('opens an inline task from a deep link with its inputs and reference', async () => {

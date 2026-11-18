@@ -140,7 +140,7 @@ class RegistrationJobs(Protocol):
 
     async def get(self, name: str) -> HelixJobResponse | None: ...
 
-    async def has_steps(self, name: str) -> bool: ...
+    async def has_job_steps(self, job_id: str) -> bool: ...
 
 
 async def adoption(
@@ -148,12 +148,12 @@ async def adoption(
 ) -> Literal["ours", "foreign", "stepless"]:
     """Whether the Job under ``request.name`` is the one this request creates.
 
-    ``foreign`` when it runs something else (``runs_request``). ``stepless`` when it is ours but its current
-    attempt has no step yet: a create still saving, or one that failed midway and will never run (AIRCORE-1379).
+    ``foreign`` when it runs something else (``runs_request``). ``stepless`` when it is ours but no
+    attempt has a step yet: a create still saving, or one that failed midway and will never run (AIRCORE-1379).
     """
     if not runs_request(job, request):
         return "foreign"
-    if not await jobs.has_steps(job.name):
+    if not await jobs.has_job_steps(job.id):
         return "stepless"
     return "ours"
 

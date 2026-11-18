@@ -186,6 +186,31 @@ describe('ToolCallStep', () => {
     expect(screen.getByTestId('assistant-work-tool-call')).toHaveTextContent('Used save_note');
   });
 
+  it('shows a finished failed call as Failed in its collapsed title', async () => {
+    await renderStep({
+      args: { command: 'pnpm test' },
+      isError: true,
+      result: 'exit 1',
+      toolName: 'Bash',
+    });
+
+    expect(getStepTitle()).toBe('Ran pnpm testFailed');
+    expect(screen.getByTestId('assistant-work-step-failed')).toHaveClass('text-feedback-danger');
+  });
+
+  it('shows the arguments as sent rather than the parsed, rounded args', async () => {
+    const user = userEvent.setup();
+    await renderStep({
+      args: { id: 9007199254740992 },
+      argsText: '{"id":9007199254740993}',
+      toolName: 'get_job',
+    });
+
+    await user.click(screen.getByTestId('nv-collapsible-trigger'));
+
+    expect(screen.getByTestId('assistant-work-tool-call')).toHaveTextContent('9007199254740993');
+  });
+
   it('keeps a failed file write as a tool call so its error shows', async () => {
     await renderStep({
       args: { file_path: 'src/notes/MEMORY.md', content: 'Pick up milk' },
