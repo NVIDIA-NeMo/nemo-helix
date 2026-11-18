@@ -84,7 +84,7 @@ ENV_MAPPINGS: list[EnvMapping] = [
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_ASSISTANT_STUDIO_ENABLED",
         config_path="studio.feature_flags.assistant_studio_enabled",
-        default="false",
+        default="preview",
     ),
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_CUSTOMIZER_ENABLED",

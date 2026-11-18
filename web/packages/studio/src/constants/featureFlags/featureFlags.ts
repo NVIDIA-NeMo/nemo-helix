@@ -72,7 +72,7 @@ export const flagDefinitions = {
   agentOptimizationsEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', true),
   agentOptimizationFormEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATION_FORM_ENABLED', true),
   anonymizerEnabled: booleanFlag('VITE_FF_ANONYMIZER_ENABLED', true),
-  assistantStudioEnabled: previewFlag('VITE_FF_ASSISTANT_STUDIO_ENABLED', false),
+  assistantStudioEnabled: previewFlag('VITE_FF_ASSISTANT_STUDIO_ENABLED', 'preview'),
   customizerEnabled: previewFlag('VITE_FF_CUSTOMIZER_ENABLED', true),
   dashboardSandboxEnabled: previewFlag('VITE_FF_DASHBOARD_SANDBOX_ENABLED', true),
   evalsBenchmarksEnabled: previewFlag('VITE_FF_EVALS_BENCHMARKS_ENABLED', false),
