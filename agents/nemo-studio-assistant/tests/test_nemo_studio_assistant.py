@@ -169,7 +169,7 @@ def test_deepagents_runtime_can_load_packaged_skill_library() -> None:
     assert error is None
     assert {skill["name"] for skill in skills} == {
         "garak",
-        "benchmark-execution",
+        "studio-guide",
         "entities",
         "evals",
         "files",
@@ -214,7 +214,7 @@ def test_fabric_resolves_packaged_skills_outside_private_workspace(tmp_path: Pat
     assert error is None
     assert {skill["name"] for skill in skills} == {
         "garak",
-        "benchmark-execution",
+        "studio-guide",
         "entities",
         "evals",
         "files",
