@@ -640,6 +640,86 @@ def test_dashboard_destination_follows_the_sandbox_dashboard_flag():
     assert "assistant" not in enabled_destinations
 
 
+@pytest.mark.parametrize(
+    ("route", "destination", "label", "args", "selections"),
+    [
+        ("/workspaces/default/agents/my-agent", "agent", "Agent my-agent", {"name": "my-agent"}, {}),
+        (
+            "/studio/workspaces/default/agents/my-agent?tab=chat-playground",
+            "agent_chat",
+            "Chat with agent my-agent",
+            {"name": "my-agent"},
+            {},
+        ),
+        (
+            "/workspaces/default/virtual-models?virtualModel=vm1&tab=chat",
+            "virtual_model_chat",
+            "Chat with VirtualModel vm1",
+            {"name": "vm1"},
+            {},
+        ),
+        (
+            "/workspaces/default/filesets/train%20data/files?file=a%2Fb.jsonl",
+            "fileset_file",
+            "File a/b.jsonl",
+            {"name": "train data", "file_path": "a/b.jsonl"},
+            {},
+        ),
+        ("/workspaces/default/filesets/~new", "fileset_new", "Create fileset", {}, {}),
+        ("/workspaces/default/agents", "agents", "Agents", {}, {}),
+        (
+            "/workspaces/default/agents/x?tab=overview&foo=bar",
+            "agent",
+            "Agent x",
+            {"name": "x"},
+            {"tab": "overview", "foo": "bar"},
+        ),
+    ],
+)
+def test_describe_studio_page_matches_the_most_specific_destination(
+    route: str,
+    destination: str,
+    label: str,
+    args: dict[str, str],
+    selections: dict[str, str],
+):
+    page = studio_links.describe_studio_page(route)
+
+    assert page == studio_links.StudioPage(destination=destination, label=label, args=args, selections=selections)
+
+
+@pytest.mark.parametrize("route", [None, "", "/models", "/workspaces/default/not-a-page/deep/path"])
+def test_describe_studio_page_returns_none_for_unknown_routes(route: str | None):
+    assert studio_links.describe_studio_page(route) is None
+
+
+def test_describe_studio_page_strips_control_characters_and_bounds_values():
+    page = studio_links.describe_studio_page(f"/workspaces/default/agents/x?note=a%0Ab{'c' * 300}")
+
+    assert page is not None
+    assert "\n" not in page.selections["note"]
+    assert len(page.selections["note"]) == 120
+
+
+def test_build_studio_system_prompt_describes_the_current_page():
+    prompt = assistant._build_studio_system_prompt(
+        "default",
+        "https://studio.test",
+        "/workspaces/default/agents/beach-finder?tab=overview",
+    )
+
+    assert "Current Studio page: Agent beach-finder (studio_link destination 'agent', name 'beach-finder')" in prompt
+    assert "Current page selections: tab=overview" in prompt
+    assert 'When the user says "this", "here", or "this page"' in prompt
+
+
+def test_build_studio_system_prompt_omits_page_lines_for_unknown_routes():
+    prompt = assistant._build_studio_system_prompt("default", "https://studio.test", "/models")
+
+    assert "Current Studio route path: /models" in prompt
+    assert "Current Studio page:" not in prompt
+
+
 def test_build_studio_system_prompt_preserves_empty_enabled_destinations():
     prompt = assistant._build_studio_system_prompt(
         "default",

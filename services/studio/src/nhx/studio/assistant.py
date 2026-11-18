@@ -332,6 +332,23 @@ def _strip_studio_context_from_prompt(content: str) -> str:
     return request.strip() or content
 
 
+def _studio_page_context_lines(studio_pathname: str | None) -> list[str]:
+    page = studio_links.describe_studio_page(studio_pathname)
+    if page is None:
+        return []
+    details = [f"studio_link destination '{page.destination}'"]
+    details.extend(f"{key} '{value}'" for key, value in page.args.items())
+    lines = [f"Current Studio page: {page.label} ({', '.join(details)})"]
+    if page.selections:
+        selections = ", ".join(f"{key}={value}" for key, value in page.selections.items())
+        lines.append(f"Current page selections: {selections}")
+    lines.append(
+        'When the user says "this", "here", or "this page", they mean the current Studio page and its '
+        "selected resource. Start from that page when you explain or suggest next steps."
+    )
+    return lines
+
+
 def _build_studio_system_prompt(
     workspace: str | None,
     studio_base_url: str | None,
@@ -346,6 +363,7 @@ def _build_studio_system_prompt(
         f"Current Studio workspace: {workspace or 'unknown'}",
         f"Studio UI base URL: {normalized_base_url or 'unknown'}",
         f"Current Studio route path: {current_studio_route}",
+        *_studio_page_context_lines(studio_pathname),
         "Enabled Studio link destinations for this Studio instance: "
         f"{studio_links.destination_description(destinations)}.",
         "Only call studio_link with one of the enabled destinations above.",
