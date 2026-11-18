@@ -55,7 +55,7 @@ export function CreateDatasetPanel({
   const draft = state.drafts[tab];
 
   const secrets = useWorkspaceSecrets(workspace, open);
-  const { submit, isPending, createdName } = useCreateDataset(workspace, open);
+  const { submit, isPending } = useCreateDataset(workspace, open);
 
   // Closing by any route (Cancel, the header X, the host) discards every tab's draft (spec 2).
   // Also runs on mount when the panel starts closed, resetting an already-initial state.
@@ -65,9 +65,7 @@ export function CreateDatasetPanel({
 
   // The spec's own rules decide validity; the server is asked only about names that pass them.
   const formatError = getDatasetNameError(draft.name, { taken: false, workspace });
-  const nameStatus = useFilesetNameStatus(workspace, formatError ? '' : draft.name, {
-    ownName: createdName,
-  });
+  const nameStatus = useFilesetNameStatus(workspace, formatError ? '' : draft.name);
   const nameTaken = nameStatus === 'conflict' || takenNames.includes(draft.name);
 
   const errors = validateDraft(tab, draft, {
