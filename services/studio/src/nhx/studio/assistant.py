@@ -134,8 +134,22 @@ _session_workspace_cache: dict[str, dict[tuple[str, str], str]] = {}
 _AGENT_INPUT_RESPONSE_RESERVED_KEYS = frozenset({"message", "status"})
 
 
+def _without_refused_turns(conversation: list[AssistantMessage]) -> list[AssistantMessage]:
+    kept: list[AssistantMessage] = []
+    for message in conversation:
+        if message.role == "assistant" and message.content == assistant_topic_gate.REFUSAL_TEXT:
+            if kept and kept[-1].role == "user":
+                kept.pop()
+            continue
+        kept.append(message)
+    return kept
+
+
 def _recent_conversation_messages(conversation: list[AssistantMessage]) -> list[AssistantMessage]:
-    """Bound and normalize model context without truncating persisted history."""
+    """Bound and normalize model context without truncating persisted history.
+
+    Turns the topic gate refused never reached the agent, so they stay out of its context.
+    """
     max_messages = MAX_MODEL_CONTEXT_TURNS_PER_SESSION * 2
     return [
         message.model_copy(
@@ -145,7 +159,7 @@ def _recent_conversation_messages(conversation: list[AssistantMessage]) -> list[
                 )
             }
         )
-        for message in conversation[-max_messages:]
+        for message in _without_refused_turns(conversation)[-max_messages:]
     ]
 
 
