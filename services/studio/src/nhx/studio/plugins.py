@@ -15,6 +15,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter
+from nemo_helix_plugin.community_plugins.registry import RegistryStore
+from nemo_helix_plugin.config import nhx_user_data_dir
 from nemo_helix_plugin.discovery import discover_entry_points, discover_manifests, discover_studio
 from nemo_helix_plugin.interface import StudioSpec
 from pydantic import BaseModel
@@ -204,7 +206,16 @@ def build_plugins_router(manifests: list[PluginManifestResponse]) -> APIRouter:
 
     @router.get("/apis/plugins", tags=["Studio Plugins"])
     async def list_plugins() -> list[_PluginManifestOut]:
-        """List installed Studio web UI plugins."""
-        return _manifests_out
+        """List Python and consented community bundles without exposing credentials."""
+        combined = {manifest.name: manifest for manifest in _manifests_out}
+        try:
+            community = RegistryStore(nhx_user_data_dir() / "plugins" / "installed.json").load()
+            for plugin in community.plugins:
+                if plugin.enabled and (plugin.name not in combined or combined[plugin.name].bundleUrl is None):
+                    combined[plugin.name] = _PluginManifestOut(name=plugin.name, bundleUrl=plugin.bundle_url)
+        except (OSError, ValueError):
+            # Malformed community state must not hide bundled Python plugins.
+            logger.error("Community plugin discovery failed; retaining bundled plugins")
+        return list(combined.values())
 
     return router

@@ -1,79 +1,31 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Community plugin runtime (experimental foundation)
+# Manifest-based community plugins
 
-## Trust model
+A community plugin is a **YAML manifest**, not an installed Python distribution.
+The registry declares gateway endpoint mappings, optional workspace credential
+bindings, and optional pinned Studio UI assets. JSON remains accepted as a wire
+format. Both formats validate to the same snapshot and consent digest.
 
-`local-trusted` executes explicitly approved third-party code with the local
-Helix OS user's privileges. It inherits the process environment, filesystem,
-network access, and available credentials. A virtualenv and a separate process
-provide dependency and crash isolation, **not security isolation**.
+The API service runs elsewhere. Its deployment can be composed independently
+using any language/runtime/host; registration neither deploys it nor invokes its
+Python entry points. The earlier wheel/virtualenv/subprocess prototype has been
+removed from this implementation. Deployment, containers, and sandbox runtimes
+remain out of scope.
 
-`isolated` and `kubernetes` are unsupported runtime stubs. They fail explicitly;
-neither silently falls back to trusted execution. Future implementations need
-not share the local runtime's artifact or process representation.
+- [GATEWAY.md](GATEWAY.md): API contract, trust model, and runnable demo flow.
+- [`../../../../examples/community_plugins/tavily.yaml`](../../../../examples/community_plugins/tavily.yaml):
+  deployment-independent example targeting Tavily's hosted MCP API.
+- `gateway.py`: declared external API proxy and workspace-secret binding.
+- `installation.py`: URL preview, explicit consent, registration, and lifecycle.
+- `demo_provider.py`: separately operator-started local stub; never launched by
+  Helix. It serves example YAML manifests and a fake Tavily-compatible API.
 
-## Implemented boundary
+Shared manifest validation, atomic state, and pinned asset helpers live in
+`nemo_helix_plugin.community_plugins` so Studio and the gateway use the same
+contract without depending on each other's service packages.
 
-`runtime.py` provides a POSIX backend with:
-
-- Explicit `trust_code=True` acknowledgement before preparation.
-- A local wheel copied into a private revision directory and verified against
-  its SHA-256 **before** running the installer.
-- One `uv` virtualenv per revision, wheel-only dependency installation, and a
-  record of resolved requirements. Dependencies and host dependencies are
-  resolved at installation time; this is **not** a hash-locked dependency bundle.
-- A subprocess running `host.py` with that virtualenv's Python in isolated Python
-  import mode (`-I`), without loading plugin entry points into the controller.
-- Startup readiness polling, timeout/failure cleanup, process-group shutdown,
-  explicit removal, and context-manager cleanup.
-- A Unix socket in a private temporary directory, with no public TCP listener.
-
-`host.py` is deliberately standalone: the plugin environment does not install
-`nhx-platform-runner` or `nhx-common`. It loads exactly one matching
-`nemo.services` entry point, checks the `NemoService` interface/name, mounts its
-routers under `/apis/<name>`, and manages service lifecycle/exception handlers.
-
-Internal endpoints:
-
-- `GET /_helix/ready`: available after service startup.
-- `GET /_helix/descriptor`: protocol version, plugin name, and runtime OpenAPI.
-
-The descriptor is a first transport contract, not yet a validated public
-operation catalog or an authorization policy contribution.
-
-## Not implemented yet
-
-This is **not a complete plugin installation feature** and is not wired into
-`nemo plugins`. In particular:
-
-- No registration API, remote URL downloader, upload route, HelixAdmin check,
-  workspace enablement, authenticated gateway, or generic CLI/SDK bindings.
-- No durable registration/controller reconciliation, restart recovery, upgrade,
-  rollback, log rotation, or retained installation-failure diagnostics. The
-  owning process must serialize lifecycle calls and stop children before exit;
-  an abrupt owner crash can leave children requiring operator cleanup.
-- No core-service dependency readiness, request-scoped typed-client injection,
-  or authorization integration. Existing plugins that use those dependencies
-  (including Tavily) require gateway/host integration before they work here.
-- No automatic function/job route mounting, custom CLI execution, controllers,
-  inference middleware, Studio code, or arbitrary SDK extension loading.
-- No sandboxing, capability enforcement, secret brokerage, or egress controls.
-
-Do not expose the socket through a public proxy until gateway authorization and
-workspace/caller propagation are implemented. A private Unix socket separates
-transport, not mutually hostile processes belonging to the same OS user.
-
-## Tests
-
-From the repository root:
-
-```bash
-uv run --frozen pytest packages/nhx_platform_runner/tests/test_community_plugin_host.py packages/nhx_platform_runner/tests/test_community_plugin_runtime.py -q
-```
-
-Tests verify artifact validation and installer commands with mocked installation,
-plus real subprocess startup, Unix-socket invocation, descriptor retrieval, and
-cleanup using a child-only fixture service. They do not download/install external
-packages or constitute end-to-end Tavily validation.
+Legacy Python plugin/Studio discovery remains a compatibility surface, separate
+from this community registry. A legacy API-only Tavily package can coexist with
+the new `/apis/plugins/tavily/...` mapping; it is not needed to register the YAML.

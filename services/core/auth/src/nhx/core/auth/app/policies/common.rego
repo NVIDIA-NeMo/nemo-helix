@@ -395,6 +395,21 @@ ordinary_permissions_satisfied(workspace, permissions) if {
 
 # /-/ pattern with a wildcard suffix (single placeholder matches any trailing path)
 path_matches_pattern(path, pattern) if {
+	# FastAPI's trailing :path converter spans one or more URL segments.
+	# Preserve the converter in derived policy patterns rather than treating it
+	# like an ordinary single-segment placeholder. The gateway uses this without
+	# the legacy /-/ separator.
+	pattern_parts := split(pattern, "/")
+	last := count(pattern_parts) - 1
+	startswith(pattern_parts[last], "{")
+	endswith(pattern_parts[last], ":path}")
+	path_parts := split(path, "/")
+	count(path_parts) >= count(pattern_parts)
+	path_parts[last] != ""
+	every i in numbers.range(0, last - 1) {
+		segment_matches(path_parts[i], pattern_parts[i])
+	}
+} else if {
 	# Pattern must contain /-/ but not at the beginning
 	contains(pattern, "/-/")
 	startswith(pattern, "/-/") == false
