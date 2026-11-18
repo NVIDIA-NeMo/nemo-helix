@@ -68,7 +68,7 @@ export const ProtoNotificationProvider: FC<PropsWithChildren> = ({ children }) =
         ref={containerRef}
         popover="manual"
         aria-live="polite"
-        className="fixed top-[calc(var(--nv-app-bar-height,0px)+1rem)] right-4 left-auto bottom-auto m-0 hidden flex-col items-end gap-3 bg-transparent p-0 z-1100 max-w-md overflow-visible [&:popover-open]:flex"
+        className="fixed top-[calc(var(--nv-app-bar-height,0px)+1rem)] right-4 left-auto bottom-auto m-0 hidden flex-col items-end gap-3 bg-transparent p-0 z-1100 max-w-md overflow-visible whitespace-normal [&:popover-open]:flex"
       >
         {visible.map((entry) =>
           entry.kind === 'notification' ? (
