@@ -20,6 +20,8 @@ Naming conventions:
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from nemo_agents_plugin.entities import (
     Agent,
     AgentComputeSpec,
@@ -53,7 +55,7 @@ from nemo_helix_plugin.agents.types import (
 from nemo_helix_plugin.agents.types import (
     RegisterAgentRequest as RegisterAgentRequest,
 )
-from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, LogicalOperation
+from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.api.parsed_filter import ENTITY_BASE_FIELDS
 from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
 from pydantic import Field
@@ -139,6 +141,71 @@ class EnvironmentSpecFilter(NemoFilter):
 
 class ComputeSpecFilter(NemoFilter):
     """Query filter for ``GET /v2/workspaces/{workspace}/compute-specs``."""
+
+
+class SkillSort(StrEnum):
+    """Sort fields for ``GET /v2/workspaces/{workspace}/skills``."""
+
+    NAME_ASC = "name"
+    NAME_DESC = "-name"
+    CREATED_AT_ASC = "created_at"
+    CREATED_AT_DESC = "-created_at"
+    UPDATED_AT_ASC = "updated_at"
+    UPDATED_AT_DESC = "-updated_at"
+
+
+#: Where a skill head keeps its search copy of the latest revision's frontmatter.
+_SKILL_FRONTMATTER = "data.frontmatter"
+
+
+class SkillFilter(NemoFilter):
+    """Query filter for ``GET /v2/workspaces/{workspace}/skills``.
+
+    Matches the latest revision's ``SKILL.md`` frontmatter. ``name`` is the skill name, which always
+    equals the frontmatter name.
+    """
+
+    description: str | None = Field(
+        default=None,
+        description="Filter by frontmatter description, e.g. `filter[description][$like]=pdf`.",
+    )
+    tags: str | None = Field(
+        default=None,
+        description="Filter by frontmatter `metadata.tags` (not revision tags): matches skills carrying the tag. "
+        "Supports `$eq` and `$in`.",
+    )
+
+    @classmethod
+    def _get_entity_field_map(cls) -> dict[str, str]:
+        return {"description": f"{_SKILL_FRONTMATTER}.description", "tags": f"{_SKILL_FRONTMATTER}.tags"}
+
+    @classmethod
+    def translate_operation(cls, operation: FilterOperation) -> FilterOperation:
+        def _walk(op: FilterOperation) -> FilterOperation:
+            if isinstance(op, ComparisonOperation):
+                if op.field == "description":
+                    return op.model_copy(update={"field": f"{_SKILL_FRONTMATTER}.description"})
+                if op.field == "tags":
+                    return _has_frontmatter_tag(op)
+                return op
+            if isinstance(op, LogicalOperation):
+                return op.model_copy(update={"operations": [_walk(child) for child in op.operations]})
+            return op
+
+        return _walk(operation)
+
+
+def _has_frontmatter_tag(op: ComparisonOperation) -> FilterOperation:
+    def contains(value: object) -> ComparisonOperation:
+        if not isinstance(value, str) or not value:
+            raise ValueError("'tags' filters take a non-empty string")
+        return ComparisonOperation(operator=FilterOperator.CONTAINS, field=f"{_SKILL_FRONTMATTER}.tags", value=value)
+
+    if op.operator == FilterOperator.EQ:
+        return contains(op.value)
+    if op.operator == FilterOperator.IN and isinstance(op.value, list) and op.value:
+        return LogicalOperation(operator=FilterOperator.OR, operations=[contains(value) for value in op.value])
+    raise ValueError("'tags' supports only $eq and a non-empty $in")
 
 
 # ---------------------------------------------------------------------------

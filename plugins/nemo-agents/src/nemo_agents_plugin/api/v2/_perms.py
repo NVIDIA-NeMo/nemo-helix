@@ -60,3 +60,10 @@ class ComputeSpecPerms(PermissionSet, namespace="agents.compute-specs"):
     LIST = perm("List agent compute specs")
     READ = perm("Read an agent compute spec")
     DELETE = perm("Delete an agent compute spec")
+
+
+class SkillPerms(PermissionSet, namespace="agents.skills"):
+    CREATE = perm("Create, publish and tag stored skills")
+    LIST = perm("List stored skills")
+    READ = perm("Read a stored skill and its revisions")
+    DELETE = perm("Delete a stored skill")

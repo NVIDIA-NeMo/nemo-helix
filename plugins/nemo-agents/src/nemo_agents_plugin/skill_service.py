@@ -32,7 +32,13 @@ from urllib.parse import quote
 
 from nemo_agents_plugin.entities import SKILL_REVISION_SELF_FIELDS, SkillEntity, SkillRevisionEntity
 from nemo_agents_plugin.skill_storage import SkillArchiveStore, SkillSourceError
-from nemo_helix_plugin.agents.skills import SKILL_NAME_MAX_LENGTH, SKILL_NAME_PATTERN, Skill, SkillInput
+from nemo_helix_plugin.agents.skills import (
+    SKILL_NAME_MAX_LENGTH,
+    SKILL_NAME_PATTERN,
+    Skill,
+    SkillFrontmatter,
+    SkillInput,
+)
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.content_hash import content_hash
 from nemo_helix_plugin.dependencies import RequestAuthorizer
@@ -462,7 +468,9 @@ class SkillService:
             existing = await self._find_by_digest(head, digest)
             if existing is not None and existing.revision >= head.tags.get(LATEST_TAG, 0):
                 verify_revision(head, existing)
-                return existing, await self._point_tags(head, tags, existing.revision)
+                return existing, await self._point_tags(
+                    head, tags, existing.revision, latest_frontmatter=existing.frontmatter
+                )
 
             ordinal = head.latest_revision + 1
             candidate = staged.model_copy(update={"name": revision_name(ordinal), "revision": ordinal})
@@ -479,20 +487,39 @@ class SkillService:
                 fresh.latest_revision = max(fresh.latest_revision, ordinal)
                 head = fresh
                 continue
-            return created, await self._point_tags(head, tags, ordinal)
+            return created, await self._point_tags(head, tags, ordinal, latest_frontmatter=created.frontmatter)
         raise SkillRevisionConflictError(
             f"could not allocate a revision for skill '{head.workspace}/{head.name}' after {_MAX_ATTEMPTS} attempts"
         )
 
-    async def _point_tags(self, head: SkillEntity, tags: set[str], ordinal: int) -> SkillEntity:
-        """Point ``tags`` at ``ordinal`` under the head's optimistic lock; ``latest`` only moves forward."""
+    async def _point_tags(
+        self,
+        head: SkillEntity,
+        tags: set[str],
+        ordinal: int,
+        *,
+        latest_frontmatter: SkillFrontmatter | None = None,
+    ) -> SkillEntity:
+        """Point ``tags`` at ``ordinal`` under the head's optimistic lock; ``latest`` only moves forward.
+
+        When ``latest`` moves, the head's search copy of the frontmatter moves with it in the same write.
+        """
         for attempt in range(_MAX_ATTEMPTS):
             moves_forward = ordinal >= head.tags.get(LATEST_TAG, 0)
             applied = {tag: ordinal for tag in tags if tag != LATEST_TAG or moves_forward}
             new_latest = max(head.latest_revision, ordinal)
-            if all(head.tags.get(t) == o for t, o in applied.items()) and new_latest == head.latest_revision:
+            new_frontmatter = (
+                latest_frontmatter if latest_frontmatter is not None and LATEST_TAG in applied else head.frontmatter
+            )
+            if (
+                all(head.tags.get(t) == o for t, o in applied.items())
+                and new_latest == head.latest_revision
+                and new_frontmatter == head.frontmatter
+            ):
                 return head
-            update = head.model_copy(update={"tags": {**head.tags, **applied}, "latest_revision": new_latest})
+            update = head.model_copy(
+                update={"tags": {**head.tags, **applied}, "latest_revision": new_latest, "frontmatter": new_frontmatter}
+            )
             update._parent, update._id, update._db_version = head._parent, head._id, head._db_version
             try:
                 return await self.entity_client.update(update)

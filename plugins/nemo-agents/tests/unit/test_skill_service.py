@@ -359,12 +359,13 @@ async def test_create_publishes_revision_one_into_the_skills_fileset(harness: Ha
         f"{WS}/{SKILLS_FILESET_NAME}#{archive_object_path(SKILL, skill.archive.files_hash)}"
     )
     assert skill.archive.archive_ref.endswith(f"{SKILL}/{skill.archive.files_hash}/skill_archive")
-    # The head holds pointers only.
+    # The head holds pointers, plus the latest frontmatter as a search copy for list filters.
     assert harness.store.head().model_dump(
         include=set(SkillEntity.model_fields) - {"name", "workspace", "project"}
     ) == {
         "latest_revision": 1,
         "tags": {"latest": 1, "v1": 1},
+        "frontmatter": skill.frontmatter.model_dump(),
     }
     (revision,) = harness.store.revisions()
     assert revision.name == revision_name(1)
@@ -410,6 +411,18 @@ async def test_publishing_new_content_cuts_revision_two_and_moves_latest(harness
     assert by_digest is not None and by_digest.revision == 1
     pinned = await harness.service.resolve_pinned_ref(f"{WS}/{SKILL}#{first.content_hash}", WS)
     assert pinned.archive == first.archive
+
+
+async def test_head_search_copy_follows_latest_only(harness: Harness) -> None:
+    first = await harness.service.create_skill(WS, SKILL, _input())
+    harness.source(description="Use it for PDFs.")
+    second, _ = await harness.service.publish_skill(WS, SKILL, _input())
+    assert harness.store.head().frontmatter == second.frontmatter
+
+    # Tagging an older revision moves no search copy: only 'latest' does.
+    await harness.service.tag_revision(WS, SKILL, "old", first.content_hash)
+    head = harness.store.head()
+    assert head.frontmatter is not None and head.frontmatter.description == "Use it for PDFs."
 
 
 async def test_reverting_to_older_content_publishes_forward(harness: Harness) -> None:
