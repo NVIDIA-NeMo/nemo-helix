@@ -24,26 +24,39 @@ const toDelta = (
   change: number,
   amount: string,
   higherIsBetter: boolean,
-  severeAt: number
+  severeAt: number,
+  against: string
 ): Delta | undefined => {
   if (change === 0) return undefined;
-  const text = `${arrow(change)} ${amount} vs baseline`;
+  const text = `${arrow(change)} ${amount} vs ${against}`;
   if (higherIsBetter ? change > 0 : change < 0) return { text, tone: 'success' };
   return { text, tone: Math.abs(change) >= severeAt ? 'error' : 'warning' };
 };
 
-export const scoreDelta = (arm: MockArmResult, baseline: MockArmResult): Delta | undefined => {
+export const scoreDelta = (
+  arm: MockArmResult,
+  baseline: MockArmResult,
+  against = 'baseline'
+): Delta | undefined => {
   const change = arm.score - baseline.score;
-  return toDelta(change, Math.abs(change).toFixed(2), true, SEVERE_SCORE_DROP);
+  return toDelta(change, Math.abs(change).toFixed(2), true, SEVERE_SCORE_DROP, against);
 };
 
-export const costDelta = (arm: MockArmResult, baseline: MockArmResult): Delta | undefined => {
+export const costDelta = (
+  arm: MockArmResult,
+  baseline: MockArmResult,
+  against = 'baseline'
+): Delta | undefined => {
   if (arm.estimatedCostPer1kTasks === null || baseline.estimatedCostPer1kTasks === null) return undefined;
   const change = percentChange(arm.estimatedCostPer1kTasks, baseline.estimatedCostPer1kTasks);
-  return toDelta(change, `${Math.abs(change)}%`, false, SEVERE_PERCENT_WORSENING);
+  return toDelta(change, `${Math.abs(change)}%`, false, SEVERE_PERCENT_WORSENING, against);
 };
 
-export const latencyDelta = (arm: MockArmResult, baseline: MockArmResult): Delta | undefined => {
+export const latencyDelta = (
+  arm: MockArmResult,
+  baseline: MockArmResult,
+  against = 'baseline'
+): Delta | undefined => {
   const change = percentChange(arm.medianLatencySec, baseline.medianLatencySec);
-  return toDelta(change, `${Math.abs(change)}%`, false, SEVERE_PERCENT_WORSENING);
+  return toDelta(change, `${Math.abs(change)}%`, false, SEVERE_PERCENT_WORSENING, against);
 };

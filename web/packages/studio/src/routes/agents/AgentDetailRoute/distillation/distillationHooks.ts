@@ -21,6 +21,11 @@ import {
   evaluationNamesByArm,
   fetchArmMetrics,
 } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationArmMetrics';
+import { fetchBaselineMetrics } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationBaseline';
+import {
+  DISTILLATION_MOCK,
+  mockArmMetrics,
+} from '@studio/routes/agents/AgentDetailRoute/distillation/distillationMock';
 import { promoteDistillation } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationPromote';
 import type { ArmId } from '@studio/routes/agents/AgentDetailRoute/distillation/mockDistillationResults';
 import {
@@ -77,7 +82,8 @@ export const useRetryDistillationNode = (workspace: string, name: string) => {
 export const usePromoteDistillation = (workspace: string) => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (workflow: DistillationWorkflow) => promoteDistillation(workflow),
+    mutationFn: ({ workflow, candidate }: { workflow: DistillationWorkflow; candidate: string }) =>
+      promoteDistillation(workflow, candidate),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: getAgentsListAgentsQueryKey(workspace) }),
   });
@@ -93,11 +99,27 @@ export const useDistillationArmMetrics = (workspace: string, workflow: Distillat
       const names = evaluationNamesByArm(workflow);
       const found = await Promise.all(
         Object.entries(names).map(async ([arm, name]) =>
-          name ? ([arm, await fetchArmMetrics(workspace, name, workflow.created_at)] as const) : null
+          name
+            ? ([
+                arm,
+                DISTILLATION_MOCK
+                  ? await mockArmMetrics(arm)
+                  : await fetchArmMetrics(workspace, name, workflow.created_at),
+              ] as const)
+            : null
         )
       );
-      return Object.fromEntries(found.filter((entry) => entry !== null)) as Partial<
+      const arms = Object.fromEntries(found.filter((entry) => entry !== null)) as Partial<
         Record<ArmId, ArmMetrics>
       >;
+      const runFileset = workflow.inputs.trajectory_filesets?.[0];
+      if (!arms.original && !workflow.results?.original && runFileset) {
+        arms.original = await fetchBaselineMetrics(
+          workspace,
+          runFileset,
+          workflow.source_agent
+        ).catch(() => undefined);
+      }
+      return arms;
     },
   });

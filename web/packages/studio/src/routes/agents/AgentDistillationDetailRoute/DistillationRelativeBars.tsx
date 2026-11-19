@@ -3,8 +3,8 @@
 
 import { Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import {
-  ARM_COLOR_CLASSES,
-  ARM_COLORS,
+  armColor,
+  armColorClass,
   type MockArmResult,
 } from '@studio/routes/agents/AgentDetailRoute/distillation/mockDistillationResults';
 import cn from 'classnames';
@@ -80,7 +80,7 @@ export const DistillationRelativeBars: FC<DistillationRelativeBarsProps> = ({ ar
             <Tooltip formatter={(value: number) => `${value}% of baseline`} />
             <ReferenceLine x={100} stroke="var(--text-color-secondary)" strokeDasharray="4 4" />
             {arms.map((arm) => (
-              <Bar key={arm.id} dataKey={arm.id} name={arm.title} fill={ARM_COLORS[arm.id]}>
+              <Bar key={arm.id} dataKey={arm.id} name={arm.title} fill={armColor(arm)}>
                 <LabelList
                   dataKey={arm.id}
                   position="right"
@@ -94,7 +94,7 @@ export const DistillationRelativeBars: FC<DistillationRelativeBarsProps> = ({ ar
         <Flex gap="density-xl" wrap="wrap" align="center">
           {arms.map((arm) => (
             <Flex key={arm.id} align="center" gap="density-sm">
-              <span aria-hidden className={cn('size-3 rounded-full', ARM_COLOR_CLASSES[arm.id])} />
+              <span aria-hidden className={cn('size-3 rounded-full', armColorClass(arm))} />
               <Text kind="body/regular/xs">{arm.title}</Text>
             </Flex>
           ))}

@@ -13,6 +13,8 @@ export interface ArmMetrics {
   outputTokensPerTask: number | null;
   medianLatencySec: number | null;
   costPer1kTasks: number | null;
+  /** The model behind the arm, when it is not already known from the workflow inputs. */
+  model?: string;
 }
 
 const finite = (value: number | null | undefined): number | null =>
@@ -25,19 +27,15 @@ const headlineScore = (scores: Record<string, EvaluatorAggregate> | undefined): 
   return chosen ? finite(chosen[1].mean) : null;
 };
 
-/**
- * Each arm's Intake Evaluation, keyed by arm. The distilled arm is the candidate's: the one key that
- * is neither the original nor the base arm.
- */
-export const evaluationNamesByArm = (workflow: DistillationWorkflow): Partial<Record<ArmId, string>> => {
+/** Each arm's Intake Evaluation, keyed by arm: `original`, `base`, and one per candidate by its name. */
+export const evaluationNamesByArm = (workflow: DistillationWorkflow): Record<ArmId, string> => {
   const evaluations = workflow.nodes.experiment?.outputs.evaluations;
   if (typeof evaluations !== 'object' || evaluations === null) return {};
-  const names = Object.entries(evaluations as Record<string, unknown>).filter(
-    (entry): entry is [string, string] => typeof entry[1] === 'string'
+  return Object.fromEntries(
+    Object.entries(evaluations as Record<string, unknown>).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string'
+    )
   );
-  const find = (arm: string) => names.find(([key]) => key === arm)?.[1];
-  const distilled = names.find(([key]) => key !== 'original' && key !== 'base')?.[1];
-  return { original: find('original'), base: find('base'), distilled };
 };
 
 /**

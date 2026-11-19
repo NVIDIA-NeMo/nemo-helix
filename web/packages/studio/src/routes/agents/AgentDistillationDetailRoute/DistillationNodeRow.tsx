@@ -3,9 +3,20 @@
 
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { Button, Flex, ProgressBar, Stack, Text } from '@nvidia/foundations-react-core';
+import type { NodeStatus } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationApiTypes';
 import type { StageNode } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationNodes';
 import { useTrainingProgress } from '@studio/routes/agents/AgentDetailRoute/distillation/useTrainingProgress';
 import type { FC } from 'react';
+
+/** The badge's own status words; it has none for a node that succeeded or was skipped. */
+const NODE_BADGE_STATUS: Record<NodeStatus, string> = {
+  pending: 'pending',
+  running: 'running',
+  succeeded: 'completed',
+  failed: 'failed',
+  skipped: 'cancelled',
+  cancelled: 'cancelled',
+};
 
 export interface DistillationNodeRowProps {
   workspace: string;
@@ -33,7 +44,10 @@ export const DistillationNodeRow: FC<DistillationNodeRowProps> = ({
       <Flex justify="between" align="center" gap="density-lg" wrap="wrap">
         <Flex align="center" gap="density-md" wrap="wrap">
           <Text kind="mono/sm">{node.key}</Text>
-          <StatusBadge status={node.status} />
+          <StatusBadge
+            status={NODE_BADGE_STATUS[node.status]}
+            label={node.status === 'skipped' ? 'Skipped' : undefined}
+          />
           {node.attempt > 1 && (
             <Text kind="body/regular/xs" className="text-secondary">
               attempt {node.attempt}

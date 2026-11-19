@@ -33,6 +33,11 @@ import {
   toArms,
   toStageView,
 } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationView';
+import {
+  BASE_ARM,
+  type MockArmResult,
+  ORIGINAL_ARM,
+} from '@studio/routes/agents/AgentDetailRoute/distillation/mockDistillationResults';
 import { DistillationResultsTab } from '@studio/routes/agents/AgentDistillationDetailRoute/DistillationResultsTab';
 import { DistillationStageCard } from '@studio/routes/agents/AgentDistillationDetailRoute/DistillationStageCard';
 import { getAgentDetailRoute, getAgentsListRoute } from '@studio/routes/utils';
@@ -59,6 +64,7 @@ export const AgentDistillationDetailRoute: FC = () => {
   const promote = usePromoteDistillation(workspace);
   const armMetrics = useDistillationArmMetrics(workspace, workflow);
   const [chosenTab, setChosenTab] = useState<DistillationTab | undefined>();
+  const [chosenCandidate, setChosenCandidate] = useState<string>();
   const wasRunning = useRef(false);
   const status = workflow?.status;
   const isDone = status === 'completed';
@@ -100,17 +106,37 @@ export const AgentDistillationDetailRoute: FC = () => {
     );
   }
 
+  const arms = toArms(workflow, armMetrics.data);
+  const candidateArms = (arms ?? []).filter(
+    (arm) => arm.id !== ORIGINAL_ARM && arm.id !== BASE_ARM
+  );
+  const bestCandidate = candidateArms.reduce<MockArmResult | undefined>(
+    (best, arm) => (!best || arm.score > best.score ? arm : best),
+    undefined
+  );
+  const promotedCandidate = candidateArms.find((arm) => arm.id === chosenCandidate) ?? bestCandidate;
   const selectedTab = chosenTab ?? (isDone ? 'results' : 'progress');
   const inputs = workflow.inputs;
 
-  const onPromote = () =>
-    promote.mutate(workflow, {
-      onSuccess: (agent) => {
-        toast.success(`Created agent "${agent.name}"`);
-        navigate(getAgentDetailRoute(workspace, agent.name ?? ''));
-      },
-      onError: (e) => toast.error(getErrorMessage(e)),
-    });
+  const canPromote =
+    isDone &&
+    !!promotedCandidate &&
+    !!distilledGatewayModel(workflow, promotedCandidate.id) &&
+    !promote.isPending;
+
+  const onPromote = () => {
+    if (!promotedCandidate) return;
+    promote.mutate(
+      { workflow, candidate: promotedCandidate.id },
+      {
+        onSuccess: (agent) => {
+          toast.success(`Created agent "${agent.name}"`);
+          navigate(getAgentDetailRoute(workspace, agent.name));
+        },
+        onError: (e) => toast.error(getErrorMessage(e)),
+      }
+    );
+  };
 
   return (
     <AccessibleTitle title={`Distillation - ${distillationName}`}>
@@ -140,11 +166,13 @@ export const AgentDistillationDetailRoute: FC = () => {
             )}
             <Button
               color="brand"
-              disabled={!isDone || !distilledGatewayModel(workflow) || promote.isPending}
+              disabled={!canPromote}
               loading={promote.isPending}
               onClick={onPromote}
             >
-              Promote
+              {candidateArms.length > 1 && promotedCandidate
+                ? `Promote ${promotedCandidate.id}`
+                : 'Promote'}
             </Button>
           </>
         }
@@ -193,7 +221,11 @@ export const AgentDistillationDetailRoute: FC = () => {
           </Stack>
         </TabsContent>
         <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="results">
-          <DistillationResultsTab status={workflow.status} arms={toArms(workflow, armMetrics.data)}
+          <DistillationResultsTab
+            status={workflow.status}
+            arms={arms}
+            selectedArm={promotedCandidate?.id}
+            onSelectArm={setChosenCandidate}
             loading={armMetrics.isLoading} />
         </TabsContent>
       </DetailPageLayout>

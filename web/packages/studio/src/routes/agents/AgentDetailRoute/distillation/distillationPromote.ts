@@ -3,9 +3,9 @@
 
 import { agentsGetAgent, agentsRegisterAgent } from '@nemo/sdk/generated/agents/agents';
 import type { DistillationWorkflow } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationApiTypes';
+import { DISTILLATION_MOCK } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationMock';
 
 const FABRIC_CONFIG_FORMAT = 'nemo-agents-spec-v1';
-const DEFAULT_CANDIDATE = 'lora';
 
 const qualify = (workspace: string, model: string): string =>
   model.includes('/') ? model : `${workspace}/${model}`;
@@ -17,12 +17,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * The gateway name of the trained model, built the way the plugin names the arm it evaluates: a LoRA
  * candidate is an adapter on the student, a full fine-tune is a model of its own.
  */
-export const distilledGatewayModel = (workflow: DistillationWorkflow): string | undefined => {
-  const candidate = workflow.inputs.candidates?.[0];
-  const trainKey =
-    `train[${candidate?.name ?? DEFAULT_CANDIDATE}]` in workflow.nodes
-      ? `train[${candidate?.name ?? DEFAULT_CANDIDATE}]`
-      : Object.keys(workflow.graph).find((key) => workflow.graph[key].kind === 'customization_job');
+export const distilledGatewayModel = (
+  workflow: DistillationWorkflow,
+  candidateName: string
+): string | undefined => {
+  const candidate = workflow.inputs.candidates?.find((entry) => entry.name === candidateName);
+  const trainKey = Object.keys(workflow.graph).find(
+    (key) => workflow.graph[key].kind === 'customization_job' && key.endsWith(`[${candidateName}]`)
+  );
   const node = trainKey ? workflow.nodes[trainKey] : undefined;
   const trained = node?.status === 'succeeded' ? node.outputs.model : undefined;
   if (typeof trained !== 'string') return undefined;
@@ -56,9 +58,16 @@ export const cloneAgentConfig = (
 };
 
 /** Register a copy of the source agent that runs on the distilled model. */
-export const promoteDistillation = async (workflow: DistillationWorkflow) => {
-  const model = distilledGatewayModel(workflow);
-  if (!model) throw new Error('The workflow has no trained model yet.');
+export const promoteDistillation = async (
+  workflow: DistillationWorkflow,
+  candidateName: string
+): Promise<{ name: string }> => {
+  if (DISTILLATION_MOCK) {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    return { name: `${workflow.source_agent.split('/').pop()}-distilled-${candidateName}` };
+  }
+  const model = distilledGatewayModel(workflow, candidateName);
+  if (!model) throw new Error(`Candidate ${candidateName} has no trained model yet.`);
 
   const [sourceWorkspace, sourceName] = workflow.source_agent.includes('/')
     ? (workflow.source_agent.split('/', 2) as [string, string])
@@ -68,12 +77,14 @@ export const promoteDistillation = async (workflow: DistillationWorkflow) => {
     throw new Error(`Only ${FABRIC_CONFIG_FORMAT} agents with a stored config can be promoted.`);
   }
 
-  const name = `${sourceName}-distilled`;
-  return agentsRegisterAgent(workflow.workspace, {
+  const multiple = (workflow.inputs.candidates?.length ?? 1) > 1;
+  const name = multiple ? `${sourceName}-distilled-${candidateName}` : `${sourceName}-distilled`;
+  const agent = await agentsRegisterAgent(workflow.workspace, {
     name,
-    description: `${sourceName} on the model distilled by ${workflow.name}.`,
+    description: `${sourceName} on the model distilled by ${workflow.name} (${candidateName}).`,
     config: cloneAgentConfig(source.config as Record<string, unknown>, name, model),
     config_format: FABRIC_CONFIG_FORMAT,
-    labels: { 'distillation/workflow': workflow.name },
+    labels: { 'distillation/workflow': workflow.name, 'distillation/candidate': candidateName },
   });
+  return { name: agent.name ?? name };
 };

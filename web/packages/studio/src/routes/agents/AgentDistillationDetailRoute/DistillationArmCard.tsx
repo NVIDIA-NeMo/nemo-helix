@@ -1,9 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { KeyValueGrid } from '@nemo/common/src/components/KeyValueGrid';
 import { StatTile, type StatTileStatus } from '@nemo/common/src/components/StatTile';
-import { Badge, Flex, Grid, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import {
+  Badge,
+  Flex,
+  Grid,
+  Panel,
+  RadioGroupInput,
+  RadioGroupItem,
+  Stack,
+  Text,
+} from '@nvidia/foundations-react-core';
 import {
   costDelta,
   type Delta,
@@ -11,8 +19,9 @@ import {
   scoreDelta,
 } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationDeltas';
 import {
-  ARM_COLOR_CLASSES,
+  armColorClass,
   type MockArmResult,
+  ORIGINAL_ARM,
 } from '@studio/routes/agents/AgentDetailRoute/distillation/mockDistillationResults';
 import cn from 'classnames';
 import type { FC } from 'react';
@@ -21,8 +30,23 @@ export interface DistillationArmCardProps {
   arm: MockArmResult;
   /** The original agent's result, which every other arm's deltas are measured against. */
   baseline: MockArmResult;
-  highlighted?: boolean;
+  /** The best-scoring candidate. */
+  best?: boolean;
+  /** Makes the card a radio option; it must sit inside a `RadioGroupRoot`. */
+  selectable?: boolean;
+  /** The candidate Promote would use. */
+  selected?: boolean;
+  /** Show the score against the untrained student too, as for a candidate. */
+  showUntrainedDelta?: boolean;
+  /** What to call the untrained student's figures, when this arm is shown against them too. */
+  untrained?: MockArmResult;
 }
+
+const TONE_CLASSES: Record<Delta['tone'], string> = {
+  success: 'text-feedback-success',
+  warning: 'text-feedback-warning',
+  error: 'text-feedback-danger',
+};
 
 interface TileDelta {
   hint: string;
@@ -41,25 +65,39 @@ const toTileDelta = (delta: Delta | undefined): TileDelta | undefined =>
 export const DistillationArmCard: FC<DistillationArmCardProps> = ({
   arm,
   baseline,
-  highlighted,
+  best,
+  selectable,
+  selected,
+  showUntrainedDelta,
+  untrained,
 }) => {
   const isBaseline = arm.id === baseline.id;
-  const scoreTile = isBaseline ? undefined : toTileDelta(scoreDelta(arm, baseline));
-  const costTile = isBaseline ? undefined : toTileDelta(costDelta(arm, baseline));
-  const latencyTile = isBaseline ? undefined : toTileDelta(latencyDelta(arm, baseline));
+  const referenceName = baseline.id === ORIGINAL_ARM ? 'baseline' : 'untrained';
+  const scoreTile = isBaseline ? undefined : toTileDelta(scoreDelta(arm, baseline, referenceName));
+  const costTile = isBaseline ? undefined : toTileDelta(costDelta(arm, baseline, referenceName));
+  const latencyTile = isBaseline ? undefined : toTileDelta(latencyDelta(arm, baseline, referenceName));
+  const againstUntrained =
+    showUntrainedDelta && untrained && untrained.id !== baseline.id
+      ? scoreDelta(arm, untrained, 'untrained')
+      : undefined;
 
-  return (
+  const labelId = `distillation-arm-${arm.id}-label`;
+
+  const card = (
     <Panel
       slotHeading={
         <Flex align="center" gap="density-md">
+          {selectable && <RadioGroupInput value={arm.id} aria-labelledby={labelId} />}
           <span
             aria-hidden
-            className={cn('size-3 shrink-0 rounded-full', ARM_COLOR_CLASSES[arm.id])}
+            className={cn('size-3 shrink-0 rounded-full', armColorClass(arm))}
           />
-          <Text kind="title/xs">{arm.title}</Text>
-          {highlighted && (
+          <Text kind="title/xs" id={labelId}>
+            {arm.title}
+          </Text>
+          {best && (
             <Badge kind="solid" color="green">
-              Best value
+              Best score
             </Badge>
           )}
         </Flex>
@@ -68,22 +106,31 @@ export const DistillationArmCard: FC<DistillationArmCardProps> = ({
       density="compact"
       className={cn(
         'h-full',
-        highlighted && 'border-2 border-(--color-purple-500)'
+        selectable && 'cursor-pointer hover:bg-interaction-hover [&_*]:cursor-pointer',
+        selected && 'border-2 border-interaction-selected'
       )}
       data-testid={`distillation-arm-${arm.id}`}
     >
       <Stack gap="density-lg">
-        <KeyValueGrid
-          items={[
-            { key: 'model', label: 'Model', value: arm.model, wrapValue: true },
-            { key: 'eval', label: 'Evaluation', value: arm.evalJobName, wrapValue: true },
+        <Stack gap="density-md">
+          {[
+            { label: 'Model', value: arm.model },
+            { label: 'Evaluation', value: arm.evalJobName },
             {
-              key: 'tokens',
               label: 'Input / output tokens per task',
               value: `${arm.inputTokensPerTask.toLocaleString()} / ${arm.outputTokensPerTask.toLocaleString()}`,
             },
-          ]}
-        />
+          ].map((item) => (
+            <Stack key={item.label} gap="density-xs">
+              <Text kind="body/regular/xs" className="text-secondary">
+                {item.label}
+              </Text>
+              <Text kind="body/regular/sm" className="min-w-0 break-all">
+                {item.value}
+              </Text>
+            </Stack>
+          ))}
+        </Stack>
         <Grid cols={2} gap="density-lg">
           <StatTile
             variant="metric"
@@ -112,7 +159,20 @@ export const DistillationArmCard: FC<DistillationArmCardProps> = ({
             value={(arm.inputTokensPerTask + arm.outputTokensPerTask).toLocaleString()}
           />
         </Grid>
+        {againstUntrained && (
+          <Text kind="body/regular/xs" className={TONE_CLASSES[againstUntrained.tone]}>
+            Score {againstUntrained.text}
+          </Text>
+        )}
       </Stack>
     </Panel>
+  );
+
+  return selectable ? (
+    <RadioGroupItem aria-labelledby={labelId} className="block h-full w-full">
+      {card}
+    </RadioGroupItem>
+  ) : (
+    card
   );
 };

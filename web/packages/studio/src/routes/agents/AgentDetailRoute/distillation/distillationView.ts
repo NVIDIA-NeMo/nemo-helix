@@ -6,10 +6,16 @@ import type {
   WorkflowArm,
   WorkflowStage,
 } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationApiTypes';
-import type { ArmMetrics } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationArmMetrics';
-import type {
-  ArmId,
-  MockArmResult,
+import {
+  type ArmMetrics,
+  evaluationNamesByArm,
+} from '@studio/routes/agents/AgentDetailRoute/distillation/distillationArmMetrics';
+import { DISTILLATION_DEFAULTS } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationDefaults';
+import {
+  type ArmId,
+  BASE_ARM,
+  type MockArmResult,
+  ORIGINAL_ARM,
 } from '@studio/routes/agents/AgentDetailRoute/distillation/mockDistillationResults';
 import type { MockStage } from '@studio/routes/agents/AgentDetailRoute/distillation/mockDistillationWorkflow';
 import {
@@ -54,7 +60,8 @@ const toArm = (
   model: string,
   arm: WorkflowArm | null,
   fallback: ArmMetrics | undefined,
-  priceModel: string | undefined
+  priceModel: string | undefined,
+  candidateIndex?: number
 ): MockArmResult | null => {
   const score = arm?.score ?? fallback?.score ?? null;
   const inputTokens = arm?.input_tokens_per_task ?? fallback?.inputTokensPerTask ?? null;
@@ -74,15 +81,33 @@ const toArm = (
     estimatedCostPer1kTasks:
       reportedCost ?? (price ? estimateCostPer1kTasks(inputTokens, outputTokens, price) : null),
     evalJobName: arm?.eval_job ?? '—',
+    candidateIndex,
   };
 };
 
+/** The candidates the workflow trains, by name: the declared ones, else the evaluated ones, else the default. */
+export const candidateNames = (workflow: DistillationWorkflow): string[] => {
+  const declared = workflow.inputs.candidates?.map((candidate) => candidate.name) ?? [];
+  if (declared.length > 0) return declared;
+  const evaluated = Object.keys(evaluationNamesByArm(workflow)).filter(
+    (arm) => arm !== ORIGINAL_ARM && arm !== BASE_ARM
+  );
+  return evaluated.length > 0 ? evaluated : [DISTILLATION_DEFAULTS.candidateName];
+};
+
+const candidateModel = (workflow: DistillationWorkflow, name: string): string => {
+  const candidate = workflow.inputs.candidates?.find((entry) => entry.name === name);
+  const student = workflow.inputs.student_model ?? 'student model';
+  return candidate?.finetuning_type === 'all_weights' ? `${student} fine-tuned (${name})` : `${student} + ${name}`;
+};
+
 /**
- * The comparison arms, baseline first. Each figure comes from the workflow's results, or from the
- * arm's Intake evaluation when the workflow reports none. The original arm is missing when the workflow
- * started from existing trajectory filesets, so the list can hold two arms. Null until every arm has
- * its score, tokens and latency. Cost is the platform's when it reports one, else tokens at the model's list price,
- * and null for a model with no listed price.
+ * The comparison arms: the baseline, the untrained student, then one per candidate. Each figure comes
+ * from the workflow's results, or from the arm's Intake evaluation when the workflow reports none. The
+ * workflow only reports its first candidate. The baseline is missing when the workflow started from
+ * existing trajectories and its run could not be read. Null until every arm has its score, tokens and
+ * latency. Cost is the platform's when it reports one, else tokens at the model's list price, and null
+ * for a model with no listed price.
  */
 export const toArms = (
   workflow: DistillationWorkflow,
@@ -91,22 +116,35 @@ export const toArms = (
   const results = workflow.results;
   if (!results) return null;
   const studentModel = workflow.inputs.student_model ?? 'student model';
+  const names = candidateNames(workflow);
+  const hasBaseline = !!(results.original || metrics[ORIGINAL_ARM]);
+  const baselineModel = workflow.inputs.teacher?.model ?? metrics[ORIGINAL_ARM]?.model;
   const arms = [
-    results.original
+    hasBaseline
       ? toArm(
-          'original',
+          ORIGINAL_ARM,
           'Baseline',
-          workflow.inputs.teacher?.model ?? 'source agent',
+          baselineModel ?? 'source agent',
           results.original,
-          metrics.original,
-          workflow.inputs.teacher?.model
+          metrics[ORIGINAL_ARM],
+          baselineModel
         )
       : null,
-    toArm('base', 'Model swap', studentModel, results.base, metrics.base, studentModel),
-    toArm('distilled', 'After distillation', `${studentModel} + adapter`, results.distilled, metrics.distilled, studentModel),
+    toArm(BASE_ARM, 'Model swap', studentModel, results.base, metrics[BASE_ARM], studentModel),
+    ...names.map((name, index) =>
+      toArm(
+        name,
+        names.length === 1 ? 'After distillation' : `Distilled: ${name}`,
+        candidateModel(workflow, name),
+        index === 0 ? results.distilled : null,
+        metrics[name],
+        studentModel,
+        index
+      )
+    ),
   ];
   const present = arms.filter((arm): arm is MockArmResult => arm !== null);
-  const expected = results.original ? 3 : 2;
+  const expected = (hasBaseline ? 1 : 0) + 1 + names.length;
   return present.length === expected ? present : null;
 };
 
