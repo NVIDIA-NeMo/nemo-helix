@@ -28,6 +28,8 @@ EVAL_CONFIGS: dict[str, dict[str, Any]] = {
     },
 }
 
+TOOL_ARGS = ["--enable-auto-tool-choice", "--tool-call-parser", "qwen3_coder"]
+
 EVALS = [
     {"name": "tasks", "kind": "agent", "config": TASKS_REF},
     {"name": "dataset", "kind": "dataset", "config": DATASET_REF, "dataset": "default/esec#dataset.jsonl"},
@@ -36,7 +38,8 @@ EVALS = [
 INPUTS: dict[str, Any] = {
     "source_agent": "default/teacher",
     "student_model": "default/student",
-    "teacher": {"model": "default/qwen36", "gpu": 1},
+    "teacher": {"model": "default/qwen36", "gpu": 1, "additional_args": TOOL_ARGS},
+    "deployment": {"additional_args": TOOL_ARGS},
     "agent_deployment": {"mode": "k8s", "image": "example.invalid/agent:1"},
     "evals": EVALS,
 }
