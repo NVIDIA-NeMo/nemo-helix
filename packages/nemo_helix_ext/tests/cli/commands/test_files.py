@@ -295,6 +295,46 @@ def test_filesets_create_from_stdin(tmp_path: Path) -> None:
     assert json.loads(recorder.last.content) == {"name": "my-fileset", "description": "piped"}
 
 
+def test_filesets_create_from_input_data_sends_real_fields() -> None:
+    recorder = Recorder([httpx.Response(201, json=FILESET)])
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(
+        app,
+        [
+            "files",
+            "filesets",
+            "create",
+            "my-fileset",
+            "--input-data",
+            '{"purpose": "dataset", "description": "Training data"}',
+        ],
+        obj=state,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert recorder.last.method == "POST"
+    assert recorder.last.url.path == "/apis/files/v2/workspaces/default/filesets"
+    assert json.loads(recorder.last.content) == {
+        "name": "my-fileset",
+        "purpose": "dataset",
+        "description": "Training data",
+    }
+
+
+def test_filesets_create_help_shows_runnable_examples() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["files", "filesets", "create", "--help"], env={"COLUMNS": "200"})
+
+    assert result.exit_code == 0, result.output
+    assert 'nemo files filesets create my-fileset --purpose dataset --description "Training data"' in result.output
+    assert '\'{"purpose": "dataset", "description": "Training data"}\'' in result.output
+    assert "nemo files upload ./data.csv my-fileset" in result.output
+    assert "<name>" not in result.output
+    assert '"value"' not in result.output
+
+
 def test_filesets_create_requires_name() -> None:
     recorder = Recorder()
     runner, state = make_runner(recorder)
