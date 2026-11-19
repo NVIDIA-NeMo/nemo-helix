@@ -649,6 +649,9 @@ extra-paths = [
   # The built-in NeMo Assistant is a standalone deployable with its own lockfile;
   # add its src so ty can resolve nemo_studio_assistant imports from its tests.
   "agents/nemo-studio-assistant/src",
+  # Operator-run external adapter: type-check its standalone package/tests
+  # without adding it to the platform dependency graph or plugin entry points.
+  "plugins/phoenix-traces/backend/src",
   # example-plugin is not a workspace member; add its src so ty can
   # resolve nhx.example_plugin imports when checking plugin test files.
   "plugins/example-plugin/src",

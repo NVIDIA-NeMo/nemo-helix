@@ -240,11 +240,12 @@ manifest only connects the running service to the gateway; it never starts it.
 Tavily needs no Helix-managed deployment because its MCP service is hosted.
 The local stub demonstrates the same separation with an operator-started server.
 
-For a future Phoenix trace plugin, define the adapter's API and Intake integration
-separately, then map that running adapter's endpoints in YAML. Access to Intake
-will need its own explicit integration credential/authorization contract, not a
-forwarded user's platform token. No Phoenix/Intake endpoint mappings are claimed
-or guessed by this demo.
+The Phoenix example in `plugins/phoenix-traces/README.md` follows this separation:
+an operator-started FastAPI adapter maps declared workspace-shaped routes to
+Intake's typed client, with ClickHouse persistence behind Intake. Each instance
+is bound to one workspace and uses a dedicated adapter capability key plus a
+separate Intake credential, never a forwarded browser token. See that runbook
+for its explicit trust boundaries, verification, and current demo limits.
 
 The installed-plugins/add-by-URL/consent **UI** remains Nathan's work. This change
 provides the backend and existing Studio loader integration; it does not add a

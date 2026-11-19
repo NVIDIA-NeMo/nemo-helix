@@ -35,14 +35,14 @@ export interface SpanRow {
   depth: number;
 }
 
-/** Phoenix `GET /v1/projects/{p}/spans` item (only the fields we read). */
+/** Phoenix-shaped item returned by the external Intake adapter. */
 export interface PhoenixSpan {
   name: string;
   context: { trace_id: string; span_id: string };
   span_kind: string;
   parent_id: string | null;
   start_time: string;
-  end_time: string;
+  end_time: string | null;
   status_code: string;
   status_message: string;
   attributes: Record<string, unknown>;
@@ -55,7 +55,8 @@ export const fromPhoenix = (s: PhoenixSpan): Span => ({
   name: s.name,
   kind: s.span_kind,
   start: Date.parse(s.start_time),
-  end: Date.parse(s.end_time),
+  // An unfinished Intake span runs until this fetch's observation time.
+  end: s.end_time === null ? Math.max(Date.parse(s.start_time), Date.now()) : Date.parse(s.end_time),
   status: s.status_code === 'OK' || s.status_code === 'ERROR' ? s.status_code : 'UNSET',
   statusMessage: s.status_message,
   attributes: s.attributes,

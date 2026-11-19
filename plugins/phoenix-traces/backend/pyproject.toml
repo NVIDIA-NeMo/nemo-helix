@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "phoenix-intake-adapter"
+version = "0.1.0"
+description = "Operator-run Phoenix trace-viewer API backed by NeMo Helix Intake"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "fastapi>=0.121.1",
+  "httpx>=0.27,<1",
+  "nemo-helix-plugin",
+  "pydantic>=2.12",
+  "pydantic-settings>=2.8",
+  "pyyaml>=6",
+  "uvicorn>=0.30",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "httpx>=0.27,<1"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemo_phoenix_traces"]
+
+# An independent environment: the platform never installs or imports this app.
+[tool.uv.workspace]
+members = []
+
+[tool.uv.sources]
+nemo-helix-plugin = { path = "../../../packages/nemo_helix_plugin", editable = true }
+filesets = { path = "../../../packages/filesets", editable = true }
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

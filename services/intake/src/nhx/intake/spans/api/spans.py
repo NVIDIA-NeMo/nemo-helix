@@ -138,7 +138,10 @@ async def list_span_groups(
     request: Request,
     service: SpansServiceDep,
     by: str = Query(
-        description="Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id.",
+        description=(
+            "Comma-separated span fields to group by: trace_id, session_id, or project. "
+            "Project grouping includes an empty-name bucket for unassigned spans."
+        ),
         examples=["trace_id"],
     ),
     page_params: PageParams = Depends(make_page_dep(default_size=10)),
@@ -238,6 +241,8 @@ def _span_filter(workspace: str, parsed: ParsedFilter) -> SpanListFilter:
             filters.trace_id = require_string_value(comparison)
         elif comparison.field == "parent_span_id":
             filters.external_parent_span_id = require_string_value(comparison)
+        elif comparison.field == "project" and comparison.value is None and comparison.operator == FilterOperator.EQ:
+            _add_attribute_eq_filter(filters, "project", "")
         elif comparison.field in ATTRIBUTE_EQ_FILTER_FIELDS:
             _add_attribute_eq_filter(
                 filters,
