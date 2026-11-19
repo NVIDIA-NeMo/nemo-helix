@@ -32,10 +32,11 @@ without suggesting that the work is outstanding.
 - A Helix execute-agent image containing the compatible Deep Agents adapter
   and harness, plus outbound access to Linear and the model gateway. No Git
   executable or GitHub credential is needed.
-- Access to `internal-agents/azure-anthropic-claude-opus-5-5` on the hosted
-  Helix instance. The model route previously passed a Chat Completions tool-call
-  probe. The ticket-only planner also passed a hosted end-to-end trial on
-  AIRCORE-1634 with the default `nhx-tasks:0.8.1` image.
+- Access to `azure-anthropic-claude-opus-5-5` through local Helix in workspace
+  `mmogallapall`. Use the shared `pr-compose:local` image, which includes Deep Agents.
+  An earlier configuration passed a hosted trial on AIRCORE-1634. Local job
+  `nemo-agents-plugin-e-ba9fepiq` also completed with a `ready` retrospective plan
+  and both expected artifacts on 2026-11-19.
 - A Linear API key with Read permission for the required team/issues, stored
   as a Helix secret and injected as `LINEAR_API_KEY`.
   [Linear's read-only MCP endpoint](https://linear.app/docs/mcp) accepts API keys
@@ -60,7 +61,7 @@ Set the execute job's inline environment secret reference, for example:
 `linear-planner-token` is provisioned in `mmogallapall` for the tested setup.
 For another workspace, supply its own secret reference.
 The instructions use `get_issue` and `list_comments`; confirm those names with
-the authenticated server before the first hosted run.
+the authenticated server during the first local run.
 
 ## Output limits
 
@@ -71,19 +72,14 @@ size and retries, and `runtime.max_turns: 20` bounds the Deep Agents graph steps
 `timeout_seconds: 300` on execute jobs for trials. Older runtimes may exceed this
 deadline while cancelling an in-flight request, so it is not a hard wall-clock cap.
 
-## Run the registered agent
+## Run locally
 
-`agent.yaml` matches the successful hosted trial, including the 8192-token
-output allowance and bounded agent loop. `run.example.json` references the
-registered agent and sets a 300-second job timeout. Replace the ticket placeholder
-in its JSON-string `input` before running from the repository root:
+`agent.yaml` directly uses the local gateway route, an 8192-token output
+allowance, and a bounded agent loop. The prepared `run.local.json` contains an
+inline copy of this config, the trial input, shared image, and Linear secret
+reference. See the [local job commands](../README.md#local-planner-and-reviewer-jobs).
 
-```bash
-NHX_BASE_URL=https://nemo-helix.aire.nvidia.com \
-  .venv/bin/nemo agents execute \
-  --workspace mmogallapall \
-  --spec-file plugins/nemo-agents/examples/pr-pipeline/planner/run.example.json
-```
-
-For a completed ticket, explicitly request a retrospective plan in the input's
-`constraints`; otherwise the planner asks whether new work is intended.
+Alternatively, register `agent.yaml` on local Helix and use `run.example.json`
+with `--image pr-compose:local --profile gpu`. Replace its ticket placeholder
+first. For a completed ticket, explicitly request a retrospective plan in the
+input's `constraints`; otherwise the planner asks whether new work is intended.

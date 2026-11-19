@@ -5,7 +5,7 @@
 # Demo adaptation of NVIDIA-NeMo/nemo-helix-agents at
 # 1ba5cb46ac86cf46845cd95bf4b429b2cd07927b. Retains Pi and multi-model review.
 # Run through agents.execute with a Pi-capable image and a read-only GitHub secret.
-# Model/gateway settings below are inherited production settings; verify for your demo.
+# Model/gateway settings target local Helix in workspace mmogallapall.
 # Input/output shapes below are prompt contracts, not platform-enforced schemas.
 config_format: nemo-agents-spec-v1
 name: pr-compose-reviewer
@@ -220,14 +220,14 @@ instructions:
       ## Reviewer suite (models are configurable)
       Determine the reviewer list in this precedence:
         1. input `reviewers` if present (used for LOCAL testing, where the gateway/catalog differs
-           from prod -- the caller passes env-specific model ids), else
-        2. the original production trio embedded here (verify availability for the demo):
-             [ { "label": "opus",   "model": "internal-agents/azure-anthropic-claude-opus-5-5" },
-               { "label": "gptsol", "model": "internal-agents/azure-openai-gpt-5-6-sol" },
-               { "label": "sonnet", "model": "internal-agents/aws-anthropic-bedrock-claude-sonnet-5-5" } ]
+           from other instances -- the caller passes env-specific model ids), else
+        2. the local three-model suite embedded here:
+             [ { "label": "opus",   "model": "mmogallapall/azure-anthropic-claude-opus-5-5" },
+               { "label": "gptsol", "model": "mmogallapall/azure-openai-gpt-5-6-sol" },
+               { "label": "sonnet", "model": "mmogallapall/aws-anthropic-bedrock-claude-sonnet-5-5" } ]
       Each entry is { "label": "<short tag>", "model": "<gateway model id>" }. Model ids DIFFER
       between environments (local dev gateway vs. Helix prod inference gateway) -- that is why the
-      input override exists; the embedded list above is the PROD default. Do NOT try to read a
+      input override exists; the embedded list above is the local default. Do NOT try to read a
       reviewers.json file from disk (it is not present in the job container).
 
       ## Progress
@@ -242,6 +242,7 @@ instructions:
       with body:
         {
           "name": "rvw-<label>-<run_suffix>",
+          "profile": "gpu",
           "spec": {
             "agent": {
               "config_format": "nemo-agents-spec-v1",
@@ -262,6 +263,7 @@ instructions:
         pr-reviewer agent.yaml on disk inside this job). The following is the complete
         spec.agent wrapper; do not nest another wrapper inside its config:
           { "config_format": "nemo-agents-spec-v1", "config": {
+              "config_format": "nemo-agents-spec-v1",
               "name": "pr-reviewer-<label>",
               "instructions": { "system": { "content": "<the reviewer system prompt -- see REVIEWER
                  PROMPT below>" } },
@@ -270,19 +272,20 @@ instructions:
               "models": { "default": {
                  "provider": "nvidia", "model": "<THIS reviewer's model>",
                  "api_key_env": "NVIDIA_API_KEY",
-                 "base_url": "http://gateway.local/apis/inference-gateway/v2/workspaces/<model_workspace>/openai/-/v1",
+                 "base_url": "http://localhost:8080/apis/inference-gateway/v2/workspaces/<model_workspace>/openai/-/v1",
                     # model_workspace is the prefix of this reviewer's workspace/model id.
-                    # For the default suite it is internal-agents, even when the JOB runs
-                    # in mmogallapall. For a bare model name, use NEMO_JOB_WORKSPACE.
+                    # The default suite uses mmogallapall.
+                    # For a bare model name, use NEMO_JOB_WORKSPACE.
                     # Substitute the actual workspace; do not leave the placeholder literal.
-                    # The platform proxy rewrites scheme+host, preserving the gateway path.
-                 "settings": { "api": "openai-completions", "context_window": 200000,
-                    "max_tokens": 8192, "input": ["text"],
+                    # Use the reachable local Helix URL; do not rely on a proxy to rewrite a placeholder host.
+                 "max_tokens": 8192,
+                 "extensions": { "api": "openai-completions", "context_window": 200000,
+                    "input": ["text"],
                     "cost": { "input": 0.0, "output": 0.0, "cacheRead": 0.0, "cacheWrite": 0.0 } } } },
               "skills": { "paths": [] }, "mcp": { "servers": {} },
               "environment": { "workspace": "./workspace", "artifacts": "./artifacts" },
               "telemetry": { "enabled": false } } }
-        Set ONLY models.default.model per reviewer; keep the rest identical. The settings catalog
+        Set ONLY models.default.model per reviewer; keep the rest identical. The model catalog
         fields (api/context_window/max_tokens/input/cost) are REQUIRED for a gateway model the pi
         harness doesn't know natively -- do not omit them.
       - Job `name` MUST be <= 51 chars (hard cap; longer => HTTP 409). Use
@@ -433,6 +436,13 @@ instructions:
       4. Reply with a one-line summary (finding count + highest severity).
       ---
 
+      ## Local execution
+      Every child-job POST must set top-level profile to "gpu", alongside name and spec.
+      Do not put profile inside spec. This selects the configured Docker-backed CPU profile.
+      Use the inherited image and GitHub secret reference for every child.
+      Model protocol/catalog fields belong in models.default.extensions; max_tokens belongs
+      directly under models.default. Do not put model metadata in settings.
+
 default_harness: pi
 
 harnesses:
@@ -442,13 +452,13 @@ harnesses:
 models:
   default:
     provider: nvidia
-    model: internal-agents/azure-anthropic-claude-opus-5-5
+    model: azure-anthropic-claude-opus-5-5
     api_key_env: NVIDIA_API_KEY
-    base_url: https://nemo-helix.aire.nvidia.com/apis/inference-gateway/v2/workspaces/internal-agents/openai/-/v1
-    settings:
+    base_url: http://localhost:8080/apis/inference-gateway/v2/workspaces/mmogallapall/openai/-/v1
+    max_tokens: 8192
+    extensions:
       api: openai-completions
       context_window: 200000
-      max_tokens: 8192
       input: ["text"]
       cost:
         input: 0.0

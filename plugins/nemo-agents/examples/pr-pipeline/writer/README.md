@@ -79,7 +79,7 @@ plan/input and consume or validate these outputs.
 
 ## Register and submit
 
-These commands target the same hosted workspace as the planner and reviewer.
+These commands target the hosted workspace used for the original agent trials.
 Registration and an execute job are separate operations; no persistent agent
 deployment is needed.
 
@@ -116,17 +116,32 @@ writer tools. Before submitting this hosted example, set its `image` field to
 a compatible published writer image; `pr-compose-writer:local` is available
 only to the local Docker daemon.
 
-## Local writer image
+## Shared local job image
 
 `Dockerfile.local` extends the existing local `pr-compose-reviewer:local` image.
-It retains that image's Git and Helix installation and adds GitHub CLI plus
-`openai-codex==0.154.0`, the installed Codex adapter's runtime dependency. It
-contains no GitHub token and does not copy the current Helix source checkout.
+It retains that image's Git and Helix installation and adds the runtimes needed
+by all three standalone agents:
+
+| Agent | Harness runtime | Fabric adapter |
+| --- | --- | --- |
+| Planner | Deep Agents 0.7.40 | 0.6.1 |
+| Writer | Codex 0.154.0 | 0.6.1 |
+| Reviewer | Pi SDK packages 1.0.3 | npm `nemo-fabric-adapters-pi` 0.6.1 |
+
+It also includes GitHub CLI and the Relay Pi extension from Relay 0.11.0.
+Existing Python dependencies remain pinned except `tenacity`, which changes
+from 9.2.1 to 9.1.4 to satisfy Deep Agents' Google client dependency. The build
+checks dependency consistency. It contains no API tokens and does not copy
+the current Helix source checkout.
 
 ```bash
 docker build -f plugins/nemo-agents/examples/pr-pipeline/writer/Dockerfile.local \
-  -t pr-compose-writer:local plugins/nemo-agents/examples/pr-pipeline/writer
+  -t pr-compose:local -t pr-compose-writer:local \
+  plugins/nemo-agents/examples/pr-pipeline/writer
 ```
+
+Both tags refer to the same shared image. New local jobs can select
+`pr-compose:local`; the writer tag keeps existing job specs working.
 
 `run.local.json` selects `pr-compose-writer:local` and includes an inline agent
 configuration using the local `mmogallapall` GPT route. No local agent
@@ -159,12 +174,20 @@ spec["image"] = "pr-compose-writer:local"
 PYLOCAL
 ```
 
-The build checks Git, GitHub CLI, the execute-job module, the Codex adapter,
-and the Codex binary. An image-local compatibility patch adds only `GH_TOKEN`
+The build checks Git, GitHub CLI, the execute-job module, Codex, Deep Agents,
+and Pi SDK imports, plus Python dependency compatibility.
+
+An image-local compatibility patch adds only `GH_TOKEN`
 to the Codex adapter 0.6.1 inherited environment allowlist. It fails the build
 if the adapter version or patch location changes. No secret value is baked in;
 Helix must still inject the token at job runtime. Local model access remains
 a separate setup requirement.
+
+The planner and reviewer [agent configs](../README.md#local-planner-and-reviewer-jobs)
+now directly contain the local gateway routes and Pi 0.6.1 metadata. The reviewer
+also selects the Docker profile for its child jobs. Their job specs select this
+shared image and reference local secrets. Local trials verified model/tool calls
+and reviewer child-job scheduling; see the trial results in the linked README.
 
 ### Local launcher prerequisite
 
@@ -196,17 +219,24 @@ Validated on 2026-11-19:
   job parsing passed.
 - Responses API checks passed for the hosted GPT route and, as verified by the
   caller, the local Inference Hub GPT route.
-- The ARM64 writer image passed smoke checks for Git, GitHub CLI, Codex, the
+- The shared ARM64 image passed offline Fabric plan, doctor, startup, readiness,
+  and shutdown checks for Deep Agents, Codex, and Pi. All installed Python
+  dependencies are compatible, and both writer compatibility patches remain.
+  Local planner and multi-model reviewer trials subsequently completed; see
+  the [trial results](../README.md#local-planner-and-reviewer-jobs).
+- The original ARM64 writer image passed smoke checks for Git, GitHub CLI, Codex, the
   adapter, and the execute-job module. A dummy-token regression check verified
   `GH_TOKEN` forwarding while unrelated secrets remain filtered.
 - Local patch trial `nemo-agents-plugin-e-2vztbcjy` completed with `patch_ready`.
+- Shared-image patch trial `nemo-agents-plugin-e-2bbhmorg` completed with
+  `patch_ready`, the expected README-only patch, and uploaded artifacts.
 - Local draft trial `nemo-agents-plugin-e-uupkn3n4` completed with `pr_created`
   and opened [draft PR #1](https://github.com/mmogallapalli/nemo-helix-hackathon/pull/1).
   Only the requested example README changed. YAML/table consistency, relative
   links, and whitespace checks passed. The generated reviewer input matched
   the published PR's head SHA.
 
-The successful end-to-end trials used the local writer image, a Linux ARM64
+The successful end-to-end trials used the earlier local writer image, a Linux ARM64
 launcher, local Helix, and local Inference Hub model routing. Hosted execution
 with a published writer image has not been verified. To reproduce the local
 build on another machine, first supply the `pr-compose-reviewer:local` base

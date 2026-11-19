@@ -17,10 +17,10 @@ harnesses:
 models:
   default:
     provider: nvidia
-    model: internal-agents/azure-anthropic-claude-opus-5-5
+    model: azure-anthropic-claude-opus-5-5
     api_key_env: NVIDIA_API_KEY
     max_tokens: 8192
-    base_url: https://nemo-helix.aire.nvidia.com/apis/inference-gateway/v2/workspaces/internal-agents/openai/-/v1
+    base_url: http://localhost:8080/apis/inference-gateway/v2/workspaces/mmogallapall/openai/-/v1
 
 instructions:
   system:

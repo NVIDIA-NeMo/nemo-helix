@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Generated personal execute-job snapshots; no credentials are stored here.
+/planner/run.local.json
+/reviewer/run.local.json
