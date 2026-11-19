@@ -16,9 +16,10 @@ Runtime contract: `../../../web/packages/studio/src/plugins/types.ts`.
   `createRoot`, never create a `BrowserRouter`.
 - **Share the singletons that carry context** — React, react-dom, react-router,
   `@nvidia/foundations-react-core`, `@tanstack/react-query`, and `@nemo/common`
-  (Studio's shared UI) resolve via Studio's import map. This dir **externalizes**
-  them so the plugin uses Studio's one instance (shared router + theme + query
-  cache + tables). Everything else bundles privately.
+  (Studio's shared UI) resolve via Studio's import map. `studioPlugin()` in
+  `vite.config.ts` **externalizes** them so the plugin uses Studio's one instance
+  (shared router + theme + query cache + tables). Everything else bundles
+  privately.
 
 ## Rules — DO / DON'T
 
@@ -30,7 +31,7 @@ Runtime contract: `../../../web/packages/studio/src/plugins/types.ts`.
 | Tables, forms, status | Studio's shared UI from `@nemo/common` — `StudioDataView`, `useStudioDataViewState`, `ControlledTextInput`, `StatusBadge`, … | re-implement a table/empty state/relative timestamp, or deep-import `@nemo/common/src/...` |
 | Styling | Studio's theme-aware tokens: `bg-surface-base/raised/sunken/hover`, `text-subtle/muted/primary`, `border-subtle` | hardcoded Tailwind palette (`bg-gray-100`, `text-blue-700`) — not compiled for the plugin, not theme-aware |
 | Auth | `host.auth.getAccessToken()` **per request** → `Authorization: Bearer …` | `react-oidc-context` / `useAuth` (refresh token must not cross the boundary) |
-| Deps | externalize the shared set in `vite.config.ts`; bundle the rest | bundle react / react-dom / react-router / foundations |
+| Deps | `studioPlugin()` in `vite.config.ts` externalizes the shared set; bundle the rest | bundle react / react-dom / react-router / foundations |
 
 Studio injects everything a plugin needs through a **single `host` prop**
 (`host.workspaceId`, `host.apiBaseUrl`, `host.auth`, `host.sdk`, `host.navigation`,
@@ -82,11 +83,11 @@ import { AssistantChat, StudioDataView, useStudioDataViewState } from '@nemo/com
 ```
 
 - **Bare specifier only.** A deep `@nemo/common/src/...` import is not
-  externalized, so it silently bundles a *second copy* of the component instead
-  of sharing Studio's — it does not error, it just quietly stops being shared.
-  The `reject-deep-shared-imports` plugin in `vite.config.ts` fails the build on
-  one; keep it when you copy this template. Importing a name the barrel doesn't
-  export is already a tsc error, so `pnpm typecheck` covers that half.
+  externalized, so it would bundle a *second copy* of the component instead of
+  sharing Studio's. `studioPlugin()` in `vite.config.ts` fails the build on one
+  (and on deep imports of the other shared packages); keep it when you copy this
+  template. Importing a name the barrel doesn't export is already a tsc error, so
+  `pnpm typecheck` covers that half.
 - **`plugin.ts` is the API.** Need something Studio has but the barrel doesn't
   export? Add it there — additions are cheap, removals are breaking.
 - **Nothing in the barrel may call the API.** The vendor build resolves
@@ -172,15 +173,19 @@ import { AssistantChat, StudioDataView, useStudioDataViewState } from '@nemo/com
 
 ## Externals & versions
 
-The `external` list in `vite.config.ts` **must match the keys of** Studio's
-`VENDOR_IMPORT_MAP` in `../../../web/packages/studio/vite.config.ts` — that map,
-not `VENDOR_EXTERNALS`, is what the browser resolves at runtime. (`@nemo/common`
-is in the map but deliberately not in `VENDOR_EXTERNALS`: Studio imports Common
-by deep path and bundles it normally, so externalizing the bare name would only
-add a dead import to every Studio chunk.) If Studio shares something new, add it
-here too or the plugin bundles its own copy and loses the shared
-instance/theme/cache. The SDK is **not** in this list — it comes in on the `sdk`
-prop (see above), so there is nothing to externalize for it.
+Plugin builds use `studioPlugin()` from
+`../../../web/packages/common/plugin-build/studio-plugin.mjs`. It externalizes
+every specifier in Studio's plugin contract (`PLUGIN_CONTRACT`, in
+`../../../web/packages/common/src/pluginContract/contract.ts`), so there is no
+hand-kept `external` list to drift from Studio's `VENDOR_IMPORT_MAP` in
+`../../../web/packages/studio/vite.config.ts` (which the browser resolves at
+runtime). In-repo plugins import the helper by relative path; out-of-tree plugins
+vendor a copy of that file. It also fails the build when a shared package is
+imported by a deep path or bundled from `node_modules`, and emits
+`plugin.manifest.json` next to `index.js`, recording the contract version, the
+bare imports left in the bundle, and the versions built against. The SDK is
+**not** in the contract — it comes in on the `sdk` prop (see above), so there is
+nothing to externalize for it.
 
 **Shared deps must also match Studio's versions**, which is a separate
 obligation from externalizing them. Studio *serves* these at runtime, so the
@@ -244,4 +249,5 @@ UI route is gated behind the `pluginsEnabled` flag (on by default).
   token or ID token) crosses through `accessToken` / `getAccessToken` — never
   reach for Studio's OIDC context.
 - **New shared singletons** with internal dynamic imports need `codeSplitting:
-  false` in Studio's vendor build; here you only add the name to `external`.
+  false` in Studio's vendor build; here you only add the name to the plugin
+  contract.

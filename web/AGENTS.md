@@ -73,12 +73,13 @@ import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
 
 Everything in `VENDOR_IMPORT_MAP` (`packages/studio/vite.config.ts`) is served to
 plugin bundles from Studio's vendor build, so plugins must leave it external and
-never ship their own copy:
+never ship their own copy. `studioPlugin()` (`packages/common/plugin-build/studio-plugin.mjs`)
+does this from Studio's plugin contract (`packages/common/src/pluginContract/contract.ts`):
 
-| Shared                                                                                          | In the plugin's `package.json`?                                                                                                                                                  |
-| ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `react`, `react-dom`, `react-router`, `@nvidia/foundations-react-core`, `@tanstack/react-query` | Yes — versions must match the `catalog:` block                                                                                                                                   |
-| `@nemo/common` (Studio's shared UI)                                                             | **No** — unpublished, has no catalog entry, and must not be added as a dependency. Externalized in the plugin's `vite.config.ts`; types come from `paths` in its `tsconfig.json` |
+| Shared                                                                                          | In the plugin's `package.json`?                                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `react`, `react-dom`, `react-router`, `@nvidia/foundations-react-core`, `@tanstack/react-query` | Yes — versions must match the `catalog:` block                                                                                                                                                     |
+| `@nemo/common` (Studio's shared UI)                                                             | **No** — unpublished, has no catalog entry, and must not be added as a dependency. Externalized by `studioPlugin()` (it is in the plugin contract); types come from `paths` in its `tsconfig.json` |
 
 Plugin web dirs are **standalone pnpm roots** and cannot reference the
 `catalog:` block, so they restate the versions by hand. When you change one of

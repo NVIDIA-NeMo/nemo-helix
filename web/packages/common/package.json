@@ -16,6 +16,7 @@
     "test:ci": "vitest run --coverage",
     "test:watch": "vitest watch",
     "test:once": "vitest --run",
+    "build:plugin-helper": "tsx scripts/build-plugin-helper.ts",
     "types:plugin": "tsx scripts/build-plugin-types.ts",
     "typecheck": "tsc --noEmit"
   },

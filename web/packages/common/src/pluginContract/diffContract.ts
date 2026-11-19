@@ -15,7 +15,7 @@ import type {
   PluginSidecar,
 } from '@nemo/common/src/pluginContract/types';
 
-const issue = (
+export const issue = (
   code: IssueCode,
   subject: string,
   fix: Pick<ContractIssue, 'message' | 'steps'>
