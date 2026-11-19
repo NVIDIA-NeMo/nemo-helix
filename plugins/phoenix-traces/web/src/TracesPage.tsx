@@ -95,7 +95,7 @@ export function TracesPage({ host }: { host: PluginHost }) {
           >
             {(projects.data ?? []).map((name) => (
               <option key={name} value={name}>
-                {name}
+                {name || '(unassigned)'}
               </option>
             ))}
           </select>
@@ -105,10 +105,10 @@ export function TracesPage({ host }: { host: PluginHost }) {
       {projects.isError || spans.isError ? (
         <TableEmptyState
           header="Couldn't load traces"
-          emptyMessage="The Phoenix plugin API request failed. Check that the plugin is registered and Phoenix is reachable."
+          emptyMessage="The Phoenix plugin API request failed. Check that the plugin is registered and the Intake adapter is reachable."
         />
-      ) : !spans.isPending && traces.length === 0 ? (
-        <TableEmptyState header="No traces" emptyMessage="This Phoenix project has no traces yet." />
+      ) : (projects.data?.length === 0 || !spans.isPending) && traces.length === 0 ? (
+        <TableEmptyState header="No traces" emptyMessage="No traces are stored in this Intake workspace/project yet." />
       ) : (
         <Stack className="min-h-[320px]">
           <StudioDataView
@@ -116,7 +116,7 @@ export function TracesPage({ host }: { host: PluginHost }) {
             makeColumns={makeColumns}
             onRowClick={(trace) =>
               host.navigation.navigate(
-                `${pluginPath(host.workspaceId, `traces/${trace.traceId}`)}?project=${encodeURIComponent(project ?? '')}`
+                `${pluginPath(host.workspaceId, `traces/${encodeURIComponent(trace.traceId)}`)}?project=${encodeURIComponent(project ?? '')}`
               )
             }
             attributes={{

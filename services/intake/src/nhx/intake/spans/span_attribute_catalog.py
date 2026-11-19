@@ -399,7 +399,8 @@ def where_clause(
     param_root = param_prefix or field
     value_param = f"{param_root}_value"
     parsed_value = _parse_filter_value(value) if spec.bag == AttributeBag.NUMBER else value
-    bag_value = to_bag(parsed_value, spec)
+    unassigned_project = spec.field == SpanAttributeField.PROJECT and sql_operator == "=" and parsed_value == ""
+    bag_value = "" if unassigned_project else to_bag(parsed_value, spec)
     if bag_value is None:
         raise ValueError(f"Span attribute filter {field!r} does not support null values")
 
@@ -408,10 +409,14 @@ def where_clause(
     for index, key in enumerate(bag_keys(spec)):
         key_param = f"{param_root}_key" if index == 0 else f"{param_root}_key_alias_{index}"
         params[key_param] = key
-        conditions.append(
-            f"has(mapKeys({spec.bag.value}), %({key_param})s) "
-            f"AND {spec.bag.value}[%({key_param})s] {sql_operator} %({value_param})s"
-        )
+        comparison = f"{spec.bag.value}[%({key_param})s] {sql_operator} %({value_param})s"
+        if unassigned_project:
+            # ClickHouse's missing Map(String, String) key reads as ''. This is
+            # the unassigned bucket exposed by project grouping, not a match
+            # against every other missing semantic attribute.
+            conditions.append(comparison)
+        else:
+            conditions.append(f"has(mapKeys({spec.bag.value}), %({key_param})s) AND {comparison}")
     sql = conditions[0] if len(conditions) == 1 else "(" + ") OR (".join(conditions) + ")"
     return sql, params
 

@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:ci": "vitest run"
   },
   "dependencies": {
     "@nvidia/foundations-react-core": "1.19.0",
@@ -17,7 +19,9 @@
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
+    "msw": "^2.15.0",
     "typescript": "~7.0.0",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "vitest": "^4.1.12"
   }
 }

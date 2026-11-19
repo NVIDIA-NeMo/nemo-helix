@@ -6538,11 +6538,15 @@ paths:
         required: true
         schema:
           type: string
-          description: Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id.
+          description: 'Comma-separated span fields to group by: trace_id, session_id,
+            or project. Project grouping includes an empty-name bucket for unassigned
+            spans.'
           examples:
           - trace_id
           title: By
-        description: Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id.
+        description: 'Comma-separated span fields to group by: trace_id, session_id,
+          or project. Project grouping includes an empty-name bucket for unassigned
+          spans.'
       - name: sort
         in: query
         required: false
@@ -10734,6 +10738,612 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/plugins/-/catalog:
+    get:
+      tags:
+      - External Plugins
+      summary: Catalog
+      operationId: catalog_apis_plugins___catalog_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogResponse'
+  /apis/plugins/-/installed:
+    get:
+      tags:
+      - External Plugins
+      summary: Installed
+      operationId: installed_apis_plugins___installed_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalPluginRegistry'
+    post:
+      tags:
+      - External Plugins
+      summary: Install Plugin
+      operationId: install_plugin_apis_plugins___installed_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstallRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/plugins/-/installed/{name}:
+    patch:
+      tags:
+      - External Plugins
+      summary: Enable Plugin
+      operationId: enable_plugin_apis_plugins___installed__name__patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnableRequest'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/plugins/-/installed/my-installed"
+
+
+          response = requests.request("PATCH", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/plugins/-/installed/my-installed\"\
+          , {\n  method: \"PATCH\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request PATCH \\\n  http://localhost:8080/apis/plugins/-/installed/my-installed\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/plugins/-/installed/my-installed"
+
+
+            response = requests.request("PATCH", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/plugins/-/installed/my-installed\"\
+            , {\n  method: \"PATCH\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
+    delete:
+      tags:
+      - External Plugins
+      summary: Uninstall Plugin
+      operationId: uninstall_plugin_apis_plugins___installed__name__delete
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/plugins/-/installed/my-installed"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/plugins/-/installed/my-installed\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/plugins/-/installed/my-installed\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/plugins/-/installed/my-installed"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/plugins/-/installed/my-installed\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
+  /apis/plugins/-/preview:
+    post:
+      tags:
+      - External Plugins
+      summary: Preview Plugin
+      operationId: preview_plugin_apis_plugins___preview_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManifestSource'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/plugins/{name}/v2/workspaces/{workspace}/{plugin_endpoint}:
+    get:
+      tags:
+      - External Plugins
+      summary: Read Workspace
+      operationId: plugins_proxy_workspace_get
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: plugin_endpoint
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Endpoint
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    head:
+      tags:
+      - External Plugins
+      summary: Read Workspace
+      operationId: plugins_proxy_workspace_head
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: plugin_endpoint
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Endpoint
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - External Plugins
+      summary: Write Workspace
+      operationId: plugins_proxy_workspace_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: plugin_endpoint
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Endpoint
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - External Plugins
+      summary: Write Workspace
+      operationId: plugins_proxy_workspace_put
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: plugin_endpoint
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Endpoint
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - External Plugins
+      summary: Write Workspace
+      operationId: plugins_proxy_workspace_patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: plugin_endpoint
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Endpoint
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - External Plugins
+      summary: Write Workspace
+      operationId: plugins_proxy_workspace_delete
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: plugin_endpoint
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Endpoint
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/plugins/{name}/{plugin_endpoint}:
+    get:
+      tags:
+      - External Plugins
+      summary: Read Plugin
+      operationId: plugins_proxy_platform_get
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: plugin_endpoint
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Endpoint
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    head:
+      tags:
+      - External Plugins
+      summary: Read Plugin
+      operationId: plugins_proxy_platform_head
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: plugin_endpoint
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Endpoint
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - External Plugins
+      summary: Write Plugin
+      operationId: plugins_proxy_platform_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: plugin_endpoint
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Endpoint
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - External Plugins
+      summary: Write Plugin
+      operationId: plugins_proxy_platform_put
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: plugin_endpoint
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Endpoint
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - External Plugins
+      summary: Write Plugin
+      operationId: plugins_proxy_platform_patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: plugin_endpoint
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Endpoint
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - External Plugins
+      summary: Write Plugin
+      operationId: plugins_proxy_platform_delete
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: plugin_endpoint
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Endpoint
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/secrets/v2/rotate-encryption-keys:
     post:
       tags:
@@ -12527,6 +13137,25 @@ components:
       title: BackendFormat
       description: Inference backend API wire formats understood by IGW and middleware
         plugins.
+    BundleSpec:
+      properties:
+        url:
+          type: string
+          maxLength: 2048
+          title: Url
+        sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          title: Sha256
+        sidecar:
+          $ref: '#/components/schemas/StudioSidecar'
+      additionalProperties: false
+      type: object
+      required:
+      - url
+      - sha256
+      - sidecar
+      title: BundleSpec
     CPUExecutionProvider:
       properties:
         provider:
@@ -12631,6 +13260,41 @@ components:
       title: CapturedChatMessage
       description: A flexible message model that requires a valid role field but allows
         provider-specific fields.
+    CatalogEntry:
+      properties:
+        url:
+          type: string
+          maxLength: 2048
+          title: Url
+        name:
+          type: string
+          maxLength: 80
+          minLength: 2
+          title: Name
+        title:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Title
+      additionalProperties: false
+      type: object
+      required:
+      - url
+      - name
+      - title
+      title: CatalogEntry
+    CatalogResponse:
+      properties:
+        entries:
+          items:
+            $ref: '#/components/schemas/CatalogEntry'
+          type: array
+          maxItems: 256
+          title: Entries
+          default: []
+      additionalProperties: false
+      type: object
+      title: CatalogResponse
     ChatCompletionAssistantMessageParam:
       properties:
         role:
@@ -14323,6 +14987,48 @@ components:
         This backend auto-completes jobs without actually running containers,
 
         making tests fast and deterministic.'
+    EnableRequest:
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+      additionalProperties: false
+      type: object
+      required:
+      - enabled
+      title: EnableRequest
+    EndpointMapping:
+      properties:
+        method:
+          type: string
+          enum:
+          - GET
+          - HEAD
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          title: Method
+        path:
+          type: string
+          title: Path
+        access:
+          type: string
+          enum:
+          - read
+          - write
+          title: Access
+        upstream_url:
+          type: string
+          title: Upstream Url
+      additionalProperties: false
+      type: object
+      required:
+      - method
+      - path
+      - access
+      - upstream_url
+      title: EndpointMapping
     Engine:
       type: string
       enum:
@@ -15680,6 +16386,67 @@ components:
       - name
       title: ExperimentUpdateRequest
       description: Request body for updating an Experiment.
+    ExternalPlugin:
+      properties:
+        name:
+          type: string
+          maxLength: 80
+          minLength: 2
+          pattern: ^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$
+          title: Name
+        title:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Title
+        enabled:
+          type: boolean
+          title: Enabled
+          default: true
+        endpoints:
+          items:
+            $ref: '#/components/schemas/EndpointMapping'
+          type: array
+          maxItems: 256
+          minItems: 1
+          title: Endpoints
+        bundle:
+          $ref: '#/components/schemas/BundleSpec'
+        navigation:
+          items:
+            $ref: '#/components/schemas/NavigationItem'
+          type: array
+          maxItems: 32
+          title: Navigation
+          default: []
+        credential:
+          $ref: '#/components/schemas/WorkspaceSecretCredential'
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - title
+      - endpoints
+      title: ExternalPlugin
+      description: Consented external endpoint/UI declaration; never a deployment
+        definition.
+    ExternalPluginRegistry:
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+          title: Schema Version
+          default: 1
+        plugins:
+          items:
+            $ref: '#/components/schemas/ExternalPlugin'
+          type: array
+          maxItems: 256
+          title: Plugins
+          default: []
+      additionalProperties: false
+      type: object
+      title: ExternalPluginRegistry
     F5GuardrailsRailConfig:
       properties:
         api_url:
@@ -18550,6 +19317,43 @@ components:
       type: object
       title: InputRails
       description: Configuration of input rails.
+    InstallRequest:
+      properties:
+        url:
+          type: string
+          maxLength: 2048
+          title: Url
+        manifest_sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          title: Manifest Sha256
+        consent:
+          type: boolean
+          title: Consent
+      additionalProperties: false
+      type: object
+      required:
+      - url
+      - manifest_sha256
+      - consent
+      title: InstallRequest
+    InstallResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        manifest_sha256:
+          type: string
+          title: Manifest Sha256
+        bundleUrl:
+          title: Bundleurl
+          type: string
+      type: object
+      required:
+      - name
+      - manifest_sha256
+      - bundleUrl
+      title: InstallResponse
     Instruction:
       properties:
         type:
@@ -19558,6 +20362,17 @@ components:
       - num_mamba_layers
       title: MambaConfig
       description: Mamba/State Space Model configuration.
+    ManifestSource:
+      properties:
+        url:
+          type: string
+          maxLength: 2048
+          title: Url
+      additionalProperties: false
+      type: object
+      required:
+      - url
+      title: ManifestSource
     MessageTemplate:
       properties:
         type:
@@ -20997,6 +21812,30 @@ components:
       - target
       - api_key_secret
       title: NGCStorageConfig
+    NavigationItem:
+      properties:
+        label:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Label
+        path:
+          type: string
+          maxLength: 256
+          pattern: ^/[a-zA-Z0-9_~./{}-]*$
+          title: Path
+        section:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Section
+          default: Community
+      additionalProperties: false
+      type: object
+      required:
+      - label
+      - path
+      title: NavigationItem
     NoteAnnotation:
       properties:
         annotation_id:
@@ -21640,6 +22479,21 @@ components:
       type: object
       title: PatronusRailConfig
       description: Configuration data for the Patronus Evaluate API
+    PluginManifest:
+      properties:
+        schema_version:
+          type: integer
+          maximum: 1.0
+          minimum: 1.0
+          title: Schema Version
+          default: 1
+        plugin:
+          $ref: '#/components/schemas/ExternalPlugin'
+      additionalProperties: false
+      type: object
+      required:
+      - plugin
+      title: PluginManifest
     PolygrafDetection:
       properties:
         server_endpoint:
@@ -21676,6 +22530,25 @@ components:
       type: object
       title: PolygrafDetectionOptions
       description: Configuration options for Polygraf.
+    PreviewResponse:
+      properties:
+        manifest:
+          $ref: '#/components/schemas/PluginManifest'
+        manifest_sha256:
+          type: string
+          title: Manifest Sha256
+        warning:
+          type: string
+          title: Warning
+          default: Installing approves the declared external endpoints and workspace
+            secret use. A UI bundle runs with Studio-origin privileges inside Studio,
+            not in a sandbox. A pinned hash verifies identity/integrity, not safety.
+            UI assets are public; never embed secrets.
+      type: object
+      required:
+      - manifest
+      - manifest_sha256
+      title: PreviewResponse
     PrivateAIDetection:
       properties:
         server_endpoint:
@@ -22992,7 +23865,7 @@ components:
           title: Trace Id
           type: string
         project:
-          description: Filter by project name.
+          description: Filter by project name; an empty name selects unassigned spans.
           title: Project
           type: string
         evaluation_name:
@@ -23087,6 +23960,7 @@ components:
       enum:
       - trace_id
       - session_id
+      - project
       title: SpanGroupBy
     SpanGroupSortField:
       type: string
@@ -23296,6 +24170,32 @@ components:
           type: array
       title: StringFilter
       type: object
+    StudioSidecar:
+      properties:
+        contractVersion:
+          type: string
+          maxLength: 80
+          minLength: 1
+          title: Contractversion
+        specifiers:
+          items:
+            type: string
+          type: array
+          maxItems: 128
+          title: Specifiers
+        builtAgainst:
+          additionalProperties:
+            type: string
+          type: object
+          maxProperties: 128
+          title: Builtagainst
+      additionalProperties: true
+      type: object
+      required:
+      - contractVersion
+      - specifiers
+      - builtAgainst
+      title: StudioSidecar
     SubprocessExecutionProvider:
       properties:
         provider:
@@ -25091,6 +25991,22 @@ components:
       - roles
       title: WorkspaceMemberUpdate
       description: Schema for updating a workspace member's roles.
+    WorkspaceSecretCredential:
+      properties:
+        secret_name:
+          type: string
+          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$
+          title: Secret Name
+        scheme:
+          type: string
+          const: bearer
+          title: Scheme
+          default: bearer
+      additionalProperties: false
+      type: object
+      required:
+      - secret_name
+      title: WorkspaceSecretCredential
     WorkspaceUpdate:
       properties:
         description:

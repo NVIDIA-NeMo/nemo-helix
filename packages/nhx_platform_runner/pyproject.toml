@@ -16,6 +16,9 @@ dependencies = [
 ]
 version = "0.0.0"
 
+[project.entry-points."nemo.services"]
+plugins = "nhx.platform_runner.community_plugins.gateway:ExternalPluginsService"
+
 [tool.uv.sources]
 nemo-helix-plugin = { workspace = true }
 nhx-common = { workspace = true }

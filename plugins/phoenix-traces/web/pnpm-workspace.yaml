@@ -3,3 +3,4 @@
 
 allowBuilds:
   '@nvidia/foundations-react-core': false
+  msw: false

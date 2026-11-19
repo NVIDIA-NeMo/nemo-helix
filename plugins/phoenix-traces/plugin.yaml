@@ -1,27 +1,26 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# ASSUMED community-plugin manifest (UI-side draft; the backend shape is Matt's call,
-# see AIRE-2330). The mock gateway in ./mock reads this file to stand in for the
-# platform's plugin registry and proxy.
-
-name: phoenix
-displayName: Phoenix Traces
-
-# The external API. Studio never sees this URL; it only calls
-# /apis/plugins/<name>/<endpoint> and the gateway maps it back to the upstream.
-upstream: http://127.0.0.1:6007
-
-# Built JS bundle (and its plugin.manifest.json sidecar), served by the platform at
-# /plugin-ui/<name>/index.js after the platform has pinned it.
-bundle: ./dist/index.js
-
-# Only declared endpoints are reachable. `path` is what Studio calls; `upstream` is
-# the upstream path it maps to. GET/HEAD are read, everything else write.
-endpoints:
-  - method: GET
-    path: /projects
-    upstream: /v1/projects
-  - method: GET
-    path: /projects/{project}/spans
-    upstream: /v1/projects/{project}/spans
+# API-only example. For the UI, register http://127.0.0.1:6007/plugin.yaml:
+# the independent adapter adds the actual built bundle's SHA-256 and sidecar.
+# Helix starts no process and imports no adapter Python.
+schema_version: 1
+plugin:
+  name: phoenix
+  title: Phoenix traces (Intake)
+  endpoints:
+    - method: GET
+      path: /v2/workspaces/{workspace}/projects
+      access: read
+      upstream_url: http://127.0.0.1:6007/v1/workspaces/{workspace}/projects
+    - method: GET
+      path: /v2/workspaces/{workspace}/spans
+      access: read
+      upstream_url: http://127.0.0.1:6007/v1/workspaces/{workspace}/spans
+    - method: POST
+      path: /v2/workspaces/{workspace}/spans
+      access: write
+      upstream_url: http://127.0.0.1:6007/v1/workspaces/{workspace}/spans
+  credential:
+    secret_name: phoenix-traces-adapter-key
+    scheme: bearer

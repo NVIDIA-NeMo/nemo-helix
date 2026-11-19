@@ -2,16 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery } from '@tanstack/react-query';
-import { listProjects, listSpans } from './api';
-import type { PluginHost } from './types';
+import { listProjects, listSpans, type ApiHost } from './api';
 
 // react-query is a Studio singleton, so these share Studio's QueryClient and cache.
-export const useProjects = (host: PluginHost) =>
-  useQuery({ queryKey: ['phoenix', 'projects'], queryFn: () => listProjects(host) });
-
-export const useSpans = (host: PluginHost, project: string | undefined) =>
+export const useProjects = (host: ApiHost) =>
   useQuery({
-    queryKey: ['phoenix', 'spans', project],
-    queryFn: () => listSpans(host, project as string),
+    queryKey: ['phoenix', host.apiBaseUrl, host.workspaceId, 'projects'],
+    queryFn: ({ signal }) => listProjects(host, signal),
+  });
+
+export const useSpans = (host: ApiHost, project: string | undefined) =>
+  useQuery({
+    queryKey: ['phoenix', host.apiBaseUrl, host.workspaceId, 'spans', project],
+    queryFn: ({ signal }) => listSpans(host, project as string, signal),
     enabled: project !== undefined,
   });
