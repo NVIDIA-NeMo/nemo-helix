@@ -26,13 +26,13 @@ import {
   usePromoteDistillation,
   useRetryDistillationNode,
 } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationHooks';
+import { nodesForStage } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationNodes';
 import { distilledGatewayModel } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationPromote';
 import {
   agentNameOf,
   toArms,
   toStageView,
 } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationView';
-import { DistillationFailedNodes } from '@studio/routes/agents/AgentDistillationDetailRoute/DistillationFailedNodes';
 import { DistillationResultsTab } from '@studio/routes/agents/AgentDistillationDetailRoute/DistillationResultsTab';
 import { DistillationStageCard } from '@studio/routes/agents/AgentDistillationDetailRoute/DistillationStageCard';
 import { getAgentDetailRoute, getAgentsListRoute } from '@studio/routes/utils';
@@ -176,16 +176,18 @@ export const AgentDistillationDetailRoute: FC = () => {
                 ]}
               />
             </Panel>
-            <DistillationFailedNodes
-              nodes={workflow.nodes}
-              onRetry={(node) =>
-                retry.mutate(node, { onError: (e) => toast.error(getErrorMessage(e)) })
-              }
-              isRetrying={retry.isPending}
-            />
             <Stack gap="density-lg" className="w-full" role="list" aria-label="Distillation stages">
               {workflow.stages.map((stage) => (
-                <DistillationStageCard key={stage.id} stage={toStageView(stage)} />
+                <DistillationStageCard
+                  key={stage.id}
+                  workspace={workspace}
+                  stage={toStageView(stage)}
+                  nodes={nodesForStage(workflow, stage.id)}
+                  onRetry={(node) =>
+                    retry.mutate(node, { onError: (e) => toast.error(getErrorMessage(e)) })
+                  }
+                  isRetrying={retry.isPending}
+                />
               ))}
             </Stack>
           </Stack>
