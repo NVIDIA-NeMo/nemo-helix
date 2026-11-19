@@ -1034,6 +1034,11 @@ jobs:
           docker pull nginx:1.29.4-alpine-slim
           docker pull alpine:3.23
         shell: bash
+      - name: Prepare workflow Docker tests
+        if: matrix.group == 'services'
+        run: |
+          docker pull busybox:stable
+          go version
       - name: Run integration tests
         run: make test-integration-ci
         env:
@@ -1045,6 +1050,7 @@ jobs:
           PYTEST_WORKERS: "4"
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           PYTEST_EXTRA: --integration-group=${{ matrix.group }}
+          NHX_TEST_WORKFLOW_DOCKER: ${{ matrix.group == 'services' && '1' || '0' }}
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

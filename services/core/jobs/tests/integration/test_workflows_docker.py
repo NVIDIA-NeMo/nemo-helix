@@ -9,6 +9,7 @@ Run with NHX_TEST_WORKFLOW_DOCKER=1; requires Docker and busybox:stable.
 import os
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Generator
 from contextlib import closing
@@ -242,6 +243,12 @@ def docker_workflow(
     client = docker.from_env()
     client.ping()
     client.images.get("busybox:stable")
+    platform_host = "host.docker.internal"
+    if sys.platform == "linux":
+        bridge = client.networks.get("bridge")
+        assert bridge.attrs is not None
+        platform_host = bridge.attrs["IPAM"]["Config"][0]["Gateway"]
+        assert isinstance(platform_host, str)
     requests: list[tuple[str, str, int]] = []
 
     def forward(request: Request) -> Response:
@@ -281,7 +288,7 @@ def docker_workflow(
                 HelixConfig: HelixConfig(
                     base_url="http://127.0.0.1",
                     service_discovery={
-                        "platform": f"http://host.docker.internal:{proxy.port}",
+                        "platform": f"http://{platform_host}:{proxy.port}",
                     },
                 ),
             },
