@@ -42,7 +42,11 @@ export interface AssistantChatThreadProps {
     slotHeading?: string;
     slotSubheading?: string;
     slotAction?: ReactNode;
+    /** `compact` drops the decorative graphic and shrinks the text, for small surfaces. */
+    variant?: 'default' | 'compact';
   };
+  /** Hides the composer's "clear chat" button, for surfaces that already offer a "new chat". */
+  hideResetButton?: boolean;
   contentClassName?: string;
   composerContainerClassName?: string;
   hideAssistantMessageActions?: boolean;

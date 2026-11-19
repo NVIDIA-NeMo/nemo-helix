@@ -25,16 +25,29 @@ vi.mock('@nemo/common/src/components/AssistantChat/AssistantChatThread', () => (
   AssistantChatThread: ({
     animateAssistantMessageCompletion,
     composerOverride,
+    emptyState,
+    hideResetButton,
+    minInputRows,
+    placeholder,
     showRunningIndicator,
   }: {
     animateAssistantMessageCompletion?: boolean;
     composerOverride?: ReactNode;
+    emptyState?: { slotHeading?: string; variant?: string };
+    hideResetButton?: boolean;
+    minInputRows?: number;
+    placeholder?: string;
     showRunningIndicator?: boolean;
   }) => (
     <div
       data-testid="assistant-chat-thread"
       data-animate-message-completion={String(animateAssistantMessageCompletion)}
       data-show-running-indicator={String(showRunningIndicator)}
+      data-hide-reset-button={String(hideResetButton)}
+      data-min-input-rows={String(minInputRows)}
+      data-placeholder={placeholder}
+      data-empty-heading={emptyState?.slotHeading}
+      data-empty-variant={String(emptyState?.variant)}
     >
       {composerOverride}
     </div>
@@ -139,5 +152,49 @@ describe('AssistantChatThread Studio UI navigation', () => {
 
     expect(mocks.resolveStudioNavigationRequest).toHaveBeenCalledWith('continue');
     expect(screen.queryByTestId('guardrails-route')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssistantChatThread compact mode', () => {
+  const renderModeThread = (mode: 'full' | 'compact') =>
+    render(
+      <TestProviders>
+        <RouterProvider
+          router={createMemoryRouter(
+            [
+              {
+                path: ROUTES.workspace.assistantChat,
+                element: <AssistantChatThread chat={makeChat(null)} mode={mode} />,
+              },
+            ],
+            { initialEntries: [CHAT_PATH] }
+          )}
+        />
+      </TestProviders>
+    );
+
+  it('is quiet in the pop-out: greeting, short prompt, two rows, no reset', () => {
+    renderModeThread('compact');
+
+    const thread = screen.getByTestId('assistant-chat-thread');
+    expect(thread).toHaveAttribute('data-empty-heading', "Hi, I'm Felix");
+    expect(thread).toHaveAttribute('data-empty-variant', 'compact');
+    expect(thread).toHaveAttribute('data-placeholder', 'Ask Felix…');
+    expect(thread).toHaveAttribute('data-min-input-rows', '2');
+    expect(thread).toHaveAttribute('data-hide-reset-button', 'true');
+  });
+
+  it('keeps the full-size chat as it was', () => {
+    renderModeThread('full');
+
+    const thread = screen.getByTestId('assistant-chat-thread');
+    expect(thread).toHaveAttribute('data-empty-heading', 'Start a NeMo Assistant session');
+    expect(thread).toHaveAttribute('data-empty-variant', 'undefined');
+    expect(thread).toHaveAttribute(
+      'data-placeholder',
+      'Ask NeMo Assistant to work in this workspace'
+    );
+    expect(thread).toHaveAttribute('data-min-input-rows', '3');
+    expect(thread).toHaveAttribute('data-hide-reset-button', 'false');
   });
 });

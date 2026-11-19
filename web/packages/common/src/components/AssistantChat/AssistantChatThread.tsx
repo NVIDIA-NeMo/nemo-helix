@@ -46,6 +46,7 @@ export const AssistantChatThread = ({
   messageContentProps,
   enableImageAttachments,
   minInputRows,
+  hideResetButton,
   animateAssistantMessageCompletion,
 }: AssistantChatThreadProps) => {
   const { className: threadViewportClassName, ...threadViewportAttributes } =
@@ -114,6 +115,7 @@ export const AssistantChatThread = ({
                 slotHeading={emptyState?.slotHeading}
                 slotSubheading={emptyState?.slotSubheading}
                 slotAction={emptyState?.slotAction}
+                variant={emptyState?.variant}
               />
             </ThreadPrimitive.Empty>
             <ThreadPrimitive.Messages components={messageComponents} />
@@ -136,6 +138,7 @@ export const AssistantChatThread = ({
               slotComposerStart={slotComposerStart}
               enableImageAttachments={enableImageAttachments}
               minInputRows={minInputRows}
+              hideResetButton={hideResetButton}
             />
           )}
         </Flex>
