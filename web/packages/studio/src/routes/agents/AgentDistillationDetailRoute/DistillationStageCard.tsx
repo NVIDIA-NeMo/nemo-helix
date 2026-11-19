@@ -3,15 +3,27 @@
 
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { Flex, Panel, ProgressBar, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
+import type { StageNode } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationNodes';
 import type { MockStage } from '@studio/routes/agents/AgentDetailRoute/distillation/mockDistillationWorkflow';
+import { DistillationNodeRow } from '@studio/routes/agents/AgentDistillationDetailRoute/DistillationNodeRow';
 import type { FC } from 'react';
 
 export interface DistillationStageCardProps {
+  workspace: string;
   stage: MockStage;
+  nodes: StageNode[];
+  onRetry: (node: string) => void;
+  isRetrying: boolean;
 }
 
 /** One step of a distillation workflow: its status, progress, key numbers and the job behind it. */
-export const DistillationStageCard: FC<DistillationStageCardProps> = ({ stage }) => (
+export const DistillationStageCard: FC<DistillationStageCardProps> = ({
+  workspace,
+  stage,
+  nodes,
+  onRetry,
+  isRetrying,
+}) => (
   <Panel
     slotHeading={
       <Flex align="center" gap="density-md">
@@ -43,15 +55,20 @@ export const DistillationStageCard: FC<DistillationStageCardProps> = ({ stage })
             <Text kind="body/semibold/md">{metric.value}</Text>
           </Stack>
         ))}
-        {stage.jobRef && (
-          <Stack gap="density-xs">
-            <Text kind="body/regular/xs" className="text-secondary">
-              {stage.jobRef.kind}
-            </Text>
-            <Text kind="mono/sm">{stage.jobRef.name}</Text>
-          </Stack>
-        )}
       </Flex>
+      {nodes.length > 0 && (
+        <Stack gap="density-lg">
+          {nodes.map((node) => (
+            <DistillationNodeRow
+              key={node.key}
+              workspace={workspace}
+              node={node}
+              onRetry={onRetry}
+              isRetrying={isRetrying}
+            />
+          ))}
+        </Stack>
+      )}
     </Stack>
   </Panel>
 );
