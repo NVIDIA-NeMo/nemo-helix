@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from nhx_sandbox.harbor_opensandbox_services import EGRESS_API_FALLBACK_PORTS
 
 ROOT = Path(__file__).parent.parent.parent
 HELM_DIR = ROOT / "k8s" / "helm"
@@ -179,6 +180,21 @@ def test_probe_rule_follows_probe_port_and_precedes_extra_ingress() -> None:
         [{"protocol": "TCP", "port": 9000}],
         None,
     ]
+
+
+def test_probe_rule_admits_the_moved_egress_api_ports_with_compose_services() -> None:
+    """The compose extension moves the egress probe off 18080 when a service takes it, to a port in its fallback range."""
+    (policy,) = _sandbox_policies(
+        _helm_template(
+            *SANDBOX_POLICIES,
+            "--set",
+            "opensandbox.composeServices.enabled=true",
+            "--set-json",
+            'opensandbox.sandboxNetworkPolicy.probeSourceCIDRs=["10.54.0.0/16"]',
+        )
+    )
+
+    assert [port["port"] for port in policy["spec"]["ingress"][1]["ports"]] == [18080, *EGRESS_API_FALLBACK_PORTS]
 
 
 def test_sandbox_policy_refuses_to_admit_the_whole_sandbox_namespace() -> None:

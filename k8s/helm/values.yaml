@@ -126,7 +126,8 @@ opensandbox:
     # trials have. Set it to the nodes' address range, from the `INTERNAL-IP` column of `kubectl get nodes -o wide`.
     probeSourceCIDRs: []
     # -- Port of the readiness probe `probeSourceCIDRs` admits: the egress sidecar's `/healthz`, which the OpenSandbox
-    # server hard-codes as 18080. Change it only if the server you run probes another port.
+    # server hard-codes as 18080. Change it only if the server you run probes another port. With `composeServices`
+    # enabled, the rule also admits 18081-18099, where the extension moves the probe when a compose service takes 18080.
     probePort: 18080
 
 # -- RBAC configuration settings for optional dependencies

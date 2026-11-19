@@ -60,6 +60,18 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
     {{- with $sandboxes.probeSourceCIDRs }}
+    {{- /*
+    The compose services extension moves the egress API, probe included, to the first port in 18081-18099 that no
+    service needs when a service takes 18080. EGRESS_API_FALLBACK_PORTS in nhx_sandbox's harbor_opensandbox_services.py
+    owns that range; tests/unit/test_helm_opensandbox.py keeps this copy in step. Listed port by port rather than with
+    endPort, which not every CNI that polices node traffic supports.
+    */}}
+    {{- $probePorts := list (int $sandboxes.probePort) }}
+    {{- if $.Values.opensandbox.composeServices.enabled }}
+    {{- range untilStep 18081 18100 1 }}
+    {{- $probePorts = append $probePorts . }}
+    {{- end }}
+    {{- end }}
     # The kubelet's readiness probe, for CNIs such as kube-router that police traffic from the node itself.
     - from:
         {{- range . }}
@@ -67,8 +79,10 @@ spec:
             cidr: {{ . | quote }}
         {{- end }}
       ports:
+        {{- range $probePorts | uniq }}
         - protocol: TCP
-          port: {{ int $sandboxes.probePort }}
+          port: {{ . }}
+        {{- end }}
     {{- end }}
     {{- with $sandboxes.extraIngress }}
     {{- toYaml . | nindent 4 }}

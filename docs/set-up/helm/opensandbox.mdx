@@ -149,7 +149,7 @@ opensandbox:
       - 10.54.0.0/16  # Replace with your node range.
 ```
 
-Find the range in the `INTERNAL-IP` column of `kubectl get nodes -o wide`, or ask your cluster administrator for the node subnet. The rule admits these CIDRs to `probePort` (default `18080`, the port the OpenSandbox server hard-codes) and nothing else. Leave `probeSourceCIDRs` empty on clusters where sandbox pods already become Ready.
+Find the range in the `INTERNAL-IP` column of `kubectl get nodes -o wide`, or ask your cluster administrator for the node subnet. The rule admits these CIDRs to `probePort` (default `18080`, the port the OpenSandbox server hard-codes) and nothing else. With `opensandbox.composeServices.enabled`, it also admits ports 18081 to 18099: when a task's compose service listens on 18080, the extension moves the egress sidecar and its probe to the first free port in that range. Leave `probeSourceCIDRs` empty on clusters where sandbox pods already become Ready.
 
 ## Verify
 
