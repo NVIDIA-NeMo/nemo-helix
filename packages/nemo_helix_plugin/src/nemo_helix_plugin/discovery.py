@@ -125,9 +125,14 @@ CUSTOMIZATION_CONTRIBUTORS_GROUP = "nemo.customization.contributors"
 
 
 def _manifest_plugin_name(group: str, entry_point_name: str) -> str:
-    if group in _DOT_SCOPED_GROUPS:
-        return entry_point_name.split(".", 1)[0]
-    return entry_point_name
+    """Map an entry-point key to its canonical plugin name.
+
+    Groups disagree on spelling: ``nemo.services`` and ``nemo.cli`` use
+    ``data-designer`` while ``nemo.sdk`` uses ``data_designer``. Normalize ``_``
+    to ``-`` so one plugin is not listed once per spelling.
+    """
+    name = entry_point_name.split(".", 1)[0] if group in _DOT_SCOPED_GROUPS else entry_point_name
+    return name.replace("_", "-")
 
 
 def _plugin_allowlist(group: str) -> set[str] | None:

@@ -593,6 +593,26 @@ class TestDiscoverManifests:
             result = discover_manifests()
         assert list(result.keys()) == ["alpha"]
 
+    def test_merges_hyphen_and_underscore_spellings_across_groups(self) -> None:
+        # nemo.services/nemo.cli say "data-designer"; nemo.sdk says "data_designer".
+        ep_svc = _make_ep("data-designer", None, version="1.0.0", description="Data Designer plugin")
+        ep_sdk = _make_ep("data_designer", None, version="9.9.9", description="sdk spelling")
+        with patch(
+            "nemo_helix_plugin.discovery.entry_points",
+            side_effect=_eps_by_group({"nemo.services": [ep_svc], "nemo.sdk": [ep_sdk]}),
+        ):
+            result = discover_manifests()
+        assert list(result.keys()) == ["data-designer"]
+        # The first surface group scanned (services) supplies the metadata.
+        assert result["data-designer"].version == "1.0.0"
+        assert result["data-designer"].description == "Data Designer plugin"
+
+    def test_underscore_only_name_is_reported_hyphenated(self) -> None:
+        ep = _make_ep("safe_synthesizer", None)
+        with patch("nemo_helix_plugin.discovery.entry_points", side_effect=_eps_by_group({"nemo.sdk": [ep]})):
+            result = discover_manifests()
+        assert list(result.keys()) == ["safe-synthesizer"]
+
     def test_dist_none_produces_empty_metadata(self) -> None:
         ep = _make_ep("alpha", None)
         ep.dist = None
