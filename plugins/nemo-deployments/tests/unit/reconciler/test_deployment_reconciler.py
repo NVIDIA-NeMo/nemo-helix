@@ -1030,15 +1030,22 @@ async def test_drift_recovery_create_failure_stays_lost_and_backoffs(
 
     mock_backend.create_deployment = AsyncMock(side_effect=_failing_create)
 
-    await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
-    assert dep.status == "LOST"
-    assert "Will retry" in dep.status_message
-    assert len(mock_backend.create_calls) == 1
+    # Freeze the clock drift recovery reads so the second reconcile always lands inside the backoff window.
+    with patch(
+        "nemo_deployments_plugin.reconciler.drift_recovery.datetime",
+        wraps=datetime,
+    ) as mock_dt:
+        mock_dt.now.return_value = NOW
 
-    await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
-    assert dep.status == "LOST"
-    assert dep.status != "FAILED"
-    assert len(mock_backend.create_calls) == 1
+        await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+        assert dep.status == "LOST"
+        assert "Will retry" in dep.status_message
+        assert len(mock_backend.create_calls) == 1
+
+        await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+        assert dep.status == "LOST"
+        assert dep.status != "FAILED"
+        assert len(mock_backend.create_calls) == 1
 
 
 @pytest.mark.asyncio
