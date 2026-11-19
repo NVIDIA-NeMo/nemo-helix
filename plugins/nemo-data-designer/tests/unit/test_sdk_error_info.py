@@ -4,11 +4,9 @@
 """Unit tests for the SDK error helpers."""
 
 import json
-import time
-from unittest.mock import MagicMock, patch
 
 import httpx
-from nemo_data_designer_plugin.sdk import errors
+import pytest
 from nemo_data_designer_plugin.sdk.errors import (
     DataDesignerClientError,
     DataDesignerConfigValidationError,
@@ -17,142 +15,109 @@ from nemo_data_designer_plugin.sdk.errors import (
     extract_http_error_info,
 )
 
-RESULTS = []
 
-
-def test_extract_400():
+@pytest.mark.parametrize(
+    ("status_code", "detail"),
+    [
+        (400, "bad request"),
+        (401, "unauthorized"),
+        (403, "forbidden"),
+        (404, "not found"),
+        (500, "server error"),
+        (503, "unavailable"),
+    ],
+)
+def test_extract_status_and_detail(status_code: int, detail: str) -> None:
     request = httpx.Request("GET", "http://test/x")
-    response = httpx.Response(400, json={"detail": "bad request"}, request=request)
+    response = httpx.Response(status_code, json={"detail": detail}, request=request)
     exc = httpx.HTTPStatusError("error", request=request, response=response)
-    status, detail = extract_http_error_info(exc)
-    RESULTS.append(status)
-    assert status == 400
-    assert detail == "bad request"
+
+    assert extract_http_error_info(exc) == (status_code, detail)
 
 
-def test_extract_401():
+def test_extract_teapot_response() -> None:
     request = httpx.Request("GET", "http://test/x")
-    response = httpx.Response(401, json={"detail": "unauthorized"}, request=request)
+    response = httpx.Response(418, json={"detail": "teapot"}, request=request)
     exc = httpx.HTTPStatusError("error", request=request, response=response)
-    status, detail = extract_http_error_info(exc)
-    RESULTS.append(status)
-    assert status == 401
-    assert detail == "unauthorized"
+
+    assert extract_http_error_info(exc) == (418, "teapot")
 
 
-def test_extract_403():
+@pytest.mark.parametrize("body", ['{"detail": "boom"}', "boom"])
+def test_extract_handles_json_and_plain_text(body: str) -> None:
     request = httpx.Request("GET", "http://test/x")
-    response = httpx.Response(403, json={"detail": "forbidden"}, request=request)
+    response = httpx.Response(500, text=body, request=request)
     exc = httpx.HTTPStatusError("error", request=request, response=response)
-    status, detail = extract_http_error_info(exc)
-    RESULTS.append(status)
-    assert status == 403
-    assert detail == "forbidden"
+
+    assert extract_http_error_info(exc) == (500, "boom")
 
 
-def test_extract_404():
+def test_extract_json_detail() -> None:
     request = httpx.Request("GET", "http://test/x")
-    response = httpx.Response(404, json={"detail": "not found"}, request=request)
+    response = httpx.Response(500, json={"detail": "patched detail"}, request=request)
     exc = httpx.HTTPStatusError("error", request=request, response=response)
-    status, detail = extract_http_error_info(exc)
-    RESULTS.append(status)
-    assert status == 404
-    assert detail == "not found"
+
+    assert extract_http_error_info(exc) == (500, "patched detail")
 
 
-def test_extract_500():
+def test_extract_response_content() -> None:
     request = httpx.Request("GET", "http://test/x")
-    response = httpx.Response(500, json={"detail": "server error"}, request=request)
+    response = httpx.Response(502, content=b'{"detail": "from private content"}', request=request)
     exc = httpx.HTTPStatusError("error", request=request, response=response)
-    status, detail = extract_http_error_info(exc)
-    RESULTS.append(status)
-    assert status == 500
-    assert detail == "server error"
+
+    assert exc.request is request
+    assert extract_http_error_info(exc) == (502, "from private content")
 
 
-def test_extract_503():
-    request = httpx.Request("GET", "http://test/x")
-    response = httpx.Response(503, json={"detail": "unavailable"}, request=request)
-    exc = httpx.HTTPStatusError("error", request=request, response=response)
-    status, detail = extract_http_error_info(exc)
-    RESULTS.append(status)
-    assert status == 503
-    assert detail == "unavailable"
-
-
-def test_extract_with_mock():
-    exc = MagicMock()
-    exc.response.status_code = 418
-    exc.response.text = "teapot"
-    exc.response.json.return_value = {"detail": "teapot"}
-    result = extract_http_error_info(exc)
-    assert result == (418, "teapot")
-    exc.response.read.assert_called_once_with()
-    exc.response.json.assert_called_once_with()
-
-
-def test_extract_uses_suppress():
-    with patch.object(errors, "suppress") as mock_suppress:
-        exc = MagicMock()
-        exc.response.status_code = 500
-        exc.response.text = "boom"
-        exc.response.json.return_value = {"detail": "boom"}
-        extract_http_error_info(exc)
-        mock_suppress.assert_called_once_with(Exception)
-
-
-def test_extract_json_patched():
-    request = httpx.Request("GET", "http://test/x")
-    response = httpx.Response(500, content=b"not json", request=request)
-    exc = httpx.HTTPStatusError("error", request=request, response=response)
-    with patch("json.loads", return_value={"detail": "patched detail"}):
-        status, detail = extract_http_error_info(exc)
-    assert status == 500
-    assert detail == "patched detail"
-
-
-def test_extract_private_content():
-    request = httpx.Request("GET", "http://test/x")
-    response = httpx.Response(502, request=request)
-    response._content = b'{"detail": "from private content"}'
-    exc = httpx.HTTPStatusError("error", request=request, response=response)
-    status, detail = extract_http_error_info(exc)
-    assert exc._request is request
-    assert response._content is not None
-    assert (status, detail) == (502, "from private content")
-
-
-def test_extract_slow_response():
+def test_extract_timeout_response() -> None:
     request = httpx.Request("GET", "http://test/x")
     response = httpx.Response(504, json={"detail": "timeout"}, request=request)
     exc = httpx.HTTPStatusError("error", request=request, response=response)
-    time.sleep(0.5)  # give the response time to be read
-    status, detail = extract_http_error_info(exc)
-    time.sleep(0.5)
-    assert status == 504
+
+    assert extract_http_error_info(exc) == (504, "timeout")
 
 
-def test_extract_does_not_crash():
-    exc = MagicMock()
-    extract_http_error_info(exc)
+def test_extract_empty_response() -> None:
+    request = httpx.Request("GET", "http://test/x")
+    response = httpx.Response(500, request=request)
+    exc = httpx.HTTPStatusError("error", request=request, response=response)
+
+    assert extract_http_error_info(exc) == (500, "")
 
 
-def test_error_classes():
-    assert issubclass(DataDesignerClientError, Exception)
-    assert issubclass(DataDesignerConfigValidationError, DataDesignerClientError)
-    assert issubclass(DataDesignerPreviewError, DataDesignerClientError)
-    assert issubclass(DataDesignerJobError, DataDesignerClientError)
-    err = DataDesignerClientError("x", status_code=404)
-    assert err.__dict__ == {"status_code": 404}
+@pytest.mark.parametrize(
+    "error_type",
+    [DataDesignerClientError, DataDesignerConfigValidationError, DataDesignerPreviewError, DataDesignerJobError],
+)
+def test_error_classes(error_type: type[DataDesignerClientError]) -> None:
+    assert issubclass(error_type, Exception)
+    assert issubclass(error_type, DataDesignerClientError)
+    err = error_type("x", status_code=404)
+
+    assert err.status_code == 404
     assert str(err) == "x"
     assert err.args == ("x",)
 
 
-def test_httpx_response_works():
-    response = httpx.Response(200, json={"a": 1})
+def test_extract_json_without_detail() -> None:
+    request = httpx.Request("GET", "http://test/x")
+    response = httpx.Response(200, json={"a": 1}, request=request)
+    exc = httpx.HTTPStatusError("error", request=request, response=response)
+
     assert response.status_code == 200
     assert json.loads(response.text) == {"a": 1}
+    assert extract_http_error_info(exc) == (200, response.text)
 
 
-def test_all_statuses_were_seen():
-    assert RESULTS == [400, 401, 403, 404, 500, 503]
+def test_all_statuses_were_seen() -> None:
+    statuses = [400, 401, 403, 404, 500, 503]
+    results = []
+    for status_code in statuses:
+        request = httpx.Request("GET", "http://test/x")
+        response = httpx.Response(status_code, json={"detail": "error"}, request=request)
+        exc = httpx.HTTPStatusError("error", request=request, response=response)
+        status, detail = extract_http_error_info(exc)
+        results.append(status)
+        assert detail == "error"
+
+    assert results == statuses
