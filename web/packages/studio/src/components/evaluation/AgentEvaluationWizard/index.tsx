@@ -95,7 +95,7 @@ import {
   DEFAULT_PARALLELISM,
   type DatasetEvalSpec,
   type EvalConfigFormat,
-  filesetNameForExperiment,
+  dataFilesetName,
   injectJudgeModel,
   MODE_DEFAULT,
   parseUploadedDatasetConfig,
@@ -197,9 +197,7 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
       // left are "nothing salvageable" and the derived fileset name — which is longer, so a name
       // that is legal on its own can still overflow once "-data" is appended, and there is no
       // fileset field to correct it in.
-      const nameError =
-        unsalvageableNameError(data.newName, 'Experiment name') ??
-        getEntityNameError(filesetNameForExperiment(data.newName), 'Derived fileset name');
+      const nameError = unsalvageableNameError(data.newName, 'Experiment name');
       if (nameError) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: nameError, path: ['newName'] });
       }
@@ -252,7 +250,9 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
         }
       }
     }
-    const recordNameError = unsalvageableNameError(data.evaluationRecordName, 'Evaluation name');
+    const recordNameError =
+      unsalvageableNameError(data.evaluationRecordName, 'Evaluation name') ??
+      getEntityNameError(dataFilesetName(data.evaluationRecordName), 'Derived fileset name');
     if (recordNameError) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -332,36 +332,25 @@ interface AgentEvaluationWizardProps {
   agent: string;
 }
 
-interface SeededEntities {
-  filesetName?: string;
-  experimentName?: string;
-  evaluationName?: string;
-}
-
-/** Undo what a failed submit created, and return the error to raise.
- *
- *  Deleting the Experiment soft-deletes the Evaluations whose only membership was that group, so
- *  the evaluation is only deleted on its own when the experiment pre-existed this submit and is
- *  therefore being kept. Names are freed either way, since the API renames on delete. When a
- *  delete itself fails the returned error names what to remove by hand. */
+/** Undo what a failed submit created, and return the error to raise. When a delete itself fails
+ *  the returned error names what to remove by hand. */
 const discardSeeded = async (
   workspace: string,
-  seeded: SeededEntities,
+  seeded: { filesetName?: string; evaluationName?: string; experimentName?: string },
   cause: unknown
 ): Promise<unknown> => {
   const leftovers: string[] = [];
-  const signal = new AbortController().signal;
   if (seeded.experimentName) {
-    await deleteExperiment(workspace, seeded.experimentName, signal).catch(() =>
+    await deleteExperiment(workspace, seeded.experimentName).catch(() =>
       leftovers.push(`experiment "${seeded.experimentName}"`)
     );
   } else if (seeded.evaluationName) {
-    await deleteEvaluation(workspace, seeded.evaluationName, signal).catch(() =>
+    await deleteEvaluation(workspace, seeded.evaluationName).catch(() =>
       leftovers.push(`evaluation "${seeded.evaluationName}"`)
     );
   }
   if (seeded.filesetName) {
-    await filesDeleteFileset(workspace, seeded.filesetName, signal).catch(() =>
+    await filesDeleteFileset(workspace, seeded.filesetName).catch(() =>
       leftovers.push(`fileset "${seeded.filesetName}"`)
     );
   }
@@ -373,25 +362,23 @@ const discardSeeded = async (
   );
 };
 
-/** The eval config of the "new experiment" path, built or picked, and the dataset it reads. */
+/** The eval config, built or picked, and the dataset it reads in place. */
 interface EvalInputs {
   spec: DatasetEvalSpec;
   /** Serialization the config was uploaded in; the stored file keeps it. */
   configFormat: EvalConfigFormat;
-  /** The dataset, read in place: a file, or a glob over Parquet shards. */
+  /** A file, or a glob over Parquet shards. */
   datasetRef: string;
 }
 
-/** Bakes the dataset and judge selection into the reusable eval config. */
-const loadPersistedSpec = async (
+/** Create the run's fileset and store the final eval config in it: the config with the picked
+ *  judge and the dataset ref baked in, so a later run can reuse it. */
+const seedRunFileset = async (
   workspace: string,
-  formData: SubmitEvaluationFormData,
-  inputs: EvalInputs | null
+  filesetName: string,
+  judgeModel: string,
+  inputs: EvalInputs
 ): Promise<DatasetEvalSpec> => {
-  if (!inputs) throw new Error('Pick a dataset and an eval config before submitting');
-  const signal = new AbortController().signal;
-  const name = filesetNameForExperiment(formData.newName);
-  const judgeModel = formData.judgeModel || null;
   const spec: DatasetEvalSpec = {
     ...inputs.spec,
     dataset: inputs.datasetRef,
@@ -399,13 +386,15 @@ const loadPersistedSpec = async (
       ? inputs.spec.metrics.map((m) => injectJudgeModel(m, judgeModel))
       : inputs.spec.metrics,
   };
-
   try {
-    await filesCreateFileset(workspace, { name, description: 'Agent Evaluation Config' }, signal);
+    await filesCreateFileset(workspace, {
+      name: filesetName,
+      description: 'Agent Evaluation Config',
+    });
   } catch (err) {
     if (isConflictError(err)) {
       throw new Error(
-        `A fileset named "${name}" already exists — choose a different experiment name`
+        `A fileset named "${filesetName}" already exists — choose a different evaluation name`
       );
     }
     throw err;
@@ -413,15 +402,14 @@ const loadPersistedSpec = async (
   try {
     await filesUploadFile(
       workspace,
-      name,
+      filesetName,
       evalConfigFilename(inputs.configFormat),
       new Blob([serializeEvalConfig(spec, inputs.configFormat)], {
         type: inputs.configFormat === 'yaml' ? 'application/yaml' : 'application/json',
-      }),
-      signal
+      })
     );
   } catch (uploadErr) {
-    throw await discardSeeded(workspace, { filesetName: name }, uploadErr);
+    throw await discardSeeded(workspace, { filesetName }, uploadErr);
   }
   return spec;
 };
@@ -685,97 +673,96 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     setValue('configKind', value as ConfigKind);
   };
 
+  const buildInputs = (formData: SubmitEvaluationFormData): EvalInputs | null => {
+    if (!datasetRef) return null;
+    if (formData.configKind === CONFIG_KIND_FORM) {
+      return {
+        spec: buildAgentEvaluationSpec(
+          formData.dataset ?? '',
+          formData.promptTemplate ?? generatedAgentPrompt,
+          { ...formData.body, judgePrompt: formData.body.judgePrompt ?? generatedJudgePrompt },
+          workspace
+        ),
+        configFormat: 'json',
+        datasetRef,
+      };
+    }
+    return pickedSpec
+      ? { spec: pickedSpec, configFormat: activeConfigPick?.format ?? 'json', datasetRef }
+      : null;
+  };
+
   const {
     mutateAsync: submitEvaluation,
     error: submitError,
     isPending,
   } = useMutation({
-    mutationFn: async (formData: SubmitEvaluationFormData) => {
-      const configInputs =
-        formData.configKind === CONFIG_KIND_FORM
-          ? {
-              spec: buildAgentEvaluationSpec(
-                formData.dataset ?? '',
-                formData.promptTemplate ?? generatedAgentPrompt,
-                {
-                  ...formData.body,
-                  judgePrompt: formData.body.judgePrompt ?? generatedJudgePrompt,
-                },
-                workspace
-              ),
-              configFormat: 'json' as const,
-            }
-          : pickedSpec && { spec: pickedSpec, configFormat: activeConfigPick?.format ?? 'json' };
-      const inputs = configInputs && datasetRef ? { ...configInputs, datasetRef } : null;
-      const spec = await loadPersistedSpec(workspace, formData, inputs);
-
-      const filesetName = filesetNameForExperiment(formData.newName);
-      const seeded: SeededEntities = { filesetName };
-
+    mutationFn: async ({
+      formData,
+      inputs,
+    }: {
+      formData: SubmitEvaluationFormData;
+      inputs: EvalInputs;
+    }) => {
+      const snapshot = await takeDatasetSnapshot(workspace, inputs.datasetRef).catch(
+        () => undefined
+      );
+      if (snapshot === null) throw new Error(`The dataset ${inputs.datasetRef} no longer exists.`);
+      const name = formData.evaluationRecordName;
+      const filesetName = dataFilesetName(name);
+      const spec = await seedRunFileset(workspace, filesetName, formData.judgeModel, inputs);
+      const metadata = runMetadata(
+        filesetName,
+        snapshot ? { [DATASET_SNAPSHOT_KEY]: JSON.stringify(snapshot) } : undefined
+      );
+      const seeded: { filesetName: string; evaluationName?: string; experimentName?: string } = {
+        filesetName,
+      };
       try {
-        const specDataset = typeof spec.dataset === 'string' ? spec.dataset : null;
-        const datasetSnapshot = specDataset
-          ? await takeDatasetSnapshot(workspace, specDataset).catch(() => undefined)
-          : undefined;
-        if (datasetSnapshot === null) {
-          throw new Error(`The dataset ${specDataset} no longer exists.`);
-        }
         const experiment = await createExperiment(workspace, {
           name: formData.newName,
           ...experimentSettingsPayload(formData),
         });
         seeded.experimentName = experiment.name;
-        const nameStem = experiment.name;
-
-        const evaluationId = await createRunEvaluation(workspace, {
+        await createRunEvaluation(workspace, {
           experimentIds: [experiment.id],
-          name: formData.evaluationRecordName,
-          nameStem,
+          name,
           filesetName,
-          datasetName: specDataset ? datasetLabel(specDataset, workspace) : undefined,
-          metadata: datasetSnapshot
-            ? { [DATASET_SNAPSHOT_KEY]: JSON.stringify(datasetSnapshot) }
-            : undefined,
+          datasetName: datasetLabel(inputs.datasetRef, workspace),
+          metadata,
         }).catch((err: unknown) => {
           if (isConflictError(err)) {
             throw new Error(
-              `An evaluation named "${formData.evaluationRecordName}" already exists — choose a different evaluation name`
+              `An evaluation named "${name}" already exists — choose a different evaluation name`
             );
           }
           throw err;
         });
-        seeded.evaluationName = evaluationId;
+        seeded.evaluationName = name;
 
-        const selections = {
-          workspace,
-          agent: formData.agent,
-          filesetName,
-          experimentName: nameStem,
-          evaluationId,
-          parallelism: formData.parallelism,
-        };
         const created = await evalsCreateEvaluateJob(
           workspace,
-          buildDatasetEvalRequestBody(spec, selections, null) as EvaluateJobRequest
+          buildDatasetEvalRequestBody(
+            spec,
+            {
+              workspace,
+              agent: formData.agent,
+              filesetName,
+              experimentName: name,
+              evaluationId: name,
+              parallelism: formData.parallelism,
+            },
+            null
+          ) as EvaluateJobRequest
         );
         if (!created?.name) throw new Error('Submission did not return a job name');
-        await recordRunJob(
-          workspace,
-          evaluationId,
-          created.name,
-          runMetadata(
-            filesetName,
-            datasetSnapshot
-              ? { [DATASET_SNAPSHOT_KEY]: JSON.stringify(datasetSnapshot) }
-              : undefined
-          )
-        );
+        await recordRunJob(workspace, name, created.name, metadata);
         return { name: created.name };
       } catch (err) {
         throw await discardSeeded(workspace, seeded, err);
       }
     },
-    onSuccess: ({ name }, formData) => {
+    onSuccess: ({ name }, { formData }) => {
       toast.success(`Evaluation "${name}" submitted`);
       void queryClient.invalidateQueries({ queryKey: ['evaluator-jobs', workspace] });
       navigate(getAgentEvaluationsTabRoute(workspace, bareName(formData.agent)), {
@@ -882,7 +869,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       return;
     }
     try {
-      await submitEvaluation(formData);
+      const inputs = buildInputs(formData);
+      if (!inputs) return;
+      await submitEvaluation({ formData, inputs });
     } catch {
       // Error rendered via errorText prop.
     }

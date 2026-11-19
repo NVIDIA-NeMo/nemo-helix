@@ -21,8 +21,6 @@ export const MODEL_EVAL_CONFIG_DESCRIPTION = 'Model Evaluation Config';
 /** The fileset that stores a run's eval config and uploaded dataset, named after the run. */
 export const dataFilesetName = (evaluationName: string): string => `${evaluationName}-data`;
 
-export const filesetNameForExperiment = dataFilesetName;
-
 /** Default parallelism for a submitted eval (Studio default; the config value is a hint). */
 export const DEFAULT_MAX_CONCURRENT_TASKS = 1;
 
