@@ -10,6 +10,7 @@ export {
   baseModelsRoutes,
   getBaseModelsSideNavItems,
 } from '@studio/routes/groups/baseModelsRoutes';
+export { communityPluginsRoutes } from '@studio/routes/groups/communityPluginsRoutes';
 export {
   customizationRoutes,
   getCustomizationSideNavItems,

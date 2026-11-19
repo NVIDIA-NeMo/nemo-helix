@@ -488,6 +488,10 @@ export const getWorkspaceMembersRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.members, { workspace });
 };
 
+export const getCommunityPluginsRoute = (workspace: string) => {
+  return generatePath(ROUTES.workspace.communityPlugins, { workspace });
+};
+
 export const getModelCompareRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.modelCompare, { workspace });
 };
