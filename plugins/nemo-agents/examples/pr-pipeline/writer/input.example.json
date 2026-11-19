@@ -1,0 +1,44 @@
+{
+  "repo": "mmogallapalli/nemo-helix-hackathon",
+  "base_branch": "main",
+  "mode": "patch",
+  "plan": {
+    "status": "ready",
+    "summary": "Add a quick comparison table for the Codex, Deep Agents, and Claude example configurations.",
+    "requirements": [
+      "Update plugins/nemo-agents/examples/nemo-agent-config/README.md with a compact table linking agent-codex.yaml, agent-deepagents.yaml, and agent-claude.yaml.",
+      "For each example, document its default harness, configured model provider/name, and whether MCP servers are configured, using the checked-out YAML as evidence.",
+      "Preserve existing instructions and describe configured values without claiming model availability or runtime compatibility."
+    ],
+    "acceptance_criteria": [
+      "The table has one row per requested example with working relative links.",
+      "Every reported value matches the corresponding YAML file.",
+      "Only the example README changes; no credentials or machine-specific paths are introduced."
+    ],
+    "tasks": [
+      {
+        "id": "T1",
+        "description": "Read the three example configurations and existing README, then add or update the comparison table without duplicating existing content.",
+        "depends_on": [],
+        "acceptance_criteria": [
+          "The comparison is concise and grounded in the YAML files."
+        ]
+      }
+    ],
+    "validation": [
+      {
+        "scenario": "Compare every table row with the source YAML and verify relative link targets exist.",
+        "expected_outcome": "All values and file links match the checkout."
+      },
+      {
+        "scenario": "Inspect changed paths and run git diff --check.",
+        "expected_outcome": "Only the requested README changes and the whitespace check passes."
+      }
+    ],
+    "open_questions": [],
+    "errors": []
+  },
+  "constraints": [
+    "Documentation only; do not change implementation or publish a branch or PR."
+  ]
+}

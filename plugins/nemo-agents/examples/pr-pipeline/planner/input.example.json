@@ -1,0 +1,6 @@
+{
+  "ticket": "REPLACE-WITH-LINEAR-ISSUE-ID-OR-URL",
+  "constraints": [
+    "Keep the implementation scoped to the ticket's acceptance criteria."
+  ]
+}

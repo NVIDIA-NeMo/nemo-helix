@@ -1,0 +1,13 @@
+{
+  "agent": "pr-compose-planner",
+  "input": "{\"ticket\": \"REPLACE-WITH-LINEAR-ISSUE-ID-OR-URL\", \"constraints\": [\"Keep the implementation scoped to the ticket's acceptance criteria.\"]}",
+  "timeout_seconds": 300,
+  "environment": {
+    "environment_spec": {
+      "provider": "local",
+      "secrets": {
+        "LINEAR_API_KEY": "mmogallapall/linear-planner-token"
+      }
+    }
+  }
+}
