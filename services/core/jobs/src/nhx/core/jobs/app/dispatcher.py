@@ -72,6 +72,7 @@ from nhx.core.jobs.entities import (
     HelixJobTask,
     get_step_spec_name,
 )
+from nhx.core.jobs.notifications import build_job_status_event, emit_job_status_event
 from nhx.core.jobs.telemetry import build_job_run_telemetry, emit_job_run_event
 from opentelemetry import metrics, trace
 from pydantic import ValidationError
@@ -1371,6 +1372,22 @@ class JobDispatcher:
                             emit_job_run_event(telemetry_event)
                     except Exception:
                         logger.debug("Failed to queue job_run telemetry", exc_info=True)
+                try:
+                    job = await self.store.get_by_id(HelixJob, attempt.job)
+                    emit_job_status_event(
+                        attempt.workspace,
+                        build_job_status_event(
+                            job_id=job.id,
+                            job_name=job.name,
+                            source=job.source,
+                            attempt_id=attempt.id,
+                            previous_status=previous_attempt_status,
+                            status=attempt.status,
+                            error_details=attempt.error_details,
+                        ),
+                    )
+                except Exception:
+                    logger.debug("Failed to queue job status notification", exc_info=True)
                 logger.info(
                     "Updated job attempt status",
                     extra={
