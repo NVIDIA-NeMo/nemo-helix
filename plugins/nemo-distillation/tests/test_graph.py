@@ -9,6 +9,30 @@ from pydantic import ValidationError
 from samples import inputs
 
 
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        {"name": "a", "hyperparameters": {"epoch": 3}},
+        {"name": "a", "hyperparameters": {"schedule": {"epoch": 3}}},
+        {"name": "a", "hyperparameters": {"schedule": {"epochs": 0}}},
+        {"name": "a", "hyperparameters": {"optimizer": {"learning_rate": 0}}},
+        {"name": "a", "hyperparameters": {"optimizer": {"lr_decay_style": "step"}}},
+        {"name": "a", "hyperparameters": {"lora": {"rank": 0}}},
+        {"name": "a", "hyperparameters": {"batch": {"global_batch_size": -1}}},
+        {"name": "a", "finetuning_type": "all_weights", "hyperparameters": {"lora": {"rank": 8}}},
+    ],
+)
+def test_bad_hyperparameters_fail_when_the_workflow_is_created(candidate: dict) -> None:
+    with pytest.raises(ValidationError):
+        inputs(candidates=[candidate])
+
+
+def test_hyperparameters_default_to_nothing_set() -> None:
+    candidate = inputs(candidates=[{"name": "a"}]).candidates[0]
+
+    assert candidate.hyperparameters.to_job() == {}
+
+
 def test_default_template_feeds_both_eval_filesets_into_prepare() -> None:
     graph = build_graph(inputs())
 

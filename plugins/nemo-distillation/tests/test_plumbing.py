@@ -255,8 +255,9 @@ async def test_the_stub_flows_through_train_deploy_and_eval() -> None:
     train = harness.platform.customizations[0]
     assert "deployment_config" not in train
     assert train["output"]["name"] == workflow.nodes["train[lora]"].external["model"]
-    assert train["dataset"] == "default/distill-data#nodes/prepare/"
-    assert train["training"] == {"type": "sft", "peft": {"type": "lora"}, "parallelism": {"num_gpus_per_node": 1}}
+    assert train["dataset"] == {"training": "default/distill-data#nodes/prepare/"}
+    assert train["training"] == {"training_type": "sft", "finetuning_type": "lora"}
+    assert train["parallelism"] == {"num_gpus_per_node": 1}
     by_arm: dict[str, list[dict[str, Any]]] = {}
     for agent in harness.platform.agents:
         by_arm.setdefault(agent["arm"], []).append(agent)
@@ -291,6 +292,55 @@ async def test_the_stub_flows_through_train_deploy_and_eval() -> None:
     assert workflow.results is not None
     assert set(workflow.results) >= {"original", "base", "distilled"}
     assert workflow.stages[0]["status"] == "completed"
+
+
+async def test_each_candidate_trains_with_its_own_hyperparameters() -> None:
+    candidates = [
+        {
+            "name": "small",
+            "hyperparameters": {
+                "max_seq_length": 4096,
+                "lora": {"rank": 8, "alpha": 16},
+                "schedule": {"epochs": 3},
+                "batch": {"global_batch_size": 2, "micro_batch_size": 1},
+                "optimizer": {"learning_rate": 0.0001, "lr_decay_style": "linear"},
+            },
+        },
+        {"name": "wide", "hyperparameters": {"lora": {"rank": 64, "alpha": 128}, "schedule": {"epochs": 1}}},
+        {"name": "plain"},
+        {"name": "full", "finetuning_type": "all_weights", "hyperparameters": {"optimizer": {"learning_rate": 1e-5}}},
+    ]
+    workflow = assemble("distill", "default", inputs(candidates=candidates, gpu_budget=4))
+    harness = Harness()
+
+    for _ in range(120):
+        await _apply(workflow, harness)
+        if workflow.status in {"completed", "failed", "cancelled"}:
+            break
+
+    assert workflow.status == "completed", _stuck(workflow)
+    by_output = {job["output"]["name"]: job for job in harness.platform.customizations}
+    job = {
+        name: by_output[workflow.nodes[f"train[{name}]"].external["model"]]
+        for name in ("small", "wide", "plain", "full")
+    }
+    assert job["small"]["training"] == {
+        "training_type": "sft",
+        "finetuning_type": "lora",
+        "max_seq_length": 4096,
+        "lora": {"rank": 8, "alpha": 16},
+    }
+    assert job["small"]["schedule"] == {"epochs": 3}
+    assert job["small"]["batch"] == {"global_batch_size": 2, "micro_batch_size": 1}
+    assert job["small"]["optimizer"] == {"learning_rate": 0.0001, "lr_decay_style": "linear"}
+    assert job["wide"]["training"]["lora"] == {"rank": 64, "alpha": 128}
+    assert job["wide"]["schedule"] == {"epochs": 1}
+    assert "batch" not in job["wide"] and "optimizer" not in job["wide"]
+    # A candidate that sets nothing sends nothing, so every default stays the customizer's.
+    assert job["plain"]["training"] == {"training_type": "sft", "finetuning_type": "lora"}
+    assert not {"schedule", "batch", "optimizer"} & set(job["plain"])
+    assert job["full"]["training"] == {"training_type": "sft", "finetuning_type": "all_weights"}
+    assert job["full"]["optimizer"] == {"learning_rate": 1e-5}
 
 
 async def test_one_gpu_runs_each_job_to_the_end_before_the_next() -> None:

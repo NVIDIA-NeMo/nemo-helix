@@ -304,6 +304,7 @@ def _wire(
             candidate = by_name[candidate_of(key) or ""]
             node.inputs["finetuning_type"] = candidate.finetuning_type
             node.inputs["gpu"] = candidate.gpu
+            node.inputs["hyperparameters"] = candidate.hyperparameters.to_job()
         elif node.kind == "agent_deployment":
             arm = node.inputs.get("arm") or candidate_of(key)
             if not isinstance(arm, str) or not arm:
