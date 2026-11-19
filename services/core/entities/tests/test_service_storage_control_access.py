@@ -13,10 +13,12 @@ from nhx.common.api.filter import ComparisonOperation, FilterOperator
 from nhx.common.auth import ALL_WORKSPACES
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.models import Principal
+from nhx.common.auth.token_claims import TokenClaims
+from nhx.common.auth.token_resolver import ResolvedBearerToken
 from nhx.common.config import AuthConfig
 from nhx.core.entities.api.v2.entities import endpoints
 from nhx.core.entities.api.v2.entities.endpoints import _validate_parent_access, create_entity, get_entity_by_id
-from nhx.core.entities.api.v2.entities.schemas import EntityCreateInput
+from nhx.core.entities.api.v2.entities.schemas import EntityCreateInput, EntityUpdate
 from nhx.core.entities.api.v2.entity_access import (
     EntityOperation,
     get_control_entity_list_workspaces,
@@ -27,6 +29,43 @@ from nhx.core.entities.app.repository import EntityRepositoryInterface, Workspac
 from nhx.core.entities.entities import Entity, Workspace
 from nhx.core.entities.utils.filter import RelationshipFilterOperation
 from nhx.core.entities.utils.relationships import Relationship
+
+
+@pytest.mark.parametrize("job", ["task-image-build-own", "task-image-build-other"])
+async def test_workload_can_only_report_progress_on_its_own_task_image_build(job: str) -> None:
+    target = control_entity().model_copy(
+        update={
+            "entity_type": "task_image_build",
+            "data": {"job": "task-image-build-own", "revision_digest": "original", "status": "pending"},
+        }
+    )
+    auth_client = AuthClient(
+        principal=Principal(id="system:serviceaccount:test:jobs", on_behalf_of="creator"),
+        config=AuthConfig(enabled=True),
+        resolved_bearer_token=ResolvedBearerToken(
+            token_kind="workload_access_token",
+            claims=TokenClaims(
+                subject="creator",
+                email=None,
+                groups=[],
+                scopes=["platform:write"],
+                raw_claims={"nhx_workload_job": job, "nhx_workload_workspace": target.workspace},
+            ),
+        ),
+    )
+    repository = AsyncMock(spec=EntityRepositoryInterface)
+    workspace_repository = AsyncMock(spec=WorkspaceRepositoryInterface)
+    update = EntityUpdate(data={"status": "running", "revision_digest": "changed"})
+
+    if job != target.data["job"]:
+        with pytest.raises(HTTPException, match="Workload does not own") as exc:
+            await endpoints._update_entity_target(target, update, repository, workspace_repository, auth_client)
+        assert exc.value.status_code == 403
+        repository.update_entity.assert_not_awaited()
+        return
+
+    await endpoints._update_entity_target(target, update, repository, workspace_repository, auth_client)
+    assert repository.update_entity.await_args.kwargs["data"] == {**target.data, "status": "running"}
 
 
 @pytest.fixture

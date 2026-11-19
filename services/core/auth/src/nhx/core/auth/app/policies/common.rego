@@ -366,6 +366,37 @@ route_permissions_satisfied(workspace) if {
 	selected_subject_permissions_satisfied(workspace)
 }
 
+# This opt-in grant is tied to the Kubernetes actor's explicit workspace
+# binding. It does not confer generic entity permissions on that actor.
+route_permissions_satisfied(workspace) if {
+	workspace != "-"
+	input.nhx_workload_workspace == workspace
+	regex.match("^task-image-build-[a-f0-9]{16}-[0-9]+$", input.nhx_workload_job)
+	actor := extract_principal_id
+	regex.match("^system:serviceaccount:[a-z0-9][-a-z0-9]*:[a-z0-9][-a-z0-9.]*$", actor)
+	"TaskImageBuildRunner" in data.authz.principals[actor].workspaces[workspace]
+	task_image_build_entity_request(workspace)
+	subject_permissions_satisfied(workspace, ["evaluator.tasks.read", "evaluator.tasks.image-builds.create"])
+}
+
+task_image_build_entity_path(workspace) := path if {
+	prefix := concat("", ["/apis/entities/v2/workspaces/", workspace, "/entities/"])
+	base_path := split(extract_path, "?")[0]
+	startswith(base_path, prefix)
+	path := trim_prefix(base_path, prefix)
+}
+
+task_image_build_entity_request(workspace) if {
+	extract_method == "GET"
+	task_image_build_entity_path(workspace) == "task_revision"
+} else if {
+	extract_method == "GET"
+	regex.match("^(task|task_image_build)/[^/]+$", task_image_build_entity_path(workspace))
+} else if {
+	extract_method == "PUT"
+	regex.match("^task_image_build/by-id/[^/]+$", task_image_build_entity_path(workspace))
+}
+
 selected_subject_permissions_satisfied(workspace) if {
 	not "subject_perms" in object.keys(selected_route_contract)
 } else if {
