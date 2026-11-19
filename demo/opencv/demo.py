@@ -1,14 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Stage this demo's flat FileSets, execute the transform, and publish its output."""
+"""Transform images staged by the Jobs launcher; the controller publishes output."""
 
-import json
-import os
+import argparse
 from pathlib import Path
-from tempfile import TemporaryDirectory
-from urllib.parse import quote
-from urllib.request import Request, urlopen
 
 import cv2  # ty: ignore[unresolved-import]  # Installed in the demo image.
 import numpy as np
@@ -48,6 +44,7 @@ def photos(images: Path) -> list[Path]:
 
 def detect_edges(images: Path, edges: Path):
     for path in photos(images):
+        print(f"[detect-edges] Detecting edges: {path.name}", flush=True)
         gray = cv2.cvtColor(read(path, cv2.IMREAD_COLOR), cv2.COLOR_BGR2GRAY)
         write(edges / (path.stem + ".png"), cv2.Canny(gray, 100, 200))
 
@@ -55,6 +52,7 @@ def detect_edges(images: Path, edges: Path):
 def build_montage(images: Path, edges: Path, montage: Path):
     rows = []
     for path in photos(images):
+        print(f"[build-montage] Adding row: {path.name}", flush=True)
         original = read(path, cv2.IMREAD_COLOR)
         edge = read(edges / (path.stem + ".png"), cv2.IMREAD_COLOR)
         if edge.shape != original.shape:
@@ -67,48 +65,38 @@ def build_montage(images: Path, edges: Path, montage: Path):
 
 
 def main():
-    config = json.loads(Path(os.environ["NEMO_JOB_STEP_CONFIG_FILE_PATH"]).read_text())
-    workspace = quote(os.environ["NEMO_JOB_WORKSPACE"], safe="")
-    base = os.environ["NHX_BASE_URL"].rstrip("/") + f"/apis/files/v2/workspaces/{workspace}/filesets"
-    with TemporaryDirectory() as temp:
-        directories = {}
-        for role, name in config["inputs"].items():
-            local = Path(temp, role)
-            local.mkdir()
-            remote = f"{base}/{quote(name, safe='')}"
-            with urlopen(remote + "/files", timeout=30) as response:
-                entries = json.load(response)["data"]
-            for entry in entries:
-                path = entry["path"]
-                if Path(path).name != path or path in {"", ".", ".."}:
-                    raise ValueError(f"Expected a flat demo FileSet, got {path!r}")
-                with urlopen(remote + "/-/" + quote(path, safe=""), timeout=30) as response:
-                    (local / path).write_bytes(response.read())
-            directories[role] = local
-
-        output_role = config["output_role"]
-        output = Path(temp, output_role)
-        output.mkdir()
-        directories[output_role] = output
-        step = config["transform"]
-        transforms = {"detect-edges": detect_edges, "build-montage": build_montage, "describe-images": describe_images}
-        transforms[step](**directories)
-
-        remote = f"{base}/{quote(config['output_name'], safe='')}"
-        artifacts = sorted(output.iterdir())
-        if not artifacts:
-            raise RuntimeError(f"{step} produced no artifacts")
-        for artifact in artifacts:
-            request = Request(
-                remote + "/-/" + quote(artifact.name, safe=""),
-                method="PUT",
-                headers={"Content-Type": "application/octet-stream"},
-                data=artifact.read_bytes(),
-            )
-            with urlopen(request, timeout=30):
-                pass
-        with urlopen(Request(remote + "/commit", method="POST"), timeout=30) as response:
-            print(f"Published {config['output_name']} at {json.load(response)['commit_revision']}")
+    parser = argparse.ArgumentParser(description=__doc__)
+    transforms = parser.add_subparsers(dest="transform", required=True)
+    detect = transforms.add_parser("detect-edges")
+    detect.add_argument("--images", type=Path, required=True)
+    detect.add_argument("--edges", type=Path, required=True)
+    montage = transforms.add_parser("build-montage")
+    montage.add_argument("--images", type=Path, required=True)
+    montage.add_argument("--edges", type=Path, required=True)
+    montage.add_argument("--montage", type=Path, required=True)
+    describe = transforms.add_parser("describe-images")
+    describe.add_argument("--images", type=Path, required=True)
+    describe.add_argument("--edges", type=Path, required=True)
+    describe.add_argument("--montage", type=Path, required=True)
+    describe.add_argument("--captions", type=Path, required=True)
+    args = parser.parse_args()
+    print(f"[{args.transform}] Inputs staged; starting transform", flush=True)
+    if args.transform == "detect-edges":
+        output = args.edges
+        output.mkdir(parents=True, exist_ok=True)
+        detect_edges(args.images, args.edges)
+    elif args.transform == "build-montage":
+        output = args.montage
+        output.mkdir(parents=True, exist_ok=True)
+        build_montage(args.images, args.edges, args.montage)
+    else:
+        output = args.captions
+        output.mkdir(parents=True, exist_ok=True)
+        describe_images(args.images, args.edges, args.montage, args.captions)
+    artifacts = sorted(output.iterdir())
+    if not artifacts:
+        raise RuntimeError(f"{args.transform} produced no artifacts")
+    print(f"[{args.transform}] Produced {len(artifacts)} artifact(s); controller will upload and commit", flush=True)
 
 
 if __name__ == "__main__":
