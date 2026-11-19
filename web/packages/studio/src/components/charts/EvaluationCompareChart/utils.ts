@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { SERIES_COLORS } from '@nemo/common/src/components/charts/tokens';
-import type { EvaluationSessionResponse } from '@nemo/sdk/generated/platform/schema';
+import type { EvaluationCompareResponse } from '@nemo/sdk/generated/platform/schema';
 import type { TrendMetric } from '@studio/components/charts/ExperimentTrendChart/utils';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 
@@ -13,9 +13,6 @@ const EVALUATOR_METRIC_PREFIX = 'evaluators.';
 
 export const isEvaluatorMetric = (metric: TrendMetric): boolean =>
   metric.id.startsWith(EVALUATOR_METRIC_PREFIX);
-
-export const evaluatorNameOf = (metric: TrendMetric): string =>
-  metric.id.slice(EVALUATOR_METRIC_PREFIX.length);
 
 export interface ComparedEvaluation {
   readonly row: EvaluationRow;
@@ -96,52 +93,54 @@ export function buildImprovementRows(
 }
 
 /**
- * Mean score per test case for one evaluator. A failed evaluator result counts as 0, matching
- * how the evaluation-level mean treats it. Sessions without a test case name cannot be paired
- * across runs, so they are left out.
+ * Win/tie/loss counts of a candidate over the baseline across the paired test cases, as
+ * computed by the compare endpoint.
  */
-export function meanScoreByTestCase(
-  sessions: readonly EvaluationSessionResponse[],
-  evaluatorName: string
-): Map<string, number> {
-  const totals = new Map<string, { sum: number; count: number }>();
-  for (const session of sessions) {
-    const testCase = session.test_case_name;
-    if (!testCase) continue;
-    const failed = session.failed_evaluators?.includes(evaluatorName) ?? false;
-    const score = failed ? 0 : finite(session.evaluator_scores?.[evaluatorName]);
-    if (score === undefined) continue;
-    const total = totals.get(testCase) ?? { sum: 0, count: 0 };
-    totals.set(testCase, { sum: total.sum + score, count: total.count + 1 });
-  }
-  return new Map([...totals].map(([testCase, { sum, count }]) => [testCase, sum / count]));
-}
-
 export interface HeadToHead {
   readonly better: number;
   readonly same: number;
   readonly worse: number;
 }
 
-const SAME_SCORE_TOLERANCE = 1e-9;
+const formatSignedDifference = (value: number): string =>
+  `${value > 0 ? '+' : ''}${value.toLocaleString(undefined, { maximumFractionDigits: 3 })}`;
 
-/** Win/tie/loss of the candidate over the baseline across the test cases both runs scored. */
-export function headToHead(
-  baseline: ReadonlyMap<string, number>,
-  candidate: ReadonlyMap<string, number>
-): HeadToHead {
-  let better = 0;
-  let same = 0;
-  let worse = 0;
-  for (const [testCase, candidateScore] of candidate) {
-    const baselineScore = baseline.get(testCase);
-    if (baselineScore === undefined) continue;
-    const diff = candidateScore - baselineScore;
-    if (Math.abs(diff) <= SAME_SCORE_TOLERANCE) same += 1;
-    else if (diff > 0) better += 1;
-    else worse += 1;
+/** The compare endpoint counts paired differences within this tolerance as the same. */
+const SAME_TOLERANCE = 1e-9;
+
+/** The direction the endpoint reports: for cost and latency a negative difference is better. */
+const favorsCandidate = (compare: EvaluationCompareResponse, difference: number): boolean =>
+  compare.higher_is_better ? difference > 0 : difference < 0;
+
+/**
+ * One line summarizing the endpoint's paired comparison for one candidate: the mean paired
+ * difference (signed candidate − baseline, with better/worse per the metric's direction),
+ * its 95% bootstrap interval, and P(candidate better), for the one selected metric.
+ */
+export function describeComparison(compare: EvaluationCompareResponse): string {
+  if (compare.n_pairs === 0) return 'no paired test cases';
+  const parts: string[] = [];
+  if (compare.mean_paired_difference != null) {
+    const mean = compare.mean_paired_difference;
+    const direction =
+      Math.abs(mean) <= SAME_TOLERANCE
+        ? ''
+        : favorsCandidate(compare, mean)
+          ? ' (better)'
+          : ' (worse)';
+    parts.push(`mean ${formatSignedDifference(mean)}${direction}`);
   }
-  return { better, same, worse };
+  if (compare.interval_low != null && compare.interval_high != null) {
+    parts.push(
+      `95% CI ${formatSignedDifference(compare.interval_low)} to ${formatSignedDifference(compare.interval_high)}`
+    );
+  }
+  if (compare.p_candidate_better != null) {
+    // 2,000 resamples resolve to 0.05%, so whole percents would print 100% for a probability short of it.
+    parts.push(`P(better) ${Number((compare.p_candidate_better * 100).toFixed(2))}%`);
+  }
+  parts.push(`${compare.n_pairs} paired test case${compare.n_pairs === 1 ? '' : 's'}`);
+  return parts.join(' · ');
 }
 
 const NICE_STEPS = [1, 2, 2.5, 4, 5, 6, 8, 10];

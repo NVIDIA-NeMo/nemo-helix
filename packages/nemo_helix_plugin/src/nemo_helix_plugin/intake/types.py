@@ -244,6 +244,35 @@ class EvaluationResponse(BaseModel):
     tokens: EvaluatorAggregate | None = None
 
 
+class EvaluationCompareResponse(BaseModel):
+    """Paired baseline-vs-candidate comparison of one metric across shared test cases.
+
+    Differences are signed ``candidate - baseline``. The interval bounds and
+    ``p_candidate_better`` are null when no test case is shared.
+    """
+
+    workspace: str
+    baseline: str
+    candidate: str
+    metric: str
+    higher_is_better: bool
+    n_pairs: int
+    better: int
+    same: int
+    worse: int
+    mean_paired_difference: float | None = None
+    interval_low: float | None = None
+    interval_high: float | None = None
+    p_candidate_better: float | None = None
+    interval_caveat: str | None = None
+
+
+class CompareEvaluationsQueryParams(TypedDict, total=False):
+    baseline: Required[str]
+    candidate: Required[str]
+    metric: Required[str]
+
+
 class ExperimentCreateRequest(BaseModel):
     """Create body for an Experiment."""
 

@@ -16,7 +16,7 @@ from nemo_helix_plugin.cli import NemoCLI
 
 
 class IntakeCLI(NemoCLI):
-    """Intake command group: traces, spans, sessions, annotations, evaluator results, ingest."""
+    """Intake command group: traces, spans, sessions, annotations, evaluator results, evaluations, ingest."""
 
     name: ClassVar[str] = "intake"
     description: ClassVar[str] = "Intake operations."

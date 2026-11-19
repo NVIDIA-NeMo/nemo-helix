@@ -16,7 +16,9 @@ from nemo_helix_plugin.intake.types import (
     AtifCreateRequest,
     ChatCompletionsIngestRequest,
     ChatCompletionsIngestResponse,
+    CompareEvaluationsQueryParams,
     DirectSpansIngestRequest,
+    EvaluationCompareResponse,
     EvaluationCreateRequest,
     EvaluationPatchRequest,
     EvaluationResponse,
@@ -128,6 +130,15 @@ def list_evaluations(
     workspace: str | None = None,
     query_params: ListEvaluationsQueryParams | None = None,
 ) -> Paginated[EvaluationResponse]: ...
+
+
+@get(f"{_INTAKE_BASE}/evaluations/compare")
+@abstractmethod
+def compare_evaluations(
+    *,
+    workspace: str | None = None,
+    query_params: CompareEvaluationsQueryParams,
+) -> EvaluationCompareResponse: ...
 
 
 @get(f"{_INTAKE_BASE}/evaluations/{{name}}")

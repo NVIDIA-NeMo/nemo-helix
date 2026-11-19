@@ -11,9 +11,11 @@ from nhx.common.service.dependencies import get_entity_client
 from nhx.intake.dependencies import DenormalizerDep as DenormalizerDep
 from nhx.intake.dependencies import IntakeServiceDep
 from nhx.intake.experiments.read_service import EvaluationReadService
+from nhx.intake.repository.clickhouse.evaluation_compare import ClickHouseEvaluationCompareRepository
 from nhx.intake.repository.clickhouse.evaluation_rollup import ClickHouseEvaluationRollupRepository
 from nhx.intake.repository.clickhouse.evaluation_session import ClickHouseEvaluationSessionRepository
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor
+from nhx.intake.repository.evaluation_compare import EvaluationCompareRepository
 from nhx.intake.repository.evaluation_rollup import EvaluationRollupRepository
 from nhx.intake.repository.evaluation_session import EvaluationSessionRepository
 
@@ -40,15 +42,27 @@ EvaluationSessionRepositoryDep = Annotated[
 ]
 
 
+def get_evaluation_compare_repository(intake: IntakeServiceDep) -> EvaluationCompareRepository | None:
+    client = intake.clickhouse_client
+    return ClickHouseEvaluationCompareRepository(ClickHouseExecutor(client)) if client is not None else None
+
+
+EvaluationCompareRepositoryDep = Annotated[
+    EvaluationCompareRepository | None, Depends(get_evaluation_compare_repository)
+]
+
+
 def get_evaluation_read_service(
     entity_client: EntityClientDep,
     rollup_repository: EvaluationRollupRepositoryDep,
     session_repository: EvaluationSessionRepositoryDep,
+    compare_repository: EvaluationCompareRepositoryDep,
 ) -> EvaluationReadService:
     return EvaluationReadService(
         entity_client=entity_client,
         rollup_repository=rollup_repository,
         session_repository=session_repository,
+        compare_repository=compare_repository,
     )
 
 

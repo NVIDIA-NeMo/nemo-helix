@@ -82,11 +82,29 @@ TRACE_METRICS = {
 }
 
 
+EVALUATION_COMPARE = {
+    "workspace": "default",
+    "baseline": "base-eval",
+    "candidate": "cand-eval",
+    "metric": "evaluators.accuracy",
+    "higher_is_better": True,
+    "n_pairs": 2,
+    "better": 2,
+    "same": 0,
+    "worse": 0,
+    "mean_paired_difference": 0.375,
+    "interval_low": 0.25,
+    "interval_high": 0.5,
+    "p_candidate_better": 1.0,
+    "interval_caveat": "Only 2 paired test cases: this 95% bootstrap interval is a weak estimate.",
+}
+
+
 def test_plugin_metadata() -> None:
     assert IntakeCLI.name == "intake"
     assert IntakeCLI.description == "Intake operations."
     groups = {group.name for group in IntakeCLI().get_cli().registered_groups}
-    assert groups == {"annotations", "evaluator-results", "ingest", "sessions", "spans", "traces"}
+    assert groups == {"annotations", "evaluations", "evaluator-results", "ingest", "sessions", "spans", "traces"}
 
 
 # ---------------------------------------------------------------------------
@@ -678,6 +696,51 @@ def test_sessions_get_code_output(intake_cli) -> None:
     assert result.exit_code == 0, result.output
     assert recorder.requests == []
     assert 'response = client.get_session(id="sess-1")' in result.stdout
+
+
+def test_evaluations_compare(intake_cli) -> None:
+    result, recorder = intake_cli.run(
+        ["evaluations", "compare", "base-eval", "cand-eval", "--metric", "evaluators.accuracy"],
+        [httpx.Response(200, json=EVALUATION_COMPARE)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert recorder.last.method == "GET"
+    assert recorder.last.url.path == f"{WS}/evaluations/compare"
+    assert dict(recorder.last.url.params) == {
+        "baseline": "base-eval",
+        "candidate": "cand-eval",
+        "metric": "evaluators.accuracy",
+    }
+    body = json.loads(result.stdout)
+    assert (body["better"], body["same"], body["worse"]) == (2, 0, 0)
+
+
+def test_evaluations_compare_without_metric_is_usage_error(intake_cli) -> None:
+    result, recorder = intake_cli.run(["evaluations", "compare", "base-eval", "cand-eval"])
+
+    assert result.exit_code == 2
+    assert "METRIC" in result.stderr
+    assert recorder.requests == []
+
+
+def test_evaluations_compare_maps_remote_errors(intake_cli) -> None:
+    result, _ = intake_cli.run(
+        [
+            "evaluations",
+            "compare",
+            "base-eval",
+            "cand-eval",
+            "--metric",
+            "duration_ms",
+            "--workspace",
+            "other",
+        ],
+        [httpx.Response(400, json={"detail": "Unsupported metric 'duration_ms': use 'evaluators.<name>'."})],
+    )
+
+    assert result.exit_code == 3
+    assert "Unsupported metric" in result.stderr
 
 
 # ---------------------------------------------------------------------------

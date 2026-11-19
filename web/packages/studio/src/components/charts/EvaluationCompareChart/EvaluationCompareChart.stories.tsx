@@ -1,17 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type {
-  EvaluationSessionResponsesPage,
-  EvaluationSessionResponse,
-} from '@nemo/sdk/generated/platform/schema';
+import type { EvaluationCompareResponse } from '@nemo/sdk/generated/platform/schema';
 import type { Meta, StoryObj } from '@storybook/react';
 import { EvaluationCompareChart } from '@studio/components/charts/EvaluationCompareChart';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { http, HttpResponse } from 'msw';
 
-const SESSIONS_API = `${PLATFORM_BASE_URL}/apis/intake/v2/workspaces/:workspace/evaluations/:name/sessions`;
+const COMPARE_API = `${PLATFORM_BASE_URL}/apis/intake/v2/workspaces/:workspace/evaluations/compare`;
 
 const TEST_CASE_COUNT = 40;
 
@@ -75,53 +72,41 @@ const LEAN: Record<string, Record<string, number>> = {
   'nemotron-routing': { 'correctness.score': 0.25, 'tool_use.score': 0.25 },
 };
 
-const sessionsFor = (evaluationName: string): EvaluationSessionResponse[] => {
-  const lean = LEAN[evaluationName];
-  return Array.from({ length: TEST_CASE_COUNT }, (_, index) => {
-    const score = (evaluator: string, base: number) => {
-      if (!lean) return base;
-      const noise = [-0.25, 0, 0.25][Math.floor(index / 3) % 3] ?? 0;
-      const shift = index % 3 === 0 ? (lean[evaluator] ?? 0) : 0;
-      return Math.min(1, Math.max(0, base + noise + shift));
-    };
-    return {
-      workspace: 'default',
-      evaluation_name: evaluationName,
-      session_id: `${evaluationName}-${index}`,
-      test_case_name: `case-${index}`,
-      trace_id: `trace-${evaluationName}-${index}`,
-      root_span_id: `span-${index}`,
-      started_at: '2026-10-01T09:00:00Z',
-      status: 'success',
-      evaluator_scores: {
-        'correctness.score': score('correctness.score', index % 3 === 0 ? 0.5 : 0.75),
-        'helpfulness.score': score('helpfulness.score', 0.5),
-        'tool_use.score': score('tool_use.score', index % 2 === 0 ? 0.5 : 0.75),
-      },
-    } as EvaluationSessionResponse;
-  });
+/** Counts and an interval consistent with the per-run lean, so the bars and the summary line agree. */
+const compareResponse = (candidate: string, metric: string): EvaluationCompareResponse => {
+  const lean = LEAN[candidate]?.[metric] ?? 0;
+  const counts =
+    lean > 0
+      ? { better: 20, same: 10, worse: 10 }
+      : lean < 0
+        ? { better: 10, same: 10, worse: 20 }
+        : { better: 13, same: 14, worse: 13 };
+  return {
+    workspace: 'default',
+    baseline: 'baseline-llama-70b',
+    candidate,
+    metric: `evaluators.${metric}`,
+    higher_is_better: true,
+    n_pairs: TEST_CASE_COUNT,
+    ...counts,
+    mean_paired_difference: lean * 0.1,
+    interval_low: lean * 0.1 - 0.05,
+    interval_high: lean * 0.1 + 0.05,
+    p_candidate_better: 0.5 + lean * 0.4,
+  } as EvaluationCompareResponse;
 };
 
-const sessionsHandler = http.get(SESSIONS_API, ({ params }) => {
-  const data = sessionsFor(String(params.name));
-  const page: EvaluationSessionResponsesPage = {
-    data,
-    pagination: {
-      page: 1,
-      page_size: 1000,
-      current_page_size: data.length,
-      total_pages: 1,
-      total_results: data.length,
-    },
-  } as EvaluationSessionResponsesPage;
-  return HttpResponse.json(page);
+const compareHandler = http.get(COMPARE_API, ({ request }) => {
+  const url = new URL(request.url);
+  const metric = (url.searchParams.get('metric') ?? '').replace(/^evaluators\./, '');
+  return HttpResponse.json(compareResponse(url.searchParams.get('candidate') ?? '', metric));
 });
 
 const meta: Meta<typeof EvaluationCompareChart> = {
   title: 'Charts/EvaluationCompareChart',
   component: EvaluationCompareChart,
   args: { workspace: 'default', evaluations: EVALUATIONS },
-  parameters: { msw: { handlers: [sessionsHandler] } },
+  parameters: { msw: { handlers: [compareHandler] } },
   decorators: [
     (Story) => (
       <div className="max-w-5xl">
