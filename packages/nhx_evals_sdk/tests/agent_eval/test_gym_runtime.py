@@ -787,7 +787,7 @@ def _trial_declaring_fabric_artifacts(tmp_path: Path, artifacts: Sequence[dict[s
     capture_dir = model_call_capture_dir(tmp_path)
     capture_dir.mkdir(parents=True)
     (capture_dir / "0-0.capture.jsonl").write_text(json.dumps({"model_call_id": "c0"}) + "\n", encoding="utf-8")
-    (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=capture_dir)
+    (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=capture_dir, run_id="default-run")
     return trial
 
 
@@ -919,7 +919,7 @@ async def test_non_mapping_fabric_result_keeps_the_projection(tmp_path: Path, ca
     captures.mkdir(parents=True)
     (captures / "0-0.capture.jsonl").write_text(json.dumps({"model_call_id": "c0"}) + "\n", encoding="utf-8")
     with caplog.at_level(logging.WARNING, logger=_GYM_RESULTS_LOG):
-        (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=captures)
+        (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=captures, run_id="default-run")
 
     assert await _trace_answer(trial) == _PROJECTED_ANSWER
     assert _declared_warnings(caplog) == []
