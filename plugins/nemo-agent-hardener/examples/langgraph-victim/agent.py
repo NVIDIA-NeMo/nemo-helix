@@ -33,7 +33,7 @@ import os
 import signal
 import subprocess
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import nemo_relay
 import openai
@@ -194,7 +194,11 @@ def build_agent() -> CompiledStateGraph:
                 reply = _model_failure(exc)
             return {LANGCHAIN_MODEL_RESPONSE_KEY: {"messages": messages_to_dict([reply])}}
 
-        result = await nemo_relay.llm.execute(MODEL, request, call, model_name=MODEL, codec=codec, response_codec=codec)
+        # execute() is typed as returning any JSON value; here it is the dict `call` returns.
+        result = cast(
+            "dict[str, Any]",
+            await nemo_relay.llm.execute(MODEL, request, call, model_name=MODEL, codec=codec, response_codec=codec),
+        )
         return {"messages": messages_from_dict(result[LANGCHAIN_MODEL_RESPONSE_KEY]["messages"])}
 
     # THE interception line. awrap_tool_call routes every tool call through Relay, which is what
