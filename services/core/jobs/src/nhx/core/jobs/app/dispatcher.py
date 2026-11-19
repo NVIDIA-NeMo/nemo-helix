@@ -1600,49 +1600,53 @@ class JobDispatcher:
     async def _retain_workflow_storage(
         self, store: EntityClient, job: HelixJob, attempt: HelixJobAttempt
     ) -> HelixJobAttempt:
-        state = attempt.workflow_state
-        if state is None or attempt.status not in (
-            HelixJobStatus.PAUSED,
-            HelixJobStatus.ERROR,
-            HelixJobStatus.CANCELLED,
-        ):
+        """Commit cleanup only while the stopped Attempt still owns the Job's storage."""
+        stopped_statuses = (HelixJobStatus.PAUSED, HelixJobStatus.ERROR, HelixJobStatus.CANCELLED)
+        if attempt.workflow_state is None or attempt.status not in stopped_statuses:
             return attempt
-        targets = storage_targets(attempt.platform_spec)
-        if not targets or job.current_attempt_id != attempt.id:
-            return attempt
-        if not attempt.status_details.get(STORAGE_RECLAIMED_AT):
-            if attempt.status == HelixJobStatus.PAUSED:
-                ttl = effective_pause_ttl_seconds(job.control, jobs_config.storage)
-                clock = state.paused_at
-            elif attempt.status == HelixJobStatus.ERROR:
-                ttl = jobs_config.storage.failed_storage_ttl_seconds
-                clock = state.stopped_at
-            else:
-                ttl, clock = 0, state.stopped_at
-            if not storage_window_expired(clock, ttl):
+        async with _get_job_mutation_lock(job.name, job.workspace):
+            # Rerun and resume share this lock; refresh ownership after reconciliation.
+            job = await store.get_by_id(HelixJob, job.id)
+            attempt = await store.get_by_id(HelixJobAttempt, attempt.id)
+            state = attempt.workflow_state
+            if state is None or attempt.status not in stopped_statuses:
                 return attempt
-            attempt.status_details = {
-                **attempt.status_details,
-                STORAGE_RECLAIMED_AT: datetime.now(timezone.utc).isoformat(),
-            }
-            if attempt.status == HelixJobStatus.PAUSED:
-                attempt.status = HelixJobStatus.CANCELLING
-                state.control = "cancelling"
-            attempt = await store.update(attempt)
-        try:
-            await self.system_store.create(
-                HelixJobStorageReclaim(
-                    name=HelixJobStorageReclaim.name_for_job(job.id),
-                    workspace=SYSTEM_WORKSPACE,
-                    job_id=job.id,
-                    job_workspace=job.workspace,
-                    job_name=job.name,
-                    targets=targets,
+            targets = storage_targets(attempt.platform_spec)
+            if not targets or job.current_attempt_id != attempt.id:
+                return attempt
+            if not attempt.status_details.get(STORAGE_RECLAIMED_AT):
+                if attempt.status == HelixJobStatus.PAUSED:
+                    ttl = effective_pause_ttl_seconds(job.control, jobs_config.storage)
+                    clock = state.paused_at
+                elif attempt.status == HelixJobStatus.ERROR:
+                    ttl = jobs_config.storage.failed_storage_ttl_seconds
+                    clock = state.stopped_at
+                else:
+                    ttl, clock = 0, state.stopped_at
+                if not storage_window_expired(clock, ttl):
+                    return attempt
+                attempt.status_details = {
+                    **attempt.status_details,
+                    STORAGE_RECLAIMED_AT: datetime.now(timezone.utc).isoformat(),
+                }
+                if attempt.status == HelixJobStatus.PAUSED:
+                    attempt.status = HelixJobStatus.CANCELLING
+                    state.control = "cancelling"
+                attempt = await store.update(attempt)
+            try:
+                await self.system_store.create(
+                    HelixJobStorageReclaim(
+                        name=HelixJobStorageReclaim.name_for_job(job.id),
+                        workspace=SYSTEM_WORKSPACE,
+                        job_id=job.id,
+                        job_workspace=job.workspace,
+                        job_name=job.name,
+                        targets=targets,
+                    )
                 )
-            )
-        except EntityConflictError:
-            pass
-        return attempt
+            except EntityConflictError:
+                pass
+            return attempt
 
     async def _require_current_step(
         self,
