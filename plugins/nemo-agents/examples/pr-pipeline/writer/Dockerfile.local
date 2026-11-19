@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Local demo image derived from the existing ARM64 PR-review image.
-# This adds writer tools; it does not install the current Helix source checkout.
+# Shared runtime for the planner, writer, and reviewer.
+# This does not install the current Helix source checkout.
 ARG REVIEW_IMAGE=pr-compose-reviewer:local
 FROM ${REVIEW_IMAGE}
 
@@ -46,8 +47,55 @@ assert source.count(old) == 1, "Recheck the result-upload patch for this Helix v
 path.write_text(source.replace(old, new, 1))
 PYCODE
 
+# Keep existing Python dependencies pinned while adding the Deep Agents harness.
+# Its Google client requires tenacity <9.2; allow that shared dependency to resolve.
+RUN python - <<'PYCODE'
+from importlib.metadata import distributions
+from pathlib import Path
+
+Path("/tmp/base-constraints.txt").write_text("".join(
+    f"{dist.metadata['Name']}=={dist.version}\n" for dist in distributions()
+    if dist.metadata["Name"].lower() != "tenacity"
+))
+PYCODE
+RUN uv pip install --python /workspace/.venv/bin/python \
+      --constraint /tmp/base-constraints.txt \
+      "nemo-fabric-adapters-deepagents[harness]==0.6.1" \
+      "deepagents==0.7.40" "tenacity==9.1.4" \
+    && rm /tmp/base-constraints.txt
+
+# Same Pi installation layout as nemo_agents_plugin/container/template.py.
+# The base already supplies Node 22. Install the real runner and its optional
+# SDK peers; the descriptor shipped in the Helix wheel alone is insufficient.
+RUN npm install -g --prefix /opt/pi-adapter nemo-fabric-adapters-pi@0.6.1 \
+    && npm install --prefix /opt/pi-adapter/lib/node_modules/nemo-fabric-adapters-pi \
+      --save-prod --omit=dev --no-audit --no-fund \
+      @earendil-works/pi-ai@1.0.3 @earendil-works/pi-coding-agent@1.0.3 \
+      @earendil-works/pi-mcp@1.0.3 @earendil-works/pi-codemode@1.0.3 \
+    && test -f /opt/pi-adapter/lib/node_modules/nemo-fabric-adapters-pi/dist/cli.js \
+    && ln -sf /opt/pi-adapter/lib/node_modules/nemo-fabric-adapters-pi/pi.fabric-adapter.json \
+      /workspace/.venv/share/nemo-fabric/adapters/pi/pi.fabric-adapter.json
+ENV PATH="/opt/pi-adapter/bin:$PATH"
+
+# Include the Relay extension used by Helix's Pi packaging recipe. Current demo
+# configs disable telemetry; this also supports enabling it with Relay 0.11.x.
+RUN git init --quiet /opt/pi-relay-src \
+    && git -C /opt/pi-relay-src remote add origin https://github.com/NVIDIA/NeMo-Relay.git \
+    && git -C /opt/pi-relay-src fetch --depth 1 origin 0.11.0 \
+    && git -C /opt/pi-relay-src checkout --quiet --detach FETCH_HEAD \
+    && cp -r /opt/pi-relay-src/crates/cli/assets/pi-extension /opt/pi-relay-extension \
+    && rm -rf /opt/pi-relay-src \
+    && chmod -R a+rX /opt/pi-adapter /opt/pi-relay-extension
+
+RUN python -c "import deepagents; import nemo_fabric_adapters.deepagents.adapter; from importlib.metadata import version; assert version('nemo-fabric-adapters-deepagents') == '0.6.1'; assert version('nemo-relay-cli-bin').startswith('0.11.')" \
+    && cd /opt/pi-adapter/lib/node_modules/nemo-fabric-adapters-pi \
+    && node --input-type=module -e 'await import("@earendil-works/pi-ai"); await import("@earendil-works/pi-coding-agent"); await import("@earendil-works/pi-mcp"); await import("@earendil-works/pi-codemode");'
+
 RUN git --version && gh --version \
     && python -c "import nemo_agents_plugin.tasks.execute.__main__; import nemo_fabric_adapters.codex.adapter; import codex_cli_bin, subprocess; subprocess.run([str(codex_cli_bin.bundled_codex_path()), '--version'], check=True)"
+
+# Check compatibility of the installed Python dependencies.
+RUN uv pip check --python /workspace/.venv/bin/python
 
 # Execute jobs provide their config and credentials at runtime.
 ENTRYPOINT ["python", "-m", "nemo_agents_plugin.tasks.execute"]
