@@ -73,6 +73,7 @@ API_SERVICES = [
 ]
 
 OPENAPI_SERVICES = [
+    "plugins",
     "auth",
     "customization",
     "entities",

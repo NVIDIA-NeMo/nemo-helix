@@ -9,9 +9,11 @@ import type {
   NavItem as NavItemData,
 } from '@studio/components/Layouts/NavigationDrawer/types';
 import { isGroup } from '@studio/components/Layouts/NavigationDrawer/utils';
+import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import {
   usePluginInstalled,
+  usePluginLoadFailures,
   usePlugins,
   usePluginsError,
   usePluginsLoaded,
@@ -40,6 +42,7 @@ import {
 } from '@studio/routes/groups';
 import { getAgentsListRoute, getWorkspaceDatasetsRoute } from '@studio/routes/utils';
 import { lazy, Suspense, useMemo } from 'react';
+import { generatePath } from 'react-router';
 
 const NoPluginNavIcon = () => null;
 
@@ -62,6 +65,7 @@ const DatasetsIcon = ENTITY_ICONS.datasets;
 export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
   const workspace = useWorkspaceFromPath();
   const plugins = usePlugins();
+  const failedPlugins = usePluginLoadFailures();
   const agentsInstalled = usePluginInstalled('agents');
   const pluginsLoaded = usePluginsLoaded();
   const pluginsError = usePluginsError();
@@ -163,8 +167,8 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
   }, [workspace]);
 
   const pluginNavGroups = useMemo(
-    () =>
-      plugins.flatMap((plugin) => {
+    () => [
+      ...plugins.flatMap((plugin) => {
         try {
           return plugin.navItems(workspace).map((group) => ({
             group: group.group,
@@ -186,7 +190,26 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
           return [];
         }
       }),
-    [plugins, workspace]
+      // Deliberately ugly and literal: a plugin that failed to load should be fixed, not ignored.
+      ...(failedPlugins.length > 0
+        ? [
+            {
+              group: 'FAILED PLUGINS',
+              items: failedPlugins.map(({ name, issues }) => ({
+                id: `failed:${name}`,
+                slotIcon: (
+                  <Suspense>
+                    <PluginNavIcon iconName="warning" className={iconColorClass} />
+                  </Suspense>
+                ),
+                slotLabel: `${name} [${issues[0].code}]`,
+                href: generatePath(ROUTES.workspace.plugin, { workspace, pluginName: name }),
+              })),
+            },
+          ]
+        : []),
+    ],
+    [plugins, failedPlugins, workspace]
   );
 
   // A plugin naming an existing group joins it rather than rendering a second

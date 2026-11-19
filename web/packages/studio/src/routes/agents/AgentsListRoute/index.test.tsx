@@ -25,6 +25,7 @@ const renderAgentsList = (history: string) =>
           <PluginContext.Provider
             value={{
               plugins: [],
+              failed: [],
               installedNames: new Set(['agents']),
               isLoaded: true,
               isError: false,

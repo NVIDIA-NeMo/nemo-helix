@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Publish this file at a URL and preview/register it with Helix.
+# Tavily already hosts this API; Helix deploys nothing and installs no Python.
+# The credential is looked up in the invoking URL workspace, never in this file.
+schema_version: 1
+plugin:
+  name: tavily
+  title: Tavily
+  endpoints:
+    - method: POST
+      path: /v2/workspaces/{workspace}/mcp
+      access: write
+      upstream_url: https://mcp.tavily.com/mcp
+  credential:
+    secret_name: tavily-api-key
+    scheme: bearer

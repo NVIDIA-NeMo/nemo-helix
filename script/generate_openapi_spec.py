@@ -171,8 +171,9 @@ SERVICES = [
         app_import="nhx.platform_runner.server:create_platform_openapi_app",
         output_file="platform.openapi.yaml",
         app_dir="/packages/nhx_platform_runner/src",
-        # Aggregate platform OpenAPI is generated without plugin services by default.
-        env_vars={"NEMO_PLUGIN_SERVICES_ALLOWLIST": ""},
+        # Include the trusted gateway itself, not the external APIs it proxies
+        # or the other plugins whose schemas are generated separately.
+        env_vars={"NEMO_PLUGIN_SERVICES_ALLOWLIST": "plugins"},
     )
 ]
 
