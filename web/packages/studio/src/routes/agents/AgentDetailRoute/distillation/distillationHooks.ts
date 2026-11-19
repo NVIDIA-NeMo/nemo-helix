@@ -16,7 +16,13 @@ import type {
   DistillInputs,
   WorkflowStatus,
 } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationApiTypes';
+import {
+  type ArmMetrics,
+  evaluationNamesByArm,
+  fetchArmMetrics,
+} from '@studio/routes/agents/AgentDetailRoute/distillation/distillationArmMetrics';
 import { promoteDistillation } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationPromote';
+import type { ArmId } from '@studio/routes/agents/AgentDetailRoute/distillation/mockDistillationResults';
 import {
   keepPreviousData,
   useMutation,
@@ -76,3 +82,22 @@ export const usePromoteDistillation = (workspace: string) => {
       queryClient.invalidateQueries({ queryKey: getAgentsListAgentsQueryKey(workspace) }),
   });
 };
+
+/** Intake figures per arm, read once the workflow is done and used where the workflow reports none. */
+export const useDistillationArmMetrics = (workspace: string, workflow: DistillationWorkflow | undefined) =>
+  useQuery({
+    queryKey: ['distillation-arm-metrics', workspace, workflow?.name],
+    enabled: workflow?.status === 'completed',
+    queryFn: async () => {
+      if (!workflow) return {};
+      const names = evaluationNamesByArm(workflow);
+      const found = await Promise.all(
+        Object.entries(names).map(async ([arm, name]) =>
+          name ? ([arm, await fetchArmMetrics(workspace, name, workflow.created_at)] as const) : null
+        )
+      );
+      return Object.fromEntries(found.filter((entry) => entry !== null)) as Partial<
+        Record<ArmId, ArmMetrics>
+      >;
+    },
+  });

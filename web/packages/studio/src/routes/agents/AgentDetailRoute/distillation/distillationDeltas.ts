@@ -38,6 +38,7 @@ export const scoreDelta = (arm: MockArmResult, baseline: MockArmResult): Delta |
 };
 
 export const costDelta = (arm: MockArmResult, baseline: MockArmResult): Delta | undefined => {
+  if (arm.estimatedCostPer1kTasks === null || baseline.estimatedCostPer1kTasks === null) return undefined;
   const change = percentChange(arm.estimatedCostPer1kTasks, baseline.estimatedCostPer1kTasks);
   return toDelta(change, `${Math.abs(change)}%`, false, SEVERE_PERCENT_WORSENING);
 };

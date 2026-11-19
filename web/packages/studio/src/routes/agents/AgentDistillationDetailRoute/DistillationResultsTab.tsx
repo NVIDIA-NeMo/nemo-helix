@@ -52,14 +52,16 @@ export const DistillationResultsTab: FC<DistillationResultsTabProps> = ({ status
   const distilled = arms[arms.length - 1];
   const modelSwap = arms.find((arm) => arm.id === 'base');
   const scoreKept = Math.round((distilled.score / baseline.score) * 100);
-  const costShare = Math.round(
-    (distilled.estimatedCostPer1kTasks / baseline.estimatedCostPer1kTasks) * 100
-  );
+  const costShare =
+    distilled.estimatedCostPer1kTasks === null || baseline.estimatedCostPer1kTasks === null
+      ? null
+      : Math.round((distilled.estimatedCostPer1kTasks / baseline.estimatedCostPer1kTasks) * 100);
 
   return (
     <Stack gap="density-2xl">
       <Banner kind="inline" status="success">
-        The distilled model keeps {scoreKept}% of the baseline score at {costShare}% of the cost
+        The distilled model keeps {scoreKept}% of the baseline score
+        {costShare === null ? '' : ` at ${costShare}% of the cost`}
         {modelSwap && modelSwap.id !== baseline.id
           ? `, and beats a plain model swap by ${(distilled.score - modelSwap.score).toFixed(2)} points`
           : ''}
@@ -89,8 +91,8 @@ export const DistillationResultsTab: FC<DistillationResultsTabProps> = ({ status
       )}
       <DistillationRelativeBars arms={arms} />
       <Text kind="body/regular/xs" className="text-secondary">
-        Cost is estimated by the platform from tokens per task and the prices supplied with the
-        workflow.
+        Cost is estimated from tokens per task at each model's list price. A model with no listed
+        price shows no cost.
       </Text>
     </Stack>
   );

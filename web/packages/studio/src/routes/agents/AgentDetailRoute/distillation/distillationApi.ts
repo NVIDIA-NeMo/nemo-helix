@@ -33,7 +33,7 @@ export const listDistillationWorkflows = (
   customFetch<WorkflowPage>({
     url: `${base(workspace)}/workflows`,
     method: 'GET',
-    params: { template: 'distillation', ...filter },
+    params: { filter: { template: 'distillation', ...filter } },
   });
 
 export const getDistillationWorkflow = (workspace: string, name: string) =>

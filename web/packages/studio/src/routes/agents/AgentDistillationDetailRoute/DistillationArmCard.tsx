@@ -95,7 +95,7 @@ export const DistillationArmCard: FC<DistillationArmCardProps> = ({
           <StatTile
             variant="metric"
             label="Cost / 1k tasks"
-            value={`$${arm.estimatedCostPer1kTasks.toFixed(2)}`}
+            value={arm.estimatedCostPer1kTasks === null ? '—' : `$${arm.estimatedCostPer1kTasks.toFixed(2)}`}
             trailingLabel="est."
             {...costTile}
           />
