@@ -22,9 +22,13 @@ FROM magi-attention-wheel-image AS magi-attention-wheel-src
 FROM alpine/git AS automodel-clone
 ARG AUTOMODEL_BRANCH
 ARG AUTOMODEL_COMMIT
-RUN git clone --branch ${AUTOMODEL_BRANCH} https://github.com/NVIDIA-NeMo/Automodel.git /opt/Automodel && \
+# Patches in docker/automodel/patches are applied to the pinned checkout; the build fails if one stops
+# applying, so drop or refresh each patch when re-pinning AUTOMODEL_COMMIT.
+RUN --mount=type=bind,source=docker/automodel/patches,target=/tmp/patches,readonly \
+    git clone --branch ${AUTOMODEL_BRANCH} https://github.com/NVIDIA-NeMo/Automodel.git /opt/Automodel && \
     cd /opt/Automodel && \
     git checkout ${AUTOMODEL_COMMIT} && \
+    git apply --verbose /tmp/patches/automodel-chat-dataset-tool-call-arguments.patch && \
     rm -rf /opt/Automodel/.git
 
 FROM ${PYTORCH_BASE} AS nhx-automodel-base-builder

@@ -80,6 +80,14 @@ To use wheels already published without rebuilding, `export WHEELS_TAG=<existing
 
 Override registry: `export WHEELS_REGISTRY=...` and `export IMAGE_REGISTRY=...` before bake.
 
+### Automodel patches
+
+`patches/*.patch` are applied with `git apply` to the pinned Automodel checkout in `Dockerfile.nhx-automodel-base` (the `automodel-clone` stage). A patch that no longer applies fails the build, so when you re-pin `AUTOMODEL_COMMIT`, drop the patches that landed upstream and refresh the rest.
+
+| Patch | Why |
+| --- | --- |
+| `automodel-chat-dataset-tool-call-arguments.patch` | `ChatDataset` stringified tool-call `arguments`, which Qwen3.5's chat template rejects. Arguments are now passed as a mapping, matching vLLM at serve time. |
+
 ## Tasks / training runtime (platform glue)
 
 **Base (`nhx-automodel-base`):** NGC PyTorch 26.09, Automodel v0.7.0 `uv sync --locked`, pinned `transformers`/`torch`.
