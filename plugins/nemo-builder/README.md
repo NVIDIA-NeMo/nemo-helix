@@ -396,7 +396,7 @@ status is `queued` and the rows stay `pending`.
 | `400` | Two specs would publish the same `repository:tag`, or the workspace name can't be a repository path component (with `backend: remote`, can't be recorded on an image's row). Or an image to copy doesn't resolve to a public image for its platform. |
 | `401` | Platform auth is on and the request names no one. |
 | `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you may, but may not create jobs there: the rows were already written, and fail five minutes on. Or you're a service that isn't acting for a person. |
-| `409` | An image to copy is on a registry the deployment doesn't allow. Or the deployment can't build: a `builder` setting is invalid, `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. Some `409`s carry a `code` beside their `detail`. `backend_rejected` (the deployment or its backend can't build this) and `missing_secrets` refuse the request itself, whatever its revision. `backend_changed` refuses only this revision, which another backend built: submit the next. A revision another request holds has no `code`. |
+| `409` | An image to copy is on a registry the deployment doesn't allow. Or the deployment can't build: a `builder` setting is invalid, `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. Some `409`s carry a `code` beside their `detail`. `backend_rejected` (the deployment or its backend can't build this) and `missing_secrets` refuse the request itself, whatever its revision. `backend_changed` refuses only this revision, which was submitted under another backend: submit the next. A revision another request holds has no `code`. |
 | `422` | The body failed validation: for example a path outside the context or fileset, a set or spec name that doesn't fit, more than 100 specs, duplicate spec names, a `revision` below 1, a repository or tag that isn't valid or is reserved, or an unknown field such as `output.registry`. |
 | `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and fail five minutes on. Or the registry of an image to copy couldn't be reached. |
 | `500` | Anything else. |
@@ -688,8 +688,8 @@ A deployment that can't run the step refuses every submit with `409` and says wh
 registry or repository, the profile, a step image, a profile whose limit is below one full set's
 build timeouts plus two minutes, or a `default_platform` the service doesn't build.
 
-Switching a deployment's backend doesn't move its images. A resubmit of a revision the other backend
-built is refused: with `code` `backend_changed` when the new backend can take the request (submit
+Switching a deployment's backend doesn't move its images. A resubmit of a revision that was submitted
+under the other backend is refused: with `code` `backend_changed` when the new backend can take the request (submit
 the next revision), and otherwise as any request it can't take is, under any revision
 (`backend_rejected` or `missing_secrets`, for example). Evals goes on using the
 task builds it has, and builds an image again, on the new backend, only when asked to `rebuild`.
@@ -800,6 +800,8 @@ key under `remote` or `sandbox`, refuses every submit with `409` `backend_reject
 names the setting, or `builder` for a check made on the section as a whole (one that spans settings,
 or the scheme of `registry`); a section that can't be read at all is answered without a name. The
 API log has the check's own sentence.
+A key directly under `builder` that isn't a setting is ignored, with a warning in the API log at the
+first submit: a misspelt `backend` leaves builds in this cluster.
 
 ```yaml
 builder:
@@ -1035,7 +1037,7 @@ and complete an image, and about what `fetch` unpacks, hold for both backends. W
   the builder.
 - **A failed row's reason is what the job under its build's name said.** `builder-settle` copies a
   job's own account of why it ended onto the rows of its build, and knows the job by its name:
-  Jobs doesn't say who created a job. A workspace member who creates a job under a build's name
+  the job status it reads names no creator. A workspace member who creates a job under a build's name
   before the build does can choose the text the build's submitter, and anyone who reads the image,
   finds in `status_detail`.
 - **Nothing restricts the sandbox's network.** A Dockerfile's `RUN` can reach anything a pod can:

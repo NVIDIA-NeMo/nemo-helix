@@ -116,7 +116,7 @@ def submit_refusal(caller: Caller) -> str | None:
 
 
 class CompletionConflict(Exception):
-    """The row has already settled, and not as this completion would settle it (409)."""
+    """The completion can't be applied: the row settled otherwise, or the request doesn't fit the row (409)."""
 
 
 class _Rows(Protocol):
@@ -156,7 +156,8 @@ async def complete(
     ``runtime_config`` is written with it: how the image starts by default, from its config. So is ``external``:
     what a remote build service calls the image.
 
-    Raises :class:`CompletionConflict` if the row settled otherwise, or the store's not-found error.
+    Raises :class:`CompletionConflict` if the row settled otherwise or the request doesn't fit the row (its
+    backend, or the digest it copies), or the store's not-found error.
     """
     for _ in range(2):
         row = await rows.get(ContainerImage, name=name, workspace=workspace)

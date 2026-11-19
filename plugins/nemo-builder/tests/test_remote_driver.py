@@ -1451,7 +1451,7 @@ class TestTheImagesOfOneSet:
     """A set's images are built one after another, and a source can change in between."""
 
     @staticmethod
-    def _sources(tmp_path: Path, files: dict[str, str]) -> Callable[[RemoteBuildImage, Path], Path]:
+    def _sources(files: dict[str, str]) -> Callable[[RemoteBuildImage, Path], Path]:
         """A fetch that writes ``files`` as they are when it is called, and counts its calls."""
 
         def fetch(image: RemoteBuildImage, directory: Path) -> Path:
@@ -1495,7 +1495,7 @@ class TestTheImagesOfOneSet:
 
     def test_every_image_is_built_from_the_source_as_it_was_first_fetched(self, tmp_path: Path) -> None:
         files = {"Dockerfile": "FROM scratch\n", "version": "first"}
-        fetch = self._sources(tmp_path, files)
+        fetch = self._sources(files)
         seen: list[str] = []
 
         class Changing(FakeService):
@@ -1536,12 +1536,7 @@ class TestTheImagesOfOneSet:
                 built.append((build.context / "Dockerfile").read_text())
                 return super().start(build)
 
-        assert (
-            _run(
-                Reading([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=self._sources(tmp_path, files), config=config
-            )
-            == 0
-        )
+        assert _run(Reading([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=self._sources(files), config=config) == 0
         assert built == ["FROM one\n", "FROM root\n", "FROM two\n"]
 
     def test_an_archive_is_downloaded_once_whichever_of_its_directories_each_image_builds(self, tmp_path: Path) -> None:
@@ -1549,7 +1544,7 @@ class TestTheImagesOfOneSet:
         revision's images could come from two uploads of the archive."""
         archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
         files = {"environment/Dockerfile": "FROM env\n", "tests/Dockerfile": "FROM tests\n"}
-        fetch = self._sources(tmp_path, files)
+        fetch = self._sources(files)
         service, built = self._reading("Dockerfile")
         config = self._set(archive | {"context_path": "environment"}, archive | {"context_path": "tests"})
 
@@ -1561,7 +1556,7 @@ class TestTheImagesOfOneSet:
 
     def test_a_filesets_whole_download_serves_the_images_that_build_a_directory_of_it(self, tmp_path: Path) -> None:
         files = {"Dockerfile": "FROM root\n", "feed/Dockerfile": "FROM feed\n"}
-        fetch = self._sources(tmp_path, files)
+        fetch = self._sources(files)
         service, built = self._reading("Dockerfile")
         config = self._set({"fileset": "default/fs-a", "context_path": "feed"}, {"fileset": "default/fs-a"})
 
@@ -1611,7 +1606,7 @@ class TestTheImagesOfOneSet:
         assert len(list((tmp_path / "scratch").glob("source-*"))) == 1
 
     def test_each_source_of_a_set_is_its_own_download(self, tmp_path: Path) -> None:
-        fetch = self._sources(tmp_path, {"Dockerfile": "FROM scratch\n"})
+        fetch = self._sources({"Dockerfile": "FROM scratch\n"})
         config = self._set({"fileset": "default/fs-a"}, {"fileset": "default/fs-b"}, {"fileset": "default/fs-a"})
         assert _run(FakeService([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=config) == 0
         assert fetch.calls == ["default/fs-a", "default/fs-b"]  # ty: ignore[unresolved-attribute]
@@ -1639,7 +1634,7 @@ class TestTheImagesOfOneSet:
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
-        fetch = self._sources(tmp_path, {"environment/Dockerfile": "FROM env\n"})
+        fetch = self._sources({"environment/Dockerfile": "FROM env\n"})
         config = self._set(archive | {"context_path": "environment"}, archive | {"context_path": "no-such"})
         builder = FakeBuilder()
         with caplog.at_level(logging.ERROR):
@@ -1657,7 +1652,7 @@ class TestTheImagesOfOneSet:
         (tmp_path / "scratch" / "beside").mkdir(parents=True)
         (tmp_path / "scratch" / "beside" / "Dockerfile").write_text("FROM beside\n")
         archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
-        fetch = self._sources(tmp_path, {"environment/Dockerfile": "FROM env\n"})
+        fetch = self._sources({"environment/Dockerfile": "FROM env\n"})
         config = self._set(archive | {"context_path": "environment"}, archive | {"context_path": outside})
         builder, service = FakeBuilder(), FakeService([DONE])
         with caplog.at_level(logging.ERROR):
@@ -1701,6 +1696,26 @@ class TestTheImagesOfOneSet:
             assert fetched.resolve().is_relative_to(root.resolve())
             assert fetched.name == (context_path or fetched.name)
 
+    def test_a_context_named_by_a_link_is_built_from_a_set_as_it_is_alone(self, tmp_path: Path) -> None:
+        """`current -> v2`, and in `v2` a link that comes back to it by its own name. The copy made for a set
+        is of the directory, under the directory's name, so the link still leads inside it."""
+
+        def fetch(image: RemoteBuildImage, directory: Path) -> Path:
+            for name in ("v2", "other"):
+                (directory / name).mkdir()
+                (directory / name / "Dockerfile").write_text(f"FROM {name}\n")
+            (directory / "v2" / "again").symlink_to("../v2/Dockerfile")
+            (directory / "current").symlink_to("v2")
+            return directory
+
+        archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
+        config = self._set(archive | {"context_path": "current"}, archive | {"context_path": "other"})
+        Reading, seen = self._reading("Dockerfile")
+        builder = FakeBuilder()
+        assert _run(Reading([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=config) == 0
+        assert [image for image, _, _ in builder.completed] == ["a", "b"]
+        assert seen == ["FROM v2\n", "FROM other\n"]
+
     def test_a_directory_reached_by_a_link_out_of_a_shared_download_is_refused(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -1732,7 +1747,7 @@ class TestTheImagesOfOneSet:
     ) -> None:
         """Nothing shares it, so it is not kept for the rest of the set, nor copied: a set of large contexts
         then holds one at a time."""
-        fetch = self._sources(tmp_path, {"Dockerfile": "FROM scratch\n"})
+        fetch = self._sources({"Dockerfile": "FROM scratch\n"})
         held: list[list[str]] = []
 
         class Looking(FakeService):
@@ -2067,7 +2082,6 @@ class TestTheStepProgram:
 
     def test_a_mounted_credential_that_isnt_there_fails_every_image_and_says_so(
         self,
-        context: Path,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         signals: None,
@@ -2090,7 +2104,6 @@ class TestTheStepProgram:
 
     def test_a_set_that_cant_start_says_why_on_every_images_line(
         self,
-        context: Path,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         signals: None,
@@ -2229,7 +2242,7 @@ class TestTheStepProgram:
         assert "ValueError: refused: Bearer [credential]" in printed
         assert "authorise('[credential]')" in printed
 
-    def test_the_credential_never_reaches_the_log(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_a_credential_in_a_log_calls_argument_is_taken_out_of_the_message(self) -> None:
         record = logging.LogRecord("x", logging.ERROR, __file__, 1, "refused: %s", ("Bearer token-value",), None)
         driver._redact_record(record, driver._redactor("token-value"))
         assert record.getMessage() == "refused: Bearer [credential]"
@@ -2270,6 +2283,8 @@ class TestTheStepProgram:
             ("two words", "GET /builds?key=two+words failed"),
             ("QUJD~REVG", "GET /builds?key=QUJD%7EREVG failed"),
             ("pa'ss-w0rd-123", repr(("401", 'reply: {"error": "bad password pa\'ss-w0rd-123"}'))),
+            ("pa'ss-w0rd-123", repr(repr('reply: {"error": "bad password pa\'ss-w0rd-123"}'))),
+            ("pa\\'ss-w0rd-123", repr(("401", 'reply: {"error": "bad password pa\\\'ss-w0rd-123"}'))),
             ("C:\\keys\\build", repr(repr("refused C:\\keys\\build"))),
             ('say "hi" twice', json.dumps({"error": json.dumps('refused say "hi" twice')})),
         ],
@@ -2279,6 +2294,8 @@ class TestTheStepProgram:
             "url-plus",
             "url-tilde",
             "apostrophe-in-a-repr",
+            "apostrophe-in-a-repr-of-a-repr",
+            "backslash-before-an-apostrophe",
             "escaped-twice",
             "json-twice",
         ],
@@ -2456,9 +2473,37 @@ class TestTheStepProgram:
         record = logging.makeLogRecord({"msg": "401 for %s", "args": ("token-value",), "levelno": logging.ERROR})
         assert record.getMessage() == "401 for [credential]"
 
-    def test_every_record_is_redacted_whichever_logger_and_handler_it_goes_through(
-        self, signals: None, caplog: pytest.LogCaptureFixture
+    @pytest.mark.parametrize("chained", [False, True], ids=["in-its-own-text", "in-what-it-was-raised-from"])
+    def test_an_exception_on_a_record_made_from_a_mapping_is_redacted_as_text(
+        self, signals: None, chained: bool
     ) -> None:
+        """A formatter prints the exception with everything it was raised from. It needs the exception whole,
+        so one that holds the credential is kept as its text, redacted, and not as itself."""
+        driver.redact_log("token-value")
+        try:
+            try:
+                raise ValueError("refused: Bearer token-value")
+            except ValueError as refused:
+                if chained:
+                    raise RuntimeError("the call failed") from refused
+                raise
+        except Exception:
+            record = logging.makeLogRecord({"msg": "the call failed", "exc_info": sys.exc_info()})
+        assert record.exc_info is None
+        printed = logging.Formatter().format(record)
+        assert "token-value" not in printed and "ValueError: refused: Bearer [credential]" in printed
+
+    def test_an_exception_without_the_credential_stays_on_a_record_made_from_a_mapping(self, signals: None) -> None:
+        driver.redact_log("token-value")
+        try:
+            raise ValueError("refused: no such build")
+        except ValueError:
+            raised = sys.exc_info()
+        record = logging.makeLogRecord({"msg": "the call failed", "exc_info": raised, "exc_text": None})
+        assert record.exc_info is raised
+        assert "ValueError: refused: no such build" in logging.Formatter().format(record)
+
+    def test_every_record_is_redacted_whichever_logger_and_handler_it_goes_through(self, signals: None) -> None:
         """A client may log through a logger that doesn't pass its records up, to a handler of its own."""
         printed: list[str] = []
 

@@ -214,9 +214,11 @@ class TestComplete:
         assert response.json()["runtime_config"] is None
         entities.update.assert_awaited_once()
 
-    def test_a_handle_for_an_image_this_cluster_builds_is_a_409(self) -> None:
+    @pytest.mark.parametrize("row", [_row(), _row("ready", DIGEST), _row("failed")], ids=["pending", "ready", "failed"])
+    def test_a_handle_for_an_image_this_cluster_builds_is_a_409(self, row: ContainerImage) -> None:
+        """Whatever the row's status: the request doesn't fit the image, before how it settled is looked at."""
         body = {"digest": DIGEST, "external": {"image_id": "img-1"}}
-        response, entities = self._post(_row(), body=body)
+        response, entities = self._post(row, body=body)
         assert response.status_code == 409
         assert "built in this cluster" in response.json()["detail"]
         entities.update.assert_not_awaited()
@@ -586,7 +588,7 @@ class TestSubmitting:
         ("failure", "code"),
         [
             (MissingSecrets("the build job needs platform secrets"), "missing_secrets"),
-            (BackendChanged("already built by the 'execution' backend"), "backend_changed"),
+            (BackendChanged("already submitted under the 'execution' backend"), "backend_changed"),
             (BuildConflict("already submitted with a different request"), None),
         ],
         ids=["secrets", "another-backends-row", "another-requests-revision"],

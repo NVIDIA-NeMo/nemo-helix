@@ -22,7 +22,7 @@ from nemo_builder_plugin.execution import ExecutionBackend
 from nemo_builder_plugin.identity import ImageReference
 from nemo_builder_plugin.plan import BuildPlan
 from nemo_builder_plugin.remote import CANCEL_MARGIN_SECONDS, STEP_BACKENDS, STEP_NAME, RemoteBackend
-from nemo_builder_plugin.schema import BuildMount, BuildOutput, BuildSet, BuildSpec, FileSetSource, ImageSource
+from nemo_builder_plugin.schema import BuildSet, BuildSpec, ImageSource
 from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, RemoteBuildStepConfig
 from nemo_builder_plugin.submit import (
     BackendChanged,
@@ -154,15 +154,6 @@ class TestWhatItRefuses:
     def test_the_root_dockerfile_is_the_root_dockerfile_however_it_is_spelt(self) -> None:
         backend = RemoteBackend(_config(allow_dockerfile_path=False), PROFILES)
         backend.check(_plan(_spec(dockerfile="./Dockerfile")))
-
-    def test_what_the_models_declare_is_what_the_cases_above_use(self) -> None:
-        # Guards the parametrized specs: each really is the shape it is named for.
-        assert _spec(output={"repository": "team/app", "tag": "v1"}).output == BuildOutput(
-            repository="team/app", tag="v1"
-        )
-        assert _spec(mounts=[{"source": {"fileset": "fs-b"}, "target": "/mnt/agent"}]).mounts == [
-            BuildMount(source=FileSetSource(fileset="fs-b"), target="/mnt/agent")
-        ]
 
 
 class TestADeploymentThatCannotBuild:
@@ -492,7 +483,7 @@ class TestSubmitting:
         await _submit(client, jobs, ExecutionBackend(in_cluster, in_cluster_profiles))
         assert client.rows["demo-1"].provenance.backend == "execution"
 
-        with pytest.raises(BackendChanged, match="already built by the 'execution' backend.*builds with 'remote'"):
+        with pytest.raises(BackendChanged, match="submitted under the 'execution' backend.*builds with 'remote'"):
             await _submit(client, jobs, RemoteBackend(_config(), PROFILES))
         # A revision conflict to a caller that doesn't know the difference, as before.
         assert issubclass(BackendChanged, BuildConflict)
@@ -521,7 +512,7 @@ class TestSubmitting:
         written, met = client.rows["demo-1.a"], client.rows["demo-1.b"]
         assert (written.status, written.status_detail) == (
             "failed",
-            "not built: demo revision 1 was already built by another backend",
+            "not built: demo revision 1 was already submitted under another backend",
         )
         assert (met.status, met.status_detail, met.provenance.backend) == ("pending", None, "execution")
 

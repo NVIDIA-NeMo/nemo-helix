@@ -759,6 +759,12 @@ def _in_a_url(secret: str) -> str:
     return "".join(pieces)
 
 
+def _in_quotes(text: str) -> str:
+    """``text`` as ``repr`` writes it inside a string that also holds a double quote: with its apostrophes
+    escaped, which ``repr`` of the text alone leaves as they are."""
+    return repr(text + '"')[1:-2]
+
+
 def _redactor(secret: str | None) -> Callable[[str], str]:
     """Takes ``secret`` out of a text, in each form the driver knows a text to hold it.
 
@@ -774,13 +780,14 @@ def _redactor(secret: str | None) -> Callable[[str], str]:
     escaped = {
         shown,
         # `repr` leaves an apostrophe as it is unless the text around it also holds a double quote.
-        re.sub(r"(?<!\\)'", r"\\'", shown),
+        _in_quotes(secret),
         json.dumps(secret)[1:-1],
         json.dumps(secret, ensure_ascii=False)[1:-1],
         secret.encode("unicode_escape").decode("ascii"),
     }
     # Quoted once more, as an error that holds another error's text is: `repr` of a tuple of messages, say.
     twice = {repr(form)[1:-1] for form in escaped} | {json.dumps(form)[1:-1] for form in escaped}
+    twice |= {_in_quotes(form) for form in escaped}
     forms = {secret, sanitize_for_log(secret), _one_line(secret), quote(secret, safe=""), quote_plus(secret)}
     forms |= escaped | twice
     lines = [line.strip() for line in secret.splitlines()]
@@ -876,6 +883,8 @@ def run_remote_build(
                 raise ImageFailed(f"context path {source.context_path!r} is not a directory in its source")
             if not _within(context, fetched[key]):
                 raise ImageFailed(f"context path {source.context_path!r} is not a directory inside its source")
+            # The directory that was checked, not a link to it: as an image built alone is staged.
+            context = context.resolve()
         # Under its own name, so that a link which comes back to it by name still does. Links as they are,
         # never followed: staging checks where each one leads.
         return Path(shutil.copytree(context, directory / (context.name or "context"), symlinks=True))
@@ -1087,6 +1096,9 @@ class _RedactedFields(dict[str, Any]):
         self.redact = redact
 
     def __setitem__(self, key: str, value: Any) -> None:
+        if key == "exc_info" and value:
+            self._set_exception(value)
+            return
         try:
             value = _redact_value(value, self.redact)
         except Exception:
@@ -1094,10 +1106,34 @@ class _RedactedFields(dict[str, Any]):
             value = WITHHELD
         super().__setitem__(key, value)
 
+    def _set_exception(self, exc_info: Any) -> None:
+        """An exception set on a record after it was made, as ``logging.makeLogRecord`` sets one.
+
+        As :func:`_redact_record` treats one a log call attached: it is kept as it is unless its text, the
+        exceptions it was raised from included, holds the credential. Then the text is kept without it, and
+        the exception is not: a formatter prints the text it finds, and needs the exception whole or not at all.
+        """
+        try:
+            text = logging.Formatter().formatException(exc_info)
+            redacted = self.redact(text)
+        except Exception:
+            text, redacted = "", WITHHELD
+        if redacted == text:
+            super().__setitem__("exc_info", exc_info)
+            return
+        super().__setitem__("exc_info", None)
+        if not self.get("exc_text"):
+            super().__setitem__("exc_text", redacted)
+
     def update(self, *args: Any, **kwargs: Any) -> None:
-        # `logging.makeLogRecord` sets a record's fields this way, its message among them.
-        for key, value in dict(*args, **kwargs).items():
-            self[key] = value
+        # `logging.makeLogRecord` sets a record's fields this way, its message among them. The exception
+        # last: its text is kept only where the mapping brought none of its own.
+        fields = dict(*args, **kwargs)
+        for key, value in fields.items():
+            if key != "exc_info":
+                self[key] = value
+        if "exc_info" in fields:
+            self["exc_info"] = fields["exc_info"]
 
     def setdefault(self, key: str, default: Any = None) -> Any:
         if key not in self:

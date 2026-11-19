@@ -221,7 +221,7 @@ def _abandoned(image: ContainerImage, status: HelixJobStatus | EndedJob | None, 
 def _own_job(image: ContainerImage) -> bool:
     """Whether the job ``image`` names has the name, in the row's own workspace, that a submit gives its job.
 
-    The name is all there is to go by: Jobs doesn't say who created a job. So this keeps a row from naming
+    The name is all it goes by: the job status the builder reads names no creator. So this keeps a row from naming
     another workspace's job, or another build's, and no more. The workspace is the one the entity client
     reports for the row, which a row written past the builder can set in its own data.
     """

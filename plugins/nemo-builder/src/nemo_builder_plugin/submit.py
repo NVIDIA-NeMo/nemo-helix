@@ -61,7 +61,7 @@ class BuildConflict(Exception):
 
 
 class BackendChanged(BuildConflict):
-    """This ``(name, revision)`` was built by another backend than the deployment builds with now (409)."""
+    """This ``(name, revision)`` was submitted under another backend than the deployment builds with now (409)."""
 
 
 class UpstreamUnavailable(Exception):
@@ -231,7 +231,7 @@ async def submit_build_set(
             except BuildConflict as exc:
                 # What the answer says: the rows this request wrote are failed for the same reason.
                 why = (
-                    "was already built by another backend"
+                    "was already submitted under another backend"
                     if isinstance(exc, BackendChanged)
                     else "belongs to a different request"
                 )
@@ -307,10 +307,11 @@ async def _adopt(
     existing = await entity_client.get(ContainerImage, name=row.name, workspace=workspace)
     if existing.provenance.request_digest != digest:
         raise _different_request(build_set)
-    # The same request, but another backend built it: its image is somewhere this backend doesn't publish.
+    # The same request, but another backend holds it: its image is, or would be, somewhere this backend doesn't
+    # publish. Whether anything was built is not looked at.
     if existing.provenance.backend != backend:
         raise BackendChanged(
-            f"build set {build_set.name!r} revision {build_set.revision} was already built by the "
+            f"build set {build_set.name!r} revision {build_set.revision} was already submitted under the "
             f"{existing.provenance.backend!r} backend, and this deployment now builds with {backend!r}. "
             "Submit a new revision."
         )

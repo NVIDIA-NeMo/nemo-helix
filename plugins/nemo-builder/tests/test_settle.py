@@ -12,9 +12,11 @@ from typing import Literal
 import pytest
 from nemo_builder_plugin import settle as settle_module
 from nemo_builder_plugin.entities import ContainerImage, Provenance
+from nemo_builder_plugin.plan import BuildPlan
 from nemo_builder_plugin.remote import STEP_NAME as REMOTE_STEP_NAME
 from nemo_builder_plugin.remote import RemoteBackend
 from nemo_builder_plugin.run.remote import MAX_REASON_CHARS
+from nemo_builder_plugin.schema import BuildSet, BuildSpec
 from nemo_builder_plugin.settle import JOB_GRACE, JOB_READS, NO_JOB, QUEUE_GONE, EndedJob, ended_job, settle
 from nemo_helix_plugin.entities import EntityConflictError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
@@ -337,6 +339,13 @@ class TestWhyAnEndedJobDidNotBuildIt:
         assert ended_job(job) == EndedJob(HelixJobStatus.ERROR, {}, "Step build failed")
         # Spelt out in settle, not imported from the backend's module: kept the same here.
         assert (settle_module._REASON_STEP, settle_module._REASON_BACKEND) == (REMOTE_STEP_NAME, RemoteBackend.name)
+        # The job a row may take a reason from is named as a submit names its job.
+        build_set = BuildSet(
+            name="demo", revision=1, build_specs=[BuildSpec.model_validate({"source": {"fileset": "fs"}})]
+        )
+        planned = BuildPlan.resolve(build_set.with_default_platform("linux/amd64"), workspace="ws-a")
+        assert settle_module._own_job(_row(job=f"ws-a/{planned.job_name}"))
+        assert not settle_module._own_job(_row(job=f"ws-b/{planned.job_name}"))
         # A step's reason ends with the name of its build, and a row's reason is cut from its end.
         assert settle_module._MAX_REASON_CHARS >= MAX_REASON_CHARS
 
