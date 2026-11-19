@@ -93,6 +93,11 @@ searchable metadata, that eval work (and later registered agents) can reference.
   for a symlink mid-build could be followed (`O_NOFOLLOW` covers only the last path component), and
   hard-linked files are accepted. Publish stages into a private temp directory first, so this
   matters only for other callers of the builder.
+- **Unpublished revisions can match list filters.** A publish that writes `rev.<n>` and dies before
+  moving `latest` leaves that revision behind. Digest reads, tagging and revision listing only see
+  revisions up to `latest`, and retrying the same publish reuses it, but if a different publish
+  lands first it stays below `latest` and can still match `description`/`tags` list filters (and
+  digest reads). Fix: record publication with the pointer update and filter on it.
 - **Relationship filter does not require the same workspace.** A revision created in workspace B
   with a skill in workspace A as its parent (only possible through the raw entities API) could
   affect A's list filters for a caller who can read both. Fix: a same-workspace option on the

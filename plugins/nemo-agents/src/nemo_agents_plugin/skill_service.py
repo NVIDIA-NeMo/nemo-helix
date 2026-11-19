@@ -354,14 +354,24 @@ class SkillService:
     async def list_revisions(
         self, workspace: str, name: str, *, page: int = 1, page_size: int = 100
     ) -> Page[Skill] | None:
-        """A page of a skill's revisions, newest first, each verified; ``None`` if the skill is absent."""
+        """A page of a skill's published revisions, newest first, each verified; ``None`` if absent.
+
+        Only revisions up to ``latest`` are listed: one a failed publish wrote without moving the
+        pointers is not part of the skill's history.
+        """
         head = await self._get_head(workspace, name)
         if head is None:
             return None
         result = await self.revision_client.list(
             SkillRevisionEntity,
             workspace=workspace,
-            filter_operation=ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=head.id),
+            filter_operation=LogicalOperation(
+                operator=FilterOperator.AND,
+                operations=[
+                    ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=head.id),
+                    ComparisonOperation(field="data.revision", operator=FilterOperator.LTE, value=_published(head)),
+                ],
+            ),
             sort=_NEWEST_FIRST,
             page=page,
             page_size=page_size,
@@ -473,8 +483,14 @@ class SkillService:
         except NemoEntityNotFoundError:
             return None
 
-    async def _find_by_digest(self, head: SkillEntity, digest: str) -> SkillRevisionEntity | None:
-        """Newest revision of this skill with ``digest``, or ``None``."""
+    async def _find_by_digest(
+        self, head: SkillEntity, digest: str, *, max_ordinal: int | None = None
+    ) -> SkillRevisionEntity | None:
+        """Newest revision of this skill with ``digest`` (at or below ``max_ordinal``, if given), or ``None``.
+
+        Publishing calls this unbounded, so a retry can find and reuse the revision its earlier
+        attempt wrote before the pointers moved; public reads bound it to published revisions.
+        """
         result = await self.revision_client.list(
             SkillRevisionEntity,
             workspace=head.workspace,
@@ -483,6 +499,13 @@ class SkillService:
                 operations=[
                     ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=head.id),
                     ComparisonOperation(field="data.content_hash", operator=FilterOperator.EQ, value=digest),
+                    *(
+                        []
+                        if max_ordinal is None
+                        else [
+                            ComparisonOperation(field="data.revision", operator=FilterOperator.LTE, value=max_ordinal)
+                        ]
+                    ),
                 ],
             ),
             sort=_NEWEST_FIRST,
@@ -491,9 +514,13 @@ class SkillService:
         return result.data[0] if result.data else None
 
     async def _resolve(self, head: SkillEntity, fragment: str) -> SkillRevisionEntity:
-        """The verified revision a tag or digest names."""
+        """The verified, published revision a tag or digest names.
+
+        Tags only ever point at published revisions. A digest is matched only up to ``latest``, so a
+        revision a failed publish wrote without moving the pointers cannot be read or tagged.
+        """
         if is_digest(fragment):
-            found = await self._find_by_digest(head, fragment)
+            found = await self._find_by_digest(head, fragment, max_ordinal=_published(head))
             if found is None:
                 raise SkillRevisionNotFoundError(
                     f"Skill '{head.workspace}/{head.name}' has no revision with digest {fragment!r}"
@@ -595,6 +622,11 @@ class SkillService:
 #: Longest tag the revision and tag routes accept in their path; a longer one could be stored but
 #: never read back.
 SKILL_TAG_MAX_LENGTH = 255
+
+
+def _published(head: SkillEntity) -> int:
+    """Highest published ordinal: what ``latest`` names (``latest`` only moves forward), 0 if none."""
+    return head.tags.get(LATEST_TAG, 0)
 
 
 def _validate_skill_tag(tag: str, *, movable: bool = False) -> str:

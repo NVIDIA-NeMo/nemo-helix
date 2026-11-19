@@ -153,9 +153,12 @@ class FakeStore:
             if etype == entity_type.__entity_type__ and ws == workspace
         ]
         for comparison in _comparisons(filter_operation):
-            assert comparison.operator is FilterOperator.EQ
+            assert comparison.operator in (FilterOperator.EQ, FilterOperator.LTE)
             if comparison.field == "parent":
                 rows = [r for r in rows if r.parent == comparison.value]
+            elif comparison.operator is FilterOperator.LTE:
+                attribute = comparison.field.removeprefix("data.")
+                rows = [r for r in rows if getattr(r, attribute) <= comparison.value]
             else:
                 attribute = comparison.field.removeprefix("data.")
                 rows = [r for r in rows if getattr(r, attribute) == comparison.value]
@@ -758,3 +761,24 @@ async def test_revisions_are_ordered_by_ordinal_not_timestamp(harness: Harness) 
     page = await harness.service.list_revisions(WS, SKILL)
 
     assert page is not None and [s.revision for s in page.data] == [2, 1]
+
+
+async def test_a_revision_a_failed_publish_left_behind_is_not_public(harness: Harness) -> None:
+    await harness.service.create_skill(WS, SKILL, _input())
+    harness.source(body="v2\n")
+    stray, _ = await harness.service.publish_skill(WS, SKILL, _input())
+    # Model the publish having died after writing rev.2 but before moving the pointers.
+    harness.store.head().tags = {"latest": 1}
+    harness.store.head().latest_revision = 1
+
+    with pytest.raises(SkillRevisionNotFoundError):
+        await harness.service.get_skill(WS, SKILL, stray.content_hash)
+    with pytest.raises(SkillRevisionNotFoundError):
+        await harness.service.tag_revision(WS, SKILL, "oops", stray.content_hash)
+    page = await harness.service.list_revisions(WS, SKILL)
+    assert page is not None and [s.revision for s in page.data] == [1]
+
+    # Retrying the same publish still finds and finishes it.
+    retried, _ = await harness.service.publish_skill(WS, SKILL, _input())
+    assert retried.revision == 2
+    assert (await harness.service.get_skill(WS, SKILL, stray.content_hash)) is not None
