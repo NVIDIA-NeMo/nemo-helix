@@ -53,3 +53,13 @@ def test_duplicate_connection_names_rejected():
     connection = ObservabilityConnection(name="a", provider="mlflow", base_url="http://localhost:5000")
     with pytest.raises(ValidationError, match="duplicate"):
         ObservabilityConfig(connections=[connection, connection])
+
+
+@pytest.mark.parametrize("secret", ["", "too-short"])
+def test_weak_session_secret_rejected(secret):
+    with pytest.raises(ValidationError, match="session_secret"):
+        ObservabilityConfig(session_secret=secret)
+
+
+def test_strong_session_secret_accepted():
+    assert ObservabilityConfig(session_secret="x" * 32).session_secret is not None

@@ -71,6 +71,7 @@ class ObservabilityConfig(NemoConfig):
     )
     session_secret: SecretStr | None = Field(
         default=None,
+        min_length=32,
         description="HMAC key for UI session cookies. Unset generates a per-process key, so sessions do not "
         "survive restarts or span replicas; set it when running more than one platform replica.",
     )
