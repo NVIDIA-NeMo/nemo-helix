@@ -1204,6 +1204,58 @@ async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_mock_skill_reaches_harbor_only_when_enabled(tmp_path, monkeypatch, enabled):
+    from harbor.skills import resolve_skills
+    from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
+
+    agents = []
+
+    async def create(job_config):
+        agents.extend(job_config.agents)
+        return _FakeJob()
+
+    monkeypatch.setattr(harbor_runtime, "_create_harbor_job", create)
+    config = HarborRuntimeConfig(
+        jobs_dir=tmp_path / "jobs",
+        agent_name="codex",
+        env_vars={"NHX_HARBOR_MOCK_SKILL": "1"} if enabled else {},
+        environment=HarborEnvironmentConfig(import_path="custom:Environment"),
+    )
+    _, run_job = _build_native_job(config, tmp_path / "dataset", None, env_templates={})
+
+    await run_job()
+
+    (agent,) = agents
+    assert "NHX_HARBOR_MOCK_SKILL" not in agent.env
+    skills = resolve_skills(agent.skills)
+    assert [skill.name for skill in skills] == (["supercool-guidelines"] if enabled else [])
+    if enabled:
+        manifest = (skills[0].source / "SKILL.md").read_text()
+        assert "`supercool_`" in manifest
+        assert "`enieme`" in manifest
+
+
+def test_mock_skill_content_only_changes_enabled_cache_stamp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
+
+    baseline, _, task = _seed_cached_job(tmp_path)
+    enabled = baseline.model_copy(update={"env_vars": {"NHX_HARBOR_MOCK_SKILL": "1"}})
+    dataset = Path(str(task.metadata["harbor_dataset_path"]))
+    skill = tmp_path / "supercool-guidelines"
+    shutil.copytree(harbor_runtime._MOCK_SKILL_DIR, skill)
+    monkeypatch.setattr(harbor_runtime, "_MOCK_SKILL_DIR", skill)
+
+    without_skill = harbor_runtime._cache_stamp(baseline, dataset, [task])
+    with_skill = harbor_runtime._cache_stamp(enabled, dataset, [task])
+    manifest = skill / "SKILL.md"
+    manifest.write_text(manifest.read_text() + "\nAdditional guidance.\n")
+
+    assert harbor_runtime._cache_stamp(baseline, dataset, [task]) == without_skill
+    assert harbor_runtime._cache_stamp(enabled, dataset, [task]) != with_skill
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("agent_shape", ["builtin", "installed_import_path", "agent_dir"])
 async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_shape: str

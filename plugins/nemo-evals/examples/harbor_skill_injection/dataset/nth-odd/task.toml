@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+version = "1.0"
+artifacts = ["/app/solution.py"]
+
+[task]
+name = "harbor/nth-odd"
+
+[environment]
+cpus = 1
+memory_mb = 512
