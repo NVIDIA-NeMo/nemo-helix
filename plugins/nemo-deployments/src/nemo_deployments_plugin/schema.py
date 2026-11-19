@@ -130,6 +130,12 @@ class CreateDeploymentConfigRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    @model_validator(mode="after")
+    def validate_auth_proxy_identity(self) -> CreateDeploymentConfigRequest:
+        if self.auth_proxy_sidecar and not self.auth_proxy_sidecar_identity:
+            raise ValueError("auth_proxy_sidecar_identity is required when auth_proxy_sidecar is True")
+        return self
+
     @field_validator("shm_size")
     @classmethod
     def validate_shm_size(cls, value: str | None) -> str | None:

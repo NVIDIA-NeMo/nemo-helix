@@ -46,6 +46,38 @@ def test_create_deployment_config_201(client: TestClient, mock_entity_client: As
     assert mock_entity_client.create.await_args.args[0].shm_size == "8Gi"
 
 
+@pytest.mark.parametrize("alias", ["authProxySidecar", "auth_proxy_sidecar"])
+@pytest.mark.parametrize("identity", [{}, {"authProxySidecarIdentity": None}, {"authProxySidecarIdentity": ""}])
+def test_create_deployment_config_rejects_auth_proxy_without_identity(
+    client: TestClient, mock_entity_client: AsyncMock, alias: str, identity: dict
+) -> None:
+    resp = client.post(
+        "/apis/deployments/v2/workspaces/default/deployment-configs",
+        json={"name": "cfg1", alias: True, **identity},
+    )
+
+    assert resp.status_code == 422
+    assert "auth_proxy_sidecar_identity is required" in resp.text
+    mock_entity_client.create.assert_not_awaited()
+
+
+@pytest.mark.parametrize("proxy_config", [{}, {"authProxySidecar": False}, {"auth_proxy_sidecar": False}])
+def test_create_deployment_config_without_auth_proxy_needs_no_identity(
+    client: TestClient, mock_entity_client: AsyncMock, proxy_config: dict
+) -> None:
+    mock_entity_client.create.side_effect = lambda config: config
+
+    resp = client.post(
+        "/apis/deployments/v2/workspaces/default/deployment-configs",
+        json={"name": "cfg1", **proxy_config},
+    )
+
+    assert resp.status_code == 201
+    created_config = mock_entity_client.create.await_args.args[0]
+    assert created_config.auth_proxy_sidecar is False
+    assert created_config.auth_proxy_sidecar_identity is None
+
+
 def test_create_deployment_config_accepts_camel_case_restart_policy(
     client: TestClient,
     mock_entity_client: AsyncMock,
