@@ -1306,6 +1306,12 @@ nemo plugins [OPTIONS] [COMMAND] [ARGS]...
 **Commands:**
 
 * `list`: List installed plugins.
+* `preview`: Show what installing an external plugin would approve.
+* `install`: Register an external plugin after reviewing and...
+* `installed`: List external plugins registered with the platform.
+* `uninstall`: Remove an external plugin's registration.
+* `enable`: Re-enable a disabled external plugin.
+* `disable`: Disable an external plugin without removing its...
 
 #### nemo plugins list
 
@@ -1336,6 +1342,191 @@ nemo plugins list [OPTIONS]
 * `--no-truncate`: Don't truncate long values in table/markdown/csv output.
 * `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
 * `--stream`: Emit newline-delimited JSON, one record per line. Requires JSON or raw output.
+
+#### nemo plugins preview
+
+Show what installing an external plugin would approve. Changes nothing.
+
+Fetches the manifest through the platform and prints its endpoints, credential
+reference, UI bundle hash, and the trust warning, plus the manifest digest that
+`install --manifest-sha256` pins.
+
+**Examples:**
+
+```shell
+nemo plugins preview http://127.0.0.1:6007/plugin.yaml
+nemo plugins preview http://127.0.0.1:6007/plugin.yaml -f json
+```
+
+**Usage:**
+
+```shell
+nemo plugins preview [OPTIONS] URL
+```
+
+**Arguments:**
+
+* `<URL>`: URL of the external plugin's plugin.yaml manifest.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+#### nemo plugins install
+
+Register an external plugin after reviewing and consenting to its manifest.
+
+Previews the manifest, prints what you are approving, and asks for confirmation.
+The install is pinned to the previewed digest, so a manifest that changes in
+between is rejected. A UI bundle runs inside Studio with Studio-origin
+privileges; only install plugins you trust.
+
+`--yes` skips the prompt but requires `--manifest-sha256`, so a non-interactive
+install can only approve a snapshot someone already reviewed.
+
+**Examples:**
+
+```shell
+nemo plugins install http://127.0.0.1:6007/plugin.yaml
+nemo plugins install http://127.0.0.1:6007/plugin.yaml --manifest-sha256 <digest> --yes
+```
+
+**Usage:**
+
+```shell
+nemo plugins install [OPTIONS] URL
+```
+
+**Arguments:**
+
+* `<URL>`: URL of the external plugin's plugin.yaml manifest.
+
+**Options:**
+
+* `--manifest-sha256`: Digest of the manifest you reviewed (from `plugins preview`). Install fails if it differs.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+#### nemo plugins installed
+
+List external plugins registered with the platform.
+
+**Examples:**
+
+```shell
+nemo plugins installed
+nemo plugins installed -f json
+```
+
+**Usage:**
+
+```shell
+nemo plugins installed [OPTIONS]
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+#### nemo plugins uninstall
+
+Remove an external plugin's registration.
+
+Removes its routes and Studio navigation entry. It does not stop the plugin's
+own server, delete data it stored, or delete the workspace secret it used.
+
+**Examples:**
+
+```shell
+nemo plugins uninstall phoenix
+```
+
+**Usage:**
+
+```shell
+nemo plugins uninstall [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Name of the registered external plugin.
+
+**Options:**
+
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+#### nemo plugins enable
+
+Re-enable a disabled external plugin.
+
+**Examples:**
+
+```shell
+nemo plugins enable phoenix
+```
+
+**Usage:**
+
+```shell
+nemo plugins enable [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Name of the registered external plugin.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo plugins disable
+
+Disable an external plugin without removing its registration.
+
+**Examples:**
+
+```shell
+nemo plugins disable phoenix
+```
+
+**Usage:**
+
+```shell
+nemo plugins disable [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Name of the registered external plugin.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
 
 ## Core plugins
 
