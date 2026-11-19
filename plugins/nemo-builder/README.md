@@ -6,7 +6,9 @@
 Container image builds for NeMo Helix. You submit Dockerfiles whose build context is in a Files
 fileset. The plugin builds them with kaniko, in a sandbox pod that holds no credentials. Then it
 pushes each image to the deployment's registry, signs it with your workspace's key, and records it
-as a `ContainerImage` you can pin by digest.
+as a `ContainerImage` you can pin by digest. A deployment can instead have a build service outside
+the cluster build its images: see
+[Building through a service outside the cluster](#building-through-a-service-outside-the-cluster).
 
 **Status: proof of concept.** It runs end to end, installed with the platform's Helm chart, on minikube
 and on a shared multi-node cluster publishing to Harbor, and it has the [limitations](#limitations)
@@ -410,14 +412,14 @@ service on its own permissions, so the service checks its user may read images h
 
 | Field | Meaning |
 |---|---|
-| `status` | `pending`, `ready` or `failed` (or `queued`, deprecated: see [Upgrading from 0.10](#upgrading-from-010)). `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit that wrote the row was refused, or once the image is found abandoned: its job ended without completing it, or it is five minutes old and has no job (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
-| `status_detail` | Why a row failed. |
+| `status` | `pending`, `ready` or `failed` (or `queued`, deprecated: see [Upgrading from 0.10](#upgrading-from-010)). `ready` is written once the push step has pushed and signed the image, or, with the `remote` backend, once the build service has published it. `failed` is written when the submit that wrote the row was refused, or once the image is found abandoned: its job ended without completing it, or it is five minutes old and has no job (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
+| `status_detail` | Why a row failed. When its job ended without completing it, the detail ends with the job's own reason, if the job gave one: for a remote build, the line its step logged for the image. |
 | `registry`, `repository` | Where the image lives. |
-| `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
+| `digest` | The digest the image is published at, set when the row becomes `ready`: the one the push step pushed and signed, or the one a remote build service published. |
 | `image_ref` | `<registry>/<repository>@<digest>`, the reference to pin. Null until the row is `ready`. |
 | `runtime_config` | How the image starts by default: its `entrypoint`, `cmd` and `working_dir`, read from the image's config when the row becomes `ready`, including what it inherits from its base image. A runtime that replaces the container's entrypoint, such as OpenSandbox, uses it to start the image's own. Null for a row completed before the builder recorded it, or whose config couldn't be read. |
 | `provenance` | The build set, revision, spec and job that produced the image, and `request_digest`, the digest of the request. `spec` is null for the unnamed spec. `backend` is the backend that built the row: `execution`, this cluster, or `remote` (see [Building through a service outside the cluster](#building-through-a-service-outside-the-cluster)). |
-| `external` | Only on a row the `remote` backend built: what the build service calls the image. `image_id` is the service's own handle, for a consumer that starts the image through that service; `build_id` is its record of the build; `attributes` holds a few facts it reports. The builder stores these and reads none of them. |
+| `external` | Only on a row the `remote` backend built: what the build service calls the image. `image_id` is the service's own handle, for a consumer that uses the same service, and isn't necessarily unique to a row; `build_id` is its record of the build; `attributes` holds a few facts it reports. The builder stores these and reads none of them. |
 
 Names come from the request:
 
@@ -566,8 +568,8 @@ images still build, push and complete. The failed image's row fails once the job
 
 ## Building through a service outside the cluster
 
-Everything above describes the default backend, `execution`, which builds in this cluster. A
-deployment can instead set `builder.backend: remote`, and a build service outside the cluster then
+Unless it says otherwise, the rest of this README describes the default backend, `execution`, which
+builds in this cluster. A deployment can instead set `builder.backend: remote`, and a build service outside the cluster then
 builds, signs and publishes every image. The API, the rows and the caller's requests stay the same.
 The plugin names no service: the deployment names a step image that holds the service's client.
 
@@ -583,9 +585,11 @@ builder:
     credential_secret: null              # or <workspace>/<name> of a platform secret holding the credential
     platforms: [linux/amd64]
     max_specs_per_set: 1
-    allow_dockerfile_path: true
+    allow_dockerfile_path: true          # false refuses a Dockerfile that isn't at the context root
     build_timeout_seconds: 3600          # for one image, from when the service is asked to start
 ```
+
+From the environment, the `remote` section is one JSON value, `NEMO_BUILDER_REMOTE`.
 
 A build set becomes one job with one step, `remote-build`. The step fetches each image's context
 from Files, acting for the submitter, has the service build it, and completes the row with the digest
@@ -596,14 +600,22 @@ What differs for a caller:
 
 - A spec with `output`, `mounts` or an image to copy is refused with `409`, as is a platform outside
   `platforms` and a set of more than `max_specs_per_set` images. The answer's `code` is
-  `backend_rejected`; a revision another request holds is a `409` with no `code`.
+  `backend_rejected`; a revision another request holds is a `409` with no `code`. Evals asks for
+  both of the first two: it builds agent layers with `mounts` and copies prebuilt task images, so
+  this backend refuses those builds.
+- A Dockerfile that isn't `Dockerfile` at the context root is copied to the root for the build, in
+  place of any `Dockerfile` already there. An ignore file named for it (`<its path>.dockerignore`)
+  isn't moved with it. With `allow_dockerfile_path: false`, such a spec is refused instead, with
+  `409` `backend_rejected`.
 - Every workspace's images land in the service's one repository, and no tag is pushed. Pin
   `image_ref`.
 - The builder doesn't sign, and holds no key. Whether an image is signed, and by whom, is the
   service's.
 - `runtime_config` is null: the step never reads the image's config.
 - There is no build log. A failed row's `status_detail` ends with the step's one-line reason, which
-  names the service's build once one was started.
+  names the service's build once one was started. If that build couldn't be cancelled, the reason
+  says it may still be running.
+- A `ready` row doesn't show whose image it names: see [Security](#security).
 - A build that starts while the service is unreachable is tried again for ten minutes, and one
   already running is waited on until its timeout. A longer outage fails each queued build as it
   reaches a slot.
@@ -622,7 +634,8 @@ What an operator sets up:
   the builds in flight, so set it to what the service lets the deployment queue. Its
   `ttl_seconds_active` is the only limit Jobs puts on the running step, and Jobs counts it from when
   the build was submitted, so it must cover the longest a build waits for a slot as well as the
-  build. Whatever the service's client reads from its environment is set there too, and so is the
+  build. The limit a submit checks it against is a floor: it leaves out fetching each context and
+  up to five minutes of reporting a built image, so set the profile's limit above it. Whatever the service's client reads from its environment is set there too, and so is the
   network path to the service: a Jobs profile has no egress setting. A profile in a namespace other
   than the release's also needs what the chart creates only for the in-cluster builder: a Role and
   RoleBinding there for the Jobs controller, the ServiceAccount the profile names, with
@@ -847,6 +860,9 @@ builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
 
 ## Limitations
 
+These describe the default `execution` backend. What differs with `backend: remote` is in
+[Building through a service outside the cluster](#building-through-a-service-outside-the-cluster).
+
 ### Deployment
 
 - **Kubernetes only, with the platform inside the cluster.** Submits fail with a `409` unless the
@@ -929,6 +945,12 @@ builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
   One that names a service can also rewrite any image's row through the platform's generic Entities
   route, including a `ready` row's digest, which `complete` never changes. Even a real workload
   token says only whom a step acts for, not which job it belongs to.
+- **With `backend: remote`, a `ready` row doesn't show whose image it names.** `complete` records
+  the digest and the `external` its caller sends, and checks neither against the build service.
+  Every workspace's images share the service's one repository, so a caller that completes its own
+  `pending` row can name another workspace's image, if it knows that image's digest or handle. A
+  consumer must not take a row's `image_ref` or `external.image_id` as proof that the image is the
+  workspace's own.
 - **Platform auth on works only with workload token exchange off.** With exchange on, the jobs
   launcher can't fetch the push step's secrets: it fetches them with the step's delegated identity,
   which Jobs doesn't give a step under exchange, so the step never starts. Without exchange, the
