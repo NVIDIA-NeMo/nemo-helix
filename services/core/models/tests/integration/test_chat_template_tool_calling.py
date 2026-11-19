@@ -189,6 +189,7 @@ def sample_deployment():
     dep.config = None
     dep.config_version = None
     dep.model_provider_id = None
+    dep.auth_context = None
     return dep
 
 
