@@ -87,6 +87,7 @@ class PreviewRenderer(CLIRenderer):
         self._processor_outputs: dict[str, list[dict]] = {}
         self._error_message: str | None = None
         self._log_levels_seen: set[str] = set()
+        self._log_level_counts: dict[str, int] = {}
 
     def on_start(self, *, ctx: RendererContext) -> None:
         print_header("Data Designer Preview")
@@ -97,6 +98,7 @@ class PreviewRenderer(CLIRenderer):
             return
         if isinstance(typed, LogFrame):
             self._log_levels_seen.add(typed.level)
+            self._log_level_counts[typed.level] = self._log_level_counts.get(typed.level, 0) + 1
             _print_log(typed)
         elif isinstance(typed, DatasetFrame):
             self._records.extend(typed.records)
@@ -183,7 +185,8 @@ class PreviewRenderer(CLIRenderer):
 
     def _print_final_status(self, total: int) -> None:
         if "error" in self._log_levels_seen:
-            print_error("Preview completed with errors. See the log lines above.")
+            errors = self._log_level_counts.get("error", 0)
+            print_error(f"Preview completed with {errors} error(s). See the log lines above.")
         elif "warning" in self._log_levels_seen or "warn" in self._log_levels_seen:
             console.print("[yellow]⚠ Preview completed with warnings.[/yellow]")
         else:
