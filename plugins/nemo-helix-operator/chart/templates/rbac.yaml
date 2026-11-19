@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+{{- if .Values.deploy.enabled }}
+{{- $builds := .Values.deploy.buildsNamespace | default (printf "%s-builds" .Release.Namespace) }}
+{{- $subject := dict "kind" "ServiceAccount" "name" .Release.Name "namespace" .Release.Namespace }}
+{{- range $namespace := list .Release.Namespace $builds }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $.Release.Name }}-admin
+  namespace: {{ $namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+  - {{ toJson $subject }}
+{{- end }}
+---
+# `admin` can only read quotas and limit ranges, which the Helix chart manages in the builds namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-quotas
+  namespace: {{ $builds }}
+rules:
+  - apiGroups: [""]
+    resources: [resourcequotas, limitranges]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-quotas
+  namespace: {{ $builds }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-quotas
+subjects:
+  - {{ toJson $subject }}
+---
+# The builds Namespace is the Helix release's only cluster-scoped object.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-namespace
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    resourceNames: [{{ $builds }}]
+    verbs: [get, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-namespace
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-namespace
+subjects:
+  - {{ toJson $subject }}
+{{- end }}
