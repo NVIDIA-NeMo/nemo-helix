@@ -32,6 +32,7 @@ import {
   readReport,
   type ComparisonReport,
 } from '@studio/routes/evaluation/SkillComparisonRoute/report';
+import { SavedRuns } from '@studio/routes/evaluation/SkillComparisonRoute/SavedRuns';
 import { useRef, useState } from 'react';
 
 export const SkillComparisonRoute = () => {
@@ -96,13 +97,25 @@ export const SkillComparisonRoute = () => {
             }
             slotDescription="Compare baseline and with-skill evaluations, then inspect the measurements and evidence behind each score."
             slotActions={
-              <Button
-                color="brand"
-                kind={report ? 'primary' : 'secondary'}
-                onClick={() => picker.current?.click()}
-              >
-                {loading ? 'Reading Report…' : report ? 'Replace Report' : 'Import Report'}
-              </Button>
+              <Flex gap="density-sm">
+                <SavedRuns
+                  workspace={workspace}
+                  onLoad={(report) => {
+                    ++request.current;
+                    setImported({ report, filename: 'Saved executions' });
+                    setMetric(null);
+                    setError(null);
+                    setLoading(false);
+                  }}
+                />
+                <Button
+                  color="brand"
+                  kind={report ? 'primary' : 'secondary'}
+                  onClick={() => picker.current?.click()}
+                >
+                  {loading ? 'Reading Report…' : report ? 'Replace Report' : 'Import Report'}
+                </Button>
+              </Flex>
             }
           />
           <input
@@ -117,10 +130,12 @@ export const SkillComparisonRoute = () => {
               if (file) void importFile(file);
             }}
           />
-          <Text kind="body/regular/sm" className="text-secondary">
-            Import skill-eval-summary.json from the Harbor Evals skill example. The report stays in
-            this browser tab; importing it does not upload data or start an evaluation.
-          </Text>
+          {!report && (
+            <Text kind="body/regular/sm" className="text-secondary">
+              Open a saved skill-eval-summary.json to compare results. Files stay in this browser
+              tab.
+            </Text>
+          )}
           {error && (
             <div role="alert">
               <ErrorPanel title="Could Not Import Report" errorMessage={error} />
@@ -136,25 +151,6 @@ export const SkillComparisonRoute = () => {
           )}
           {report && (
             <>
-              <KeyValueGrid
-                items={[
-                  { key: 'file', label: 'Report', value: imported.filename },
-                  {
-                    key: 'skill',
-                    label: 'Skill Revision',
-                    value: report.skill_ref,
-                    wrapValue: true,
-                  },
-                  {
-                    key: 'taskset',
-                    label: 'Taskset Revision',
-                    value: report.taskset_ref,
-                    wrapValue: true,
-                  },
-                  { key: 'context', label: 'Source Context', value: report.context },
-                  { key: 'workspace', label: 'Source Workspace', value: report.workspace },
-                ]}
-              />
               {warnings.length > 0 && (
                 <DetailPanel title="Comparison Needs Review">
                   <Stack gap="density-sm">
@@ -171,31 +167,24 @@ export const SkillComparisonRoute = () => {
                   Scoring error: {report.error}
                 </Text>
               )}
-              <div className="grid grid-cols-1 gap-density-lg md:grid-cols-2">
+              <Flex gap="density-xl" align="center" className="flex-wrap border-y border-base py-3">
                 {ARM_NAMES.map((name) => (
-                  <DetailPanel key={name} title={name === 'baseline' ? 'Baseline' : 'With Skill'}>
-                    <Stack gap="density-sm">
-                      <Text kind="title/lg" className="tabular-nums">
-                        {report.arms[name].reward.toFixed(2)}
-                      </Text>
-                      <Text>Live Harbor reward · {report.arms[name].run_id}</Text>
-                      <Text kind="body/regular/sm" className="text-secondary">
-                        Skill activation:{' '}
-                        {report.arms[name].activation == null
-                          ? 'Unmeasured'
-                          : report.arms[name].activation
-                            ? 'Confirmed'
-                            : 'Not Activated'}
-                      </Text>
-                    </Stack>
-                  </DetailPanel>
+                  <Flex key={name} gap="density-md" align="center">
+                    <Text className="text-secondary">
+                      {name === 'baseline' ? 'Baseline' : 'With Skill'}
+                    </Text>
+                    <Text kind="title/sm" className="tabular-nums">
+                      {report.arms[name].reward.toFixed(2)}
+                    </Text>
+                    <Text kind="body/regular/sm" className="text-secondary">
+                      task reward
+                    </Text>
+                  </Flex>
                 ))}
-              </div>
-              <Text kind="body/regular/sm" className="text-secondary">
-                Each arm is one live trial. Differences describe these observations; the report does
-                not establish statistical significance. Live rewards, replay metrics, and package
-                checks are separate measurements.
-              </Text>
+                <Text kind="body/regular/sm" className="text-secondary">
+                  Each arm is one live trial. Select a score to inspect its evidence.
+                </Text>
+              </Flex>
               <Tabs
                 className="min-w-0 w-full"
                 key={imported.filename + report.arms.baseline.run_id}
@@ -269,6 +258,29 @@ export const SkillComparisonRoute = () => {
                     children: 'Evidence',
                     slotContent: (
                       <Stack gap="density-lg" className="pt-4">
+                        <KeyValueGrid
+                          items={[
+                            { key: 'file', label: 'Report', value: imported.filename },
+                            {
+                              key: 'skill',
+                              label: 'Skill Revision',
+                              value: report.skill_ref,
+                              wrapValue: true,
+                            },
+                            {
+                              key: 'taskset',
+                              label: 'Taskset Revision',
+                              value: report.taskset_ref,
+                              wrapValue: true,
+                            },
+                            { key: 'context', label: 'Source Context', value: report.context },
+                            {
+                              key: 'workspace',
+                              label: 'Source Workspace',
+                              value: report.workspace,
+                            },
+                          ]}
+                        />
                         <Text className="text-secondary" kind="body/regular/sm">
                           Report context: {report.context}. Job links open this Helix deployment in
                           workspace {report.workspace}.

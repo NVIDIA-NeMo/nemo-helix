@@ -13,6 +13,8 @@ import {
   Text,
 } from '@nvidia/foundations-react-core';
 import { DetailPanel } from '@studio/components/DetailPanel';
+import styles from '@studio/routes/evaluation/SkillComparisonRoute/comparison.module.css';
+import { metricLabel } from '@studio/routes/evaluation/SkillComparisonRoute/presentation';
 import {
   ARM_NAMES,
   comparisonMetrics,
@@ -70,16 +72,33 @@ export function MetricComparison({
   return (
     <Stack gap="density-xl">
       {chartMetrics.length > 0 && (
-        <DetailPanel title="Scores by Metric">
+        <section className={styles.chart} aria-label="Scores by metric">
           <Stack gap="density-lg">
-            <Text kind="body/regular/sm" className="text-secondary">
-              Thick bars show with-skill scores; thin bars show the baseline. Only measured scores
-              on a 0–1 scale appear here. Select a metric to inspect its evidence. Confidence
-              intervals are not available in this report.
-            </Text>
-            <div className="grid grid-cols-[minmax(10rem,1fr)_minmax(12rem,3fr)] gap-x-density-lg gap-y-density-lg overflow-x-auto">
+            <Flex justify="between" align="center" gap="density-lg">
+              <Text kind="title/sm">Scores by Metric</Text>
+              <Flex gap="density-lg" align="center">
+                <Flex gap="2" align="center">
+                  <svg width="24" height="12" aria-hidden>
+                    <rect
+                      width="24"
+                      height="12"
+                      rx="2"
+                      fill="var(--color-chart-data-categorical-1)"
+                    />
+                  </svg>
+                  <Text>With skill</Text>
+                </Flex>
+                <Flex gap="2" align="center">
+                  <svg width="24" height="4" aria-hidden>
+                    <rect width="24" height="4" fill="var(--text-color-secondary)" />
+                  </svg>
+                  <Text>Baseline</Text>
+                </Flex>
+              </Flex>
+            </Flex>
+            <div className={styles.scoreGrid}>
               <span />
-              <div className="flex justify-between text-secondary text-xs tabular-nums" aria-hidden>
+              <div className={styles.axis} aria-hidden>
                 {[0, 0.25, 0.5, 0.75, 1].map((tick) => (
                   <span key={tick}>{tick}</span>
                 ))}
@@ -88,12 +107,19 @@ export function MetricComparison({
                 <div key={metric.name} className="contents">
                   <Button
                     kind="tertiary"
-                    className="justify-start h-auto break-all text-left"
+                    className="justify-start h-auto text-left text-sm"
+                    aria-label={metric.name}
+                    title={metric.name}
                     onClick={() => onInspect(metric.name)}
                   >
-                    {metric.name}
+                    {metricLabel(metric.name)}
                   </Button>
-                  <Stack gap="2" className="min-w-0">
+                  <div className={styles.plot}>
+                    <div className={styles.gridlines} aria-hidden>
+                      {[0, 1, 2, 3, 4].map((tick) => (
+                        <span key={tick} />
+                      ))}
+                    </div>
                     {(
                       [
                         ['with-skill', metric.treatment],
@@ -106,36 +132,34 @@ export function MetricComparison({
                         align="center"
                         aria-label={`${metric.name}, ${labels[arm]}: ${format(observation.value)}`}
                       >
-                        <div className="flex-1 rounded bg-surface-sunken" aria-hidden>
+                        <div className="flex-1 relative" aria-hidden>
                           <svg
                             viewBox="0 0 100 12"
                             preserveAspectRatio="none"
                             width="100%"
-                            height={arm === 'with-skill' ? 12 : 6}
+                            height={arm === 'with-skill' ? 12 : 4}
                           >
                             <rect
                               width={(observation.value ?? 0) * 100}
                               height="12"
-                              rx="2"
+                              rx="0.3"
                               fill={
                                 arm === 'with-skill'
                                   ? 'var(--color-chart-data-categorical-1)'
-                                  : 'var(--color-chart-data-categorical-2)'
+                                  : 'var(--text-color-secondary)'
                               }
                             />
                           </svg>
                         </div>
-                        <Text kind="body/regular/sm" className="w-24 text-right tabular-nums">
-                          {format(observation.value)}
-                        </Text>
+                        <Text className={styles.value}>{format(observation.value)}</Text>
                       </Flex>
                     ))}
-                  </Stack>
+                  </div>
                 </div>
               ))}
             </div>
           </Stack>
-        </DetailPanel>
+        </section>
       )}
       <Stack gap="density-md">
         <Text kind="title/sm">Every Metric</Text>
@@ -160,7 +184,16 @@ export function MetricComparison({
                 id: metric.name,
                 onRowSelect: () => onInspect(metric.name),
                 cells: [
-                  metric.name,
+                  {
+                    children: (
+                      <Stack gap="1">
+                        <Text>{metricLabel(metric.name)}</Text>
+                        <Text kind="body/regular/sm" className="text-secondary">
+                          {metric.name}
+                        </Text>
+                      </Stack>
+                    ),
+                  },
                   { children: <Observation observation={metric.baseline} />, align: 'right' },
                   { children: <Observation observation={metric.treatment} />, align: 'right' },
                   { children: deltaText(metric.delta), align: 'right', className: 'tabular-nums' },
@@ -229,13 +262,13 @@ interface TrialRow {
   scores: TrialScore[];
 }
 const heatColors = [
-  'bg-[var(--color-chart-data-sequential-blue-1)]',
-  'bg-[var(--color-chart-data-sequential-blue-2)]',
-  'bg-[var(--color-chart-data-sequential-blue-3)]',
-  'bg-[var(--color-chart-data-sequential-blue-4)]',
-  'bg-[var(--color-chart-data-sequential-blue-5)]',
-  'bg-[var(--color-chart-data-sequential-blue-6)]',
-  'bg-[var(--color-chart-data-sequential-blue-7)]',
+  styles.heat0,
+  styles.heat1,
+  styles.heat2,
+  styles.heat3,
+  styles.heat4,
+  styles.heat5,
+  styles.heat6,
 ];
 
 export function TrialHeatmap({ report }: { report: ComparisonReport }) {
@@ -251,23 +284,46 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
       score.outputs.forEach((output) => metricNames.add(`${score.metric_type}.${output.name}`));
     }
   }
-  const metrics = [...metricNames].sort();
+  const metrics = [...metricNames]
+    .filter((name) => !name.endsWith('.label') && !name.endsWith('.efficiency_tokens'))
+    .sort();
   return (
     <Stack gap="density-md">
       <Text kind="title/sm">Scores by Task and Trial</Text>
       <Text className="text-secondary" kind="body/regular/sm">
-        Each row identifies a task, trial, and arm. Blue intensity shows reported values from 0 to
-        1; other values use neutral cells. Unmeasured cells have no intensity. Select a cell for the
-        original metric outputs and diagnostics.
+        Each row is one trial. Color shows the reported 0–1 score; — means unmeasured. Select a cell
+        to inspect its evidence.
       </Text>
+      <Flex align="center" gap="2">
+        <Text kind="body/regular/sm" className="text-secondary">
+          Low
+        </Text>
+        {heatColors.map((color, index) => (
+          <span
+            key={color}
+            className={`${color} w-6 h-3`}
+            aria-label={`Score intensity ${index}/6`}
+          />
+        ))}
+        <Text kind="body/regular/sm" className="text-secondary">
+          High
+        </Text>
+      </Flex>
       {rows.size === 0 ? (
         <Text>No per-trial scoring evidence was retained.</Text>
       ) : (
         <div className="overflow-x-auto">
           <Table
             aria-label="Scores by task and trial"
+            className={styles.matrix}
             layout="auto"
-            columns={['Task / Trial', 'Arm', ...metrics]}
+            columns={[
+              'Task / Trial',
+              'Arm',
+              ...metrics.map((name) => ({
+                children: <span title={name}>{metricLabel(name)}</span>,
+              })),
+            ]}
             rows={[...rows.values()].map((row) => ({
               id: row.id,
               cells: [
@@ -311,14 +367,14 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
                         : format(value);
                   return {
                     children: (
-                      <Button
-                        kind="tertiary"
-                        className={`w-full min-w-24 tabular-nums ${heat}`}
+                      <button
+                        type="button"
+                        className={`${styles.heatCell} ${heat}`}
                         onClick={() => setSelection({ row, metric })}
                         aria-label={`${row.task}, ${labels[row.arm]}, ${metric}: ${display === '—' ? 'Unmeasured' : display}`}
                       >
-                        <span className="rounded bg-surface-base px-1 text-primary">{display}</span>
-                      </Button>
+                        {display}
+                      </button>
                     ),
                   };
                 }),

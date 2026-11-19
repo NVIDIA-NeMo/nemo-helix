@@ -1,0 +1,138 @@
+/* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+.chart {
+  border: 1px solid var(--border-color-base);
+  border-radius: var(--radius-lg);
+  background: var(--background-color-surface-raised);
+  padding: 20px 24px;
+}
+
+.scoreGrid {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  column-gap: 24px;
+  row-gap: 14px;
+}
+
+.axis {
+  display: flex;
+  justify-content: space-between;
+  padding-right: 72px;
+  color: var(--text-color-secondary);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.plot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-block: 4px;
+}
+
+.gridlines {
+  position: absolute;
+  inset: 0 72px 0 0;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.gridlines > span {
+  width: 1px;
+  background: var(--border-color-chart);
+}
+
+.value {
+  width: 64px;
+  flex-shrink: 0;
+  font-family: ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  text-align: right;
+}
+
+.matrix {
+  min-width: 960px;
+}
+
+.matrix th {
+  max-width: 150px;
+  white-space: normal;
+  font-size: 13px;
+}
+
+.matrix td:not(:first-child) {
+  padding: 0;
+  text-align: center;
+}
+
+.heatCell {
+  min-width: 88px;
+  min-height: 56px;
+  width: 100%;
+  border: 0;
+  color: var(--text-color-primary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.heatCell:focus-visible {
+  outline: 2px solid var(--border-color-interaction-focus);
+  outline-offset: -3px;
+}
+
+.heat0 {
+  background: color-mix(
+    in srgb,
+    var(--color-chart-data-categorical-1) 5%,
+    var(--background-color-surface-raised)
+  );
+}
+.heat1 {
+  background: color-mix(
+    in srgb,
+    var(--color-chart-data-categorical-1) 11%,
+    var(--background-color-surface-raised)
+  );
+}
+.heat2 {
+  background: color-mix(
+    in srgb,
+    var(--color-chart-data-categorical-1) 18%,
+    var(--background-color-surface-raised)
+  );
+}
+.heat3 {
+  background: color-mix(
+    in srgb,
+    var(--color-chart-data-categorical-1) 26%,
+    var(--background-color-surface-raised)
+  );
+}
+.heat4 {
+  background: color-mix(
+    in srgb,
+    var(--color-chart-data-categorical-1) 34%,
+    var(--background-color-surface-raised)
+  );
+}
+.heat5 {
+  background: color-mix(
+    in srgb,
+    var(--color-chart-data-categorical-1) 43%,
+    var(--background-color-surface-raised)
+  );
+}
+.heat6 {
+  background: color-mix(
+    in srgb,
+    var(--color-chart-data-categorical-1) 52%,
+    var(--background-color-surface-raised)
+  );
+}

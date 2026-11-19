@@ -174,6 +174,16 @@ from [SkillEvaluator](https://gitlab-master.nvidia.com/ai_tools/nvevalcollection
 It uses Helix metric names and evidence contracts. It does not reinterpret those
 metrics as native SkillEvaluator dimensions or publish data to Eval Studio.
 
+The viewer also offers **Load Saved Runs** for completed Helix executions in the
+current workspace. Select a baseline without skills and a treatment with the same
+pinned taskset and one skill. The initial loader supports one task and one trial
+per arm, searches the latest 100 executions/scoring jobs, and uses the latest
+completed scoring replay with the exact trial ID. Its scoring job is identified
+in Evidence. Imported reports remain available for choosing other scoring
+configurations. No new evaluation is launched. Saved-run loading does not
+confirm runtime skill discovery from the live rollout, so differences remain
+withheld until that evidence is available.
+
 Set `EXPECT_SETUP_EGRESS=0` when using a profile with an empty `agent_setup_egress` list.
 The stored scoring Taskset follows the documented Harbor replay and metric extension APIs.
 [Custom metrics and views](https://docs.nvidia.com/nemo-helix/v0.10/documentation/evaluate-models/agent-eval/harbor-runner#custom-metrics-and-views)
