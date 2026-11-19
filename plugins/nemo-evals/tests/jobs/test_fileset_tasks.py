@@ -308,9 +308,13 @@ def test_a_resubmit_verifies_members_in_batches(ctx: ClientContext, monkeypatch:
 
     _submit(ctx, _tasks())
 
-    reads = [r for r in ctx.access_log.requests if r.method == "GET" and "/entities/" in r.path]
-    # Six batches of five pins at two queries each, plus a handful of lookups, never two per member.
-    assert len(reads) < 30, [r.path for r in reads]
+    reads = [
+        r
+        for r in ctx.access_log.requests
+        if r.method == "GET" and re.search(r"/entities/(?:task|task_revision)(?:/|$)", r.path)
+    ]
+    # Six batches of five pins use two queries each, without per-member lookups.
+    assert len(reads) == 12, [r.path for r in reads]
 
 
 def test_a_failing_submission_check_writes_nothing(ctx: ClientContext, monkeypatch: pytest.MonkeyPatch) -> None:

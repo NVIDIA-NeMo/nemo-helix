@@ -96,6 +96,7 @@ class AsyncJobsWatchClient(AsyncJobStatusClient, AsyncJobLogsClient, Protocol):
 
 
 class _JobsMethods:
+    read_job_events = method(endpoints.read_job_events)
     # Execution profiles
     get_execution_profiles = method(endpoints.get_execution_profiles)
 

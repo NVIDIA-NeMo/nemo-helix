@@ -10,7 +10,10 @@
     "noEmit": true,
     "strict": true,
     "skipLibCheck": true,
-    "types": ["vitest/globals", "vite/client", "node"]
+    "types": ["vitest/globals", "vite/client", "node"],
+    "paths": {
+      "@nemo/sdk/*": ["./*"]
+    }
   },
   "include": ["src/**/*.ts", "generated/*/api.ts", "generated/*/schema/**/*.ts"]
 }

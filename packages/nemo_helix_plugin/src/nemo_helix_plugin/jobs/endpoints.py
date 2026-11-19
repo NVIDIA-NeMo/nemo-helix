@@ -14,6 +14,7 @@ from abc import abstractmethod
 
 from nemo_helix_plugin.client.endpoint import delete, get, patch, post, put
 from nemo_helix_plugin.client.types import BinaryContent, CursorPagination, Paginated
+from nemo_helix_plugin.jobs.events import JobEventPage, JobEventRequest
 from nemo_helix_plugin.jobs.execution_profiles import (
     DockerJobExecutionProfile,
     E2EJobExecutionProfile,
@@ -300,3 +301,8 @@ def update_attempt_step_task(
 def get_attempt_step_task(
     *, workspace: str | None = None, job: str, attempt: str, step: str, name: str
 ) -> HelixJobTaskResponse: ...
+
+
+@post("/apis/jobs/v2/jobs/events")
+@abstractmethod
+def read_job_events(*, body: JobEventRequest) -> JobEventPage: ...
