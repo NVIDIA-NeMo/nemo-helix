@@ -88,6 +88,7 @@ Override registry: `export WHEELS_REGISTRY=...` and `export IMAGE_REGISTRY=...` 
 | --- | --- |
 | `automodel-chat-dataset-tool-call-arguments.patch` | `ChatDataset` stringified tool-call `arguments`, which Qwen3.5's chat template rejects. Arguments are now passed as a mapping, matching vLLM at serve time. |
 | `automodel-chat-dataset-thinking-and-tool-call-ids.patch` | The platform's SFT chat rows keep reasoning in separate `{"role": "assistant", "thinking": ...}` messages and send `tool` messages with no `tool_call_id`. `ChatDataset` rendered the first as an empty assistant turn (reasoning lost) and raised on the second. `thinking` is now folded into `reasoning_content` on the next assistant message, and an id-less tool result takes the id of the next unanswered tool call before it. Applies after the tool-call-arguments patch. |
+| `automodel-vlm-collate-thinking-and-tools.patch` | A checkpoint with a vision tower (Qwen3.5 included, even for text-only data) trains through the VLM recipe, whose `default_collate_fn` never passed `example["tools"]` to the chat template and did not recognise `thinking` messages. Agent rows trained with no tool definitions and with an extra empty assistant turn (reasoning lost). The collate now merges `thinking` into `reasoning_content` and passes the batch's tools, and raises if examples in one batch carry different tools. Applies after the thinking-and-tool-call-ids patch, whose `_merge_thinking_messages` it imports. |
 
 ## Tasks / training runtime (platform glue)
 
