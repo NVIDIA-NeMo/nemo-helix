@@ -27,6 +27,11 @@ logger = logging.getLogger(__name__)
 # malicious/buggy plugin's StudioSpec.name value.
 _PLUGIN_NAME_RE = re.compile(r"^[a-z][a-z0-9-]+$")
 
+# A bare origin: scheme, DNS name or IPv4 host, optional port, nothing else. The
+# value lands verbatim in a CSP header, so whitespace, ';', '*' and paths must
+# never pass.
+_FRAME_ORIGIN_RE = re.compile(r"https?://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d{1,5})?/?")
+
 
 def _editable_source_root(dist: Distribution) -> Path | None:
     """Source directory of an editable install, per PEP 610's direct_url.json.
@@ -106,6 +111,28 @@ def _validate_bundle_path(ep_name: str, bundle_path: Path) -> bool:
     return True
 
 
+def _validate_frame_src(ep_name: str, frame_src: object) -> tuple[str, ...]:
+    """Keep the ``'self'`` keyword and bare ``http(s)://host[:port]`` origins; drop and warn on the rest.
+
+    Wildcards, paths, queries, credentials and other schemes would let one plugin
+    widen Studio's frame-src far beyond what it needs, so they are rejected.
+    """
+    if not isinstance(frame_src, (tuple, list)):
+        logger.warning("Studio plugin %r frame_src must be a tuple of strings — ignoring it", ep_name)
+        return ()
+    accepted: list[str] = []
+    for entry in frame_src:
+        if not isinstance(entry, str) or not (entry == "'self'" or _FRAME_ORIGIN_RE.fullmatch(entry)):
+            logger.warning(
+                "Studio plugin %r frame_src entry %r is not 'self' or an http(s) origin — dropped", ep_name, entry
+            )
+            continue
+        normalized = entry.rstrip("/")
+        if normalized not in accepted:
+            accepted.append(normalized)
+    return tuple(accepted)
+
+
 @dataclass
 class PluginManifestResponse:
     """Manifest returned by the /apis/plugins endpoint.
@@ -117,11 +144,14 @@ class PluginManifestResponse:
         bundle_dir: Parent directory of the plugin's built ``index.js``, for static
             file mounting.  ``None`` when there is no bundle or the directory could
             not be resolved.
+        frame_src: Validated ``frame-src`` sources the plugin's UI embeds; unioned
+            into Studio's Content-Security-Policy. Not exposed by the endpoint.
     """
 
     name: str
     bundle_url: str | None = field(default=None)
     bundle_dir: Path | None = field(default=None)
+    frame_src: tuple[str, ...] = field(default=())
 
 
 class _PluginManifestOut(BaseModel):
@@ -179,15 +209,19 @@ def discover_plugins() -> list[PluginManifestResponse]:
     manifests: list[PluginManifestResponse] = []
     for name in sorted(all_plugin_names):
         spec = studio_specs.get(name)
+        frame_src: tuple[str, ...] = ()
         if spec is not None and spec.bundle_path is not None and _validate_bundle_path(name, spec.bundle_path):
             bundle_url: str | None = f"/plugin-ui/{name}/index.js"
             bundle_dir: Path | None = spec.bundle_path.resolve().parent
+            frame_src = _validate_frame_src(name, spec.frame_src)
             logger.info("Registered studio plugin %r at %s", name, bundle_url)
         else:
             bundle_url = None
             bundle_dir = None
             logger.info("Registered plugin %r (no web bundle)", name)
-        manifests.append(PluginManifestResponse(name=name, bundle_url=bundle_url, bundle_dir=bundle_dir))
+        manifests.append(
+            PluginManifestResponse(name=name, bundle_url=bundle_url, bundle_dir=bundle_dir, frame_src=frame_src)
+        )
 
     return manifests
 

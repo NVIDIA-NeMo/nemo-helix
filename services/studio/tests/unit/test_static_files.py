@@ -124,6 +124,17 @@ class TestBuildCSP:
         csp = build_csp(frame_src_urls=("https://issuer.example.com",))
         assert _directive(csp, "frame-src") == "'self' https://issuer.example.com"
 
+    def test_plugin_self_frame_src_switches_from_none_to_self(self):
+        csp = build_csp(plugin_frame_src=("'self'",))
+        assert _directive(csp, "frame-src") == "'self'"
+
+    def test_plugin_frame_src_unions_with_configured_origins_deduped(self):
+        csp = build_csp(
+            frame_src_urls=("https://issuer.example.com/realms/x",),
+            plugin_frame_src=("'self'", "https://issuer.example.com", "https://ui.example.com"),
+        )
+        assert _directive(csp, "frame-src") == "'self' https://issuer.example.com https://ui.example.com"
+
     def test_only_scheme_host_port_kept_not_path_or_query(self):
         """A path/query in a configured URL must not leak into the directive."""
         csp = build_csp(connect_src_urls=("https://api.example.com:8443/apis/v2?x=1",))

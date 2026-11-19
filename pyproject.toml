@@ -112,6 +112,8 @@ dev = [
   # Dev only, so its unit tests and type checks run with the rest; it stays out of
   # `enabled-plugins` and `nemo-helix[all]`, so no shipped image carries Strands.
   "strands-harness-optimizer-plugin",
+  # POC, dev only: loads in local `nemo services run` but stays out of `enabled-plugins` and shipped images.
+  "nemo-observability-plugin",
   "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for intake ATIF ingest
   "nemo-helix-tools",               # License and package-layout maintenance tooling
   "nhx-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
@@ -475,6 +477,7 @@ nemo-compass-plugin = { workspace = true }
 nemo-evals-plugin = { workspace = true }
 nemo-scaled-evals-plugin = { path = "plugins/_temporary-scaled-evals", editable = true }
 strands-harness-optimizer-plugin = { path = "plugins/strands-harness-optimizer", editable = true }
+nemo-observability-plugin = { path = "plugins/nemo-observability", editable = true }
 nemo-guardrails-plugin = { workspace = true }
 nemo-garak-plugin = { workspace = true }
 nemo-safe-synthesizer-plugin = { workspace = true }

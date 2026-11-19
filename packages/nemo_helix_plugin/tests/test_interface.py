@@ -21,4 +21,4 @@ def test_studio_spec_stores_name_and_bundle_path():
 def test_studio_spec_is_dataclass():
     """StudioSpec should be a plain dataclass — no pydantic, no validation."""
     assert dataclasses.is_dataclass(StudioSpec)
-    assert len(dataclasses.fields(StudioSpec)) == 2
+    assert [field.name for field in dataclasses.fields(StudioSpec)] == ["name", "bundle_path", "frame_src"]

@@ -7353,6 +7353,27 @@ requires-dist = [
 ]
 
 [[package]]
+name = "nemo-observability-plugin"
+version = "0.0.0"
+source = { editable = "plugins/nemo-observability" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "nemo-helix-plugin" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+]
+
+[[package]]
 name = "nemo-optimization-plugin"
 version = "0.0.0"
 source = { editable = "plugins/nemo-optimization" }
@@ -7936,6 +7957,7 @@ dev = [
     { name = "nemo-helix-plugin" },
     { name = "nemo-helix-tools" },
     { name = "nemo-nb" },
+    { name = "nemo-observability-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
     { name = "nest-asyncio" },
     { name = "nhx-build-tools" },
@@ -8227,6 +8249,7 @@ dev = [
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-tools", editable = "tools/nemo-helix-tools" },
     { name = "nemo-nb", editable = "packages/nemo_nb" },
+    { name = "nemo-observability-plugin", editable = "plugins/nemo-observability" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
     { name = "nest-asyncio", specifier = "==1.6.0" },
     { name = "nhx-build-tools", editable = "packages/nhx_build_tools" },
