@@ -42,7 +42,7 @@ from nemo_helix_plugin.models.types import (
 from nemo_helix_plugin.models.types import (
     ModelSpec as PluginModelSpec,
 )
-from nhx.common.client_factory import get_nemo_client
+from nhx.common.client_factory import get_task_nemo_client
 from nhx.common.entities.utils import parse_entity_ref
 from nhx.common.model_utils import is_embedding_model
 from nhx.core.models.config import config as models_config
@@ -331,7 +331,7 @@ def run(*, client: NemoClient | None = None, job_ctx: NHXJobContext | None = Non
 
     Args:
         client: Optional platform client for dependency injection (for testing).
-            If None, creates one via get_nemo_client().
+            If None, creates one via get_task_nemo_client().
         job_ctx: Optional job context for dependency injection (for testing).
             If None, creates one via NHXJobContext.from_env().
 
@@ -342,11 +342,7 @@ def run(*, client: NemoClient | None = None, job_ctx: NHXJobContext | None = Non
 
     client_owned = client is None
     try:
-        client = client or get_nemo_client(
-            as_service="models",
-            internal=True,
-            workspace=job_ctx.workspace,
-        )
+        client = client or get_task_nemo_client("models", workspace=job_ctx.workspace)
         runner = ModelSpecRunner(client=client, job_ctx=job_ctx)
 
         if job_ctx.config_path is None:

@@ -944,6 +944,29 @@ authz:
         scopes:
         - files:write
         - platform:write
+    # HF-compatible routes are hidden from OpenAPI but require the same
+    # workspace-scoped read permission as the regular fileset API.
+    /apis/files/v2/hf/{workspace}/{name}/resolve/{revision}/{path:path}:
+      get: &hf-fileset-read
+        direct:
+          actor_perms:
+          - filesets.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - filesets.read
+        scopes:
+        - files:read
+        - platform:read
+      head: *hf-fileset-read
+    /apis/files/v2/hf/api/models/{workspace}/{name}:
+      get: *hf-fileset-read
+    /apis/files/v2/hf/api/models/{workspace}/{name}/revision/{revision}:
+      get: *hf-fileset-read
+    /apis/files/v2/hf/api/models/{workspace}/{name}/tree/{revision}:
+      get: *hf-fileset-read
+    /apis/files/v2/hf/api/models/{workspace}/{name}/paths-info/{revision}:
+      post: *hf-fileset-read
     /apis/files/v2/workspaces/{workspace}/filesets/{name}:
       delete:
         direct:
