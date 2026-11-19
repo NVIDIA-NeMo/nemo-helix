@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from nhx.customization_common.image_size import image_size_bounds
 from nhx.customization_common.schemas.checkpoint import (
-    VLM_LORA_EXCLUDE_MODULES,
     CheckpointTraits,
-    lora_uses_default_targets,
     traits_from_step_model,
+    vlm_lora_exclude_modules,
 )
 from nhx.customization_common.service.constants import (
     DEFAULT_ENVIRONMENT_PATH,
@@ -57,7 +57,11 @@ from nhx.rl.tasks.training.datasets.validation import DatasetValidator
 logger = logging.getLogger(__name__)
 
 
-def _build_lora_cfg(customizer_config: TrainingStepConfig, is_vlm: bool = False) -> dict[str, Any]:
+def _build_lora_cfg(
+    customizer_config: TrainingStepConfig,
+    is_vlm: bool = False,
+    checkpoint_model_name: str | None = None,
+) -> dict[str, Any]:
     """Map TrainingStepConfig LoRA settings onto NeMo-RL DTensor lora_cfg."""
     enabled = customizer_config.training.finetuning_type in (FinetuningType.LORA, FinetuningType.LORA_MERGED)
     lora = customizer_config.training.lora
@@ -69,9 +73,14 @@ def _build_lora_cfg(customizer_config: TrainingStepConfig, is_vlm: bool = False)
     use_triton = (tp == 1) if requested_triton is None else requested_triton
     target_modules = list(lora.target_modules) if lora and lora.target_modules else []
     exclude_modules = list(lora.exclude_modules) if lora and lora.exclude_modules else []
-    if is_vlm and enabled and lora_uses_default_targets(target_modules, exclude_modules):
+    # A named target list is the caller's filter. An exclude list is unioned with the
+    # vision patterns so ``*.out_proj`` does not drop the vision-tower freeze.
+    if is_vlm and enabled and (not target_modules or target_modules == ["*proj"]):
         target_modules = []
-        exclude_modules = list(VLM_LORA_EXCLUDE_MODULES)
+        exclude_modules = vlm_lora_exclude_modules(
+            exclude_modules,
+            checkpoint_model_name=checkpoint_model_name,
+        )
     return {
         "enabled": enabled,
         "target_modules": target_modules,
@@ -592,7 +601,11 @@ def compile_grpo_config(
     model_path = customizer_config.model.path
     precision = _adapt_precision(customizer_config.model.precision)
     parallelism = customizer_config.parallelism
-    lora_cfg = _build_lora_cfg(customizer_config, is_vlm=traits.has_vision_tower)
+    lora_cfg = _build_lora_cfg(
+        customizer_config,
+        is_vlm=traits.has_vision_tower,
+        checkpoint_model_name=traits.checkpoint_model_name,
+    )
     dynamic_batching_cfg, sequence_packing_cfg = _build_batching_config(
         customizer_config, grpo_hp, is_vlm=traits.has_vision_tower
     )
@@ -678,8 +691,31 @@ def compile_grpo_config(
             "limit_mm_per_prompt": {"image": max(max_images, 1)},
             "mm_processor_cache_gb": 0,
         }
+    image_size = image_size_bounds(
+        customizer_config.model.max_pixels,
+        customizer_config.model.image_longest_edge,
+        customizer_config.model.image_shortest_edge,
+    )
+    if image_size is not None:
+        # vLLM reads these names and writes them onto the image processor size.
+        vllm_kwargs["mm_processor_kwargs"] = {
+            "max_pixels": image_size["longest_edge"],
+            "min_pixels": image_size["shortest_edge"],
+        }
     if grpo_hp.vllm_kwargs:
-        vllm_kwargs.update(grpo_hp.vllm_kwargs)
+        # A nested mm_processor_kwargs must not replace the pixel bounds set above.
+        # The platform bounds win; other caller keys in that dict are kept.
+        caller_kwargs = dict(grpo_hp.vllm_kwargs)
+        caller_mm = caller_kwargs.pop("mm_processor_kwargs", None)
+        vllm_kwargs.update(caller_kwargs)
+        if isinstance(caller_mm, dict):
+            platform_mm = vllm_kwargs.get("mm_processor_kwargs")
+            if isinstance(platform_mm, dict):
+                vllm_kwargs["mm_processor_kwargs"] = {**caller_mm, **platform_mm}
+            else:
+                vllm_kwargs["mm_processor_kwargs"] = caller_mm
+        elif caller_mm is not None:
+            vllm_kwargs["mm_processor_kwargs"] = caller_mm
     if vllm_kwargs:
         cfg["policy"]["generation"]["vllm_kwargs"] = vllm_kwargs
 
@@ -705,6 +741,10 @@ def compile_grpo_config(
         hf_config_overrides["router_aux_loss_coef"] = float(grpo_hp.router_aux_loss_coef)
     if hf_config_overrides:
         cfg["policy"]["hf_config_overrides"] = hf_config_overrides
+
+    if image_size is not None:
+        # The policy processor and the Gym actor both load through AutoProcessor with these kwargs.
+        cfg["policy"]["tokenizer"]["tokenizer_kwargs"] = {"size": image_size}
 
     cfg["data"] = {
         "max_input_seq_length": customizer_config.model.max_seq_length,

@@ -13,6 +13,7 @@ from nhx.common.entities.constants import (
     MAX_LENGTH_255,
     REGEX_WORD_CHARACTER_DOT_DASH,
 )
+from nhx.customization_common.image_size import check_image_size_edges, check_max_pixels_or_image_size
 from nhx.customization_common.training.reporting import ProgressReportingConfig
 from pydantic import (
     AfterValidator,
@@ -317,6 +318,29 @@ class MTPParams(BaseModel):
     )
 
 
+class ImageSize(BaseModel):
+    """Pixel-area bounds passed to the vision processor as ``size``.
+
+    Both edges are required. ``longest_edge`` is the maximum pixel count and matches ``max_pixels``.
+    """
+
+    longest_edge: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Maximum pixels in a resized image. The same ceiling as max_pixels.",
+    )
+    shortest_edge: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Minimum pixels in a resized image.",
+    )
+
+    @model_validator(mode="after")
+    def _has_both_edges(self) -> Self:
+        check_image_size_edges(self.longest_edge, self.shortest_edge)
+        return self
+
+
 class _TrainingBase(BaseModel):
     """Common training configuration shared by all methods.
 
@@ -477,7 +501,29 @@ class _TrainingBase(BaseModel):
     max_seq_length: int = Field(
         default=2048,
         gt=0,
-        description="Maximum token sequence length for training. Higher = more memory, longer training.",
+        description=(
+            "Maximum token sequence length for training. Higher means more memory and longer training. "
+            "With a pixel ceiling, this must be larger than the tokens one image can use. The model spec's "
+            "vision patch size decides how many pixels that is; a shorter cap is rejected."
+        ),
+    )
+    max_pixels: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Shorthand for image_size.longest_edge. The compiler writes it as the processor size and does not "
+            "pass this name to transformers. Larger images are downscaled before the vision tower. The model "
+            "spec's vision patch size turns that ceiling into a token count, which max_seq_length must exceed. "
+            "Unset keeps the checkpoint ceiling. Rejected for text checkpoints."
+        ),
+    )
+    image_size: Optional[ImageSize] = Field(
+        default=None,
+        description=(
+            "Pixel-area bounds for a vision-language processor, as size.longest_edge and size.shortest_edge. "
+            "Both edges are required, and shortest_edge must be less than longest_edge. Set this or max_pixels, "
+            "not both. Rejected for text checkpoints."
+        ),
     )
     precision: Optional[Precision] = Field(
         default=None,
@@ -544,6 +590,7 @@ class _TrainingBase(BaseModel):
         # against packing=false is silently ignored -- and the run is slower than asked for.
         if self.packed_sequence_size is not None and not self.sequence_packing:
             raise ValueError("packed_sequence_size requires sequence_packing=true.")
+        check_max_pixels_or_image_size(self.max_pixels, self.image_size is not None)
         return self
 
     @property

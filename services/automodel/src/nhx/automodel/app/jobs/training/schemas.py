@@ -113,6 +113,18 @@ class ModelConfig(BaseModel):
         default=2048,
         description="Maximum token sequence length for training; longer sequences are truncated",
     )
+    max_pixels: int | None = Field(
+        default=None,
+        description="Shorthand for image_longest_edge. None keeps the checkpoint ceiling.",
+    )
+    image_longest_edge: int | None = Field(
+        default=None,
+        description="Maximum pixels in a resized image. None keeps the checkpoint ceiling.",
+    )
+    image_shortest_edge: int | None = Field(
+        default=None,
+        description="Minimum pixels in a resized image. None keeps the checkpoint floor.",
+    )
 
     # Model loading options
     precision: Optional[Precision] = Field(

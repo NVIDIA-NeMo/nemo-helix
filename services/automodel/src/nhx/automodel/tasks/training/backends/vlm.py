@@ -6,15 +6,15 @@
 Automodel's collate reads ``{"conversation": [{"role", "content": [parts]}]}``
 with ``{type: image, image: path}`` and ``{type: text, text}``. A fileset row
 is still OpenAI chat (``image_url``) or prompt/completion. The compiler writes
-the conversation JSONL; this loader injects the fake image that keeps FSDP
-from skipping the vision tower on a text row.
+the conversation JSONL and sets ``dataset.max_length``, which turns on
+Automodel's pretokenized wrapper. That wrapper injects the fake image that
+keeps FSDP from skipping the vision tower on a text row, and masks it.
 """
 
 from __future__ import annotations
 
 import base64
 import binascii
-import copy
 import hashlib
 import json
 import logging
@@ -80,11 +80,11 @@ def rewrite_fileset_rows(
 
 
 def make_conversation_dataset(path_or_dataset: str, **kwargs: Any) -> list[dict[str, Any]]:
-    """Load conversation JSONL and mark text rows for the fake-image mask.
+    """Load conversation JSONL written by the compiler.
 
-    ``FinetuneRecipeForVLM.build_dataloader`` instantiates this with
-    ``path_or_dataset``. The collate masks vision tokens only when the example
-    carries ``_injected_fake``, so the image has to be in the conversation here.
+    ``FinetuneRecipeForVLM`` instantiates this with ``path_or_dataset``.
+    ``max_length`` stays on the dataset config for Automodel's pretokenized
+    wrapper, which truncates to that length and injects the fake image.
     """
     del kwargs
     examples: list[dict[str, Any]] = []
@@ -93,13 +93,9 @@ def make_conversation_dataset(path_or_dataset: str, **kwargs: Any) -> list[dict[
             if not line.strip():
                 continue
             parsed = json.loads(line)
-            conversation = parsed["conversation"]
-            example: dict[str, Any] = {"conversation": conversation}
+            example: dict[str, Any] = {"conversation": parsed["conversation"]}
             if "tools" in parsed:
                 example["tools"] = parsed["tools"]
-            if not _conversation_has_media(conversation):
-                example["conversation"] = _inject_fake_image(conversation)
-                example["_injected_fake"] = True
             examples.append(example)
     return examples
 
@@ -223,41 +219,3 @@ def _write_data_url(url: str, image_dir: Path) -> str:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
     return str(dest)
-
-
-def _conversation_has_media(conversation: list[dict[str, Any]]) -> bool:
-    for message in conversation:
-        content = message.get("content")
-        if not isinstance(content, list):
-            continue
-        for item in content:
-            if isinstance(item, dict) and item.get("type") in {"image", "video"}:
-                return True
-    return False
-
-
-def _inject_fake_image(conversation: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Prefer Automodel's 56x56 image. Tests without that package still set the flag."""
-    try:
-        from nemo_automodel.components.datasets.vlm.fake_image import inject_fake_image_into_conversation
-    except ImportError:
-        return _inject_placeholder(conversation)
-    return inject_fake_image_into_conversation(conversation)
-
-
-def _inject_placeholder(conversation: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    conversation = copy.deepcopy(conversation)
-    placeholder = {"type": "image", "image": "fake"}
-    for message in conversation:
-        if message.get("role") != "user":
-            continue
-        content = message.get("content")
-        if isinstance(content, list):
-            content.insert(0, placeholder)
-        elif content:
-            message["content"] = [placeholder, {"type": "text", "text": content}]
-        else:
-            message["content"] = [placeholder]
-        return conversation
-    conversation.insert(0, {"role": "user", "content": [placeholder]})
-    return conversation
