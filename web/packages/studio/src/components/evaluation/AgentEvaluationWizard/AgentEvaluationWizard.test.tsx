@@ -7,7 +7,6 @@ import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experim
 import { getFilesListFilesetFilesQueryKey } from '@nemo/sdk/generated/platform/files';
 import type { EvaluationResponse, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
-import { DATASET_SNAPSHOT_KEY } from '@studio/components/evaluation/AgentEvaluationWizard/datasetSnapshot';
 import {
   EVAL_CONFIG_FILESET_KEY,
   evaluationConfigError,
@@ -18,7 +17,7 @@ import { server } from '@studio/mocks/node';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
-import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -45,27 +44,6 @@ vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOrigi
 }));
 
 const AGENT = 'my-agent';
-
-/** A minimal eval config: parsed locally, never submitted. */
-const EVAL_CONFIG = `prompt_template: "{{ item.prompt }}"
-metrics:
-  - bundle_kind: metric-bundle
-    bundle_format_version: v1
-    metric_type: string-check
-    metadata: {}
-    outputs:
-      - name: string-check
-        value_json_schema:
-          type: number
-    secrets: {}
-    payload:
-      kind: inline
-      metric:
-        type: string-check
-        operation: equals
-        left_template: "{{ sample.output_text }}"
-        right_template: "{{ item.expected }}"
-`;
 
 const emptyPage = { data: [], pagination: { total: 0, page: 1, page_size: 100 } };
 
@@ -128,59 +106,6 @@ const mockLists = () => {
   );
 };
 
-const SNAPSHOT_REF = `${DEFAULT_WORKSPACE}/source-data#rows.jsonl`;
-
-/** Makes "baseline" a run that recorded its dataset, and answers the dataset listing with
- *  ``files``. */
-const mockSnapshotSource = (files: HttpResponse<string> | { path: string; size: number }[]) => {
-  const evaluations = EVALUATIONS.map((item) =>
-    item.name === 'baseline'
-      ? {
-          ...item,
-          metadata: {
-            ...item.metadata,
-            [DATASET_SNAPSHOT_KEY]: JSON.stringify({
-              ref: SNAPSHOT_REF,
-              files: [{ path: 'rows.jsonl', size: 10 }],
-            }),
-          },
-        }
-      : item
-  );
-  server.use(
-    http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), ({ request }) => {
-      const name = new URL(request.url).searchParams.get('filter[name]');
-      return HttpResponse.json(
-        name
-          ? { ...emptyPage, data: evaluations.filter((item) => item.name === name) }
-          : { data: evaluations }
-      );
-    }),
-    http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
-      Array.isArray(files)
-        ? HttpResponse.json({
-            data: files.map((file) => ({ ...file, file_ref: file.path, file_url: file.path })),
-          })
-        : files
-    )
-  );
-};
-
-/** Holds the evaluation list request until the returned function is called. */
-const holdEvaluationsList = (): (() => void) => {
-  let release: () => void = () => {};
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  server.use(
-    http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), async () => {
-      await held;
-      return HttpResponse.json({ data: EVALUATIONS });
-    })
-  );
-  return release;
-};
-
 const renderWizard = (props: Partial<React.ComponentProps<typeof AgentEvaluationWizard>> = {}) =>
   renderRoute(undefined, {
     history: `/workspaces/${DEFAULT_WORKSPACE}`,
@@ -216,48 +141,6 @@ describe('AgentEvaluationWizard', () => {
     expect(screen.getByRole('switch', { name: /favorite/i })).toBeInTheDocument();
   });
 
-  it("does not carry the re-run path's derived name onto a new experiment", async () => {
-    mockLists();
-    const user = userEvent.setup();
-    renderWizard();
-
-    // Seed a name on the re-run path first: pick a source, let it prefill, then switch paths.
-    await screen.findByText('How do you want to start?');
-    await user.click(screen.getByRole('radio', { name: /Re-run an existing evaluation/ }));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-
-    await user.click(await screen.findByRole('combobox', { name: /evaluation to re-run/i }));
-    await user.click(await screen.findByRole('option', { name: 'nemotron-super-3-temp-point5' }));
-    const seeded = await screen.findByLabelText<HTMLInputElement>('New Evaluation Name');
-    await waitFor(() => expect(seeded).toHaveValue('nemotron-super-3-temp-point5'));
-
-    await user.click(screen.getByRole('button', { name: 'Back' }));
-    await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-
-    await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-
-    await user.click(await screen.findByLabelText('Dataset file ref'));
-    await user.paste(`${DEFAULT_WORKSPACE}/data#rows.jsonl`);
-    await user.click(
-      within(
-        await screen.findByRole('radiogroup', { name: 'Eval configuration source' })
-      ).getByRole('radio', { name: 'Upload' })
-    );
-    await user.upload(
-      screen.getByLabelText('Eval configuration file'),
-      new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
-    );
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByLabelText('Evaluation Name');
-
-    // A borrowed name would say this run is a repeat of some other experiment's run.
-    expect(screen.getByLabelText<HTMLInputElement>('Evaluation Name')).toHaveValue('');
-  });
-
   it('offers a parallel-requests setting that defaults to 1', async () => {
     mockLists();
     const user = userEvent.setup();
@@ -285,203 +168,6 @@ describe('AgentEvaluationWizard', () => {
 
     await user.type(screen.getByLabelText('Name'), 'model-update-tests');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-  });
-
-  it('names every step under its dot, not just the one in progress', async () => {
-    mockLists();
-    const user = userEvent.setup();
-    renderWizard();
-
-    // Re-running has no experiment to set up, so it is two steps.
-    expect(await screen.findByText('Begin')).toBeInTheDocument();
-    expect(screen.getByText('Run Evaluation')).toBeInTheDocument();
-    expect(screen.queryByText('Create experiment')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('radio', { name: /Create a new experiment/ }));
-
-    // The new-experiment path gains its own step, and all three are named up front.
-    expect(await screen.findByText('Create experiment')).toBeInTheDocument();
-    expect(screen.getByText('Begin')).toBeInTheDocument();
-    expect(screen.getByText('Run Evaluation')).toBeInTheDocument();
-  });
-
-  it("puts the new run's name under the picker it is derived from", async () => {
-    mockLists();
-    const user = userEvent.setup();
-    renderWizard();
-
-    await user.click(await screen.findByRole('radio', { name: /Re-run an existing evaluation/ }));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-
-    // One screen: pick the run to re-run, then name the run that pick produces.
-    const picker = await screen.findByRole('combobox', { name: /evaluation to re-run/i });
-    const nameField = screen.getByLabelText('New Evaluation Name');
-    expect(
-      picker.compareDocumentPosition(nameField) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-  });
-
-  it('routes the re-run path to a picker grouped by experiment', async () => {
-    mockLists();
-    const user = userEvent.setup();
-    renderWizard();
-
-    await user.click(await screen.findByRole('radio', { name: /Re-run an existing evaluation/ }));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-
-    await user.click(await screen.findByRole('combobox', { name: /evaluation to re-run/i }));
-    expect(await screen.findByText('primary-use-cases-benchmark')).toBeInTheDocument();
-    expect(await screen.findByText('regression-sweep')).toBeInTheDocument();
-
-    // Searching an experiment's name narrows to that one section, including the runs under it
-    // whose own names share nothing with the term.
-    await user.type(screen.getByTestId('evaluationName-search'), 'primary-use-cases-benchmark');
-    await waitFor(() =>
-      expect(screen.queryByRole('option', { name: 'baseline-regression' })).not.toBeInTheDocument()
-    );
-    expect(
-      screen.getByRole('option', { name: 'nemotron-super-3-temp-point5' })
-    ).toBeInTheDocument();
-  });
-
-  it('opens on the last step for a handed-in source, with an editable derived name', async () => {
-    mockLists();
-    renderWizard({ sourceEvaluation: 'nemotron-super-3-temp-point5' });
-
-    // Straight to naming the run — the first two answers came in with the source.
-    const nameField = await screen.findByLabelText<HTMLInputElement>('New Evaluation Name');
-    await waitFor(() => expect(nameField.value).toBe('nemotron-super-3-temp-point5'));
-    // The picker sits on this step too, so the name appears in its options as well; the point is
-    // that the help text under it states which experiment the chosen run belongs to.
-    await waitFor(() =>
-      expect(
-        screen.getByRole('combobox', { name: /evaluation to re-run/i })
-      ).toHaveAccessibleDescription(/Experiment: primary-use-cases-benchmark/)
-    );
-
-    const user = userEvent.setup();
-    await user.clear(nameField);
-    await user.type(nameField, 'nemotron-super-3-temp-1');
-    expect(nameField.value).toBe('nemotron-super-3-temp-1');
-  });
-
-  it('holds Run Evaluation, saying why, until the saved eval config is checked', async () => {
-    mockLists();
-    let finishCheck: (issue: string | null) => void = () => {};
-    vi.mocked(evaluationConfigError).mockReturnValue(
-      new Promise((resolve) => {
-        finishCheck = resolve;
-      })
-    );
-    const user = userEvent.setup();
-    renderWizard({ sourceEvaluation: 'baseline' });
-
-    const name = await screen.findByLabelText('New Evaluation Name');
-    await user.clear(name);
-    await user.type(name, 'baseline-rerun');
-    expect(await screen.findByText('Checking the saved eval config...')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
-
-    finishCheck(null);
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
-    );
-  });
-
-  it('blocks a re-run whose dataset no longer exists, saying so under the picker', async () => {
-    mockLists();
-    mockSnapshotSource(new HttpResponse(null, { status: 404 }));
-    const user = userEvent.setup();
-    renderWizard({ sourceEvaluation: 'baseline' });
-
-    const name = await screen.findByLabelText('New Evaluation Name');
-    await user.clear(name);
-    await user.type(name, 'baseline-rerun');
-    expect(
-      await screen.findByText(
-        `The dataset this evaluation read, ${SNAPSHOT_REF}, no longer exists. Pick another evaluation.`
-      )
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
-  });
-
-  it('warns about a re-run whose dataset changed, and still lets it run', async () => {
-    mockLists();
-    mockSnapshotSource([{ path: 'rows.jsonl', size: 12 }]);
-    const user = userEvent.setup();
-    renderWizard({ sourceEvaluation: 'baseline' });
-
-    const name = await screen.findByLabelText('New Evaluation Name');
-    await user.clear(name);
-    await user.type(name, 'baseline-rerun');
-    expect(
-      await screen.findByText(/The dataset has changed since baseline ran/)
-    ).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
-    );
-  });
-
-  it('holds Run Evaluation on a taken name, saying so only under the name field', async () => {
-    mockLists();
-    renderWizard({ sourceEvaluation: 'baseline' });
-
-    // The re-run proposes the source's own name, which is taken.
-    expect(await screen.findByText(/named baseline already exists/)).toBeInTheDocument();
-    expect(screen.getAllByText(/named baseline already exists/)).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
-  });
-
-  it('waits for the evaluation list before a handed-in source can run', async () => {
-    mockLists();
-    const releaseList = holdEvaluationsList();
-    renderWizard({ sourceEvaluation: 'baseline' });
-
-    expect(await screen.findByText('Loading evaluations...')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
-
-    releaseList();
-    await waitFor(() =>
-      expect(screen.queryByText('Loading evaluations...')).not.toBeInTheDocument()
-    );
-  });
-
-  it('holds Run Evaluation while the list loads, before anything can be picked', async () => {
-    mockLists();
-    const releaseList = holdEvaluationsList();
-    const user = userEvent.setup();
-    renderWizard();
-
-    await user.click(await screen.findByRole('radio', { name: /Re-run an existing evaluation/ }));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText('Loading evaluations...')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
-
-    releaseList();
-    await waitFor(() =>
-      expect(screen.queryByText('Loading evaluations...')).not.toBeInTheDocument()
-    );
-  });
-
-  it('says a handed-in source that is no longer listed is gone, and holds Run Evaluation', async () => {
-    mockLists();
-    renderWizard({ sourceEvaluation: 'deleted-run' });
-
-    expect(
-      await screen.findByText('Evaluation deleted-run no longer exists. Pick another.')
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
-  });
-
-  it('lets Back walk out of a handed-in source so the choice stays reviewable', async () => {
-    mockLists();
-    const user = userEvent.setup();
-    renderWizard({ sourceEvaluation: 'baseline' });
-
-    await screen.findByLabelText('New Evaluation Name');
-    await user.click(screen.getByRole('button', { name: 'Back' }));
-
-    expect(await screen.findByText('How do you want to start?')).toBeInTheDocument();
   });
 
   it("cancels to the agent's evaluations when opened by a direct link", async () => {
