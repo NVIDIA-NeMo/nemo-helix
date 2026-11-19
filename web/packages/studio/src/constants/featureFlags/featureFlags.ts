@@ -82,6 +82,7 @@ export const flagDefinitions = {
   guardrailsEnabled: previewFlag('VITE_FF_GUARDRAILS_ENABLED'),
   intakeEnabled: previewFlag('VITE_FF_INTAKE_ENABLED', true),
   membersEnabled: previewFlag('VITE_FF_MEMBERS_ENABLED', true),
+  metricsEnabled: previewFlag('VITE_FF_METRICS_ENABLED', false),
   modelDetailsEnabled: previewFlag('VITE_FF_MODEL_DETAILS_ENABLED'),
   modelEvaluationFormEnabled: previewFlag('VITE_FF_MODEL_EVALUATION_FORM_ENABLED', true),
   monitorEnabled: previewFlag('VITE_FF_MONITOR_ENABLED'),

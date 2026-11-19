@@ -31,6 +31,7 @@ import {
   getGuardrailsSideNavItems,
   getIntakeSideNavItems,
   getJobSideNavItems,
+  getMetricSideNavItems,
   getModelCompareSideNavItems,
   getOptimizerSideNavItems,
   getSafeSynthesizerSideNavItems,
@@ -75,6 +76,7 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
     const tracesNav = getIntakeSideNavItems(workspace);
     const evaluationItems = [
       ...getExperimentSideNavItems(workspace),
+      ...getMetricSideNavItems(workspace),
       ...getTasksetSideNavItems(workspace),
     ];
     const safeSynthesizerNav = getSafeSynthesizerSideNavItems(workspace);

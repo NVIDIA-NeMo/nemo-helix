@@ -44,6 +44,7 @@ const pathParams = {
   [RP.taskTab]: 'revisions',
   [RP.experimentName]: 'test-experiment-group',
   [RP.evaluationName]: 'test-experiment',
+  [RP.metricName]: 'test-metric',
   [RP.insightId]: 'test-insight',
   [RP.guardrailConfigName]: 'test-guardrail-config',
   [RP.guardrailChecksSubTab]: GuardrailChecksSubTab.Tests,
