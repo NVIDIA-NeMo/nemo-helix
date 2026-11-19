@@ -251,7 +251,7 @@ def request_digest(req: TasksetRunInput) -> str:
 
     Returns:
         SHA-256 of compact JSON with sorted keys, excluding idempotency_key. An omitted
-        ``publication``, a Harbor target's unset ``closed_book``, and empty result-retention
+        ``publication``, a Harbor target's unset ``closed_book`` and ``skills``, and empty result-retention
         settings are left out too, so requests from before those fields existed keep their digest.
     """
     exclude = {"idempotency_key"} if req.publication is not None else {"idempotency_key", "publication"}
@@ -262,6 +262,9 @@ def request_digest(req: TasksetRunInput) -> str:
     target = spec.get("target")
     if isinstance(req.spec.target, HarborRunnerTarget) and not req.spec.target.closed_book and isinstance(target, dict):
         target.pop("closed_book", None)
+    if isinstance(req.spec.target, HarborRunnerTarget) and req.spec.target.skills is None and isinstance(target, dict):
+        # The field already serializes nothing when None; popping keeps the digest independent of that.
+        target.pop("skills", None)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
