@@ -8,6 +8,7 @@ description = "The `tool-calling` strategy for `nemo agents optimize`: scores an
 requires-python = ">=3.12,<3.15"
 dependencies = [
   "httpx>=0.28.1",
+  "json-repair>=0.60.1",
   "jsonschema>=4.23.0",
   "mcp>=1.20.0",
   "nemo-agent-optimization-plugin",

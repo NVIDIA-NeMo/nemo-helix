@@ -10,18 +10,21 @@ import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 import httpx
 import jsonschema
+from nemo_tool_calling_plugin.json_extract import json_object_in, parse_error
+from nemo_tool_calling_plugin.schema_edits import SchemaEdit, apply_edits
 from nemo_tool_calling_plugin.scoring import ToolCall
 
 logger = logging.getLogger(__name__)
 
 ANALYZER_TIMEOUT_SECONDS = 900.0
 ANALYZER_MAX_TOKENS = 32768
-_FENCE = re.compile(r"```(?:json|JSON)?\s*\n(.*?)```", re.DOTALL)
-_THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
+CONFIG_FIX_KEYS = ("config_fix", "findings")
+SCHEMA_FIX_KEYS = ("schema_fix",)
 
 Severity = Literal["high", "medium", "low"]
 
@@ -141,32 +144,17 @@ class Analyzer(Protocol):
     def analyze(self, context: AnalysisContext) -> Analysis: ...
 
 
-def extract_json(message: Mapping[str, Any]) -> dict[str, Any]:
+def extract_json(message: Mapping[str, Any], *, keys: Sequence[str] = ()) -> dict[str, Any]:
     """The JSON object in a chat message, looking in ``content`` then ``reasoning_content``."""
-    for key in ("content", "reasoning_content", "reasoning"):
-        text = message.get(key)
-        if not isinstance(text, str) or not text.strip():
-            continue
-        parsed = _json_object_in(text)
+    texts = [message.get(key) for key in ("content", "reasoning_content", "reasoning")]
+    texts = [text for text in texts if isinstance(text, str) and text.strip()]
+    for text in texts:
+        parsed = json_object_in(text, keys=keys)
         if parsed is not None:
             return parsed
-    raise AnalyzerError("The analyzer reply holds no JSON object.", reason="no JSON in the reply")
-
-
-def _json_object_in(text: str) -> dict[str, Any] | None:
-    stripped = _THINK.sub("", text)
-    candidates = [match.group(1) for match in _FENCE.finditer(stripped)][::-1]
-    start, end = stripped.find("{"), stripped.rfind("}")
-    if start != -1 and end > start:
-        candidates.append(stripped[start : end + 1])
-    for candidate in candidates:
-        try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            return parsed
-    return None
+    wanted = f" with a {' or '.join(repr(key) for key in keys)} key" if keys else ""
+    detail = parse_error(texts[0]) if texts else "the reply is empty"
+    raise AnalyzerError(f"The analyzer reply holds no JSON object{wanted}: {detail}", reason="no JSON in the reply")
 
 
 def _severity(value: Any) -> Severity:
@@ -211,35 +199,74 @@ def parse_config_fix(payload: Mapping[str, Any], current_prompt: str) -> ConfigF
     )
 
 
-def parse_schema_fix(payload: Mapping[str, Any], current: Sequence[ToolDefinition]) -> SchemaFix | None:
+def _skipped_edit(tool: str, detail: str) -> AnalyzerFinding:
+    return AnalyzerFinding(title="Skipped a suggested schema edit", detail=detail, severity="low", tool=tool)
+
+
+def parse_schema_fix(
+    payload: Mapping[str, Any], current: Sequence[ToolDefinition]
+) -> tuple[SchemaFix | None, list[AnalyzerFinding]]:
+    """Build patched tool definitions from ``edits`` (JSON Pointer into ``inputSchema``) or full ``tools``."""
     raw = payload.get("schema_fix")
     if not isinstance(raw, Mapping):
-        return None
-    by_name = {tool.name: tool for tool in current}
-    patched: list[ToolDefinition] = []
+        return None, []
+    published = {tool.name: tool for tool in current}
+    starts: dict[str, ToolDefinition] = {}
     for item in raw.get("tools") or []:
-        if not isinstance(item, Mapping) or item.get("name") not in by_name:
+        if not isinstance(item, Mapping) or item.get("name") not in published:
             continue
-        original = by_name[str(item["name"])]
         schema = item.get("inputSchema", item.get("input_schema"))
-        if not isinstance(schema, Mapping):
-            continue
-        description = item.get("description")
-        patched.append(
-            ToolDefinition(
+        if isinstance(schema, Mapping):
+            original = published[str(item["name"])]
+            description = item.get("description")
+            starts[original.name] = ToolDefinition(
                 server=original.server,
                 name=original.name,
                 description=description if isinstance(description, str) and description else original.description,
                 input_schema=dict(schema),
             )
-        )
+    descriptions = {
+        str(name): text
+        for name, text in (raw.get("descriptions") or {}).items()
+        if name in published and isinstance(text, str) and text
+    }
+    edits: dict[str, list[SchemaEdit]] = {}
+    skipped: list[AnalyzerFinding] = []
+    for item in raw.get("edits") or []:
+        if not isinstance(item, Mapping):
+            continue
+        tool = str(item.get("tool") or (current[0].name if len(current) == 1 else ""))
+        if tool not in published:
+            skipped.append(_skipped_edit(tool, f"Edit names unknown tool {tool!r}."))
+            continue
+        if isinstance(item.get("description"), str) and "path" not in item:
+            descriptions[tool] = item["description"]
+            continue
+        if not isinstance(item.get("path"), str) or "value" not in item:
+            skipped.append(_skipped_edit(tool, "Edit has no string 'path' or no 'value'."))
+            continue
+        edits.setdefault(tool, []).append(SchemaEdit(tool=tool, path=item["path"], value=item["value"]))
+
+    patched: list[ToolDefinition] = []
+    for name in [*published]:
+        if name not in starts and name not in edits and name not in descriptions:
+            continue
+        start = starts.get(name, published[name])
+        schema, problems = apply_edits(start.input_schema, edits.get(name, []))
+        skipped.extend(_skipped_edit(name, f"Could not apply an edit at {problem}.") for problem in problems)
+        description = descriptions.get(name, start.description)
+        original = published[name]
+        if schema == original.input_schema and description == original.description:
+            continue
+        patched.append(ToolDefinition(server=original.server, name=name, description=description, input_schema=schema))
     if not patched:
-        return None
-    return SchemaFix(
+        return None, skipped
+    fix = SchemaFix(
         title=str(raw.get("title") or "Tighten the tool schema"),
         rationale=str(raw.get("rationale") or ""),
         tools=tuple(patched),
     )
+    return fix, skipped
 
 
 def check_schema_fix(fix: SchemaFix, accepted: Mapping[str, Sequence[ToolCall]]) -> tuple[SchemaFix | None, list[dict]]:
@@ -335,36 +362,121 @@ def schema_fix_messages(context: AnalysisContext) -> list[dict[str, str]]:
         "required keys and at most two optional keys; use enum (never const) for fixed values; give arrays typed "
         "items; drop fields and variants the tool rejects anyway. Shorten the description so it does not repeat "
         "the schema.\n"
-        "Reply with JSON:\n"
-        '{"schema_fix": {"title": str, "rationale": str, "tools": [{"name": str, "description": str, '
-        '"inputSchema": {...}}]}}'
+        "Do not repeat the whole schema. Return edits: each edit replaces the subschema at a JSON Pointer (RFC 6901) "
+        "into the tool's inputSchema, or adds a key when the pointer's parent exists, e.g. "
+        '"/properties/job_request/properties/spec/properties/config/properties/columns/items". Prefer a few edits '
+        "high in the tree over many small ones. Reply with exactly one JSON object, no prose, no comments:\n"
+        '{"schema_fix": {"title": str, "rationale": str, '
+        '"edits": [{"tool": str, "path": "<JSON Pointer into inputSchema>", "value": <replacement subschema>}], '
+        '"descriptions": {"<tool name>": "<new tool description, optional>"}}}'
     )
     return [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": f"{_context_block(context)}\n\n{task}"}]
 
 
-class GatewayAnalyzer:
-    """Analyzer backed by an OpenAI-compatible chat completions endpoint (the platform Inference Gateway)."""
+RETRY_INSTRUCTION = (
+    "Your reply could not be parsed: {error}. Reply again with only the JSON object: no prose, no code fences, "
+    "no comments, no trailing commas."
+)
 
-    def __init__(self, *, base_url: str, model: str, timeout_seconds: float = ANALYZER_TIMEOUT_SECONDS) -> None:
+
+def _request_summary(messages: Sequence[Mapping[str, str]]) -> dict[str, Any]:
+    return {
+        "messages": len(messages),
+        "roles": [message["role"] for message in messages],
+        "prompt_chars": sum(len(message["content"]) for message in messages),
+    }
+
+
+class GatewayAnalyzer:
+    """Analyzer backed by an OpenAI-compatible chat completions endpoint (the platform Inference Gateway).
+
+    Every reply, including failed calls and retries, is written to ``replies_dir/<step>.json`` when one is given.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        timeout_seconds: float = ANALYZER_TIMEOUT_SECONDS,
+        replies_dir: Path | None = None,
+    ) -> None:
         self.model = model
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
+        self._replies_dir = replies_dir
 
-    def _complete(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+    def _save(self, name: str, record: dict[str, Any]) -> None:
+        if self._replies_dir is None:
+            return
+        self._replies_dir.mkdir(parents=True, exist_ok=True)
+        (self._replies_dir / f"{name}.json").write_text(
+            json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+
+    def _post(self, messages: list[dict[str, str]], record: dict[str, Any]) -> dict[str, Any]:
         body = {"model": self.model, "messages": messages, "temperature": 0.2, "max_tokens": ANALYZER_MAX_TOKENS}
-        with httpx.Client(timeout=self._timeout_seconds) as client:
-            response = client.post(f"{self._base_url}/chat/completions", json=body)
+        try:
+            with httpx.Client(timeout=self._timeout_seconds) as client:
+                response = client.post(f"{self._base_url}/chat/completions", json=body)
+        except httpx.HTTPError as error:
+            record["parse"] = {"ok": False, "error": f"{type(error).__name__}: {error}"}
+            raise
+        record["status"] = response.status_code
         if response.status_code >= 400:
-            body = response.text if len(response.text) <= MAX_DETAIL_CHARS else f"{response.text[:MAX_DETAIL_CHARS]}…"
-            raise AnalyzerError(
-                f"Analyzer model {self.model!r} returned HTTP {response.status_code}: {body}",
+            excerpt = (
+                response.text if len(response.text) <= MAX_DETAIL_CHARS else f"{response.text[:MAX_DETAIL_CHARS]}…"
+            )
+            error = AnalyzerError(
+                f"Analyzer model {self.model!r} returned HTTP {response.status_code}: {excerpt}",
                 status=response.status_code,
                 reason=short_reason(response.text),
             )
-        choices = response.json().get("choices") or []
-        if not choices:
-            raise AnalyzerError(f"Analyzer model {self.model!r} returned no choices.", reason="no choices in the reply")
-        return extract_json(choices[0].get("message") or {})
+            record["error_body"] = response.text
+            record["parse"] = {"ok": False, "error": str(error)}
+            raise error
+        reply = response.json()
+        choice = (reply.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        record.update(
+            content=message.get("content"),
+            reasoning_content=message.get("reasoning_content", message.get("reasoning")),
+            finish_reason=choice.get("finish_reason"),
+            usage=reply.get("usage"),
+        )
+        if not reply.get("choices"):
+            error = AnalyzerError(
+                f"Analyzer model {self.model!r} returned no choices.", reason="no choices in the reply"
+            )
+            record["parse"] = {"ok": False, "error": str(error)}
+            raise error
+        return message
+
+    def _call(
+        self, step: AnalysisStep, messages: list[dict[str, str]], keys: Sequence[str], *, retry: bool = True
+    ) -> dict[str, Any]:
+        name = step if retry else f"{step}-retry"
+        record: dict[str, Any] = {"step": name, "model": self.model, "request": _request_summary(messages)}
+        try:
+            message = self._post(messages, record)
+            try:
+                payload = extract_json(message, keys=keys)
+            except AnalyzerError as error:
+                record["parse"] = {"ok": False, "error": str(error)}
+                if not retry:
+                    raise
+                logger.warning("%s reply did not parse (%s); asking once more for only the JSON", step, error)
+                previous = str(message.get("content") or message.get("reasoning_content") or "")
+                follow_up = [
+                    *messages,
+                    {"role": "assistant", "content": previous},
+                    {"role": "user", "content": RETRY_INSTRUCTION.format(error=error)},
+                ]
+                return self._call(step, follow_up, keys, retry=False)
+            record["parse"] = {"ok": True}
+            return payload
+        finally:
+            self._save(name, record)
 
     def _failure(self, step: AnalysisStep, error: AnalyzerError | httpx.HTTPError) -> AnalyzerFailure:
         logger.warning("%s analysis failed: %s", step, error)
@@ -375,14 +487,15 @@ class GatewayAnalyzer:
     def analyze(self, context: AnalysisContext) -> Analysis:
         analysis = Analysis()
         try:
-            payload = self._complete(config_fix_messages(context))
+            payload = self._call("config-fix", config_fix_messages(context), CONFIG_FIX_KEYS)
             analysis.findings.extend(parse_findings(payload))
             analysis.config_fix = parse_config_fix(payload, context.system_prompt)
         except (AnalyzerError, httpx.HTTPError) as error:
             analysis.errors.append(self._failure("config-fix", error))
         try:
-            payload = self._complete(schema_fix_messages(context))
-            analysis.schema_fix = parse_schema_fix(payload, context.tools)
+            payload = self._call("schema-fix", schema_fix_messages(context), SCHEMA_FIX_KEYS)
+            analysis.schema_fix, skipped = parse_schema_fix(payload, context.tools)
+            analysis.findings.extend(skipped)
         except (AnalyzerError, httpx.HTTPError) as error:
             analysis.errors.append(self._failure("schema-fix", error))
         return analysis

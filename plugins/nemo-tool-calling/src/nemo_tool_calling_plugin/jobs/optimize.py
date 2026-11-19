@@ -67,6 +67,7 @@ TASK_ENTRYPOINT = ["python", "-m"]
 TASK_COMMAND = [TASK_MODULE]
 TASK_IMAGE = "nhx-tasks"
 RESULT_NAME = "tool_calling"
+ANALYZER_REPLIES_DIR = "analyzer"
 SUPPORTED_CONFIG_FORMAT = "nemo-agents-spec-v1"
 PLATFORM_LIST_TIMEOUT_SECONDS = 15.0
 
@@ -179,7 +180,9 @@ class ToolCallingOptimizeJob(NemoJob):
                     trace_window=traced.window.to_json() if traced is not None else None,
                 ),
                 runner=runner,
-                analyzer=GatewayAnalyzer(base_url=gateway_url, model=spec.analyzer_model),
+                analyzer=GatewayAnalyzer(
+                    base_url=gateway_url, model=spec.analyzer_model, replies_dir=results_dir / ANALYZER_REPLIES_DIR
+                ),
                 results_dir=results_dir,
             )
 

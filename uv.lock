@@ -7698,6 +7698,7 @@ version = "0.1.0"
 source = { editable = "plugins/nemo-tool-calling" }
 dependencies = [
     { name = "httpx" },
+    { name = "json-repair" },
     { name = "jsonschema" },
     { name = "mcp" },
     { name = "nemo-agent-optimization-plugin" },
@@ -7710,6 +7711,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "json-repair", specifier = ">=0.60.1" },
     { name = "jsonschema", specifier = ">=4.23.0" },
     { name = "mcp", specifier = ">=1.20.0" },
     { name = "nemo-agent-optimization-plugin", editable = "plugins/nemo-agent-optimization" },

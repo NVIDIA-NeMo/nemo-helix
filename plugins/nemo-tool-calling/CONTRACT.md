@@ -13,6 +13,7 @@ detail page reads `tool-calling-result.json`; every file also shows in the Artif
 | `candidate-agent.yaml` | The agent config with the suggested prompt fix applied. |
 | `candidate-agent.diff` | Unified diff of `candidate-agent.yaml` against the original config. |
 | `schema-patch/<server>/<tool>.json` | Suggested tool definition (`name`, `description`, `inputSchema`) per tool. |
+| `analyzer/<step>.json` | One per analyzer call (`config-fix`, `schema-fix`, retries as `<step>-retry`): model, request summary, raw `content`, `reasoning_content`, `finish_reason`, token `usage`, and the parse outcome. For debugging; Studio only lists it in Artifacts. |
 | `schema-patch.diff` | Unified diff of the suggested schemas against the published ones (pretty-printed JSON). |
 
 ## `tool-calling-result.json`

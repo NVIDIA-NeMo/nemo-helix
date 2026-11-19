@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -65,7 +66,7 @@ def test_parse_config_fix_ignores_an_unchanged_prompt() -> None:
     assert parse_config_fix({"config_fix": {"system_prompt": "Base."}}, "Base.") is None
 
 
-def test_parse_schema_fix_keeps_known_tools_only() -> None:
+def test_parse_schema_fix_still_accepts_full_definitions() -> None:
     payload = {
         "schema_fix": {
             "title": "Tighten",
@@ -76,12 +77,88 @@ def test_parse_schema_fix_keeps_known_tools_only() -> None:
         }
     }
 
-    fix = parse_schema_fix(payload, [TOOL])
+    fix, skipped = parse_schema_fix(payload, [TOOL])
 
     assert fix is not None
+    assert skipped == []
     assert [(tool.server, tool.name, tool.description) for tool in fix.tools] == [
         ("data_designer", "make", "Make a thing.")
     ]
+    assert fix.tools[0].input_schema == {"type": "object", "additionalProperties": False}
+
+
+NESTED = ToolDefinition(
+    server="data_designer",
+    name="make",
+    description="Make a thing.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "job": {"type": "object", "properties": {"columns": {"type": "array", "items": {"type": "object"}}}}
+        },
+    },
+)
+
+
+def test_parse_schema_fix_applies_pointer_edits_to_the_published_schema() -> None:
+    column = {"type": "object", "required": ["name"], "additionalProperties": False, "properties": {"name": {}}}
+    payload = {
+        "schema_fix": {
+            "title": "Close the columns",
+            "edits": [
+                {"tool": "make", "path": "/properties/job/properties/columns/items", "value": column},
+                {"tool": "make", "path": "/properties/job/additionalProperties", "value": False},
+                {"tool": "make", "path": "/required", "value": ["job"]},
+            ],
+            "descriptions": {"make": "Make a thing from columns."},
+        }
+    }
+
+    fix, skipped = parse_schema_fix(payload, [NESTED])
+
+    assert skipped == []
+    assert fix is not None
+    [tool] = fix.tools
+    assert tool.description == "Make a thing from columns."
+    assert tool.input_schema["required"] == ["job"]
+    assert tool.input_schema["properties"]["job"]["additionalProperties"] is False
+    assert tool.input_schema["properties"]["job"]["properties"]["columns"]["items"] == column
+    assert NESTED.input_schema["properties"]["job"]["properties"]["columns"]["items"] == {"type": "object"}
+
+
+def test_parse_schema_fix_skips_bad_edits_with_a_finding() -> None:
+    payload = {
+        "schema_fix": {
+            "edits": [
+                {"tool": "make", "path": "/properties/nope/properties/x", "value": {}},
+                {"tool": "make", "path": "properties/job", "value": {}},
+                {"tool": "make", "path": "", "value": ["not", "an", "object"]},
+                {"tool": "other", "path": "/x", "value": {}},
+                {"tool": "make", "path": "/properties/job/description", "value": "The job."},
+            ]
+        }
+    }
+
+    fix, skipped = parse_schema_fix(payload, [NESTED])
+
+    assert fix is not None
+    assert fix.tools[0].input_schema["properties"]["job"]["description"] == "The job."
+    assert [finding.detail for finding in skipped] == [
+        "Edit names unknown tool 'other'.",
+        "Could not apply an edit at /properties/nope/properties/x: '/properties/nope' does not exist.",
+        "Could not apply an edit at properties/job: a JSON Pointer must be empty or start with '/'.",
+        "Could not apply an edit at <root>: the input schema must stay an object.",
+    ]
+    assert {finding.severity for finding in skipped} == {"low"}
+
+
+def test_parse_schema_fix_with_only_bad_edits_proposes_nothing() -> None:
+    payload = {"schema_fix": {"edits": [{"tool": "make", "path": "/a/b", "value": {}}]}}
+
+    fix, skipped = parse_schema_fix(payload, [NESTED])
+
+    assert fix is None
+    assert len(skipped) == 1
 
 
 def test_check_schema_fix_drops_invalid_schemas() -> None:
@@ -192,3 +269,96 @@ def test_gateway_analyzer_reports_a_transport_error() -> None:
 )
 def test_short_reason(body: str, reason: str) -> None:
     assert short_reason(body) == reason
+
+
+def _raw_completion(content: str, *, finish_reason: str = "stop") -> httpx.Response:
+    choice = {"message": {"content": content, "reasoning_content": "thinking"}, "finish_reason": finish_reason}
+    return httpx.Response(200, json={"choices": [choice], "usage": {"prompt_tokens": 10, "completion_tokens": 20}})
+
+
+GOOD_CONFIG = json.dumps({"findings": [], "config_fix": {"system_prompt": "New."}})
+GOOD_SCHEMA = json.dumps({"schema_fix": {"edits": [{"tool": "make", "path": "/additionalProperties", "value": False}]}})
+
+
+@respx.mock
+def test_replies_are_saved_on_success(tmp_path: Path) -> None:
+    respx.post("http://gw/v1/chat/completions").mock(
+        side_effect=[_raw_completion(GOOD_CONFIG), _raw_completion(GOOD_SCHEMA)]
+    )
+
+    analysis = GatewayAnalyzer(base_url="http://gw/v1", model="m", replies_dir=tmp_path).analyze(_context())
+
+    assert analysis.schema_fix is not None
+    assert analysis.schema_fix.tools[0].input_schema["additionalProperties"] is False
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["config-fix.json", "schema-fix.json"]
+    saved = json.loads((tmp_path / "schema-fix.json").read_text())
+    assert saved["step"] == "schema-fix"
+    assert saved["model"] == "m"
+    assert saved["request"]["messages"] == 2
+    assert saved["request"]["roles"] == ["system", "user"]
+    assert saved["request"]["prompt_chars"] > 0
+    assert saved["content"] == GOOD_SCHEMA
+    assert saved["reasoning_content"] == "thinking"
+    assert saved["finish_reason"] == "stop"
+    assert saved["usage"] == {"prompt_tokens": 10, "completion_tokens": 20}
+    assert saved["parse"] == {"ok": True}
+
+
+@respx.mock
+def test_replies_are_saved_on_http_failure(tmp_path: Path) -> None:
+    respx.post("http://gw/v1/chat/completions").mock(return_value=httpx.Response(404, text="No VirtualModel named m"))
+
+    GatewayAnalyzer(base_url="http://gw/v1", model="m", replies_dir=tmp_path).analyze(_context())
+
+    saved = json.loads((tmp_path / "config-fix.json").read_text())
+    assert saved["status"] == 404
+    assert saved["error_body"] == "No VirtualModel named m"
+    assert saved["parse"]["ok"] is False
+    assert "HTTP 404" in saved["parse"]["error"]
+
+
+@respx.mock
+def test_replies_are_saved_on_transport_failure(tmp_path: Path) -> None:
+    respx.post("http://gw/v1/chat/completions").mock(side_effect=httpx.ReadTimeout("slow"))
+
+    GatewayAnalyzer(base_url="http://gw/v1", model="m", replies_dir=tmp_path).analyze(_context())
+
+    saved = json.loads((tmp_path / "schema-fix.json").read_text())
+    assert saved["parse"] == {"ok": False, "error": "ReadTimeout: slow"}
+
+
+@respx.mock
+def test_an_unparseable_reply_is_retried_once_with_the_parse_error(tmp_path: Path) -> None:
+    bad = "Here is the patch: {{ column }} and then {broken"
+    route = respx.post("http://gw/v1/chat/completions").mock(
+        side_effect=[_raw_completion(GOOD_CONFIG), _raw_completion(bad), _raw_completion(GOOD_SCHEMA)]
+    )
+
+    analysis = GatewayAnalyzer(base_url="http://gw/v1", model="m", replies_dir=tmp_path).analyze(_context())
+
+    assert route.call_count == 3
+    assert analysis.errors == []
+    assert analysis.schema_fix is not None
+    retry_request = json.loads(route.calls[2].request.content)["messages"]
+    assert [message["role"] for message in retry_request] == ["system", "user", "assistant", "user"]
+    assert retry_request[2]["content"] == bad
+    assert "could not be parsed" in retry_request[3]["content"]
+    assert "'schema_fix'" in retry_request[3]["content"]
+    first = json.loads((tmp_path / "schema-fix.json").read_text())
+    retry = json.loads((tmp_path / "schema-fix-retry.json").read_text())
+    assert first["parse"]["ok"] is False
+    assert retry["parse"] == {"ok": True}
+    assert retry["request"]["roles"] == ["system", "user", "assistant", "user"]
+
+
+@respx.mock
+def test_a_reply_that_fails_twice_is_an_analyzer_failure(tmp_path: Path) -> None:
+    respx.post("http://gw/v1/chat/completions").mock(
+        side_effect=[_raw_completion(GOOD_CONFIG), _raw_completion("nope"), _raw_completion("still nope")]
+    )
+
+    analysis = GatewayAnalyzer(base_url="http://gw/v1", model="m", replies_dir=tmp_path).analyze(_context())
+
+    [failure] = analysis.errors
+    assert (failure.step, failure.reason) == ("schema-fix", "no JSON in the reply")
+    assert json.loads((tmp_path / "schema-fix-retry.json").read_text())["parse"]["ok"] is False
