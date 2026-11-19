@@ -47,7 +47,7 @@ External plugins served by their own HTTP adapter can be previewed, registered,
 and removed with `preview`, `install`, `installed`, and `uninstall`.
 
 Examples:
-# List installed plugins.
+# List installed plugins, including registered external ones.
 nemo plugins list
 # Review an external plugin's manifest without installing it.
 nemo plugins preview http://127.0.0.1:6007/plugin.yaml
@@ -81,6 +81,36 @@ def _render_preview(preview: PreviewResponse) -> str:
     return "\n".join(lines)
 
 
+_EXTERNAL_LOOKUP_TIMEOUT_SECONDS = 3.0
+
+
+def _external_plugin_rows(state: CLIContext) -> tuple[list[dict[str, str]], str | None]:
+    """Best-effort rows for external plugins registered with the platform.
+
+    ``plugins list`` has always worked offline, so an unreachable or unauthorized
+    platform must not fail it: return no rows plus a short note instead. The lookup
+    uses a short timeout and never triggers a login or token refresh.
+    """
+    try:
+        client = _plugins_client(state).with_options(timeout=_EXTERNAL_LOOKUP_TIMEOUT_SECONDS)
+        registry = client.list_installed_plugins().data()
+    except Exception as exc:  # noqa: BLE001 - best effort; the offline list is still correct
+        return (
+            [],
+            f"Note: could not list external plugins from the platform ({type(exc).__name__}); showing local plugins only.",
+        )
+    rows = [
+        {
+            "name": plugin.name,
+            "source": "external",
+            "version": "",
+            "description": plugin.title if plugin.enabled else f"{plugin.title} (disabled)",
+        }
+        for plugin in registry.plugins
+    ]
+    return rows, None
+
+
 @app.callback(invoke_without_command=True)
 def plugins_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
@@ -99,7 +129,10 @@ def list_plugins(
 ) -> None:
     """List installed plugins.
 
-    Discovers installed plugins from registered NeMo plugin entry points.
+    Shows plugins discovered from registered NeMo plugin entry points
+    (`source: entry-point`) and external plugins registered with the platform
+    through `nemo plugins install` (`source: external`). If the platform cannot
+    be reached, only the entry-point plugins are shown, with a note.
 
     Examples:
       nemo plugins list
@@ -114,6 +147,7 @@ def list_plugins(
 
     default_columns = [
         Column("name", None),
+        Column("source", None),
         Column("version", None),
         Column("description", None),
     ]
@@ -131,11 +165,16 @@ def list_plugins(
     items = [
         {
             "name": manifest.name,
+            "source": "entry-point",
             "version": manifest.version,
             "description": manifest.description,
         }
-        for manifest in sorted(manifests.values(), key=lambda manifest: manifest.name)
+        for manifest in manifests.values()
     ]
+    external_rows, note = _external_plugin_rows(state)
+    items = sorted(items + external_rows, key=lambda item: item["name"])
+    if note is not None:
+        typer.echo(note, err=True)
 
     format_output(
         items,

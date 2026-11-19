@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
+import pytest
 from nemo_helix_ext.cli.app import app
 from nemo_helix_ext.quickstart.config import QuickstartConfig
 from nemo_helix_plugin.interface import PluginManifest
@@ -18,6 +20,13 @@ runner = CliRunner()
 
 _qs_no_auth = QuickstartConfig(auth_enabled=False)
 _qs_auth = QuickstartConfig(auth_enabled=True)
+
+
+@pytest.fixture(autouse=True)
+def _no_platform_lookup():
+    """`plugins list` also asks the platform for external plugins; keep these tests offline."""
+    with patch("nemo_helix_ext.cli.commands.plugins._external_plugin_rows", return_value=([], None)) as mock:
+        yield mock
 
 
 def _invoke(*args: str):
@@ -112,9 +121,32 @@ class TestPluginsList:
 
         assert_exit_code(result, 0)
         assert result.stdout.splitlines() == [
-            '{"name":"alpha","version":"1.0.0","description":"Alpha plugin"}',
-            '{"name":"beta","version":"1.5.0","description":"Beta plugin"}',
+            '{"name":"alpha","source":"entry-point","version":"1.0.0","description":"Alpha plugin"}',
+            '{"name":"beta","source":"entry-point","version":"1.5.0","description":"Beta plugin"}',
         ]
+
+    def test_list_includes_external_plugins_with_their_source(self, _no_platform_lookup):
+        manifests = {"zeta": PluginManifest(name="zeta", version="2.0.0", description="Zeta plugin")}
+        external = [{"name": "phoenix", "source": "external", "version": "", "description": "Phoenix traces"}]
+        _no_platform_lookup.return_value = (external, None)
+
+        with patch("nemo_helix_plugin.discovery.discover_manifests", return_value=manifests):
+            result = _invoke("plugins", "list", "-f", "json")
+
+        assert_exit_code(result, 0)
+        rows = json.loads(result.stdout)
+        assert [(r["name"], r["source"]) for r in rows] == [("phoenix", "external"), ("zeta", "entry-point")]
+
+    def test_list_falls_back_to_local_plugins_with_a_note_when_platform_unreachable(self, _no_platform_lookup):
+        manifests = {"alpha": PluginManifest(name="alpha", version="1.0.0", description="Alpha plugin")}
+        _no_platform_lookup.return_value = ([], "Note: could not list external plugins from the platform (X).")
+
+        with patch("nemo_helix_plugin.discovery.discover_manifests", return_value=manifests):
+            result = _invoke("plugins", "list", "-f", "json")
+
+        assert_exit_code(result, 0)
+        assert [r["name"] for r in json.loads(result.stdout)] == ["alpha"]
+        assert "could not list external plugins" in result.stderr
 
     def test_stream_requires_json_output(self):
         with patch("nemo_helix_plugin.discovery.discover_manifests") as mock_discover:

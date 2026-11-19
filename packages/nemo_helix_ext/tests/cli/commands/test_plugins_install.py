@@ -212,3 +212,33 @@ def test_enable_and_disable_patch_the_flag(command: str, enabled: bool) -> None:
     assert result.exit_code == 0, result.output
     assert recorder.calls == [("PATCH", "/apis/plugins/-/installed/phoenix")]
     assert json.loads(recorder.requests[0].content) == {"enabled": enabled}
+
+
+def test_external_plugin_rows_come_from_the_installed_registry() -> None:
+    from nemo_helix_ext.cli.commands.plugins import _external_plugin_rows
+
+    disabled = {**PLUGIN, "name": "quiet", "title": "Quiet one", "enabled": False}
+    body = {"schema_version": 1, "plugins": [PLUGIN, disabled]}
+    recorder = Recorder([httpx.Response(200, json=body)])
+    _, state = make_runner(recorder)
+
+    rows, note = _external_plugin_rows(state)
+
+    assert note is None
+    assert recorder.calls == [("GET", "/apis/plugins/-/installed")]
+    assert rows == [
+        {"name": "phoenix", "source": "external", "version": "", "description": "Phoenix traces (Intake)"},
+        {"name": "quiet", "source": "external", "version": "", "description": "Quiet one (disabled)"},
+    ]
+
+
+@pytest.mark.parametrize("status", [401, 403, 404, 503])
+def test_external_plugin_rows_degrade_to_a_note_when_the_platform_refuses(status: int) -> None:
+    from nemo_helix_ext.cli.commands.plugins import _external_plugin_rows
+
+    _, state = make_runner(Recorder([httpx.Response(status, json={"detail": "nope"})]))
+
+    rows, note = _external_plugin_rows(state)
+
+    assert rows == []
+    assert note is not None and "showing local plugins only" in note
