@@ -208,6 +208,8 @@ def _principal_claims(principal: Principal) -> dict[str, Any]:
         claims["email"] = principal.email
     if principal.groups:
         claims["groups"] = ",".join(principal.groups)
+    if principal.account_id:
+        claims["nhx_subject_account_id"] = principal.account_id
     if principal.authz_aliases:
         claims["nhx_subject_aliases"] = principal.authz_aliases
     return claims

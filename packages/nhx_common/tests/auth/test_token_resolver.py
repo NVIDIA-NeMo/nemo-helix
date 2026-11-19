@@ -103,6 +103,7 @@ def test_delegated_workload_token_subject_aliases(aliases: object, expected: lis
 def test_non_workload_access_tokens_ignore_actor_claims(token_kind: ResolvedTokenKind) -> None:
     claims = _claims_with_actor()
     claims.raw_claims["nhx_subject_aliases"] = ["legacy-alice"]
+    claims.raw_claims["nhx_subject_account_id"] = "account-alice"
     resolved = ResolvedBearerToken(claims=claims, token_kind=token_kind)
 
     principal = resolved.principal
@@ -113,6 +114,8 @@ def test_non_workload_access_tokens_ignore_actor_claims(token_kind: ResolvedToke
     assert principal.on_behalf_of is None
     assert principal.on_behalf_of_email is None
     assert principal.on_behalf_of_groups is None
+    assert principal.account_id is None
+    assert principal.on_behalf_of_account_id is None
     assert resolved.principal_headers() == {
         "X-NHX-Principal-Id": "user:alice",
         "X-NHX-Principal-Email": "alice@example.test",
