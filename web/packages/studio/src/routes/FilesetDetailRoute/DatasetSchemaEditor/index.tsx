@@ -54,6 +54,7 @@ export const DatasetSchemaEditor: FC<DatasetSchemaEditorProps> = ({
     handleInferFromExisting,
     isSaving,
     validation,
+    saveError,
     sharedReferrerCount,
     pendingShareConfirm,
     setPendingShareConfirm,
@@ -167,6 +168,12 @@ export const DatasetSchemaEditor: FC<DatasetSchemaEditorProps> = ({
             </Text>
           ))}
         </Stack>
+      )}
+
+      {saveError && (
+        <Text kind="body/regular/sm" className="shrink-0" data-testid="dataset-schema-save-error">
+          {saveError}
+        </Text>
       )}
 
       {inferError && (
