@@ -6,6 +6,7 @@ import {
   Grid,
   GridItem,
   SegmentedControl,
+  Spinner,
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
@@ -26,10 +27,12 @@ const VIEW_ITEMS = [
 export interface DistillationResultsTabProps {
   status: WorkflowStatus;
   arms: MockArmResult[] | null;
+  /** The Intake figures are still being read. */
+  loading?: boolean;
 }
 
 /** The workflow's evaluations side by side. Cost is the platform's estimate from token usage. */
-export const DistillationResultsTab: FC<DistillationResultsTabProps> = ({ status, arms }) => {
+export const DistillationResultsTab: FC<DistillationResultsTabProps> = ({ status, arms, loading = false }) => {
   const [view, setView] = useState<ComparisonView>('table');
 
   if (status !== 'completed') {
@@ -38,6 +41,9 @@ export const DistillationResultsTab: FC<DistillationResultsTabProps> = ({ status
         Results appear once every evaluation has finished.
       </Text>
     );
+  }
+  if (loading) {
+    return <Spinner size="medium" aria-label="Loading results" />;
   }
   if (!arms) {
     return (
