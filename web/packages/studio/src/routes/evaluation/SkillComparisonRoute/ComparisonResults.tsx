@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { KeyValueGrid } from '@nemo/common/src/components/KeyValueGrid';
+import { ChevronLeft, ChevronRight } from '@nemo/icons/icons';
 import {
   Anchor,
   Badge,
@@ -30,7 +31,7 @@ import {
   type MetricObservation,
 } from '@studio/routes/evaluation/SkillComparisonRoute/report';
 import { getAgentEvaluationDetailRoute } from '@studio/routes/utils';
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 
 const format = (value: number | null | undefined) =>
@@ -318,6 +319,81 @@ const heatColors = [
   styles.heat6,
 ];
 
+function MatrixViewport({ children }: { children: ReactNode }) {
+  const viewport = useRef<HTMLDivElement>(null);
+  const id = useId();
+  const [position, setPosition] = useState<'fits' | 'start' | 'middle' | 'end'>('fits');
+
+  function updatePosition() {
+    const element = viewport.current;
+    if (!element) return;
+    const limit = element.scrollWidth - element.clientWidth;
+    if (limit <= 1) setPosition('fits');
+    else if (element.scrollLeft <= 1) setPosition('start');
+    else if (element.scrollLeft >= limit - 1) setPosition('end');
+    else setPosition('middle');
+  }
+
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element) return;
+    updatePosition();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updatePosition);
+    observer.observe(element);
+    if (element.firstElementChild) observer.observe(element.firstElementChild);
+    return () => observer.disconnect();
+  }, []);
+
+  function scrollColumns(direction: number) {
+    const element = viewport.current;
+    if (element) element.scrollBy({ left: direction * element.clientWidth * 0.65 });
+  }
+
+  return (
+    <Stack gap="density-sm" className="min-w-0">
+      {position !== 'fits' && (
+        <Flex align="center" justify="end" gap="density-sm">
+          <Text kind="body/regular/sm" className="text-secondary">
+            Scroll columns
+          </Text>
+          <Button
+            kind="secondary"
+            size="small"
+            aria-label="Scroll columns left"
+            aria-controls={id}
+            disabled={position === 'start'}
+            onClick={() => scrollColumns(-1)}
+          >
+            <ChevronLeft size="16" />
+          </Button>
+          <Button
+            kind="secondary"
+            size="small"
+            aria-label="Scroll columns right"
+            aria-controls={id}
+            disabled={position === 'end'}
+            onClick={() => scrollColumns(1)}
+          >
+            <ChevronRight size="16" />
+          </Button>
+        </Flex>
+      )}
+      <div
+        id={id}
+        className="min-w-0 w-full overflow-x-auto"
+        ref={viewport}
+        role="region"
+        aria-label="Task results matrix"
+        tabIndex={0}
+        onScroll={updatePosition}
+      >
+        {children}
+      </div>
+    </Stack>
+  );
+}
+
 export function TrialHeatmap({ report }: { report: ComparisonReport }) {
   const [selection, setSelection] = useState<{ row: TrialRow; metric: string } | null>(null);
   const rows = new Map<string, TrialRow>();
@@ -345,7 +421,7 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
     )
     .sort();
   return (
-    <Stack gap="density-md">
+    <Stack gap="density-md" className="min-w-0 w-full">
       <Text kind="title/sm">Scores by Task and Trial</Text>
       <Text className="text-secondary" kind="body/regular/sm">
         Each row is one trial. Color shows the reported 0–1 score; — means unmeasured. Select a cell
@@ -369,14 +445,13 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
       {rows.size === 0 ? (
         <Text>No per-trial scoring evidence was retained.</Text>
       ) : (
-        <div className="overflow-x-auto">
+        <MatrixViewport>
           <Table
             aria-label="Scores by task and trial"
             className={styles.matrix}
             layout="auto"
             columns={[
               'Task / Trial',
-              'Arm',
               ...metrics.map((name) => ({
                 children: <span title={name}>{metricLabel(name)}</span>,
               })),
@@ -389,12 +464,11 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
                     <Stack gap="1">
                       <Text>{row.task}</Text>
                       <Text kind="body/regular/sm" className="text-secondary">
-                        {row.trial}
+                        {ARM_LABELS[row.arm]} · {row.trial}
                       </Text>
                     </Stack>
                   ),
                 },
-                ARM_LABELS[row.arm],
                 ...metrics.map((metric) => {
                   const score = row.scores.find((entry) =>
                     entry.outputs.some((output) => `${entry.metric_type}.${output.name}` === metric)
@@ -438,7 +512,7 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
               ],
             }))}
           />
-        </div>
+        </MatrixViewport>
       )}
       <Modal
         open={selection !== null}

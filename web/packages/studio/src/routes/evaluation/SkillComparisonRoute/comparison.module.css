@@ -93,6 +93,17 @@
   font-size: 13px;
 }
 
+.matrix :is(th, td):first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 190px;
+  max-width: 245px;
+  overflow-wrap: anywhere;
+  background: var(--background-color-surface-raised);
+  box-shadow: 1px 0 var(--border-color-base);
+}
+
 .matrix td:not(:first-child) {
   padding: 0;
   text-align: center;

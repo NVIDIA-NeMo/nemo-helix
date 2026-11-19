@@ -25,11 +25,8 @@ import {
   TokenComparison,
   TrialHeatmap,
 } from '@studio/routes/evaluation/SkillComparisonRoute/ComparisonResults';
-import { MetricDetails } from '@studio/routes/evaluation/SkillComparisonRoute/MetricDetails';
-import {
-  ARM_LABELS,
-  metricLabel,
-} from '@studio/routes/evaluation/SkillComparisonRoute/presentation';
+import { PackageChecks } from '@studio/routes/evaluation/SkillComparisonRoute/PackageChecks';
+import { ARM_LABELS } from '@studio/routes/evaluation/SkillComparisonRoute/presentation';
 import {
   ARM_NAMES,
   comparisonWarnings,
@@ -210,7 +207,7 @@ export const SkillComparisonRoute = () => {
                     value: 'trials',
                     children: 'Task Results',
                     slotContent: (
-                      <div className="pt-4">
+                      <div className="pt-4 min-w-0 w-full">
                         <TrialHeatmap report={report} />
                       </div>
                     ),
@@ -218,23 +215,7 @@ export const SkillComparisonRoute = () => {
                   {
                     value: 'package',
                     children: 'Package Checks',
-                    slotContent: (
-                      <Stack gap="density-lg" className="pt-4">
-                        <Text kind="body/regular/sm" className="text-secondary">
-                          These checks run once on the pinned skill archive. They do not measure the
-                          difference between trial arms.
-                        </Text>
-                        {report.package_metrics && Object.keys(report.package_metrics).length ? (
-                          Object.entries(report.package_metrics).map(([name, result]) => (
-                            <DetailPanel key={name} title={metricLabel(name)}>
-                              <MetricDetails name={name} result={result} />
-                            </DetailPanel>
-                          ))
-                        ) : (
-                          <Text>No package checks were retained.</Text>
-                        )}
-                      </Stack>
-                    ),
+                    slotContent: <PackageChecks checks={report.package_metrics} />,
                   },
                   {
                     value: 'evidence',

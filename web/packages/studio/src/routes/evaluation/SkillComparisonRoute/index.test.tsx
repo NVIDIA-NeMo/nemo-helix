@@ -103,10 +103,11 @@ describe('SkillComparisonRoute', () => {
     expect(within(row).getByText('+0.21', { exact: true })).toBeInTheDocument();
   });
 
-  it('shows structured package scan findings alongside the measured counts', async () => {
+  it('filters compact package checks by a finding and opens the matching details', async () => {
     renderComparison();
     const report = makeSkillComparisonReport();
     report.package_metrics = {
+      skill_structure: { outputs: [{ name: 'conforms', value: 1 }], diagnostics: [] },
       skill_security_scan: {
         outputs: [{ name: 'finding_count', value: 1 }],
         diagnostics: [
@@ -124,6 +125,16 @@ describe('SkillComparisonRoute', () => {
     };
     await importReport(report);
     await userEvent.click(screen.getByRole('tab', { name: 'Package Checks' }));
+    const packagePanel = screen.getByRole('tabpanel', { name: 'Package Checks' });
+    expect(within(packagePanel).getAllByRole('group')).toHaveLength(2);
+    await userEvent.type(
+      screen.getByRole('searchbox', { name: 'Search package checks' }),
+      'setup.py'
+    );
+    expect(screen.getByText('1 of 2 checks')).toBeInTheDocument();
+    expect(screen.queryByText('Skill structure', { exact: true })).not.toBeInTheDocument();
+    expect(within(packagePanel).getByRole('group')).not.toHaveAttribute('open');
+    await userEvent.click(screen.getByText('Skill security scan', { exact: true }));
     expect(screen.getByRole('table', { name: 'Skill security scan outputs' })).toHaveTextContent(
       'Finding count'
     );
