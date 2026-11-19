@@ -48,6 +48,8 @@ from nhx.core.jobs.controllers.backends.base import (
     JobBackend,
     JobExecutionProfileConfig,
     JobUpdate,
+    get_job_runtime_shared_envvars,
+    get_job_transfer_envvars,
     get_logs_endpoint_config_from_fileset,
     step_ttl_seconds_active,
     validate_step_environment,
@@ -219,6 +221,18 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
         env, task_id, work_dir, log_path, persistent_dir = self._prepare_runtime(step)
         command = self._build_command(executor_config, env.get("VIRTUAL_ENV"))
+        if step.step_spec is not None and step.step_spec.filesets.enabled:
+            launcher = self._execution_profile_config.launcher_tool_path
+            if not Path(launcher).is_file():
+                self._cleanup_failed_startup_dirs(work_dir, persistent_dir)
+                return JobUpdate(
+                    status=HelixJobStatus.ERROR,
+                    error_details={
+                        "message": "Fileset transfers require launcher_tool_path to an executable host jobs-launcher"
+                    },
+                )
+            command = [launcher, "run", "--require-fileset-transfers", "--", *command]
+
         log_extra = {
             "command": command,
             "path": env.get("PATH"),
@@ -560,6 +574,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         )
         env = {name: value for name, value in os.environ.items() if name in SUBPROCESS_INHERITED_ENV_ALLOWLIST}
         env.update(self._execution_profile_config.env)
+        env.update(get_job_transfer_envvars(step))
         env.update(
             {
                 NEMO_JOB_ID_ENVVAR: step.job,
@@ -599,6 +614,8 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                     env[envvar.name] = envvar.value
 
         env.update(platform_config.to_shared_envvars(loopback_address="localhost"))
+        if spec is not None and spec.filesets.enabled:
+            env.update(get_job_runtime_shared_envvars(platform_config, loopback_address="localhost"))
 
         if step.auth_context:
             auth_context = AuthContext.model_validate(step.auth_context.model_dump(mode="python", exclude_none=True))

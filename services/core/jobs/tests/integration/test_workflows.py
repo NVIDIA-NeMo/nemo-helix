@@ -15,7 +15,19 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
 from nemo_helix_plugin.jobs.spec import HelixJobEnvironmentVariable, HelixJobSpec, HelixJobStepSpec
-from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse, HelixJobStatusUpdateRequest
+from nemo_helix_plugin.jobs.transfers import (
+    FilesetPush,
+    FilesetUploadResult,
+    StepFilesets,
+    TaskTransferProgress,
+    TransferPhase,
+)
+from nemo_helix_plugin.jobs.types import (
+    CreateHelixJobRequest,
+    HelixJobResponse,
+    HelixJobStatusUpdateRequest,
+    HelixJobTaskUpdate,
+)
 from nemo_helix_plugin.jobs.workflows import WorkflowInput, WorkflowMode, WorkflowNodeState, WorkflowSpec
 from nhx.common.entities.client import SyncEntityClient
 from nhx.core.files.service import FilesService
@@ -44,6 +56,7 @@ class WorkflowHarness:
         inputs: dict[str, list[str]] | None = None,
         mode: str = "continuous",
         storage: bool = False,
+        filesets: dict[str, StepFilesets] | None = None,
     ) -> HelixJobResponse:
         spec = HelixJobSpec(
             workflow=WorkflowSpec.model_validate({"mode": mode}),
@@ -51,6 +64,7 @@ class WorkflowHarness:
                 HelixJobStepSpec(
                     name=name,
                     depends_on=parents,
+                    filesets=(filesets or {}).get(name, StepFilesets()),
                     inputs=[WorkflowInput(fileset_id=identifier) for identifier in (inputs or {}).get(name, [])],
                     executor=TestConstants.TEST_EXECUTOR,
                     environment=[HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value="/storage")]
@@ -2104,3 +2118,105 @@ def test_event_workflow_once_mode_remains_terminal(workflow_harness: WorkflowHar
     h.files.commit_fileset(workspace="default", name=source.name)
     still_terminal = h.tick(job)
     assert still_terminal.status == HelixJobStatus.COMPLETED and len(still_terminal.steps) == 2
+
+
+@pytest.mark.parametrize("publication_succeeds", [True, False])
+def test_parallel_workflow_nodes_wait_for_uploads_and_commit_before_releasing_join(
+    workflow_harness: WorkflowHarness, publication_succeeds: bool
+) -> None:
+    harness = workflow_harness
+    outputs = {name: harness.fileset() for name in ("left", "right")}
+    initial_revisions = {name: fileset.commit_revision for name, fileset in outputs.items()}
+    job = harness.create(
+        {"left": [], "right": [], "join": ["left", "right"]},
+        filesets={
+            name: StepFilesets(push=[FilesetPush(fileset_id=fileset.id, directory="/output")])
+            for name, fileset in outputs.items()
+        },
+    )
+    first = harness.tick(job)
+    assert first.workflow is not None and job.attempt_id is not None
+    roots = {node.name: node.active_execution_id for node in first.workflow.nodes if node.name in outputs}
+
+    def report(name: str, phase: TransferPhase, success: bool = True) -> str:
+        execution_id = roots[name]
+        assert execution_id is not None and execution_id != name and job.attempt_id is not None
+        uploaded = phase in {"uploaded", "upload_failed"}
+        result = harness.jobs.update_attempt_step_task(
+            workspace="default",
+            job=job.id,
+            attempt=job.attempt_id,
+            step=execution_id,
+            name="task",
+            body=HelixJobTaskUpdate(
+                status=HelixJobStatus.ACTIVE,
+                transfer=TaskTransferProgress(
+                    phase=phase,
+                    runtime_id=name,
+                    exit_code=0 if phase == "finished" or uploaded else None,
+                    uploads=[FilesetUploadResult(fileset_id=outputs[name].id, success=success)] if uploaded else [],
+                ),
+            ),
+        ).data()
+        return result.transfer_action
+
+    def backend_finished(name: str) -> None:
+        execution_id = roots[name]
+        assert execution_id is not None and job.attempt_id is not None
+        harness.jobs.update_attempt_step_status(
+            workspace="default",
+            job=job.id,
+            attempt=job.attempt_id,
+            name=execution_id,
+            body=HelixJobStatusUpdateRequest(status=HelixJobStatus.COMPLETED),
+        )
+
+    for name in outputs:
+        execution_id = roots[name]
+        assert execution_id is not None
+        harness.jobs.update_attempt_step_status(
+            workspace="default",
+            job=job.id,
+            attempt=job.attempt_id,
+            name=execution_id,
+            body=HelixJobStatusUpdateRequest(status=HelixJobStatus.ACTIVE),
+        )
+        assert report(name, "ready") == "run"
+    assert report("left", "finished") == "upload_success"
+    backend_finished("left")
+    waiting = harness.tick(job)
+    assert waiting.workflow is not None
+    assert next(node for node in waiting.workflow.nodes if node.name == "join").active_execution_id is None
+    assert harness.node_state(job, "left").successful_step_id is None
+    assert (
+        harness.files.get_fileset_by_id(workspace="default", fileset_id=outputs["left"].id).data().commit_revision
+        == initial_revisions["left"]
+    )
+    harness.files.upload_file(workspace="default", name=outputs["left"].name, path="result.txt", content=b"left")
+    assert report("left", "uploaded") == "done"
+    backend_finished("left")
+    partial = harness.tick(job)
+    assert partial.workflow is not None
+    assert harness.node_state(job, "left").successful_step_id == roots["left"]
+    assert harness.node_state(job, "right").active_step_id == roots["right"]
+    assert next(node for node in partial.workflow.nodes if node.name == "join").active_execution_id is None
+    assert (
+        harness.files.get_fileset_by_id(workspace="default", fileset_id=outputs["left"].id).data().commit_revision
+        != initial_revisions["left"]
+    )
+    assert report("right", "finished") == "upload_success"
+    if publication_succeeds:
+        harness.files.upload_file(workspace="default", name=outputs["right"].name, path="result.txt", content=b"right")
+    assert (
+        report("right", "uploaded" if publication_succeeds else "upload_failed", success=publication_succeeds) == "done"
+    )
+    backend_finished("right")
+    final = harness.tick(job)
+    assert final.workflow is not None
+    join = next(node for node in final.workflow.nodes if node.name == "join")
+    assert (join.active_execution_id is not None) == publication_succeeds
+    assert (
+        harness.files.get_fileset_by_id(workspace="default", fileset_id=outputs["right"].id).data().commit_revision
+        != initial_revisions["right"]
+    ) == publication_succeeds
+    assert harness.node_state(job, "right").last_outcome == ("completed" if publication_succeeds else "error")

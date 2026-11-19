@@ -357,7 +357,7 @@ class VolcanoJobBackend(
 
         if num_nodes <= 1:
             # (single task, minimal)
-            tasks = [
+            tasks: list[dict[str, Any]] = [
                 {
                     "name": "worker",
                     "replicas": 1,
@@ -366,7 +366,7 @@ class VolcanoJobBackend(
                 }
             ]
         else:
-            leader_task = {
+            leader_task: dict[str, Any] = {
                 "name": "leader",
                 "replicas": 1,
                 "policies": leader_policies,
@@ -380,6 +380,12 @@ class VolcanoJobBackend(
             if worker_policies:
                 worker_task["policies"] = worker_policies
             tasks = [leader_task, worker_task]
+
+        if step.step_spec is not None and step.step_spec.filesets.enabled:
+            for task in tasks:
+                task["template"]["spec"]["containers"][0]["env"].append(
+                    {"name": "NEMO_JOB_TRANSFER_LEADER", "value": "true" if task["name"] == "leader" else "false"}
+                )
 
         volcano_job_spec: dict[str, Any] = {
             "minAvailable": num_nodes,

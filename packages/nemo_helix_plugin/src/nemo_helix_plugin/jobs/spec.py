@@ -21,6 +21,7 @@ from nemo_helix_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTI
 from nemo_helix_plugin.jobs._mapping_access import JobSpecModel
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.providers import Provider
+from nemo_helix_plugin.jobs.transfers import StepFilesets
 from nemo_helix_plugin.jobs.workflows import (
     WorkflowCondition,
     WorkflowFilesetCommit,
@@ -164,6 +165,9 @@ class HelixJobStepSpec(JobSpecModel):
     )
     executor: Provider = Field(description="The executor for the step")
     config: dict = Field(default_factory=dict, description="Configuration for the step")
+    filesets: StepFilesets = Field(
+        default_factory=StepFilesets, description="Task-local Fileset pulls and conditional uploads"
+    )
     gateway_providers: dict[str, GatewayProviderBinding] = Field(default_factory=dict)
     gateway_read_filesets: list[str] = Field(
         default_factory=list,

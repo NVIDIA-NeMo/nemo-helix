@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // stepSpecNameConfigKey is the key the jobs controller adds to a step entity's
@@ -20,12 +21,14 @@ type JobStepClient interface {
 	// GetJobStepConfig returns the step spec config for a job step as JSON,
 	// in the shape the workload reads from NEMO_JOB_STEP_CONFIG_FILE_PATH.
 	GetJobStepConfig(ctx context.Context, workspace, job, step string) ([]byte, error)
+	GetAttemptStepConfig(ctx context.Context, workspace, job, attempt, step string) ([]byte, error)
 }
 
 type jobStepClient struct {
 	httpClient *http.Client
 	principal  *Principal
 	apiBaseURL string
+	session    *Session
 }
 
 func NewJobStepClientWithHTTPClient(apiBaseURL string, principal *Principal, httpClient *http.Client) JobStepClient {
@@ -33,7 +36,8 @@ func NewJobStepClientWithHTTPClient(apiBaseURL string, principal *Principal, htt
 		httpClient = http.DefaultClient
 	}
 	return &jobStepClient{
-		httpClient: httpClient,
+		httpClient: safeHTTPClient(httpClient),
+		session:    &Session{},
 		principal:  principal,
 		apiBaseURL: apiBaseURL,
 	}
@@ -47,19 +51,21 @@ func getJobStepURL(baseURL, workspace, job, step string) string {
 }
 
 func (c *jobStepClient) GetJobStepConfig(ctx context.Context, workspace, job, step string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", getJobStepURL(c.apiBaseURL, workspace, job, step), nil)
+	return c.getConfig(ctx, getJobStepURL(c.apiBaseURL, workspace, job, step))
+}
+
+func (c *jobStepClient) GetAttemptStepConfig(ctx context.Context, workspace, job, attempt, step string) ([]byte, error) {
+	resource := fmt.Sprintf("%s/apis/jobs/v2/workspaces/%s/jobs/%s/attempts/%s/steps/%s", c.apiBaseURL, url.PathEscape(workspace), url.PathEscape(job), url.PathEscape(attempt), url.PathEscape(step))
+	return c.getConfig(ctx, resource)
+}
+
+func (c *jobStepClient) getConfig(ctx context.Context, resource string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", resource, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// Same principal scheme as the secrets fetch: the jobs service acting on
-	// behalf of the job creator.
-	if c.principal != nil && c.principal.ID != "" {
-		req.Header.Set("X-NHX-Principal-Id", "service:jobs")
-		req.Header.Set("X-NHX-Principal-On-Behalf-Of", c.principal.ID)
-	}
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.session.do(req, c.httpClient, c.principal)
 	if err != nil {
 		return nil, err
 	}
@@ -82,4 +88,14 @@ func (c *jobStepClient) GetJobStepConfig(ctx context.Context, workspace, job, st
 	}
 	delete(config, stepSpecNameConfigKey)
 	return json.Marshal(config)
+}
+
+func (s *Session) JobStepClient(endpoint Endpoint, principal *Principal) JobStepClient {
+	client := s.clientForEndpoint(endpoint)
+	if client.Timeout == 0 {
+		client.Timeout = 30 * time.Second
+	}
+	c := NewJobStepClientWithHTTPClient(endpoint.ConnectBaseURL, principal, client).(*jobStepClient)
+	c.session = s
+	return c
 }

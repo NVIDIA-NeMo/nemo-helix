@@ -24,7 +24,7 @@ from nhx.common.api.parsed_filter import ParsedFilter
 from nhx.common.auth import AuthContext
 from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.entities import SYSTEM_WORKSPACE
-from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
+from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError, EntityValidationError
 from nhx.common.jobs.schemas import (
     HelixJobStatus,
     HelixJobStatusResponse,
@@ -66,6 +66,9 @@ from nhx.core.jobs.app.lifecycle import (
 from nhx.core.jobs.app.schemas import (
     HelixJobSpec,
 )
+from nhx.core.jobs.app.transfers import coordinate as coordinate_transfers
+from nhx.core.jobs.app.transfers import execution_spec
+from nhx.core.jobs.app.transfers import report as report_transfer
 from nhx.core.jobs.app.workflow import (
     WORKFLOW_CONTROL,
     WORKFLOW_REQUESTS,
@@ -327,6 +330,14 @@ class JobDispatcher:
                         raise JobEnvironmentValidationError(f"Input Fileset {fileset_id} has no commit_revision")
         # Ensure that any referenced secrets in steps exist and the user has access (user-scoped client).
         for step in job_spec.steps:
+            for entry in [*step.filesets.pull, *step.filesets.push]:
+                fileset = (
+                    await self.files.get_fileset_by_id(workspace=job_workspace, fileset_id=entry.fileset_id)
+                ).data()
+                if fileset.id != entry.fileset_id or fileset.workspace != job_workspace:
+                    raise EntityValidationError("Transfer Fileset must belong to the Job workspace")
+                if entry in step.filesets.push and fileset.storage.read_only:
+                    raise EntityValidationError("Push Fileset storage is read-only")
             if step.gateway_providers:
                 try:
                     await authorize_provider_references(
@@ -1225,6 +1236,34 @@ class JobDispatcher:
         parent_job = await self.store.get_by_id(HelixJob, parent_attempt.job)
         self._require_published(parent_job)
         step_to_save = await self.store.get_by_id(HelixJobStep, step.id)
+        has_transfers = any(spec.filesets.enabled for spec in parent_attempt.platform_spec.steps)
+        if (
+            has_transfers
+            and status in {HelixJobStatus.COMPLETED, HelixJobStatus.ERROR}
+            and execution_spec(parent_attempt, step_to_save).filesets.enabled
+        ):
+            transfer_store = self.store.as_service("jobs", internal=True)
+            observed_tasks = await self.list_tasks(step.id, step.workspace)
+            missing_uploader = any(
+                task.status.is_terminal()
+                and (task.transfer is None or task.transfer.phase not in {"uploaded", "upload_failed"})
+                for task in observed_tasks
+            )
+            step_to_save = await coordinate_transfers(
+                transfer_store,
+                self.files,
+                parent_attempt,
+                step_to_save,
+                observed_tasks,
+                backend_failed=status == HelixJobStatus.ERROR or missing_uploader,
+                allow_commit=False,
+            )
+            transfer_state = step_to_save.transfer_state
+            if transfer_state is None or transfer_state.phase not in {"done", "aborted"}:
+                return step_to_save, parent_attempt
+            if transfer_state.phase == "aborted" or transfer_state.outcome == "failure" or transfer_state.errors:
+                status = HelixJobStatus.ERROR
+                error_details = {**(error_details or {}), "transfers": transfer_state.model_dump(mode="json")}
         if status == HelixJobStatus.ERROR:
             error_details = await self._with_task_cause(step_to_save, error_details)
         saved_step: HelixJobStep | None = None
@@ -2134,6 +2173,17 @@ class JobDispatcher:
         if job.workspace != workspace or attempt.workspace != workspace or step.workspace != workspace:
             raise EntityNotFoundError("Task parent chain does not belong to this workspace")
         self._require_published(job)
+
+        if task_update.transfer is not None:
+            return await report_transfer(
+                self.store.as_service("jobs", internal=True),
+                self.files,
+                attempt,
+                step,
+                task_name,
+                task_update.transfer,
+                await self.list_tasks(step.id, workspace),
+            )
 
         task = await self.get_task(step.id, task_name, workspace=workspace)
 

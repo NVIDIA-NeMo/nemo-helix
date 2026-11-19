@@ -46,7 +46,8 @@ class _PauseDeadline(Protocol):
 
 
 class _StepLifecycleSpec(Protocol):
-    lifecycle: _PauseDeadline | None
+    @property
+    def lifecycle(self) -> _PauseDeadline | None: ...
 
 
 class StatusDetailsStep(Protocol):
