@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Submit the images FileSet to local Helix Jobs and download its artifacts."""
+"""Start a continuous OpenCV Job and download the first pass for the demo."""
 
 import argparse
 import json
@@ -111,23 +111,32 @@ def main():
                 name=prefix,
                 source="opencv-demo",
                 spec={},
-                platform_spec=HelixJobSpec(steps=steps, workflow=WorkflowSpec(mode="run_to_completion")),
+                platform_spec=HelixJobSpec(steps=steps, workflow=WorkflowSpec(mode="continuous")),
             )
         ).data()
         print(f"Job {job.name} ({job.id}), attempt {job.attempt_id}", flush=True)
         deadline = time.monotonic() + 300
         while True:
             status = jobs.get_job_status(name=job.id, attempt_id=job.attempt_id).data()
-            if status.status.is_terminal() or time.monotonic() >= deadline:
+            workflow = status.workflow
+            if (
+                status.status.is_terminal()
+                or (workflow and workflow.waiting_for_changes)
+                or time.monotonic() >= deadline
+            ):
                 break
             time.sleep(2)
         (out / "status.json").write_text(status.model_dump_json(indent=2))
         if (
-            status.status != HelixJobStatus.COMPLETED
-            or len(status.steps) != len(steps)
-            or any(s.status != HelixJobStatus.COMPLETED for s in status.steps)
+            status.status != HelixJobStatus.ACTIVE
+            or workflow is None
+            or not workflow.waiting_for_changes
+            or workflow.degraded
+            or any(node.last_outcome != "completed" for node in workflow.nodes)
         ):
-            raise RuntimeError(f"Job status {status.status.value}. Inspect {out / 'status.json'}")
+            raise RuntimeError(
+                f"First pass did not finish successfully (Job {status.status.value}). Inspect {out / 'status.json'}"
+            )
         outputs = {
             "edges": [Path(photo).stem + ".png" for photo in photos],
             "montage": ["contact-sheet.png"],
@@ -148,6 +157,8 @@ def main():
         expected.add(("montage", "contact-sheet.png"))
         if {(r["source"], r["image"]) for r in records if r["caption"].strip()} != expected:
             raise RuntimeError("Expected a caption for each image, edge map, and montage")
+
+        print(f"First pass downloaded. Job {job.name} is watching for new images FileSet commits.")
 
 
 if __name__ == "__main__":
