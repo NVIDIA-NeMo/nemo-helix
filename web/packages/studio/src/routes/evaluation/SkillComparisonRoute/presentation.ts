@@ -40,7 +40,9 @@ const normalizedOutputs: Record<string, string[]> = {
 };
 
 export function isNormalizedOutput(name: string): boolean {
-  const [metric, output] = name.split('.', 2);
+  const [metric, output] = name.startsWith('harbor_skill_metrics.')
+    ? name.split('.').slice(-2)
+    : name.split('.', 2);
   return !Object.hasOwn(normalizedOutputs, metric) || normalizedOutputs[metric].includes(output);
 }
 
@@ -55,11 +57,19 @@ const metricLabels: Record<string, string> = {
 };
 
 export function metricLabel(name: string): string {
+  const pass = /^(.*)\.pass@(\d+)$/.exec(name);
+  if (pass) return `${metricLabel(pass[1])} · pass@${pass[2]}`;
+  if (name.startsWith('harbor_skill_metrics.')) {
+    const output = name.slice('harbor_skill_metrics.'.length);
+    const scoped = /^skill\.(.+)\.([^.]+\.[^.]+)$/.exec(output);
+    if (scoped) return `${metricLabel(scoped[2])} · ${scoped[1]}`;
+    return metricLabel(output);
+  }
+  const packageCheck = /^package\.(.+)\.([^.]+)$/.exec(name);
+  if (packageCheck) return `${metricLabel(packageCheck[2])} · ${packageCheck[1]}`;
   if (Object.hasOwn(metricLabels, name)) return metricLabels[name];
   const judge = /^llm-judge\.assertion_(\d+)(\.label)?$/.exec(name);
   if (judge) return `Judge assertion ${judge[1]}${judge[2] ? ' label' : ''}`;
-  const pass = /^(.*)\.pass@(\d+)$/.exec(name);
-  if (pass) return `${metricLabel(pass[1])} · pass@${pass[2]}`;
   return name
     .replace(/^view\./, '')
     .replace(/[_.-]+/g, ' ')

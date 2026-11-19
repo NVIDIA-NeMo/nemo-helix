@@ -10,18 +10,24 @@ import type { AgentEvaluateJob, TasksetRunStatus } from '@nemo/sdk/generated/eva
 import { customFetch } from '@nemo/sdk/generated/fetchers/evals';
 import { jobsGetJob } from '@nemo/sdk/generated/platform/jobs';
 import {
+  fetchAgentEvalBundle,
+  fetchAgentEvalResult,
+  type AgentEvalScoreRow,
+} from '@studio/api/evaluation/agent-evaluations';
+import {
   parseReport,
   type ComparisonReport,
 } from '@studio/routes/evaluation/SkillComparisonRoute/report';
 import { z } from 'zod';
 
 const MAX_BUNDLE_BYTES = 32 * 1024 * 1024;
+const packageDiagnostic = z.object({ details: z.object({ metric: z.string() }) });
 const taskJobSchema = z.object({
   spec: z.object({
     spec: z.object({ target: z.object({ skills: z.array(z.string()).nullish() }) }),
     environment: z.object({
       agent: z.object({ image_ref: z.string() }),
-      verifier: z.object({ image_ref: z.string() }),
+      verifier: z.object({ image_ref: z.string() }).nullish(),
     }),
   }),
 });
@@ -75,7 +81,7 @@ export async function readScoringBundle(blob: Blob) {
   };
 }
 
-async function loadArm(workspace: string, run: TasksetRunStatus, scoringJobs: AgentEvaluateJob[]) {
+async function loadExecution(workspace: string, run: TasksetRunStatus) {
   const members = await evalsListTasksetRunTasks(workspace, run.run_id, { page_size: 2 });
   if (members.data.length !== 1 || (members.pagination?.total_results ?? 1) !== 1)
     throw new Error(
@@ -85,45 +91,139 @@ async function loadArm(workspace: string, run: TasksetRunStatus, scoringJobs: Ag
   const task = await evalsGetTasksetRunTask(workspace, run.run_id, member.task_index);
   if (!member.job || task.trials?.length !== 1)
     throw new Error('This run does not retain exactly one live trial.');
-  const trialId = task.trials[0].trial;
-  const matching = scoringJobs.filter(
+  const stored = taskJobSchema.parse(await jobsGetJob(workspace, member.job));
+  return {
+    run,
+    trial: task.trials[0],
+    jobName: member.job,
+    skills: stored.spec.spec.target.skills ?? [],
+    agentImage: stored.spec.environment.agent.image_ref,
+    verifierImage: stored.spec.environment.verifier?.image_ref ?? null,
+  };
+}
+
+type SavedExecution = Awaited<ReturnType<typeof loadExecution>>;
+
+function findReplay(execution: SavedExecution, jobs: AgentEvaluateJob[]) {
+  return jobs.find(
     (job) =>
       job.status === 'completed' &&
       job.spec.trials?.length === 1 &&
-      job.spec.trials[0].id === trialId
+      job.spec.trials[0].id === execution.trial.trial
   );
-  if (!matching.length)
-    throw new Error('No completed scoring replay matches this run in the latest 100 scoring jobs.');
-  const scoring = matching[0];
-  const trial = scoring.spec.trials?.[0];
-  const [job, bundle] = await Promise.all([
-    jobsGetJob(workspace, member.job),
-    customFetch<Blob>({
-      url: `/apis/evals/v2/workspaces/${encodeURIComponent(workspace)}/agent-evaluate/jobs/${encodeURIComponent(scoring.name)}/results/agent-eval-results/download`,
-      method: 'GET',
-      responseType: 'blob',
-      maxContentLength: MAX_BUNDLE_BYTES,
-    }).then(readScoringBundle),
-  ]);
-  const stored = taskJobSchema.parse(job);
+}
+
+async function loadReplay(workspace: string, scoring: AgentEvaluateJob) {
+  const bundle = await customFetch<Blob>({
+    url: `/apis/evals/v2/workspaces/${encodeURIComponent(workspace)}/agent-evaluate/jobs/${encodeURIComponent(scoring.name)}/results/agent-eval-results/download`,
+    method: 'GET',
+    responseType: 'blob',
+    maxContentLength: MAX_BUNDLE_BYTES,
+  }).then(readScoringBundle);
   return {
-    skills: stored.spec.spec.target.skills ?? [],
-    arm: {
-      run_id: run.run_id,
-      job_name: member.job,
-      reward: task.trials[0].reward,
-      agent_image_ref: stored.spec.environment.agent.image_ref,
-      verifier_image_ref: stored.spec.environment.verifier.image_ref,
-      bundle: 'Retained execution artifacts',
-      activation: z.record(z.boolean()).safeParse(trial?.metadata?.skill_activation).success
-        ? z.record(z.boolean()).parse(trial?.metadata?.skill_activation)[
-            (stored.spec.spec.target.skills?.[0] ?? '').split('/').pop()?.split('#')[0] ?? ''
-          ]
-        : undefined,
-      measurements: trial?.measurements,
-      scoring_job: { name: scoring.name },
-      replay: { bundle: 'Retained scoring artifacts', ...bundle },
+    trial: scoring.spec.trials?.[0],
+    scoringJob: { name: scoring.name },
+    replay: { bundle: 'Retained scoring artifacts', ...bundle },
+  };
+}
+
+async function loadNative(workspace: string, execution: SavedExecution, signal: AbortSignal) {
+  const runId = execution.run.run_id;
+  const result = await fetchAgentEvalResult(workspace, runId, signal);
+  if (!result?.summary) throw new Error(`Run ${runId} has no saved scoring results.`);
+  const bundle = await fetchAgentEvalBundle(workspace, result.bundle_ref, signal);
+  if (!bundle) throw new Error(`Run ${runId} has no readable scoring bundle.`);
+  const trial = bundle.trials.find(({ id }) => id === execution.trial.trial);
+  if (!trial) throw new Error(`Run ${runId} has no matching trial in its scoring bundle.`);
+  const scores = bundle.scores.filter(({ trial_id }) => trial_id === trial.id);
+  const { packageMetrics, trialScores } = projectNativeScores(scores);
+  return {
+    trial,
+    packageMetrics,
+    replay: {
+      bundle: result.bundle_ref,
+      source: 'run' as const,
+      summary: {
+        ...result.summary,
+        scores: {
+          scores: result.scores.scores.filter(
+            ({ name }) => !name.startsWith('harbor_skill_metrics.package.')
+          ),
+        },
+        metric_coverage: {
+          ...result.summary.metric_coverage,
+          ...(result.summary.metric_coverage?.harbor_skill_metrics && {
+            harbor_skill_metrics: Object.fromEntries(
+              Object.entries(result.summary.metric_coverage.harbor_skill_metrics).filter(
+                ([name]) => !name.startsWith('package.')
+              )
+            ),
+          }),
+        },
+      },
+      scores: trialScores,
     },
+  };
+}
+
+function projectNativeScores(scores: AgentEvalScoreRow[]) {
+  interface PackageResult {
+    outputs: NonNullable<AgentEvalScoreRow['outputs']>;
+    diagnostics: unknown[];
+  }
+  const packageMetrics = new Map<string, PackageResult>();
+  const packageMetric = (key: string) => {
+    let result = packageMetrics.get(key);
+    if (!result) {
+      result = { outputs: [], diagnostics: [] };
+      packageMetrics.set(key, result);
+    }
+    return result;
+  };
+  const trialScores = scores.map((score) => {
+    const outputs = score.outputs ?? [];
+    if (score.metric_type !== 'harbor_skill_metrics') return { ...score, outputs };
+    const diagnostics = score.diagnostics ?? [];
+    for (const output of outputs) {
+      const separator = output.name.lastIndexOf('.');
+      if (!output.name.startsWith('package.') || separator <= 'package.'.length) continue;
+      const key = output.name.slice(0, separator);
+      packageMetric(key).outputs.push({ ...output, name: output.name.slice(separator + 1) });
+    }
+    const trialDiagnostics = diagnostics.filter((diagnostic) => {
+      const metric = packageDiagnostic.safeParse(diagnostic);
+      if (!metric.success || !metric.data.details.metric.startsWith('package.')) return true;
+      packageMetric(metric.data.details.metric).diagnostics.push(diagnostic);
+      return false;
+    });
+    return {
+      ...score,
+      outputs: outputs.filter(({ name }) => !name.startsWith('package.')),
+      diagnostics: trialDiagnostics,
+    };
+  });
+  return { packageMetrics: Object.fromEntries(packageMetrics), trialScores };
+}
+
+function toArm(
+  execution: SavedExecution,
+  results: Awaited<ReturnType<typeof loadReplay>> | Awaited<ReturnType<typeof loadNative>>
+) {
+  const activation = z.record(z.boolean()).safeParse(results.trial?.metadata?.skill_activation);
+  const skillName =
+    execution.skills.length === 1 ? execution.skills[0].split('#')[0].split('/').pop() : undefined;
+  return {
+    run_id: execution.run.run_id,
+    job_name: execution.jobName,
+    reward: execution.trial.reward,
+    agent_image_ref: execution.agentImage,
+    verifier_image_ref: execution.verifierImage,
+    skill_refs: execution.skills,
+    bundle: 'Retained execution artifacts',
+    activation: activation.success && skillName ? activation.data[skillName] : undefined,
+    measurements: results.trial?.measurements ?? undefined,
+    scoring_job: 'scoringJob' in results ? results.scoringJob : undefined,
+    replay: results.replay,
   };
 }
 
@@ -135,23 +235,30 @@ export async function loadSavedComparison(
   if (baseline.run_id === treatment.run_id) throw new Error('Choose two distinct runs.');
   if (baseline.taskset_ref !== treatment.taskset_ref)
     throw new Error('Choose runs with the same pinned taskset.');
-  const scoring = await evalsListAgentEvaluateJobs(workspace, {
-    page_size: 100,
-    sort: '-created_at',
-  });
-  const [before, after] = await Promise.all([
-    loadArm(workspace, baseline, scoring.data),
-    loadArm(workspace, treatment, scoring.data),
+  const [before, after, scoring] = await Promise.all([
+    loadExecution(workspace, baseline),
+    loadExecution(workspace, treatment),
+    evalsListAgentEvaluateJobs(workspace, { page_size: 100, sort: '-created_at' }),
   ]);
-  if (before.skills.length || after.skills.length !== 1)
-    throw new Error('Choose a control without skills and a variant with exactly one pinned skill.');
+  if (before.skills.length || !after.skills.length)
+    throw new Error(
+      'Choose a control without skills and a variant with at least one pinned skill.'
+    );
+
+  const beforeReplay = findReplay(before, scoring.data);
+  const afterReplay = findReplay(after, scoring.data);
+  const signal = AbortSignal.timeout(60_000);
+  const [controlResults, variantResults] = await (beforeReplay && afterReplay
+    ? Promise.all([loadReplay(workspace, beforeReplay), loadReplay(workspace, afterReplay)])
+    : Promise.all([loadNative(workspace, before, signal), loadNative(workspace, after, signal)]));
   return parseReport(
     JSON.stringify({
       context: 'Saved Helix executions',
       workspace,
       taskset_ref: treatment.taskset_ref,
-      skill_ref: after.skills[0],
-      arms: { baseline: before.arm, 'with-skill': after.arm },
+      package_metrics:
+        'packageMetrics' in variantResults ? variantResults.packageMetrics : undefined,
+      arms: { baseline: toArm(before, controlResults), 'with-skill': toArm(after, variantResults) },
     })
   );
 }

@@ -309,6 +309,8 @@ interface TrialRow {
   arm: ArmName;
   scores: TrialScore[];
 }
+const metricGroup = (name: string) => name.slice(0, name.lastIndexOf('.'));
+
 const heatColors = [
   styles.heat0,
   styles.heat1,
@@ -410,14 +412,14 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
   const outcomeTypes = new Set(
     [...metricNames]
       .filter((name) => isNormalizedOutput(name) && !name.endsWith('.complete'))
-      .map((name) => name.split('.', 1)[0])
+      .map(metricGroup)
   );
   const metrics = [...metricNames]
     .filter(
       (name) =>
         !name.endsWith('.label') &&
         ((isNormalizedOutput(name) && !name.endsWith('.complete')) ||
-          !outcomeTypes.has(name.split('.', 1)[0]))
+          !outcomeTypes.has(metricGroup(name)))
     )
     .sort();
   return (
@@ -561,19 +563,33 @@ export function ArmEvidence({
             { key: 'run', label: 'Live Run', value: arm.run_id },
             { key: 'job', label: 'Task Job', value: arm.job_name },
             { key: 'reward', label: 'Live Harbor Reward', value: format(arm.reward) },
+            {
+              key: 'skills',
+              label: 'Pinned Skills',
+              value: arm.skill_refs?.length
+                ? arm.skill_refs.map((ref) => (
+                    <span className="block" key={ref}>
+                      {ref}
+                    </span>
+                  ))
+                : arm.skill_refs
+                  ? 'None'
+                  : undefined,
+              wrapValue: true,
+            },
             { key: 'discovery', label: 'Skill Discovered', value: flag(arm.discovery) },
             { key: 'activation', label: 'Skill Activated', value: flag(arm.activation) },
             { key: 'agent', label: 'Agent Image', value: arm.agent_image_ref, wrapValue: true },
             {
               key: 'verifier',
               label: 'Verifier Image',
-              value: arm.verifier_image_ref,
+              value: arm.verifier_image_ref ?? 'No separate verifier image',
               wrapValue: true,
             },
             { key: 'bundle', label: 'Local Trial Bundle', value: arm.bundle, wrapValue: true },
             {
               key: 'replay-bundle',
-              label: 'Local Scoring Bundle',
+              label: arm.replay?.source === 'run' ? 'Saved Results Bundle' : 'Scoring Bundle',
               value: arm.replay?.bundle,
               wrapValue: true,
             },
@@ -588,8 +604,8 @@ export function ArmEvidence({
         )}
         {arm.replay && (
           <Badge color={arm.replay.summary.error_count ? 'yellow' : 'gray'}>
-            {arm.replay.summary.trial_count} replay trials · {arm.replay.summary.error_count} trial
-            errors
+            {arm.replay.summary.trial_count} {arm.replay.source === 'run' ? 'saved' : 'replay'}{' '}
+            trials · {arm.replay.summary.error_count} trial errors
           </Badge>
         )}
         {(arm.evidence_error || arm.replay_error) && (
