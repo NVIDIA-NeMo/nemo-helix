@@ -124,6 +124,7 @@ describe('Routes', () => {
         ROUTES.workspace.agentEvaluationNew,
         ROUTES.workspace.baseModels,
         ROUTES.workspace.baseModelsModel,
+        ROUTES.workspace.communityPlugins,
         ROUTES.workspace.dataDesignerJobList,
         ROUTES.workspace.dataDesignerJobDetails,
         ROUTES.workspace.dataDesignerJobNew,
