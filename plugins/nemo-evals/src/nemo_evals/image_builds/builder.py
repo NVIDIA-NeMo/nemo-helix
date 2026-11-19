@@ -102,7 +102,7 @@ def archive_source(fileset_ref: str, context_path: str) -> FileSetSource:
 
 
 #: The codes Builder gives a 409 that refuses the request itself, where the next revision would fare no better.
-#: A revision another request holds has no code, and a row another backend built has one of its own.
+#: A revision another request holds has no code, and one submitted under another backend has one of its own.
 _REFUSALS = frozenset({CODE_BACKEND_REJECTED, CODE_MISSING_SECRETS})
 
 
@@ -124,7 +124,7 @@ async def ensure_build(
 
     A pending revision whose job has ended, or has none, counts as failed: Builder leaves it pending for good.
     So does one Builder refuses as another request's: the same name can mean another platform once the
-    deployment's default changes. And so does one another backend built, after the deployment changed its
+    deployment's default changes. And so does one submitted under another backend, after the deployment changed its
     backend. A 409 by which Builder refuses the request itself, whatever its revision, is raised instead.
     """
     newest: ContainerImage | None = None
@@ -142,7 +142,7 @@ async def ensure_build(
                 # Builder refuses the request itself, and would refuse it under any revision.
                 raise
             logger.info(
-                "Builder holds %s-%d for another request, or another backend built it; submitting the next revision",
+                "Builder holds %s-%d for another request, or under another backend; submitting the next revision",
                 name,
                 revision - 1,
             )

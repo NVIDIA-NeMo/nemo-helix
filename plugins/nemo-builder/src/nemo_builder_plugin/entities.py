@@ -62,7 +62,7 @@ class Provenance(BaseModel):
         default=IN_CLUSTER_BACKEND,
         max_length=64,
         description=(
-            "The builder backend that built the row, as `builder.backend` named it at submit. A row written before "
+            "The builder backend the row was submitted under, as `builder.backend` named it. A row written before "
             "this field existed reads as `execution`, the only backend there was."
         ),
     )

@@ -115,6 +115,24 @@ class RemoteConfig(BaseModel):
         min_length=1,
         description="The step program in that image, and its arguments.",
     )
+
+    @field_validator("image")
+    @classmethod
+    def _image_is_named(cls, value: str | None) -> str | None:
+        """Without surrounding spaces, and not blank: the job would be created, and its image never pulled."""
+        if value is None:
+            return None
+        if not value.strip():
+            raise ValueError("remote.image is blank")
+        return value.strip()
+
+    @field_validator("command")
+    @classmethod
+    def _command_has_no_blank_part(cls, value: list[str]) -> list[str]:
+        if any(not part.strip() for part in value):
+            raise ValueError("remote.command has a blank entry")
+        return value
+
     credential_secret: str | None = Field(
         default=None,
         min_length=1,

@@ -113,9 +113,10 @@ def _refused_values(refused: object, depth: int = 0) -> Iterator[str]:
     if isinstance(refused, str):
         # As a validator would most likely have written it, quoted, then bare. One trimmed of what a validator
         # trims first, too. Not a short one: it would be found in words that have nothing to do with it.
-        for form in (repr(refused), refused, refused.strip(), refused.strip("/")):
-            if len(form) >= _MIN_REFUSED_CHARS:
-                yield form
+        for spelling in (refused, refused.strip(), refused.strip("/")):
+            for form in (repr(spelling), repr(spelling)[1:-1], spelling):
+                if len(form) >= _MIN_REFUSED_CHARS:
+                    yield form
     elif depth < 4 and isinstance(refused, list | tuple | set | frozenset):
         for item in refused:
             yield from _refused_values(item, depth + 1)

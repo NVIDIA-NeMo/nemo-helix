@@ -492,10 +492,15 @@ class TestSubmitting:
                 "Value error, bad path bot:t0ken@reg",
                 "Value error, bad path <the value>",
             ),
+            (
+                "/bot:pa\\ss@reg/team",
+                f"Value error, invalid repository path: {'bot:pa\\ss@reg/team'!r}",
+                "Value error, invalid repository path: <the value>",
+            ),
             # A value too short to be anything but a word of the sentence is left where it is.
             ("to", "Value error, set it to a host", "Value error, set it to a host"),
         ],
-        ids=["a-string", "in-a-list", "trimmed-in-a-mapping", "too-short-to-take-out"],
+        ids=["a-string", "in-a-list", "trimmed-in-a-mapping", "trimmed-then-escaped", "too-short-to-take-out"],
     )
     def test_a_validator_that_quotes_what_it_refused_has_it_taken_out_of_the_log(
         self, refused: object, message: str, logged: str

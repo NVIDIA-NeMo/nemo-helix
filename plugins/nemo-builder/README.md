@@ -618,8 +618,9 @@ What differs for a caller:
   is in, which such a service would follow without end. And so does a `context_path` that leads
   out of its source once the links in it are followed: the step checks that for itself, since it
   holds the service's credential.
-- What a set downloads, it downloads once: an archive whole, and a fileset whole if any image builds
-  from all of it. Images built from one download see the same files, however long the set takes.
+- Each archive a set names is downloaded once, whole, and so is a fileset if any image builds from
+  all of it; otherwise each directory of a fileset that the set names is its own download. Images
+  built from one download see the same files, however long the set takes.
 - Every workspace's images land in the service's one repository, and no tag is pushed. Pin
   `image_ref`.
 - The builder doesn't sign, and holds no key. Whether an image is signed, and by whom, is the
@@ -627,9 +628,10 @@ What differs for a caller:
 - `runtime_config` is null: the step never reads the image's config.
 - There is no build log. When the step ends as a failed step, the row's `status_detail` ends with
   the step's one-line reason, which names the service's build once one was started, and says so if
-  that build couldn't be cancelled and may still be running. When the job is cancelled, Jobs keeps
-  no log for the step: the row says only that its job ended, and the reason is only in the step's
-  own log.
+  that build couldn't be cancelled and may still be running. In a set of many images, the end of the
+  log that Jobs keeps holds only the last few reasons, and the other rows say only that their job
+  ended. When the job is cancelled, Jobs usually keeps no log for the step: the row then says only
+  that its job ended, and the reason is only in the step's own log.
 - A `ready` row doesn't show whose image it names: see [Security](#security).
 - A build that starts while the service is unreachable is tried again for up to ten minutes, less
   if its timeout is sooner, and one already running is waited on until its timeout. A longer outage fails each queued build as it
@@ -689,7 +691,7 @@ registry or repository, the profile, a step image, a profile whose limit is belo
 build timeouts plus two minutes, or a `default_platform` the service doesn't build.
 
 Switching a deployment's backend doesn't move its images. A resubmit of a revision that was submitted
-under the other backend is refused: with `code` `backend_changed` when the new backend can take the request (submit
+under the other backend, and whose rows are still there, is refused: with `code` `backend_changed` when the new backend can take the request (submit
 the next revision), and otherwise as any request it can't take is, under any revision
 (`backend_rejected` or `missing_secrets`, for example). Evals goes on using the
 task builds it has, and builds an image again, on the new backend, only when asked to `rebuild`.

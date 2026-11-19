@@ -19,7 +19,7 @@ from collections.abc import Callable, Iterator
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import httpx
 import pytest
@@ -68,7 +68,7 @@ from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError, Nemo
 
 DESTINATION = "registry.example.com/team/images"
 #: What follows a reason when the build was to be cancelled and the service couldn't be told.
-UNCANCELLED = "[build build-1; the service could not be told to stop it, it may still be running]"
+UNCANCELLED = "[build build-1; the build service could not be told to stop it, it may still be running]"
 DIGEST = "sha256:" + "d" * 64
 ATTEMPT = JobAttempt(workspace="default", job_uid="job-uid-1", attempt_id="attempt-1")
 
@@ -899,9 +899,11 @@ class TestABuildThatFails:
     ) -> None:
         builder = FakeBuilder(failing=[_unreachable()] * 50)
         clock = FakeClock()
+        # Not at the start of time: the window is counted from when the image was built.
+        clock.now = began = 1000.0
         with caplog.at_level(logging.ERROR):
             assert _run(FakeService([DONE]), builder, context, tmp_path, clock=clock) == 1
-        assert clock.now < COMPLETION_SECONDS
+        assert COMPLETION_SECONDS - MAX_BACKOFF_SECONDS <= clock.now - began < COMPLETION_SECONDS
         assert "it was built, but the builder could not be told" in caplog.text
 
     @pytest.mark.parametrize(
@@ -1066,13 +1068,42 @@ class TestSeveralImages:
         """A reason is what is cut to share the space. The key that finds a build that may be running never is,
         even where that means the first lines fall outside what Jobs keeps."""
         names = [f"image-{n}" for n in range(6)]
-        service = FakeService([DONE], start=[RetryableError("connection reset")])
-        with caplog.at_level(logging.ERROR):
+        service = FakeService([DONE], start=[RetryableError("connection reset " * 20)])
+        with caplog.at_level(logging.INFO):
             assert _run(service, FakeBuilder(), context, tmp_path, config=_config(*names, timeout=3600)) == 1
         messages = [record.getMessage() for record in caplog.records]
-        last = [line for line in messages if line.startswith(FAILURE_MARKER)][-6:]
+        last = messages[messages.index("6 image(s), 6 failure(s)") + 1 :]
+        assert len(last) == 6
         for name, line in zip(names, last, strict=True):
+            # The reason is cut, and what follows it is whole.
+            assert "… [a build may be running, started with key " in line
             assert line.endswith(f"started with key {idempotency_key(ATTEMPT, name)}]")
+
+    def test_a_line_that_names_a_build_is_logged_again_for_that_alone(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """With too little room left for a reason worth reading, the build's name is still what finds it."""
+        names = list("abcdefgh")
+        builds = [f"{'b' * 85}{number}" for number in range(8)]
+        service = FakeService([RemoteBuildStatus("failed", "no such base image")], start=list(builds))
+        with caplog.at_level(logging.INFO):
+            assert _run(service, FakeBuilder(), context, tmp_path, config=_config(*names)) == 1
+        messages = [record.getMessage() for record in caplog.records]
+        last = messages[messages.index("8 image(s), 8 failure(s)") + 1 :]
+        assert [line.split(": ")[0] for line in last] == [f"{FAILURE_MARKER} {name}" for name in names]
+        assert [line.rpartition(" [")[2] for line in last] == [f"build {build}]" for build in builds]
+
+    def test_each_image_of_a_set_has_the_whole_build_timeout_to_itself(self, context: Path, tmp_path: Path) -> None:
+        """Counted from when its own build is asked for, however long the images before it took."""
+        service = FakeService([BUILDING] * 8 + [DONE], start=["build-1", "build-2"])
+        builder, clock = FakeBuilder(), FakeClock()
+        assert _run(service, builder, context, tmp_path, config=_config("a", "b", timeout=35), clock=clock) == 1
+        assert service.cancelled == ["build-1"]
+        assert [(image, external.build_id if external else None) for image, _, external in builder.completed] == [
+            ("b", "build-2")
+        ]
+        # The first is given up at 35s. The second is read at 35, 45 and 55, and is done at 65: inside its own 35s.
+        assert clock.now == 65
 
     def test_an_image_whose_directory_cant_be_made_does_not_cost_the_next(
         self, context: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -1696,6 +1727,65 @@ class TestTheImagesOfOneSet:
             assert fetched.resolve().is_relative_to(root.resolve())
             assert fetched.name == (context_path or fetched.name)
 
+    def test_a_link_that_comes_back_by_the_directories_above_it_leads_inside_the_copy_too(self, tmp_path: Path) -> None:
+        """`services/api/shared -> ../../services/api/lib`. The copy made for a set is placed as the directory
+        was in the download, so such a link builds from a set as it does alone."""
+
+        def fetch(image: RemoteBuildImage, directory: Path) -> Path:
+            for name in ("api", "web"):
+                (directory / "services" / name).mkdir(parents=True)
+                (directory / "services" / name / "Dockerfile").write_text(f"FROM {name}\n")
+            (directory / "services" / "api" / "lib").mkdir()
+            (directory / "services" / "api" / "lib" / "util.py").write_text("")
+            (directory / "services" / "api" / "shared").symlink_to("../../services/api/lib")
+            return directory
+
+        archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
+        config = self._set(archive | {"context_path": "services/api"}, archive | {"context_path": "services/web"})
+        Reading, seen = self._reading("Dockerfile")
+        builder = FakeBuilder()
+        assert _run(Reading([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=config) == 0
+        assert [image for image, _, _ in builder.completed] == ["a", "b"]
+        assert seen == ["FROM api\n", "FROM web\n"]
+
+    def test_a_shared_download_is_removed_once_its_last_image_has_had_its_turn(self, tmp_path: Path) -> None:
+        """Two archives, two images each. While the second pair builds, the first archive is no longer held."""
+        fetch = self._sources({"Dockerfile": "FROM scratch\n"})
+        held: list[int] = []
+
+        class Looking(FakeService):
+            def start(self, build: RemoteBuild) -> str:
+                held.append(sum(path.name.startswith("source-") for path in (tmp_path / "scratch").iterdir()))
+                return super().start(build)
+
+        first, second = ({"fileset": "default/fs-a", "archive": f"{name}.tar.gz"} for name in ("one", "two"))
+        config = self._set(first, first, second, second)
+        assert _run(Looking([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=config) == 0
+        assert (len(fetch.calls), held) == (2, [1, 1, 1, 1])  # ty: ignore[unresolved-attribute]
+
+    def test_an_archive_that_is_refused_is_not_fetched_again_for_each_image_that_names_it(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """One that unpacks to more than is allowed, say: it would be downloaded and unpacked as far as that
+        for every image, to be refused the same way."""
+        calls: list[str] = []
+
+        def fetch(image: RemoteBuildImage, directory: Path) -> Path:
+            calls.append(image.image)
+            raise ArchiveRefused("it unpacks to more than 4294967296 bytes")
+
+        archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
+        config = self._set(*(archive | {"context_path": name} for name in ("one", "two", "three")))
+        with caplog.at_level(logging.ERROR):
+            assert _run(FakeService([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=config) == 1
+        assert calls == ["a"]
+        for name in "abc":
+            assert (
+                f"{FAILURE_MARKER} {name}: cannot fetch its build context: it unpacks to more than 4294967296 bytes"
+            ) in caplog.text
+        # Nothing of the refused download is left in the step's directory.
+        assert not [path for path in (tmp_path / "scratch").iterdir() if path.name.startswith("source-")]
+
     def test_a_context_named_by_a_link_is_built_from_a_set_as_it_is_alone(self, tmp_path: Path) -> None:
         """`current -> v2`, and in `v2` a link that comes back to it by its own name. The copy made for a set
         is of the directory, under the directory's name, so the link still leads inside it."""
@@ -2046,9 +2136,16 @@ class TestTheStepProgram:
         ("raised", "said"),
         [
             (ValueError("unexpected text in the key file: t0p-s3cret-value"), "ValueError"),
+            (OSError("unexpected text in the key file: t0p-s3cret-value"), "OSError"),
+            (OSError(5, "read failed near: t0p-s3cret-value"), os.strerror(5)),
             (FileNotFoundError(2, "No such file or directory", "/var/run/build/token"), "/var/run/build/token"),
         ],
-        ids=["a-reader-that-quotes-what-it-read", "a-file-that-is-not-there"],
+        ids=[
+            "a-reader-that-quotes-what-it-read",
+            "one-that-quotes-it-in-an-error-of-the-systems-kind",
+            "one-that-quotes-it-beside-an-error-number",
+            "a-file-that-is-not-there",
+        ],
     )
     def test_a_credential_that_cant_be_read_is_not_reported_in_the_readers_words(
         self, step: dict[str, list], tmp_path: Path, caplog: pytest.LogCaptureFixture, raised: Exception, said: str
@@ -2286,6 +2383,9 @@ class TestTheStepProgram:
             ("pa'ss-w0rd-123", repr(repr('reply: {"error": "bad password pa\'ss-w0rd-123"}'))),
             ("pa\\'ss-w0rd-123", repr(("401", 'reply: {"error": "bad password pa\\\'ss-w0rd-123"}'))),
             ("C:\\keys\\build", repr(repr("refused C:\\keys\\build"))),
+            ("pässwörd-123", json.dumps({"error": "bad password pässwörd-123"})),
+            ("pässwörd-123", ascii("bad password pässwörd-123")),
+            ('pä"ss-wörd', json.dumps('refused pä"ss-wörd', ensure_ascii=False)),
             ('say "hi" twice', json.dumps({"error": json.dumps('refused say "hi" twice')})),
         ],
         ids=[
@@ -2297,13 +2397,16 @@ class TestTheStepProgram:
             "apostrophe-in-a-repr-of-a-repr",
             "backslash-before-an-apostrophe",
             "escaped-twice",
+            "json-ascii-only",
+            "ascii-of-a-repr",
+            "json-as-it-is",
             "json-twice",
         ],
     )
     def test_a_credential_is_taken_out_however_what_holds_it_wrote_it(self, secret: str, text: str) -> None:
         redacted = driver._redactor(secret)(text)
         assert "[credential]" in redacted
-        for part in ("REVG", "words", "w0rd", "keys", "hi"):
+        for part in ("REVG", "words", "w0rd", "keys", "hi", "rd-123", "ss-w"):
             assert part not in redacted or part not in secret
 
     def test_a_credential_of_several_lines_in_a_url_is_taken_out_whole_not_one_line_of_it(self) -> None:
@@ -2488,10 +2591,48 @@ class TestTheStepProgram:
                     raise RuntimeError("the call failed") from refused
                 raise
         except Exception:
-            record = logging.makeLogRecord({"msg": "the call failed", "exc_info": sys.exc_info()})
+            # In the order a record's own fields are in: the exception, then its text, unset.
+            record = logging.makeLogRecord({"msg": "the call failed", "exc_info": sys.exc_info(), "exc_text": None})
         assert record.exc_info is None
         printed = logging.Formatter().format(record)
         assert "token-value" not in printed and "ValueError: refused: Bearer [credential]" in printed
+
+    def test_a_mappings_own_text_of_its_exception_is_kept_redacted(self, signals: None) -> None:
+        """A record relayed with the text another process made of its exception."""
+        driver.redact_log("token-value")
+        try:
+            raise ValueError("refused: Bearer token-value")
+        except ValueError:
+            fields = {"msg": "the call failed", "exc_info": sys.exc_info(), "exc_text": "relayed: Bearer token-value"}
+        record = logging.makeLogRecord(fields)
+        assert record.exc_info is None
+        assert logging.Formatter().format(record) == "the call failed\nrelayed: Bearer [credential]"
+
+    def test_an_exception_that_cant_be_checked_is_withheld_from_a_record_made_from_a_mapping(
+        self, signals: None
+    ) -> None:
+        """`True` in place of the exception, which only a log call turns into one."""
+        driver.redact_log("token-value")
+        record = logging.makeLogRecord({"msg": "the call failed", "exc_info": True})
+        assert (record.exc_info, record.exc_text) == (None, driver.WITHHELD)
+
+    def test_an_exception_nothing_was_taken_out_of_is_written_by_a_handlers_own_formatter(self, signals: None) -> None:
+        """A step program's format may put a traceback on one line. The text made to check the exception is
+        not left on the record in its place."""
+        driver.redact_log("token-value")
+
+        class OneLine(logging.Formatter):
+            def formatException(self, ei: Any) -> str:
+                return f"raised {type(ei[1]).__name__}"
+
+        try:
+            raise ValueError("no such build")
+        except ValueError:
+            record = logging.getLogger("some.build.client").makeRecord(
+                "some.build.client", logging.ERROR, __file__, 1, "start failed", (), sys.exc_info()
+            )
+        assert record.exc_info is not None and record.exc_text is None
+        assert OneLine("%(message)s").format(record) == "start failed\nraised ValueError"
 
     def test_an_exception_without_the_credential_stays_on_a_record_made_from_a_mapping(self, signals: None) -> None:
         driver.redact_log("token-value")

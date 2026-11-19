@@ -177,6 +177,14 @@ class TestADeploymentThatCannotBuild:
         with pytest.raises(BackendRejectedError, match=f"runs on {profile.backend}, which can't run the remote-build"):
             RemoteBackend(_config(), [profile]).check(_plan())
 
+    def test_a_step_image_is_kept_without_surrounding_spaces_and_a_blank_one_is_refused(self) -> None:
+        """A templated value, say. The job would be created all the same, and its image never pulled."""
+        assert _config(image="  steps.example.com/my-step:1 ").remote.image == "steps.example.com/my-step:1"
+        with pytest.raises(ValueError, match="remote.image is blank"):
+            _config(image="   ")
+        with pytest.raises(ValueError, match="remote.command has a blank entry"):
+            _config(command=["remote-build", " "])
+
     def test_a_padded_credential_secret_is_kept_without_the_padding(self) -> None:
         """Jobs trims the reference before it reads it. The builder's own check of the secret splits it as it
         is, and would look for the secret in a workspace named with a space."""
@@ -515,6 +523,8 @@ class TestSubmitting:
             "not built: demo revision 1 was already submitted under another backend",
         )
         assert (met.status, met.status_detail, met.provenance.backend) == ("pending", None, "execution")
+        # Written to the store, not only on the row the submit holds.
+        assert "update:demo-1.a:failed" in client.events
 
     async def test_a_credential_the_submitter_cannot_read_is_refused_before_anything_is_written(self) -> None:
         client = FakeEntityClient()

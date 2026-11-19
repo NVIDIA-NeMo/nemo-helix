@@ -278,7 +278,8 @@ def stage_context(context: Path, dockerfile: str) -> Path:
     lead, and they are checked below where the context is.
 
     Docker resolves ``COPY`` against the context, not the Dockerfile's directory, so moving the file changes what a
-    build reads in one case: a context with a root ``Dockerfile`` of its own loses it to the one the spec names.
+    build reads only where it copies these files themselves: the root gains the named Dockerfile, in place of
+    any ``Dockerfile`` there, and the root ``Dockerfile.dockerignore`` becomes the named Dockerfile's own, or goes.
 
     What the build leaves out must not change with the move. A builder reads the ignore file named for a
     Dockerfile (``<its path>.dockerignore``) in preference to the context's own ``.dockerignore``, so that file
@@ -513,7 +514,7 @@ def _cancel(service: RemoteBuildService, build_id: str, *, clock: Clock) -> bool
 def _ending(build_id: str, *, uncancelled: bool = False) -> str:
     """What follows an image's reason: the service's name for its build, and whether that build may live on."""
     if uncancelled:
-        return f" [build {build_id}; the service could not be told to stop it, it may still be running]"
+        return f" [build {build_id}; the build service could not be told to stop it, it may still be running]"
     return f" [build {build_id}]"
 
 
@@ -847,8 +848,15 @@ def run_remote_build(
         whole = source.archive is not None or source.fileset in whole_filesets
         return (source.model_copy(update={"context_path": None}) if whole else source), whole
 
-    #: How many of the set's images each download serves.
-    shared = Counter(downloaded(image.source)[0].model_dump_json() for image in config.images)
+    #: Each image's download, by what names it, in the set's order.
+    keys = [downloaded(image.source)[0].model_dump_json() for image in config.images]
+    #: How many of the set's images each download serves, and the last image that needs it.
+    shared = Counter(keys)
+    last = {key: index for index, key in enumerate(keys)}
+    #: The directory each shared download was fetched into, removed once its last image has had its turn.
+    sources: dict[str, Path] = {}
+    #: A shared archive that was refused, with why: the same archive is refused the same way.
+    refused: dict[str, ArchiveRefused] = {}
 
     def context_for(image: RemoteBuildImage, directory: Path) -> Path:
         """``image``'s build context, in ``directory``.
@@ -865,15 +873,23 @@ def run_remote_build(
         if shared[key] == 1:
             # Nothing to share it with: fetched where it is built, and removed with the image's directory.
             return fetch(image, directory)
+        if key in refused:
+            # Not fetched and unpacked again for each image that names it.
+            raise refused[key]
         if key not in fetched:
             into = Path(tempfile.mkdtemp(dir=scratch, prefix="source-"))
             try:
                 fetched[key] = fetch(image.model_copy(update={"source": download}), into)
-            except BaseException:
-                # Not kept: the next image that names it tries again, in a directory of its own.
+            except BaseException as exc:
+                # Not kept: the next image that names it tries again, in a directory of its own. Unless it is
+                # the archive that was refused, which a second try would be too.
+                if isinstance(exc, ArchiveRefused):
+                    refused[key] = exc
                 _remove(into)
                 raise
+            sources[key] = into
         context = fetched[key]
+        root = context.resolve()
         if whole and source.context_path:
             inside = PurePosixPath(source.context_path)
             if inside.is_absolute() or ".." in inside.parts:
@@ -885,16 +901,23 @@ def run_remote_build(
                 raise ImageFailed(f"context path {source.context_path!r} is not a directory inside its source")
             # The directory that was checked, not a link to it: as an image built alone is staged.
             context = context.resolve()
-        # Under its own name, so that a link which comes back to it by name still does. Links as they are,
-        # never followed: staging checks where each one leads.
-        return Path(shutil.copytree(context, directory / (context.name or "context"), symlinks=True))
+        # Where it was in the download, under the download's own name: a link that comes back to the context
+        # by way of the directories above it still does. Links as they are, never followed: staging checks
+        # where each one leads.
+        inside = context.relative_to(root) if root in context.parents else Path()
+        return Path(shutil.copytree(context, directory / (root.name or "context") / inside, symlinks=True))
 
     def report(image: str, reason: str, ending: str = "") -> None:
         reason, ending = redact(_one_line(redact(reason))), redact(_one_line(redact(ending)))
         _report(image, reason, ending)
         failed.append((image, reason, ending))
 
-    for image in config.images:
+    for index, image in enumerate(config.images):
+        # A download the set shared, once the last image that names it has had its turn: a set of large
+        # contexts then holds no more of them than it still needs.
+        for key in [key for key in sources if last[key] < index]:
+            fetched.pop(key, None)
+            _remove(sources.pop(key))
         if cancelled():
             report(image.image, STOPPED)
             failures += 1
@@ -962,7 +985,7 @@ def run_remote_build(
         # one, though it may have fallen outside what is kept, says more than one cut to nothing.
         for image, reason, ending in failed:
             room = _room(len(failed), image)
-            if room - len(ending) >= MIN_REASON_ROOM:
+            if room - len(ending) >= MIN_REASON_ROOM or (ending and room > len(ending)):
                 _report(image, reason, ending, room=room)
     return 1 if failures else 0
 
@@ -980,6 +1003,12 @@ def _within(context: Path, source: Path) -> bool:
         # A loop of links, on a Python that raises for one: it leads to no directory.
         return False
     return real == root or root in real.parents
+
+
+def _os_error(exc: OSError) -> str:
+    """What the operating system says of ``exc``, and the file it was about: none of the error's own text."""
+    said = os.strerror(exc.errno) if exc.errno is not None else type(exc).__name__
+    return f"{said}: {exc.filename}" if exc.filename else said
 
 
 def _remove(directory: str | Path) -> None:
@@ -1182,6 +1211,10 @@ class _RedactingFactory:
             _redact_record(record, _REDACTION)
             if record.name != logger.name:
                 _unmark_record(record)
+            if record.exc_info:
+                # Nothing was taken out of the exception. Its text, made here to be checked, is not kept: a
+                # handler's own formatter writes it as it would have.
+                record.exc_text = None
         except Exception:
             # Never into the code that logged. A record that can't be checked is withheld, not printed as it is.
             record.msg, record.args = WITHHELD, None
@@ -1270,7 +1303,8 @@ def step_main(
     neither, ``make_service`` gets None and finds the credential itself, and gives it to :func:`redact_log`.
 
     The step logs with the level first, in brackets, which Jobs' launcher reads. A step program that sets up
-    logging of its own before it calls this keeps that format. What a step program prints, instead of logging,
+    logging of its own before it calls this keeps that format, which must end a line with the message: what
+    follows an image's name on its failure line is taken for the reason. What a step program prints, instead of logging,
     is not redacted, and what it prints after the driver's last line pushes the failure lines out of the end of
     the log that Jobs keeps: standard output is made line-buffered here so that nothing is held back until then.
     """
@@ -1293,7 +1327,7 @@ def step_main(
             except Exception as exc:
                 # Not what it says, unless the file system says it: a reader that quotes what it read would
                 # put the credential, which nothing can take out yet, on every row.
-                why = str(exc) if isinstance(exc, OSError) else type(exc).__name__
+                why = _os_error(exc) if isinstance(exc, OSError) and exc.errno is not None else type(exc).__name__
                 raise RuntimeError(f"the build service's credential could not be read: {why}") from None
             if not credential:
                 raise RuntimeError("the build service's credential is empty: the step's Jobs profile did not mount it")

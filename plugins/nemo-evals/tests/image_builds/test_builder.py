@@ -68,6 +68,8 @@ class _Builder:
         self.conflicting = conflicting
         #: What kind of 409 it answers a conflicting revision with, when it says: a refusal has a code.
         self.code = code
+        #: The 409 itself, when it is not Builder's own: what a proxy in front of it answers, say.
+        self.response: httpx.Response | None = None
         self.submitted: list[int] = []
 
     async def get_image(self, name: str) -> ContainerImage | None:
@@ -92,7 +94,7 @@ class _Builder:
         self.submitted.append(revision)
         if revision in self.conflicting:
             body = {"detail": "a revision names one request"} | ({"code": self.code} if self.code else {})
-            raise ConflictError(httpx.Response(409, json=body))
+            raise ConflictError(self.response or httpx.Response(409, json=body))
         return _submitted(name, revision)
 
     async def image_platforms(self, image: str) -> list[str]:
@@ -244,6 +246,23 @@ async def test_a_code_that_is_no_code_is_not_taken_for_a_refusal(code: object) -
     builder.code = code  # ty: ignore[invalid-assignment]
     submitted = await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
     # A revision another request holds, as a 409 with no code is: the next one is submitted.
+    assert (builder.submitted, submitted.images[0].name) == ([1, 2], "harbor-env-0123456789ab-2")
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(409, text="<html>conflict</html>"),
+        httpx.Response(409, json=["backend_rejected"]),
+        httpx.Response(409, json="backend_rejected"),
+    ],
+    ids=["not-json", "a-list", "a-string"],
+)
+async def test_a_409_whose_body_is_no_object_is_not_taken_for_a_refusal(response: httpx.Response) -> None:
+    """An ingress in front of Builder answers with a page of its own. It is no refusal of the request."""
+    builder = _Builder(["ready"], conflicting=frozenset({1}))
+    builder.response = response
+    submitted = await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
     assert (builder.submitted, submitted.images[0].name) == ([1, 2], "harbor-env-0123456789ab-2")
 
 
