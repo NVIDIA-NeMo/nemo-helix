@@ -158,6 +158,21 @@ const jobName = (selections: SubmitSelections) => {
   return stem ? { name: buildEvalJobName(stem) } : {};
 };
 
+/** A copy of a submitted job's spec, re-pointed to publish into ``evaluationId``. Everything else
+ *  — dataset, metrics, target, params — is reused verbatim, so the copy measures the same thing. */
+export const buildRerunRequestBody = (
+  spec: Record<string, unknown>,
+  stem: string,
+  evaluationId: string,
+  agent: string
+) => {
+  const rest = Object.fromEntries(Object.entries(spec).filter(([key]) => key !== 'publication'));
+  return {
+    name: buildEvalJobName(stem),
+    spec: { ...rest, ...publicationSpec(evaluationId, agent) },
+  };
+};
+
 /** Strip an optional ``workspace/`` prefix, returning the bare model/agent name. */
 export const bareName = (value: string): string =>
   value.includes('/') ? (value.split('/').pop() ?? value) : value;
