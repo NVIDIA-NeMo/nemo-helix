@@ -141,6 +141,33 @@ jq -n --arg url "$PHOENIX_PUBLIC_URL/plugin.yaml" --arg sha "$DIGEST" \
 it registers APIs only. The checked-in `plugin.yaml` is an API-only example;
 register the served URL for the UI. Keep the adapter process running separately.
 
+#### Or register from Studio
+
+Studio has a registry page for the same preview, consent and install flow:
+**Settings → Community Plugins** (also **System → Community Plugins** in the side
+nav), at `/workspaces/<workspace>/community-plugins`. Click **Add Plugin**, enter
+`$PHOENIX_PUBLIC_URL/plugin.yaml`, review the endpoints, secret name, bundle
+SHA-256 and trust warning, tick the consent box, and click **Register**. The
+workspace secret from this step must exist first. After registering, the side nav
+gains **Phoenix** and the viewer is at `/workspaces/<workspace>/plugin/phoenix`.
+
+Notes for trying it locally:
+
+- Plugin administration only accepts **same-origin** requests, so use a Studio
+  that the platform serves itself (a built Studio at `/studio`). A Studio dev
+  server on another origin gets `403 Plugin administration requires a same-origin
+  request`.
+- A dev server also does not proxy `/plugin-ui/`, so community bundles fail with
+  `PLUGIN_LOAD_FAILED` unless `VITE_PLATFORM_BASE_URL` is the platform's absolute
+  URL.
+- If a Phoenix container already uses port 6007, run the adapter on another
+  port (`python -m nemo_phoenix_traces --port 6008`) and use that port in
+  `PHOENIX_PUBLIC_URL`.
+- To view traces you already have in Arize Phoenix, post its
+  `GET /v1/projects/<project>/spans` output to the registered `spans` route.
+  The adapter rejects Phoenix's extra `id` and `events` span fields, so remove
+  them first.
+
 ### 4. Write a clearly labeled sample trace through the registered gateway
 
 This generates synthetic spans, **not an LLM call**, but stores real records in
