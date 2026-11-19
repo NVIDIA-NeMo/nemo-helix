@@ -59,6 +59,12 @@ class _Client:
             raise self.error
         self.inserts.append((table, rows, column_names))
 
+    async def command(self, statement: str, *, parameters: dict[str, Any]) -> None:
+        self.statements.append(statement)
+        self.parameters.append(parameters)
+        if self.error is not None:
+            raise self.error
+
 
 def _executor(client: _Client) -> ClickHouseExecutor:
     return ClickHouseExecutor(cast(ClickHouseSpanClient, client))
@@ -78,6 +84,23 @@ def test_query_bind_preserves_base_parameters() -> None:
         "metric_key": "cost.total",
         "session_id": "session-a",
     }
+
+
+@pytest.mark.asyncio
+async def test_executor_executes_bound_statement() -> None:
+    client = _Client()
+    query = ClickHouseQuery(name="sessions.delete", statement="INSERT SELECT %(session_id)s")
+    await _executor(client).execute(query.bind(session_id="session-a"))
+    assert client.statements == [query.statement]
+    assert client.parameters == [{"session_id": "session-a"}]
+
+
+@pytest.mark.asyncio
+async def test_executor_translates_statement_failure() -> None:
+    with pytest.raises(ClickHouseQueryError, match="sessions.delete"):
+        await _executor(_Client(error=ClickHouseError("driver details"))).execute(
+            ClickHouseQuery(name="sessions.delete", statement="INSERT SELECT")
+        )
 
 
 @pytest.mark.asyncio

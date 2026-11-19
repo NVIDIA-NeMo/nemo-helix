@@ -645,6 +645,8 @@ class TestIntakeAuthorization:
         static_authz_data["authz"]["principals"] = {
             "viewer@test.com": {"workspaces": {"my-ws": ["Viewer"]}},
             "editor@test.com": {"workspaces": {"my-ws": ["Editor"]}},
+            "admin@test.com": {"workspaces": {"my-ws": ["Admin"]}},
+            "platform-admin@test.com": {"workspaces": {"system": ["HelixAdmin"]}},
         }
         static_authz_data["authz"]["workspaces"] = {"my-ws": {}, "other-ws": {}}
         set_policy_data(static_authz_data)
@@ -720,6 +722,77 @@ class TestIntakeAuthorization:
             },
         )
         assert read_scoped["allowed"] is False
+
+    @pytest.mark.parametrize(
+        ("principal", "allowed"),
+        [
+            ("viewer@test.com", False),
+            ("editor@test.com", False),
+            ("admin@test.com", True),
+            ("platform-admin@test.com", True),
+        ],
+    )
+    def test_session_delete_requires_admin(self, static_authz_data, principal, allowed):
+        self._setup_principals(static_authz_data)
+        result = evaluate(
+            "allow",
+            {
+                "principal_id": principal,
+                "method": "DELETE",
+                "path": "/apis/intake/v2/workspaces/my-ws/sessions/target",
+                "scopes": ["intake:write"],
+            },
+        )
+        assert result["allowed"] is allowed
+
+    @pytest.mark.parametrize("principal", ["admin@test.com", "platform-admin@test.com"])
+    @pytest.mark.parametrize(
+        ("scope", "allowed"),
+        [
+            ("intake:write", True),
+            ("platform:write", True),
+            ("intake:read", False),
+            ("platform:read", False),
+            ("jobs:write", False),
+        ],
+    )
+    def test_session_delete_requires_write_scope(self, static_authz_data, principal, scope, allowed):
+        self._setup_principals(static_authz_data)
+        result = evaluate(
+            "allow",
+            {
+                "principal_id": principal,
+                "method": "DELETE",
+                "path": "/apis/intake/v2/workspaces/my-ws/sessions/target",
+                "scopes": [scope],
+            },
+        )
+        assert result["allowed"] is allowed
+
+    def test_workspace_admin_cannot_delete_other_workspace_telemetry(self, static_authz_data):
+        self._setup_principals(static_authz_data)
+        result = evaluate(
+            "allow",
+            {
+                "principal_id": "admin@test.com",
+                "method": "DELETE",
+                "path": "/apis/intake/v2/workspaces/other-ws/sessions/target",
+                "scopes": ["intake:write"],
+            },
+        )
+        assert result["allowed"] is False
+
+    def test_platform_admin_can_delete_telemetry_across_workspaces(self, static_authz_data):
+        self._setup_principals(static_authz_data)
+        result = evaluate(
+            "allow",
+            {
+                "principal_id": "platform-admin@test.com",
+                "method": "DELETE",
+                "path": "/apis/intake/v2/workspaces/other-ws/sessions/target",
+            },
+        )
+        assert result["allowed"] is True
 
 
 class TestGenericEntitiesApiBlocked:

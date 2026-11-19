@@ -6,12 +6,16 @@
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nhx.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
+from nhx.intake.repository.clickhouse.executor import ClickHouseQueryError
 from nhx.intake.repository.evaluation_rollup import EvaluationRollup
+from nhx.intake.spans.api.dependencies import get_spans_service
 
 EXPERIMENTS = "/apis/intake/v2/workspaces/default/experiments"
 # The deprecated pre-rename path; kept as a hidden alias for backwards compatibility.
@@ -553,7 +557,7 @@ def test_evaluation_filter_by_created_by(client: TestClient) -> None:
     assert response.status_code == 200, response.text
 
 
-def test_soft_delete_frees_name_for_reuse(client: TestClient) -> None:
+def test_soft_delete_frees_evaluation_name_after_relinking(client: TestClient) -> None:
     group = _create_group(client)
     first = client.post(EVALUATIONS, json=_evaluation_body(name="reusable", experiment_group_id=group["id"]))
     assert first.status_code == 201, first.text
@@ -561,18 +565,14 @@ def test_soft_delete_frees_name_for_reuse(client: TestClient) -> None:
     deleted = client.delete(f"{EVALUATIONS}/reusable")
     assert deleted.status_code == 204, deleted.text
 
-    # The original name is now free; a new evaluation can claim it.
+    # Cleanup relinks retained telemetry before the original name is released.
     second = client.post(EVALUATIONS, json=_evaluation_body(name="reusable", experiment_group_id=group["id"]))
     assert second.status_code == 201, second.text
     assert second.json()["id"] != first.json()["id"]
 
 
-def test_recreated_evaluation_reads_are_bound_to_its_own_created_at(client: TestClient) -> None:
-    """A recreated Evaluation must not inherit the deleted namesake's results.
-
-    Delete frees the name, so the new entity can claim it; its rollup reads must then be
-    bounded to the new entity's created_at, not the deleted one's lifetime.
-    """
+def test_new_evaluation_reads_are_bound_to_its_own_created_at(client: TestClient) -> None:
+    """Deleting another evaluation does not change the new evaluation's rollup boundary."""
 
     class CapturingRollupRepository:
         def __init__(self) -> None:
@@ -589,7 +589,7 @@ def test_recreated_evaluation_reads_are_bound_to_its_own_created_at(client: Test
     assert first.status_code == 201, first.text
     assert client.delete(f"{EVALUATIONS}/recreated").status_code == 204
 
-    second = client.post(EVALUATIONS, json=_evaluation_body(name="recreated", experiment_group_id=group["id"]))
+    second = client.post(EVALUATIONS, json=_evaluation_body(name="replacement", experiment_group_id=group["id"]))
     assert second.status_code == 201, second.text
     assert second.json()["id"] != first.json()["id"]
 
@@ -597,15 +597,15 @@ def test_recreated_evaluation_reads_are_bound_to_its_own_created_at(client: Test
     app = cast(FastAPI, client.app)
     app.dependency_overrides[get_evaluation_rollup_repository] = lambda: capturing
     try:
-        fetched = client.get(f"{EVALUATIONS}/recreated")
+        fetched = client.get(f"{EVALUATIONS}/replacement")
         assert fetched.status_code == 200, fetched.text
     finally:
         app.dependency_overrides.pop(get_evaluation_rollup_repository, None)
 
-    # The rollup request is bounded to the recreated entity's created_at — the one the
+    # The rollup request is bounded to the new entity's created_at — the one the
     # store stamped on the new row, not the deleted evaluation's.
     assert len(capturing.calls) == 1
-    created_after = capturing.calls[0].get("recreated")
+    created_after = capturing.calls[0].get("replacement")
     assert created_after is not None
     assert created_after == datetime.fromisoformat(second.json()["created_at"])
 
@@ -633,14 +633,11 @@ def test_filter_is_deleted_true_returns_only_deleted(client: TestClient) -> None
     response = client.get(EVALUATIONS, params={"filter[is_deleted]": "true"})
     assert response.status_code == 200, response.text
     data = response.json()["data"]
-    # Live evaluations are excluded; only deleted rows (with mangled names) appear. The
-    # response body intentionally omits ``is_deleted``; the filter context and mangled name
-    # are the signal that these are trash-bin rows.
     assert any(e["name"].startswith("exp-trash-deleted-") for e in data)
     assert not any(e["name"] == "exp-still-here" for e in data)
 
 
-def test_group_soft_delete_cascades_and_frees_names(client: TestClient) -> None:
+def test_group_soft_delete_cascades_and_frees_evaluation_names(client: TestClient) -> None:
     group = client.post(EXPERIMENTS, json={"name": "doomed-group-v2"}).json()
     client.post(EVALUATIONS, json=_evaluation_body(name="child-1", experiment_group_id=group["id"]))
     client.post(EVALUATIONS, json=_evaluation_body(name="child-2", experiment_group_id=group["id"]))
@@ -653,7 +650,7 @@ def test_group_soft_delete_cascades_and_frees_names(client: TestClient) -> None:
     for child_name in ("child-1", "child-2"):
         assert client.get(f"{EVALUATIONS}/{child_name}").status_code == 404
 
-    # Names are reusable in a fresh group.
+    # Group and evaluation names are reusable after cleanup and relinking.
     fresh_group = client.post(EXPERIMENTS, json={"name": "doomed-group-v2"})
     assert fresh_group.status_code == 201, fresh_group.text
     revived = client.post(
@@ -666,8 +663,8 @@ def test_group_soft_delete_cascades_and_frees_names(client: TestClient) -> None:
     assert any(g["name"].startswith("doomed-group-v2-deleted-") for g in deleted_groups.json()["data"])
     deleted_exps = client.get(EVALUATIONS, params={"filter[is_deleted]": "true"})
     deleted_names = {e["name"] for e in deleted_exps.json()["data"]}
-    assert any(n.startswith("child-1-deleted-") for n in deleted_names)
-    assert any(n.startswith("child-2-deleted-") for n in deleted_names)
+    assert any(name.startswith("child-1-deleted-") for name in deleted_names)
+    assert any(name.startswith("child-2-deleted-") for name in deleted_names)
 
 
 def test_create_evaluation_in_deleted_group_rejected(client: TestClient) -> None:
@@ -682,12 +679,12 @@ def test_create_evaluation_in_deleted_group_rejected(client: TestClient) -> None
     assert "deleted" in response.json()["detail"].lower()
 
 
-def test_update_or_delete_deleted_evaluation_returns_404(client: TestClient) -> None:
+def test_update_or_delete_completed_deletion_returns_404(client: TestClient) -> None:
     group = _create_group(client)
     client.post(EVALUATIONS, json=_evaluation_body(name="exp-once", experiment_group_id=group["id"]))
     client.delete(f"{EVALUATIONS}/exp-once")
 
-    # GET, PUT, and a second DELETE all 404 on the (now-renamed) deleted row.
+    # Successful cleanup releases the original name, so all original-name reads are missing.
     assert client.get(f"{EVALUATIONS}/exp-once").status_code == 404
     assert (
         client.put(
@@ -698,6 +695,58 @@ def test_update_or_delete_deleted_evaluation_returns_404(client: TestClient) -> 
     )
     delete_response = client.delete(f"{EVALUATIONS}/exp-once")
     assert delete_response.status_code == 404
+
+
+def test_failed_relink_reserves_name_until_retry_succeeds(client: TestClient) -> None:
+    group = _create_group(client, "relink-group")
+    body = _evaluation_body(name="retry-relink", experiment_group_id=group["id"])
+    assert client.post(EVALUATIONS, json=body).status_code == 201
+    service = SimpleNamespace(
+        delete_evaluation_sessions=AsyncMock(),
+        rename_evaluation_references=AsyncMock(
+            side_effect=[ClickHouseQueryError("sessions.rename_evaluation_traces"), None]
+        ),
+    )
+    app = cast(FastAPI, client.app)
+    original_override = app.dependency_overrides[get_spans_service]
+    app.dependency_overrides[get_spans_service] = lambda: service
+    try:
+        first = client.delete(f"{EVALUATIONS}/retry-relink")
+        assert first.status_code == 503, first.text
+        assert client.post(EVALUATIONS, json=body).status_code == 409
+        retried = client.delete(f"{EVALUATIONS}/retry-relink")
+        assert retried.status_code == 204, retried.text
+        first_call, second_call = service.rename_evaluation_references.await_args_list
+        assert first_call == second_call
+        assert first_call.kwargs["deleted_name"].startswith("retry-relink-deleted-")
+        assert client.post(EVALUATIONS, json=body).status_code == 201
+    finally:
+        app.dependency_overrides[get_spans_service] = original_override
+
+
+def test_experiment_delete_retries_cleanup_for_already_deleted_members(client: TestClient) -> None:
+    group = _create_group(client, "retry-group")
+    response = client.post(EVALUATIONS, json=_evaluation_body(name="retry-eval", experiment_group_id=group["id"]))
+    assert response.status_code == 201, response.text
+    service = SimpleNamespace(
+        delete_evaluation_sessions=AsyncMock(side_effect=[ClickHouseQueryError("sessions.delete"), None]),
+        rename_evaluation_references=AsyncMock(),
+    )
+    app = cast(FastAPI, client.app)
+    original_override = app.dependency_overrides[get_spans_service]
+    app.dependency_overrides[get_spans_service] = lambda: service
+    try:
+        first = client.delete(f"{EXPERIMENTS}/retry-group")
+        assert first.status_code == 503, first.text
+        assert client.get(f"{EVALUATIONS}/retry-eval").status_code == 404
+        assert client.get(f"{EXPERIMENTS}/retry-group").status_code == 200
+
+        retried = client.delete(f"{EXPERIMENTS}/retry-group")
+        assert retried.status_code == 204, retried.text
+        assert service.delete_evaluation_sessions.await_count == 2
+        service.delete_evaluation_sessions.assert_awaited_with(workspace="default", evaluation_name="retry-eval")
+    finally:
+        app.dependency_overrides[get_spans_service] = original_override
 
 
 def test_pin_and_unpin_evaluation(client: TestClient) -> None:

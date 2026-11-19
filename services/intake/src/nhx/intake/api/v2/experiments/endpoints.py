@@ -59,10 +59,13 @@ from nhx.intake.experiments.read_service import (
     InvalidEvaluationSessionStatusError,
 )
 from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
+from nhx.intake.repository.clickhouse.executor import ClickHouseQueryError
 from nhx.intake.repository.evaluation_rollup import EvaluationRollup, ScoreRollup
 from nhx.intake.repository.evaluation_session import MetricSortTooLargeError
-from nhx.intake.spans.api.dependencies import require_workspace_access, validate_list_query_params
+from nhx.intake.repository.session import TraceIndexCollisionError
+from nhx.intake.spans.api.dependencies import SpansServiceDep, require_workspace_access, validate_list_query_params
 from nhx.intake.spans.domain import SpanStatus
+from nhx.intake.spans.service import IntakeSpansService
 from nhx.intake.spans.storage import make_pagination
 
 logger = logging.getLogger(__name__)
@@ -290,16 +293,19 @@ async def update_experiment(
     "/v2/workspaces/{workspace}/experiments/{name}",
     status_code=status.HTTP_204_NO_CONTENT,
     tags=[EXPERIMENTS_TAG],
-    responses={404: {"description": "Experiment not found"}},
+    responses={
+        404: {"description": "Experiment not found"},
+        409: {"description": "Conflicting trace-index ownership prevents telemetry cleanup"},
+        503: {"description": "Telemetry storage unavailable; retry deletion to resume cleanup"},
+    },
 )
 async def delete_experiment(
     workspace: str,
     name: str,
     entity_client: EntityClientDep,
+    spans_service: SpansServiceDep,
 ) -> None:
-    # Soft delete: flip ``is_deleted`` and rename the row so the original name is free for reuse.
-    # The unique index on (workspace, entity_type, name) doesn't read into the JSON data column,
-    # so renaming on delete is what lets a new group/evaluation claim the same name later.
+    """Delete the group and clean telemetry for evaluations whose last membership it owns."""
     group = await _get_or_404(
         entity_client,
         ExperimentGroup,
@@ -312,7 +318,7 @@ async def delete_experiment(
     # Reference-counted cascade, sequential — one update per member. Linear in group size, fine for
     # now. A member whose *sole* membership was this group is soft-deleted; a member also in another
     # group just drops this membership and survives there. Both outcomes remove the member from the
-    # live-membership filter below (soft-delete renames + flips is_deleted; membership removal drops
+    # live-membership filter below (soft-delete flips is_deleted; membership removal drops
     # the group id from experiment_ids and leaves no legacy scalar), so re-fetching page 1 keeps
     # returning the next unprocessed batch until nothing is left. No fixed cap on group size.
     live_children_filter = LogicalOperation(
@@ -346,6 +352,23 @@ async def delete_experiment(
             else:
                 # This group was the member's sole membership — cascade the delete.
                 await _soft_delete(entity_client, child)
+    # Include already-deleted members so retries resume interrupted cleanup. The
+    # group keeps its name until cleanup succeeds; shared live evaluations survive.
+    page_number = 1
+    while True:
+        page = await entity_client.list(
+            Evaluation,
+            workspace=workspace,
+            filter_operation=_group_membership_filter(group.id),
+            page=page_number,
+            page_size=100,
+        )
+        if not page.data:
+            break
+        for child in page.data:
+            if child.is_deleted:
+                await _cleanup_evaluation_sessions(spans_service, entity_client, child, workspace=workspace)
+        page_number += 1
     await _soft_delete(entity_client, group)
 
 
@@ -666,14 +689,23 @@ async def patch_evaluation(
     tags=[EVALUATIONS_TAG],
     responses={
         404: {"description": "Evaluation not found"},
-        409: {"description": "Evaluation is selected as an Experiment's baseline"},
+        409: {"description": "Evaluation is a baseline or telemetry has conflicting trace-index ownership"},
+        503: {"description": "Telemetry storage unavailable; retry deletion to resume cleanup"},
     },
 )
 async def delete_evaluation(
     workspace: str,
     name: str,
     entity_client: EntityClientDep,
+    spans_service: SpansServiceDep,
 ) -> None:
+    """Soft-delete an evaluation and its eligible sessions' spans and traces.
+
+    Shared sessions remain until all associated evaluations are deleted. Retained
+    telemetry follows the renamed evaluation, allowing its original name to be reused.
+    Failed cleanup keeps the original name reserved so DELETE can be retried.
+    Evaluator results and annotations are retained.
+    """
     entity = await _get_or_404(
         entity_client,
         Evaluation,
@@ -681,13 +713,14 @@ async def delete_evaluation(
         name=name,
         label="Evaluation",
     )
-    _reject_if_deleted(entity, workspace=workspace, name=name, label="Evaluation")
-    await _validate_baseline_memberships_preserved(
-        entity_client,
-        evaluation=entity,
-        desired_group_ids=[],
-    )
-    await _soft_delete(entity_client, entity)
+    if not entity.is_deleted:
+        await _validate_baseline_memberships_preserved(
+            entity_client,
+            evaluation=entity,
+            desired_group_ids=[],
+        )
+        entity = await _soft_delete(entity_client, entity)
+    await _cleanup_evaluation_sessions(spans_service, entity_client, entity, workspace=workspace)
 
 
 @router.post(
@@ -899,12 +932,77 @@ def _to_base36(value: int) -> str:
     return "".join(reversed(out))
 
 
-async def _soft_delete(entity_client: EntityClient, entity: Evaluation | ExperimentGroup) -> None:
-    """Flip ``is_deleted`` and rename the entity in a single update."""
+async def _soft_delete(entity_client: EntityClient, entity: EntityT) -> EntityT:
+    """Reserve an evaluation's destination name until its telemetry is relinked."""
     original_name = entity.name
     entity.is_deleted = True
-    entity.name = _deleted_name(original_name)
-    await entity_client.update(entity, original_name=original_name)
+    if isinstance(entity, ExperimentGroup):
+        entity.name = _deleted_name(original_name)
+    elif entity.deletion_name is None:
+        entity.deletion_name = _deleted_name(original_name)
+    try:
+        return await entity_client.update(entity, original_name=original_name)
+    except EntityConflictError as exc:
+        raise HTTPException(status_code=409, detail="Deletion state changed; retry the request.") from exc
+
+
+async def _cleanup_evaluation_sessions(
+    service: IntakeSpansService, entity_client: EntityClient, entity: Evaluation, *, workspace: str
+) -> None:
+    # Reload by immutable ID: a caller may hold a snapshot from before another
+    # request finished deletion and a replacement acquired its original name.
+    entity = await entity_client.get_by_id(Evaluation, entity.id)
+    if not entity.is_deleted:
+        raise HTTPException(status_code=409, detail="Evaluation must be deleted before telemetry cleanup.")
+    if entity.name == entity.deletion_name:
+        return
+    if entity.deletion_owner is not None:
+        raise HTTPException(status_code=409, detail="Evaluation telemetry cleanup is already in progress.")
+    if entity.deletion_name is None:
+        entity = await _soft_delete(entity_client, entity)
+    # Persisted optimistic locking coordinates separate Intake workers. Never
+    # expire/take over this claim: ClickHouse mutations cannot be fenced against
+    # a paused old worker. A crashed owner requires operator recovery after that
+    # worker has stopped. Ordinary storage errors release the claim for retry.
+    entity.deletion_owner = secrets.token_hex(16)
+    try:
+        entity = await entity_client.update(entity)
+    except EntityConflictError as exc:
+        raise HTTPException(status_code=409, detail="Deletion state changed; retry the request.") from exc
+    original_name = entity.name
+    deleted_name = entity.deletion_name
+    assert deleted_name is not None
+    try:
+        await service.delete_evaluation_sessions(workspace=workspace, evaluation_name=original_name)
+        await service.rename_evaluation_references(
+            workspace=workspace, original_name=original_name, deleted_name=deleted_name
+        )
+        entity.name = deleted_name
+        entity.deletion_owner = None
+        await entity_client.update(entity, original_name=original_name)
+    except TraceIndexCollisionError as exc:
+        await _release_evaluation_cleanup(entity_client, entity, original_name)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ClickHouseQueryError as exc:
+        await _release_evaluation_cleanup(entity_client, entity, original_name)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=CLICKHOUSE_UNAVAILABLE_MESSAGE
+        ) from exc
+    except Exception:
+        # An uncertain final rename must not trigger any further telemetry writes.
+        # Retain the claim on unexpected errors; a retry reloads authoritative state.
+        logger.exception("Evaluation cleanup needs recovery: %s/%s", workspace, entity.id)
+        raise
+
+
+async def _release_evaluation_cleanup(entity_client: EntityClient, entity: Evaluation, original_name: str) -> None:
+    entity.name = original_name
+    entity.deletion_owner = None
+    try:
+        await entity_client.update(entity)
+    except (EntityConflictError, EntityNotFoundError):
+        # Fail closed if another entity update invalidated our snapshot.
+        logger.exception("Could not release evaluation cleanup claim: %s", entity.id)
 
 
 async def _count_live_evaluations_in_group(entity_client: EntityClient, *, workspace: str, group_id: str) -> int:
@@ -1584,7 +1682,7 @@ for _legacy_route in list(router.routes):
         router.add_api_route(
             _legacy_route.path.replace("/experiments", "/experiment-groups", 1),
             _legacy_route.endpoint,
-            methods=sorted(_legacy_route.methods),
+            methods=sorted(_legacy_route.methods or ()),
             response_model=_legacy_route.response_model,
             status_code=_legacy_route.status_code,
             include_in_schema=False,

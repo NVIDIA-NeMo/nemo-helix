@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from nhx.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
 from nhx.intake.config import ClickHouseConfig, IntakeConfig
 from nhx.intake.service import IntakeService
+from nhx.intake.spans.api.dependencies import get_spans_service
 from nhx.testing import create_test_client
 
 
@@ -28,7 +29,10 @@ def client(monkeypatch: pytest.MonkeyPatch, intake_service: IntakeService):
     with create_test_client(
         lambda: intake_service,
         client_type=TestClient,
-        dependency_overrides={get_evaluation_rollup_repository: lambda: None},
+        dependency_overrides={
+            get_evaluation_rollup_repository: lambda: None,
+            get_spans_service: lambda: AsyncMock(),
+        },
         service_configs={IntakeService: intake_config},
     ) as tc:
         yield tc

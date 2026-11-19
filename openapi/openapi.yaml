@@ -5571,6 +5571,18 @@ paths:
       tags:
       - Evaluations
       summary: Delete Evaluation
+      description: 'Soft-delete an evaluation and its eligible sessions'' spans and
+        traces.
+
+
+        Shared sessions remain until all associated evaluations are deleted. Retained
+
+        telemetry follows the renamed evaluation, allowing its original name to be
+        reused.
+
+        Failed cleanup keeps the original name reserved so DELETE can be retried.
+
+        Evaluator results and annotations are retained.'
       operationId: delete_evaluation_apis_intake_v2_workspaces__workspace__evaluations__name__delete
       parameters:
       - name: workspace
@@ -5591,7 +5603,10 @@ paths:
         '404':
           description: Evaluation not found
         '409':
-          description: Evaluation is selected as an Experiment's baseline
+          description: Evaluation is a baseline or telemetry has conflicting trace-index
+            ownership
+        '503':
+          description: Telemetry storage unavailable; retry deletion to resume cleanup
         '422':
           description: Validation Error
           content:
@@ -6147,6 +6162,8 @@ paths:
       tags:
       - Experiments
       summary: Delete Experiment
+      description: Delete the group and clean telemetry for evaluations whose last
+        membership it owns.
       operationId: delete_experiment_apis_intake_v2_workspaces__workspace__experiments__name__delete
       parameters:
       - name: workspace
@@ -6166,6 +6183,10 @@ paths:
           description: Successful Response
         '404':
           description: Experiment not found
+        '409':
+          description: Conflicting trace-index ownership prevents telemetry cleanup
+        '503':
+          description: Telemetry storage unavailable; retry deletion to resume cleanup
         '422':
           description: Validation Error
           content:
@@ -6582,6 +6603,95 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Sessions
+      summary: Delete Session
+      description: 'Soft-delete a session''s current spans and traces, preserving
+        evaluator results and annotations.
+
+
+        Evaluation-linked sessions can be deleted only after every associated evaluation
+
+        is confirmed soft-deleted. Deletion does not block subsequent ingestion into
+        the same session ID.
+
+        Conflicting ownership of a root span''s trace-index key prevents deletion
+        of the entire session.'
+      operationId: delete_session_apis_intake_v2_workspaces__workspace__sessions__id__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '204':
+          description: Successful Response
+        '403':
+          description: Insufficient permission or write scope
+        '404':
+          description: Session not found
+        '409':
+          description: Session has a protected evaluation or conflicting trace-index
+            ownership
+        '503':
+          description: Telemetry storage unavailable; retry deletion to finish cleanup
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/intake/v2/workspaces/default/sessions/my-session"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/sessions/my-session\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/sessions/my-session\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/sessions/my-session"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/sessions/my-session\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/intake/v2/workspaces/{workspace}/spans:
     get:
       tags:
